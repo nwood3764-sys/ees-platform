@@ -9,6 +9,7 @@ import QualificationModule from './modules/QualificationModule'
 import FieldModule from './modules/FieldModule'
 import IncentivesModule from './modules/IncentivesModule'
 import StockModule from './modules/StockModule'
+import FleetModule from './modules/FleetModule'
 
 function AuthedApp({ session }) {
   const [activeModule, setActiveModule] = useState('home')
@@ -25,6 +26,7 @@ function AuthedApp({ session }) {
       case 'field':         return <FieldModule />
       case 'incentives':    return <IncentivesModule />
       case 'stock':         return <StockModule />
+      case 'fleet':         return <FleetModule />
       default:              return <ComingSoon label={activeModule.charAt(0).toUpperCase() + activeModule.slice(1)} />
     }
   }
