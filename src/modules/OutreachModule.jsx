@@ -1,15 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
 import { OPPORTUNITIES, PROPERTIES, BUILDINGS, CONTACTS, ENROLLMENTS } from '../data/mockData'
+import { fetchProperties, fetchBuildings, fetchUnits } from '../data/outreachService'
 
 const SECTIONS = [
   { id: 'home',       label: 'Home'         },
   { id: 'opps',       label: 'Opportunities' },
   { id: 'properties', label: 'Properties'    },
   { id: 'buildings',  label: 'Buildings'     },
+  { id: 'units',      label: 'Units'         },
   { id: 'contacts',   label: 'Contacts'      },
   { id: 'enrollment', label: 'Enrollment'    },
 ]
@@ -51,6 +53,17 @@ const BLDG_COLS = [
   { field:'yearBuilt', label:'Year Built', type:'text',   sortable:true, filterable:false },
   { field:'state',     label:'State',      type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
 ]
+const UNIT_COLS = [
+  { field:'id',        label:'Record #',  type:'text',   sortable:true, filterable:false },
+  { field:'unit',      label:'Unit',      type:'text',   sortable:true, filterable:true  },
+  { field:'building',  label:'Building',  type:'text',   sortable:true, filterable:true  },
+  { field:'property',  label:'Property',  type:'text',   sortable:true, filterable:true  },
+  { field:'status',    label:'Status',    type:'select', sortable:true, filterable:true, options:['Active','Vacant','Under Renovation'] },
+  { field:'bedrooms',  label:'Beds',      type:'text',   sortable:true, filterable:false },
+  { field:'bathrooms', label:'Baths',     type:'text',   sortable:true, filterable:false },
+  { field:'sqft',      label:'Sq Ft',     type:'text',   sortable:true, filterable:false },
+  { field:'state',     label:'State',     type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
+]
 const CONTACT_COLS = [
   { field:'id',     label:'Record #',    type:'text',   sortable:true, filterable:false },
   { field:'name',   label:'Name',        type:'text',   sortable:true, filterable:true  },
@@ -81,6 +94,7 @@ const ENR_COLS = [
 const OPP_VIEWS  = [{ id:'OV-01', name:'All Opportunities',    filters:[], sortField:'closeDate', sortDir:'asc' }, { id:'OV-02', name:'Reservation Obtained', filters:[{ field:'stage', label:'Stage', op:'equals', value:'Opportunity — Reservation Obtained' }], sortField:'closeDate', sortDir:'asc' }, { id:'OV-03', name:'Application Submitted', filters:[{ field:'stage', label:'Stage', op:'equals', value:'Opportunity — Application Submitted' }], sortField:'closeDate', sortDir:'asc' }]
 const PROP_VIEWS = [{ id:'PV-01', name:'All Properties',  filters:[], sortField:'name', sortDir:'asc' }, { id:'PV-02', name:'Enrolled',        filters:[{ field:'status', label:'Status', op:'equals', value:'Enrolled' }],        sortField:'name', sortDir:'asc' }, { id:'PV-03', name:'Outreach Active', filters:[{ field:'status', label:'Status', op:'equals', value:'Outreach Active' }], sortField:'name', sortDir:'asc' }]
 const BLDG_VIEWS = [{ id:'BV-01', name:'All Buildings', filters:[], sortField:'name', sortDir:'asc' }]
+const UNIT_VIEWS = [{ id:'UV-01', name:'All Units', filters:[], sortField:'unit', sortDir:'asc' }]
 const CONT_VIEWS = [{ id:'CV-01', name:'All Contacts', filters:[], sortField:'name', sortDir:'asc' }]
 const ENR_VIEWS  = [{ id:'EV-01', name:'All Enrollments', filters:[], sortField:'status', sortDir:'asc' }, { id:'EV-02', name:'HAF Pending',          filters:[{ field:'hafAgreement', label:'HAF', op:'equals', value:'Pending' }],            sortField:'property', sortDir:'asc' }, { id:'EV-03', name:'Income Qual In Progress', filters:[{ field:'incomeQual', label:'Income Qual', op:'equals', value:'In Progress' }], sortField:'property', sortDir:'asc' }, { id:'EV-04', name:'Enrollment Complete', filters:[{ field:'status', label:'Status', op:'equals', value:'Enrollment — Complete' }], sortField:'property', sortDir:'asc' }]
 
@@ -284,11 +298,61 @@ function OutreachHome({ setSec }) {
   )
 }
 
+function LiveListView({ loading, error, data, ...rest }) {
+  if (loading) {
+    return (
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>
+        Loading…
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}>
+        <div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div>
+        <div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div>
+      </div>
+    )
+  }
+  return <ListView data={data} {...rest} />
+}
+
 export default function OutreachModule() {
   const [sec, setSec] = useState('home')
 
+  // Live data from Supabase. Opportunities, contacts, and enrollments are
+  // still on mock data — they get wired in a follow-up pass.
+  const [properties, setProperties] = useState([])
+  const [buildings, setBuildings] = useState([])
+  const [units, setUnits] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    Promise.all([fetchProperties(), fetchBuildings(), fetchUnits()])
+      .then(([p, b, u]) => {
+        if (cancelled) return
+        setProperties(p)
+        setBuildings(b)
+        setUnits(u)
+      })
+      .catch(err => { if (!cancelled) setError(err) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
   const hafUrgent = ENROLLMENTS.filter(e => e.hafAgreement === 'Pending').length
-  const counts = { opps: OPPORTUNITIES.length, properties: PROPERTIES.length, buildings: BUILDINGS.length, contacts: CONTACTS.length, enrollment: ENROLLMENTS.length }
+  const counts = {
+    opps: OPPORTUNITIES.length,
+    properties: properties.length,
+    buildings: buildings.length,
+    units: units.length,
+    contacts: CONTACTS.length,
+    enrollment: ENROLLMENTS.length,
+  }
   const urgentSections = { home: hafUrgent }
 
   return (
@@ -311,8 +375,9 @@ export default function OutreachModule() {
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {sec === 'home'       && <OutreachHome setSec={setSec} />}
         {sec === 'opps'       && <ListView data={OPPORTUNITIES} columns={OPP_COLS}  systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => {}} />}
-        {sec === 'properties' && <ListView data={PROPERTIES}   columns={PROP_COLS}  systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => {}} />}
-        {sec === 'buildings'  && <ListView data={BUILDINGS}    columns={BLDG_COLS}  systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => {}} />}
+        {sec === 'properties' && <LiveListView loading={loading} error={error} data={properties} columns={PROP_COLS}  systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => {}} />}
+        {sec === 'buildings'  && <LiveListView loading={loading} error={error} data={buildings}  columns={BLDG_COLS}  systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => {}} />}
+        {sec === 'units'      && <LiveListView loading={loading} error={error} data={units}      columns={UNIT_COLS}  systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => {}} />}
         {sec === 'contacts'   && <ListView data={CONTACTS}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"   onNew={() => {}} renderCell={contactCell} />}
         {sec === 'enrollment' && <ListView data={ENROLLMENTS}  columns={ENR_COLS}   systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => {}} renderCell={enrollmentCell} />}
       </div>
