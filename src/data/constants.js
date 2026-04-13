@@ -1,0 +1,111 @@
+export const C = {
+  sidebar: '#07111f',
+  sidebarHover: '#0d1f35',
+  emerald: '#3ecf8e',
+  emeraldMid: '#2aab72',
+  page: '#f0f3f8',
+  card: '#ffffff',
+  border: '#e4e9f2',
+  borderDark: '#d0d8e8',
+  textPrimary: '#0d1a2e',
+  textSecondary: '#4a5e7a',
+  textMuted: '#8fa0b8',
+  navInactive: 'rgba(255,255,255,0.62)',
+  navActive: 'rgba(255,255,255,0.96)',
+  amber: '#e8a949',
+  sky: '#7eb3e8',
+  danger: '#e85c5c',
+  purple: '#a78bfa',
+};
+
+export const CHART_COLORS = ['#3ecf8e','#7eb3e8','#e8a949','#a78bfa','#e85c5c','#5eead4','#fb923c'];
+
+export const STATUS_CFG = {
+  // Opportunity
+  'Opportunity — Property Identified':          { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
+  'Opportunity — Outreach Active':              { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Opportunity — Decision Maker Identified':    { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Opportunity — Relationship Active':          { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Opportunity — Enrollment In Progress':       { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Opportunity — Assessment Scheduled':         { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Opportunity — Application Submitted':        { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Opportunity — Reservation Obtained':         { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Opportunity — Project In Progress':          { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Opportunity Closed Won':                     { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Opportunity Closed Lost':                    { bg:'#fce8e8', color:'#8a1a1a', dot:'#e85c5c' },
+  // Property
+  'Prospect':                                   { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
+  'Outreach Active':                            { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Enrolled':                                   { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'In Progress':                                { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Active':                                     { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  // Enrollment
+  'Enrollment — Outreach Active':               { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Enrollment — HAF Agreement Pending':         { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Enrollment — HAF Agreement Executed':        { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Enrollment — Income Qualification In Progress': { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Enrollment — Census Tract Verification Pending': { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Enrollment — Complete':                      { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Enrollment — On Hold':                       { bg:'#fce8e8', color:'#8a1a1a', dot:'#e85c5c' },
+  // Incentive Applications
+  'Incentive Application To Be Prepared':       { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
+  'Incentive Application To Be Verified':       { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Incentive Application To Be Submitted':      { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Incentive Application Submitted — Awaiting Program Response': { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Incentive Application Pre-Approved':         { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Incentive Application Approved':             { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Incentive Application Corrections Needed':   { bg:'#fce8e8', color:'#8a1a1a', dot:'#e85c5c' },
+  'Incentive Application Denied':               { bg:'#fce8e8', color:'#8a1a1a', dot:'#e85c5c' },
+  // Assessment
+  'Assessment To Be Scheduled':                 { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
+  'Assessment Scheduled':                       { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Assessment In Progress':                     { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Assessment Completed — To Be Reviewed':      { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Assessment Verified':                        { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  // EFR
+  'EFR To Be Scheduled':                        { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
+  'EFR In Progress':                            { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'EFR Completed — To Be Reviewed':             { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'EFR Verified':                               { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  // Projects
+  'Project To Be Scheduled':                    { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
+  'Project Scheduled':                          { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Project In Progress':                        { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Project To Be Verified':                     { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Project Verified':                           { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Project Complete':                           { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  // Work Orders
+  'Work Order To Be Scheduled':                 { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
+  'Work Order Scheduled':                       { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Work Order In Progress':                     { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Work Order Submitted':                       { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Work Order To Be Verified':                  { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Work Order Corrections Needed':              { bg:'#fce8e8', color:'#8a1a1a', dot:'#e85c5c' },
+  'Work Order Verified':                        { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Work Order Complete':                        { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  // Project Payment Requests
+  'Payment Request To Be Prepared':             { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
+  'Payment Request To Be Verified':             { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Payment Request To Be Submitted':            { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Payment Request Submitted — Awaiting Review':{ bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Payment Request Under Review':               { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Payment Request Approved':                   { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Payment Request Payment Pending':            { bg:'#fef3e2', color:'#8a5a0a', dot:'#e8a949' },
+  'Payment Request Payment Received':           { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Payment Request Closed':                     { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+};
+
+export const NAV_MODULES = [
+  { id:'home',          label:'Home',          icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+  { id:'outreach',      label:'Outreach',      icon:'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
+  { id:'qualification', label:'Qualification', icon:'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
+  { id:'field',         label:'Field',         icon:'M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z' },
+  { id:'incentives',    label:'Incentives',    icon:'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+  { id:'stock',         label:'Stock',         icon:'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
+  { id:'fleet',         label:'Fleet',         icon:'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' },
+  { id:'people',        label:'People',        icon:'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+  { id:'portal',        label:'Portal',        icon:'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9' },
+  { id:'admin',         label:'Admin',         icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
+];
+
+export const fmt = (n) => n != null ? '$' + Number(n).toLocaleString() : '—';
