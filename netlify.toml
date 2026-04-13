@@ -1,0 +1,32 @@
+# Netlify build configuration.
+#
+# Environment variables set here are injected into `npm run build` so Vite can
+# inline them into the client bundle via import.meta.env.VITE_*.
+#
+# Why these are in a committed file rather than the Netlify dashboard:
+#   1. Vite-exposed env vars (VITE_* prefix) end up inlined in the built JS
+#      and are visible to anyone who views the site source. Keeping them in
+#      this file is no less secure than putting them in the dashboard — the
+#      public surface is identical.
+#   2. Committing the config makes the build reproducible and removes the
+#      need to manually configure Netlify via the UI.
+#
+# The Supabase publishable key relies on row-level security to control
+# access; possessing the key does not grant access to any data without a
+# valid authenticated session. See Supabase → Authentication → Policies.
+
+[build]
+  command  = "npm run build"
+  publish  = "dist"
+
+[build.environment]
+  VITE_SUPABASE_URL      = "https://flyjigrijjjtcsvpgzvk.supabase.co"
+  VITE_SUPABASE_ANON_KEY = "sb_publishable_qkmVXJMofrUrSoVA3bhZ2g_XNsdE9lq"
+  NODE_VERSION           = "20"
+
+# SPA routing — any unknown path should serve index.html so the React
+# router (via AuthGate) can handle it client-side.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

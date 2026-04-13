@@ -1,19 +1,31 @@
 import { createClient } from '@supabase/supabase-js'
 
-// These are injected at build time by Vite from env vars.
+// Both values must be provided via Vite env vars at build time.
 // Set them in Netlify under Site settings → Environment variables:
-//   VITE_SUPABASE_URL        = https://flyjigrijjjtcsvpgzvk.supabase.co
-//   VITE_SUPABASE_ANON_KEY   = <publishable key from Supabase → Project Settings → API>
+//   VITE_SUPABASE_URL       = https://flyjigrijjjtcsvpgzvk.supabase.co
+//   VITE_SUPABASE_ANON_KEY  = <publishable key from Supabase → Project Settings → API>
 //
-// Fallbacks below let local `npm run dev` work without a .env file.
-// The anon/publishable key is safe to ship in the client bundle — row-level
-// security on every table enforces what it can and cannot read.
-const FALLBACK_URL = 'https://flyjigrijjjtcsvpgzvk.supabase.co'
-const FALLBACK_ANON_KEY = 'sb_publishable_qkmVXJMofrUrSoVA3bhZ2g_XNsdE9lq'
+// For local development create a file at /home/claude/anura/.env.local with
+// the same two variables. No fallback is hardcoded on purpose — the key
+// should only live in environment variables, never in source.
+const url = import.meta.env.VITE_SUPABASE_URL
+const key = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-const url = import.meta.env.VITE_SUPABASE_URL || FALLBACK_URL
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY || FALLBACK_ANON_KEY
+if (!url || !key) {
+  // Surface a clear error at app start rather than letting queries fail
+  // mysteriously later. The error will appear in the browser console and
+  // the login screen will show a friendly message.
+  console.error(
+    'Missing Supabase env vars. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
+  )
+}
 
-export const supabase = createClient(url, key, {
-  auth: { persistSession: false },
+export const supabase = createClient(url || '', key || '', {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+  },
 })
+
+export const hasSupabaseConfig = Boolean(url && key)

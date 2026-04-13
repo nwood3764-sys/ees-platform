@@ -137,7 +137,15 @@ export function ComingSoon({ label }) {
   );
 }
 
-export function Sidebar({ activeModule, onModuleChange, user = { name: 'Nicholas Wood', role: 'Admin', initials: 'NW' } }) {
+export function Sidebar({ activeModule, onModuleChange, userEmail, onSignOut, user = { name: 'Nicholas Wood', role: 'Admin', initials: 'NW' } }) {
+  // If an auth email is provided, derive display values from it so the
+  // sidebar reflects whoever is actually signed in rather than a hardcoded
+  // default. Falls back to the `user` prop for non-auth usages.
+  const displayName = userEmail ? userEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : user.name
+  const displayInitials = userEmail
+    ? userEmail.split('@')[0].split(/[._]/).map((s) => s[0]?.toUpperCase() || '').join('').slice(0, 2)
+    : user.initials
+  const displayRole = userEmail ? userEmail : user.role
   return (
     <div style={{ width: 240, background: C.sidebar, display: 'flex', flexDirection: 'column', flexShrink: 0, height: '100vh' }}>
       {/* Logo */}
@@ -171,19 +179,42 @@ export function Sidebar({ activeModule, onModuleChange, user = { name: 'Nicholas
         })}
       </nav>
 
-      {/* User */}
+      {/* User + sign out */}
       <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{
           width: 28, height: 28, borderRadius: '50%', background: C.emerald,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 11, fontWeight: 600, color: '#07111f', flexShrink: 0
         }}>
-          {user.initials}
+          {displayInitials || 'U'}
         </div>
-        <div>
-          <div style={{ color: C.navActive, fontSize: 12, fontWeight: 500 }}>{user.name}</div>
-          <div style={{ color: C.navInactive, fontSize: 10 }}>{user.role}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: C.navActive, fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</div>
+          <div style={{ color: C.navInactive, fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayRole}</div>
         </div>
+        {onSignOut && (
+          <button
+            onClick={onSignOut}
+            title="Sign out"
+            aria-label="Sign out"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: 4,
+              borderRadius: 4,
+              cursor: 'pointer',
+              color: C.navInactive,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = C.navActive }}
+            onMouseLeave={e => { e.currentTarget.style.color = C.navInactive }}
+          >
+            <Icon path="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" size={14} color="currentColor" />
+          </button>
+        )}
       </div>
     </div>
   );
