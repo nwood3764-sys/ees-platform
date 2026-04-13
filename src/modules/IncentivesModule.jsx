@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
-import { PROJECT_PAYMENT_REQUESTS, PAYMENT_RECEIPTS } from '../data/mockData'
+import { fetchPaymentRequests, fetchPaymentReceipts } from '../data/incentivesService'
 
 const SECTIONS = [
   { id:'home',     label:'Home'                       },
@@ -56,26 +56,50 @@ function pmtCell(col, r) {
   return undefined
 }
 
-const receivedByMonth = [{ month:'Nov',value:0},{month:'Dec',value:88},{month:'Jan',value:128},{month:'Feb',value:44},{month:'Mar',value:0},{month:'Apr',value:175}]
-const pipelineByProgram = [{ name:'WI-IRA-MF-HOMES',value:490},{name:'CO - Denver',value:320},{name:'WI-IRA-SF-HOMES',value:175},{name:'WI-IRA-MF-HEAR',value:89},{name:'WI - FOE',value:55},{name:'MI-IRA-MF-HOMES',value:98}]
-
-function IncentivesHome({ setSec }) {
-  const toPrepare    = PROJECT_PAYMENT_REQUESTS.filter(r => r.status==='Payment Request To Be Prepared'||r.status==='Payment Request To Be Verified')
-  const toSubmit     = PROJECT_PAYMENT_REQUESTS.filter(r => r.status==='Payment Request To Be Submitted')
-  const awaitReview  = PROJECT_PAYMENT_REQUESTS.filter(r => r.status.includes('Awaiting')||r.status==='Payment Request Under Review')
-  const pmtPending   = PROJECT_PAYMENT_REQUESTS.filter(r => r.status==='Payment Request Payment Pending')
-  const overdue      = PROJECT_PAYMENT_REQUESTS.filter(r => r.daysOpen>30&&!r.status.includes('Received'))
-  const totalPipeline = PROJECT_PAYMENT_REQUESTS.reduce((s,r)=>s+(r.amount||0),0)
-  const totalApproved = PROJECT_PAYMENT_REQUESTS.filter(r=>['Payment Request Approved','Payment Request Payment Pending','Payment Request Payment Received'].includes(r.status)).reduce((s,r)=>s+(r.amount||0),0)
-  const totalReceived = PAYMENT_RECEIPTS.reduce((s,r)=>s+(r.amount||0),0)
+function IncentivesHome({ setSec, requests, receipts }) {
+  const toPrepare    = requests.filter(r => r.status==='Payment Request To Be Prepared'||r.status==='Payment Request To Be Verified')
+  const toSubmit     = requests.filter(r => r.status==='Payment Request To Be Submitted')
+  const awaitReview  = requests.filter(r => r.status.includes('Awaiting')||r.status==='Payment Request Under Review')
+  const pmtPending   = requests.filter(r => r.status==='Payment Request Payment Pending')
+  const overdue      = requests.filter(r => r.daysOpen>30&&!r.status.includes('Received'))
+  const totalPipeline = requests.reduce((s,r)=>s+(r.amount||0),0)
+  const totalApproved = requests.filter(r=>['Payment Request Approved','Payment Request Payment Pending','Payment Request Payment Received'].includes(r.status)).reduce((s,r)=>s+(r.amount||0),0)
+  const totalReceived = receipts.reduce((s,r)=>s+(r.amount||0),0)
 
   const prByStatus = [
     { name:'To Prepare',     value:toPrepare.length  },
     { name:'To Submit',      value:toSubmit.length   },
     { name:'Awaiting Review',value:awaitReview.length },
     { name:'Pmt Pending',    value:pmtPending.length },
-    { name:'Received',       value:PAYMENT_RECEIPTS.length },
+    { name:'Received',       value:receipts.length },
   ]
+
+  // Pipeline by program computed from live requests
+  const progMap = new Map()
+  for (const r of requests) {
+    const k = r.program || '—'
+    progMap.set(k, (progMap.get(k) || 0) + (r.amount || 0))
+  }
+  const pipelineByProgram = Array.from(progMap, ([name, v]) => ({ name, value: Math.round(v/1000) }))
+    .sort((a,b)=>b.value-a.value)
+
+  // Payments received rolling 6-month line (from live receipts)
+  const monthKeys = []
+  const now = new Date()
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1)
+    monthKeys.push({
+      key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
+      label: d.toLocaleString('en-US', { month: 'short' }),
+    })
+  }
+  const monthMap = new Map(monthKeys.map(m => [m.key, 0]))
+  for (const r of receipts) {
+    if (!r.receivedDate) continue
+    const k = r.receivedDate.slice(0, 7)
+    if (monthMap.has(k)) monthMap.set(k, monthMap.get(k) + (r.amount || 0))
+  }
+  const receivedByMonth = monthKeys.map(m => ({ month: m.label, value: Math.round((monthMap.get(m.key) || 0) / 1000) }))
 
   return (
     <div style={{ flex:1, overflow:'auto', display:'flex' }}>
@@ -175,7 +199,7 @@ function IncentivesHome({ setSec }) {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
             <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>{['Record #','Request','Property','Status','Amount','Days Open','Payment Body'].map(h=><th key={h} style={{ padding:'9px 12px', textAlign:'left', color:C.textMuted, fontWeight:500, fontSize:11, textTransform:'uppercase', letterSpacing:'0.04em' }}>{h}</th>)}</tr></thead>
             <tbody>
-              {[...PROJECT_PAYMENT_REQUESTS].sort((a,b)=>b.daysOpen-a.daysOpen).map(r=>(
+              {[...requests].sort((a,b)=>b.daysOpen-a.daysOpen).map(r=>(
                 <TableRow key={r.id}>
                   <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textMuted, fontFamily:'JetBrains Mono, monospace', fontSize:10 }}>{r.id}</td>
                   <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textPrimary, fontWeight:500, maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</td>
@@ -212,8 +236,8 @@ function IncentivesHome({ setSec }) {
 
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
           <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><span style={{ fontWeight:600, fontSize:13, color:C.textPrimary }}>Recent Receipts</span></div>
-          {PAYMENT_RECEIPTS.map((r,i)=>(
-            <div key={r.id} style={{ padding:'10px 14px', borderBottom:i<PAYMENT_RECEIPTS.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
+          {receipts.map((r,i)=>(
+            <div key={r.id} style={{ padding:'10px 14px', borderBottom:i<receipts.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
               onMouseEnter={e=>e.currentTarget.style.background='#f7f9fc'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
               <div style={{ color:'#1a7a4e', fontSize:12, fontWeight:600, marginBottom:2 }}>{fmt(r.amount)}</div>
               <div style={{ color:C.textSecondary, fontSize:11, marginBottom:1 }}>{r.property}</div>
@@ -227,10 +251,32 @@ function IncentivesHome({ setSec }) {
   )
 }
 
+function LiveListView({ loading, error, data, ...rest }) {
+  if (loading) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>Loading…</div>
+  if (error) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}><div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div><div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div></div>
+  return <ListView data={data} {...rest} />
+}
+
 export default function IncentivesModule() {
   const [sec, setSec] = useState('home')
-  const urgentCount = PROJECT_PAYMENT_REQUESTS.filter(r=>r.daysOpen>30&&!r.status.includes('Received')).length
-  const counts = { requests: PROJECT_PAYMENT_REQUESTS.length, received: PAYMENT_RECEIPTS.length }
+  const [requests, setRequests] = useState([])
+  const [receipts, setReceipts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    Promise.all([fetchPaymentRequests(), fetchPaymentReceipts()])
+      .then(([r, p]) => { if (!cancelled) { setRequests(r); setReceipts(p) } })
+      .catch(err => { if (!cancelled) setError(err) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  const urgentCount = requests.filter(r=>r.daysOpen>30&&!r.status.includes('Received')).length
+  const counts = { requests: requests.length, received: receipts.length }
   const urgentSections = { home: urgentCount }
 
   return (
@@ -246,9 +292,9 @@ export default function IncentivesModule() {
       </div>
       <SectionTabs sections={SECTIONS} active={sec} onChange={setSec} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
-        {sec==='home'     && <IncentivesHome setSec={setSec} />}
-        {sec==='requests' && <ListView data={PROJECT_PAYMENT_REQUESTS} columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell} />}
-        {sec==='received' && <ListView data={PAYMENT_RECEIPTS}         columns={PMT_COLS} systemViews={PMT_VIEWS} defaultViewId="PTV-01" newLabel="Payment Receipt"         onNew={()=>{}} renderCell={pmtCell} />}
+        {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} />}
+        {sec==='requests' && <LiveListView loading={loading} error={error} data={requests} columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell} />}
+        {sec==='received' && <LiveListView loading={loading} error={error} data={receipts} columns={PMT_COLS} systemViews={PMT_VIEWS} defaultViewId="PTV-01" newLabel="Payment Receipt"         onNew={()=>{}} renderCell={pmtCell} />}
       </div>
     </div>
   )
