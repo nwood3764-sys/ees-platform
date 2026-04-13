@@ -11,6 +11,7 @@ import IncentivesModule from './modules/IncentivesModule'
 import StockModule from './modules/StockModule'
 import FleetModule from './modules/FleetModule'
 import PeopleModule from './modules/PeopleModule'
+import AdminModule from './modules/AdminModule'
 
 function AuthedApp({ session }) {
   const [activeModule, setActiveModule] = useState('home')
@@ -29,6 +30,7 @@ function AuthedApp({ session }) {
       case 'stock':         return <StockModule />
       case 'fleet':         return <FleetModule />
       case 'people':        return <PeopleModule />
+      case 'admin':         return <AdminModule />
       default:              return <ComingSoon label={activeModule.charAt(0).toUpperCase() + activeModule.slice(1)} />
     }
   }
