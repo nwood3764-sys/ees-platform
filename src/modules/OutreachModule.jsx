@@ -4,7 +4,7 @@ import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
 import { ListView } from '../components/ListView'
 import { OPPORTUNITIES, PROPERTIES, BUILDINGS, CONTACTS, ENROLLMENTS } from '../data/mockData'
-import { fetchProperties, fetchBuildings, fetchUnits } from '../data/outreachService'
+import { fetchProperties, fetchBuildings, fetchUnits, fetchOpportunities, fetchContacts, fetchEnrollments } from '../data/outreachService'
 
 const SECTIONS = [
   { id: 'home',       label: 'Home'         },
@@ -132,16 +132,32 @@ function contactCell(col, r) {
   return undefined
 }
 
-function OutreachHome({ setSec }) {
-  const enrolled = PROPERTIES.filter(p => p.status === 'Enrolled')
-  const hafPending = ENROLLMENTS.filter(e => e.hafAgreement === 'Pending')
-  const iqInProgress = ENROLLMENTS.filter(e => e.incomeQual === 'In Progress')
-  const needsAction = ENROLLMENTS.filter(e => e.status !== 'Enrollment — Complete' && e.status !== 'Enrollment — Outreach Active')
-  const pipeline = OPPORTUNITIES.reduce((s, r) => s + (r.amount || 0), 0)
+function OutreachHome({ setSec, properties, opportunities, enrollments, contacts }) {
+  const enrolled = properties.filter(p => p.status === 'Enrolled')
+  const hafPending = enrollments.filter(e => e.hafAgreement === 'Pending')
+  const iqInProgress = enrollments.filter(e => e.incomeQual === 'In Progress')
+  const needsAction = enrollments.filter(e => e.status !== 'Enrollment — Complete' && e.status !== 'Enrollment — Outreach Active')
+  const pipeline = opportunities.reduce((s, r) => s + (r._amountRaw || 0), 0)
 
-  const propByStatus = [{ name: 'Enrolled', value: 3 }, { name: 'In Progress', value: 2 }, { name: 'Outreach Active', value: 2 }, { name: 'Prospect', value: 1 }]
-  const oppByStage = [{ name: 'Property Identified', value: 0 }, { name: 'Outreach Active', value: 1 }, { name: 'Decision Maker ID\'d', value: 1 }, { name: 'Enrollment In Progress', value: 1 }, { name: 'Application Submitted', value: 2 }, { name: 'Reservation Obtained', value: 2 }, { name: 'Project In Progress', value: 1 }]
-  const pipelineByState = [{ name: 'WI', value: 812 }, { name: 'CO', value: 320 }, { name: 'NC', value: 175 }, { name: 'MI', value: 98 }]
+  // Group by count for charts
+  const groupCount = (arr, key) => {
+    const m = new Map()
+    for (const r of arr) m.set(r[key] || '—', (m.get(r[key] || '—') || 0) + 1)
+    return Array.from(m, ([name, value]) => ({ name, value }))
+  }
+  const propByStatus = groupCount(properties, 'status')
+  const oppByStage = groupCount(opportunities, 'stage').map(d => ({
+    ...d,
+    name: d.name.replace(/^Opportunity\s*[—-]?\s*/, '').slice(0, 24)
+  }))
+  // Pipeline by state from live opportunity amounts (thousands)
+  const pipelineByStateMap = new Map()
+  for (const o of opportunities) {
+    if (!o.state) continue
+    pipelineByStateMap.set(o.state, (pipelineByStateMap.get(o.state) || 0) + (o._amountRaw || 0))
+  }
+  const pipelineByState = Array.from(pipelineByStateMap, ([name, v]) => ({ name, value: Math.round(v / 1000) }))
+    .sort((a, b) => b.value - a.value)
 
   return (
     <div style={{ flex: 1, overflow: 'auto', display: 'flex' }}>
@@ -154,8 +170,8 @@ function OutreachHome({ setSec }) {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
           {[
-            { label: 'Active Pipeline',        value: fmt(pipeline),      sub: `${OPPORTUNITIES.length} opportunities`, color: C.emerald, action: () => setSec('opps')       },
-            { label: 'Properties Enrolled',    value: enrolled.length,    sub: `${enrolled.reduce((s,r)=>s+r.units,0)} units`, color: C.sky, action: () => setSec('properties') },
+            { label: 'Active Pipeline',        value: fmt(pipeline),      sub: `${opportunities.length} opportunities`, color: C.emerald, action: () => setSec('opps')       },
+            { label: 'Properties Enrolled',    value: enrolled.length,    sub: `${enrolled.reduce((s,r)=>s+(Number(r.units)||0),0)} units`, color: C.sky, action: () => setSec('properties') },
             { label: 'Enrollments Need Action',value: needsAction.length, sub: 'Awaiting documents',    color: C.amber,  action: () => setSec('enrollment')  },
             { label: 'HAF Agreements Pending', value: hafPending.length,  sub: 'Signature required',   color: C.danger, urgent: hafPending.length > 0, action: () => setSec('enrollment') },
           ].map(s => (
@@ -277,7 +293,7 @@ function OutreachHome({ setSec }) {
 
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
           <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}><span style={{ fontWeight: 600, fontSize: 13, color: C.textPrimary }}>Recent Contacts</span></div>
-          {CONTACTS.slice(0, 5).map((c, i) => {
+          {contacts.slice(0, 5).map((c, i) => {
             const initials = c.name.split(' ').map(n => n[0]).join('').slice(0, 2)
             return (
               <div key={c.id} style={{ padding: '9px 14px', borderBottom: i < 4 ? `1px solid ${C.border}` : 'none', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
@@ -320,11 +336,13 @@ function LiveListView({ loading, error, data, ...rest }) {
 export default function OutreachModule() {
   const [sec, setSec] = useState('home')
 
-  // Live data from Supabase. Opportunities, contacts, and enrollments are
-  // still on mock data — they get wired in a follow-up pass.
+  // All six datasets are live from Supabase.
   const [properties, setProperties] = useState([])
   const [buildings, setBuildings] = useState([])
   const [units, setUnits] = useState([])
+  const [opportunities, setOpportunities] = useState([])
+  const [contacts, setContacts] = useState([])
+  const [enrollments, setEnrollments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -332,26 +350,36 @@ export default function OutreachModule() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    Promise.all([fetchProperties(), fetchBuildings(), fetchUnits()])
-      .then(([p, b, u]) => {
+    Promise.all([
+      fetchProperties(),
+      fetchBuildings(),
+      fetchUnits(),
+      fetchOpportunities(),
+      fetchContacts(),
+      fetchEnrollments(),
+    ])
+      .then(([p, b, u, o, c, e]) => {
         if (cancelled) return
         setProperties(p)
         setBuildings(b)
         setUnits(u)
+        setOpportunities(o)
+        setContacts(c)
+        setEnrollments(e)
       })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [])
 
-  const hafUrgent = ENROLLMENTS.filter(e => e.hafAgreement === 'Pending').length
+  const hafUrgent = enrollments.filter(e => e.hafAgreement === 'Pending').length
   const counts = {
-    opps: OPPORTUNITIES.length,
+    opps: opportunities.length,
     properties: properties.length,
     buildings: buildings.length,
     units: units.length,
-    contacts: CONTACTS.length,
-    enrollment: ENROLLMENTS.length,
+    contacts: contacts.length,
+    enrollment: enrollments.length,
   }
   const urgentSections = { home: hafUrgent }
 
@@ -373,13 +401,13 @@ export default function OutreachModule() {
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => setSec(s)} counts={counts} urgentSections={urgentSections} />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
-        {sec === 'home'       && <OutreachHome setSec={setSec} />}
-        {sec === 'opps'       && <ListView data={OPPORTUNITIES} columns={OPP_COLS}  systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => {}} />}
-        {sec === 'properties' && <LiveListView loading={loading} error={error} data={properties} columns={PROP_COLS}  systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => {}} />}
-        {sec === 'buildings'  && <LiveListView loading={loading} error={error} data={buildings}  columns={BLDG_COLS}  systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => {}} />}
-        {sec === 'units'      && <LiveListView loading={loading} error={error} data={units}      columns={UNIT_COLS}  systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => {}} />}
-        {sec === 'contacts'   && <ListView data={CONTACTS}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"   onNew={() => {}} renderCell={contactCell} />}
-        {sec === 'enrollment' && <ListView data={ENROLLMENTS}  columns={ENR_COLS}   systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => {}} renderCell={enrollmentCell} />}
+        {sec === 'home'       && <OutreachHome setSec={setSec} properties={properties} opportunities={opportunities} enrollments={enrollments} contacts={contacts} />}
+        {sec === 'opps'       && <LiveListView loading={loading} error={error} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => {}} />}
+        {sec === 'properties' && <LiveListView loading={loading} error={error} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => {}} />}
+        {sec === 'buildings'  && <LiveListView loading={loading} error={error} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => {}} />}
+        {sec === 'units'      && <LiveListView loading={loading} error={error} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => {}} />}
+        {sec === 'contacts'   && <LiveListView loading={loading} error={error} data={contacts}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => {}} renderCell={contactCell} />}
+        {sec === 'enrollment' && <LiveListView loading={loading} error={error} data={enrollments}  columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => {}} renderCell={enrollmentCell} />}
       </div>
     </div>
   )

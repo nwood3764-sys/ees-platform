@@ -180,3 +180,169 @@ export async function fetchPropertyOwners() {
     email: r.property_owner_email || '',
   }))
 }
+
+// ---------------------------------------------------------------------------
+// Opportunities
+// ---------------------------------------------------------------------------
+
+export async function fetchOpportunities() {
+  const picklists = await loadPicklists()
+
+  const { data, error } = await supabase
+    .from('opportunities')
+    .select(`
+      id,
+      opportunity_record_number,
+      opportunity_name,
+      opportunity_stage,
+      opportunity_status,
+      opportunity_program,
+      opportunity_amount,
+      opportunity_close_date,
+      opportunity_state,
+      opportunity_owner,
+      property_id,
+      properties:property_id ( property_name, property_total_units )
+    `)
+    .eq('opportunity_is_deleted', false)
+    .order('opportunity_close_date', { ascending: true })
+
+  if (error) throw error
+
+  const fmtAmount = n => n == null ? '—' : `$${Number(n).toLocaleString()}`
+  return (data || []).map(r => ({
+    id: r.opportunity_record_number || r.id,
+    _id: r.id,
+    name: r.opportunity_name || '',
+    property: r.properties?.property_name || '—',
+    stage: picklists.byId.get(r.opportunity_stage) || '—',
+    program: r.opportunity_program || '—',
+    owner: 'Nicholas Wood', // placeholder — user join comes in a follow-up pass
+    amount: fmtAmount(r.opportunity_amount),
+    _amountRaw: Number(r.opportunity_amount) || 0,
+    units: r.properties?.property_total_units ?? 0,
+    closeDate: r.opportunity_close_date || '',
+    state: r.opportunity_state || '',
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// Contacts
+// ---------------------------------------------------------------------------
+
+export async function fetchContacts() {
+  const picklists = await loadPicklists()
+
+  const { data, error } = await supabase
+    .from('contacts')
+    .select(`
+      id,
+      contact_record_number,
+      contact_name,
+      contact_title,
+      contact_role,
+      contact_status,
+      contact_phone,
+      contact_email,
+      property_owner_id,
+      property_management_company_id,
+      property_owners:property_owner_id ( property_owner_name, property_owner_billing_state ),
+      property_management_companies:property_management_company_id ( pmc_name, pmc_billing_state )
+    `)
+    .eq('contact_is_deleted', false)
+    .order('contact_name', { ascending: true })
+
+  if (error) throw error
+
+  return (data || []).map(r => ({
+    id: r.contact_record_number || r.id,
+    _id: r.id,
+    name: r.contact_name,
+    title: r.contact_title || '',
+    org: r.property_owners?.property_owner_name
+      || r.property_management_companies?.pmc_name
+      || '—',
+    role: picklists.byId.get(r.contact_role) || '—',
+    email: r.contact_email || '',
+    phone: r.contact_phone || '',
+    status: picklists.byId.get(r.contact_status) || '—',
+    state: r.property_owners?.property_owner_billing_state
+      || r.property_management_companies?.pmc_billing_state
+      || '',
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// Enrollments (property_programs joined to properties + programs)
+// ---------------------------------------------------------------------------
+// The "enrollments" concept in the UI maps to rows in property_programs —
+// the junction between a property and a program, with a lifecycle status.
+// Each property can be enrolled in multiple programs simultaneously, and
+// each enrollment has its own independent status.
+
+export async function fetchEnrollments() {
+  const { data, error } = await supabase
+    .from('property_programs')
+    .select(`
+      id,
+      status,
+      enrollment_date,
+      affordability_category,
+      census_tract,
+      is_dac,
+      property_id,
+      program_id,
+      properties:property_id ( property_name, property_state, property_total_units ),
+      programs:program_id ( name, short_name, state )
+    `)
+    .order('enrollment_date', { ascending: false })
+
+  if (error) throw error
+
+  // The list-view columns defined in the Outreach module expect a set of
+  // sub-status fields (hafAgreement, incomeQual, censusTract, rentRoll,
+  // dacDesignation). property_programs.status is a single text lifecycle,
+  // so we derive those sub-statuses from the main status string. The
+  // dedicated tracking columns live on related docs/records and get wired
+  // in a follow-up pass.
+  const derive = status => {
+    const s = status || ''
+    const hafAgreement =
+      s.includes('HAF Agreement Pending') ? 'Pending' :
+      (s.includes('Complete') || s.includes('Executed') || s.includes('Income Qualification') || s.includes('Census Tract')) ? 'Executed' :
+      'Not Started'
+    const incomeQual =
+      s.includes('Income Qualification In Progress') ? 'In Progress' :
+      s.includes('Complete') ? 'Complete' :
+      s.includes('Review') ? 'In Review' :
+      'Not Started'
+    const censusTract =
+      s.includes('Census Tract Verification') ? 'Pending' :
+      s.includes('Complete') ? 'Verified' :
+      'Pending'
+    return { hafAgreement, incomeQual, censusTract }
+  }
+
+  return (data || []).map(r => {
+    const d = derive(r.status)
+    // Strip "Enrollment — " prefix for the name column, keep full for status
+    const propertyName = r.properties?.property_name || '—'
+    const programShort = r.programs?.short_name || r.programs?.name || '—'
+    return {
+      id: r.id.slice(0, 8).toUpperCase(),
+      _id: r.id,
+      name: `${propertyName} – ${programShort}`,
+      property: propertyName,
+      program: programShort,
+      status: r.status || '—',
+      owner: 'Nicholas Wood',
+      hafAgreement: d.hafAgreement,
+      incomeQual: d.incomeQual,
+      censusTract: d.censusTract,
+      dacDesignation: r.is_dac ? 'Yes' : 'No',
+      rentRoll: d.hafAgreement === 'Executed' ? 'Received' : 'Not Received',
+      state: r.properties?.property_state || r.programs?.state || '',
+      units: r.properties?.property_total_units || 0,
+    }
+  })
+}
