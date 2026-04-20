@@ -218,7 +218,7 @@ export default function QualificationModule() {
   const [sec, setSec] = useState('home')
   const [selectedRecord, setSelectedRecord] = useState(null)
   const SEC_TABLE = {'assessments': 'assessments', 'applications': 'incentive_applications', 'efr': 'efr_reports'}
-  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id }) }
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
   const [assessments, setAssessments] = useState([])
   const [applications, setApplications] = useState([])

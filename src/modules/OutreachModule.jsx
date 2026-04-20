@@ -351,7 +351,7 @@ export default function OutreachModule() {
   const openRecord = (row) => {
     if (!row?._id) return
     const table = SEC_TABLE_MAP[sec]
-    if (table) setSelectedRecord({ table, id: row._id })
+    if (table) setSelectedRecord({ table, id: row._id, name: row.name })
   }
 
   const closeRecord = () => setSelectedRecord(null)
@@ -410,7 +410,8 @@ export default function OutreachModule() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
           <span style={{ color: C.textMuted }}>Outreach</span>
           <span style={{ color: C.textMuted }}>/</span>
-          <span style={{ color: C.textPrimary, fontWeight: 500 }}>{SECTIONS.find(s => s.id === sec)?.label}</span>
+          <span style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }} onClick={() => selectedRecord && closeRecord()}>{SECTIONS.find(s => s.id === sec)?.label}</span>
+          {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name}</span></>}
         </div>
         <button style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, color: C.textSecondary, cursor: 'pointer', fontWeight: 500 }}>
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary} />
