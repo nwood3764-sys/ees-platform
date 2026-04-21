@@ -413,3 +413,65 @@ export async function fetchAllPageLayouts() {
     updatedAt: r.updated_at ? new Date(r.updated_at).toISOString().slice(0, 10) : '—',
   }))
 }
+
+// Full structure of a single page layout — sections + widgets ordered.
+// Returns: { layout, sections: [{...section, widgets: [...]}] }
+export async function fetchPageLayoutStructure(layoutId) {
+  const { data: layout, error: le } = await supabase
+    .from('page_layouts')
+    .select('id, page_layout_record_number, page_layout_name, page_layout_object, page_layout_type, page_layout_description, page_layout_is_default, updated_at')
+    .eq('id', layoutId)
+    .maybeSingle()
+  if (le) throw le
+  if (!layout) return null
+
+  const { data: sections, error: se } = await supabase
+    .from('page_layout_sections')
+    .select('id, section_label, section_order, section_columns, section_is_collapsible, section_is_collapsed_by_default, section_tab')
+    .eq('page_layout_id', layoutId)
+    .order('section_order', { ascending: true })
+  if (se) throw se
+
+  const sectionIds = (sections || []).map(s => s.id)
+  let widgets = []
+  if (sectionIds.length > 0) {
+    const { data: wData, error: we } = await supabase
+      .from('page_layout_widgets')
+      .select('id, page_layout_widget_record_number, section_id, widget_type, widget_title, widget_column, widget_position, widget_size, widget_config, widget_is_required')
+      .in('section_id', sectionIds)
+      .eq('is_deleted', false)
+      .order('widget_position', { ascending: true })
+    if (we) throw we
+    widgets = wData || []
+  }
+
+  // Group widgets by section
+  const widgetsBySection = {}
+  for (const w of widgets) {
+    if (!widgetsBySection[w.section_id]) widgetsBySection[w.section_id] = []
+    widgetsBySection[w.section_id].push(w)
+  }
+
+  return {
+    layout: {
+      id: layout.id,
+      recordNumber: layout.page_layout_record_number,
+      name: layout.page_layout_name,
+      object: layout.page_layout_object,
+      type: layout.page_layout_type,
+      isDefault: layout.page_layout_is_default,
+      description: layout.page_layout_description || '',
+      updatedAt: layout.updated_at,
+    },
+    sections: (sections || []).map(s => ({
+      id: s.id,
+      label: s.section_label,
+      order: s.section_order,
+      columns: s.section_columns,
+      isCollapsible: s.section_is_collapsible,
+      isCollapsedByDefault: s.section_is_collapsed_by_default,
+      tab: s.section_tab,
+      widgets: widgetsBySection[s.id] || [],
+    })),
+  }
+}
