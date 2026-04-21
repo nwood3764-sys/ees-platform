@@ -475,3 +475,170 @@ export async function fetchPageLayoutStructure(layoutId) {
     })),
   }
 }
+
+// ---------------------------------------------------------------------------
+// Work Plan Templates (Work Plan Builder — list view with step-count rollup)
+// ---------------------------------------------------------------------------
+
+export async function fetchWorkPlanTemplates() {
+  // 1. Plan headers
+  const { data: plans, error: planErr } = await supabase
+    .from('work_plan_templates')
+    .select(`
+      id, wpt_record_number, wpt_name, wpt_description,
+      wpt_is_active, wpt_relative_execution_order
+    `)
+    .eq('wpt_is_deleted', false)
+    .order('wpt_name', { ascending: true })
+  if (planErr) throw planErr
+
+  if (!plans || plans.length === 0) return []
+
+  // 2. All entries for these plans — join to step templates for duration rollup
+  const planIds = plans.map(p => p.id)
+  const { data: entries, error: entErr } = await supabase
+    .from('work_plan_template_entries')
+    .select(`
+      work_plan_template_id,
+      wpte_execution_order,
+      work_step_templates:work_step_template_id (
+        id, wst_estimated_duration_minutes, wst_is_deleted
+      )
+    `)
+    .in('work_plan_template_id', planIds)
+    .eq('wpte_is_deleted', false)
+  if (entErr) throw entErr
+
+  // 3. Rollups per plan
+  const rollup = new Map()   // plan_id -> { stepCount, totalMinutes }
+  for (const e of (entries || [])) {
+    const step = e.work_step_templates
+    if (!step || step.wst_is_deleted) continue
+    const r = rollup.get(e.work_plan_template_id) || { stepCount: 0, totalMinutes: 0 }
+    r.stepCount += 1
+    r.totalMinutes += Number(step.wst_estimated_duration_minutes || 0)
+    rollup.set(e.work_plan_template_id, r)
+  }
+
+  // 4. Flatten
+  return plans.map(p => {
+    const r = rollup.get(p.id) || { stepCount: 0, totalMinutes: 0 }
+    const hrs = r.totalMinutes / 60
+    const totalLabel = r.totalMinutes === 0
+      ? '—'
+      : (r.totalMinutes >= 60 ? `${hrs.toFixed(2).replace(/\.00$/, '')} hr (${r.totalMinutes} min)` : `${r.totalMinutes} min`)
+    return {
+      id: p.wpt_record_number || p.id.slice(0, 8).toUpperCase(),
+      _id: p.id,
+      name: p.wpt_name,
+      description: p.wpt_description || '—',
+      stepCount: r.stepCount,
+      totalDuration: totalLabel,
+      status: p.wpt_is_active ? 'Active' : 'Inactive',
+    }
+  })
+}
+
+// Full drill-in: plan header + ordered steps with role/evidence labels resolved
+export async function fetchWorkPlanTemplateDetail(planId) {
+  // 1. Plan header
+  const { data: plan, error: planErr } = await supabase
+    .from('work_plan_templates')
+    .select('id, wpt_record_number, wpt_name, wpt_description, wpt_is_active, wpt_relative_execution_order')
+    .eq('id', planId)
+    .single()
+  if (planErr) throw planErr
+
+  // 2. Entries with step templates
+  const { data: entries, error: entErr } = await supabase
+    .from('work_plan_template_entries')
+    .select(`
+      id, wpte_execution_order,
+      work_step_templates:work_step_template_id (
+        id, wst_record_number, wst_name, wst_description,
+        wst_estimated_duration_minutes,
+        wst_required_evidence_type_id,
+        wst_assigned_owner_role_id,
+        wst_verifier_role_id,
+        wst_photos_required_count,
+        wst_photo_before_required,
+        wst_photo_after_required,
+        wst_is_active, wst_is_deleted
+      )
+    `)
+    .eq('work_plan_template_id', planId)
+    .eq('wpte_is_deleted', false)
+    .order('wpte_execution_order', { ascending: true })
+  if (entErr) throw entErr
+
+  const steps = (entries || [])
+    .map(e => ({ order: e.wpte_execution_order, wste: e.id, step: e.work_step_templates }))
+    .filter(s => s.step && !s.step.wst_is_deleted)
+
+  // 3. Resolve roles and evidence type labels in batch
+  const roleIds = new Set()
+  const evidenceIds = new Set()
+  steps.forEach(s => {
+    if (s.step.wst_assigned_owner_role_id) roleIds.add(s.step.wst_assigned_owner_role_id)
+    if (s.step.wst_verifier_role_id)       roleIds.add(s.step.wst_verifier_role_id)
+    if (s.step.wst_required_evidence_type_id) evidenceIds.add(s.step.wst_required_evidence_type_id)
+  })
+
+  const [roleRes, evRes] = await Promise.all([
+    roleIds.size > 0
+      ? supabase.from('roles').select('id, role_name').in('id', [...roleIds])
+      : Promise.resolve({ data: [] }),
+    evidenceIds.size > 0
+      ? supabase.from('picklist_values').select('id, picklist_label').in('id', [...evidenceIds])
+      : Promise.resolve({ data: [] }),
+  ])
+  if (roleRes.error) throw roleRes.error
+  if (evRes.error)   throw evRes.error
+
+  const roleMap = new Map((roleRes.data || []).map(r => [r.id, r.role_name]))
+  const evMap   = new Map((evRes.data   || []).map(p => [p.id, p.picklist_label]))
+
+  // 4. Find associated work types that use this plan as default
+  const { data: workTypes, error: wtErr } = await supabase
+    .from('work_types')
+    .select('id, work_type_record_number, work_type_name')
+    .eq('work_type_default_work_plan_template_id', planId)
+    .eq('work_type_is_deleted', false)
+  if (wtErr) throw wtErr
+
+  // 5. Shape output
+  const totalMinutes = steps.reduce((sum, s) => sum + Number(s.step.wst_estimated_duration_minutes || 0), 0)
+
+  return {
+    plan: {
+      id: plan.id,
+      recordNumber: plan.wpt_record_number,
+      name: plan.wpt_name,
+      description: plan.wpt_description || '',
+      isActive: plan.wpt_is_active,
+      totalMinutes,
+      totalHours: totalMinutes / 60,
+      stepCount: steps.length,
+    },
+    workTypes: (workTypes || []).map(wt => ({
+      id: wt.id,
+      recordNumber: wt.work_type_record_number,
+      name: wt.work_type_name,
+    })),
+    steps: steps.map(({ order, step }) => ({
+      order,
+      recordNumber: step.wst_record_number,
+      id: step.id,
+      name: step.wst_name,
+      description: step.wst_description || '',
+      durationMinutes: Number(step.wst_estimated_duration_minutes || 0),
+      evidenceType: evMap.get(step.wst_required_evidence_type_id) || '—',
+      ownerRole:    roleMap.get(step.wst_assigned_owner_role_id)  || '—',
+      verifierRole: roleMap.get(step.wst_verifier_role_id)         || '—',
+      photosRequired: step.wst_photos_required_count || 0,
+      photoBefore:    !!step.wst_photo_before_required,
+      photoAfter:     !!step.wst_photo_after_required,
+      isActive:       !!step.wst_is_active,
+    })),
+  }
+}

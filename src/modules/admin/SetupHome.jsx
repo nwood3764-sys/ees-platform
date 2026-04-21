@@ -9,6 +9,7 @@ import {
   fetchAutomationRules, fetchValidationRules,
   fetchPicklistValues, fetchUsers, fetchAuditLog,
   fetchAllPageLayouts,
+  fetchWorkPlanTemplates, fetchWorkPlanTemplateDetail,
 } from '../../data/adminService'
 
 // ---------------------------------------------------------------------------
@@ -218,7 +219,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'document_templates':return <NodePage title="Document Templates"      table="document_templates" fetcher={fetchDocumentTemplates} columns={DT_COLS}            newLabel="Document Template" onOpenRecord={onOpenRecord} />
     case 'programs':          return <NodePage title="Programs"                table="programs"          fetcher={fetchPrograms}          columns={PROG_COLS}           newLabel="Program"          onOpenRecord={onOpenRecord} />
     case 'work_types':        return <NodePage title="Work Types"              table="work_types"        fetcher={fetchWorkTypes}         columns={WT_COLS}             newLabel="Work Type"        onOpenRecord={onOpenRecord} />
-    case 'work_plan_templates': return <ComingSoonPane label="Work Plan Templates" />
+    case 'work_plan_templates': return <WorkPlanTemplatesPane />
     case 'service_territories': return <ComingSoonPane label="Service Territories" />
     case 'audit_log':         return <NodePage title="Audit Log"               table="audit_log"         fetcher={fetchAuditLog}          columns={AL_COLS}             newLabel={null}             onOpenRecord={null} />
     default:                  return <ComingSoonPane label={nodeId} />
@@ -331,6 +332,338 @@ function RecordTypesNodePane({ onOpenObjectManager }) {
   )
 }
 
+// ─── Work Plan Templates pane (Work Plan Builder) ──────────────────────
+//
+// Two modes:
+//   - list:   ListView of all plan templates (step count + total duration rollups)
+//   - detail: drilled into one plan — shows header + ordered step table
+//
+// The detail view intentionally does NOT route through RecordDetail because the
+// step sequence is the point of the Builder view — a generic field-section
+// record page would hide the ordered step list that matters most.
+
+function WorkPlanTemplatesPane() {
+  const [mode, setMode]         = useState('list')    // 'list' | 'detail'
+  const [plans, setPlans]       = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState(null)
+  const [selectedId, setSelected] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    fetchWorkPlanTemplates()
+      .then(d => { if (!cancelled) setPlans(d) })
+      .catch(err => { if (!cancelled) setError(err) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  if (mode === 'detail' && selectedId) {
+    return (
+      <WorkPlanTemplateDetail
+        planId={selectedId}
+        onBack={() => { setMode('list'); setSelected(null) }}
+      />
+    )
+  }
+
+  const systemViews = [{ id: 'AV', name: 'All', filters: [], sortField: 'id', sortDir: 'asc' }]
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 24px 10px', background: C.card, borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Work Plan Templates</div>
+        <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
+          {loading ? 'Loading…' : `${plans.length} template${plans.length === 1 ? '' : 's'}`}
+          {!loading && ' — click a row to view the step sequence'}
+        </div>
+      </div>
+      {loading && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading…</div>
+      )}
+      {error && !loading && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, padding: 24 }}>
+          <div style={{ color: '#b03a2e', fontSize: 13, fontWeight: 600 }}>Could not load work plan templates</div>
+          <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace', maxWidth: 560, textAlign: 'center' }}>
+            {String(error.message || error)}
+          </div>
+        </div>
+      )}
+      {!loading && !error && (
+        <ListView
+          data={plans}
+          columns={WPT_COLS}
+          systemViews={systemViews}
+          defaultViewId="AV"
+          onOpenRecord={row => {
+            if (!row?._id) return
+            setSelected(row._id)
+            setMode('detail')
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Work Plan Template Detail ─────────────────────────────────────────
+
+function WorkPlanTemplateDetail({ planId, onBack }) {
+  const [data, setData]       = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    fetchWorkPlanTemplateDetail(planId)
+      .then(d => { if (!cancelled) setData(d) })
+      .catch(err => { if (!cancelled) setError(err) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [planId])
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header bar with back button */}
+      <div style={{
+        padding: '12px 24px', background: C.card, borderBottom: `1px solid ${C.border}`,
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+        <button
+          onClick={onBack}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
+            padding: '5px 10px', fontSize: 12, color: C.textSecondary, cursor: 'pointer',
+          }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = C.borderDark || C.border}
+          onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
+        >
+          <Icon path="M15 19l-7-7 7-7" size={12} color={C.textSecondary} />
+          Back to list
+        </button>
+        <div style={{ fontSize: 12.5, color: C.textMuted }}>
+          {loading ? 'Loading…' : (data?.plan ? `${data.plan.recordNumber} · ${data.plan.name}` : 'Not found')}
+        </div>
+      </div>
+
+      {loading && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading…</div>
+      )}
+      {error && !loading && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, padding: 24 }}>
+          <div style={{ color: '#b03a2e', fontSize: 13, fontWeight: 600 }}>Could not load this plan</div>
+          <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace', maxWidth: 560, textAlign: 'center' }}>
+            {String(error.message || error)}
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && data && (
+        <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px', background: C.page }}>
+          {/* Summary card */}
+          <div style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: '18px 20px', marginBottom: 16,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.3 }}>
+                  {data.plan.recordNumber}
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 600, color: C.textPrimary, marginTop: 2 }}>
+                  {data.plan.name}
+                </div>
+                {data.plan.description && (
+                  <div style={{ fontSize: 12.5, color: C.textSecondary, marginTop: 8, lineHeight: 1.5, maxWidth: 820 }}>
+                    {data.plan.description}
+                  </div>
+                )}
+              </div>
+              <StatusBadge active={data.plan.isActive} />
+            </div>
+
+            {/* Stat row */}
+            <div style={{
+              display: 'flex', gap: 28, marginTop: 18, paddingTop: 16,
+              borderTop: `1px solid ${C.border}`, flexWrap: 'wrap',
+            }}>
+              <Stat label="Steps" value={data.plan.stepCount} />
+              <Stat
+                label="Total Duration"
+                value={
+                  data.plan.totalMinutes === 0
+                    ? '—'
+                    : (data.plan.totalMinutes >= 60
+                        ? `${(data.plan.totalHours).toFixed(2).replace(/\.00$/, '')} hr`
+                        : `${data.plan.totalMinutes} min`)
+                }
+                sub={data.plan.totalMinutes >= 60 ? `${data.plan.totalMinutes} min` : null}
+              />
+              <Stat
+                label="Used By Work Types"
+                value={data.workTypes.length}
+                sub={data.workTypes.length > 0
+                  ? data.workTypes.map(wt => wt.recordNumber).join(', ')
+                  : null}
+              />
+            </div>
+          </div>
+
+          {/* Steps table */}
+          <div style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+              fontSize: 13, fontWeight: 600, color: C.textPrimary,
+            }}>
+              Work Steps
+            </div>
+            {data.steps.length === 0 ? (
+              <div style={{ padding: '28px 16px', textAlign: 'center', color: C.textMuted, fontSize: 12.5 }}>
+                No steps defined on this plan yet.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ background: C.cardSecondary || C.page }}>
+                      <Th style={{ width: 42 }}>#</Th>
+                      <Th style={{ width: 110 }}>Record #</Th>
+                      <Th>Step</Th>
+                      <Th style={{ width: 72, textAlign: 'right' }}>Duration</Th>
+                      <Th style={{ width: 140 }}>Evidence</Th>
+                      <Th style={{ width: 170 }}>Owner Role</Th>
+                      <Th style={{ width: 170 }}>Verifier Role</Th>
+                      <Th style={{ width: 130, textAlign: 'center' }}>Photos</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.steps.map(s => (
+                      <tr key={s.id} style={{ borderTop: `1px solid ${C.border}` }}>
+                        <Td mono center>{s.order}</Td>
+                        <Td mono>{s.recordNumber}</Td>
+                        <Td>
+                          <div style={{ fontWeight: 500, color: C.textPrimary }}>{s.name}</div>
+                          {s.description && (
+                            <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 3, lineHeight: 1.4 }}>
+                              {s.description}
+                            </div>
+                          )}
+                        </Td>
+                        <Td align="right" mono>
+                          {s.durationMinutes > 0 ? `${s.durationMinutes} min` : '—'}
+                        </Td>
+                        <Td>
+                          <EvidencePill type={s.evidenceType} />
+                        </Td>
+                        <Td>{s.ownerRole}</Td>
+                        <Td>{s.verifierRole}</Td>
+                        <Td center>
+                          <PhotoSummary count={s.photosRequired} before={s.photoBefore} after={s.photoAfter} />
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Stat({ label, value, sub }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 500 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 600, color: C.textPrimary, marginTop: 3, fontFamily: 'JetBrains Mono, monospace' }}>
+        {value}
+      </div>
+      {sub && (
+        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{sub}</div>
+      )}
+    </div>
+  )
+}
+
+function StatusBadge({ active }) {
+  const bg    = active ? 'rgba(62,207,142,0.12)' : 'rgba(143,160,184,0.16)'
+  const color = active ? '#2aab72' : C.textSecondary
+  return (
+    <span style={{
+      background: bg, color, padding: '3px 10px', borderRadius: 12,
+      fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap',
+    }}>
+      {active ? 'Active' : 'Inactive'}
+    </span>
+  )
+}
+
+function EvidencePill({ type }) {
+  if (!type || type === '—') return <span style={{ color: C.textMuted }}>—</span>
+  const palette = {
+    'Photo':            { bg: 'rgba(126,179,232,0.18)', fg: '#3b82b8' },
+    'Document Upload':  { bg: 'rgba(62,207,142,0.14)',  fg: '#2aab72' },
+    'Measurement':      { bg: 'rgba(232,169,73,0.18)',  fg: '#b77d1f' },
+    'Verified Yes/No':  { bg: 'rgba(143,160,184,0.22)', fg: C.textSecondary },
+  }
+  const p = palette[type] || { bg: C.page, fg: C.textSecondary }
+  return (
+    <span style={{
+      background: p.bg, color: p.fg, padding: '2px 8px', borderRadius: 10,
+      fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap',
+    }}>{type}</span>
+  )
+}
+
+function PhotoSummary({ count, before, after }) {
+  if (!count && !before && !after) {
+    return <span style={{ color: C.textMuted }}>—</span>
+  }
+  const flags = []
+  if (before) flags.push('B')
+  if (after)  flags.push('A')
+  return (
+    <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, color: C.textSecondary }}>
+      {count || 0}{flags.length ? ` · ${flags.join('/')}` : ''}
+    </span>
+  )
+}
+
+function Th({ children, style }) {
+  return (
+    <th style={{
+      textAlign: 'left', padding: '10px 14px',
+      fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6,
+      color: C.textMuted, borderBottom: `1px solid ${C.border}`,
+      ...style,
+    }}>{children}</th>
+  )
+}
+
+function Td({ children, mono, align, center }) {
+  return (
+    <td style={{
+      padding: '10px 14px', verticalAlign: 'top',
+      fontFamily: mono ? 'JetBrains Mono, monospace' : 'inherit',
+      fontSize: mono ? 11.5 : 12.5,
+      textAlign: center ? 'center' : (align || 'left'),
+      color: C.textSecondary,
+    }}>{children}</td>
+  )
+}
+
 function ComingSoonPane({ label }) {
   return (
     <div style={{ padding: '60px 32px', textAlign: 'center', flex: 1 }}>
@@ -384,6 +717,15 @@ const WT_COLS = [
   { field: 'minCrew',     label: 'Min Crew',    type: 'text', sortable: true, filterable: false },
   { field: 'recCrew',     label: 'Rec Crew',    type: 'text', sortable: true, filterable: false },
   { field: 'status',      label: 'Status',      type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
+]
+
+const WPT_COLS = [
+  { field: 'id',            label: 'Record #',       type: 'text',   sortable: true, filterable: false },
+  { field: 'name',          label: 'Work Plan',      type: 'text',   sortable: true, filterable: true },
+  { field: 'description',   label: 'Description',    type: 'text',   sortable: false, filterable: true },
+  { field: 'stepCount',     label: 'Steps',          type: 'text',   sortable: true, filterable: false },
+  { field: 'totalDuration', label: 'Total Duration', type: 'text',   sortable: true, filterable: false },
+  { field: 'status',        label: 'Status',         type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
 ]
 
 const ET_COLS = [
