@@ -539,6 +539,77 @@ export async function fetchWorkPlanTemplates() {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Work Step Templates (Work Plan Builder — reusable step library)
+// ---------------------------------------------------------------------------
+//
+// Standalone list view of step templates. Steps are the building blocks
+// assembled into work plans via the WPTE junction; this view lets admins
+// author and edit the step library without having to open a specific plan.
+// Mirrors the shape of fetchWorkPlanTemplates so the NodePage + ListView
+// wiring behaves identically.
+// ---------------------------------------------------------------------------
+
+export async function fetchWorkStepTemplates() {
+  // 1. Step template headers.
+  const { data: steps, error: stepErr } = await supabase
+    .from('work_step_templates')
+    .select(`
+      id, wst_record_number, wst_name, wst_description,
+      wst_estimated_duration_minutes,
+      wst_required_evidence_type_id,
+      wst_assigned_owner_role_id,
+      wst_is_active
+    `)
+    .eq('wst_is_deleted', false)
+    .order('wst_name', { ascending: true })
+  if (stepErr) throw stepErr
+
+  if (!steps || steps.length === 0) return []
+
+  // 2. Resolve evidence-type labels (picklist_values) and role labels in batch.
+  const evidenceIds = new Set()
+  const roleIds     = new Set()
+  for (const s of steps) {
+    if (s.wst_required_evidence_type_id) evidenceIds.add(s.wst_required_evidence_type_id)
+    if (s.wst_assigned_owner_role_id)    roleIds.add(s.wst_assigned_owner_role_id)
+  }
+
+  const [evRes, roleRes] = await Promise.all([
+    evidenceIds.size > 0
+      ? supabase.from('picklist_values').select('id, picklist_label, picklist_value').in('id', [...evidenceIds])
+      : Promise.resolve({ data: [] }),
+    roleIds.size > 0
+      ? supabase.from('roles').select('id, role_name').in('id', [...roleIds])
+      : Promise.resolve({ data: [] }),
+  ])
+  if (evRes.error)   throw evRes.error
+  if (roleRes.error) throw roleRes.error
+
+  const evMap   = new Map((evRes.data   || []).map(p => [p.id, p.picklist_label || p.picklist_value]))
+  const roleMap = new Map((roleRes.data || []).map(r => [r.id, r.role_name]))
+
+  // 3. Flatten for the ListView.
+  return steps.map(s => {
+    const mins = Number(s.wst_estimated_duration_minutes || 0)
+    const durationLabel = mins === 0
+      ? '—'
+      : (mins >= 60
+          ? `${(mins / 60).toFixed(2).replace(/\.00$/, '')} hr (${mins} min)`
+          : `${mins} min`)
+    return {
+      id:          s.wst_record_number || s.id.slice(0, 8).toUpperCase(),
+      _id:         s.id,
+      name:        s.wst_name,
+      description: s.wst_description || '—',
+      duration:    durationLabel,
+      evidenceType: evMap.get(s.wst_required_evidence_type_id) || '—',
+      ownerRole:    roleMap.get(s.wst_assigned_owner_role_id)  || '—',
+      status:      s.wst_is_active ? 'Active' : 'Inactive',
+    }
+  })
+}
+
 // Full drill-in: plan header + ordered steps with role/evidence labels resolved
 export async function fetchWorkPlanTemplateDetail(planId) {
   // 1. Plan header

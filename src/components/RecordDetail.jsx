@@ -1161,6 +1161,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           if (!fields.ppr_owner) fields.ppr_owner = userId
           if (!fields.ppr_created_by) fields.ppr_created_by = userId
         }
+        if (tableName === 'work_step_templates') {
+          // wst_record_number is assigned by trg_wst_rn (BEFORE INSERT) — we
+          // set a placeholder so findMissingRequired doesn't flag it, and the
+          // trigger overwrites it unconditionally on insert.
+          if (!fields.wst_record_number) fields.wst_record_number = 'NEW'
+          if (!fields.wst_owner) fields.wst_owner = userId
+          if (!fields.wst_created_by) fields.wst_created_by = userId
+        }
         if (tableName === 'partner_organizations') {
           if (!fields.owner_id) fields.owner_id = userId
           if (!fields.created_by) fields.created_by = userId

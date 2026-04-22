@@ -10,6 +10,7 @@ import {
   fetchPicklistValues, fetchUsers, fetchAuditLog,
   fetchAllPageLayouts,
   fetchWorkPlanTemplates,
+  fetchWorkStepTemplates,
 } from '../../data/adminService'
 
 // ---------------------------------------------------------------------------
@@ -220,6 +221,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'programs':          return <NodePage title="Programs"                table="programs"          fetcher={fetchPrograms}          columns={PROG_COLS}           newLabel="Program"          onOpenRecord={onOpenRecord} />
     case 'work_types':        return <NodePage title="Work Types"              table="work_types"        fetcher={fetchWorkTypes}         columns={WT_COLS}             newLabel="Work Type"        onOpenRecord={onOpenRecord} />
     case 'work_plan_templates': return <WorkPlanTemplatesPane onOpenRecord={onOpenRecord} />
+    case 'work_step_templates': return <NodePage title="Work Step Templates"   table="work_step_templates" fetcher={fetchWorkStepTemplates} columns={WST_COLS}            newLabel="Work Step Template" onOpenRecord={onOpenRecord} />
     case 'service_territories': return <ComingSoonPane label="Service Territories" />
     case 'audit_log':         return <NodePage title="Audit Log"               table="audit_log"         fetcher={fetchAuditLog}          columns={AL_COLS}             newLabel={null}             onOpenRecord={null} />
     default:                  return <ComingSoonPane label={nodeId} />
@@ -462,6 +464,16 @@ const WPT_COLS = [
   { field: 'stepCount',     label: 'Steps',          type: 'text',   sortable: true, filterable: false },
   { field: 'totalDuration', label: 'Total Duration', type: 'text',   sortable: true, filterable: false },
   { field: 'status',        label: 'Status',         type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
+]
+
+const WST_COLS = [
+  { field: 'id',           label: 'Record #',      type: 'text',   sortable: true, filterable: false },
+  { field: 'name',         label: 'Step Template', type: 'text',   sortable: true, filterable: true },
+  { field: 'description',  label: 'Description',   type: 'text',   sortable: false, filterable: true },
+  { field: 'duration',     label: 'Est. Duration', type: 'text',   sortable: true, filterable: false },
+  { field: 'evidenceType', label: 'Evidence',      type: 'text',   sortable: true, filterable: true },
+  { field: 'ownerRole',    label: 'Owner Role',    type: 'text',   sortable: true, filterable: true },
+  { field: 'status',       label: 'Status',        type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
 ]
 
 const ET_COLS = [

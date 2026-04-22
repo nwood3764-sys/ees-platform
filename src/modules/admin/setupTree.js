@@ -59,6 +59,7 @@ export const SETUP_TREE = [
       { id: 'programs',              label: 'Programs' },
       { id: 'work_types',            label: 'Work Types' },
       { id: 'work_plan_templates',   label: 'Work Plan Templates' },
+      { id: 'work_step_templates',   label: 'Work Step Templates' },
       { id: 'service_territories',   label: 'Service Territories' },
     ],
   },
