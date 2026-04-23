@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { C, CHART_COLORS } from '../data/constants'
-import { Icon, SectionTabs } from '../components/UI'
+import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchVehicles, fetchVehicleActivities, fetchEquipmentContainers } from '../data/fleetService'
@@ -201,9 +201,9 @@ function FleetHome({ setSec, vehicles, activities, kits }) {
 // LiveListView wrapper
 // ---------------------------------------------------------------------------
 
-function LiveListView({ loading, error, data, ...rest }) {
-  if (loading) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>Loading…</div>
-  if (error)   return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}><div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div><div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div></div>
+function LiveListView({ loading, error, data, onRetry, ...rest }) {
+  if (loading) return <LoadingState />
+  if (error)   return <ErrorState error={error} onRetry={onRetry} />
   return <ListView data={data} {...rest} />
 }
 
@@ -273,9 +273,9 @@ export default function FleetModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'       && <FleetHome setSec={setSec} vehicles={vehicles} activities={activities} kits={kits} />}
-        {sec==='vehicles'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={vehicles}   columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => setSelectedRecord({ table: 'vehicles', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='activities' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={activities} columns={ACT_COLS} systemViews={ACT_VIEWS} defaultViewId="AV-01" newLabel="Activity" onNew={() => setSelectedRecord({ table: 'vehicle_activities', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='kits'       && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={kits}       columns={KIT_COLS} systemViews={KIT_VIEWS} defaultViewId="KV-01" newLabel="Kit"      onNew={() => setSelectedRecord({ table: 'equipment_containers', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='vehicles'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={vehicles}   columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => setSelectedRecord({ table: 'vehicles', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='activities' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={activities} columns={ACT_COLS} systemViews={ACT_VIEWS} defaultViewId="AV-01" newLabel="Activity" onNew={() => setSelectedRecord({ table: 'vehicle_activities', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='kits'       && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={kits}       columns={KIT_COLS} systemViews={KIT_VIEWS} defaultViewId="KV-01" newLabel="Kit"      onNew={() => setSelectedRecord({ table: 'equipment_containers', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

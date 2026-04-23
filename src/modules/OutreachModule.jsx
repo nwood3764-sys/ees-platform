@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { C, CHART_COLORS, fmt } from '../data/constants'
-import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
+import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { OPPORTUNITIES, PROPERTIES, BUILDINGS, CONTACTS, ENROLLMENTS } from '../data/mockData'
@@ -315,22 +315,9 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
   )
 }
 
-function LiveListView({ loading, error, data, ...rest }) {
-  if (loading) {
-    return (
-      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>
-        Loading…
-      </div>
-    )
-  }
-  if (error) {
-    return (
-      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}>
-        <div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div>
-        <div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div>
-      </div>
-    )
-  }
+function LiveListView({ loading, error, data, onRetry, ...rest }) {
+  if (loading) return <LoadingState />
+  if (error)   return <ErrorState error={error} onRetry={onRetry} />
   return <ListView data={data} {...rest} />
 }
 
@@ -455,12 +442,12 @@ export default function OutreachModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec === 'home'       && <OutreachHome setSec={setSec} properties={properties} opportunities={opportunities} enrollments={enrollments} contacts={contacts} />}
-        {sec === 'opps'       && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'properties' && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'buildings'  && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'units'      && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'contacts'   && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={contacts}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => setSelectedRecord({ table: 'contacts', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={contactCell} />}
-        {sec === 'enrollment' && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={enrollments}  columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'property_programs', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
+        {sec === 'opps'       && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} onRetry={() => loadAll()} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'properties' && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} onRetry={() => loadAll()} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'buildings'  && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} onRetry={() => loadAll()} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'units'      && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} onRetry={() => loadAll()} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'contacts'   && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} onRetry={() => loadAll()} data={contacts}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => setSelectedRecord({ table: 'contacts', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={contactCell} />}
+        {sec === 'enrollment' && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} onRetry={() => loadAll()} data={enrollments}  columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'property_programs', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
         </>)}
       </div>
     </div>

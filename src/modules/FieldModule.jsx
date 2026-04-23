@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { C, CHART_COLORS, fmt } from '../data/constants'
-import { Badge, Icon, TableRow, ProgramTag, SectionTabs } from '../components/UI'
+import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchProjects, fetchWorkOrders, fetchSchedule } from '../data/fieldService'
@@ -416,9 +416,9 @@ function projRelatedList(row, paymentRequests) {
   )
 }
 
-function LiveListView({ loading, error, data, ...rest }) {
-  if (loading) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>Loading…</div>
-  if (error) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}><div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div><div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div></div>
+function LiveListView({ loading, error, data, onRetry, ...rest }) {
+  if (loading) return <LoadingState />
+  if (error)   return <ErrorState error={error} onRetry={onRetry} />
   return <ListView data={data} {...rest} />
 }
 
@@ -547,8 +547,8 @@ export default function FieldModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
-        {sec==='projects'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
-        {sec==='workorders' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec==='projects'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
+        {sec==='workorders' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='schedule'   && <ScheduleView
           crews={schedule}
           loading={scheduleLoading}

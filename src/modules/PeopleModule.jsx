@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { C, CHART_COLORS } from '../data/constants'
-import { Icon, SectionTabs } from '../components/UI'
+import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import {
@@ -221,9 +221,9 @@ function PeopleHome({ setSec, users, technicians, certifications, timesheets }) 
 // LiveListView wrapper
 // ---------------------------------------------------------------------------
 
-function LiveListView({ loading, error, data, ...rest }) {
-  if (loading) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>Loading…</div>
-  if (error)   return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}><div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div><div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div></div>
+function LiveListView({ loading, error, data, onRetry, ...rest }) {
+  if (loading) return <LoadingState />
+  if (error)   return <ErrorState error={error} onRetry={onRetry} />
   return <ListView data={data} {...rest} />
 }
 
@@ -299,10 +299,10 @@ export default function PeopleModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'           && <PeopleHome setSec={setSec} users={users} technicians={technicians} certifications={certifications} timesheets={timesheets} />}
-        {sec==='users'          && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={users}          columns={USER_COLS} systemViews={USER_VIEWS} defaultViewId="UV-01"  newLabel="User"          onNew={() => setSelectedRecord({ table: 'users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='technicians'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={technicians}    columns={TECH_COLS} systemViews={TECH_VIEWS} defaultViewId="TV-01"  newLabel="Technician"    onNew={() => setSelectedRecord({ table: 'technicians', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='certifications' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={certifications} columns={CERT_COLS} systemViews={CERT_VIEWS} defaultViewId="CV-01"  newLabel="Certification" onNew={() => setSelectedRecord({ table: 'certifications', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='timesheets'     && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={timesheets}     columns={TS_COLS}   systemViews={TS_VIEWS}   defaultViewId="TSV-01" newLabel="Time Sheet"    onNew={() => setSelectedRecord({ table: 'time_sheets', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='users'          && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={users}          columns={USER_COLS} systemViews={USER_VIEWS} defaultViewId="UV-01"  newLabel="User"          onNew={() => setSelectedRecord({ table: 'users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='technicians'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={technicians}    columns={TECH_COLS} systemViews={TECH_VIEWS} defaultViewId="TV-01"  newLabel="Technician"    onNew={() => setSelectedRecord({ table: 'technicians', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='certifications' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={certifications} columns={CERT_COLS} systemViews={CERT_VIEWS} defaultViewId="CV-01"  newLabel="Certification" onNew={() => setSelectedRecord({ table: 'certifications', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='timesheets'     && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={timesheets}     columns={TS_COLS}   systemViews={TS_VIEWS}   defaultViewId="TSV-01" newLabel="Time Sheet"    onNew={() => setSelectedRecord({ table: 'time_sheets', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

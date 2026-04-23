@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { C, CHART_COLORS, fmt } from '../data/constants'
-import { Badge, Icon, SectionTabs } from '../components/UI'
+import { Badge, Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import {
@@ -221,9 +221,9 @@ function StockHome({ setSec, products, inventory, requests, equipment }) {
 // LiveListView wrapper — same loading/error pattern as other modules
 // ---------------------------------------------------------------------------
 
-function LiveListView({ loading, error, data, ...rest }) {
-  if (loading) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>Loading…</div>
-  if (error)   return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}><div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div><div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div></div>
+function LiveListView({ loading, error, data, onRetry, ...rest }) {
+  if (loading) return <LoadingState />
+  if (error)   return <ErrorState error={error} onRetry={onRetry} />
   return <ListView data={data} {...rest} />
 }
 
@@ -300,10 +300,10 @@ export default function StockModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'      && <StockHome setSec={setSec} products={products} inventory={inventory} requests={requests} equipment={equipment} />}
-        {sec==='inventory' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={inventory} columns={INV_COLS}  systemViews={INV_VIEWS}  defaultViewId="IV-01"  newLabel="Inventory Record" onNew={() => setSelectedRecord({ table: 'product_items', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='products'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={products}  columns={PROD_COLS} systemViews={PROD_VIEWS} defaultViewId="PRV-01" newLabel="Product"          onNew={() => setSelectedRecord({ table: 'products', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='requests'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={requests}  columns={REQ_COLS}  systemViews={REQ_VIEWS}  defaultViewId="RV-01"  newLabel="Materials Request" onNew={() => setSelectedRecord({ table: 'materials_requests', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='equipment' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={equipment} columns={EQ_COLS}   systemViews={EQ_VIEWS}   defaultViewId="EQV-01" newLabel="Equipment"        onNew={() => setSelectedRecord({ table: 'equipment', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='inventory' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={inventory} columns={INV_COLS}  systemViews={INV_VIEWS}  defaultViewId="IV-01"  newLabel="Inventory Record" onNew={() => setSelectedRecord({ table: 'product_items', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='products'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={products}  columns={PROD_COLS} systemViews={PROD_VIEWS} defaultViewId="PRV-01" newLabel="Product"          onNew={() => setSelectedRecord({ table: 'products', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='requests'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={requests}  columns={REQ_COLS}  systemViews={REQ_VIEWS}  defaultViewId="RV-01"  newLabel="Materials Request" onNew={() => setSelectedRecord({ table: 'materials_requests', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='equipment' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={equipment} columns={EQ_COLS}   systemViews={EQ_VIEWS}   defaultViewId="EQV-01" newLabel="Equipment"        onNew={() => setSelectedRecord({ table: 'equipment', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

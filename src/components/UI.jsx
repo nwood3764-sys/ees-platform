@@ -147,6 +147,117 @@ export function ComingSoon({ label }) {
   );
 }
 
+// ─── LoadingState ────────────────────────────────────────────────────────────
+// Drop-in replacement for the previous "Loading…" spinner. On mobile renders
+// six skeleton cards so the list shape is immediately visible and the
+// perceived load time is shorter than a centered spinner. On desktop falls
+// back to a centered spinner that matches the design system.
+// ─────────────────────────────────────────────────────────────────────────────
+export function LoadingState() {
+  const isMobile = useIsMobile();
+  if (!isMobile) {
+    return (
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 12,
+        color: C.textMuted,
+      }}>
+        <div style={{
+          width: 26, height: 26, borderRadius: '50%',
+          border: `2.5px solid ${C.border}`,
+          borderTopColor: C.emerald,
+          animation: 'anura-spin 0.7s linear infinite',
+        }} />
+        <div style={{ fontSize: 13 }}>Loading…</div>
+      </div>
+    );
+  }
+  // Mobile skeleton — 6 placeholder cards that match the real card shape.
+  // The shimmer animation is intentionally subtle; strong shimmers are
+  // distracting when there's a real list coming in a second or two.
+  return (
+    <div style={{ flex: 1, overflow: 'hidden', padding: '8px 10px', background: C.page }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} style={{
+            background: C.card, border: `1px solid ${C.border}`,
+            borderRadius: 8, padding: '12px 14px',
+            display: 'flex', alignItems: 'center', gap: 10,
+            minHeight: 64,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                width: '28%', height: 10, borderRadius: 3,
+                background: 'linear-gradient(90deg, #f0f3f8 0%, #e4e9f2 50%, #f0f3f8 100%)',
+                backgroundSize: '200% 100%',
+                animation: 'anura-shimmer 1.4s ease-in-out infinite',
+                marginBottom: 8,
+              }} />
+              <div style={{
+                width: '70%', height: 14, borderRadius: 3,
+                background: 'linear-gradient(90deg, #f0f3f8 0%, #e4e9f2 50%, #f0f3f8 100%)',
+                backgroundSize: '200% 100%',
+                animation: 'anura-shimmer 1.4s ease-in-out infinite',
+                animationDelay: '0.1s',
+              }} />
+            </div>
+            <div style={{
+              width: 56, height: 20, borderRadius: 10, flexShrink: 0,
+              background: 'linear-gradient(90deg, #f0f3f8 0%, #e4e9f2 50%, #f0f3f8 100%)',
+              backgroundSize: '200% 100%',
+              animation: 'anura-shimmer 1.4s ease-in-out infinite',
+              animationDelay: '0.2s',
+            }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── ErrorState ──────────────────────────────────────────────────────────────
+// Consistent error presentation across modules. Optional onRetry shows a
+// retry button; omit it to render a read-only error.
+// ─────────────────────────────────────────────────────────────────────────────
+export function ErrorState({ error, onRetry }) {
+  const message = String(error?.message || error || 'Something went wrong')
+  return (
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      gap: 10, padding: 24, textAlign: 'center',
+    }}>
+      <div style={{
+        width: 40, height: 40, borderRadius: '50%',
+        background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b03a2e" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+      </div>
+      <div style={{ color: '#b03a2e', fontSize: 14, fontWeight: 600 }}>Could not load records</div>
+      <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace', maxWidth: 560, wordBreak: 'break-word' }}>
+        {message}
+      </div>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          style={{
+            marginTop: 6, background: C.emerald, color: '#fff',
+            border: 'none', borderRadius: 6,
+            padding: '9px 18px', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+            minHeight: 40,
+          }}
+        >
+          Try again
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 // Desktop (≥ 769px): fixed inline column. Two widths:
 //                    - Expanded (default): 240px, icon + label.

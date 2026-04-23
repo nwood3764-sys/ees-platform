@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { C, CHART_COLORS } from '../data/constants'
-import { Icon, SectionTabs } from '../components/UI'
+import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchPortalUsers, fetchPartnerOrganizations } from '../data/portalService'
@@ -182,9 +182,9 @@ function PortalHome({ setSec, users, partners }) {
 // LiveListView wrapper
 // ---------------------------------------------------------------------------
 
-function LiveListView({ loading, error, data, ...rest }) {
-  if (loading) return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:13 }}>Loading…</div>
-  if (error)   return <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}><div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load records</div><div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div></div>
+function LiveListView({ loading, error, data, onRetry, ...rest }) {
+  if (loading) return <LoadingState />
+  if (error)   return <ErrorState error={error} onRetry={onRetry} />
   return <ListView data={data} {...rest} />
 }
 
@@ -249,8 +249,8 @@ export default function PortalModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'     && <PortalHome setSec={setSec} users={users} partners={partners} />}
-        {sec==='users'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={users}    columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => setSelectedRecord({ table: 'portal_users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='partners' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => setSelectedRecord({ table: 'partner_organizations', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='users'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={users}    columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => setSelectedRecord({ table: 'portal_users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='partners' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => setSelectedRecord({ table: 'partner_organizations', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>
