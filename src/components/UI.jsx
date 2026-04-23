@@ -301,6 +301,20 @@ export function Sidebar({
     return () => window.removeEventListener('keydown', handler);
   }, [isMobile, mobileOpen, onMobileClose]);
 
+  // Swipe-to-dismiss for the mobile drawer. Hoisted up here — rather than
+  // left below the early returns where it logically belongs — because hooks
+  // must be called in the same order on every render. When the drawer is
+  // closed Sidebar returns null; if useSwipeToDismiss were called after
+  // that, React would see a different hook count on the tap-to-open render
+  // ("rendered more hooks than during the previous render") and unmount the
+  // whole tree, blanking the app. The `enabled` flag makes the hook a no-op
+  // everywhere it doesn't apply (desktop, collapsed-drawer, etc.).
+  const swipe = useSwipeToDismiss({
+    direction: 'left',
+    onDismiss: onMobileClose,
+    enabled: isMobile && mobileOpen,
+  });
+
   const handleModuleClick = (id) => {
     onModuleChange(id);
     if (isMobile && onMobileClose) onMobileClose();
@@ -449,8 +463,9 @@ export function Sidebar({
     );
   }
 
-  // Mobile: fixed overlay + drawer with swipe-left to dismiss
-  const swipe = useSwipeToDismiss({ direction: 'left', onDismiss: onMobileClose });
+  // Mobile: fixed overlay + drawer with swipe-left to dismiss.
+  // `swipe` was initialized at the top of the component (see the hoisted
+  // useSwipeToDismiss call) to keep hook order stable across renders.
   return (
     <>
       {/* Backdrop */}
