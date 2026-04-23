@@ -3,6 +3,7 @@ import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
+import ActivityTimeline from './ActivityTimeline'
 import {
   loadRecordDetailData,
   saveRecord,
@@ -220,8 +221,9 @@ function validateBeforeSave(tableName, fields, evidenceLabelById) {
 
 // Build the ordered list of tab names from the loaded sections.
 // Details first, Related second (if any section has related_list widgets),
-// then any custom tabs alphabetical after.
-function buildOrderedTabs(sections) {
+// Activity third (always shown on existing records), then any custom tabs
+// alphabetical after.
+function buildOrderedTabs(sections, { includeActivity = true } = {}) {
   const names = new Set()
   let hasRelatedList = false
   for (const sec of sections || []) {
@@ -231,7 +233,8 @@ function buildOrderedTabs(sections) {
     }
   }
   if (hasRelatedList) names.add('Related')
-  const rank = (t) => t === 'Details' ? 0 : t === 'Related' ? 1 : 2
+  if (includeActivity) names.add('Activity')
+  const rank = (t) => t === 'Details' ? 0 : t === 'Related' ? 1 : t === 'Activity' ? 2 : 3
   return [...names].sort((a, b) => {
     const ra = rank(a), rb = rank(b)
     if (ra !== rb) return ra - rb
@@ -1723,8 +1726,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const { record, layout, sections, picklists, lookups } = data
 
   // Build the ordered tab list from the loaded sections. Details first,
-  // Related second (if any section has related_list widgets), alphabetical after.
-  const orderedTabs = buildOrderedTabs(sections)
+  // Related second (if any section has related_list widgets), Activity third
+  // (not on new records — nothing to show yet), alphabetical after.
+  const orderedTabs = buildOrderedTabs(sections, { includeActivity: !isInsertMode })
 
   const objectLabel = TABLE_META[tableName]?.label || tableName
   const displayName = isCreate
@@ -2052,6 +2056,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               }}
             />
           ))}
+
+        {/* Activity Timeline — chronological audit trail of tracked field
+            changes and record-level actions (create, soft-delete, restore).
+            Hidden on new records since there's no history yet. */}
+        {!isInsertMode && activeTab === 'Activity' && (
+          <ActivityTimeline tableName={tableName} recordId={recordId} />
+        )}
       </div>
 
       {/* Sticky bottom action bar — mobile edit mode only. Always visible,
