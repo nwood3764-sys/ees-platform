@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { C } from '../data/constants';
+import { useIsMobile } from '../lib/useMediaQuery';
 import { Badge, Icon, TableRow, ProgramTag } from './UI';
 
 // ── Filter Dropdown ──────────────────────────────────────────────────────────
@@ -249,6 +250,7 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClos
 // ── Main ListView ────────────────────────────────────────────────────────────
 export function ListView({ data, columns, systemViews, defaultViewId, newLabel, renderCell, renderDetail, onNew, onOpenRecord }) {
   const firstView = systemViews.find(v => v.id === defaultViewId) || systemViews[0];
+  const isMobile = useIsMobile();
 
   const [sortField, setSortField] = useState(firstView?.sortField || null);
   const [sortDir, setSortDir] = useState(firstView?.sortDir || 'asc');
@@ -327,6 +329,145 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
     if (col.field === 'email') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: '#1a5a8a', fontSize: 12 }}>{v}</td>;
     return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: v ? C.textSecondary : C.textMuted, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v || '—'}</td>;
   };
+
+  // ── Mobile card value formatter ────────────────────────────────────────────
+  // Returns a JSX snippet (no <td>) suitable for rendering inside a card row.
+  // Mirrors the special cases from defaultCell but without table markup.
+  const cardValue = (col, r) => {
+    const v = r[col.field];
+    if (v === null || v === undefined || v === '') return <span style={{ color: C.textMuted }}>—</span>;
+    if (col.field === 'status' || col.field === 'stage') return <Badge s={v} />;
+    if (col.field === 'program') return <ProgramTag value={v} />;
+    if (col.field === 'amount') return <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>${Number(v).toLocaleString()}</span>;
+    if (col.field === 'email') return <span style={{ color: '#1a5a8a' }}>{v}</span>;
+    if (col.field === 'id') return <span style={{ fontFamily: 'JetBrains Mono, monospace', color: C.textMuted }}>{v}</span>;
+    return <span>{String(v)}</span>;
+  };
+
+  // Pick up to 2 "secondary" fields for the body of each card — skip the ones
+  // already shown in the header (id, name, status, stage).
+  const secondaryCols = columns
+    .filter(c => !['id', 'name', 'status', 'stage'].includes(c.field))
+    .slice(0, 2);
+
+  // ─── Mobile render ───────────────────────────────────────────────────────
+  if (isMobile) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
+        {/* Mobile toolbar: view selector on top row, search + new on second */}
+        <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+              <button onClick={() => setShowViewSel(v => !v)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 14, color: C.textPrimary, cursor: 'pointer', fontWeight: 500, width: '100%' }}>
+                <Icon path="M4 6h16M4 10h16M4 14h16M4 18h16" size={14} color={C.textSecondary} />
+                <span style={{ flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeViewName}</span>
+                {isDirty && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.amber, flexShrink: 0 }} />}
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}><path d="M19 9l-7 7-7-7" /></svg>
+              </button>
+              {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} />}
+            </div>
+            <button onClick={onNew} aria-label={`New ${newLabel}`}
+              style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5}><path d="M12 5v14M5 12h14" /></svg>
+              New
+            </button>
+          </div>
+
+          <div style={{ position: 'relative' }}>
+            <input placeholder="Search..." value={globalSearch} onChange={e => setGlobalSearch(e.target.value)}
+              style={{ width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '9px 10px 9px 32px', color: C.textPrimary, outline: 'none' }} />
+            <svg style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+          </div>
+
+          {(activeFilters.length > 0 || sortField) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {activeFilters.map((f, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#e8f3fb', border: `1px solid #b8d8f0`, borderRadius: 5, padding: '4px 8px', fontSize: 12 }}>
+                  <span style={{ color: '#1a5a8a', fontWeight: 500 }}>{f.label}:</span>
+                  <span style={{ color: '#1a5a8a' }}>{f.value}</span>
+                  <button onClick={() => removeFilter(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#7eb3e8', lineHeight: 1, marginLeft: 2 }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M18 6 6 18M6 6l12 12" /></svg>
+                  </button>
+                </div>
+              ))}
+              {sortField && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#f0eeff', border: `1px solid #d0c8f8`, borderRadius: 5, padding: '4px 8px', fontSize: 12 }}>
+                  <span style={{ color: '#6d5ae0', fontWeight: 500 }}>Sort: {columns.find(c => c.field === sortField)?.label} {sortDir === 'asc' ? '↑' : '↓'}</span>
+                  <button onClick={() => { setSortField(null); setSortDir('asc'); setIsDirty(true); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#a78bfa' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M18 6 6 18M6 6l12 12" /></svg>
+                  </button>
+                </div>
+              )}
+              <button onClick={clearAll} style={{ background: 'none', border: 'none', fontSize: 12, color: C.textMuted, cursor: 'pointer', padding: '4px 6px' }}>Clear all</button>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: C.textMuted }}>
+            <span>{filtered.length} record{filtered.length === 1 ? '' : 's'}</span>
+            {totalAmount !== null && <span>${Math.round(totalAmount / 1000)}K pipeline</span>}
+            {totalUnits !== null && totalAmount === null && <span>{filtered.reduce((s, r) => s + (r.units || 0), 0).toLocaleString()} units</span>}
+          </div>
+        </div>
+
+        {/* Card list */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 24px', WebkitOverflowScrolling: 'touch' }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+              No records match the current filters.{' '}
+              <span onClick={clearAll} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {filtered.map(r => {
+                const statusVal = r.status || r.stage;
+                return (
+                  <div
+                    key={r.id}
+                    onClick={() => onOpenRecord && onOpenRecord(r)}
+                    style={{
+                      background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+                      padding: 14, cursor: 'pointer',
+                      boxShadow: '0 1px 2px rgba(13, 26, 46, 0.04)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        {r.id && (
+                          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, color: C.textMuted, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {r.id}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, lineHeight: 1.35, wordBreak: 'break-word' }}>
+                          {r.name || '(no name)'}
+                        </div>
+                      </div>
+                      {statusVal && <div style={{ flexShrink: 0 }}><Badge s={statusVal} /></div>}
+                    </div>
+
+                    {secondaryCols.length > 0 && (
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {secondaryCols.map(col => (
+                          <div key={col.field} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                            <span style={{ color: C.textMuted, flexShrink: 0 }}>{col.label}</span>
+                            <span style={{ color: C.textSecondary, textAlign: 'right', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {cardValue(col, r)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => setShowSave(false)} />}
+      </div>
+    );
+  }
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

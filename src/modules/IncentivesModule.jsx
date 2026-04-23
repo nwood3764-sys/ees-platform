@@ -111,7 +111,7 @@ function IncentivesHome({ setSec, requests, receipts }) {
           <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>Nicholas Wood · Program Manager · Sunday, April 12, 2026</div>
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
           {[
             { label:'Requests to Prepare',  value:toPrepare.length,   color:C.amber,  action:() => setSec('requests') },
             { label:'Ready to Submit',       value:toSubmit.length,    color:C.sky,    action:() => setSec('requests') },
@@ -128,7 +128,7 @@ function IncentivesHome({ setSec, requests, receipts }) {
           ))}
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:12, marginBottom:16 }}>
           {[
             { label:'Total Pipeline',     value:totalPipeline,  note:'All active project payment requests' },
             { label:'Approved / Pending', value:totalApproved,  note:'Approved + payment pending'          },
@@ -142,7 +142,7 @@ function IncentivesHome({ setSec, requests, receipts }) {
           ))}
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14, marginBottom:14 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:14, marginBottom:14 }}>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Project Payment Requests by Status</div></div>
             <div style={{ padding:'12px 14px', display:'flex', gap:10, alignItems:'center' }}>

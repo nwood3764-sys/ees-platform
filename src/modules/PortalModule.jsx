@@ -81,7 +81,7 @@ function PortalHome({ setSec, users, partners }) {
       </div>
 
       {/* KPI row */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:16 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
         {[
           { label:'Total Portal Users', value: total,              sub:'Active external accounts',       color:C.emerald, action: () => setSec('users')    },
           { label:'Property Owner',     value: propertyOwnerUsers, sub:'Customer portal users',          color:C.sky,     action: () => setSec('users')    },
@@ -100,7 +100,7 @@ function PortalHome({ setSec, users, partners }) {
       </div>
 
       {/* Charts row */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:14, marginBottom:14 }}>
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'14px 16px' }}>
           <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary, marginBottom:10 }}>Portal Users by Role</div>
           {byRole.length === 0 ? (

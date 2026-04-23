@@ -2,17 +2,70 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html, body {
+  height: 100%;
+  overflow: hidden;
+  /* Prevent iOS rubber-band from scrolling the whole app */
+  overscroll-behavior: none;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: #f0f3f8;
   color: #0d1a2e;
   -webkit-font-smoothing: antialiased;
+  /* Respect the device safe areas (iOS notch / home indicator) */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
-button { font-family: inherit; }
-input, select { font-family: inherit; }
+button {
+  font-family: inherit;
+  /* Kill the 300ms tap delay and the gray tap highlight on iOS */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
 
+input, select, textarea {
+  font-family: inherit;
+  touch-action: manipulation;
+}
+
+/* ─── Mobile inputs (≤ 768px) ──────────────────────────────────────────────
+   iOS Safari auto-zooms any <input> smaller than 16px on focus. Force 16px
+   on mobile to prevent the zoom — desktop keeps its compact 12–13px sizing. */
+@media (max-width: 768px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* ─── Scrollbars ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #d0d8e8; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #8fa0b8; }
+
+/* Hide scrollbars on mobile for a cleaner look */
+@media (max-width: 768px) {
+  ::-webkit-scrollbar { width: 0; height: 0; }
+}
+
+/* ─── Utility: horizontal scroll with no visible scrollbar ─────────────────
+   Used for mobile section tabs and similar horizontal nav strips */
+.anura-hscroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.anura-hscroll::-webkit-scrollbar { display: none; }
+
+/* ─── Mobile drawer animations ─────────────────────────────────────────── */
+@keyframes anura-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes anura-slide-in-left {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}

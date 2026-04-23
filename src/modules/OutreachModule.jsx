@@ -169,7 +169,7 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
           <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>Nicholas Wood · Program Manager · Sunday, April 12, 2026</div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
           {[
             { label: 'Active Pipeline',        value: fmt(pipeline),      sub: `${opportunities.length} opportunities`, color: C.emerald, action: () => setSec('opps')       },
             { label: 'Properties Enrolled',    value: enrolled.length,    sub: `${enrolled.reduce((s,r)=>s+(Number(r.units)||0),0)} units`, color: C.sky, action: () => setSec('properties') },
@@ -187,7 +187,7 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
           ))}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 14 }}>
           <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
             <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}><div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Opportunities by Stage</div></div>
             <div style={{ padding: '10px 14px' }}>

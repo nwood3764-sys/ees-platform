@@ -120,7 +120,7 @@ function PeopleHome({ setSec, users, technicians, certifications, timesheets }) 
       </div>
 
       {/* KPI row */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:16 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
         {[
           { label:'Total Users',       value: totalUsers,     sub:'Active internal accounts',            color:C.emerald, action: () => setSec('users')          },
           { label:'Active Technicians',value: activeTechs,    sub:`${technicians.length} technician records`, color:C.sky,     action: () => setSec('technicians')    },
@@ -139,7 +139,7 @@ function PeopleHome({ setSec, users, technicians, certifications, timesheets }) 
       </div>
 
       {/* Charts row */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:14, marginBottom:14 }}>
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'14px 16px' }}>
           <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary, marginBottom:10 }}>Users by Role</div>
           {byRole.length === 0 ? (

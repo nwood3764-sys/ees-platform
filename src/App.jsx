@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Sidebar, ComingSoon } from './components/UI'
+import { Sidebar, MobileHeader, ComingSoon } from './components/UI'
 import AuthGate from './components/AuthGate'
 import { ToastProvider } from './components/Toast'
 import { C } from './data/constants'
@@ -17,6 +17,9 @@ import PortalModule from './modules/PortalModule'
 
 function AuthedApp({ session }) {
   const [activeModule, setActiveModule] = useState('home')
+  // Mobile menu drawer state. Desktop ignores this entirely — the Sidebar
+  // component only honors mobileOpen when useIsMobile() is true.
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -45,8 +48,11 @@ function AuthedApp({ session }) {
         onModuleChange={setActiveModule}
         userEmail={session?.user?.email}
         onSignOut={handleSignOut}
+        mobileOpen={mobileMenuOpen}
+        onMobileClose={() => setMobileMenuOpen(false)}
       />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+        <MobileHeader onOpenMenu={() => setMobileMenuOpen(true)} />
         {renderModule()}
       </div>
     </div>

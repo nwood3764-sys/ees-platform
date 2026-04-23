@@ -280,7 +280,7 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
           </div>
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
           {[
             { label:'Work Orders to Verify',  value:toVerify.length,    color:C.amber,  action:() => setSec('workorders') },
             { label:'Corrections Needed',      value:corrections.length, color:C.danger, urgent:corrections.length>0, action:() => setSec('workorders') },
@@ -297,7 +297,7 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
           ))}
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14, marginBottom:14 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:14, marginBottom:14 }}>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Work Orders by Status</div></div>
             <div style={{ padding:'12px 14px', display:'flex', gap:10, alignItems:'center' }}>

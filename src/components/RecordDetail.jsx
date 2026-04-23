@@ -405,7 +405,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
   if (fields.length === 0) return null
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0' }}>
       {fields.map(f => {
         const raw = editing ? draft[f.name] : record[f.name]
         const display = formatFieldValue(raw, f, picklists, lookups)

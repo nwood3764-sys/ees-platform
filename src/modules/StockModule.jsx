@@ -120,7 +120,7 @@ function StockHome({ setSec, products, inventory, requests, equipment }) {
       </div>
 
       {/* KPI row */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:16 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
         {[
           { label:'Total SKUs',        value: totalSkus,     sub:`${products.length} products in catalog`, color:C.emerald, action: () => setSec('products') },
           { label:'Units On Hand',     value: totalOnHand.toLocaleString(), sub:'Across all locations',     color:C.sky,     action: () => setSec('inventory') },
@@ -139,7 +139,7 @@ function StockHome({ setSec, products, inventory, requests, equipment }) {
       </div>
 
       {/* Charts row */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:14, marginBottom:14 }}>
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'14px 16px' }}>
           <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary, marginBottom:10 }}>On-Hand by Product Family</div>
           {invByFamily.length === 0 ? (

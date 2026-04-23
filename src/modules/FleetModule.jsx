@@ -104,7 +104,7 @@ function FleetHome({ setSec, vehicles, activities, kits }) {
       </div>
 
       {/* KPIs */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12, marginBottom:16 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
         {[
           { label:'Active Vehicles',  value: active,                    sub:`${vehicles.length} total in fleet`,       color:C.emerald, action: () => setSec('vehicles') },
           { label:'In Maintenance',   value: inMaint,                   sub:'Currently out of service',                 color:C.amber,   action: () => setSec('vehicles') },
@@ -123,7 +123,7 @@ function FleetHome({ setSec, vehicles, activities, kits }) {
       </div>
 
       {/* Charts + watch list */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:14, marginBottom:14 }}>
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'14px 16px' }}>
           <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary, marginBottom:10 }}>Activities by Type</div>
           {byType.length === 0 ? (

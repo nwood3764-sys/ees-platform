@@ -215,7 +215,7 @@ export default function HomeModule({ onNavigate }) {
           </div>
 
           {/* KPI row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
             {[
               { label: 'Active Pipeline',        value: fmt(pipeline),   sub: `${opportunities.length} opportunities`, color: C.emerald, action: () => onNavigate('outreach') },
               { label: 'Properties Enrolled',    value: enrolled.length, sub: `${enrolledUnits} enrolled units`,       color: C.sky,     action: () => onNavigate('outreach') },
@@ -234,7 +234,7 @@ export default function HomeModule({ onNavigate }) {
           </div>
 
           {/* Chart widgets row 1 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
             <Widget title="Work Orders by Status" subtitle={`Total: ${woTotal}`} footer="View Work Orders →" onFooter={() => onNavigate('field')}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <ResponsiveContainer width={100} height={100}>
@@ -278,7 +278,7 @@ export default function HomeModule({ onNavigate }) {
           </div>
 
           {/* Chart widgets row 2 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
             <Widget title="Properties by Status" footer="View Outreach →" onFooter={() => onNavigate('outreach')}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <ResponsiveContainer width={90} height={90}>
