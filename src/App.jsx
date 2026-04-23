@@ -67,6 +67,49 @@ function AuthedApp({ session }) {
   // once the keyboard has finished opening. Quiet no-op on desktop.
   useInputFocusScroll()
 
+  // Edge-swipe to open the mobile nav drawer (iOS-native pattern).
+  // Listens for touchstart within 20px of the left screen edge; if the user
+  // drags rightward more than 60px and the drawer is closed, opens it.
+  // Desktop listeners remain dormant. Skipped when the drawer is already open
+  // — useSwipeToDismiss on the drawer itself handles close-by-swipe.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    if (!isTouch) return
+    let startX = null, startY = null
+    const onStart = (e) => {
+      if (mobileMenuOpen) return
+      const t = e.touches[0]
+      if (!t) return
+      // Only engage if the touch starts right at the left edge
+      if (t.clientX > 20) return
+      startX = t.clientX; startY = t.clientY
+    }
+    const onMove = (e) => {
+      if (startX == null) return
+      const t = e.touches[0]
+      if (!t) return
+      const dx = t.clientX - startX
+      const dy = t.clientY - startY
+      // Trigger only on a clearly rightward drag (dx dominates dy)
+      if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+        setMobileMenuOpen(true)
+        startX = null; startY = null
+      }
+    }
+    const onEnd = () => { startX = null; startY = null }
+    document.addEventListener('touchstart', onStart, { passive: true })
+    document.addEventListener('touchmove', onMove, { passive: true })
+    document.addEventListener('touchend', onEnd, { passive: true })
+    document.addEventListener('touchcancel', onEnd, { passive: true })
+    return () => {
+      document.removeEventListener('touchstart', onStart)
+      document.removeEventListener('touchmove', onMove)
+      document.removeEventListener('touchend', onEnd)
+      document.removeEventListener('touchcancel', onEnd)
+    }
+  }, [mobileMenuOpen])
+
   const handleSignOut = async () => {
     await supabase.auth.signOut()
   }

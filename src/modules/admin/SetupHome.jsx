@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { C } from '../../data/constants'
-import { Icon } from '../../components/UI'
+import { Icon, LoadingState, ErrorState } from '../../components/UI'
 import { ListView } from '../../components/ListView'
 import { SETUP_TREE } from './setupTree'
 import {
@@ -256,17 +256,8 @@ function NodePage({ title, table, fetcher, columns, newLabel, onOpenRecord }) {
           {loading ? 'Loading…' : `${data.length} record${data.length === 1 ? '' : 's'}`}
         </div>
       </div>
-      {loading && (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading…</div>
-      )}
-      {error && !loading && (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, padding: 24 }}>
-          <div style={{ color: '#b03a2e', fontSize: 13, fontWeight: 600 }}>Could not load records</div>
-          <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace', maxWidth: 560, textAlign: 'center' }}>
-            {String(error.message || error)}
-          </div>
-        </div>
-      )}
+      {loading && <LoadingState />}
+      {error && !loading && <ErrorState error={error} />}
       {!loading && !error && (
         <ListView
           data={data}
@@ -369,17 +360,8 @@ function WorkPlanTemplatesPane({ onOpenRecord }) {
           {!loading && ' — click a row to open the record'}
         </div>
       </div>
-      {loading && (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading…</div>
-      )}
-      {error && !loading && (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, padding: 24 }}>
-          <div style={{ color: '#b03a2e', fontSize: 13, fontWeight: 600 }}>Could not load work plan templates</div>
-          <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace', maxWidth: 560, textAlign: 'center' }}>
-            {String(error.message || error)}
-          </div>
-        </div>
-      )}
+      {loading && <LoadingState />}
+      {error && !loading && <ErrorState error={error} />}
       {!loading && !error && (
         <ListView
           data={plans}
