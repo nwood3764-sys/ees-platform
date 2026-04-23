@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { C } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
+import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
 import { Badge, Icon, TableRow, ProgramTag } from './UI';
 
 // ── Filter Dropdown ──────────────────────────────────────────────────────────
@@ -198,6 +199,11 @@ function MobileFilterSheet({
 
   const activeCount = draftFilters.length + (draftSortField ? 1 : 0);
 
+  // Swipe-down to dismiss — attached to the sheet's drag handle + header
+  // region only so it doesn't intercept taps/scrolls inside the filter
+  // list itself.
+  const swipe = useSwipeToDismiss({ direction: 'down', onDismiss: onClose });
+
   return (
     <>
       {/* Backdrop */}
@@ -220,18 +226,26 @@ function MobileFilterSheet({
           display: 'flex', flexDirection: 'column',
           boxShadow: '0 -8px 32px rgba(0,0,0,0.25)',
           animation: 'anura-slide-up 220ms ease',
+          ...swipe.style,
         }}
       >
-        {/* Drag handle (visual cue only — not actually draggable) */}
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 0' }}>
-          <div style={{ width: 40, height: 4, borderRadius: 2, background: C.borderDark }} />
-        </div>
+        {/* Swipe-grab region: drag handle + header. Touching here and
+            dragging down dismisses the sheet. Touches inside the scrollable
+            body below use native scroll — no gesture conflict. */}
+        <div {...swipe.handlers}>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 0', touchAction: 'none' }}>
+            <div style={{
+              width: 40, height: 4, borderRadius: 2,
+              background: swipe.isDragging ? C.emerald : C.borderDark,
+              transition: 'background 150ms',
+            }} />
+          </div>
 
-        {/* Header */}
-        <div style={{
-          padding: '10px 16px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          borderBottom: `1px solid ${C.border}`,
-        }}>
+          {/* Header */}
+          <div style={{
+            padding: '10px 16px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            borderBottom: `1px solid ${C.border}`,
+          }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: C.textPrimary }}>Filters</h2>
             {activeCount > 0 && (
@@ -254,6 +268,7 @@ function MobileFilterSheet({
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
           </button>
+        </div>
         </div>
 
         {/* Scrollable body */}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { C, STATUS_CFG, NAV_MODULES } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
+import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
 
 export function Badge({ s }) {
   const cfg = STATUS_CFG[s] || { bg: '#f0f3f8', color: '#4a5e7a', dot: '#8fa0b8' };
@@ -376,7 +377,8 @@ export function Sidebar({
     );
   }
 
-  // Mobile: fixed overlay + drawer
+  // Mobile: fixed overlay + drawer with swipe-left to dismiss
+  const swipe = useSwipeToDismiss({ direction: 'left', onDismiss: onMobileClose });
   return (
     <>
       {/* Backdrop */}
@@ -391,6 +393,7 @@ export function Sidebar({
       <div
         role="dialog"
         aria-label="Navigation menu"
+        {...swipe.handlers}
         style={{
           position: 'fixed', top: 0, left: 0, bottom: 0,
           width: 'min(86vw, 320px)', background: C.sidebar,
@@ -398,6 +401,7 @@ export function Sidebar({
           boxShadow: '2px 0 24px rgba(0,0,0,0.35)',
           animation: 'anura-slide-in-left 220ms ease',
           overscrollBehavior: 'contain',
+          ...swipe.style,
         }}
       >
         {inner}

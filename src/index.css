@@ -50,6 +50,15 @@ input, select, textarea {
   body {
     font-size: 15px;
   }
+
+  /* Give focused inputs some margin so the mobile keyboard doesn't sit
+     flush against them. scroll-margin-bottom combined with scrollIntoView
+     from useInputFocusScroll below produces a clean 'scroll into view'
+     when the keyboard opens. */
+  input:focus, select:focus, textarea:focus {
+    scroll-margin-bottom: 120px;
+    scroll-margin-top: 80px;
+  }
 }
 
 /* ─── Scrollbars ─────────────────────────────────────────────────────────── */
@@ -84,4 +93,8 @@ input, select, textarea {
 @keyframes anura-slide-up {
   from { transform: translateY(100%); }
   to   { transform: translateY(0); }
+}
+@keyframes anura-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }

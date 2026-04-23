@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useIsMobile } from '../lib/useMediaQuery'
 
 // ---------------------------------------------------------------------------
 // Toast — stacked, auto-dismissing notifications shown top-right.
@@ -51,6 +52,7 @@ const VARIANTS = {
 
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
+  const isMobile = useIsMobile()
   // Track timers so we can clear them on manual dismiss and on unmount.
   const timers = useRef(new Map())
 
@@ -85,33 +87,44 @@ export function ToastProvider({ children }) {
     dismiss,
   }), [push, dismiss])
 
+  // On mobile, dock toasts at the top-center above the MobileHeader. Full-width
+  // with side inset, safe-area padded. Desktop keeps the classic top-right stack.
+  // Top is chosen over bottom because the bottom-right is occupied by the FAB
+  // and an ongoing edit-mode action bar in RecordDetail.
+  const containerStyle = isMobile ? {
+    position: 'fixed',
+    top: 'calc(60px + env(safe-area-inset-top))',
+    left: 10, right: 10,
+    zIndex: 9999,
+    display: 'flex', flexDirection: 'column', gap: 8,
+    pointerEvents: 'none',
+    alignItems: 'stretch',
+  } : {
+    position: 'fixed',
+    top: 16, right: 16,
+    zIndex: 9999,
+    display: 'flex', flexDirection: 'column', gap: 8,
+    pointerEvents: 'none',
+    maxWidth: 'calc(100vw - 32px)',
+  }
+
   return (
     <ToastContext.Provider value={api}>
       {children}
       <div
         aria-live="polite"
         aria-atomic="true"
-        style={{
-          position: 'fixed',
-          top: 16,
-          right: 16,
-          zIndex: 9999,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          pointerEvents: 'none',
-          maxWidth: 'calc(100vw - 32px)',
-        }}
+        style={containerStyle}
       >
         {toasts.map((t) => (
-          <ToastCard key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+          <ToastCard key={t.id} toast={t} onDismiss={() => dismiss(t.id)} isMobile={isMobile} />
         ))}
       </div>
     </ToastContext.Provider>
   )
 }
 
-function ToastCard({ toast, onDismiss }) {
+function ToastCard({ toast, onDismiss, isMobile }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     // Trigger the mount transition on the next frame
@@ -129,17 +142,18 @@ function ToastCard({ toast, onDismiss }) {
         display: 'flex',
         alignItems: 'flex-start',
         gap: 10,
-        minWidth: 280,
-        maxWidth: 420,
+        minWidth: isMobile ? 0 : 280,
+        maxWidth: isMobile ? '100%' : 420,
+        width: isMobile ? '100%' : undefined,
         background: cfg.bg,
         border: `1px solid ${cfg.border}`,
         color: cfg.color,
         borderRadius: 8,
-        padding: '10px 14px',
-        fontSize: 13,
+        padding: isMobile ? '12px 14px' : '10px 14px',
+        fontSize: isMobile ? 14 : 13,
         fontWeight: 500,
         lineHeight: 1.45,
-        boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
         cursor: 'pointer',
         pointerEvents: 'auto',
         opacity: mounted ? 1 : 0,
@@ -148,7 +162,7 @@ function ToastCard({ toast, onDismiss }) {
       }}
     >
       <svg
-        width="16" height="16" viewBox="0 0 24 24"
+        width={isMobile ? 18 : 16} height={isMobile ? 18 : 16} viewBox="0 0 24 24"
         fill="none" stroke={cfg.color} strokeWidth={2.2}
         strokeLinecap="round" strokeLinejoin="round"
         style={{ flexShrink: 0, marginTop: 1 }}
