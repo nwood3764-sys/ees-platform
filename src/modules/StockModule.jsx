@@ -244,10 +244,23 @@ export default function StockModule() {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
 
+  // Pull-to-refresh handler. Refetches in the background without blanking
+  // the UI; the ListView indicator shows progress inline.
+  const loadAll = async () => {
+    setError(null)
+    try {
+      const [p, i, r, e] = await Promise.all([
+        fetchProducts(), fetchProductItems(), fetchMaterialsRequests(), fetchEquipment(),
+      ])
+      setProducts(p); setInventory(i); setRequests(r); setEquipment(e)
+    } catch (err) {
+      setError(err)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     Promise.all([fetchProducts(), fetchProductItems(), fetchMaterialsRequests(), fetchEquipment()])
       .then(([p, i, r, e]) => { if (!cancelled) { setProducts(p); setInventory(i); setRequests(r); setEquipment(e) } })
       .catch(err => { if (!cancelled) setError(err) })
@@ -287,10 +300,10 @@ export default function StockModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'      && <StockHome setSec={setSec} products={products} inventory={inventory} requests={requests} equipment={equipment} />}
-        {sec==='inventory' && <LiveListView loading={loading} error={error} data={inventory} columns={INV_COLS}  systemViews={INV_VIEWS}  defaultViewId="IV-01"  newLabel="Inventory Record" onNew={() => setSelectedRecord({ table: 'product_items', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='products'  && <LiveListView loading={loading} error={error} data={products}  columns={PROD_COLS} systemViews={PROD_VIEWS} defaultViewId="PRV-01" newLabel="Product"          onNew={() => setSelectedRecord({ table: 'products', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='requests'  && <LiveListView loading={loading} error={error} data={requests}  columns={REQ_COLS}  systemViews={REQ_VIEWS}  defaultViewId="RV-01"  newLabel="Materials Request" onNew={() => setSelectedRecord({ table: 'materials_requests', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='equipment' && <LiveListView loading={loading} error={error} data={equipment} columns={EQ_COLS}   systemViews={EQ_VIEWS}   defaultViewId="EQV-01" newLabel="Equipment"        onNew={() => setSelectedRecord({ table: 'equipment', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='inventory' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={inventory} columns={INV_COLS}  systemViews={INV_VIEWS}  defaultViewId="IV-01"  newLabel="Inventory Record" onNew={() => setSelectedRecord({ table: 'product_items', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='products'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={products}  columns={PROD_COLS} systemViews={PROD_VIEWS} defaultViewId="PRV-01" newLabel="Product"          onNew={() => setSelectedRecord({ table: 'products', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='requests'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={requests}  columns={REQ_COLS}  systemViews={REQ_VIEWS}  defaultViewId="RV-01"  newLabel="Materials Request" onNew={() => setSelectedRecord({ table: 'materials_requests', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='equipment' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={equipment} columns={EQ_COLS}   systemViews={EQ_VIEWS}   defaultViewId="EQV-01" newLabel="Equipment"        onNew={() => setSelectedRecord({ table: 'equipment', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

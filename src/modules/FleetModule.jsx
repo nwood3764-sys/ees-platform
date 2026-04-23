@@ -223,10 +223,22 @@ export default function FleetModule() {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
 
+  // Pull-to-refresh handler.
+  const loadAll = async () => {
+    setError(null)
+    try {
+      const [v, a, k] = await Promise.all([
+        fetchVehicles(), fetchVehicleActivities(), fetchEquipmentContainers(),
+      ])
+      setVehicles(v); setActivities(a); setKits(k)
+    } catch (err) {
+      setError(err)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     Promise.all([fetchVehicles(), fetchVehicleActivities(), fetchEquipmentContainers()])
       .then(([v, a, k]) => { if (!cancelled) { setVehicles(v); setActivities(a); setKits(k) } })
       .catch(err => { if (!cancelled) setError(err) })
@@ -261,9 +273,9 @@ export default function FleetModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'       && <FleetHome setSec={setSec} vehicles={vehicles} activities={activities} kits={kits} />}
-        {sec==='vehicles'   && <LiveListView loading={loading} error={error} data={vehicles}   columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => setSelectedRecord({ table: 'vehicles', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='activities' && <LiveListView loading={loading} error={error} data={activities} columns={ACT_COLS} systemViews={ACT_VIEWS} defaultViewId="AV-01" newLabel="Activity" onNew={() => setSelectedRecord({ table: 'vehicle_activities', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='kits'       && <LiveListView loading={loading} error={error} data={kits}       columns={KIT_COLS} systemViews={KIT_VIEWS} defaultViewId="KV-01" newLabel="Kit"      onNew={() => setSelectedRecord({ table: 'equipment_containers', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='vehicles'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={vehicles}   columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => setSelectedRecord({ table: 'vehicles', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='activities' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={activities} columns={ACT_COLS} systemViews={ACT_VIEWS} defaultViewId="AV-01" newLabel="Activity" onNew={() => setSelectedRecord({ table: 'vehicle_activities', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='kits'       && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={kits}       columns={KIT_COLS} systemViews={KIT_VIEWS} defaultViewId="KV-01" newLabel="Kit"      onNew={() => setSelectedRecord({ table: 'equipment_containers', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

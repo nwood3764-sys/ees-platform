@@ -269,10 +269,22 @@ export default function IncentivesModule() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
+  // Pull-to-refresh: re-fetch without flipping the main loading flag so the
+  // UI doesn't blank out during the pull. The hook in ListView shows its own
+  // inline indicator while this promise is in flight.
+  const loadAll = async () => {
+    setError(null)
+    try {
+      const [r, p] = await Promise.all([fetchPaymentRequests(), fetchPaymentReceipts()])
+      setRequests(r); setReceipts(p)
+    } catch (err) {
+      setError(err)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     Promise.all([fetchPaymentRequests(), fetchPaymentReceipts()])
       .then(([r, p]) => { if (!cancelled) { setRequests(r); setReceipts(p) } })
       .catch(err => { if (!cancelled) setError(err) })
@@ -306,8 +318,8 @@ export default function IncentivesModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} />}
-        {sec==='requests' && <LiveListView loading={loading} error={error} data={requests} columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell}  onOpenRecord={openRecord}/>}
-        {sec==='received' && <LiveListView loading={loading} error={error} data={receipts} columns={PMT_COLS} systemViews={PMT_VIEWS} defaultViewId="PTV-01" newLabel="Payment Receipt"         onNew={()=>{}} renderCell={pmtCell}  onOpenRecord={openRecord}/>}
+        {sec==='requests' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={requests} columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell}  onOpenRecord={openRecord}/>}
+        {sec==='received' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={receipts} columns={PMT_COLS} systemViews={PMT_VIEWS} defaultViewId="PTV-01" newLabel="Payment Receipt"         onNew={()=>{}} renderCell={pmtCell}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

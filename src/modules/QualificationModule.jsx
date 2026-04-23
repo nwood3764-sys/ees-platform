@@ -226,10 +226,22 @@ export default function QualificationModule() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
+  // Pull-to-refresh handler.
+  const loadAll = async () => {
+    setError(null)
+    try {
+      const [a, i, e] = await Promise.all([
+        fetchAssessments(), fetchIncentiveApplications(), fetchEfrReports(),
+      ])
+      setAssessments(a); setApplications(i); setEfrReports(e)
+    } catch (err) {
+      setError(err)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     Promise.all([fetchAssessments(), fetchIncentiveApplications(), fetchEfrReports()])
       .then(([a, i, e]) => { if (!cancelled) { setAssessments(a); setApplications(i); setEfrReports(e) } })
       .catch(err => { if (!cancelled) setError(err) })
@@ -262,9 +274,9 @@ export default function QualificationModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'         && <QualHome setSec={setSec} assessments={assessments} applications={applications} efrReports={efrReports} />}
-        {sec==='assessments'  && <LiveListView loading={loading} error={error} data={assessments} columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => setSelectedRecord({ table: 'assessments', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='applications' && <LiveListView loading={loading} error={error} data={applications} columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => setSelectedRecord({ table: 'incentive_applications', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='efr'          && <LiveListView loading={loading} error={error} data={efrReports}  columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => setSelectedRecord({ table: 'efr_reports', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='assessments'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={assessments} columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => setSelectedRecord({ table: 'assessments', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='applications' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={applications} columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => setSelectedRecord({ table: 'incentive_applications', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='efr'          && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={efrReports}  columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => setSelectedRecord({ table: 'efr_reports', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

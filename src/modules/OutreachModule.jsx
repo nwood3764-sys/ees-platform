@@ -366,29 +366,54 @@ export default function OutreachModule() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
+  // Extract the fetch logic so pull-to-refresh can call it without reloading
+  // the page. The initial mount uses the full loading spinner; pull-to-refresh
+  // uses a subtler inline indicator and doesn't flip the main `loading` flag.
+  const loadAll = async ({ showLoader = false } = {}) => {
+    if (showLoader) { setLoading(true) }
     setError(null)
-    Promise.all([
-      fetchProperties(),
-      fetchBuildings(),
-      fetchUnits(),
-      fetchOpportunities(),
-      fetchContacts(),
-      fetchEnrollments(),
-    ])
-      .then(([p, b, u, o, c, e]) => {
+    try {
+      const [p, b, u, o, c, e] = await Promise.all([
+        fetchProperties(),
+        fetchBuildings(),
+        fetchUnits(),
+        fetchOpportunities(),
+        fetchContacts(),
+        fetchEnrollments(),
+      ])
+      setProperties(p)
+      setBuildings(b)
+      setUnits(u)
+      setOpportunities(o)
+      setContacts(c)
+      setEnrollments(e)
+    } catch (err) {
+      setError(err)
+    } finally {
+      if (showLoader) { setLoading(false) }
+    }
+  }
+
+  useEffect(() => {
+    // Initial load shows the full loading spinner. Use a cancellation flag so
+    // a fast-navigating user can't leave a setState against an unmounted tree.
+    let cancelled = false
+    ;(async () => {
+      setLoading(true); setError(null)
+      try {
+        const [p, b, u, o, c, e] = await Promise.all([
+          fetchProperties(), fetchBuildings(), fetchUnits(),
+          fetchOpportunities(), fetchContacts(), fetchEnrollments(),
+        ])
         if (cancelled) return
-        setProperties(p)
-        setBuildings(b)
-        setUnits(u)
-        setOpportunities(o)
-        setContacts(c)
-        setEnrollments(e)
-      })
-      .catch(err => { if (!cancelled) setError(err) })
-      .finally(() => { if (!cancelled) setLoading(false) })
+        setProperties(p); setBuildings(b); setUnits(u)
+        setOpportunities(o); setContacts(c); setEnrollments(e)
+      } catch (err) {
+        if (!cancelled) setError(err)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
     return () => { cancelled = true }
   }, [])
 
@@ -430,12 +455,12 @@ export default function OutreachModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec === 'home'       && <OutreachHome setSec={setSec} properties={properties} opportunities={opportunities} enrollments={enrollments} contacts={contacts} />}
-        {sec === 'opps'       && <LiveListView loading={loading} error={error} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'properties' && <LiveListView loading={loading} error={error} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'buildings'  && <LiveListView loading={loading} error={error} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'units'      && <LiveListView loading={loading} error={error} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'contacts'   && <LiveListView loading={loading} error={error} data={contacts}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => setSelectedRecord({ table: 'contacts', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={contactCell} />}
-        {sec === 'enrollment' && <LiveListView loading={loading} error={error} data={enrollments}  columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'property_programs', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
+        {sec === 'opps'       && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'properties' && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'buildings'  && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'units'      && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'contacts'   && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={contacts}     columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => setSelectedRecord({ table: 'contacts', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={contactCell} />}
+        {sec === 'enrollment' && <LiveListView loading={loading} error={error} onRefresh={() => loadAll()} data={enrollments}  columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'property_programs', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
         </>)}
       </div>
     </div>

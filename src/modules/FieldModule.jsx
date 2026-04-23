@@ -450,14 +450,29 @@ export default function FieldModule() {
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     Promise.all([fetchProjects(), fetchWorkOrders(), fetchPaymentRequests(), fetchSchedule(new Date())])
       .then(([p, w, pr, tc]) => { if (!cancelled) { setProjects(p); setWorkOrders(w); setPaymentRequests(pr); setTodayCrews(tc) } })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [])
+
+  // Pull-to-refresh handler for the Projects / Work Orders list views.
+  // Refetches without flipping `loading` so the cards don't blank out.
+  // Schedule has its own refetch effect (scheduleDate dep), so we don't
+  // need to re-pull it here — its dedicated loader keeps running.
+  const loadAll = async () => {
+    setError(null)
+    try {
+      const [p, w, pr, tc] = await Promise.all([
+        fetchProjects(), fetchWorkOrders(), fetchPaymentRequests(), fetchSchedule(new Date()),
+      ])
+      setProjects(p); setWorkOrders(w); setPaymentRequests(pr); setTodayCrews(tc)
+    } catch (err) {
+      setError(err)
+    }
+  }
 
   // Re-fetch the schedule whenever scheduleDate changes. Kept separate from
   // the main fetch effect so the full list views don't refetch on every
@@ -532,8 +547,8 @@ export default function FieldModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
-        {sec==='projects'   && <LiveListView loading={loading} error={error} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
-        {sec==='workorders' && <LiveListView loading={loading} error={error} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec==='projects'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
+        {sec==='workorders' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='schedule'   && <ScheduleView
           crews={schedule}
           loading={scheduleLoading}

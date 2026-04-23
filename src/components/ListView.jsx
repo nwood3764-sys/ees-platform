@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { C } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
+import { usePullToRefresh } from '../lib/usePullToRefresh';
 import { Badge, Icon, TableRow, ProgramTag } from './UI';
 
 // ── Filter Dropdown ──────────────────────────────────────────────────────────
@@ -631,9 +632,17 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClos
 }
 
 // ── Main ListView ────────────────────────────────────────────────────────────
-export function ListView({ data, columns, systemViews, defaultViewId, newLabel, renderCell, renderDetail, onNew, onOpenRecord }) {
+export function ListView({ data, columns, systemViews, defaultViewId, newLabel, renderCell, renderDetail, onNew, onOpenRecord, onRefresh }) {
   const firstView = systemViews.find(v => v.id === defaultViewId) || systemViews[0];
   const isMobile = useIsMobile();
+
+  // Pull-to-refresh plumbing — attached to the mobile card scroll container
+  // below. No-op when onRefresh isn't provided (so modules that haven't wired
+  // a refetch callback through still work exactly as before).
+  const pullToRefresh = usePullToRefresh({
+    onRefresh,
+    enabled: isMobile && typeof onRefresh === 'function',
+  });
 
   const [sortField, setSortField] = useState(firstView?.sortField || null);
   const [sortDir, setSortDir] = useState(firstView?.sortDir || 'asc');
@@ -879,7 +888,39 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
         </div>
 
         {/* Minimal card list — ID + name + status, high density */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px 96px', WebkitOverflowScrolling: 'touch' }}>
+        <div
+          {...pullToRefresh.handlers}
+          style={{
+            flex: 1, overflowY: 'auto', padding: '8px 10px 96px',
+            WebkitOverflowScrolling: 'touch',
+            position: 'relative',
+          }}
+        >
+          {/* Pull-to-refresh indicator — only visible while pulling or
+              refreshing. Sits above the first card with a spinner that
+              fills in as the user pulls, becoming solid when past the
+              threshold. Absolutely positioned so it doesn't take layout
+              space when idle. */}
+          {(pullToRefresh.pullDistance > 0 || pullToRefresh.refreshing) && (
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0,
+              height: pullToRefresh.pullDistance,
+              display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+              paddingBottom: 8, pointerEvents: 'none',
+              transition: pullToRefresh.refreshing ? 'height 160ms ease' : undefined,
+            }}>
+              <div style={{
+                width: 24, height: 24, borderRadius: '50%',
+                border: `2px solid ${C.border}`,
+                borderTopColor: pullToRefresh.pullDistance >= pullToRefresh.threshold || pullToRefresh.refreshing ? C.emerald : C.borderDark,
+                animation: pullToRefresh.refreshing ? 'anura-spin 0.7s linear infinite' : undefined,
+                transform: pullToRefresh.refreshing
+                  ? undefined
+                  : `rotate(${Math.min(1, pullToRefresh.pullDistance / pullToRefresh.threshold) * 360}deg)`,
+                transition: pullToRefresh.refreshing ? undefined : 'transform 80ms linear, border-top-color 150ms',
+              }} />
+            </div>
+          )}
           {filtered.length === 0 ? (
             <div style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted }}>
               No records match the current filters.{' '}

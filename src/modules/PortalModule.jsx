@@ -203,10 +203,20 @@ export default function PortalModule() {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
 
+  // Pull-to-refresh handler.
+  const loadAll = async () => {
+    setError(null)
+    try {
+      const [u, p] = await Promise.all([fetchPortalUsers(), fetchPartnerOrganizations()])
+      setUsers(u); setPartners(p)
+    } catch (err) {
+      setError(err)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     Promise.all([fetchPortalUsers(), fetchPartnerOrganizations()])
       .then(([u, p]) => { if (!cancelled) { setUsers(u); setPartners(p) } })
       .catch(err => { if (!cancelled) setError(err) })
@@ -239,8 +249,8 @@ export default function PortalModule() {
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'     && <PortalHome setSec={setSec} users={users} partners={partners} />}
-        {sec==='users'    && <LiveListView loading={loading} error={error} data={users}    columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => setSelectedRecord({ table: 'portal_users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='partners' && <LiveListView loading={loading} error={error} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => setSelectedRecord({ table: 'partner_organizations', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='users'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={users}    columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => setSelectedRecord({ table: 'portal_users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='partners' && <LiveListView loading={loading} error={error} onRefresh={loadAll} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => setSelectedRecord({ table: 'partner_organizations', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>
