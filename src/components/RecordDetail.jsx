@@ -478,6 +478,29 @@ function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
   )
 }
 
+// Mobile variant: returns the formatted value as a JSX snippet (no <td> wrapper)
+// for use inside a card layout. Mirrors the type-dispatch logic of
+// renderRelatedCell but omits the table-specific padding / truncation.
+function renderRelatedValue(col, val, picklists) {
+  let shown = val
+  if (col.type === 'picklist' && shown) shown = picklists.byId.get(shown) || shown
+  if (col.type === 'date' && shown) {
+    shown = new Date(shown + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+  if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
+  if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
+  if (col.type === 'picklist' && shown) return <Badge s={shown} />
+  if (shown == null || shown === '') return <span style={{ color: C.textMuted }}>—</span>
+  return (
+    <span style={{
+      fontFamily: col.type === 'number' ? 'JetBrains Mono, monospace' : 'inherit',
+      color: C.textSecondary,
+    }}>
+      {shown}
+    </span>
+  )
+}
+
 function RelatedListWidget({
   widget, picklists, onNavigateToRecord, parentRecordId, onRefreshRelated,
 }) {
@@ -486,6 +509,7 @@ function RelatedListWidget({
   const allRows = widget._relatedData || []
   const [collapsed, setCollapsed] = useState(false)
   const toast = useToast()
+  const isMobile = useIsMobile()
 
   const childTable = config.table
   const fk = config.fk
@@ -494,6 +518,11 @@ function RelatedListWidget({
   // Editable mode gates: config opt-in AND parent wired a refresh callback.
   // If either is missing we render the original read-only card.
   const editable = config.editable === true && typeof onRefreshRelated === 'function'
+  // On mobile we disable drag-to-reorder entirely — HTML5 DnD doesn't work on
+  // touch, and the visual complexity of drag affordances isn't worth the
+  // screen real estate. Users can still use Add/Remove on mobile; for full
+  // reordering they should switch to desktop.
+  const editableReorder = editable && !isMobile
   const pickerCfg = config.picker
   const orderField = config.order_field
 
@@ -660,14 +689,17 @@ function RelatedListWidget({
                 style={{
                   background: C.emerald, color: '#fff',
                   border: 'none', borderRadius: 5,
-                  padding: '4px 10px', fontSize: 11.5, cursor: 'pointer',
+                  padding: isMobile ? '8px 14px' : '4px 10px',
+                  fontSize: isMobile ? 13 : 11.5,
+                  cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 4,
                   fontWeight: 500,
+                  minHeight: isMobile ? 36 : undefined,
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = '#2aab72' }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
               >
-                <Icon path="M12 5v14M5 12h14" size={11} color="#fff" />
+                <Icon path="M12 5v14M5 12h14" size={isMobile ? 13 : 11} color="#fff" />
                 {pickerCfg.add_button_label || 'Add'}
               </button>
             ) : canNavigate ? (
@@ -676,14 +708,17 @@ function RelatedListWidget({
                 style={{
                   background: C.card, color: C.textSecondary,
                   border: `1px solid ${C.border}`, borderRadius: 5,
-                  padding: '4px 10px', fontSize: 11.5, cursor: 'pointer',
+                  padding: isMobile ? '8px 14px' : '4px 10px',
+                  fontSize: isMobile ? 13 : 11.5,
+                  cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 4,
                   fontWeight: 500,
+                  minHeight: isMobile ? 36 : undefined,
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2f7'; e.currentTarget.style.borderColor = C.borderDark }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = C.card; e.currentTarget.style.borderColor = C.border }}
               >
-                <Icon path="M12 5v14M5 12h14" size={11} color={C.textSecondary} />
+                <Icon path="M12 5v14M5 12h14" size={isMobile ? 13 : 11} color={C.textSecondary} />
                 New
               </button>
             ) : null}
@@ -698,12 +733,114 @@ function RelatedListWidget({
               <div style={{ padding: '22px 16px', fontSize: 12, color: C.textMuted, textAlign: 'center' }}>
                 No {title.toLowerCase()} related to this record.
               </div>
+            ) : isMobile ? (
+              /* ── Mobile card layout ─────────────────────────────────────
+                 First column becomes the card title. Remaining columns
+                 render underneath as label/value rows. Tap navigates to
+                 the record (same as double-click on desktop). Editable
+                 lists get a trash icon on the right; drag-to-reorder is
+                 disabled on touch. */
+              <div>
+                {shownRows.map((row, ri) => {
+                  const firstCol = columns[0]
+                  const restCols = columns.slice(1)
+                  const titleVal = firstCol
+                    ? (firstCol.type === 'picklist' && row[firstCol.name]
+                        ? (picklists.byId.get(row[firstCol.name]) || row[firstCol.name])
+                        : row[firstCol.name])
+                    : null
+                  return (
+                    <div
+                      key={row.id || ri}
+                      onClick={() => canNavigate && handleRowClick(row)}
+                      style={{
+                        padding: '12px 14px',
+                        borderBottom: ri < shownRows.length - 1 ? `1px solid ${C.border}` : 'none',
+                        cursor: canNavigate ? 'pointer' : 'default',
+                        display: 'flex', alignItems: 'flex-start', gap: 10,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {/* Title row: first column value + chevron */}
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          minWidth: 0,
+                        }}>
+                          <span style={{
+                            fontSize: 14, fontWeight: 600,
+                            color: canNavigate ? '#1a5a8a' : C.textPrimary,
+                            minWidth: 0, flex: 1,
+                            overflow: 'hidden', textOverflow: 'ellipsis',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                            whiteSpace: 'normal',
+                          }}>
+                            {firstCol && firstCol.type === 'picklist' && titleVal
+                              ? <Badge s={titleVal} />
+                              : (titleVal != null && titleVal !== '' ? String(titleVal) : '—')}
+                          </span>
+                        </div>
+
+                        {/* Remaining columns as label/value pairs */}
+                        {restCols.length > 0 && (
+                          <div style={{
+                            marginTop: 8,
+                            display: 'flex', flexDirection: 'column', gap: 4,
+                          }}>
+                            {restCols.map((col) => (
+                              <div key={col.name} style={{
+                                display: 'flex', justifyContent: 'space-between',
+                                alignItems: 'center', gap: 10, fontSize: 13,
+                              }}>
+                                <span style={{ color: C.textMuted, flexShrink: 0 }}>{col.label}</span>
+                                <span style={{
+                                  textAlign: 'right', minWidth: 0,
+                                  overflow: 'hidden', textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}>
+                                  {renderRelatedValue(col, row[col.name], picklists)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right edge: either a remove button (editable) or a chevron (nav) */}
+                      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', paddingTop: 2 }}>
+                        {editable ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleRemove(e, row) }}
+                            disabled={removingId === row.id}
+                            aria-label="Remove from list"
+                            style={{
+                              background: 'none', border: 'none',
+                              color: removingId === row.id ? C.textMuted : '#b03a2e',
+                              cursor: removingId === row.id ? 'wait' : 'pointer',
+                              padding: 8, borderRadius: 6,
+                              minWidth: 36, minHeight: 36,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                          >
+                            <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" size={16} color="currentColor" />
+                          </button>
+                        ) : canNavigate ? (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}>
+                            <path d="M9 6l6 6-6 6" />
+                          </svg>
+                        ) : null}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             ) : (
+              /* ── Desktop table layout (unchanged) ─────────────────────── */
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                      {editable && <th style={{ width: 28, padding: '8px 0 8px 14px' }} />}
+                      {editableReorder && <th style={{ width: 28, padding: '8px 0 8px 14px' }} />}
                       {columns.map((col) => (
                         <th key={col.name} style={{
                           textAlign: 'left', padding: '8px 14px',
@@ -722,25 +859,25 @@ function RelatedListWidget({
                       return (
                         <tr
                           key={row.id || ri}
-                          draggable={editable}
-                          onDragStart={editable ? (e) => handleDragStart(e, ri) : undefined}
-                          onDragOver={editable ? (e) => handleDragOver(e, ri) : undefined}
-                          onDragLeave={editable ? handleDragLeaveRow : undefined}
-                          onDragEnd={editable ? handleDragEnd : undefined}
-                          onDrop={editable ? (e) => handleDrop(e, ri) : undefined}
-                          onClick={editable ? undefined : () => handleRowClick(row)}
+                          draggable={editableReorder}
+                          onDragStart={editableReorder ? (e) => handleDragStart(e, ri) : undefined}
+                          onDragOver={editableReorder ? (e) => handleDragOver(e, ri) : undefined}
+                          onDragLeave={editableReorder ? handleDragLeaveRow : undefined}
+                          onDragEnd={editableReorder ? handleDragEnd : undefined}
+                          onDrop={editableReorder ? (e) => handleDrop(e, ri) : undefined}
+                          onClick={editableReorder ? undefined : () => handleRowClick(row)}
                           onDoubleClick={() => handleRowClick(row)}
                           style={{
                             borderBottom: ri < shownRows.length - 1 ? `1px solid ${C.border}` : 'none',
-                            cursor: editable ? 'grab' : (canNavigate ? 'pointer' : 'default'),
+                            cursor: editableReorder ? 'grab' : (canNavigate ? 'pointer' : 'default'),
                             background: isDropTarget ? '#eff6ff' : 'transparent',
                             opacity: isDragging ? 0.45 : 1,
                             transition: 'background 0.1s, opacity 0.1s',
                           }}
-                          onMouseEnter={(e) => { if (!editable && canNavigate) e.currentTarget.style.background = '#f7f9fc' }}
-                          onMouseLeave={(e) => { if (!editable) e.currentTarget.style.background = 'transparent' }}
+                          onMouseEnter={(e) => { if (!editableReorder && canNavigate) e.currentTarget.style.background = '#f7f9fc' }}
+                          onMouseLeave={(e) => { if (!editableReorder) e.currentTarget.style.background = 'transparent' }}
                         >
-                          {editable && (
+                          {editableReorder && (
                             <td style={{ padding: '10px 0 10px 14px', width: 28, color: C.textMuted, userSelect: 'none' }}>
                               <div
                                 title="Drag to reorder"
@@ -753,7 +890,7 @@ function RelatedListWidget({
                           {columns.map((col, ci) =>
                             renderRelatedCell(col, row[col.name], picklists, {
                               isFirstCol: ci === 0,
-                              canNavigate: canNavigate && !editable,
+                              canNavigate: canNavigate && !editableReorder,
                             })
                           )}
                           {editable && (
