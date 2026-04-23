@@ -175,6 +175,48 @@ function findMissingRequired(requiredFields, values, labelMap) {
   return missing
 }
 
+// Cross-field sanity validation. Runs after required-field check, before
+// the row hits the DB. Returns an array of human-readable error strings;
+// empty array means valid. Add new tables here as forms come online —
+// keeps validation rules close to the form code instead of scattered
+// across triggers and Admin tables. Production-grade rules belong in
+// validation_rules eventually; this is the lightweight first pass.
+function validateBeforeSave(tableName, fields, evidenceLabelById) {
+  const errors = []
+
+  if (tableName === 'work_step_templates') {
+    const photosReq      = Number(fields.wst_photos_required_count || 0)
+    const beforeRequired = !!fields.wst_photo_before_required
+    const afterRequired  = !!fields.wst_photo_after_required
+    const evidenceLabel  = (evidenceLabelById && fields.wst_required_evidence_type_id)
+      ? (evidenceLabelById.get(fields.wst_required_evidence_type_id) || '').toLowerCase()
+      : ''
+    const evidenceIsPhoto = evidenceLabel.includes('photo')
+    const dur = Number(fields.wst_estimated_duration_minutes || 0)
+
+    // 1. If you ask for a Before or After photo, you need at least one photo
+    if ((beforeRequired || afterRequired) && photosReq < 1) {
+      errors.push('Photos Required must be at least 1 when Before Photo or After Photo is required.')
+    }
+    // 2. Inverse: if Photos Required > 0, mark which side(s) are required
+    if (photosReq > 0 && !beforeRequired && !afterRequired) {
+      errors.push('Mark Before Photo Required, After Photo Required, or both — Photos Required is greater than zero.')
+    }
+    // 3. Evidence Type = Photo implies Photos Required > 0
+    if (evidenceIsPhoto && photosReq < 1) {
+      errors.push('Evidence Type is Photo — Photos Required must be at least 1.')
+    }
+    // 4. Negative durations are nonsense
+    if (fields.wst_estimated_duration_minutes != null
+        && fields.wst_estimated_duration_minutes !== ''
+        && dur < 0) {
+      errors.push('Estimated Duration cannot be negative.')
+    }
+  }
+
+  return errors
+}
+
 // Build the ordered list of tab names from the loaded sections.
 // Details first, Related second (if any section has related_list widgets),
 // then any custom tabs alphabetical after.
@@ -867,6 +909,19 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
         : `Required fields missing:\n• ${missing.join('\n• ')}`)
       return
     }
+    // Cross-field sanity validation. Build an id->label map for the
+    // evidence-type picklist so the validator can read its semantic meaning
+    // (e.g. "Photo" implies Photos Required > 0).
+    const evidenceLabelById = new Map(
+      (picklistOpts.wst_required_evidence_type_id || []).map(o => [o.value, o.label])
+    )
+    const sanityErrors = validateBeforeSave(picker.source_table, draft, evidenceLabelById)
+    if (sanityErrors.length) {
+      toast.error(sanityErrors.length === 1
+        ? sanityErrors[0]
+        : `Cannot save:\n• ${sanityErrors.join('\n• ')}`)
+      return
+    }
     setCreating(true)
     try {
       const userId = await getCurrentUserId()
@@ -1350,6 +1405,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           return
         }
 
+        // Cross-field sanity validation (lightweight, table-aware)
+        const sanityErrors = validateBeforeSave(tableName, fields, data?.picklists?.byId)
+        if (sanityErrors.length) {
+          toast.error(sanityErrors.length === 1
+            ? sanityErrors[0]
+            : `Cannot save:\n• ${sanityErrors.join('\n• ')}`)
+          setSaving(false)
+          return
+        }
+
         const created = await insertRecord(tableName, fields)
         toast.success(cloneSource ? 'Clone created' : 'Record created')
 
@@ -1394,6 +1459,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             ? `Required field missing: ${missing[0]}`
             : `Required fields missing:\n• ${missing.join('\n• ')}`
         )
+        setSaving(false)
+        return
+      }
+
+      // Cross-field sanity validation against merged view
+      const sanityErrors = validateBeforeSave(tableName, merged, data?.picklists?.byId)
+      if (sanityErrors.length) {
+        toast.error(sanityErrors.length === 1
+          ? sanityErrors[0]
+          : `Cannot save:\n• ${sanityErrors.join('\n• ')}`)
         setSaving(false)
         return
       }
