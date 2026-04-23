@@ -140,9 +140,14 @@ export function ComingSoon({ label }) {
 }
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
-// Desktop (≥ 769px): fixed 240px inline column — renders as a flex child.
-// Mobile (≤ 768px):  slide-in drawer with backdrop. Hidden until `mobileOpen`.
-//                    Tapping a module closes the drawer automatically.
+// Desktop (≥ 769px): fixed inline column. Two widths:
+//                    - Expanded (default): 240px, icon + label.
+//                    - Collapsed:           60px,  icon only, label via title tooltip.
+//                    A chevron toggle on the right edge swaps between the two.
+// Mobile  (≤ 768px): slide-in drawer with backdrop. Hidden until `mobileOpen`.
+//                    Tapping a module closes the drawer automatically. The
+//                    `collapsed` prop is ignored on mobile — the drawer is
+//                    always fully expanded when visible.
 //                    The caller is responsible for the hamburger that opens it
 //                    (see MobileHeader below) and for maintaining `mobileOpen`.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,8 +159,12 @@ export function Sidebar({
   user = { name: 'Nicholas Wood', role: 'Admin', initials: 'NW' },
   mobileOpen = false,
   onMobileClose,
+  collapsed = false,
+  onToggleCollapse,
 }) {
   const isMobile = useIsMobile();
+  // `collapsed` only applies on desktop — the mobile drawer always shows full labels.
+  const isCollapsed = !isMobile && collapsed;
 
   // Derive display values from the authenticated email when available so the
   // sidebar reflects whoever is actually signed in rather than a hardcoded
@@ -188,11 +197,16 @@ export function Sidebar({
     <>
       {/* Logo (desktop only; mobile shows the logo in the header bar) */}
       {!isMobile && (
-        <div style={{ padding: '18px 20px 16px', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: C.emerald, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{
+          padding: isCollapsed ? '18px 0 16px' : '18px 20px 16px',
+          borderBottom: '1px solid rgba(255,255,255,0.07)',
+          display: 'flex', alignItems: 'center', gap: 10,
+          justifyContent: isCollapsed ? 'center' : 'flex-start',
+        }}>
+          <div style={{ width: 28, height: 28, borderRadius: 6, background: C.emerald, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
           </div>
-          <span style={{ color: C.navActive, fontWeight: 600, fontSize: 15 }}>Anura</span>
+          {!isCollapsed && <span style={{ color: C.navActive, fontWeight: 600, fontSize: 15 }}>Anura</span>}
         </div>
       )}
 
@@ -221,16 +235,24 @@ export function Sidebar({
       )}
 
       {/* Nav */}
-      <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto' }}>
+      <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto', overflowX: 'hidden' }}>
         {NAV_MODULES.map(m => {
           const on = m.id === activeModule;
           // Mobile rows are a bit taller for easier tapping (44px tap target minimum)
-          const rowPadding = isMobile ? '14px 20px' : '9px 20px';
+          const rowPadding = isMobile
+            ? '14px 20px'
+            : isCollapsed ? '11px 0' : '9px 20px';
           const rowFontSize = isMobile ? 15 : 13.5;
           return (
-            <div key={m.id} onClick={() => handleModuleClick(m.id)}
+            <div
+              key={m.id}
+              onClick={() => handleModuleClick(m.id)}
+              title={isCollapsed ? m.label : undefined}
               style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: rowPadding,
+                display: 'flex', alignItems: 'center',
+                justifyContent: isCollapsed ? 'center' : 'flex-start',
+                gap: isCollapsed ? 0 : 12,
+                padding: rowPadding,
                 cursor: 'pointer', color: on ? C.navActive : C.navInactive,
                 background: on ? C.sidebarHover : 'transparent',
                 borderLeft: on ? `3px solid ${C.emerald}` : '3px solid transparent',
@@ -241,7 +263,7 @@ export function Sidebar({
               onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'transparent'; }}
             >
               <Icon path={m.icon} color="currentColor" size={isMobile ? 17 : 15} />
-              {m.label}
+              {!isCollapsed && m.label}
             </div>
           );
         })}
@@ -249,21 +271,33 @@ export function Sidebar({
 
       {/* User + sign out */}
       <div style={{
-        padding: isMobile ? '14px 20px calc(14px + env(safe-area-inset-bottom)) 20px' : '12px 20px',
+        padding: isMobile
+          ? '14px 20px calc(14px + env(safe-area-inset-bottom)) 20px'
+          : isCollapsed ? '12px 0' : '12px 20px',
         borderTop: '1px solid rgba(255,255,255,0.07)',
-        display: 'flex', alignItems: 'center', gap: 10,
+        display: 'flex',
+        flexDirection: isCollapsed ? 'column' : 'row',
+        alignItems: 'center',
+        gap: isCollapsed ? 10 : 10,
       }}>
-        <div style={{
-          width: isMobile ? 32 : 28, height: isMobile ? 32 : 28, borderRadius: '50%', background: C.emerald,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: isMobile ? 12 : 11, fontWeight: 600, color: '#07111f', flexShrink: 0
-        }}>
+        <div
+          title={isCollapsed ? `${displayName}\n${displayRole}` : undefined}
+          style={{
+            width: isMobile ? 32 : 28, height: isMobile ? 32 : 28, borderRadius: '50%', background: C.emerald,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: isMobile ? 12 : 11, fontWeight: 600, color: '#07111f', flexShrink: 0
+          }}
+        >
           {displayInitials || 'U'}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: C.navActive, fontSize: isMobile ? 13 : 12, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</div>
-          <div style={{ color: C.navInactive, fontSize: isMobile ? 11 : 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayRole}</div>
-        </div>
+
+        {!isCollapsed && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: C.navActive, fontSize: isMobile ? 13 : 12, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</div>
+            <div style={{ color: C.navInactive, fontSize: isMobile ? 11 : 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayRole}</div>
+          </div>
+        )}
+
         {onSignOut && (
           <button
             onClick={onSignOut}
@@ -284,11 +318,53 @@ export function Sidebar({
     </>
   );
 
-  // Desktop: inline flex column
+  // Desktop: inline flex column with optional collapse toggle
   if (!isMobile) {
+    const width = isCollapsed ? 60 : 240;
     return (
-      <div style={{ width: 240, background: C.sidebar, display: 'flex', flexDirection: 'column', flexShrink: 0, height: '100vh' }}>
+      <div
+        style={{
+          width, background: C.sidebar,
+          display: 'flex', flexDirection: 'column',
+          flexShrink: 0, height: '100vh',
+          position: 'relative',
+          transition: 'width 180ms ease',
+        }}
+      >
         {inner}
+
+        {/* Collapse/expand toggle — pull-tab on the right edge */}
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            style={{
+              position: 'absolute',
+              top: 22,
+              right: -11,
+              width: 22,
+              height: 22,
+              borderRadius: '50%',
+              background: C.card,
+              border: `1px solid ${C.border}`,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: C.textSecondary,
+              padding: 0,
+              zIndex: 20,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = C.textPrimary; e.currentTarget.style.borderColor = C.borderDark; }}
+            onMouseLeave={e => { e.currentTarget.style.color = C.textSecondary; e.currentTarget.style.borderColor = C.border; }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+              {isCollapsed ? <path d="M9 6l6 6-6 6" /> : <path d="M15 6l-6 6 6 6" />}
+            </svg>
+          </button>
+        )}
       </div>
     );
   }

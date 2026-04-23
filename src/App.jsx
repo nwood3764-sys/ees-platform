@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Sidebar, MobileHeader, ComingSoon } from './components/UI'
 import AuthGate from './components/AuthGate'
 import { ToastProvider } from './components/Toast'
@@ -20,6 +20,15 @@ function AuthedApp({ session }) {
   // Mobile menu drawer state. Desktop ignores this entirely — the Sidebar
   // component only honors mobileOpen when useIsMobile() is true.
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  // Desktop sidebar collapse state. Persisted to localStorage so the choice
+  // survives reloads. Ignored on mobile (the drawer is always full-width).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try { return localStorage.getItem('anura.sidebar.collapsed') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('anura.sidebar.collapsed', sidebarCollapsed ? '1' : '0') } catch { /* storage disabled */ }
+  }, [sidebarCollapsed])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -50,6 +59,8 @@ function AuthedApp({ session }) {
         onSignOut={handleSignOut}
         mobileOpen={mobileMenuOpen}
         onMobileClose={() => setMobileMenuOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(c => !c)}
       />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         <MobileHeader onOpenMenu={() => setMobileMenuOpen(true)} />
