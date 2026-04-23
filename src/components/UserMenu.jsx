@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { C } from '../data/constants'
-import { Icon } from './UI'
 import { getCurrentUserProfile } from '../data/layoutService'
 
 // ---------------------------------------------------------------------------
@@ -281,7 +280,18 @@ function MenuItem({ icon, label, onClick, variant = 'neutral' }) {
         transition: 'background 120ms ease',
       }}
     >
-      <Icon path={icon} size={14} color={C.textSecondary} />
+      {/* Inline SVG instead of importing Icon from ./UI — ./UI imports this
+          file (UserMenu), so reaching back into ./UI creates a circular
+          dependency that leaves Icon undefined in the production bundle
+          when ./UI evaluates first. */}
+      <svg
+        width={14} height={14} viewBox="0 0 24 24" fill="none"
+        stroke={C.textSecondary} strokeWidth={1.8}
+        strokeLinecap="round" strokeLinejoin="round"
+        style={{ flexShrink: 0 }}
+      >
+        <path d={icon} />
+      </svg>
       <span>{label}</span>
     </button>
   )
