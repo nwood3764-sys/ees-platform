@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
+import { useIsMobile } from '../../lib/useMediaQuery'
 import RecordDetail from '../../components/RecordDetail'
 import SetupHome from './SetupHome'
 import ObjectManager from './ObjectManager'
@@ -20,6 +21,19 @@ export default function AdminModule() {
   const [tab, setTab] = useState('setup')               // 'setup' | 'objects'
   const [selectedObject, setSelectedObject] = useState(null)   // catalog entry from ObjectManager
   const [selectedRecord, setSelectedRecord] = useState(null)   // { table, id, name?, mode?, prefill? }
+  const isMobile = useIsMobile()
+  // Dismissible "use desktop" banner. Persisted so the user only sees it once
+  // per device. Admin tools like the object manager and page layout editor
+  // are dense tables that don't adapt well to phone screens, so we set the
+  // expectation upfront rather than pretending the mobile experience is good.
+  const [desktopNoticeDismissed, setDesktopNoticeDismissed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try { return localStorage.getItem('anura.admin.desktopNotice.dismissed') === '1' } catch { return false }
+  })
+  const dismissDesktopNotice = () => {
+    setDesktopNoticeDismissed(true)
+    try { localStorage.setItem('anura.admin.desktopNotice.dismissed', '1') } catch { /* storage disabled */ }
+  }
 
   const openObjectManager = () => {
     setTab('objects')
@@ -40,8 +54,58 @@ export default function AdminModule() {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* ─── Mobile-only "use desktop" notice ────────────────────────
+          Admin contains dense table UIs (Object Manager, page layout
+          editor, permission matrix) that we don't adapt for touch. Set
+          the expectation upfront instead of letting the user fight
+          cramped tables. Dismissible + persisted per-device. */}
+      {isMobile && !desktopNoticeDismissed && (
+        <div style={{
+          flexShrink: 0,
+          background: '#fef7e0',
+          borderBottom: '1px solid #f5d680',
+          padding: '10px 14px',
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 10,
+          fontSize: 13,
+          color: '#8b5a00',
+          lineHeight: 1.35,
+        }}>
+          <div style={{ flexShrink: 0, marginTop: 1 }}>
+            <Icon path="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" size={16} color="#c97f0a" />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <strong style={{ fontWeight: 600 }}>Admin works best on desktop.</strong>{' '}
+            The Object Manager, page layout editor, and permission tools are designed for a larger screen.
+          </div>
+          <button
+            onClick={dismissDesktopNotice}
+            aria-label="Dismiss"
+            style={{
+              flexShrink: 0,
+              background: 'transparent',
+              border: 'none',
+              padding: 4,
+              borderRadius: 4,
+              cursor: 'pointer',
+              color: '#8b5a00',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: 28,
+              minHeight: 28,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* ─── Top bar — breadcrumb + reports ─────────────────────────── */}
-      <div style={{
+      <div data-module-topbar="1" style={{
         height: 54, background: C.card, borderBottom: `1px solid ${C.border}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 24px', flexShrink: 0,
