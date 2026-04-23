@@ -4,6 +4,7 @@ import AuthGate from './components/AuthGate'
 import { ToastProvider } from './components/Toast'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
+import { useInputFocusScroll } from './lib/useInputFocusScroll'
 
 // ─── Lazy-loaded modules ─────────────────────────────────────────────────────
 // Each module becomes its own webpack/rollup chunk. Only the active module's
@@ -61,6 +62,10 @@ function AuthedApp({ session }) {
   useEffect(() => {
     try { localStorage.setItem('anura.sidebar.collapsed', sidebarCollapsed ? '1' : '0') } catch { /* storage disabled */ }
   }, [sidebarCollapsed])
+
+  // Global: when an input focuses on a touch device, scroll it into view
+  // once the keyboard has finished opening. Quiet no-op on desktop.
+  useInputFocusScroll()
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
