@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
 import { useToast } from './Toast'
+import { useIsMobile } from '../lib/useMediaQuery'
 import {
   loadRecordDetailData,
   saveRecord,
@@ -1240,16 +1241,17 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 // ---------------------------------------------------------------------------
 
 function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName }) {
+  const isMobile = useIsMobile()
   const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
   // Only render field_group widgets inside a section. Related lists are
   // rendered as their own standalone cards outside sections.
   const fieldGroupWidgets = (section.widgets || []).filter(w => w.widget_type === 'field_group')
   if (fieldGroupWidgets.length === 0) return null
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
       <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
-        style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: section.section_is_collapsible ? 'pointer' : 'default', borderBottom: collapsed ? 'none' : `1px solid ${C.border}`, background: '#fafbfd' }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
+        style={{ padding: isMobile ? '12px 14px' : '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: section.section_is_collapsible ? 'pointer' : 'default', borderBottom: collapsed ? 'none' : `1px solid ${C.border}`, background: '#fafbfd' }}>
+        <span style={{ fontSize: isMobile ? 14 : 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
         {section.section_is_collapsible && <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={14} color={C.textMuted} />}
       </div>
       {!collapsed && fieldGroupWidgets.map(w => (
@@ -1267,6 +1269,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
 export default function RecordDetail({ tableName, recordId, onBack, mode = 'view', onRecordCreated, onNavigateToRecord, prefill }) {
   const isCreate = mode === 'create'
   const toast = useToast()
+  const isMobile = useIsMobile()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -1568,9 +1571,29 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const statusLabel = statusRaw ? (picklists.byId.get(statusRaw) || statusRaw) : null
 
   if (!layout) return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
-      <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} />
-      <h1 style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, margin: '0 0 16px' }}>{displayName}</h1>
+    <div style={{
+      flex: 1,
+      overflow: 'auto',
+      padding: isMobile ? '12px' : '20px 24px',
+      paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom))' : '20px',
+    }}>
+      {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} />}
+      {isMobile && (
+        <button
+          onClick={onBack}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'transparent', border: 'none', padding: '6px 0',
+            color: '#1a5a8a', fontSize: 13, cursor: 'pointer', marginBottom: 10,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+          Back
+        </button>
+      )}
+      <h1 style={{ fontSize: isMobile ? 18 : 20, fontWeight: 700, color: C.textPrimary, margin: '0 0 16px' }}>{displayName}</h1>
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
         <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>No page layout configured for "{tableName}". Showing raw fields.</div>
         {Object.entries(record).filter(([k]) => !k.endsWith('_is_deleted') && k !== 'id').map(([k, v]) => (
@@ -1583,141 +1606,317 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     </div>
   )
 
+  // Tracks whether the main edit action bar is "busy" — used to gate taps on mobile sticky bar.
+  const editActionsDisabled = saving || deleting
+
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
-      <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} />
-
-      {/* Header */}
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted, marginBottom: 4 }}>{recordNumber}</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px' }}>{displayName}</h1>
-          {statusLabel && <Badge s={statusLabel} />}
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {editing ? (<>
-            <button onClick={handleSave} disabled={saving} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 5 }}>
-              <Icon path="M5 13l4 4L19 7" size={13} color="#fff" />{saving ? 'Saving…' : 'Save'}
-            </button>
-            <button onClick={cancelEditing} disabled={saving} style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
-          </>) : (<>
-            <button onClick={startEditing} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Edit</button>
-            <button
-              onClick={handleClone}
-              title="Create a new record seeded from this one"
-              style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2f7' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
-            >
-              <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={13} color={C.textSecondary} />
-              Clone
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              title="Move to recycle bin"
-              style={{
-                background: C.page, color: '#b03a2e',
-                border: `1px solid ${C.border}`, borderRadius: 6,
-                padding: '7px 12px', fontSize: 12.5, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 5,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.borderColor = '#fca5a5' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = C.page; e.currentTarget.style.borderColor = C.border }}
-            >
-              <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" size={13} color="#b03a2e" />
-              Delete
-            </button>
-          </>)}
-        </div>
-      </div>
-
-      {/* Editing / cloning indicator */}
-      {editing && cloneSource && (
-        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#1e40af', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={14} color="#1e40af" />
-          Cloning <strong>{cloneSource.sourceName}</strong> — modify the copy and Save to create a new record.
-        </div>
-      )}
-      {editing && !cloneSource && (
-        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#166534', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Icon path="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" size={14} color="#166534" />
-          Editing mode — modify fields and click Save.
-        </div>
-      )}
-
-      {/* Timestamps (view mode only) */}
-      {!editing && (
-        <div style={{ display: 'flex', gap: 20, marginBottom: 16, fontSize: 11, color: C.textMuted }}>
-          {(record.created_at || record.contact_created_at || record.property_created_at || record.opportunity_created_at || record.work_order_created_at || record.project_created_at) && (
-            <span>Created {new Date(record.created_at || record.contact_created_at || record.property_created_at || record.opportunity_created_at || record.work_order_created_at || record.project_created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-          )}
-        </div>
-      )}
-
-      {/* Tab bar — only shown when there's more than one tab. Styled to
-          match SectionTabs in UI.jsx: bottom border, 2px emerald underline
-          on the active tab. */}
-      {orderedTabs.length > 1 && (
+    <div style={{
+      flex: 1,
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
+      minHeight: 0,
+    }}>
+      {/* Sticky mobile header bar — back button + record number + icon actions.
+          Replaces desktop breadcrumbs and the large header card's action row. */}
+      {isMobile && (
         <div style={{
-          background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-          padding: '0 16px', marginBottom: 16, display: 'flex', alignItems: 'center',
+          flexShrink: 0, background: C.card, borderBottom: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', gap: 4,
+          padding: '6px 4px 6px 0', minHeight: 52,
         }}>
-          {orderedTabs.map(t => {
-            const on = t === activeTab
-            return (
+          <button
+            onClick={onBack}
+            aria-label="Back"
+            style={{
+              background: 'transparent', border: 'none', padding: 10,
+              borderRadius: 6, cursor: 'pointer', color: C.textPrimary,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              minWidth: 44, minHeight: 44, flexShrink: 0,
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0 }}>
+            {recordNumber && (
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {editing && cloneSource ? `Cloning ${recordNumber}` : editing ? `Editing ${recordNumber}` : recordNumber}
+              </div>
+            )}
+            <div style={{
+              fontSize: 15, fontWeight: 600, color: C.textPrimary, lineHeight: 1.2,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {displayName}
+            </div>
+          </div>
+
+          {/* Right-side actions — compact icon buttons. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, paddingRight: 6 }}>
+            {editing ? (
               <button
-                key={t}
-                onClick={() => setActiveTab(t)}
+                onClick={cancelEditing}
+                disabled={saving}
+                aria-label="Cancel editing"
+                title="Cancel"
                 style={{
-                  padding: '10px 16px', background: 'none', border: 'none',
-                  borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
-                  color: on ? C.textPrimary : C.textMuted, fontSize: 13,
-                  fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
-                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                  cursor: saving ? 'wait' : 'pointer', color: C.textSecondary,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  minWidth: 44, minHeight: 44,
                 }}
               >
-                {t}
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
               </button>
-            )
-          })}
+            ) : (
+              <>
+                <button
+                  onClick={startEditing}
+                  aria-label="Edit"
+                  title="Edit"
+                  style={{
+                    background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                    cursor: 'pointer', color: C.emerald,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    minWidth: 44, minHeight: 44,
+                  }}
+                >
+                  <Icon path="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" size={18} color="currentColor" />
+                </button>
+                <button
+                  onClick={handleClone}
+                  aria-label="Clone"
+                  title="Clone"
+                  style={{
+                    background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                    cursor: 'pointer', color: C.textSecondary,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    minWidth: 44, minHeight: 44,
+                  }}
+                >
+                  <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={18} color="currentColor" />
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  aria-label="Delete"
+                  title="Delete"
+                  style={{
+                    background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                    cursor: 'pointer', color: '#b03a2e',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    minWidth: 44, minHeight: 44,
+                  }}
+                >
+                  <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" size={18} color="currentColor" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Sections — field groups only. Filter by active tab. */}
-      {sections
-        .filter(sec => (sec.section_tab || 'Details') === activeTab)
-        .map(sec => (
-          <Section key={sec.id} section={sec} record={record} picklists={picklists} lookups={lookups}
-            editing={editing} draft={draft} onChange={handleFieldChange}
-            allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName} />
-        ))}
+      {/* Scrollable content region */}
+      <div style={{
+        flex: 1, overflow: 'auto', minHeight: 0,
+        padding: isMobile ? '10px 10px' : '20px 24px',
+        paddingBottom: isMobile && editing ? 'calc(80px + env(safe-area-inset-bottom))' : isMobile ? 'calc(24px + env(safe-area-inset-bottom))' : undefined,
+      }}>
+        {/* Desktop breadcrumbs (hidden on mobile — the sticky header handles back navigation) */}
+        {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} />}
 
-      {/* Related lists — standalone Salesforce-style cards, shown only on
-          the Related tab regardless of which section they came from. */}
-      {!isInsertMode && activeTab === 'Related' && sections
-        .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'related_list'))
-        .map(w => (
-          <RelatedListWidget
-            key={w.id}
-            widget={w}
-            picklists={picklists}
-            onNavigateToRecord={onNavigateToRecord}
-            parentRecordId={recordId}
-            onRefreshRelated={async () => {
-              try {
-                const rows = await fetchRelatedRecords(w.widget_config, recordId)
-                // Mutate the widget's cached data in place, then nudge
-                // React with a top-level data clone so the widget re-reads.
-                w._relatedData = rows
-                setData(prev => ({ ...prev }))
-              } catch (err) {
-                // Non-fatal — widget will keep showing its previous rows.
-                // eslint-disable-next-line no-console
-                console.error('Related list refresh failed', err)
-              }
+        {/* Desktop header card (mobile already shows this info in the sticky bar above — mobile shows a compact title + status chip instead) */}
+        {!isMobile ? (
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted, marginBottom: 4 }}>{recordNumber}</div>
+              <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px' }}>{displayName}</h1>
+              {statusLabel && <Badge s={statusLabel} />}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {editing ? (<>
+                <button onClick={handleSave} disabled={saving} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Icon path="M5 13l4 4L19 7" size={13} color="#fff" />{saving ? 'Saving…' : 'Save'}
+                </button>
+                <button onClick={cancelEditing} disabled={saving} style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
+              </>) : (<>
+                <button onClick={startEditing} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Edit</button>
+                <button
+                  onClick={handleClone}
+                  title="Create a new record seeded from this one"
+                  style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2f7' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
+                >
+                  <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={13} color={C.textSecondary} />
+                  Clone
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  title="Move to recycle bin"
+                  style={{
+                    background: C.page, color: '#b03a2e',
+                    border: `1px solid ${C.border}`, borderRadius: 6,
+                    padding: '7px 12px', fontSize: 12.5, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 5,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.borderColor = '#fca5a5' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = C.page; e.currentTarget.style.borderColor = C.border }}
+                >
+                  <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" size={13} color="#b03a2e" />
+                  Delete
+                </button>
+              </>)}
+            </div>
+          </div>
+        ) : (
+          /* Mobile status chip row — shown only when there's a status to display */
+          statusLabel && (
+            <div style={{ marginBottom: 10 }}>
+              <Badge s={statusLabel} />
+            </div>
+          )
+        )}
+
+        {/* Editing / cloning indicator — hidden on mobile (sticky bottom bar makes state obvious) */}
+        {!isMobile && editing && cloneSource && (
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#1e40af', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={14} color="#1e40af" />
+            Cloning <strong>{cloneSource.sourceName}</strong> — modify the copy and Save to create a new record.
+          </div>
+        )}
+        {!isMobile && editing && !cloneSource && (
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#166534', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon path="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" size={14} color="#166534" />
+            Editing mode — modify fields and click Save.
+          </div>
+        )}
+
+        {/* Timestamps (view mode only, hidden on mobile to reduce clutter) */}
+        {!editing && !isMobile && (
+          <div style={{ display: 'flex', gap: 20, marginBottom: 16, fontSize: 11, color: C.textMuted }}>
+            {(record.created_at || record.contact_created_at || record.property_created_at || record.opportunity_created_at || record.work_order_created_at || record.project_created_at) && (
+              <span>Created {new Date(record.created_at || record.contact_created_at || record.property_created_at || record.opportunity_created_at || record.work_order_created_at || record.project_created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            )}
+          </div>
+        )}
+
+        {/* Tab bar — only shown when there's more than one tab. Styled to
+            match SectionTabs in UI.jsx: bottom border, 2px emerald underline
+            on the active tab. On mobile, horizontally scrolls with snap. */}
+        {orderedTabs.length > 1 && (
+          <div
+            className={isMobile ? 'anura-hscroll' : ''}
+            style={{
+              background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+              padding: isMobile ? '0 4px' : '0 16px',
+              marginBottom: isMobile ? 10 : 16,
+              display: 'flex', alignItems: 'center',
+              ...(isMobile ? { scrollSnapType: 'x proximity' } : {}),
             }}
-          />
-        ))}
+          >
+            {orderedTabs.map(t => {
+              const on = t === activeTab
+              return (
+                <button
+                  key={t}
+                  onClick={() => setActiveTab(t)}
+                  style={{
+                    padding: isMobile ? '12px 14px' : '10px 16px', background: 'none', border: 'none',
+                    borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
+                    color: on ? C.textPrimary : C.textMuted, fontSize: isMobile ? 14 : 13,
+                    fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    whiteSpace: 'nowrap', flexShrink: 0,
+                    ...(isMobile ? { scrollSnapAlign: 'start' } : {}),
+                  }}
+                >
+                  {t}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Sections — field groups only. Filter by active tab. */}
+        {sections
+          .filter(sec => (sec.section_tab || 'Details') === activeTab)
+          .map(sec => (
+            <Section key={sec.id} section={sec} record={record} picklists={picklists} lookups={lookups}
+              editing={editing} draft={draft} onChange={handleFieldChange}
+              allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName} />
+          ))}
+
+        {/* Related lists — standalone Salesforce-style cards, shown only on
+            the Related tab regardless of which section they came from. */}
+        {!isInsertMode && activeTab === 'Related' && sections
+          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'related_list'))
+          .map(w => (
+            <RelatedListWidget
+              key={w.id}
+              widget={w}
+              picklists={picklists}
+              onNavigateToRecord={onNavigateToRecord}
+              parentRecordId={recordId}
+              onRefreshRelated={async () => {
+                try {
+                  const rows = await fetchRelatedRecords(w.widget_config, recordId)
+                  // Mutate the widget's cached data in place, then nudge
+                  // React with a top-level data clone so the widget re-reads.
+                  w._relatedData = rows
+                  setData(prev => ({ ...prev }))
+                } catch (err) {
+                  // Non-fatal — widget will keep showing its previous rows.
+                  // eslint-disable-next-line no-console
+                  console.error('Related list refresh failed', err)
+                }
+              }}
+            />
+          ))}
+      </div>
+
+      {/* Sticky bottom action bar — mobile edit mode only. Always visible,
+          safe-area-padded so it clears the iOS home indicator. */}
+      {isMobile && editing && (
+        <div style={{
+          flexShrink: 0, background: C.card, borderTop: `1px solid ${C.border}`,
+          padding: '10px 14px calc(10px + env(safe-area-inset-bottom)) 14px',
+          display: 'flex', alignItems: 'center', gap: 10,
+          boxShadow: '0 -4px 12px rgba(13, 26, 46, 0.05)',
+        }}>
+          <button
+            onClick={cancelEditing}
+            disabled={editActionsDisabled}
+            style={{
+              flex: 1, background: C.page, color: C.textSecondary,
+              border: `1px solid ${C.border}`, borderRadius: 8,
+              padding: '12px 16px', fontSize: 15, fontWeight: 500,
+              cursor: editActionsDisabled ? 'wait' : 'pointer', minHeight: 48,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={editActionsDisabled}
+            style={{
+              flex: 2, background: C.emerald, color: '#fff',
+              border: 'none', borderRadius: 8,
+              padding: '12px 16px', fontSize: 15, fontWeight: 600,
+              cursor: editActionsDisabled ? 'wait' : 'pointer',
+              opacity: editActionsDisabled ? 0.7 : 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              minHeight: 48,
+            }}
+          >
+            <Icon path="M5 13l4 4L19 7" size={16} color="#fff" />
+            {saving ? 'Saving…' : (cloneSource ? 'Save as New' : (isCreate ? 'Create' : 'Save'))}
+          </button>
+        </div>
+      )}
 
       {/* Delete confirmation */}
       {showDeleteConfirm && (
