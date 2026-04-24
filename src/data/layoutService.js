@@ -187,21 +187,226 @@ export async function fetchRelatedRecords(config, parentRecordId) {
   return data || []
 }
 
+// ---------------------------------------------------------------------------
+// Layout synthesizer — when an object has no configured page layout, we build
+// a minimal one on the fly from the column metadata so the record is still
+// editable. Users get a usable Edit/Save experience on every object out of
+// the box; configuring a real layout in Object Manager upgrades the display
+// (section grouping, custom labels, picklists, related lists) without
+// changing any code paths.
+// ---------------------------------------------------------------------------
+
+/**
+ * Describe an object's columns via the introspection RPC. Cached per-session.
+ * Returns the raw RPC rows (column_name, data_type, is_nullable, is_foreign_key,
+ * references_table, references_column, ordinal_position, etc.).
+ */
+const _columnDescCache = new Map()
+export async function fetchColumnDescriptions(tableName) {
+  if (_columnDescCache.has(tableName)) return _columnDescCache.get(tableName)
+  const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
+  if (error) throw error
+  const rows = data || []
+  _columnDescCache.set(tableName, rows)
+  return rows
+}
+
+/**
+ * Humanize a snake_case column name into a display label by stripping the
+ * object prefix and title-casing. Mirrors the same humanizer in RecordDetail
+ * — duplicated here so the synthesized layout's labels match what a hand-
+ * configured layout would produce.
+ */
+function _humanizeColumn(col) {
+  const prefixes = [
+    'contact_', 'property_owner_', 'property_management_company_', 'pmc_',
+    'property_', 'opportunity_', 'work_order_', 'work_plan_template_',
+    'work_step_template_', 'work_type_', 'project_payment_request_',
+    'project_', 'building_', 'unit_', 'assessment_', 'vehicle_',
+    'vehicle_activity_', 'va_', 'technician_', 'product_item_', 'product_',
+    'equipment_', 'incentive_application_', 'ia_', 'ppr_', 'wpt_', 'wst_',
+    'wpte_', 'user_', 'program_', 'partner_org_', 'role_', 'page_layout_',
+    'picklist_', 'portal_user_',
+  ]
+  let name = col
+  for (const p of prefixes) { if (name.startsWith(p)) { name = name.slice(p.length); break } }
+  if (name.endsWith('_id')) name = name.slice(0, -3)
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim() || col
+}
+
+/**
+ * Given a target table's column list, pick the best display column to show in
+ * a lookup. Priority: {prefix}_name → {prefix}_display_name → name/title →
+ * {prefix}_record_number → id. Returns the column name, or 'id' as a last
+ * resort so something (at least the truncated UUID) always renders.
+ */
+function _pickDisplayColumn(targetTable, targetColumns) {
+  const names = new Set(targetColumns.map(c => c.column_name))
+  // 1. Unprefixed canonical names (programs.name, etc.) beat prefixed variants.
+  for (const c of ['name', 'title', 'display_name', 'label']) if (names.has(c)) return c
+  // 2. Prefixed name columns (property_name, pmc_name). Shortest wins so the
+  //    canonical "property_name" beats variants like "property_aka_name".
+  const prefixNameCols = targetColumns
+    .filter(c => c.column_name.endsWith('_name')
+               && !c.column_name.endsWith('_first_name')
+               && !c.column_name.endsWith('_last_name'))
+    .map(c => c.column_name)
+    .sort((a, b) => a.length - b.length)
+  if (prefixNameCols.length) return prefixNameCols[0]
+  // 3. Record number as a last-resort identifier.
+  for (const c of targetColumns) if (c.column_name.endsWith('_record_number')) return c.column_name
+  return 'id'
+}
+
+/**
+ * Build a synthetic { layout, sections } for a table that has no configured
+ * page layout. The returned object has the same shape as fetchPageLayout
+ * so the downstream render/edit code doesn't need a separate path.
+ *
+ * Async because it introspects each FK target table to pick a readable
+ * display column for lookups. FK introspections are parallelized.
+ */
+export async function synthesizeLayoutFromColumns(tableName) {
+  const columns = await fetchColumnDescriptions(tableName)
+
+  const visible = columns.filter(c => {
+    const n = c.column_name
+    if (n === 'id') return false
+    if (n === 'is_deleted' || n.endsWith('_is_deleted')) return false
+    if (c.data_type === 'ARRAY' || c.data_type === 'jsonb' || c.data_type === 'json') return false
+    // created_by / updated_by are audit fields set by triggers or the save
+    // path — rendering them as editable lookups would be misleading. Owner
+    // fields stay (ownership transfer is a legitimate user action).
+    if (n === 'created_by' || n === 'updated_by') return false
+    if (n.endsWith('_created_by') || n.endsWith('_updated_by')) return false
+    return true
+  })
+
+  // Resolve display columns for every distinct FK target in parallel.
+  const fkTargets = [...new Set(
+    visible
+      .filter(c => c.is_foreign_key && c.data_type === 'uuid' && c.references_table)
+      .map(c => c.references_table)
+  )]
+  const displayColByTable = new Map()
+  await Promise.all(fkTargets.map(async (t) => {
+    try {
+      const targetCols = await fetchColumnDescriptions(t)
+      displayColByTable.set(t, _pickDisplayColumn(t, targetCols))
+    } catch {
+      displayColByTable.set(t, 'id')
+    }
+  }))
+
+  // Split business fields from audit/system fields so system fields sink to
+  // the bottom of the form. Matches the Salesforce convention.
+  const business = []
+  const system = []
+  for (const c of visible) {
+    const n = c.column_name
+    const isSystem =
+      n === 'owner_id' ||
+      n === 'created_by' || n === 'created_at' ||
+      n === 'updated_by' || n === 'updated_at' ||
+      n.endsWith('_owner') ||
+      n.endsWith('_owner_id') ||
+      n.endsWith('_created_by') || n.endsWith('_created_at') ||
+      n.endsWith('_updated_by') || n.endsWith('_updated_at')
+    if (isSystem) system.push(c); else business.push(c)
+  }
+  const byOrdinal = (a, b) => (a.ordinal_position || 0) - (b.ordinal_position || 0)
+  business.sort(byOrdinal)
+  system.sort(byOrdinal)
+
+  const toField = (c) => {
+    const field = { name: c.column_name, label: _humanizeColumn(c.column_name) }
+
+    if (c.is_foreign_key && c.data_type === 'uuid' && c.references_table) {
+      field.type = 'lookup'
+      field.lookup_table = c.references_table
+      field.lookup_field = displayColByTable.get(c.references_table) || 'id'
+    } else if (c.data_type === 'date') {
+      field.type = 'date'
+    } else if (c.data_type === 'timestamp with time zone' || c.data_type === 'timestamp without time zone') {
+      field.type = 'datetime'
+    } else if (c.data_type === 'boolean') {
+      field.type = 'boolean'
+    } else if (['integer', 'bigint', 'smallint', 'numeric', 'real', 'double precision'].includes(c.data_type)) {
+      field.type = 'number'
+    } else if (
+      /(_notes|_description|_content|_message|_body|_instructions|_guidance)$/.test(c.column_name) ||
+      ['notes', 'description', 'comments', 'instructions', 'guidance'].includes(c.column_name)
+    ) {
+      field.type = 'textarea'
+    } else {
+      field.type = 'text'
+    }
+    return field
+  }
+
+  const businessFields = business.map(toField)
+  const systemFields = system.map(toField)
+
+  const sections = [{
+    id: `__synth_section_${tableName}_details`,
+    section_name: 'Record',
+    section_tab: 'Details',
+    section_order: 1,
+    widgets: [{
+      id: `__synth_widget_${tableName}_details`,
+      widget_type: 'field_group',
+      widget_name: 'Details',
+      widget_order: 1,
+      widget_config: { title: 'Details', fields: businessFields },
+    }],
+  }]
+
+  if (systemFields.length) {
+    sections.push({
+      id: `__synth_section_${tableName}_system`,
+      section_name: 'System Information',
+      section_tab: 'Details',
+      section_order: 2,
+      widgets: [{
+        id: `__synth_widget_${tableName}_system`,
+        widget_type: 'field_group',
+        widget_name: 'System Information',
+        widget_order: 1,
+        widget_config: { title: 'System Information', fields: systemFields },
+      }],
+    })
+  }
+
+  return {
+    layout: {
+      id: `__synth_layout_${tableName}`,
+      page_layout_name: 'Auto-generated Layout',
+      page_layout_object: tableName,
+      synthesized: true,
+    },
+    sections,
+  }
+}
+
 /**
  * Master function: load everything needed to render a record detail page.
  * Returns { record, layout, sections, picklists, lookups }
+ *
+ * If the object has no configured page layout, a synthetic one is built from
+ * the column metadata so the record is still editable. The returned layout
+ * carries a `synthesized: true` flag so the UI can show a "configure layout"
+ * hint.
  */
 export async function loadRecordDetailData(tableName, recordId) {
   // Parallel fetch: record, layout, picklists
-  const [record, layoutData, picklists] = await Promise.all([
+  const [record, realLayout, picklists] = await Promise.all([
     fetchRecord(tableName, recordId),
     fetchPageLayout(tableName),
     loadPicklists(),
   ])
 
-  if (!layoutData) {
-    return { record, layout: null, sections: [], picklists, lookups: new Map() }
-  }
+  // Fall back to a synthesized layout when no real one is configured.
+  const layoutData = realLayout || await synthesizeLayoutFromColumns(tableName)
 
   // Collect lookup requests from all field_group widgets
   const lookupRequests = []
