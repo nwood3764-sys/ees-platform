@@ -115,11 +115,12 @@ export async function fetchPageLayout(objectName, recordTypeValue = null) {
     null
   if (!layout) return null
 
-  // Get sections ordered by section_order
+  // Get sections ordered by section_order — respect soft-delete
   const { data: sections, error: secErr } = await supabase
     .from('page_layout_sections')
     .select('*')
     .eq('page_layout_id', layout.id)
+    .eq('is_deleted', false)
     .order('section_order', { ascending: true })
 
   if (secErr) throw secErr

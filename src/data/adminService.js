@@ -429,6 +429,7 @@ export async function fetchPageLayoutStructure(layoutId) {
     .from('page_layout_sections')
     .select('id, section_label, section_order, section_columns, section_is_collapsible, section_is_collapsed_by_default, section_tab')
     .eq('page_layout_id', layoutId)
+    .eq('is_deleted', false)
     .order('section_order', { ascending: true })
   if (se) throw se
 
