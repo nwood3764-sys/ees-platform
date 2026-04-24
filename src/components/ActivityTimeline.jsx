@@ -160,19 +160,113 @@ function TimelineEntry({ entry, isLast }) {
 // ActivityTimeline — public component
 // -----------------------------------------------------------------------------
 
-export default function ActivityTimeline({ tableName, recordId }) {
-  const [entries, setEntries] = useState(null)   // null = loading
-  const [error, setError] = useState(null)
+// Filter chip configuration. Each chip has a predicate run over an entry —
+// the feed just filters the accumulated list when a chip is active. This
+// keeps filtering purely client-side so switching chips is instant and does
+// not trigger a refetch.
+const FILTERS = [
+  {
+    id: 'all',
+    label: 'All',
+    test: () => true,
+  },
+  {
+    id: 'changes',
+    label: 'Field changes',
+    test: (e) => e.kind === 'update' && e.changes.length > 0,
+  },
+  {
+    id: 'create_delete',
+    label: 'Created / Deleted',
+    test: (e) => e.kind === 'create' || e.kind === 'soft_delete'
+              || e.kind === 'restore' || e.kind === 'hard_delete',
+  },
+]
 
+function FilterChips({ active, onChange, disabled }) {
+  return (
+    <div style={{
+      display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16,
+    }}>
+      {FILTERS.map(f => {
+        const isActive = f.id === active
+        return (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => onChange(f.id)}
+            disabled={disabled}
+            style={{
+              background: isActive ? C.emerald : C.card,
+              color:      isActive ? '#fff'     : C.textSecondary,
+              border:     `1px solid ${isActive ? C.emerald : C.border}`,
+              borderRadius: 14,
+              padding: '4px 12px',
+              fontSize: 11,
+              fontWeight: isActive ? 600 : 500,
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              opacity: disabled ? 0.6 : 1,
+              transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+            }}
+          >
+            {f.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+export default function ActivityTimeline({ tableName, recordId }) {
+  const [entries, setEntries] = useState(null)    // null = initial loading
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState(null)
+  const [filterId, setFilterId] = useState('all')
+
+  // Initial load — also resets everything when the record changes.
   useEffect(() => {
     let cancelled = false
     setEntries(null)
+    setHasMore(false)
     setError(null)
+    setFilterId('all')
     fetchActivityTimeline(tableName, recordId)
-      .then(rows => { if (!cancelled) setEntries(rows) })
+      .then(({ entries, hasMore }) => {
+        if (cancelled) return
+        setEntries(entries)
+        setHasMore(hasMore)
+      })
       .catch(err => { if (!cancelled) setError(err.message || String(err)) })
     return () => { cancelled = true }
   }, [tableName, recordId])
+
+  // Load-more handler — paginate using the oldest timestamp currently loaded
+  // as the cursor. New entries are appended; hasMore is recomputed from the
+  // next page's caps. Captures tableName/recordId at click time so if the
+  // record switches mid-request, the stale response is dropped instead of
+  // leaking old-record entries into the new view.
+  const handleLoadMore = async () => {
+    if (loadingMore || !entries || entries.length === 0) return
+    const oldest = entries[entries.length - 1].timestamp
+    const reqTable = tableName
+    const reqId    = recordId
+    setLoadingMore(true)
+    try {
+      const { entries: next, hasMore: more } =
+        await fetchActivityTimeline(reqTable, reqId, { before: oldest })
+      // Drop the response if the viewer has moved to a different record.
+      if (reqTable !== tableName || reqId !== recordId) return
+      setEntries(prev => [...(prev || []), ...next])
+      setHasMore(more)
+    } catch (err) {
+      if (reqTable === tableName && reqId === recordId) {
+        setError(err.message || String(err))
+      }
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   if (error) {
     return (
@@ -210,23 +304,75 @@ export default function ActivityTimeline({ tableName, recordId }) {
     )
   }
 
+  const activeFilter = FILTERS.find(f => f.id === filterId) || FILTERS[0]
+  const visible = entries.filter(activeFilter.test)
+
   return (
     <div style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
       padding: 20,
     }}>
       <div style={{
-        fontSize: 11, fontWeight: 600, color: C.textMuted,
-        textTransform: 'uppercase', letterSpacing: 0.5,
-        marginBottom: 16,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 12, marginBottom: 12, flexWrap: 'wrap',
       }}>
-        Activity Timeline
+        <div style={{
+          fontSize: 11, fontWeight: 600, color: C.textMuted,
+          textTransform: 'uppercase', letterSpacing: 0.5,
+        }}>
+          Activity Timeline
+        </div>
+        <div style={{ fontSize: 11, color: C.textMuted }}>
+          {visible.length === entries.length
+            ? `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`
+            : `${visible.length} of ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`}
+        </div>
       </div>
-      <div>
-        {entries.map((e, i) => (
-          <TimelineEntry key={e.id} entry={e} isLast={i === entries.length - 1} />
-        ))}
-      </div>
+
+      <FilterChips active={filterId} onChange={setFilterId} disabled={loadingMore} />
+
+      {visible.length === 0 ? (
+        <div style={{
+          padding: '24px 8px', color: C.textMuted, fontSize: 12.5,
+          textAlign: 'center',
+        }}>
+          No entries match this filter.
+        </div>
+      ) : (
+        <div>
+          {visible.map((e, i) => (
+            <TimelineEntry key={e.id} entry={e} isLast={i === visible.length - 1} />
+          ))}
+        </div>
+      )}
+
+      {hasMore && (
+        <div style={{
+          marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}`,
+          textAlign: 'center',
+        }}>
+          <button
+            type="button"
+            onClick={handleLoadMore}
+            disabled={loadingMore}
+            style={{
+              background: C.card,
+              color: C.textSecondary,
+              border: `1px solid ${C.border}`,
+              borderRadius: 6,
+              padding: '7px 16px',
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: loadingMore ? 'wait' : 'pointer',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => { if (!loadingMore) e.currentTarget.style.background = '#f7f9fc' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = C.card }}
+          >
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

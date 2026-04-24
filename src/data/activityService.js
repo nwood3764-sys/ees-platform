@@ -127,7 +127,16 @@ function groupFieldHistoryByBatch(fhRows) {
 // -----------------------------------------------------------------------------
 // Public API: fetchActivityTimeline
 //
-// Returns a descending-chronological array of timeline entries. Each entry:
+// Returns a descending-chronological page of timeline entries plus a flag
+// indicating whether either source hit its row cap (so the UI can render a
+// "Load more" button). Pass the oldest timestamp from the current page back
+// as `before` to fetch the next page.
+//
+// Signature:
+//   fetchActivityTimeline(tableName, recordId, { before, auditLimit, fhLimit })
+//     → { entries, hasMore }
+//
+// Each entry shape:
 // {
 //   id:         string   (unique per entry, for React keys)
 //   kind:       'create' | 'update' | 'soft_delete' | 'restore' | 'hard_delete'
@@ -136,31 +145,49 @@ function groupFieldHistoryByBatch(fhRows) {
 //   actorName:  string | 'System'
 //   changes:    [{ field, fieldLabel, oldValue, newValue }]   (empty unless kind='update')
 // }
+//
+// A field_history batch straddling a page boundary will render as two adjacent
+// cards instead of one — acceptable for a log view, and avoids re-grouping
+// across accumulated pages.
 // -----------------------------------------------------------------------------
 
-export async function fetchActivityTimeline(tableName, recordId) {
-  if (!tableName || !recordId) return []
+const DEFAULT_AUDIT_LIMIT = 500
+const DEFAULT_FH_LIMIT    = 1000
 
-  // Fetch both sources in parallel.
-  const [auditRes, fhRes] = await Promise.all([
-    supabase
-      .from('audit_log')
-      .select('id, al_action, al_performed_by, al_performed_at, al_notes')
-      .eq('al_object', tableName)
-      .eq('al_record_id', recordId)
-      .order('al_performed_at', { ascending: false })
-      .limit(500),
-    supabase
-      .from('field_history')
-      .select('id, fh_field, fh_old_value, fh_new_value, fh_changed_by, fh_changed_at')
-      .eq('fh_object', tableName)
-      .eq('fh_record_id', recordId)
-      .order('fh_changed_at', { ascending: false })
-      .limit(1000),
-  ])
+export async function fetchActivityTimeline(tableName, recordId, opts = {}) {
+  if (!tableName || !recordId) return { entries: [], hasMore: false }
+
+  const auditLimit = opts.auditLimit ?? DEFAULT_AUDIT_LIMIT
+  const fhLimit    = opts.fhLimit    ?? DEFAULT_FH_LIMIT
+  const before     = opts.before || null
+
+  // Both queries are filtered identically on record + date cursor so each page
+  // represents a contiguous time window.
+  let auditQuery = supabase
+    .from('audit_log')
+    .select('id, al_action, al_performed_by, al_performed_at, al_notes')
+    .eq('al_object', tableName)
+    .eq('al_record_id', recordId)
+    .order('al_performed_at', { ascending: false })
+    .limit(auditLimit)
+  if (before) auditQuery = auditQuery.lt('al_performed_at', before)
+
+  let fhQuery = supabase
+    .from('field_history')
+    .select('id, fh_field, fh_old_value, fh_new_value, fh_changed_by, fh_changed_at')
+    .eq('fh_object', tableName)
+    .eq('fh_record_id', recordId)
+    .order('fh_changed_at', { ascending: false })
+    .limit(fhLimit)
+  if (before) fhQuery = fhQuery.lt('fh_changed_at', before)
+
+  const [auditRes, fhRes] = await Promise.all([auditQuery, fhQuery])
 
   const auditRows = auditRes.error ? [] : (auditRes.data || [])
   const fhRows    = fhRes.error    ? [] : (fhRes.data    || [])
+
+  // If either source came back with a full page, there's probably more to pull.
+  const hasMore = auditRows.length >= auditLimit || fhRows.length >= fhLimit
 
   // Resolve picklist labels and user names in bulk.
   const [picklistMap, userMap] = await Promise.all([
@@ -225,9 +252,9 @@ export async function fetchActivityTimeline(tableName, recordId) {
     }))
 
   // Merge and sort descending.
-  const all = [...updateEntries, ...standaloneEntries]
-  all.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-  return all
+  const entries = [...updateEntries, ...standaloneEntries]
+  entries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+  return { entries, hasMore }
 }
 
 function actionToKind(action) {
