@@ -495,22 +495,34 @@ export function interpolateNameTemplate(template, { order, sourceLabel } = {}) {
 
 /**
  * Reorder a junction table by rewriting each row's order field to its
- * 1-based index in `orderedIds`. Runs sequentially and bails on the first
- * error so callers can roll back their optimistic UI state.
+ * 1-based index in `orderedIds`.
+ *
+ * Routes through the `reorder_junction_rows` RPC so the whole reorder lands
+ * in one atomic Postgres transaction. A prior loop-update implementation
+ * broke on any table with a UNIQUE (parent_fk, order_field) constraint —
+ * mid-loop two rows briefly shared the same order and raised 23505. The RPC
+ * two-phases through negative staging indexes inside a single function so
+ * the unique constraint stays satisfied end-to-end.
+ *
+ * The server-side function whitelists which (table, field) pairs are
+ * callable. Adding a new reorderable junction requires extending that
+ * whitelist in a migration.
  */
 export async function reorderJunctionRows(config, orderedIds) {
   const { table, order_field: orderField } = config || {}
   if (!table || !orderField) {
     throw new Error('reorderJunctionRows: widget_config.order_field is required')
   }
-  for (let i = 0; i < orderedIds.length; i++) {
-    const { error } = await supabase
-      .from(table)
-      .update({ [orderField]: i + 1 })
-      .eq('id', orderedIds[i])
-    if (error) throw error
+  if (!orderedIds || orderedIds.length === 0) {
+    return { reordered: 0 }
   }
-  return { reordered: orderedIds.length }
+  const { data, error } = await supabase.rpc('reorder_junction_rows', {
+    p_table: table,
+    p_order_field: orderField,
+    p_ids: orderedIds,
+  })
+  if (error) throw error
+  return { reordered: typeof data === 'number' ? data : orderedIds.length }
 }
 
 /**
