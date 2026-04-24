@@ -7,6 +7,7 @@ import {
   fetchValidationsFor, fetchAutomationsFor,
   fetchPicklistsFor, fetchPageLayoutStructure,
 } from '../../data/adminService'
+import RecordTypesPane from './RecordTypesPane'
 
 // ---------------------------------------------------------------------------
 // Object Detail — Salesforce-style per-object configuration page.
@@ -36,6 +37,10 @@ export default function ObjectDetail({ obj, onBack }) {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [selectedLayoutId, setSelectedLayoutId] = useState(null)
+  // Live record-types count — updated by the RecordTypesPane when it
+  // creates/deactivates types, so the tab badge stays in sync without a
+  // full parent refetch. Null until the pane reports.
+  const [recordTypesCount, setRecordTypesCount] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -43,6 +48,7 @@ export default function ObjectDetail({ obj, onBack }) {
     setError(null)
     setSub('details')
     setSelectedLayoutId(null)
+    setRecordTypesCount(null)
 
     Promise.all([
       describeObject(obj.table),
@@ -68,11 +74,13 @@ export default function ObjectDetail({ obj, onBack }) {
     return () => { cancelled = true }
   }, [obj.table])
 
-  // Count badges for tabs — mirrors Salesforce's counts in object setup
+  // Count badges for tabs — mirrors Salesforce's counts in object setup.
+  // recordtypes prefers the live count reported by RecordTypesPane; falls
+  // back to the initial picklists fetch before the pane has loaded.
   const counts = {
     fields:      columns.length,
     layouts:     pageLayouts.length,
-    recordtypes: picklists.filter(p => p.field === 'record_type').length,
+    recordtypes: recordTypesCount ?? picklists.filter(p => p.field === 'record_type').length,
     validations: validations.length,
     automations: automations.length,
     related:     incomingFKs.length,
@@ -135,7 +143,7 @@ export default function ObjectDetail({ obj, onBack }) {
             {sub === 'details'     && <DetailsPane obj={obj} columns={columns} recordCount={recordCount} />}
             {sub === 'fields'      && <FieldsPane columns={columns} />}
             {sub === 'layouts'     && <LayoutsPane layouts={pageLayouts} selectedLayoutId={selectedLayoutId} onSelectLayout={setSelectedLayoutId} onBackToList={() => setSelectedLayoutId(null)} />}
-            {sub === 'recordtypes' && <RecordTypesPane picklists={picklists.filter(p => p.field === 'record_type')} />}
+            {sub === 'recordtypes' && <RecordTypesPane objectName={obj.table} objectLabel={obj.pluralLabel || obj.label} onCountChange={setRecordTypesCount} />}
             {sub === 'validations' && <ValidationsPane rules={validations} />}
             {sub === 'automations' && <AutomationsPane rules={automations} />}
             {sub === 'related'     && <RelatedPane fks={incomingFKs} />}
@@ -460,27 +468,6 @@ function WidgetCard({ widget, index }) {
           Preview not yet implemented for widget type '{widget.widget_type}'.
         </div>
       )}
-    </div>
-  )
-}
-
-function RecordTypesPane({ picklists }) {
-  if (picklists.length === 0) {
-    return <EmptyPane label="Record Types" hint="This object has no record_type picklist values. Add rows to picklist_values with picklist_field='record_type' to create record types." />
-  }
-  return (
-    <div style={{ padding: '16px 24px' }}>
-      <Card title={`Record Types (${picklists.length})`} noBody>
-        <SimpleTable
-          columns={[
-            { label: 'Value',   field: 'value',     width: '1.4fr', mono: true },
-            { label: 'Label',   field: 'label',     width: '2fr' },
-            { label: 'Order',   field: 'sortOrder', width: '80px',  center: true, mono: true },
-            { label: 'Status',  field: 'status',    width: '100px' },
-          ]}
-          rows={picklists}
-        />
-      </Card>
     </div>
   )
 }
