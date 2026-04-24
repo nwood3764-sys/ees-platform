@@ -21,7 +21,6 @@ import {
   addJunctionRow,
   removeJunctionRow,
   applyInsertDefaults,
-  synthesizeLayoutFromColumns,
 } from '../data/layoutService'
 
 // ---------------------------------------------------------------------------
@@ -1475,25 +1474,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     if (isCreate) {
       // Create mode: fetch layout + picklists only, no record
       Promise.all([fetchPageLayout(tableName), loadAllPicklists()])
-        .then(async ([layoutData, picklists]) => {
-          if (cancelled) return
-          // Fall back to a synthesized layout if none is configured — keeps
-          // the create form functional on objects that haven't been set up
-          // in Object Manager yet.
-          const effective = layoutData || await synthesizeLayoutFromColumns(tableName)
+        .then(([layoutData, picklists]) => {
           if (cancelled) return
           setData({
             record: {},
-            layout: effective?.layout || null,
-            sections: effective?.sections || [],
+            layout: layoutData?.layout || null,
+            sections: layoutData?.sections || [],
             picklists,
             lookups: new Map(),
           })
           setDraft(prefill ? { ...prefill } : {})
           setEditing(true)
           // Pre-load picklist + lookup options
-          if (effective?.sections) {
-            loadAllEditOpts(effective.sections)
+          if (layoutData?.sections) {
+            loadAllEditOpts(layoutData.sections)
           }
         })
         .catch(err => { if (!cancelled) setError(err) })
@@ -1757,8 +1751,38 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const statusLabel = statusRaw ? (picklists.byId.get(statusRaw) || statusRaw) : null
 
   if (!layout) return (
-    <div style={{ padding: 24, color: C.textMuted, fontSize: 13 }}>
-      Unable to load record — no layout available for "{tableName}".
+    <div style={{
+      flex: 1,
+      overflow: 'auto',
+      padding: isMobile ? '12px' : '20px 24px',
+      paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom))' : '20px',
+    }}>
+      {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} />}
+      {isMobile && (
+        <button
+          onClick={onBack}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'transparent', border: 'none', padding: '6px 0',
+            color: '#1a5a8a', fontSize: 13, cursor: 'pointer', marginBottom: 10,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+          Back
+        </button>
+      )}
+      <h1 style={{ fontSize: isMobile ? 18 : 20, fontWeight: 700, color: C.textPrimary, margin: '0 0 16px' }}>{displayName}</h1>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>No page layout configured for "{tableName}". Showing raw fields.</div>
+        {Object.entries(record).filter(([k]) => !k.endsWith('_is_deleted') && k !== 'id').map(([k, v]) => (
+          <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${C.border}`, gap: 16 }}>
+            <span style={{ color: C.textMuted, fontSize: 12, flexShrink: 0 }}>{k}</span>
+            <span style={{ color: C.textPrimary, fontSize: 12, textAlign: 'right', wordBreak: 'break-all' }}>{v != null ? String(v) : '—'}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 
@@ -1942,16 +1966,6 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#1e40af', display: 'flex', alignItems: 'center', gap: 8 }}>
             <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={14} color="#1e40af" />
             Cloning <strong>{cloneSource.sourceName}</strong> — modify the copy and Save to create a new record.
-          </div>
-        )}
-        {!isMobile && layout?.synthesized && (
-          <div style={{
-            background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
-            padding: '10px 16px', marginBottom: 16, fontSize: 12, color: '#854d0e',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <Icon path="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" size={14} color="#854d0e" />
-            Auto-generated layout — no page layout is configured for "{tableName}". Configure one in Admin → Object Manager for custom sections, labels, and related lists.
           </div>
         )}
         {!isMobile && editing && !cloneSource && (
