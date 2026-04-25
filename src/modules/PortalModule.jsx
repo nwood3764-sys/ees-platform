@@ -195,7 +195,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 export default function PortalModule() {
   const [sec, setSec] = useState('home')
   const [selectedRecord, setSelectedRecord] = useState(null)
-  const SEC_TABLE = {'users': 'portal_users', 'partners': 'partner_organizations'}
+  const SEC_TABLE = {'users': 'portal_users', 'partners': 'accounts'}
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
   const [users,    setUsers]    = useState([])
@@ -250,7 +250,7 @@ export default function PortalModule() {
         ) : (<>
         {sec==='home'     && <PortalHome setSec={setSec} users={users} partners={partners} />}
         {sec==='users'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={users}    columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => setSelectedRecord({ table: 'portal_users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='partners' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => setSelectedRecord({ table: 'partner_organizations', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='partners' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={partners} columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => setSelectedRecord({ table: 'accounts', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

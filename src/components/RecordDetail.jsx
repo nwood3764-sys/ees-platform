@@ -58,11 +58,13 @@ const monoInput = { ...inputBase, fontFamily: 'JetBrains Mono, monospace' }
 // ---------------------------------------------------------------------------
 
 const TABLE_META = {
-  contacts:                  { module: 'Outreach',       label: 'Contacts',            parents: ['property_owner_id', 'property_management_company_id'] },
-  properties:                { module: 'Outreach',       label: 'Properties',           parents: ['property_owner_id'] },
+  accounts:                  { module: 'Outreach',       label: 'Accounts',             parents: ['parent_account_id'] },
+  contacts:                  { module: 'Outreach',       label: 'Contacts',             parents: ['contact_account_id'] },
+  account_contact_relations: { module: 'Outreach',       label: 'Account Contact Roles', parents: ['account_id', 'contact_id'] },
+  properties:                { module: 'Outreach',       label: 'Properties',           parents: ['property_account_id'] },
   buildings:                 { module: 'Outreach',       label: 'Buildings',            parents: ['property_id'] },
   units:                     { module: 'Outreach',       label: 'Units',                parents: ['building_id', 'property_id'] },
-  opportunities:             { module: 'Outreach',       label: 'Opportunities',        parents: ['property_id'] },
+  opportunities:             { module: 'Outreach',       label: 'Opportunities',        parents: ['property_id', 'opportunity_account_id'] },
   property_programs:         { module: 'Outreach',       label: 'Enrollment',           parents: ['property_id'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          parents: ['project_id', 'property_id', 'building_id'] },
   projects:                  { module: 'Field',          label: 'Projects',             parents: ['property_id'] },
@@ -79,9 +81,10 @@ const TABLE_META = {
   vehicle_activities:        { module: 'Fleet',          label: 'Activities',           parents: ['vehicle_id'] },
   equipment_containers:      { module: 'Fleet',          label: 'Vehicle Kits',         parents: ['issued_to_vehicle_id'] },
   users:                     { module: 'People',         label: 'Users',                parents: [] },
-  technicians:               { module: 'People',         label: 'Technicians',          parents: [] },
-  certifications:            { module: 'People',         label: 'Certifications',       parents: ['technician_id'] },
-  time_sheets:               { module: 'People',         label: 'Time Sheets',          parents: ['technician_id'] },
+  skills:                    { module: 'People',         label: 'Skills',               parents: [] },
+  contact_skills:            { module: 'People',         label: 'Contact Skills',       parents: ['contact_id', 'skill_id'] },
+  work_type_skill_requirements: { module: 'Admin',       label: 'Skill Requirements',   parents: ['work_type_id', 'skill_id'] },
+  time_sheets:               { module: 'People',         label: 'Time Sheets',          parents: ['contact_id'] },
   programs:                  { module: 'Admin',          label: 'Programs',             parents: [] },
   work_types:                { module: 'Admin',          label: 'Work Types',           parents: [] },
   email_templates:           { module: 'Admin',          label: 'Email Templates',      parents: [] },
@@ -90,8 +93,7 @@ const TABLE_META = {
   validation_rules:          { module: 'Admin',          label: 'Validation Rules',     parents: [] },
   roles:                     { module: 'Admin',          label: 'Roles',                parents: [] },
   picklist_values:           { module: 'Admin',          label: 'Picklist Values',      parents: [] },
-  portal_users:              { module: 'Portal',         label: 'Portal Users',         parents: ['property_owner_id', 'partner_org_id'] },
-  partner_organizations:     { module: 'Portal',         label: 'Partners',             parents: [] },
+  portal_users:              { module: 'Portal',         label: 'Portal Users',         parents: ['portal_user_account_id'] },
 }
 
 function Breadcrumbs({ tableName, record, lookups, onBack }) {
@@ -132,8 +134,9 @@ function Breadcrumbs({ tableName, record, lookups, onBack }) {
 // Known object prefixes so humanize() can strip them for readable error messages
 const FIELD_PREFIXES = [
   'contact_', 'property_', 'opportunity_', 'work_order_', 'project_',
-  'building_', 'unit_', 'assessment_', 'vehicle_', 'va_', 'technician_',
+  'building_', 'unit_', 'assessment_', 'vehicle_', 'va_', 'account_',
   'product_item_', 'product_', 'equipment_', 'ia_', 'ppr_', 'user_',
+  'skill_', 'cs_', 'acr_', 'wtsr_', 'mr_',
 ]
 
 function humanizeFieldName(col) {
@@ -1738,18 +1741,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     : (record.contact_first_name
         ? `${record.contact_first_name} ${record.contact_last_name || ''}`.trim()
         : record.property_name || record.opportunity_name || record.work_order_name || record.project_name
-          || record.building_name || record.unit_name || record.vehicle_name || record.technician_name
+          || record.building_name || record.unit_name || record.vehicle_name
+          || record.account_name || record.skill_name
           || record.product_name || record.equipment_name || record.name || 'Record')
 
   const recordNumber = record.contact_record_number || record.property_record_number
     || record.opportunity_record_number || record.work_order_record_number || record.project_record_number
-    || record.building_record_number || record.vehicle_record_number || record.technician_record_number
+    || record.building_record_number || record.vehicle_record_number
+    || record.account_record_number || record.skill_record_number
     || record.product_record_number || record.equipment_record_number
     || record.id?.slice(0, 8).toUpperCase() || ''
 
   const statusRaw = record.contact_status || record.property_status || record.opportunity_status
     || record.work_order_status || record.project_status || record.building_status
-    || record.vehicle_status || record.technician_status
+    || record.vehicle_status || record.account_status
   const statusLabel = statusRaw ? (picklists.byId.get(statusRaw) || statusRaw) : null
 
   if (!layout) return (

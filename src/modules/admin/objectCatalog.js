@@ -10,16 +10,15 @@
 
 export const OBJECT_CATALOG = [
   // ─── CRM & OUTREACH ────────────────────────────────────────────────────
-  { table: 'property_owners',               label: 'Property Owner',              pluralLabel: 'Property Owners',              module: 'CRM & Outreach',        description: 'Top-level account representing a real estate owner.' },
-  { table: 'property_management_companies', label: 'Property Management Company', pluralLabel: 'Property Management Companies',module: 'CRM & Outreach',        description: 'PMC that operates properties on behalf of owners.' },
+  { table: 'accounts',                      label: 'Account',                     pluralLabel: 'Accounts',                     module: 'CRM & Outreach',        description: 'Organization or household — record types: Property Owner, PMC, Partner Org, Customer Household, EES-WI Internal, etc.' },
+  { table: 'account_contact_relations',     label: 'Account Contact Role',        pluralLabel: 'Account Contact Roles',        module: 'CRM & Outreach',        description: 'Junction — secondary contact relationships beyond a contact\'s primary account.' },
   { table: 'properties',                    label: 'Property',                    pluralLabel: 'Properties',                   module: 'CRM & Outreach',        description: 'Physical site with one or more buildings.' },
   { table: 'buildings',                     label: 'Building',                    pluralLabel: 'Buildings',                    module: 'CRM & Outreach',        description: 'Structure within a property — contains units.' },
   { table: 'units',                         label: 'Unit',                        pluralLabel: 'Units',                        module: 'CRM & Outreach',        description: 'Individual dwelling within a building.' },
-  { table: 'contacts',                      label: 'Contact',                     pluralLabel: 'Contacts',                     module: 'CRM & Outreach',        description: 'Person associated with an organization.' },
+  { table: 'contacts',                      label: 'Contact',                     pluralLabel: 'Contacts',                     module: 'CRM & Outreach',        description: 'Person associated with an account — internal staff, property owner contact, partner tech, tenant, etc.' },
   { table: 'opportunities',                 label: 'Opportunity',                 pluralLabel: 'Opportunities',                module: 'CRM & Outreach',        description: 'Pipeline record — potential project at a property.' },
   { table: 'opportunity_contact_roles',     label: 'Opportunity Contact Role',    pluralLabel: 'Opportunity Contact Roles',    module: 'CRM & Outreach',        description: 'Stakeholder role on an opportunity.' },
   { table: 'opportunity_line_items',        label: 'Opportunity Line Item',       pluralLabel: 'Opportunity Line Items',       module: 'CRM & Outreach',        description: 'Scope-of-work line on an opportunity.' },
-  { table: 'partner_organizations',         label: 'Partner Organization',        pluralLabel: 'Partner Organizations',        module: 'CRM & Outreach',        description: 'Subcontractor or external service provider.' },
 
   // ─── QUALIFICATION ─────────────────────────────────────────────────────
   { table: 'assessments',                   label: 'Assessment',                  pluralLabel: 'Assessments',                  module: 'Qualification',         description: 'Energy audit / ASHRAE Level 2 assessment.' },
@@ -74,13 +73,14 @@ export const OBJECT_CATALOG = [
   { table: 'asset_assignments',             label: 'Asset Assignment',            pluralLabel: 'Asset Assignments',            module: 'Fleet',                 description: 'Who currently has this vehicle / equipment / phone.' },
 
   // ─── PEOPLE ────────────────────────────────────────────────────────────
-  { table: 'users',                         label: 'User',                        pluralLabel: 'Users',                        module: 'People',                description: 'Anura user account.' },
-  { table: 'technicians',                   label: 'Technician',                  pluralLabel: 'Technicians',                  module: 'People',                description: 'Field-crew employee record.' },
-  { table: 'certifications',                label: 'Certification',               pluralLabel: 'Certifications',               module: 'People',                description: 'BPI, EPA, NATE, OSHA credentials per technician.' },
+  { table: 'users',                         label: 'User',                        pluralLabel: 'Users',                        module: 'People',                description: 'Anura login account — auth + role + permissions. Linked to a contact via contacts.contact_user_id.' },
+  { table: 'skills',                        label: 'Skill',                       pluralLabel: 'Skills',                       module: 'People',                description: 'Master catalog of skills (Salesforce Field Service: Skill). E.g., BPI Building Analyst, EPA 608, OSHA 30.' },
+  { table: 'contact_skills',                label: 'Contact Skill',               pluralLabel: 'Contact Skills',               module: 'People',                description: 'Junction (FSL ServiceResourceSkill) — a contact has a skill, with effective dates that handle cert expiry.' },
+  { table: 'work_type_skill_requirements',  label: 'Work Type Skill Requirement', pluralLabel: 'Work Type Skill Requirements', module: 'People',                description: 'Junction (FSL SkillRequirement) — skills required to perform a Work Type. Drives the assignment matching engine.' },
   { table: 'time_sheets',                   label: 'Time Sheet',                  pluralLabel: 'Time Sheets',                  module: 'People',                description: 'Weekly time sheet header.' },
   { table: 'time_sheet_entries',            label: 'Time Sheet Entry',            pluralLabel: 'Time Sheet Entries',           module: 'People',                description: 'Individual clock-in / clock-out entry.' },
   { table: 'occurrences',                   label: 'Occurrence',                  pluralLabel: 'Occurrences',                  module: 'People',                description: 'HR incident, safety event, disciplinary record.' },
-  { table: 'occurrence_participants',       label: 'Occurrence Participant',      pluralLabel: 'Occurrence Participants',      module: 'People',                description: 'User involved in an occurrence.' },
+  { table: 'occurrence_participants',       label: 'Occurrence Participant',      pluralLabel: 'Occurrence Participants',      module: 'People',                description: 'Contact involved in an occurrence.' },
   { table: 'crew_phones',                   label: 'Crew Phone',                  pluralLabel: 'Crew Phones',                  module: 'People',                description: 'Company-issued phone tracked by named owner.' },
 
   // ─── CONFIGURATION / BUILDERS ─────────────────────────────────────────

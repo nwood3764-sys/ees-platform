@@ -355,7 +355,7 @@ export async function insertRecord(tableName, fields) {
 export function applyInsertDefaults(tableName, fields, userId) {
   const prefixes = [
     'contact', 'property', 'opportunity', 'work_order', 'project', 'building',
-    'unit', 'assessment', 'vehicle', 'technician', 'product', 'equipment',
+    'unit', 'assessment', 'vehicle', 'product', 'equipment', 'account', 'skill',
   ]
   for (const p of prefixes) {
     if (tableName.startsWith(p) || tableName === p + 's' || tableName === p + 'ies') {
@@ -365,6 +365,10 @@ export function applyInsertDefaults(tableName, fields, userId) {
       // Auto-derive contact_name when only first/last were typed
       if (p === 'contact' && !fields.contact_name && fields.contact_first_name) {
         fields.contact_name = `${fields.contact_first_name} ${fields.contact_last_name || ''}`.trim()
+      }
+      // Auto-derive account_name from organization_name when present
+      if (p === 'account' && !fields.account_name && fields.account_organization_name) {
+        fields.account_name = fields.account_organization_name
       }
       return fields
     }
@@ -391,10 +395,18 @@ export function applyInsertDefaults(tableName, fields, userId) {
     if (!fields.wpt_record_number) fields.wpt_record_number = 'NEW'
     if (!fields.wpt_owner)         fields.wpt_owner         = userId
     if (!fields.wpt_created_by)    fields.wpt_created_by    = userId
-  } else if (tableName === 'partner_organizations') {
-    if (!fields.owner_id)    fields.owner_id    = userId
-    if (!fields.created_by)  fields.created_by  = userId
-    if (!fields.record_type) fields.record_type = 'Partner Organization'
+  } else if (tableName === 'account_contact_relations') {
+    if (!fields.acr_record_number) fields.acr_record_number = 'NEW'
+    if (!fields.acr_owner)         fields.acr_owner         = userId
+    if (!fields.acr_created_by)    fields.acr_created_by    = userId
+  } else if (tableName === 'contact_skills') {
+    if (!fields.cs_record_number) fields.cs_record_number = 'NEW'
+    if (!fields.cs_owner)         fields.cs_owner         = userId
+    if (!fields.cs_created_by)    fields.cs_created_by    = userId
+  } else if (tableName === 'work_type_skill_requirements') {
+    if (!fields.wtsr_record_number) fields.wtsr_record_number = 'NEW'
+    if (!fields.wtsr_owner)         fields.wtsr_owner         = userId
+    if (!fields.wtsr_created_by)    fields.wtsr_created_by    = userId
   }
   return fields
 }

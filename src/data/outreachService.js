@@ -58,8 +58,8 @@ export async function fetchProperties() {
       property_total_buildings,
       property_status,
       property_subsidy_type,
-      property_owner_id,
-      property_owners:property_owner_id ( property_owner_name )
+      property_account_id,
+      accounts:property_account_id ( account_name )
     `)
     .eq('property_is_deleted', false)
     .order('property_name', { ascending: true })
@@ -70,7 +70,7 @@ export async function fetchProperties() {
     id: r.property_record_number || r.id,
     _id: r.id,
     name: r.property_name || '',
-    owner: r.property_owners?.property_owner_name || '—',
+    owner: r.accounts?.account_name || '—',
     address: [r.property_street, r.property_city].filter(Boolean).join(', '),
     units: r.property_total_units ?? 0,
     buildings: r.property_total_buildings ?? 0,
@@ -162,22 +162,39 @@ export async function fetchUnits() {
   }))
 }
 
+// Property owners moved into the unified `accounts` table with
+// record_type = 'property_owner'. The function name is kept for backward
+// compatibility with anything that imports it; the implementation now
+// queries accounts and filters by record type.
 export async function fetchPropertyOwners() {
+  // Resolve the picklist row id for accounts.record_type = 'property_owner'
+  // so we can filter accounts to only that record type.
+  const { data: rt, error: rtErr } = await supabase
+    .from('picklist_values')
+    .select('id')
+    .eq('picklist_object', 'accounts')
+    .eq('picklist_field', 'record_type')
+    .eq('picklist_value', 'property_owner')
+    .maybeSingle()
+  if (rtErr) throw rtErr
+  if (!rt?.id) return []
+
   const { data, error } = await supabase
-    .from('property_owners')
-    .select('id, property_owner_record_number, property_owner_name, property_owner_billing_state, property_owner_phone, property_owner_email')
-    .eq('property_owner_is_deleted', false)
-    .order('property_owner_name', { ascending: true })
+    .from('accounts')
+    .select('id, account_record_number, account_name, billing_state, account_phone, account_email')
+    .eq('account_record_type', rt.id)
+    .eq('account_is_deleted', false)
+    .order('account_name', { ascending: true })
 
   if (error) throw error
 
   return (data || []).map(r => ({
-    id: r.property_owner_record_number || r.id,
+    id: r.account_record_number || r.id,
     _id: r.id,
-    name: r.property_owner_name,
-    state: r.property_owner_billing_state || '',
-    phone: r.property_owner_phone || '',
-    email: r.property_owner_email || '',
+    name: r.account_name,
+    state: r.billing_state || '',
+    phone: r.account_phone || '',
+    email: r.account_email || '',
   }))
 }
 
@@ -244,10 +261,8 @@ export async function fetchContacts() {
       contact_status,
       contact_phone,
       contact_email,
-      property_owner_id,
-      property_management_company_id,
-      property_owners:property_owner_id ( property_owner_name, property_owner_billing_state ),
-      property_management_companies:property_management_company_id ( pmc_name, pmc_billing_state )
+      contact_account_id,
+      accounts:contact_account_id ( account_name, billing_state )
     `)
     .eq('contact_is_deleted', false)
     .order('contact_name', { ascending: true })
@@ -259,16 +274,12 @@ export async function fetchContacts() {
     _id: r.id,
     name: r.contact_name,
     title: r.contact_title || '',
-    org: r.property_owners?.property_owner_name
-      || r.property_management_companies?.pmc_name
-      || '—',
+    org: r.accounts?.account_name || '—',
     role: picklists.byId.get(r.contact_role) || '—',
     email: r.contact_email || '',
     phone: r.contact_phone || '',
     status: picklists.byId.get(r.contact_status) || '—',
-    state: r.property_owners?.property_owner_billing_state
-      || r.property_management_companies?.pmc_billing_state
-      || '',
+    state: r.accounts?.billing_state || '',
   }))
 }
 

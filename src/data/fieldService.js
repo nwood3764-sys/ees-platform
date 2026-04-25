@@ -184,13 +184,13 @@ export async function fetchSchedule(date = new Date()) {
       .select(`
         id,
         service_appointment_id,
-        technician_id,
-        technicians:technician_id (
+        contact_id,
+        contacts:contact_id (
           id,
-          technician_first_name,
-          technician_last_name,
-          technician_title,
-          technician_record_type
+          contact_first_name,
+          contact_last_name,
+          contact_title,
+          contact_record_type
         )
       `)
       .in('service_appointment_id', saIds)
@@ -226,27 +226,27 @@ export async function fetchSchedule(date = new Date()) {
   for (const sa of saRows || []) {
     const members = assignmentsBySa.get(sa.id) || []
     const leadAssn = members.find(a => {
-      const title = a.technicians?.technician_title || ''
+      const title = a.contacts?.contact_title || ''
       return /Team Lead/i.test(title)
     })
 
     let key, crewLabel, leadName, leadFirst, leadLast, crewMembers
     if (leadAssn) {
-      const t = leadAssn.technicians
-      leadFirst = t.technician_first_name
-      leadLast  = t.technician_last_name
+      const t = leadAssn.contacts
+      leadFirst = t.contact_first_name
+      leadLast  = t.contact_last_name
       leadName  = `${leadFirst} ${leadLast}`.trim()
-      crewLabel = crewNameFromTitle(t.technician_title) || `${leadLast} Crew`
+      crewLabel = crewNameFromTitle(t.contact_title) || `${leadLast} Crew`
       key = `lead:${t.id}`
       crewMembers = members
-        .map(a => `${a.technicians?.technician_first_name || ''} ${a.technicians?.technician_last_name || ''}`.trim())
+        .map(a => `${a.contacts?.contact_first_name || ''} ${a.contacts?.contact_last_name || ''}`.trim())
         .filter(Boolean)
     } else {
       key = UNASSIGNED
       crewLabel = 'Unassigned'
       leadName = ''
       crewMembers = members
-        .map(a => `${a.technicians?.technician_first_name || ''} ${a.technicians?.technician_last_name || ''}`.trim())
+        .map(a => `${a.contacts?.contact_first_name || ''} ${a.contacts?.contact_last_name || ''}`.trim())
         .filter(Boolean)
     }
 

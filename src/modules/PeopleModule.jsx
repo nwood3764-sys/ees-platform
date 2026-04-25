@@ -234,7 +234,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 export default function PeopleModule() {
   const [sec, setSec] = useState('home')
   const [selectedRecord, setSelectedRecord] = useState(null)
-  const SEC_TABLE = {'users': 'users', 'technicians': 'technicians', 'certifications': 'certifications', 'timesheets': 'time_sheets'}
+  const SEC_TABLE = {'users': 'users', 'technicians': 'contacts', 'certifications': 'contact_skills', 'timesheets': 'time_sheets'}
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
   const [users,          setUsers]          = useState([])
@@ -300,8 +300,8 @@ export default function PeopleModule() {
         ) : (<>
         {sec==='home'           && <PeopleHome setSec={setSec} users={users} technicians={technicians} certifications={certifications} timesheets={timesheets} />}
         {sec==='users'          && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={users}          columns={USER_COLS} systemViews={USER_VIEWS} defaultViewId="UV-01"  newLabel="User"          onNew={() => setSelectedRecord({ table: 'users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='technicians'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={technicians}    columns={TECH_COLS} systemViews={TECH_VIEWS} defaultViewId="TV-01"  newLabel="Technician"    onNew={() => setSelectedRecord({ table: 'technicians', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
-        {sec==='certifications' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={certifications} columns={CERT_COLS} systemViews={CERT_VIEWS} defaultViewId="CV-01"  newLabel="Certification" onNew={() => setSelectedRecord({ table: 'certifications', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='technicians'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={technicians}    columns={TECH_COLS} systemViews={TECH_VIEWS} defaultViewId="TV-01"  newLabel="Technician"    onNew={() => setSelectedRecord({ table: 'contacts',       id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='certifications' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={certifications} columns={CERT_COLS} systemViews={CERT_VIEWS} defaultViewId="CV-01"  newLabel="Certification" onNew={() => setSelectedRecord({ table: 'contact_skills', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='timesheets'     && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={timesheets}     columns={TS_COLS}   systemViews={TS_VIEWS}   defaultViewId="TSV-01" newLabel="Time Sheet"    onNew={() => setSelectedRecord({ table: 'time_sheets', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
