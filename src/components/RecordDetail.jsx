@@ -7,6 +7,7 @@ import { useIsMobile } from '../lib/useMediaQuery'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import { supabase } from '../lib/supabase'
+import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
 import {
   loadRecordDetailData,
   saveRecord,
@@ -522,7 +523,254 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
 }
 
 // ---------------------------------------------------------------------------
-// RelatedListWidget — Salesforce-style card
+// SectionConfigEditorWidget — schema-driven editor for project_report_template
+// _sections.prts_config. The schema is keyed on prts_section_type's picklist
+// _value (cover_page, work_order_section, etc.). Section types not in the
+// schema map fall back to a JSON textarea.
+//
+// Reads section type from the record (or draft, when editing). Renders a form
+// keyed off SECTION_CONFIG_SCHEMAS, writing back to draft.prts_config via
+// onChange. When the user changes the section_type, the previously-saved
+// config keys are preserved if they still appear in the new schema; new keys
+// are seeded with defaults.
+// ---------------------------------------------------------------------------
+
+function SectionConfigEditorWidget({ widget, record, picklists, editing, draft, onChange }) {
+  // Section type is a uuid → resolve to its picklist_value (e.g. "cover_page")
+  const sectionTypeId = (editing ? draft.prts_section_type : record.prts_section_type) || null
+  const sectionTypeValue = sectionTypeId ? picklists.valueById?.get(sectionTypeId) : null
+  const schema = sectionTypeValue ? getSectionConfigSchema(sectionTypeValue) : null
+  const sectionTypeLabel = sectionTypeId ? picklists.byId?.get(sectionTypeId) : null
+
+  // Resolve current config (object). If draft.prts_config is undefined in
+  // edit mode, fall back to the record value to preserve unsaved keys.
+  const config = editing
+    ? (draft.prts_config !== undefined ? draft.prts_config : (record.prts_config || {}))
+    : (record.prts_config || {})
+
+  const setKey = (key, value) => {
+    if (!editing) return
+    const next = { ...(config && typeof config === 'object' ? config : {}) }
+    if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
+      delete next[key]
+    } else {
+      next[key] = value
+    }
+    onChange('prts_config', next)
+  }
+
+  // No section type chosen yet — prompt to pick one in Section Information first
+  if (!sectionTypeValue) {
+    return (
+      <div style={{ padding: 18, fontSize: 12.5, color: C.textMuted }}>
+        Pick a Section Type above to configure its options.
+      </div>
+    )
+  }
+
+  // Unknown / unsupported section type — fall back to JSON editor in edit mode
+  if (!schema) {
+    return (
+      <div style={{ padding: 18 }}>
+        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>
+          No schema defined for section type <strong style={{ color: C.textPrimary }}>{sectionTypeLabel || sectionTypeValue}</strong>. Edit configuration as raw JSON below.
+        </div>
+        {editing ? (
+          <JsonField value={config} onChange={(parsed) => onChange('prts_config', parsed || {})} />
+        ) : (
+          <pre style={{ margin: 0, padding: 12, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: C.textPrimary, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {JSON.stringify(config, null, 2)}
+          </pre>
+        )}
+      </div>
+    )
+  }
+
+  // Group fields by their `group` attribute, preserving first-appearance order.
+  const groups = []
+  const seenGroups = new Map()
+  for (const f of schema) {
+    const g = f.group || ''
+    if (!seenGroups.has(g)) {
+      seenGroups.set(g, groups.length)
+      groups.push({ name: g, fields: [] })
+    }
+    groups[seenGroups.get(g)].fields.push(f)
+  }
+
+  const headerNote = (
+    <div style={{ padding: '10px 16px', background: '#f7f9fc', borderBottom: `1px solid ${C.border}`, fontSize: 11.5, color: C.textMuted, display: 'flex', alignItems: 'center', gap: 6 }}>
+      <Icon path="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" size={13} color={C.textMuted} />
+      <span>
+        Configuring <strong style={{ color: C.textPrimary }}>{sectionTypeLabel || sectionTypeValue}</strong> section.
+        {editing ? ' Changes are saved when you click Save on the record.' : ' Switch to edit mode to change values.'}
+      </span>
+    </div>
+  )
+
+  return (
+    <div>
+      {headerNote}
+      {groups.map((g, gi) => (
+        <div key={g.name || `g${gi}`}>
+          {g.name ? (
+            <div style={{ padding: '12px 16px 6px', fontSize: 10.5, fontWeight: 600, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em', borderTop: gi > 0 ? `1px solid ${C.border}` : 'none' }}>
+              {g.name}
+            </div>
+          ) : null}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 0 }}>
+            {g.fields.map(f => (
+              <ConfigFieldRow
+                key={f.key}
+                field={f}
+                value={f.type === 'info' ? null : (config[f.key] !== undefined ? config[f.key] : f.default)}
+                editing={editing}
+                onChange={(v) => setKey(f.key, v)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ConfigFieldRow — one row inside SectionConfigEditorWidget.
+// ---------------------------------------------------------------------------
+
+function ConfigFieldRow({ field, value, editing, onChange }) {
+  // The 'info' type is a non-editable note used for section types with no
+  // configurable keys (page_break, custom_text → body lives elsewhere).
+  if (field.type === 'info') {
+    return (
+      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, gridColumn: '1 / -1', fontSize: 12, color: C.textSecondary, lineHeight: 1.5 }}>
+        {field.description}
+      </div>
+    )
+  }
+
+  const renderEdit = () => {
+    switch (field.type) {
+      case 'boolean': {
+        const isYes = value === true
+        const isNo = value === false
+        const segBtn = (active) => ({
+          flex: 1, padding: '6px 12px', fontSize: 12, fontWeight: 500,
+          cursor: 'pointer', border: `1px solid ${active ? C.emerald : C.border}`,
+          background: active ? C.emerald : C.card, color: active ? '#fff' : C.textPrimary,
+          outline: 'none',
+        })
+        return (
+          <div style={{ display: 'flex', gap: 0, maxWidth: 180 }}>
+            <button type="button" onClick={() => onChange(true)}
+              style={{ ...segBtn(isYes), borderRadius: '5px 0 0 5px' }}>Yes</button>
+            <button type="button" onClick={() => onChange(false)}
+              style={{ ...segBtn(isNo), borderRadius: '0 5px 5px 0', borderLeftWidth: 0 }}>No</button>
+          </div>
+        )
+      }
+      case 'number':
+        return <input type="number"
+          min={field.min} max={field.max} step="1"
+          style={{ ...inputBase, fontFamily: 'JetBrains Mono, monospace', maxWidth: 120 }}
+          value={value ?? ''}
+          onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} />
+      case 'text':
+        return <input type="text" style={inputBase}
+          value={value ?? ''} onChange={e => onChange(e.target.value)} />
+      case 'textarea':
+        return <textarea style={{ ...inputBase, minHeight: 56, resize: 'vertical' }}
+          value={value ?? ''} onChange={e => onChange(e.target.value)} />
+      case 'select':
+        return (
+          <select style={{ ...inputBase, cursor: 'pointer' }}
+            value={value ?? ''} onChange={e => onChange(e.target.value || null)}>
+            <option value="">— Select —</option>
+            {(field.options || []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )
+      case 'multiselect': {
+        const selected = new Set(Array.isArray(value) ? value : [])
+        return (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {(field.options || []).map(o => {
+              const on = selected.has(o.value)
+              return (
+                <button key={o.value} type="button"
+                  onClick={() => {
+                    const next = new Set(selected)
+                    if (on) next.delete(o.value); else next.add(o.value)
+                    onChange(Array.from(next))
+                  }}
+                  style={{
+                    background: on ? C.emerald : C.card,
+                    color: on ? '#fff' : C.textSecondary,
+                    border: `1px solid ${on ? C.emerald : C.border}`,
+                    borderRadius: 14, padding: '4px 10px',
+                    fontSize: 11.5, cursor: 'pointer',
+                    fontWeight: on ? 500 : 400,
+                  }}>
+                  {o.label}
+                </button>
+              )
+            })}
+          </div>
+        )
+      }
+      default:
+        return <input type="text" style={inputBase}
+          value={value ?? ''} onChange={e => onChange(e.target.value)} />
+    }
+  }
+
+  const renderView = () => {
+    if (value === null || value === undefined || value === '') {
+      return <span style={{ fontSize: 13, color: C.textMuted }}>—</span>
+    }
+    switch (field.type) {
+      case 'boolean': return <span style={{ fontSize: 13, color: C.textPrimary }}>{value ? 'Yes' : 'No'}</span>
+      case 'multiselect': {
+        const labelByValue = new Map((field.options || []).map(o => [o.value, o.label]))
+        const labels = (Array.isArray(value) ? value : []).map(v => labelByValue.get(v) || v)
+        if (labels.length === 0) return <span style={{ fontSize: 13, color: C.textMuted }}>—</span>
+        return (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {labels.map((l, i) => (
+              <span key={i} style={{ fontSize: 11.5, padding: '2px 8px', background: '#eef2f7', borderRadius: 10, color: C.textSecondary }}>{l}</span>
+            ))}
+          </div>
+        )
+      }
+      case 'select': {
+        const opt = (field.options || []).find(o => o.value === value)
+        return <span style={{ fontSize: 13, color: C.textPrimary }}>{opt?.label || String(value)}</span>
+      }
+      case 'number':
+        return <span style={{ fontSize: 13, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{Number(value).toLocaleString()}</span>
+      default:
+        return <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>{String(value)}</span>
+    }
+  }
+
+  return (
+    <div style={{
+      padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
+      display: 'flex', flexDirection: 'column', gap: 4,
+      background: editing ? '#fafffe' : 'transparent',
+    }}>
+      <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+        {field.label}
+      </span>
+      {editing ? renderEdit() : renderView()}
+      {field.description && (
+        <span style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.45, marginTop: 2 }}>
+          {field.description}
+        </span>
+      )}
+    </div>
+  )
+}
 //   • Collapsible header with icon, title, record count badge
 //   • "New" button to add a child record (passes parent FK as prefill)
 //   • First N rows shown as a clickable table
@@ -1559,10 +1807,12 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName }) {
   const isMobile = useIsMobile()
   const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
-  // Only render field_group widgets inside a section. Related lists are
-  // rendered as their own standalone cards outside sections.
-  const fieldGroupWidgets = (section.widgets || []).filter(w => w.widget_type === 'field_group')
-  if (fieldGroupWidgets.length === 0) return null
+  // Render any widgets that live inside a section card. Today: field_group
+  // and section_config_editor. Related lists, file galleries, and the
+  // activity timeline render as their own standalone cards outside sections.
+  const inSectionTypes = new Set(['field_group', 'section_config_editor'])
+  const sectionWidgets = (section.widgets || []).filter(w => inSectionTypes.has(w.widget_type))
+  if (sectionWidgets.length === 0) return null
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
       <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
@@ -1570,10 +1820,17 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
         <span style={{ fontSize: isMobile ? 14 : 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
         {section.section_is_collapsible && <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={14} color={C.textMuted} />}
       </div>
-      {!collapsed && fieldGroupWidgets.map(w => (
-        <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
-          editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} />
-      ))}
+      {!collapsed && sectionWidgets.map(w => {
+        if (w.widget_type === 'field_group') {
+          return <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
+            editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} />
+        }
+        if (w.widget_type === 'section_config_editor') {
+          return <SectionConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
+            editing={editing} draft={draft} onChange={onChange} />
+        }
+        return null
+      })}
     </div>
   )
 }
@@ -1608,6 +1865,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
   const [reloadTick, setReloadTick] = useState(0)
+  // Deep-clone state — only used on project_report_templates. Uses the
+  // clone_project_report_template RPC to copy the PRT plus all PRTS rows
+  // atomically; lands the user on the new clone via onNavigateToRecord.
+  const [cloningTemplate, setCloningTemplate] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -1736,6 +1997,32 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     if (data.sections) loadAllEditOpts(data.sections)
     setEditing(true)
   }, [data, recordId, loadAllEditOpts])
+
+  // Deep clone for project_report_templates — atomic copy of the PRT plus all
+  // its sections via the clone_project_report_template RPC. Resets the clone
+  // to Draft + version 1 + not-default-for-unmapped, then navigates to it.
+  const handleCloneTemplate = useCallback(async () => {
+    if (cloningTemplate) return
+    if (tableName !== 'project_report_templates') return
+    setCloningTemplate(true)
+    try {
+      const sourceName = data?.record?.prt_name || 'Template'
+      const { data: newId, error } = await supabase.rpc('clone_project_report_template', {
+        p_source_prt_id: recordId,
+        p_new_name: `${sourceName} (Clone)`,
+      })
+      if (error) throw error
+      if (!newId) throw new Error('Clone returned no id')
+      toast.success(`Cloned ${sourceName}`)
+      if (onNavigateToRecord) {
+        onNavigateToRecord({ table: 'project_report_templates', id: newId })
+      }
+    } catch (err) {
+      toast.error(`Clone failed — ${err.message || String(err)}`)
+    } finally {
+      setCloningTemplate(false)
+    }
+  }, [cloningTemplate, tableName, recordId, data, onNavigateToRecord, toast])
 
   const handleSave = async () => {
     setSaving(true)
@@ -2017,6 +2304,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={18} color="currentColor" />
                   </button>
                 )}
+                {tableName === 'project_report_templates' && (
+                  <button
+                    onClick={handleCloneTemplate}
+                    disabled={cloningTemplate}
+                    aria-label="Clone Template"
+                    title="Clone Template (with sections)"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: cloningTemplate ? 'wait' : 'pointer', color: C.emerald,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44, opacity: cloningTemplate ? 0.6 : 1,
+                    }}
+                  >
+                    <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={18} color="currentColor" />
+                  </button>
+                )}
                 <button
                   onClick={startEditing}
                   aria-label="Edit"
@@ -2096,6 +2399,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   >
                     <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={13} color={C.emerald} />
                     Generate Report
+                  </button>
+                )}
+                {tableName === 'project_report_templates' && (
+                  <button
+                    onClick={handleCloneTemplate}
+                    disabled={cloningTemplate}
+                    title="Duplicate this template AND all its sections, reset to Draft / version 1"
+                    style={{ background: cloningTemplate ? '#86efac' : C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: cloningTemplate ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: cloningTemplate ? 0.85 : 1 }}
+                    onMouseEnter={(e) => { if (!cloningTemplate) e.currentTarget.style.background = '#ecfdf5' }}
+                    onMouseLeave={(e) => { if (!cloningTemplate) e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={13} color={C.emerald} />
+                    {cloningTemplate ? 'Cloning…' : 'Clone Template'}
                   </button>
                 )}
                 <button onClick={startEditing} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Edit</button>

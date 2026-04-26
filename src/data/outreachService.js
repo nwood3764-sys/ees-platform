@@ -20,15 +20,17 @@ export function loadPicklists() {
       .order('picklist_sort_order', { ascending: true })
     if (error) throw error
     const byId = new Map()
+    const valueById = new Map()   // id → picklist_value (machine name like "cover_page")
     const byField = new Map()
     for (const row of data || []) {
       if (row.picklist_is_active === false) continue
       byId.set(row.id, row.picklist_label || row.picklist_value)
+      valueById.set(row.id, row.picklist_value)
       const k = `${row.picklist_object}.${row.picklist_field}`
       if (!byField.has(k)) byField.set(k, [])
       byField.get(k).push(row.picklist_label || row.picklist_value)
     }
-    return { byId, byField }
+    return { byId, valueById, byField }
   })()
   return _picklistPromise
 }
