@@ -1114,19 +1114,32 @@ Deno.serve(async (req: Request) => {
       global: { headers: { Authorization: authHeader } },
     })
 
-    // Identify caller (for documents.uploaded_by + report metadata)
+    // Identify caller (for documents.uploaded_by + report metadata).
+    //
+    // public.users.id is NOT the same as auth.users.id — they're linked via
+    // public.users.auth_user_id. Every record-owner FK in the schema points
+    // at public.users.id, so anywhere we need to "act as the user" we need
+    // the public id, not the auth id. The frontend's getCurrentUserId()
+    // does this same translation; matching the convention here.
     const { data: userData } = await client.auth.getUser()
-    const userId = userData?.user?.id ?? null
+    const authUserId = userData?.user?.id ?? null
     const userEmail = userData?.user?.email ?? null
+    let publicUserId: string | null = null  // public.users.id, resolved below
     let generatedByName = userEmail || "Unknown"
-    if (userId) {
-      const r = await client.from("users").select("user_first_name,user_last_name,user_email").eq("id", userId).maybeSingle()
+    if (authUserId) {
+      const r = await client.from("users")
+        .select("id,user_first_name,user_last_name,user_email")
+        .eq("auth_user_id", authUserId).maybeSingle()
       if (!r.error && r.data) {
+        publicUserId = r.data.id
         const full = [r.data.user_first_name, r.data.user_last_name].filter(Boolean).join(" ").trim()
         if (full) generatedByName = full
         else if (r.data.user_email) generatedByName = r.data.user_email
       }
     }
+    // Used downstream as documents.uploaded_by — must be a public.users.id,
+    // not an auth.users.id (the FK points at public.users).
+    const userId = publicUserId
 
     const picklistById = await loadAllPicklists(client)
 
@@ -1180,23 +1193,16 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // User-name map: project_owner + step_owner + photo.taken_by
+    // User-name map: project_owner + step_owner + photo.taken_by.
+    // All owner-FK columns reference public.users.id, so this lookup resolves
+    // correctly in both real Generate and Preview modes (the synthetic graph
+    // stamps the caller's resolved publicUserId, not auth.uid()).
     const userIds: string[] = []
     if (project.project_owner) userIds.push(project.project_owner)
     for (const arr of workStepsByWO.values()) for (const s of arr) if (s.work_step_owner) userIds.push(s.work_step_owner)
     for (const arr of photosByStep.values()) for (const p of arr) if (p.taken_by) userIds.push(p.taken_by)
     for (const arr of photosByWO.values())   for (const p of arr) if (p.taken_by) userIds.push(p.taken_by)
     const userNamesById = await loadUserNames(client, userIds)
-
-    // Belt-and-suspenders for preview mode: the synthetic graph stamps the
-    // caller's auth uid on project_owner / work_step_owner. If the DB
-    // lookup in loadUserNames couldn't resolve that uid (e.g. when
-    // auth.users.id and public.users.id are out of sync, which they
-    // currently are for some accounts), fall back to the generatedByName
-    // we already computed up top so Owner doesn't render as "—".
-    if (previewMode && userId && !userNamesById.has(userId)) {
-      userNamesById.set(userId, generatedByName)
-    }
 
     // Build PDF
     const pdf = await PDFDocument.create()
