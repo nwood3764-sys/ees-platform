@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
+import ProjectReportModal from './ProjectReportModal'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
 import ActivityTimeline from './ActivityTimeline'
@@ -1471,6 +1472,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // draft pre-populated from the source.
   const [cloneSource, setCloneSource] = useState(null)
   const isInsertMode = isCreate || cloneSource !== null
+  // Project report generator (only used when tableName === 'projects'). The
+  // tick is bumped after a successful generation so the related-records area
+  // (Documents widget) re-fetches and the new PDF appears immediately.
+  const [showReportModal, setShowReportModal] = useState(false)
+  const [reloadTick, setReloadTick] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -1508,7 +1514,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         .finally(() => { if (!cancelled) setLoading(false) })
     }
     return () => { cancelled = true }
-  }, [tableName, recordId, isCreate])
+  }, [tableName, recordId, isCreate, reloadTick])
 
   // When data first loads (or when the loaded record changes tables),
   // pick the first tab as active. Only initializes — does not override
@@ -1865,6 +1871,21 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               </button>
             ) : (
               <>
+                {tableName === 'projects' && (
+                  <button
+                    onClick={() => setShowReportModal(true)}
+                    aria-label="Generate Report"
+                    title="Generate Project Report"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: 'pointer', color: C.emerald,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44,
+                    }}
+                  >
+                    <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={18} color="currentColor" />
+                  </button>
+                )}
                 <button
                   onClick={startEditing}
                   aria-label="Edit"
@@ -1934,6 +1955,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 </button>
                 <button onClick={cancelEditing} disabled={saving} style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
               </>) : (<>
+                {tableName === 'projects' && (
+                  <button
+                    onClick={() => setShowReportModal(true)}
+                    title="Generate a PDF project report saved to this project's Documents"
+                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#ecfdf5' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={13} color={C.emerald} />
+                    Generate Report
+                  </button>
+                )}
                 <button onClick={startEditing} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Edit</button>
                 <button
                   onClick={handleClone}
@@ -2139,6 +2172,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           busy={deleting}
           onConfirm={handleDelete}
           onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+
+      {/* Project report generator (only mounted on projects, opt-in via toolbar button) */}
+      {showReportModal && tableName === 'projects' && (
+        <ProjectReportModal
+          projectId={recordId}
+          project={record}
+          onClose={() => setShowReportModal(false)}
+          onComplete={() => { setReloadTick(t => t + 1) }}
         />
       )}
     </div>

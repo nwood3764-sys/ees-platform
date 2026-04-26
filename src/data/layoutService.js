@@ -444,6 +444,19 @@ export function applyInsertDefaults(tableName, fields, userId) {
     if (!fields.wtsr_record_number) fields.wtsr_record_number = 'NEW'
     if (!fields.wtsr_owner)         fields.wtsr_owner         = userId
     if (!fields.wtsr_created_by)    fields.wtsr_created_by    = userId
+  } else if (tableName === 'project_report_templates') {
+    // prt_record_number populated by trg_prt_rn (BEFORE INSERT, unconditional).
+    if (!fields.prt_record_number) fields.prt_record_number = 'NEW'
+    if (!fields.prt_owner)         fields.prt_owner         = userId
+    if (!fields.prt_created_by)    fields.prt_created_by    = userId
+  } else if (tableName === 'project_report_template_record_type_assignments') {
+    // PRTRTA has no owner column — assignments belong to their parent PRT.
+    if (!fields.prtrta_record_number) fields.prtrta_record_number = 'NEW'
+    if (!fields.prtrta_created_by)    fields.prtrta_created_by    = userId
+  } else if (tableName === 'project_report_template_sections') {
+    // PRTS has no owner column — sections belong to their parent PRT.
+    if (!fields.prts_record_number) fields.prts_record_number = 'NEW'
+    if (!fields.prts_created_by)    fields.prts_created_by    = userId
   }
   return fields
 }
