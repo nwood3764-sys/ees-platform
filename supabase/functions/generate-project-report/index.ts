@@ -939,6 +939,19 @@ Deno.serve(async (req: Request) => {
 
     const picklistById = await loadAllPicklists(client)
 
+    // Status gate — only Active templates can be used for generation. Drafts
+    // are unpublished and may have unresolved issues; Archived templates are
+    // retired and shouldn't be used. Surface a clear, user-friendly message
+    // so the UI can show it in the modal.
+    const prtStatusValue = prt.prt_status ? picklistById.get(prt.prt_status)?.picklist_value : null
+    if (prtStatusValue !== "Active") {
+      const label = prt.prt_record_number || prt.prt_name || "template"
+      const statusLabel = prtStatusValue || "unknown"
+      return jsonResponse({
+        error: `${label} is in ${statusLabel} status. Only Active (published) templates can generate reports — publish the template first, or pick a different one.`,
+      }, 400)
+    }
+
     // User-name map: project_owner + step_owner + photo.taken_by
     const userIds: string[] = []
     if (project.project_owner) userIds.push(project.project_owner)

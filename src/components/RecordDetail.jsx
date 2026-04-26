@@ -1869,6 +1869,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // clone_project_report_template RPC to copy the PRT plus all PRTS rows
   // atomically; lands the user on the new clone via onNavigateToRecord.
   const [cloningTemplate, setCloningTemplate] = useState(false)
+  // Publish/unpublish/archive/restore in flight — disables status buttons
+  // and shows a 'wait' cursor while the RPC is round-tripping.
+  const [statusChanging, setStatusChanging] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -2023,6 +2026,56 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       setCloningTemplate(false)
     }
   }, [cloningTemplate, tableName, recordId, data, onNavigateToRecord, toast])
+
+  // ─── Publish workflow (project_report_templates only) ─────────────────────
+  // Resolve the current template status FROM the loaded record. Picklist map
+  // is populated by the page-layout loader at fetchPageLayout time. We read
+  // the picklist's machine value (not label) so logic is locale-stable.
+  const prtStatusValue = (() => {
+    if (tableName !== 'project_report_templates') return null
+    const sid = data?.record?.prt_status
+    if (!sid) return null
+    return data?.picklists?.valueById?.get(sid) || null
+  })()
+  // Locked = read-only across header fields, body templates, sections related
+  // list, and the Edit button. Drafts are unlocked. Archived templates are
+  // locked the same way Active ones are; users go through Restore to edit.
+  const prtIsLocked = prtStatusValue === 'Active' || prtStatusValue === 'Archived'
+
+  // Generic helper — DRY across publish/unpublish/archive/restore. Wraps the
+  // RPC call with toast feedback and a reload tick so the page picks up the
+  // new status, version, and prt_published_at without a manual refresh.
+  const runStatusRpc = useCallback(async (rpcName, successMsg) => {
+    if (statusChanging) return
+    if (tableName !== 'project_report_templates') return
+    setStatusChanging(true)
+    try {
+      const { data: result, error } = await supabase.rpc(rpcName, { p_prt_id: recordId })
+      if (error) throw error
+      const newStatus = result?.new_status
+      const newVersion = result?.new_version
+      const firstPublish = result?.first_publish
+      let msg = successMsg
+      if (newStatus === 'Active' && newVersion != null) {
+        msg = firstPublish
+          ? `Published v${newVersion}`
+          : `Re-published as v${newVersion}`
+      }
+      toast.success(msg)
+      // Bump reloadTick to force a fresh fetchPageLayout — pulls the new
+      // status, version, and any other fields the RPC mutated.
+      setReloadTick(t => t + 1)
+    } catch (err) {
+      toast.error(err.message || String(err))
+    } finally {
+      setStatusChanging(false)
+    }
+  }, [statusChanging, tableName, recordId, toast])
+
+  const handlePublish   = useCallback(() => runStatusRpc('publish_project_report_template',   'Published'),                   [runStatusRpc])
+  const handleUnpublish = useCallback(() => runStatusRpc('unpublish_project_report_template', 'Unpublished — back to Draft'), [runStatusRpc])
+  const handleArchive   = useCallback(() => runStatusRpc('archive_project_report_template',   'Archived'),                    [runStatusRpc])
+  const handleRestore   = useCallback(() => runStatusRpc('restore_project_report_template',   'Restored to Draft'),           [runStatusRpc])
 
   const handleSave = async () => {
     setSaving(true)
@@ -2320,19 +2373,69 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={18} color="currentColor" />
                   </button>
                 )}
-                <button
-                  onClick={startEditing}
-                  aria-label="Edit"
-                  title="Edit"
-                  style={{
-                    background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                    cursor: 'pointer', color: C.emerald,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    minWidth: 44, minHeight: 44,
-                  }}
-                >
-                  <Icon path="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" size={18} color="currentColor" />
-                </button>
+                {tableName === 'project_report_templates' && prtStatusValue === 'Draft' && (
+                  <button
+                    onClick={handlePublish}
+                    disabled={statusChanging}
+                    aria-label="Publish"
+                    title="Publish to Active"
+                    style={{
+                      background: statusChanging ? '#a7f3d0' : C.emerald, border: 'none', padding: 10, borderRadius: 6,
+                      cursor: statusChanging ? 'wait' : 'pointer', color: '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44,
+                    }}
+                  >
+                    <Icon path="M5 13l4 4L19 7" size={18} color="#fff" />
+                  </button>
+                )}
+                {tableName === 'project_report_templates' && prtStatusValue === 'Active' && (
+                  <button
+                    onClick={handleUnpublish}
+                    disabled={statusChanging}
+                    aria-label="Unpublish"
+                    title="Unpublish to Draft"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: statusChanging ? 'wait' : 'pointer', color: '#b45309',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44, opacity: statusChanging ? 0.6 : 1,
+                    }}
+                  >
+                    <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={18} color="currentColor" />
+                  </button>
+                )}
+                {tableName === 'project_report_templates' && prtStatusValue === 'Archived' && (
+                  <button
+                    onClick={handleRestore}
+                    disabled={statusChanging}
+                    aria-label="Restore"
+                    title="Restore to Draft"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: statusChanging ? 'wait' : 'pointer', color: C.emerald,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44, opacity: statusChanging ? 0.6 : 1,
+                    }}
+                  >
+                    <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={18} color="currentColor" />
+                  </button>
+                )}
+                {!prtIsLocked && (
+                  <button
+                    onClick={startEditing}
+                    aria-label="Edit"
+                    title="Edit"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: 'pointer', color: C.emerald,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44,
+                    }}
+                  >
+                    <Icon path="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" size={18} color="currentColor" />
+                  </button>
+                )}
                 <button
                   onClick={handleClone}
                   aria-label="Clone"
@@ -2414,7 +2517,53 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     {cloningTemplate ? 'Cloning…' : 'Clone Template'}
                   </button>
                 )}
-                <button onClick={startEditing} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Edit</button>
+                {tableName === 'project_report_templates' && prtStatusValue === 'Draft' && (
+                  <button
+                    onClick={handlePublish}
+                    disabled={statusChanging}
+                    title="Publish this template — locks editing and makes it generatable"
+                    style={{ background: statusChanging ? '#a7f3d0' : C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: statusChanging ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                  >
+                    <Icon path="M5 13l4 4L19 7" size={13} color="#fff" />
+                    {statusChanging ? 'Publishing…' : 'Publish'}
+                  </button>
+                )}
+                {tableName === 'project_report_templates' && prtStatusValue === 'Active' && (
+                  <>
+                    <button
+                      onClick={handleUnpublish}
+                      disabled={statusChanging}
+                      title="Unpublish back to Draft so the template can be edited"
+                      style={{ background: C.page, color: '#b45309', border: '1px solid #fcd34d', borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: statusChanging ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: statusChanging ? 0.7 : 1 }}
+                    >
+                      <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={13} color="#b45309" />
+                      {statusChanging ? '…' : 'Unpublish'}
+                    </button>
+                    <button
+                      onClick={handleArchive}
+                      disabled={statusChanging}
+                      title="Archive this template — retired but kept for history"
+                      style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, cursor: statusChanging ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: statusChanging ? 0.7 : 1 }}
+                    >
+                      <Icon path="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" size={13} color={C.textSecondary} />
+                      Archive
+                    </button>
+                  </>
+                )}
+                {tableName === 'project_report_templates' && prtStatusValue === 'Archived' && (
+                  <button
+                    onClick={handleRestore}
+                    disabled={statusChanging}
+                    title="Restore this template to Draft so it can be edited"
+                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: statusChanging ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: statusChanging ? 0.7 : 1 }}
+                  >
+                    <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={13} color={C.emerald} />
+                    {statusChanging ? '…' : 'Restore to Draft'}
+                  </button>
+                )}
+                {!prtIsLocked && (
+                  <button onClick={startEditing} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Edit</button>
+                )}
                 <button
                   onClick={handleClone}
                   title="Create a new record seeded from this one"
@@ -2512,6 +2661,39 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           </div>
         )}
 
+        {/* Locked-state banner — shown above sections for Active/Archived
+            project_report_templates. Communicates why fields read-only and
+            points the user to the right path forward. */}
+        {prtIsLocked && (
+          <div style={{
+            background: prtStatusValue === 'Archived' ? '#f3f4f6' : '#fffbeb',
+            border: `1px solid ${prtStatusValue === 'Archived' ? '#d1d5db' : '#fde68a'}`,
+            borderLeftWidth: 4,
+            borderLeftColor: prtStatusValue === 'Archived' ? '#6b7280' : '#d97706',
+            borderRadius: 8, padding: '12px 16px', marginBottom: 14,
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+          }}>
+            <Icon
+              path={prtStatusValue === 'Archived'
+                ? 'M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4'
+                : 'M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3l-6.93-12a2 2 0 00-3.48 0L3.34 16a2 2 0 001.73 3z'}
+              size={16}
+              color={prtStatusValue === 'Archived' ? '#4b5563' : '#b45309'}
+            />
+            <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5, color: prtStatusValue === 'Archived' ? '#374151' : '#78350f' }}>
+              {prtStatusValue === 'Active' ? (
+                <>
+                  <strong>This template is published and locked.</strong> Header fields, sections, body templates, and configuration are read-only while a template is Active. To make changes: <em>Unpublish</em> back to Draft, or use <em>Clone Template</em> to start a new draft from this one. Re-publishing increments the version.
+                </>
+              ) : (
+                <>
+                  <strong>This template is archived.</strong> It cannot be used to generate reports and its contents are read-only. Use <em>Restore to Draft</em> to bring it back into editable state, or use <em>Clone Template</em> to start fresh.
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Sections — field groups only. Filter by active tab. */}
         {sections
           .filter(sec => (sec.section_tab || 'Details') === activeTab)
@@ -2525,28 +2707,41 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             the Related tab regardless of which section they came from. */}
         {!isInsertMode && activeTab === 'Related' && sections
           .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'related_list'))
-          .map(w => (
-            <RelatedListWidget
-              key={w.id}
-              widget={w}
-              picklists={picklists}
-              onNavigateToRecord={onNavigateToRecord}
-              parentRecordId={recordId}
-              onRefreshRelated={async () => {
-                try {
-                  const rows = await fetchRelatedRecords(w.widget_config, recordId)
-                  // Mutate the widget's cached data in place, then nudge
-                  // React with a top-level data clone so the widget re-reads.
-                  w._relatedData = rows
-                  setData(prev => ({ ...prev }))
-                } catch (err) {
-                  // Non-fatal — widget will keep showing its previous rows.
-                  // eslint-disable-next-line no-console
-                  console.error('Related list refresh failed', err)
-                }
-              }}
-            />
-          ))}
+          .map(w => {
+            // Lock the Sections related_list when the parent PRT is Active or
+            // Archived. The Record Type Assignments related_list (different
+            // child table) stays editable — assignments are independent of
+            // template lock state. We force editable=false on the widget
+            // copy so the Add button + drag handles + remove buttons all
+            // disappear; the trigger is the ultimate enforcement layer.
+            const isLockedSectionsList = prtIsLocked
+              && w.widget_config?.table === 'project_report_template_sections'
+            const effectiveWidget = isLockedSectionsList
+              ? { ...w, widget_config: { ...w.widget_config, editable: false } }
+              : w
+            return (
+              <RelatedListWidget
+                key={w.id}
+                widget={effectiveWidget}
+                picklists={picklists}
+                onNavigateToRecord={onNavigateToRecord}
+                parentRecordId={recordId}
+                onRefreshRelated={async () => {
+                  try {
+                    const rows = await fetchRelatedRecords(w.widget_config, recordId)
+                    // Mutate the widget's cached data in place, then nudge
+                    // React with a top-level data clone so the widget re-reads.
+                    w._relatedData = rows
+                    setData(prev => ({ ...prev }))
+                  } catch (err) {
+                    // Non-fatal — widget will keep showing its previous rows.
+                    // eslint-disable-next-line no-console
+                    console.error('Related list refresh failed', err)
+                  }
+                }}
+              />
+            )
+          })}
 
         {/* File galleries — photos and documents widgets. Self-contained:
             each widget loads its own data, owns its own upload/delete UI,

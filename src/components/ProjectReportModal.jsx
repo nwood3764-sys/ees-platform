@@ -41,8 +41,11 @@ export default function ProjectReportModal({ projectId, project, onClose, onComp
           .order('prt_name', { ascending: true })
         if (tErr) throw new Error(tErr.message)
 
+        // Only Active (published) templates can generate reports. Drafts and
+        // Archived templates are filtered out of the picker; the Edge Function
+        // also enforces this server-side as defense-in-depth.
         const active = (prts || []).filter(
-          p => !p.status || p.status.picklist_value === 'Active'
+          p => p.status?.picklist_value === 'Active'
         )
 
         // 2) record-type assignment for this project
@@ -192,7 +195,7 @@ export default function ProjectReportModal({ projectId, project, onClose, onComp
                   disabled={generating || templates.length === 0}
                   style={selectStyle}
                 >
-                  {templates.length === 0 && <option value="">(no templates available)</option>}
+                  {templates.length === 0 && <option value="">(no published templates)</option>}
                   {templates.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.prt_name} ({t.prt_record_number} v{t.prt_version})
@@ -200,6 +203,11 @@ export default function ProjectReportModal({ projectId, project, onClose, onComp
                     </option>
                   ))}
                 </select>
+                {templates.length === 0 && (
+                  <div style={{ ...hintStyle, color: '#b45309' }}>
+                    No Active templates yet. Open a template in Setup → Project Report Templates and click <strong>Publish</strong> to make it available for generation.
+                  </div>
+                )}
                 {selectedPrtId === resolvedDefaultId && resolvedDefaultId && (
                   <div style={hintStyle}>
                     Default for this project's record type.
