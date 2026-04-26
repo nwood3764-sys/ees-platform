@@ -58,6 +58,14 @@
 // render a placeholder "[Section: <type> — not yet supported]" line so a
 // template authored in the Phase 2 Builder UI doesn't silently drop content.
 //
+// ── Section filters (prts_filter_config) ──────────────────────────────────
+// work_orders_overview and work_order_section honor a flat filter object on
+// each PRTS row (jsonb). Recognized keys:
+//   work_order_status_in, work_order_record_type_in, work_step_status_in
+// Each is an array of picklist_values.id uuids. Missing key or empty array
+// means "no constraint." Filters are AND-combined. Other section types
+// ignore the filter config.
+//
 // All authentication piggybacks on the caller's JWT (verify_jwt = true). RLS
 // already grants `authenticated` SELECT on every table we read here, so no
 // service role is required.
@@ -467,14 +475,60 @@ async function renderProjectSummary(ctx: RenderCtx, section: PRTS) {
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Section filters (prts_filter_config)
+//
+// Two filter scopes apply to work-order-bearing sections:
+//   • Work orders — filter the WO list itself by status and/or record type.
+//   • Work steps  — within each kept WO, filter the steps by status.
+// Filters are AND-combined. Empty arrays / missing keys = no constraint.
+// Future filter rules slot into this same shape; the section editor picker
+// in the frontend is what authors them.
+// ───────────────────────────────────────────────────────────────────────────
+
+function readUuidArray(cfg: any, key: string): string[] | null {
+  if (!cfg || typeof cfg !== "object") return null
+  const v = cfg[key]
+  if (!Array.isArray(v) || v.length === 0) return null
+  // Defensive: keep only string values that look like uuids. Anything else
+  // (mistyped value, leftover string from a renamed key) is silently dropped
+  // rather than failing the whole render.
+  const out = v.filter((x) => typeof x === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x))
+  return out.length > 0 ? out : null
+}
+
+function applyWorkOrderFilter(workOrders: WorkOrder[], filterCfg: any): WorkOrder[] {
+  const statusIn      = readUuidArray(filterCfg, "work_order_status_in")
+  const recordTypeIn  = readUuidArray(filterCfg, "work_order_record_type_in")
+  if (!statusIn && !recordTypeIn) return workOrders
+  return workOrders.filter((wo) => {
+    if (statusIn && (wo.work_order_status === null || !statusIn.includes(wo.work_order_status))) return false
+    if (recordTypeIn && (wo.work_order_record_type === null || !recordTypeIn.includes(wo.work_order_record_type))) return false
+    return true
+  })
+}
+
+function applyWorkStepFilter(workSteps: WorkStep[], filterCfg: any): WorkStep[] {
+  const statusIn = readUuidArray(filterCfg, "work_step_status_in")
+  if (!statusIn) return workSteps
+  return workSteps.filter((s) => s.work_step_status !== null && statusIn.includes(s.work_step_status))
+}
+
 async function renderWorkOrdersOverview(ctx: RenderCtx, section: PRTS) {
-  const { cur, workOrders, workStepsByWO, photosByStep, photosByWO, picklistById } = ctx
+  const { cur, workStepsByWO, photosByStep, photosByWO, picklistById } = ctx
 
   drawText(cur, section.prts_section_title || "Work Orders Overview", { size: 16, bold: true })
   drawDivider(cur)
 
+  // Apply per-section filters: subset of workOrders honoring prts_filter_config.
+  const workOrders = applyWorkOrderFilter(ctx.workOrders, section.prts_filter_config)
+
   if (workOrders.length === 0) {
-    drawText(cur, "No work orders found for this project.", { color: C.textMuted, size: 11 })
+    if (ctx.workOrders.length === 0) {
+      drawText(cur, "No work orders found for this project.", { color: C.textMuted, size: 11 })
+    } else {
+      drawText(cur, "No work orders match this section's filters.", { color: C.textMuted, size: 11 })
+    }
     return
   }
 
@@ -504,11 +558,18 @@ async function renderWorkOrdersOverview(ctx: RenderCtx, section: PRTS) {
 
 async function renderWorkOrderSection(ctx: RenderCtx, section: PRTS) {
   const cfg = section.prts_config || {}
-  const { cur, workOrders, workStepsByWO, photosByStep, photosByWO, picklistById } = ctx
+  const { cur, workStepsByWO, photosByStep, photosByWO, picklistById } = ctx
+
+  // Apply per-section filters: subset of workOrders + per-WO subset of steps.
+  const workOrders = applyWorkOrderFilter(ctx.workOrders, section.prts_filter_config)
 
   if (workOrders.length === 0) {
     if (!section.prts_show_if_empty) return
-    drawText(cur, "No work orders found for this project.", { color: C.textMuted, size: 11 })
+    if (ctx.workOrders.length === 0) {
+      drawText(cur, "No work orders found for this project.", { color: C.textMuted, size: 11 })
+    } else {
+      drawText(cur, "No work orders match this section's filters.", { color: C.textMuted, size: 11 })
+    }
     return
   }
 
@@ -528,7 +589,8 @@ async function renderWorkOrderSection(ctx: RenderCtx, section: PRTS) {
     drawKeyValueRow(cur, "Record type",
       wo.work_order_record_type ? (picklistById.get(wo.work_order_record_type)?.picklist_label || "—") : "—")
 
-    const steps = workStepsByWO.get(wo.id) || []
+    const allSteps = workStepsByWO.get(wo.id) || []
+    const steps = applyWorkStepFilter(allSteps, section.prts_filter_config)
     drawKeyValueRow(cur, "Work steps", String(steps.length))
 
     const woPhotos = photosByWO.get(wo.id) || []

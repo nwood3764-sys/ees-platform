@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
 import ProjectReportModal from './ProjectReportModal'
@@ -8,6 +8,8 @@ import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import { supabase } from '../lib/supabase'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
+import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
+import { MERGE_FIELD_CATALOG } from '../data/mergeFieldCatalog'
 import {
   loadRecordDetailData,
   saveRecord,
@@ -237,7 +239,7 @@ function buildOrderedTabs(sections, { includeActivity = true } = {}) {
   let hasRelated = false
   for (const sec of sections || []) {
     names.add(sec.section_tab || 'Details')
-    if ((sec.widgets || []).some(w => w.widget_type === 'related_list' || w.widget_type === 'file_gallery')) {
+    if ((sec.widgets || []).some(w => w.widget_type === 'related_list' || w.widget_type === 'file_gallery' || w.widget_type === 'prtsn_history')) {
       hasRelated = true
     }
   }
@@ -404,6 +406,9 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts }) {
     case 'datetime':
       return <span style={{ fontSize: 13, color: C.textMuted, fontStyle: 'italic' }}>Read-only</span>
 
+    case 'merge_textarea':
+      return <MergeFieldTextarea value={v} onChange={(next) => onChange(field.name, next)} />
+
     case 'json':
       return <JsonField value={value} onChange={(parsed) => onChange(field.name, parsed)} />
 
@@ -474,6 +479,481 @@ function JsonField({ value, onChange }) {
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// MergeFieldTextarea — textarea + Insert Merge Field popover. Used by the
+// `merge_textarea` field type. The popover is grouped by section
+// (Project / Property / Account / Report / User / Today) and inserts the
+// `{{path}}` token at the textarea's caret position. The token text and
+// resolution are validated server-side at render time; this UI is a
+// convenience picker only — authors can still type tokens directly.
+// ---------------------------------------------------------------------------
+
+function MergeFieldTextarea({ value, onChange }) {
+  const taRef = useRef(null)
+  const [open, setOpen] = useState(false)
+  const text = value == null ? '' : String(value)
+
+  const insertToken = (path) => {
+    const ta = taRef.current
+    const token = `{{${path}}}`
+    if (!ta) {
+      onChange(`${text}${token}`)
+      setOpen(false)
+      return
+    }
+    const start = ta.selectionStart ?? text.length
+    const end = ta.selectionEnd ?? text.length
+    const next = text.slice(0, start) + token + text.slice(end)
+    onChange(next)
+    // Restore caret position after the inserted token.
+    requestAnimationFrame(() => {
+      const ta2 = taRef.current
+      if (!ta2) return
+      const pos = start + token.length
+      ta2.focus()
+      ta2.setSelectionRange(pos, pos)
+    })
+    setOpen(false)
+  }
+
+  return (
+    <div>
+      <textarea
+        ref={taRef}
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          ...inputBase,
+          minHeight: 110,
+          resize: 'vertical',
+          fontSize: 13,
+          lineHeight: 1.5,
+        }}
+      />
+      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          style={{
+            padding: '5px 12px', fontSize: 12, fontWeight: 500,
+            background: C.card, border: `1px solid ${C.borderDark}`,
+            borderRadius: 4, cursor: 'pointer', color: C.textPrimary,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <Icon path="M12 4v16m8-8H4" size={13} color={C.textPrimary} />
+          Insert Merge Field
+        </button>
+        <span style={{ fontSize: 11, color: C.textMuted }}>
+          Tokens use <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{`{{path}}`}</code> syntax.
+          Unknown tokens render as <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>[unknown: …]</code>.
+        </span>
+        {open && (
+          <div
+            style={{
+              position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50,
+              background: C.card, border: `1px solid ${C.borderDark}`, borderRadius: 8,
+              boxShadow: '0 4px 16px rgba(13, 26, 46, 0.12)',
+              minWidth: 320, maxWidth: 460, maxHeight: 360, overflow: 'auto',
+            }}
+            onMouseLeave={() => setOpen(false)}
+          >
+            {MERGE_FIELD_CATALOG.map(g => (
+              <div key={g.group}>
+                <div style={{
+                  padding: '8px 14px 4px', fontSize: 10.5, fontWeight: 600,
+                  color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
+                  background: '#fafbfd',
+                }}>
+                  {g.group}
+                </div>
+                {g.items.map(item => (
+                  <button
+                    key={item.path}
+                    type="button"
+                    onClick={() => insertToken(item.path)}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      padding: '8px 14px', fontSize: 12, color: C.textPrimary,
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      borderBottom: `1px solid ${C.border}`,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#f0f6f3' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <div>{item.label}</div>
+                    <code style={{ fontSize: 10.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>
+                      {`{{${item.path}}}`}
+                    </code>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FilterConfigEditorWidget — schema-driven editor for project_report_template
+// _sections.prts_filter_config. Mirrors SectionConfigEditorWidget. Reads the
+// filter schema for the row's prts_section_type picklist_value, renders a
+// structured picker per rule, and writes back to draft.prts_filter_config.
+//
+// When the section type has no filter schema (cover_page, project_summary,
+// page_break, footer, custom_text), the widget renders a muted note instead
+// of the picker — there's nothing to filter on.
+// ---------------------------------------------------------------------------
+
+function FilterConfigEditorWidget({ widget, record, picklists, editing, draft, onChange }) {
+  const sectionTypeId = (editing ? draft.prts_section_type : record.prts_section_type) || null
+  const sectionTypeValue = sectionTypeId ? picklists.valueById?.get(sectionTypeId) : null
+  const sectionTypeLabel = sectionTypeId ? picklists.byId?.get(sectionTypeId) : null
+  const schema = sectionTypeValue ? getSectionFilterSchema(sectionTypeValue) : null
+
+  const filterConfig = editing
+    ? (draft.prts_filter_config !== undefined ? draft.prts_filter_config : (record.prts_filter_config || {}))
+    : (record.prts_filter_config || {})
+
+  const setKey = (key, value) => {
+    if (!editing) return
+    const next = { ...(filterConfig && typeof filterConfig === 'object' ? filterConfig : {}) }
+    if (value === null || value === undefined || (Array.isArray(value) && value.length === 0)) {
+      delete next[key]
+    } else {
+      next[key] = value
+    }
+    onChange('prts_filter_config', next)
+  }
+
+  if (!sectionTypeValue) {
+    return (
+      <div style={{ padding: 18, fontSize: 12.5, color: C.textMuted }}>
+        Pick a Section Type above to configure filters.
+      </div>
+    )
+  }
+
+  if (!schema) {
+    return (
+      <div style={{ padding: 18, fontSize: 12.5, color: C.textMuted }}>
+        The <strong style={{ color: C.textPrimary }}>{sectionTypeLabel || sectionTypeValue}</strong> section type
+        has no filter rules — it always renders all relevant content.
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div style={{ padding: '10px 16px', background: '#f7f9fc', borderBottom: `1px solid ${C.border}`, fontSize: 11.5, color: C.textMuted, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Icon path="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" size={13} color={C.textMuted} />
+        <span>
+          Filtering <strong style={{ color: C.textPrimary }}>{sectionTypeLabel || sectionTypeValue}</strong>.
+          Rules are AND-combined. Leave a rule empty to skip it.
+        </span>
+      </div>
+      <div>
+        {schema.map(rule => (
+          <FilterRuleRow
+            key={rule.key}
+            rule={rule}
+            value={filterConfig[rule.key]}
+            editing={editing}
+            onChange={(v) => setKey(rule.key, v)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function FilterRuleRow({ rule, value, editing, onChange }) {
+  const [opts, setOpts] = useState(null)
+
+  // Lazy-load picklist options for this filter rule.
+  useEffect(() => {
+    if (rule.type !== 'picklist_multi') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('picklist_values')
+          .select('id, picklist_label, picklist_value, picklist_is_active')
+          .eq('picklist_object', rule.picklist_object)
+          .eq('picklist_field', rule.picklist_field)
+          .order('picklist_label', { ascending: true })
+        if (cancelled) return
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.error('FilterRuleRow picklist load failed', error)
+          setOpts([])
+          return
+        }
+        // Show inactive values too if they're already selected — otherwise
+        // the user can't see what's currently saved. Otherwise hide them.
+        const selectedSet = new Set(Array.isArray(value) ? value : [])
+        setOpts((data || []).filter(o => o.picklist_is_active || selectedSet.has(o.id)))
+      } catch (e) {
+        if (!cancelled) setOpts([])
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rule.picklist_object, rule.picklist_field])
+
+  const selected = new Set(Array.isArray(value) ? value : [])
+  const selectedCount = selected.size
+
+  const toggle = (id) => {
+    if (!editing) return
+    const next = new Set(selected)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    onChange(next.size === 0 ? null : Array.from(next))
+  }
+
+  return (
+    <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 4 }}>
+        {rule.label}
+        {selectedCount > 0 && (
+          <span style={{ marginLeft: 8, color: C.emerald, textTransform: 'none', fontSize: 11 }}>
+            · {selectedCount} selected
+          </span>
+        )}
+      </div>
+      {rule.description && (
+        <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 8 }}>
+          {rule.description}
+        </div>
+      )}
+      {editing ? (
+        opts === null ? (
+          <div style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic' }}>Loading options…</div>
+        ) : opts.length === 0 ? (
+          <div style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic' }}>No options configured for this filter.</div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {opts.map(o => {
+              const on = selected.has(o.id)
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => toggle(o.id)}
+                  style={{
+                    padding: '5px 10px', fontSize: 12, fontWeight: 500,
+                    cursor: 'pointer', borderRadius: 4,
+                    border: `1px solid ${on ? C.emerald : C.border}`,
+                    background: on ? C.emerald : C.card,
+                    color: on ? '#fff' : C.textPrimary,
+                    opacity: o.picklist_is_active ? 1 : 0.65,
+                  }}
+                  title={o.picklist_is_active ? '' : 'This picklist value is inactive.'}
+                >
+                  {o.picklist_label}
+                </button>
+              )
+            })}
+          </div>
+        )
+      ) : (
+        <div style={{ fontSize: 13, color: C.textPrimary }}>
+          {selectedCount === 0 ? (
+            <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Any (no constraint)</span>
+          ) : (
+            <span>
+              {Array.from(selected).map(id => {
+                const o = (opts || []).find(x => x.id === id)
+                return o ? o.picklist_label : id
+              }).join(', ')}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// PrtsnHistoryWidget — Versions list for project_report_templates. Reads
+// project_report_template_snapshots rows for the current PRT and renders one
+// row per published version with action buttons:
+//   • Preview — POSTs { preview: true, prtsn_id } to the generate-project-
+//     report edge function and opens the resulting PDF in a new tab. Works
+//     for any version regardless of the live PRT's current status (the edge
+//     fn skips the Active-only gate for snapshot-sourced renders).
+//
+// The widget is read-only: snapshots are written by the publish RPC and
+// never mutated through this UI.
+// ---------------------------------------------------------------------------
+
+function PrtsnHistoryWidget({ widget, parentRecordId }) {
+  const toast = useToast()
+  const [rows, setRows] = useState(null)
+  const [error, setError] = useState(null)
+  const [previewingId, setPreviewingId] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('project_report_template_snapshots')
+          .select('id, prtsn_record_number, prtsn_version, prtsn_published_at, prtsn_published_by, prtsn_template_json')
+          .eq('prt_id', parentRecordId)
+          .order('prtsn_version', { ascending: false })
+        if (cancelled) return
+        if (error) { setError(error.message); return }
+        // Hydrate prtsn_published_by → public.users name if possible
+        const publisherIds = Array.from(new Set((data || []).map(r => r.prtsn_published_by).filter(Boolean)))
+        let publisherMap = new Map()
+        if (publisherIds.length > 0) {
+          const { data: users } = await supabase
+            .from('users')
+            .select('id, user_first_name, user_last_name, user_email')
+            .in('id', publisherIds)
+          publisherMap = new Map((users || []).map(u => {
+            const name = [u.user_first_name, u.user_last_name].filter(Boolean).join(' ').trim()
+            return [u.id, name || u.user_email || u.id]
+          }))
+        }
+        if (!cancelled) {
+          setRows((data || []).map(r => ({ ...r, _publisher_name: publisherMap.get(r.prtsn_published_by) || '—' })))
+        }
+      } catch (e) {
+        if (!cancelled) setError(e.message || String(e))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [parentRecordId])
+
+  const previewSnapshot = async (snapshotId) => {
+    setPreviewingId(snapshotId)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) {
+        toast.error('Not signed in — refresh the page and try again.')
+        setPreviewingId(null)
+        return
+      }
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-project-report`
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ preview: true, prtsn_id: snapshotId }),
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`Edge function returned ${res.status}: ${text.slice(0, 200)}`)
+      }
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      window.open(objectUrl, '_blank', 'noopener')
+    } catch (e) {
+      toast.error(`Preview failed: ${e.message || e}`)
+    } finally {
+      setPreviewingId(null)
+    }
+  }
+
+  const fmtTs = (ts) => {
+    if (!ts) return '—'
+    try {
+      const d = new Date(ts)
+      return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    } catch {
+      return String(ts)
+    }
+  }
+
+  const widgetTitle = widget.widget_title || 'Versions'
+  const maxVersion = (rows || []).reduce((m, r) => Math.max(m, r.prtsn_version || 0), 0)
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+      <div style={{ padding: '14px 18px', borderBottom: `1px solid ${C.border}`, background: '#fafbfd', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{widgetTitle}</span>
+        {rows && (
+          <span style={{ fontSize: 11, color: C.textMuted, padding: '2px 8px', background: '#eef2f7', borderRadius: 10 }}>
+            {rows.length}
+          </span>
+        )}
+      </div>
+      {error ? (
+        <div style={{ padding: 18, fontSize: 12.5, color: '#b03a2e' }}>
+          Failed to load versions: {error}
+        </div>
+      ) : rows === null ? (
+        <div style={{ padding: 18, fontSize: 12.5, color: C.textMuted, fontStyle: 'italic' }}>Loading versions…</div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding: 18, fontSize: 12.5, color: C.textMuted }}>
+          No published versions yet. Publish the template to create the first snapshot.
+        </div>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead style={{ background: '#fafbfd', borderBottom: `1px solid ${C.border}` }}>
+            <tr>
+              <th style={thStyle}>Snapshot</th>
+              <th style={thStyle}>Version</th>
+              <th style={thStyle}>Published</th>
+              <th style={thStyle}>Published By</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const isLatest = r.prtsn_version === maxVersion
+              return (
+                <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ ...tdStyle, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+                    {r.prtsn_record_number}
+                  </td>
+                  <td style={tdStyle}>
+                    <span style={{ fontSize: 13, color: C.textPrimary }}>v{r.prtsn_version}</span>
+                    {isLatest && (
+                      <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, padding: '2px 7px', borderRadius: 10, background: C.emerald, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Latest
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ ...tdStyle, fontSize: 12.5 }}>{fmtTs(r.prtsn_published_at)}</td>
+                  <td style={{ ...tdStyle, fontSize: 12.5 }}>{r._publisher_name}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>
+                    <button
+                      type="button"
+                      onClick={() => previewSnapshot(r.id)}
+                      disabled={previewingId === r.id}
+                      style={{
+                        padding: '5px 12px', fontSize: 12, fontWeight: 500,
+                        border: `1px solid ${C.borderDark}`, borderRadius: 4,
+                        background: C.card, color: C.textPrimary,
+                        cursor: previewingId === r.id ? 'wait' : 'pointer',
+                        opacity: previewingId === r.id ? 0.7 : 1,
+                      }}
+                    >
+                      {previewingId === r.id ? 'Generating…' : 'Preview PDF'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+const thStyle = { textAlign: 'left', padding: '8px 14px', fontSize: 11, fontWeight: 600, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.03em' }
+const tdStyle = { padding: '10px 14px', color: C.textPrimary, verticalAlign: 'middle' }
 
 // ---------------------------------------------------------------------------
 // FieldGroup widget — view mode OR edit mode
@@ -1807,10 +2287,11 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName }) {
   const isMobile = useIsMobile()
   const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
-  // Render any widgets that live inside a section card. Today: field_group
-  // and section_config_editor. Related lists, file galleries, and the
-  // activity timeline render as their own standalone cards outside sections.
-  const inSectionTypes = new Set(['field_group', 'section_config_editor'])
+  // Render any widgets that live inside a section card. Today: field_group,
+  // section_config_editor, and filter_config_editor. Related lists, file
+  // galleries, prtsn history, and the activity timeline render as their own
+  // standalone cards outside sections.
+  const inSectionTypes = new Set(['field_group', 'section_config_editor', 'filter_config_editor'])
   const sectionWidgets = (section.widgets || []).filter(w => inSectionTypes.has(w.widget_type))
   if (sectionWidgets.length === 0) return null
   return (
@@ -1827,6 +2308,10 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
         }
         if (w.widget_type === 'section_config_editor') {
           return <SectionConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
+            editing={editing} draft={draft} onChange={onChange} />
+        }
+        if (w.widget_type === 'filter_config_editor') {
+          return <FilterConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
             editing={editing} draft={draft} onChange={onChange} />
         }
         return null
@@ -2855,6 +3340,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               key={w.id}
               widget={w}
               parentTable={tableName}
+              parentRecordId={recordId}
+            />
+          ))}
+
+        {/* PRTSN history — Versions list for project_report_templates only.
+            Self-contained widget that fetches snapshots for the current PRT
+            and offers a Preview-from-snapshot action per version. */}
+        {!isInsertMode && activeTab === 'Related' && sections
+          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'prtsn_history'))
+          .map(w => (
+            <PrtsnHistoryWidget
+              key={w.id}
+              widget={w}
               parentRecordId={recordId}
             />
           ))}
