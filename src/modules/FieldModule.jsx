@@ -6,13 +6,17 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchProjects, fetchWorkOrders, fetchSchedule } from '../data/fieldService'
 import { fetchPaymentRequests } from '../data/incentivesService'
+import { fetchTechnicians, fetchCertifications, fetchTimeSheets } from '../data/peopleService'
 import { getCurrentUserProfile } from '../data/layoutService'
 
 const SECTIONS = [
-  { id:'home',       label:'Home'         },
-  { id:'projects',   label:'Projects'     },
-  { id:'workorders', label:'Work Orders'  },
-  { id:'schedule',   label:'Schedule'     },
+  { id:'home',        label:'Home'         },
+  { id:'projects',    label:'Projects'     },
+  { id:'workorders',  label:'Work Orders'  },
+  { id:'schedule',    label:'Schedule'     },
+  { id:'technicians', label:'Technicians'  },
+  { id:'credentials', label:'Credentials'  },
+  { id:'timesheets',  label:'Time Sheets'  },
 ]
 
 const PROJ_COLS = [
@@ -51,6 +55,59 @@ const WO_VIEWS = [
   { id:'WOV-02', name:'To Be Verified',    filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order To Be Verified' }],    sortField:'scheduledDate', sortDir:'asc' },
   { id:'WOV-03', name:'Corrections Needed',filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order Corrections Needed' }], sortField:'scheduledDate', sortDir:'asc' },
   { id:'WOV-04', name:'In Progress Today', filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order In Progress' }],         sortField:'scheduledDate', sortDir:'asc' },
+]
+
+// ─── Field-staff views (folded in from the old People module) ───────────────
+// "Technicians" is a filtered view of contacts (record_type ∈ Team Lead,
+// Lead Technician, Technician in Training). "Credentials" is the
+// contact_skills ledger — what used to be the Certifications table.
+const TECH_COLS = [
+  { field:'id',              label:'Record #',   type:'text',   sortable:true, filterable:false },
+  { field:'name',            label:'Technician', type:'text',   sortable:true, filterable:true  },
+  { field:'title',           label:'Title',      type:'text',   sortable:true, filterable:true  },
+  { field:'employeeId',      label:'Emp ID',     type:'text',   sortable:true, filterable:false },
+  { field:'status',          label:'Status',     type:'select', sortable:true, filterable:true, options:['Active','On Leave','Inactive','Terminated'] },
+  { field:'hireDate',        label:'Hire Date',  type:'date',   sortable:true, filterable:true  },
+  { field:'bpiCertified',    label:'BPI',        type:'select', sortable:true, filterable:true, options:['Yes','No'] },
+  { field:'bpiExpiry',       label:'BPI Expiry', type:'date',   sortable:true, filterable:true  },
+  { field:'licenseState',    label:'DL State',   type:'text',   sortable:true, filterable:true  },
+  { field:'licenseExpiry',   label:'DL Expiry',  type:'date',   sortable:true, filterable:true  },
+  { field:'phone',           label:'Phone',      type:'text',   sortable:true, filterable:false },
+]
+const CRED_COLS = [
+  { field:'id',             label:'Record #',      type:'text',   sortable:true, filterable:false },
+  { field:'name',           label:'Skill',         type:'text',   sortable:true, filterable:true  },
+  { field:'technician',     label:'Held By',       type:'text',   sortable:true, filterable:true  },
+  { field:'type',           label:'Type',          type:'select', sortable:true, filterable:true, options:['BPI','EPA','NATE','OSHA','HRAI','NEBB','Other'] },
+  { field:'issuingBody',    label:'Issuing Body',  type:'text',   sortable:true, filterable:true  },
+  { field:'certNumber',     label:'Cert #',        type:'text',   sortable:false, filterable:false },
+  { field:'issueDate',      label:'Issued',        type:'date',   sortable:true, filterable:true  },
+  { field:'expirationDate', label:'Expires',       type:'date',   sortable:true, filterable:true  },
+  { field:'status',         label:'Status',        type:'select', sortable:true, filterable:true, options:['Active','Expired','Pending','Revoked'] },
+]
+const TS_COLS = [
+  { field:'id',         label:'Record #',  type:'text',   sortable:true, filterable:false },
+  { field:'name',       label:'Time Sheet',type:'text',   sortable:true, filterable:true  },
+  { field:'technician', label:'Technician',type:'text',   sortable:true, filterable:true  },
+  { field:'weekStart',  label:'Week Start',type:'date',   sortable:true, filterable:true  },
+  { field:'weekEnd',    label:'Week End',  type:'date',   sortable:true, filterable:true  },
+  { field:'status',     label:'Status',    type:'select', sortable:true, filterable:true, options:['Draft','Submitted','Approved','Rejected'] },
+  { field:'totalHours', label:'Hours',     type:'text',   sortable:true, filterable:false },
+]
+const TECH_VIEWS = [
+  { id:'TV-01', name:'All Technicians', filters:[], sortField:'name', sortDir:'asc' },
+  { id:'TV-02', name:'Active',          filters:[{ field:'status', label:'Status', op:'equals', value:'Active' }], sortField:'name', sortDir:'asc' },
+  { id:'TV-03', name:'BPI Certified',   filters:[{ field:'bpiCertified', label:'BPI', op:'equals', value:'Yes' }], sortField:'bpiExpiry', sortDir:'asc' },
+]
+const CRED_VIEWS = [
+  { id:'CDV-01', name:'All Credentials', filters:[], sortField:'expirationDate', sortDir:'asc' },
+  { id:'CDV-02', name:'Active',          filters:[{ field:'status', label:'Status', op:'equals', value:'Active' }], sortField:'expirationDate', sortDir:'asc' },
+  { id:'CDV-03', name:'BPI',             filters:[{ field:'type', label:'Type', op:'equals', value:'BPI' }], sortField:'expirationDate', sortDir:'asc' },
+]
+const TS_VIEWS = [
+  { id:'TSV-01', name:'All Time Sheets', filters:[], sortField:'weekStart', sortDir:'desc' },
+  { id:'TSV-02', name:'Submitted',       filters:[{ field:'status', label:'Status', op:'equals', value:'Submitted' }], sortField:'weekStart', sortDir:'desc' },
+  { id:'TSV-03', name:'Approved',        filters:[{ field:'status', label:'Status', op:'equals', value:'Approved' }], sortField:'weekStart', sortDir:'desc' },
 ]
 
 // Schedule constants
@@ -428,6 +485,9 @@ export default function FieldModule() {
   const [projects, setProjects] = useState([])
   const [workOrders, setWorkOrders] = useState([])
   const [paymentRequests, setPaymentRequests] = useState([])
+  const [technicians, setTechnicians]   = useState([])
+  const [credentials, setCredentials]   = useState([])
+  const [timesheets,  setTimesheets]    = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -444,15 +504,33 @@ export default function FieldModule() {
   // tab. Fetched once on mount alongside projects/work orders/payments.
   const [todayCrews, setTodayCrews] = useState([])
 
-  const SEC_TABLE = { projects: 'projects', workorders: 'work_orders' }
+  const SEC_TABLE = {
+    projects:    'projects',
+    workorders:  'work_orders',
+    technicians: 'contacts',
+    credentials: 'contact_skills',
+    timesheets:  'time_sheets',
+  }
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
-    Promise.all([fetchProjects(), fetchWorkOrders(), fetchPaymentRequests(), fetchSchedule(new Date())])
-      .then(([p, w, pr, tc]) => { if (!cancelled) { setProjects(p); setWorkOrders(w); setPaymentRequests(pr); setTodayCrews(tc) } })
+    Promise.all([
+      fetchProjects(),
+      fetchWorkOrders(),
+      fetchPaymentRequests(),
+      fetchSchedule(new Date()),
+      fetchTechnicians(),
+      fetchCertifications(),
+      fetchTimeSheets(),
+    ])
+      .then(([p, w, pr, tc, tech, cred, ts]) => {
+        if (cancelled) return
+        setProjects(p); setWorkOrders(w); setPaymentRequests(pr); setTodayCrews(tc)
+        setTechnicians(tech); setCredentials(cred); setTimesheets(ts)
+      })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -465,10 +543,17 @@ export default function FieldModule() {
   const loadAll = async () => {
     setError(null)
     try {
-      const [p, w, pr, tc] = await Promise.all([
-        fetchProjects(), fetchWorkOrders(), fetchPaymentRequests(), fetchSchedule(new Date()),
+      const [p, w, pr, tc, tech, cred, ts] = await Promise.all([
+        fetchProjects(),
+        fetchWorkOrders(),
+        fetchPaymentRequests(),
+        fetchSchedule(new Date()),
+        fetchTechnicians(),
+        fetchCertifications(),
+        fetchTimeSheets(),
       ])
       setProjects(p); setWorkOrders(w); setPaymentRequests(pr); setTodayCrews(tc)
+      setTechnicians(tech); setCredentials(cred); setTimesheets(ts)
     } catch (err) {
       setError(err)
     }
@@ -489,7 +574,13 @@ export default function FieldModule() {
   }, [scheduleDate])
 
   const urgentCount = workOrders.filter(w => w.status==='Work Order To Be Verified'||w.status==='Work Order Corrections Needed').length
-  const counts = { projects: projects.length, workorders: workOrders.length }
+  const counts = {
+    projects:    projects.length,
+    workorders:  workOrders.length,
+    technicians: technicians.length,
+    credentials: credentials.length,
+    timesheets:  timesheets.length,
+  }
   const urgentSections = { home: urgentCount }
 
   // Project row detail renderer — shows all project fields plus any
@@ -557,6 +648,9 @@ export default function FieldModule() {
           setSelectedDate={setScheduleDate}
           onOpenWorkOrder={(id, name) => setSelectedRecord({ table: 'work_orders', id, name })}
         />}
+        {sec==='technicians' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={technicians} columns={TECH_COLS} systemViews={TECH_VIEWS} defaultViewId="TV-01"  newLabel="Technician" onNew={() => setSelectedRecord({ table: 'contacts',       id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec==='credentials' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={credentials} columns={CRED_COLS} systemViews={CRED_VIEWS} defaultViewId="CDV-01" newLabel="Credential" onNew={() => setSelectedRecord({ table: 'contact_skills', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec==='timesheets'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={timesheets}  columns={TS_COLS}   systemViews={TS_VIEWS}   defaultViewId="TSV-01" newLabel="Time Sheet" onNew={() => setSelectedRecord({ table: 'time_sheets',    id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         </>)}
       </div>
     </div>

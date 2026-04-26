@@ -23,7 +23,6 @@ const FieldModule         = lazy(() => import('./modules/FieldModule'))
 const IncentivesModule    = lazy(() => import('./modules/IncentivesModule'))
 const StockModule         = lazy(() => import('./modules/StockModule'))
 const FleetModule         = lazy(() => import('./modules/FleetModule'))
-const PeopleModule        = lazy(() => import('./modules/PeopleModule'))
 const AdminModule         = lazy(() => import('./modules/admin'))
 const PortalModule        = lazy(() => import('./modules/PortalModule'))
 
@@ -128,7 +127,6 @@ function AuthedApp({ session }) {
       case 'incentives':    return <IncentivesModule />
       case 'stock':         return <StockModule />
       case 'fleet':         return <FleetModule />
-      case 'people':        return <PeopleModule />
       case 'admin':         return <AdminModule />
       case 'portal':        return <PortalModule />
       default:              return <ComingSoon label={activeModule.charAt(0).toUpperCase() + activeModule.slice(1)} />
