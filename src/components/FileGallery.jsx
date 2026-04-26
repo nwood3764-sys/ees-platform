@@ -74,6 +74,7 @@ export default function FileGalleryWidget({
   const [uploading, setUploading] = useState(0)      // count of in-flight uploads
   const [dragActive, setDragActive] = useState(false)
   const [lightboxIdx, setLightboxIdx] = useState(null) // photos only
+  const [previewDoc, setPreviewDoc] = useState(null)   // documents only — modal preview
   const [confirmDelete, setConfirmDelete] = useState(null) // {id, name}
 
   // Photos-only: detect a misconfigured widget (e.g. on a property) so we
@@ -221,9 +222,12 @@ export default function FileGalleryWidget({
       else                     await softDeleteDocument(id)
       toast.success(`Deleted ${name}`)
       setConfirmDelete(null)
-      // If we were viewing the deleted photo in the lightbox, close it.
+      // If we were viewing the deleted item in a modal, close it.
       if (target === 'photos' && lightboxIdx !== null) {
         setLightboxIdx(null)
+      }
+      if (target === 'documents' && previewDoc?.id === id) {
+        setPreviewDoc(null)
       }
       await refresh()
     } catch (e) {
@@ -394,6 +398,7 @@ export default function FileGalleryWidget({
               <DocumentList
                 documents={items}
                 isMobile={isMobile}
+                onPreview={(d) => setPreviewDoc(d)}
                 onDelete={(d) => setConfirmDelete({ id: d.id, name: d.name || 'document' })}
               />
             )}
@@ -408,6 +413,15 @@ export default function FileGalleryWidget({
           startIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
           onIndexChange={setLightboxIdx}
+        />
+      )}
+
+      {/* Document preview modal — documents only. Renders PDFs and images
+          inline; falls back to a download panel for unsupported types. */}
+      {target === 'documents' && previewDoc && (
+        <DocumentPreviewModal
+          doc={previewDoc}
+          onClose={() => setPreviewDoc(null)}
         />
       )}
 
@@ -711,7 +725,7 @@ function PhotoTile({ photo, onOpen, onReprocess, onDelete }) {
   )
 }
 
-function DocumentList({ documents, isMobile, onDelete }) {
+function DocumentList({ documents, isMobile, onPreview, onDelete }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {documents.map((d) => (
@@ -719,6 +733,7 @@ function DocumentList({ documents, isMobile, onDelete }) {
           key={d.id}
           doc={d}
           isMobile={isMobile}
+          onPreview={() => onPreview(d)}
           onDelete={() => onDelete(d)}
         />
       ))}
@@ -726,7 +741,7 @@ function DocumentList({ documents, isMobile, onDelete }) {
   )
 }
 
-function DocumentRow({ doc, isMobile, onDelete }) {
+function DocumentRow({ doc, isMobile, onPreview, onDelete }) {
   const [hover, setHover] = useState(false)
   const ext = (doc.name || '').split('.').pop()?.toLowerCase() || ''
   const iconPath = ext === 'pdf'
@@ -741,7 +756,7 @@ function DocumentRow({ doc, isMobile, onDelete }) {
     : null
 
   const open = () => {
-    if (doc._url) window.open(doc._url, '_blank', 'noopener,noreferrer')
+    if (doc._url) onPreview()
   }
 
   return (
@@ -977,6 +992,266 @@ function Lightbox({ photos, startIndex, onClose, onIndexChange }) {
           <span>{[photo.camera_make, photo.camera_model].filter(Boolean).join(' ')}</span>
         )}
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// DocumentPreviewModal — inline preview for documents
+//
+// Strategy by type:
+//   PDF                       → <iframe>; modern browsers have built-in viewers
+//   Images (png/jpg/gif/webp) → <img>; lets the browser handle decoding
+//   Everything else           → metadata + "Open in new tab" / "Download"
+//                               buttons (Office docs, archives, etc. have no
+//                               native browser preview and should not be
+//                               proxied through third-party viewers — the
+//                               signed URL TTL would race with iframe loads)
+//
+// On mobile the modal goes full-screen; on desktop it occupies ~90% of the
+// viewport so the file content has real estate without losing the dimming
+// context behind it.
+// ---------------------------------------------------------------------------
+
+function getPreviewKind(doc) {
+  const ext = (doc.name || '').split('.').pop()?.toLowerCase() || ''
+  const mime = (doc.mime_type || '').toLowerCase()
+  if (mime === 'application/pdf' || ext === 'pdf') return 'pdf'
+  if (mime.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext)) return 'image'
+  // Plain text could be inlined too, but the dominant uploaded text
+  // formats (CSV, TSV) are better browsed in a spreadsheet — fall through
+  // to the open-in-new-tab fallback so the browser can dispatch.
+  return 'fallback'
+}
+
+function DocumentPreviewModal({ doc, onClose }) {
+  const isMobile = useIsMobile()
+  const kind = getPreviewKind(doc)
+  const url = doc._url
+
+  // ESC closes
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const sizeStr = doc.file_size_bytes ? formatBytes(doc.file_size_bytes) : null
+  const createdStr = doc.created_at
+    ? new Date(doc.created_at).toLocaleString('en-US',
+        { year: 'numeric', month: 'short', day: 'numeric',
+          hour: 'numeric', minute: '2-digit' })
+    : null
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9000,
+        background: 'rgba(8,12,20,0.78)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: isMobile ? 0 : 24,
+      }}
+    >
+      <div
+        role="dialog" aria-modal="true" aria-label={doc.name || 'Document preview'}
+        style={{
+          background: C.card,
+          borderRadius: isMobile ? 0 : 10,
+          width: isMobile ? '100%' : 'min(1100px, 95vw)',
+          height: isMobile ? '100%' : '90vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '12px 16px',
+          borderBottom: `1px solid ${C.border}`,
+          background: '#fafbfd',
+          flexShrink: 0,
+          paddingTop: isMobile ? 'calc(12px + env(safe-area-inset-top))' : 12,
+        }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 5,
+            background: '#e8f3fb',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Icon
+              path={kind === 'image'
+                ? 'M3 7h18v12H3V7z M3 7l5-5h8l5 5 M9 13a2 2 0 100-4 2 2 0 000 4z'
+                : 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z M14 2v6h6'}
+              size={14} color="#1a5a8a"
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontSize: 14, fontWeight: 600, color: C.textPrimary,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {doc.name || 'Untitled'}
+            </div>
+            <div style={{
+              fontSize: 11.5, color: C.textMuted,
+              display: 'flex', gap: 8, marginTop: 1,
+              flexWrap: 'wrap',
+            }}>
+              {doc.document_type && <span>{doc.document_type}</span>}
+              {sizeStr && <span>· {sizeStr}</span>}
+              {createdStr && !isMobile && <span>· Uploaded {createdStr}</span>}
+            </div>
+          </div>
+          {url && !isMobile && (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                background: C.card, color: C.textSecondary,
+                border: `1px solid ${C.border}`, borderRadius: 5,
+                padding: '6px 12px', fontSize: 12.5, cursor: 'pointer',
+                fontWeight: 500, textDecoration: 'none',
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              <Icon path="M14 3h7v7 M21 3l-9 9 M21 14v6a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1h6"
+                size={11} color={C.textSecondary} />
+              Open in new tab
+            </a>
+          )}
+          <button
+            onClick={onClose}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              width: 32, height: 32, borderRadius: 5,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+            aria-label="Close"
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2f7' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+          >
+            <Icon path="M6 18L18 6M6 6l12 12" size={15} color={C.textSecondary} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{
+          flex: 1, minHeight: 0,
+          background: kind === 'image' ? '#0d1a2e' : '#f5f7fa',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          overflow: 'auto',
+          position: 'relative',
+        }}>
+          {!url ? (
+            <div style={{ color: C.textMuted, fontSize: 13, padding: 32 }}>
+              Preview unavailable — could not generate a signed URL.
+            </div>
+          ) : kind === 'pdf' ? (
+            <iframe
+              src={url}
+              title={doc.name || 'Document preview'}
+              style={{
+                width: '100%', height: '100%',
+                border: 'none', display: 'block',
+              }}
+            />
+          ) : kind === 'image' ? (
+            <img
+              src={url}
+              alt={doc.name || 'Document preview'}
+              style={{
+                maxWidth: '100%', maxHeight: '100%',
+                objectFit: 'contain', display: 'block',
+              }}
+            />
+          ) : (
+            <FallbackPreview doc={doc} />
+          )}
+        </div>
+
+        {/* Mobile footer — gives "Open in new tab" a touch target since
+            we hid it from the header to save horizontal space. Desktop
+            users get the header link instead. */}
+        {isMobile && url && (
+          <div style={{
+            padding: '12px 16px calc(12px + env(safe-area-inset-bottom))',
+            borderTop: `1px solid ${C.border}`,
+            background: '#fafbfd',
+            display: 'flex', justifyContent: 'flex-end',
+          }}>
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                background: C.emerald, color: '#fff',
+                border: 'none', borderRadius: 6,
+                padding: '10px 16px', fontSize: 14, fontWeight: 500,
+                textDecoration: 'none',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <Icon path="M14 3h7v7 M21 3l-9 9 M21 14v6a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1h6"
+                size={12} color="#fff" />
+              Open in new tab
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function FallbackPreview({ doc }) {
+  const ext = (doc.name || '').split('.').pop()?.toUpperCase() || 'FILE'
+  const url = doc._url
+  return (
+    <div style={{
+      padding: '32px 28px',
+      textAlign: 'center',
+      maxWidth: 420,
+    }}>
+      <div style={{
+        width: 72, height: 72, borderRadius: 10,
+        background: '#e8f3fb', margin: '0 auto 16px',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 14, fontWeight: 700, color: '#1a5a8a',
+        fontFamily: 'JetBrains Mono, monospace',
+        letterSpacing: 0.5,
+      }}>
+        {ext.slice(0, 4)}
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, marginBottom: 6 }}>
+        Preview not available in browser
+      </div>
+      <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.55, marginBottom: 18 }}>
+        This file type can't render inline. Open it in a new tab and your
+        browser or operating system will hand it off to the right app.
+      </div>
+      {url && (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            background: C.emerald, color: '#fff',
+            border: 'none', borderRadius: 6,
+            padding: '9px 18px', fontSize: 13, fontWeight: 500,
+            textDecoration: 'none',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <Icon path="M14 3h7v7 M21 3l-9 9 M21 14v6a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1h6"
+            size={12} color="#fff" />
+          Open in new tab
+        </a>
+      )}
     </div>
   )
 }
