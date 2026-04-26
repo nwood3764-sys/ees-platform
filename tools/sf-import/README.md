@@ -12,7 +12,7 @@ DONE — 4 of 22 SF SObjects fully imported:
 - buildings (5 layouts, 150 fields, 0 new cols — already complete)
 
 PARTIAL — opportunities (170 cols, 28 active SF record types):
-- 9 of 24 mappable layouts applied:
+- 19 of 24 mappable layouts applied:
   - Opportunity Layout (master fallback)
   - Multifamily
   - 45L Retroactive Tax Credit
@@ -20,10 +20,10 @@ PARTIAL — opportunities (170 cols, 28 active SF record types):
   - MFES-2024, MFES-2024-Equipment
   - MFES-2025-Equipment
   - MFES-Mechanical
-- 15 layouts pending:
   - PACE-CO, PACE-IL, PACE-WI
   - TAX-CREDIT-179D, TruTeam Illinois
   - WI-IRA-FOE-SF-HOMES, WI-IRA-HEAR, WI-IRA-HOMES, WI-IRA-MF-HOMES-Audit, WI-IRA-SF-HOMES-AUDIT
+- 5 layouts pending (need fresh SF metadata refetch — pre-generated SQL not in repo):
   - Denver-Audit, Denver-Building Electrification Rebates, Denver-EFR
   - FOE-2024-WI, MFES-2022
 - 21 SF layouts SKIPPED (no matching active RT — retired utility programs):
@@ -33,7 +33,7 @@ PARTIAL — opportunities (170 cols, 28 active SF record types):
   Property Qualification, Single Family, Infiltration Reduction Program
 
 PENDING — 17 SObjects to go:
-1. Finish opportunities (apply pending batches; regenerate Denver/FOE/MFES-2022)
+1. Finish opportunities (5 remaining: Denver-Audit, Denver-BER, Denver-EFR, FOE-2024-WI, MFES-2022 — needs SF metadata refetch)
 2. projects (22 layouts) — column adds + layouts
 3. assessments, work_orders (15 + 15 layouts)
 4. equipment, equipment_activities, mechanical_equipment (5+7+8)
