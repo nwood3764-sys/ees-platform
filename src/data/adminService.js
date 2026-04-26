@@ -787,3 +787,60 @@ export async function fetchWorkPlanTemplateDetail(planId) {
     })),
   }
 }
+
+// ---------------------------------------------------------------------------
+// Skills (Salesforce Field Service: Skill master catalog)
+// ---------------------------------------------------------------------------
+export async function fetchSkills() {
+  const { data, error } = await supabase
+    .from('skills')
+    .select(`
+      id,
+      skill_record_number,
+      skill_name,
+      skill_description,
+      skill_issuing_body,
+      skill_requires_certification,
+      skill_validity_months,
+      category:skill_category ( picklist_label )
+    `)
+    .eq('skill_is_deleted', false)
+    .order('skill_name', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({
+    id: r.skill_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id: r.id,
+    name: r.skill_name,
+    description: r.skill_description || '—',
+    category: r.category?.picklist_label || '—',
+    issuingBody: r.skill_issuing_body || '—',
+    requiresCert: r.skill_requires_certification ? 'Yes' : 'No',
+    validityMonths: r.skill_validity_months ?? '—',
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// Work Type Skill Requirements (FSL: SkillRequirement on WorkType)
+// ---------------------------------------------------------------------------
+export async function fetchWorkTypeSkillRequirements() {
+  const { data, error } = await supabase
+    .from('work_type_skill_requirements')
+    .select(`
+      id,
+      wtsr_record_number,
+      wtsr_minimum_level,
+      work_types:work_type_id ( work_type_record_number, work_type_name ),
+      skills:skill_id ( skill_record_number, skill_name )
+    `)
+    .eq('wtsr_is_deleted', false)
+  if (error) throw error
+  return (data || []).map(r => ({
+    id: r.wtsr_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id: r.id,
+    workType: r.work_types?.work_type_name || '—',
+    workTypeNumber: r.work_types?.work_type_record_number || '—',
+    skill: r.skills?.skill_name || '—',
+    skillNumber: r.skills?.skill_record_number || '—',
+    minLevel: r.wtsr_minimum_level ?? 1,
+  }))
+}

@@ -13,6 +13,8 @@ import {
   fetchAllPageLayouts,
   fetchWorkPlanTemplates,
   fetchWorkStepTemplates,
+  fetchSkills,
+  fetchWorkTypeSkillRequirements,
 } from '../../data/adminService'
 
 // ---------------------------------------------------------------------------
@@ -319,6 +321,8 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'work_plan_templates': return <WorkPlanTemplatesPane onOpenRecord={onOpenRecord} />
     case 'work_step_templates': return <NodePage title="Work Step Templates"   table="work_step_templates" fetcher={fetchWorkStepTemplates} columns={WST_COLS}            newLabel="Work Step Template" onOpenRecord={onOpenRecord} />
     case 'service_territories': return <ComingSoonPane label="Service Territories" />
+    case 'skills':              return <NodePage title="Skills"                  table="skills"                       fetcher={fetchSkills}                       columns={SKILL_COLS} newLabel="Skill"                       onOpenRecord={onOpenRecord} />
+    case 'work_type_skill_requirements': return <NodePage title="Work Type Skill Requirements" table="work_type_skill_requirements" fetcher={fetchWorkTypeSkillRequirements} columns={WTSR_COLS}  newLabel="Skill Requirement"           onOpenRecord={onOpenRecord} />
     case 'audit_log':         return <NodePage title="Audit Log"               table="audit_log"         fetcher={fetchAuditLog}          columns={AL_COLS}             newLabel={null}             onOpenRecord={null} />
     default:                  return <ComingSoonPane label={nodeId} />
   }
@@ -545,6 +549,24 @@ const WST_COLS = [
   { field: 'evidenceType', label: 'Evidence',      type: 'text',   sortable: true, filterable: true },
   { field: 'ownerRole',    label: 'Owner Role',    type: 'text',   sortable: true, filterable: true },
   { field: 'status',       label: 'Status',        type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
+]
+
+const SKILL_COLS = [
+  { field: 'id',             label: 'Record #',     type: 'text',   sortable: true, filterable: false },
+  { field: 'name',           label: 'Skill',        type: 'text',   sortable: true, filterable: true  },
+  { field: 'category',       label: 'Category',     type: 'text',   sortable: true, filterable: true  },
+  { field: 'issuingBody',    label: 'Issuing Body', type: 'text',   sortable: true, filterable: true  },
+  { field: 'requiresCert',   label: 'Cert Backed',  type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'] },
+  { field: 'validityMonths', label: 'Validity (mo)',type: 'text',   sortable: true, filterable: false },
+]
+
+const WTSR_COLS = [
+  { field: 'id',             label: 'Record #',  type: 'text', sortable: true, filterable: false },
+  { field: 'workType',       label: 'Work Type', type: 'text', sortable: true, filterable: true  },
+  { field: 'workTypeNumber', label: 'WT #',      type: 'text', sortable: true, filterable: false },
+  { field: 'skill',          label: 'Skill',     type: 'text', sortable: true, filterable: true  },
+  { field: 'skillNumber',    label: 'Skill #',   type: 'text', sortable: true, filterable: false },
+  { field: 'minLevel',       label: 'Min Level', type: 'text', sortable: true, filterable: false },
 ]
 
 const ET_COLS = [
