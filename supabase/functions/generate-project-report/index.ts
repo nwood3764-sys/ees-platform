@@ -1188,6 +1188,16 @@ Deno.serve(async (req: Request) => {
     for (const arr of photosByWO.values())   for (const p of arr) if (p.taken_by) userIds.push(p.taken_by)
     const userNamesById = await loadUserNames(client, userIds)
 
+    // Belt-and-suspenders for preview mode: the synthetic graph stamps the
+    // caller's auth uid on project_owner / work_step_owner. If the DB
+    // lookup in loadUserNames couldn't resolve that uid (e.g. when
+    // auth.users.id and public.users.id are out of sync, which they
+    // currently are for some accounts), fall back to the generatedByName
+    // we already computed up top so Owner doesn't render as "—".
+    if (previewMode && userId && !userNamesById.has(userId)) {
+      userNamesById.set(userId, generatedByName)
+    }
+
     // Build PDF
     const pdf = await PDFDocument.create()
     const font = await pdf.embedFont(StandardFonts.Helvetica)
@@ -1203,11 +1213,17 @@ Deno.serve(async (req: Request) => {
       prt,
     }
 
-    // Pass 1 — render everything except footer
-    for (const sec of sections) {
-      if (sec.section_type_value === "footer") continue
+    // Pass 1 — render everything except footer. Compute the index of the
+    // last renderable (non-footer) section up-front so we can suppress a
+    // trailing prts_page_break_after — otherwise that page break creates
+    // an empty page at the end of the report (the footer pass stamps all
+    // pages, including the blank one, with the page-X-of-Y line).
+    const renderableSections = sections.filter((s) => s.section_type_value !== "footer")
+    for (let i = 0; i < renderableSections.length; i++) {
+      const sec = renderableSections[i]
       await renderSection(ctx, sec)
-      if (sec.prts_page_break_after) cur.pageBreak()
+      const isLast = i === renderableSections.length - 1
+      if (sec.prts_page_break_after && !isLast) cur.pageBreak()
     }
     // Pass 2 — footer (knows total page count)
     const footer = sections.find((s) => s.section_type_value === "footer")
