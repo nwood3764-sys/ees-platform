@@ -5,7 +5,8 @@ This directory holds the translator that converts Salesforce metadata XML
 
 ## Status
 
-DONE — 12 of 22 SF SObjects fully imported (production):
+DONE — 22 of 22 SF SObjects fully imported (production):
+
 - accounts (8 layouts, 132 fields, 32 new cols)
 - contacts (6 layouts, 203 fields, 41 new cols)
 - properties (5 layouts, 166 fields, 1 new col)
@@ -18,29 +19,44 @@ DONE — 12 of 22 SF SObjects fully imported (production):
 - incentives (3 layouts, 16 new cols)
 - time_sheet_entries (4 layouts, 16 new cols)
 - equipment (3 layouts, 23 new cols)
+- equipment_activities (7 layouts, 11 new cols)
+- vehicle_activities (5 layouts, 23 new cols)
+- diagnostic_tests (5 layouts, 40 new cols)
+- products (3 layouts, 26 new cols — SF had 4, one orphan SKIPped)
+- mechanical_equipment (8 layouts, 16 new cols)
+- efr_reports (2 layouts, 119 new cols)
+- work_orders (10 layouts, 32 new cols)
+- incentive_applications (9 layouts, 96 new cols)
+- assessments (12 layouts, 196 new cols)
+- opportunities (24 layouts — DESTRUCTIVE replace; soft-deleted prior 9
+  on first chunk, then inserted all 24 across 6 chunks in same session)
 
-ALTERS APPLIED, LAYOUTS PENDING (10 SObjects, 21 chunks staged in `generated/`):
-- equipment_activities (1 chunk, 7 layouts, 11 cols added)
-- vehicle_activities (1 chunk, 5 layouts, 23 cols added)
-- diagnostic_tests (1 chunk, 5 layouts, 40 cols added)
-- products (1 chunk, 4 layouts, 26 cols added)
-- mechanical_equipment (1 chunk, 8 layouts, 16 cols added)
-- efr_reports (1 chunk, 2 layouts, 119 cols added)
-- work_orders (2 chunks, 10 layouts, 32 cols added)
-- incentive_applications (2 chunks, 9 layouts, 96 cols added)
-- assessments (4 chunks, 12 layouts, 196 cols added)
-- opportunities (6 chunks, 24 layouts — DESTRUCTIVE replace; soft-deletes
-  current 9 then restores 24 from SF; all 6 chunks must apply same session)
+Total: 137 page layouts, ~870 columns added across the 22 tables.
 
-To resume: each pending table has an `_alter.sql` (already applied) and
-`_layouts_chunk_N.sql` files in `generated/`. Apply chunks in order via
-`Supabase:apply_migration` — don't read into context first if avoiding
-token bloat; just feed file content directly.
+## Resume mechanism
 
-Non-trivial gotcha: all chunks were generated before the `gps_points`
-prefix fix (`gps_point_` → `gps_`) and the gps chunk was hand-patched.
-Other tables' field references already match their alter prefixes — spot-
-check before applying any chunk if columns suddenly look wrong.
+The remaining chunks for the last 4 SObjects (work_orders, incentive_applications,
+assessments, opportunities — 14 chunks total) were applied via a database-side
+helper that fetches each chunk file from the public GitHub repo and executes it:
+
+```sql
+SELECT public.apply_sql_from_url(
+  'https://raw.githubusercontent.com/nwood3764-sys/anura/master/tools/sf-import/generated/<chunk>.sql'
+);
+```
+
+The helper relies on the `http` extension (enabled in this project) and a
+SECURITY DEFINER function `public.apply_sql_from_url(text)`. This pattern
+avoids round-tripping ~50KB of verbose layout SQL through the MCP tool
+parameter on every chunk — the database fetches the chunk content directly.
+
+If you ever need to re-run or amend a layout import:
+1. Edit / regenerate the chunk file in `generated/`.
+2. Push the change to `master`.
+3. Call `SELECT public.apply_sql_from_url('<raw github url>');` from the
+   Supabase SQL editor or MCP.
+
+## Translator
 
 `sf_layout_translator.py` — main module:
 - `SF_TO_ANURA_TABLE` / `ANURA_TO_SF_TABLE` — name mappings
@@ -88,7 +104,7 @@ if needed:
   individual per-axis columns (billing_street, billing_city, ...)
 - Apply migrations directly to production (no Supabase dev branches)
 
-## Workflow per object
+## Workflow per object (when adding a NEW SObject in the future)
 
 1. Pull current Anura schema:
    `SELECT column_name FROM information_schema.columns WHERE table_name='X'`
@@ -102,10 +118,8 @@ if needed:
    (split into chunks if >60KB)
 8. Verify with `SELECT count(*) FROM page_layouts WHERE page_layout_object='X' AND is_deleted=false`
 
-## Resuming
+## Resuming in a fresh session
 
-In a fresh session, copy these files from this folder back to /home/claude:
-```bash
-cp /path/to/anura/tools/sf-import/*.py /home/claude/
-```
-Then refetch SF metadata to /home/claude/sf_metadata/ if needed.
+The translator scripts are committed to this folder. Refetch SF metadata to
+`/home/claude/sf_metadata/` if needed via Workbench, copy translator files to
+`/home/claude/`, then proceed per the workflow above.
