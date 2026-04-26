@@ -22,6 +22,7 @@ import {
   addJunctionRow,
   removeJunctionRow,
   applyInsertDefaults,
+  getRecordTypeValue,
 } from '../data/layoutService'
 
 // ---------------------------------------------------------------------------
@@ -1479,7 +1480,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       // Create mode: fetch layout + picklists only, no record.
       // If a record_type was pre-populated (via prefill or URL), use it to
       // select the record-type-specific layout. Otherwise falls back to master.
-      Promise.all([fetchPageLayout(tableName, prefill?.record_type ?? null), loadAllPicklists()])
+      Promise.all([fetchPageLayout(tableName, getRecordTypeValue(prefill)), loadAllPicklists()])
         .then(([layoutData, picklists]) => {
           if (cancelled) return
           setData({

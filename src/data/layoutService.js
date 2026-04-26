@@ -57,32 +57,69 @@ export async function getCurrentUserProfile() {
 }
 
 /**
+ * Extract the record-type value from a record (or prefill draft) regardless of
+ * column-naming convention. Anura business tables use a {prefix}_record_type
+ * column (e.g. property_record_type, account_record_type, ia_record_type) that
+ * holds a uuid FK to picklist_values.id; a few legacy tables still use a
+ * generic `record_type` text column. This finds the first matching key on
+ * the input and returns its value, or null if none is set.
+ */
+export function getRecordTypeValue(obj) {
+  if (!obj) return null
+  // Prefer a generic `record_type` if present (covers prefill paths and the
+  // small set of legacy text-typed tables), but fall through to any prefixed
+  // form. There is at most one record-type column per table by convention.
+  if ('record_type' in obj && obj.record_type != null && obj.record_type !== '') {
+    return obj.record_type
+  }
+  for (const key of Object.keys(obj)) {
+    if (key.endsWith('_record_type') && obj[key] != null && obj[key] !== '') {
+      return obj[key]
+    }
+  }
+  return null
+}
+
+// A canonical RFC 4122 uuid string. We use this to decide whether a value
+// passed into fetchPageLayout is already a picklist_values.id (uuid path)
+// or needs to be resolved through a name lookup (legacy text path).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
  * Fetch the page layout configuration for a given object.
  * Returns { layout, sections: [{ ...section, widgets: [...] }] }
+ *
+ * The `recordTypeValue` argument accepts either form:
+ *   • a uuid — used directly as the page_layouts.record_type_id (the
+ *     `{prefix}_record_type` columns on business tables ARE the
+ *     picklist_values.id, so no resolution is needed)
+ *   • a non-uuid string — resolved through picklist_values via
+ *     (picklist_object, picklist_field='record_type', picklist_value)
+ *     for the small set of legacy tables that still store text values
+ *
+ * If neither resolves, falls back to the master layout
+ * (record_type_id IS NULL).
  */
 export async function fetchPageLayout(objectName, recordTypeValue = null) {
-  // Resolution order:
-  //   1. If recordTypeValue is provided AND a layout exists with record_type_id
-  //      matching that picklist row → return it.
-  //   2. Otherwise return the master layout (record_type_id IS NULL).
-  //   3. If neither exists → return null (caller falls back to raw field render).
-  //
-  // We issue one query that pulls both the record-type-specific layout and
-  // the master at once, then pick the preferred one in JS. One round trip.
-
   // Step 1 — resolve the record_type_id if a value was supplied.
   let recordTypeId = null
   if (recordTypeValue != null && recordTypeValue !== '') {
-    const { data: rtRows, error: rtErr } = await supabase
-      .from('picklist_values')
-      .select('id')
-      .eq('picklist_object', objectName)
-      .eq('picklist_field', 'record_type')
-      .eq('picklist_value', recordTypeValue)
-      .eq('picklist_is_active', true)
-      .limit(1)
-    if (rtErr) throw rtErr
-    if (rtRows && rtRows.length > 0) recordTypeId = rtRows[0].id
+    if (UUID_RE.test(String(recordTypeValue))) {
+      // The value is already a picklist_values.id — use it directly.
+      recordTypeId = recordTypeValue
+    } else {
+      // Legacy text-value path: resolve via picklist_values lookup.
+      const { data: rtRows, error: rtErr } = await supabase
+        .from('picklist_values')
+        .select('id')
+        .eq('picklist_object', objectName)
+        .eq('picklist_field', 'record_type')
+        .eq('picklist_value', recordTypeValue)
+        .eq('picklist_is_active', true)
+        .limit(1)
+      if (rtErr) throw rtErr
+      if (rtRows && rtRows.length > 0) recordTypeId = rtRows[0].id
+    }
   }
 
   // Step 2 — fetch candidate layouts: the record-type-specific one (if any)
@@ -240,9 +277,9 @@ export async function loadRecordDetailData(tableName, recordId) {
     loadPicklists(),
   ])
 
-  // record_type is optional — tables without it yield `undefined`, which
-  // fetchPageLayout treats as null (master layout fallback).
-  const layoutData = await fetchPageLayout(tableName, record?.record_type ?? null)
+  // record_type is optional — tables without it yield null, which
+  // fetchPageLayout treats as a request for the master layout.
+  const layoutData = await fetchPageLayout(tableName, getRecordTypeValue(record))
 
   if (!layoutData) {
     return { record, layout: null, sections: [], picklists, lookups: new Map() }
