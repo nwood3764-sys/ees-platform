@@ -5,44 +5,42 @@ This directory holds the translator that converts Salesforce metadata XML
 
 ## Status
 
-DONE — 4 of 22 SF SObjects fully imported:
+DONE — 12 of 22 SF SObjects fully imported (production):
 - accounts (8 layouts, 132 fields, 32 new cols)
 - contacts (6 layouts, 203 fields, 41 new cols)
-- properties (5 layouts, 166 fields, 1 new col: property_market_type)
-- buildings (5 layouts, 150 fields, 0 new cols — already complete)
+- properties (5 layouts, 166 fields, 1 new col)
+- buildings (5 layouts, 150 fields, 0 new cols)
+- projects (7 layouts, 40 new cols)
+- gps_points (2 layouts, 7 new cols, prefix `gps_`)
+- work_steps (2 layouts, 1 new col)
+- time_sheets (3 layouts, 5 new cols)
+- occurrences (2 layouts, 14 new cols)
+- incentives (3 layouts, 16 new cols)
+- time_sheet_entries (4 layouts, 16 new cols)
+- equipment (3 layouts, 23 new cols)
 
-PARTIAL — opportunities (170 cols, 28 active SF record types):
-- 19 of 24 mappable layouts applied:
-  - Opportunity Layout (master fallback)
-  - Multifamily
-  - 45L Retroactive Tax Credit
-  - MFES-2023, MFES-2023-Equipment
-  - MFES-2024, MFES-2024-Equipment
-  - MFES-2025-Equipment
-  - MFES-Mechanical
-  - PACE-CO, PACE-IL, PACE-WI
-  - TAX-CREDIT-179D, TruTeam Illinois
-  - WI-IRA-FOE-SF-HOMES, WI-IRA-HEAR, WI-IRA-HOMES, WI-IRA-MF-HOMES-Audit, WI-IRA-SF-HOMES-AUDIT
-- 5 layouts pending (need fresh SF metadata refetch — pre-generated SQL not in repo):
-  - Denver-Audit, Denver-Building Electrification Rebates, Denver-EFR
-  - FOE-2024-WI, MFES-2022
-- 21 SF layouts SKIPPED (no matching active RT — retired utility programs):
-  Assessment, BHE-* (4 variants), HES-2022, IPL-MF-AH-BS, MEC-* (2),
-  Joint-MES, MFES-DI-2023, MF_IPL_ILAHP, Multifamily Affordable Housing,
-  Multifamily Infiltration, Nicor-* (3), Property Enrollment,
-  Property Qualification, Single Family, Infiltration Reduction Program
+ALTERS APPLIED, LAYOUTS PENDING (10 SObjects, 21 chunks staged in `generated/`):
+- equipment_activities (1 chunk, 7 layouts, 11 cols added)
+- vehicle_activities (1 chunk, 5 layouts, 23 cols added)
+- diagnostic_tests (1 chunk, 5 layouts, 40 cols added)
+- products (1 chunk, 4 layouts, 26 cols added)
+- mechanical_equipment (1 chunk, 8 layouts, 16 cols added)
+- efr_reports (1 chunk, 2 layouts, 119 cols added)
+- work_orders (2 chunks, 10 layouts, 32 cols added)
+- incentive_applications (2 chunks, 9 layouts, 96 cols added)
+- assessments (4 chunks, 12 layouts, 196 cols added)
+- opportunities (6 chunks, 24 layouts — DESTRUCTIVE replace; soft-deletes
+  current 9 then restores 24 from SF; all 6 chunks must apply same session)
 
-PENDING — 17 SObjects to go:
-1. Finish opportunities (5 remaining: Denver-Audit, Denver-BER, Denver-EFR, FOE-2024-WI, MFES-2022 — needs SF metadata refetch)
-2. projects (22 layouts) — column adds + layouts
-3. assessments, work_orders (15 + 15 layouts)
-4. equipment, equipment_activities, mechanical_equipment (5+7+8)
-5. vehicle_activities, diagnostic_tests (6+5)
-6. incentives, incentive_applications (3+9)
-7. time_sheets, time_sheet_entries (3+4)
-8. occurrences, gps_points, efr_reports, products, work_steps (~13 total)
+To resume: each pending table has an `_alter.sql` (already applied) and
+`_layouts_chunk_N.sql` files in `generated/`. Apply chunks in order via
+`Supabase:apply_migration` — don't read into context first if avoiding
+token bloat; just feed file content directly.
 
-## How the translator works
+Non-trivial gotcha: all chunks were generated before the `gps_points`
+prefix fix (`gps_point_` → `gps_`) and the gps chunk was hand-patched.
+Other tables' field references already match their alter prefixes — spot-
+check before applying any chunk if columns suddenly look wrong.
 
 `sf_layout_translator.py` — main module:
 - `SF_TO_ANURA_TABLE` / `ANURA_TO_SF_TABLE` — name mappings
