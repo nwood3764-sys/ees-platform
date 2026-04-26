@@ -1,0 +1,1 @@
+-- All SF Layout fields already exist as Anura columns for opportunities.

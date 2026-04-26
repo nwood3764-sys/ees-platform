@@ -64,7 +64,7 @@ PREFIX = {
     'time_sheets':             'ts_',
     'time_sheet_entries':      'tse_',
     'occurrences':             'occurrence_',
-    'gps_points':              'gps_point_',
+    'gps_points':              'gps_',
     'efr_reports':             'efr_',
     'products':                'product_',
     'work_steps':              'work_step_',

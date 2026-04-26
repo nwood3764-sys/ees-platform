@@ -1,0 +1,47 @@
+ALTER TABLE public.diagnostic_tests
+  ADD COLUMN IF NOT EXISTS diagnostic_afue_estimate                                numeric(3,1),
+  ADD COLUMN IF NOT EXISTS diagnostic_appliance_tested                             text,
+  ADD COLUMN IF NOT EXISTS diagnostic_assessment                                   uuid,
+  ADD COLUMN IF NOT EXISTS diagnostic_blower_door_test_type                        text,
+  ADD COLUMN IF NOT EXISTS diagnostic_building_sq_ft                               numeric(18,0),
+  ADD COLUMN IF NOT EXISTS diagnostic_building                                     uuid,
+  ADD COLUMN IF NOT EXISTS diagnostic_cfm_existing                                 numeric(7,2),
+  ADD COLUMN IF NOT EXISTS diagnostic_cfm_new                                      numeric(7,2),
+  ADD COLUMN IF NOT EXISTS diagnostic_capacity                                     numeric(18,0),
+  ADD COLUMN IF NOT EXISTS diagnostic_condition_of_appliance                       text,
+  ADD COLUMN IF NOT EXISTS diagnostic_date_of_diagnostic_test                      date,
+  ADD COLUMN IF NOT EXISTS diagnostic_ee_measure                                   uuid,
+  ADD COLUMN IF NOT EXISTS diagnostic_efficiency_estimated                         numeric(3,1),
+  ADD COLUMN IF NOT EXISTS diagnostic_existing_pressure_pa                         numeric(7,2),
+  ADD COLUMN IF NOT EXISTS diagnostic_image_of_appliance_combustion_analysis       text,
+  ADD COLUMN IF NOT EXISTS diagnostic_image_of_appliance_nameplate                 text,
+  ADD COLUMN IF NOT EXISTS diagnostic_location_of_blower_door                      text,
+  ADD COLUMN IF NOT EXISTS diagnostic_location_of_exhaust_fan                      text,
+  ADD COLUMN IF NOT EXISTS diagnostic_manufacture                                  text,
+  ADD COLUMN IF NOT EXISTS diagnostic_model_number                                 text,
+  ADD COLUMN IF NOT EXISTS diagnostic_new_pressure_pa                              numeric(7,2),
+  ADD COLUMN IF NOT EXISTS diagnostic_opportunity                                  uuid,
+  ADD COLUMN IF NOT EXISTS diagnostic_post_ach50                                   numeric(18,2),
+  ADD COLUMN IF NOT EXISTS diagnostic_post_blower_door_cfm                         integer,
+  ADD COLUMN IF NOT EXISTS diagnostic_post_combustion_analysis_co                  integer,
+  ADD COLUMN IF NOT EXISTS diagnostic_post_combustion_efficiency                   numeric(3,1),
+  ADD COLUMN IF NOT EXISTS diagnostic_pre_ach50                                    numeric(18,2),
+  ADD COLUMN IF NOT EXISTS diagnostic_pre_blower_door_cfm                          integer,
+  ADD COLUMN IF NOT EXISTS diagnostic_pre_combustion_analysis_co                   numeric(3,1),
+  ADD COLUMN IF NOT EXISTS diagnostic_pre_combustion_efficiency                    numeric(3,1),
+  ADD COLUMN IF NOT EXISTS diagnostic_project                                      uuid,
+  ADD COLUMN IF NOT EXISTS diagnostic_property                                     text,
+  ADD COLUMN IF NOT EXISTS diagnostic_rated_afue                                   numeric(3,1),
+  ADD COLUMN IF NOT EXISTS diagnostic_rated_efficiency                             numeric(3,1),
+  ADD COLUMN IF NOT EXISTS diagnostic_square_feet_tested                           numeric(12,0),
+  ADD COLUMN IF NOT EXISTS diagnostic_stories_of_building                          numeric(18,0),
+  ADD COLUMN IF NOT EXISTS diagnostic_technician                                   uuid,
+  ADD COLUMN IF NOT EXISTS diagnostic_test_notes                                   text,
+  ADD COLUMN IF NOT EXISTS diagnostic_unit                                         uuid,
+  ADD COLUMN IF NOT EXISTS diagnostic_volume_tested                                numeric(18,0);
+COMMENT ON COLUMN public.diagnostic_tests.diagnostic_building_sq_ft IS 'SF formula/rollup field. Populated by future trigger or view.';
+COMMENT ON COLUMN public.diagnostic_tests.diagnostic_post_ach50 IS 'SF formula/rollup field. Populated by future trigger or view.';
+COMMENT ON COLUMN public.diagnostic_tests.diagnostic_pre_ach50 IS 'SF formula/rollup field. Populated by future trigger or view.';
+COMMENT ON COLUMN public.diagnostic_tests.diagnostic_property IS 'SF formula/rollup field. Populated by future trigger or view.';
+COMMENT ON COLUMN public.diagnostic_tests.diagnostic_stories_of_building IS 'SF formula/rollup field. Populated by future trigger or view.';
+COMMENT ON COLUMN public.diagnostic_tests.diagnostic_volume_tested IS 'SF formula/rollup field. Populated by future trigger or view.';

@@ -1,0 +1,17 @@
+ALTER TABLE public.mechanical_equipment
+  ADD COLUMN IF NOT EXISTS me_ahri_certified_ratings_hspf2_region_i                numeric(18,2),
+  ADD COLUMN IF NOT EXISTS me_connectible_system                                   uuid,
+  ADD COLUMN IF NOT EXISTS me_cooling_capacity_95_f                                numeric(18,0),
+  ADD COLUMN IF NOT EXISTS me_equipment_manufacture                                text,
+  ADD COLUMN IF NOT EXISTS me_equipment_model_number                               text,
+  ADD COLUMN IF NOT EXISTS me_equipment_serial_number                              text,
+  ADD COLUMN IF NOT EXISTS me_equipment_year_of_manufacture                        text,
+  ADD COLUMN IF NOT EXISTS me_heat_pump_cooling_eer2                               numeric(18,2),
+  ADD COLUMN IF NOT EXISTS me_heat_pump_cooling_seer2                              numeric(18,2),
+  ADD COLUMN IF NOT EXISTS me_heat_pump_cop_at_17_f                                numeric(18,2),
+  ADD COLUMN IF NOT EXISTS me_heat_pump_cop_at_47_f                                numeric(18,2),
+  ADD COLUMN IF NOT EXISTS me_heating_cop_5_f                                      numeric(18,2),
+  ADD COLUMN IF NOT EXISTS me_heating_capacity_17_f                                numeric(18,0),
+  ADD COLUMN IF NOT EXISTS me_heating_capacity_47_f                                numeric(18,0),
+  ADD COLUMN IF NOT EXISTS me_heating_capacity_5_f                                 numeric(18,0),
+  ADD COLUMN IF NOT EXISTS me_neep_or_ahri_cold_climate_certified                  text;
