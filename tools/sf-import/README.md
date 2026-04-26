@@ -12,15 +12,25 @@ DONE — 4 of 22 SF SObjects fully imported:
 - buildings (5 layouts, 150 fields, 0 new cols — already complete)
 
 PARTIAL — opportunities (170 cols, 28 active SF record types):
-- 3 of 24 mappable layouts applied:
+- 9 of 24 mappable layouts applied:
   - Opportunity Layout (master fallback)
   - Multifamily
   - 45L Retroactive Tax Credit
-- 21 layouts pending — see `pending-opportunities-batch-{2,3,4}.sql`
-  - batch-2: MFES-2023, MFES-2023-Equipment, MFES-2024, MFES-2024-Equipment, MFES-2025-Equipment, MFES-Mechanical
-  - batch-3: PACE-CO, PACE-IL, PACE-WI, TAX-CREDIT-179D (and dup Multifamily, Opportunity Layout — skip those)
-  - batch-4: TruTeam Illinois, WI-IRA-FOE-SF-HOMES, WI-IRA-HEAR, WI-IRA-HOMES, WI-IRA-MF-HOMES-Audit, WI-IRA-SF-HOMES-AUDIT
-  - Missing from staged batches: Denver-Audit, Denver-Building Electrification Rebates, Denver-EFR, FOE-2024-WI, MFES-2022 — regenerate via runner.py
+  - MFES-2023, MFES-2023-Equipment
+  - MFES-2024, MFES-2024-Equipment
+  - MFES-2025-Equipment
+  - MFES-Mechanical
+- 15 layouts pending:
+  - PACE-CO, PACE-IL, PACE-WI
+  - TAX-CREDIT-179D, TruTeam Illinois
+  - WI-IRA-FOE-SF-HOMES, WI-IRA-HEAR, WI-IRA-HOMES, WI-IRA-MF-HOMES-Audit, WI-IRA-SF-HOMES-AUDIT
+  - Denver-Audit, Denver-Building Electrification Rebates, Denver-EFR
+  - FOE-2024-WI, MFES-2022
+- 21 SF layouts SKIPPED (no matching active RT — retired utility programs):
+  Assessment, BHE-* (4 variants), HES-2022, IPL-MF-AH-BS, MEC-* (2),
+  Joint-MES, MFES-DI-2023, MF_IPL_ILAHP, Multifamily Affordable Housing,
+  Multifamily Infiltration, Nicor-* (3), Property Enrollment,
+  Property Qualification, Single Family, Infiltration Reduction Program
 
 PENDING — 17 SObjects to go:
 1. Finish opportunities (apply pending batches; regenerate Denver/FOE/MFES-2022)
