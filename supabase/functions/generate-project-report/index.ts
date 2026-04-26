@@ -1,6 +1,9 @@
 // =============================================================================
 // generate-project-report
 //
+// Two modes, dispatched by `preview` in the request body.
+//
+// ── Generate mode (default) ───────────────────────────────────────────────
 // Reads a project + its full work-order/work-step/photo chain, walks the
 // project_report_templates → project_report_template_sections rows, and
 // renders the report as a PDF. Uploads the PDF to property-documents and
@@ -13,8 +16,21 @@
 //      and prtrta_is_default = true
 //   3. PRT row with prt_is_default_for_unmapped = true (the seeded fallback)
 //
-// Renderer support (Phase 1): cover_page, project_summary,
-// work_orders_overview, work_order_section, footer. Other section types
+// Active-only status gate: only PRTs with prt_status = "Active" can generate
+// real reports. Drafts and Archived templates are rejected with a 400.
+//
+// ── Preview mode (preview: true) ──────────────────────────────────────────
+// Renders the same PDF against a synthetic in-memory project graph. No
+// project is read from the DB, no documents row is created, no storage
+// upload happens — the PDF is returned as a binary `application/pdf`
+// response so the browser can open it in a new tab.
+//
+// Preview requires `prt_id` (the template being previewed) but not
+// `project_id`. The Active-only status gate is bypassed so authors can
+// preview Draft and Archived templates while iterating.
+//
+// Renderer support: cover_page, project_summary, work_orders_overview,
+// work_order_section, custom_text, page_break, footer. Other section types
 // render a placeholder "[Section: <type> — not yet supported]" line so a
 // template authored in the Phase 2 Builder UI doesn't silently drop content.
 //
@@ -718,6 +734,24 @@ async function loadAllPicklists(client: SupabaseClient): Promise<Map<string, Pic
   return map
 }
 
+// Find a picklist row by its (object, field, value) triple. Returns the row's
+// id, or null if no row matches. Used by the preview-mode synthetic graph to
+// pick realistic status / record_type UUIDs so the rendered PDF shows real
+// labels ("Project Scheduled") instead of dashes.
+function findPicklistIdByValue(
+  map: Map<string, Picklist>,
+  object: string,
+  field: string,
+  value: string,
+): string | null {
+  for (const row of map.values()) {
+    if (row.picklist_object === object && row.picklist_field === field && row.picklist_value === value) {
+      return row.id
+    }
+  }
+  return null
+}
+
 async function loadUserNames(client: SupabaseClient, userIds: string[]): Promise<Map<string, string>> {
   const ids = Array.from(new Set(userIds.filter(Boolean)))
   const map = new Map<string, string>()
@@ -817,6 +851,134 @@ async function loadProjectGraph(client: SupabaseClient, projectId: string) {
   return { project: project as Project, property, account, workOrders: (workOrders as WorkOrder[]) || [], workStepsByWO, photosByStep, photosByWO }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Synthetic project graph for preview mode.
+//
+// Returns the same shape as loadProjectGraph but assembled in-memory from
+// hard-coded fixture data. Status and record_type fields are resolved to
+// real picklist UUIDs from the loaded picklist map so the rendered labels
+// look like a real report; if a picklist value can't be found (e.g. the
+// expected seed row was renamed), the field falls back to null and the
+// renderer shows "—".
+//
+// The synthetic graph deliberately includes no photos. tryEmbedPhoto would
+// fail to resolve fake storage paths and render "[image unavailable]"
+// placeholders everywhere, which gives false-negative previews. Authors
+// who need to validate photo embedding should run a real Generate Report
+// against a real project that has photos.
+// ───────────────────────────────────────────────────────────────────────────
+
+function buildSyntheticGraph(picklistById: Map<string, Picklist>, callerUserId: string | null) {
+  const previewProjectId      = "00000000-0000-0000-0000-000000000001"
+  const previewPropertyId     = "00000000-0000-0000-0000-000000000002"
+  const previewAccountId      = "00000000-0000-0000-0000-000000000003"
+  const previewWorkOrder1Id   = "00000000-0000-0000-0000-000000000010"
+  const previewWorkOrder2Id   = "00000000-0000-0000-0000-000000000011"
+
+  // Resolve picklist UUIDs by their machine value. If a value isn't seeded
+  // we fall back to null and the renderer prints "—" — preview still works,
+  // just with a couple of empty status cells.
+  const projectStatus     = findPicklistIdByValue(picklistById, "projects",    "project_status",    "Project Scheduled")
+  const projectRecordType = findPicklistIdByValue(picklistById, "projects",    "record_type",       "Single_Family")
+  const woStatus          = findPicklistIdByValue(picklistById, "work_orders", "work_order_status", "Scheduled")
+  const woRecordType      = findPicklistIdByValue(picklistById, "work_orders", "record_type",       "General")
+  const wsStatusDone      = findPicklistIdByValue(picklistById, "work_steps",  "work_step_status",  "Completed")
+  const wsStatusPending   = findPicklistIdByValue(picklistById, "work_steps",  "work_step_status",  "New")
+
+  const project: Project = {
+    id: previewProjectId,
+    project_record_number: "PROJ-PREVIEW",
+    project_name: "Sample Project for Preview",
+    project_record_type: projectRecordType,
+    project_status: projectStatus,
+    project_owner: callerUserId,
+    property_id: previewPropertyId,
+    project_account_id: previewAccountId,
+  }
+
+  const property = {
+    id: previewPropertyId,
+    property_name: "Sample Multifamily Property",
+    property_address_line_1: "3218 Progress Rd",
+    property_address_line_2: null,
+    property_city: "Madison",
+    property_state: "WI",
+    property_postal_code: "53716",
+  }
+
+  const account = {
+    id: previewAccountId,
+    account_name: "Sample Property Owner LLC",
+  }
+
+  const workOrders: WorkOrder[] = [
+    {
+      id: previewWorkOrder1Id,
+      work_order_record_number: "WO-PREVIEW-1",
+      work_order_name: "Heat Pump Install — Building A, Unit 101",
+      work_order_status: woStatus,
+      work_order_record_type: woRecordType,
+      work_type_id: null,
+      project_id: previewProjectId,
+    },
+    {
+      id: previewWorkOrder2Id,
+      work_order_record_number: "WO-PREVIEW-2",
+      work_order_name: "Insulation & Air Sealing — Building A, Unit 101",
+      work_order_status: woStatus,
+      work_order_record_type: woRecordType,
+      work_type_id: null,
+      project_id: previewProjectId,
+    },
+  ]
+
+  const mkStep = (
+    woId: string, idx: number, name: string, description: string, statusId: string | null,
+  ): WorkStep => ({
+    id: `${woId.slice(0, 28)}${String(100 + idx).padStart(8, "0")}`,
+    work_step_record_number: `WS-PREVIEW-${woId.endsWith("10") ? "1" : "2"}-${idx}`,
+    work_step_name: name,
+    work_step_description: description,
+    work_step_status: statusId,
+    work_step_execution_order: idx,
+    work_step_plan_execution_order: idx,
+    work_step_start_time: null,
+    work_step_end_time: null,
+    work_step_owner: callerUserId,
+    work_order_id: woId,
+  })
+
+  const workStepsByWO = new Map<string, WorkStep[]>()
+  workStepsByWO.set(previewWorkOrder1Id, [
+    mkStep(previewWorkOrder1Id, 1, "Pre-install site verification",
+      "Confirm panel capacity, refrigerant line route, and condensate drain path before staging equipment.",
+      wsStatusDone),
+    mkStep(previewWorkOrder1Id, 2, "Outdoor unit set & line set run",
+      "Set outdoor unit on pad, route line set through wall penetration, seal and insulate.",
+      wsStatusDone),
+    mkStep(previewWorkOrder1Id, 3, "Indoor head install & commissioning",
+      "Mount indoor head, connect line set + control wire, evacuate, charge, and run startup test.",
+      wsStatusPending),
+  ])
+  workStepsByWO.set(previewWorkOrder2Id, [
+    mkStep(previewWorkOrder2Id, 1, "Pre-work blower door test",
+      "Baseline ACH50 reading recorded. Confirm test conditions and tape readings to job folder.",
+      wsStatusDone),
+    mkStep(previewWorkOrder2Id, 2, "Air sealing — attic & rim joist",
+      "Seal top plates, plumbing/wire penetrations, and rim joist with two-part foam.",
+      wsStatusDone),
+    mkStep(previewWorkOrder2Id, 3, "Dense-pack cellulose to attic",
+      "Blow attic insulation to R-60. Verify depth markers at 4 corners + center.",
+      wsStatusPending),
+  ])
+
+  // No photos in preview — see comment block above.
+  const photosByStep = new Map<string, Photo[]>()
+  const photosByWO   = new Map<string, Photo[]>()
+
+  return { project, property, account, workOrders, workStepsByWO, photosByStep, photosByWO }
+}
+
 async function resolveTemplate(client: SupabaseClient, project: Project, explicitPrtId?: string): Promise<{ prt: PRT, sections: PRTS[] }> {
   let prt: PRT | null = null
   if (explicitPrtId) {
@@ -844,6 +1006,30 @@ async function resolveTemplate(client: SupabaseClient, project: Project, explici
     prt = r.data as PRT | null
   }
   if (!prt) throw new Error("No project report template available — admin must seed at least one PRT with prt_is_default_for_unmapped=true.")
+
+  const sr = await client.from("project_report_template_sections").select("*")
+    .eq("prt_id", prt.id).eq("prts_is_deleted", false)
+    .order("prts_section_order", { ascending: true })
+  if (sr.error) throw new Error(`PRT sections load failed: ${sr.error.message}`)
+
+  const picklistMap = await loadAllPicklists(client)
+  const sections: PRTS[] = (sr.data || []).map((s: any) => ({
+    ...s,
+    section_type_value: picklistMap.get(s.prts_section_type)?.picklist_value || "unknown",
+  }))
+  return { prt, sections }
+}
+
+// Preview-mode template loader. Loads strictly by prt_id without any
+// assignment-cascade or unmapped-default fallback — preview is always
+// previewing one specific template, period. Throws a clear error if the
+// template is missing or soft-deleted.
+async function resolveTemplateById(client: SupabaseClient, prtId: string): Promise<{ prt: PRT, sections: PRTS[] }> {
+  const r = await client.from("project_report_templates").select("*")
+    .eq("id", prtId).eq("prt_is_deleted", false).maybeSingle()
+  if (r.error) throw new Error(`PRT lookup failed: ${r.error.message}`)
+  const prt = r.data as PRT | null
+  if (!prt) throw new Error(`Template ${prtId} not found (or has been deleted).`)
 
   const sr = await client.from("project_report_template_sections").select("*")
     .eq("prt_id", prt.id).eq("prts_is_deleted", false)
@@ -902,12 +1088,22 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json()
+    const previewMode: boolean = body?.preview === true
     const projectId: string | undefined = body?.project_id
     const explicitPrtId: string | undefined = body?.prt_id
     const watermarkChoice: "watermarked" | "original" =
       body?.use_watermarked === false ? "original" : "watermarked"
 
-    if (!projectId) return jsonResponse({ error: "project_id is required" }, 400)
+    // Per-mode argument validation. Preview mode requires prt_id (we're
+    // previewing a specific template, server-side template resolution from
+    // a project doesn't apply). Generate mode requires project_id.
+    if (previewMode) {
+      if (!explicitPrtId) {
+        return jsonResponse({ error: "prt_id is required when preview=true" }, 400)
+      }
+    } else {
+      if (!projectId) return jsonResponse({ error: "project_id is required" }, 400)
+    }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
@@ -932,24 +1128,56 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const { project, property, account, workOrders, workStepsByWO, photosByStep, photosByWO } =
-      await loadProjectGraph(client, projectId)
-
-    const { prt, sections } = await resolveTemplate(client, project, explicitPrtId)
-
     const picklistById = await loadAllPicklists(client)
 
-    // Status gate — only Active templates can be used for generation. Drafts
-    // are unpublished and may have unresolved issues; Archived templates are
-    // retired and shouldn't be used. Surface a clear, user-friendly message
-    // so the UI can show it in the modal.
-    const prtStatusValue = prt.prt_status ? picklistById.get(prt.prt_status)?.picklist_value : null
-    if (prtStatusValue !== "Active") {
-      const label = prt.prt_record_number || prt.prt_name || "template"
-      const statusLabel = prtStatusValue || "unknown"
-      return jsonResponse({
-        error: `${label} is in ${statusLabel} status. Only Active (published) templates can generate reports — publish the template first, or pick a different one.`,
-      }, 400)
+    // ── Project graph: real or synthetic ────────────────────────────────
+    let project: Project, property: any, account: any
+    let workOrders: WorkOrder[]
+    let workStepsByWO: Map<string, WorkStep[]>
+    let photosByStep: Map<string, Photo[]>
+    let photosByWO: Map<string, Photo[]>
+
+    if (previewMode) {
+      const synthetic = buildSyntheticGraph(picklistById, userId)
+      project       = synthetic.project
+      property      = synthetic.property
+      account       = synthetic.account
+      workOrders    = synthetic.workOrders
+      workStepsByWO = synthetic.workStepsByWO
+      photosByStep  = synthetic.photosByStep
+      photosByWO    = synthetic.photosByWO
+    } else {
+      const real = await loadProjectGraph(client, projectId!)
+      project       = real.project
+      property      = real.property
+      account       = real.account
+      workOrders    = real.workOrders
+      workStepsByWO = real.workStepsByWO
+      photosByStep  = real.photosByStep
+      photosByWO    = real.photosByWO
+    }
+
+    // ── Template resolution ─────────────────────────────────────────────
+    // Preview mode always uses the explicit prt_id (validated above) and
+    // skips the record-type assignment / unmapped-default cascade — the
+    // user is looking at a specific PRT and wants to see THAT PRT render.
+    const { prt, sections } = previewMode
+      ? await resolveTemplateById(client, explicitPrtId!)
+      : await resolveTemplate(client, project, explicitPrtId)
+
+    // Status gate — only Active templates can be used for real generation.
+    // Drafts are unpublished and may have unresolved issues; Archived
+    // templates are retired. Preview mode bypasses this gate so authors can
+    // see what a Draft renders to before publishing.
+    if (!previewMode) {
+      const prtStatusValue = prt.prt_status ? picklistById.get(prt.prt_status)?.picklist_value : null
+      if (prtStatusValue !== "Active") {
+        const label = prt.prt_record_number || prt.prt_name || "template"
+        const statusLabel = prtStatusValue || "unknown"
+        return jsonResponse({
+          error: `${label} is in ${statusLabel} status. Only Active (published) templates can generate reports — publish the template first, or pick a different one.`,
+        }, 400)
+      }
     }
 
     // User-name map: project_owner + step_owner + photo.taken_by
@@ -985,14 +1213,33 @@ Deno.serve(async (req: Request) => {
     const footer = sections.find((s) => s.section_type_value === "footer")
     if (footer) await renderFooter(ctx, footer)
 
-    pdf.setTitle(`${project.project_record_number || ""} ${project.project_name || "Project Report"}`.trim())
+    const titlePrefix = previewMode ? "PREVIEW — " : ""
+    pdf.setTitle(`${titlePrefix}${project.project_record_number || ""} ${project.project_name || "Project Report"}`.trim())
     pdf.setProducer("Anura")
-    pdf.setCreator(`Anura • ${prt.prt_name} (${prt.prt_record_number} v${prt.prt_version})`)
+    pdf.setCreator(`Anura • ${prt.prt_name} (${prt.prt_record_number} v${prt.prt_version})${previewMode ? " • PREVIEW" : ""}`)
     pdf.setCreationDate(ctx.generatedAt)
 
     const pdfBytes = await pdf.save()
 
-    // Upload to property-documents
+    // ── Preview short-circuit: return binary PDF, no upload, no DB write ─
+    if (previewMode) {
+      const datePart = ctx.generatedAt.toISOString().slice(0, 10)
+      const previewFileName = `${prt.prt_record_number || "template"}_preview_${datePart}.pdf`
+      return new Response(pdfBytes, {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${previewFileName}"`,
+          "X-Anura-Mode": "preview",
+          "X-Anura-Prt-Id": prt.id,
+          "X-Anura-Prt-Version": String(prt.prt_version),
+          "X-Anura-Page-Count": String(cur.pages.length),
+        },
+      })
+    }
+
+    // ── Generate mode: upload + insert documents row ────────────────────
     const docId = crypto.randomUUID()
     const fileNameBase = (project.project_record_number || project.id).replace(/[^A-Za-z0-9_\-]/g, "_")
     const datePart = ctx.generatedAt.toISOString().slice(0, 10)

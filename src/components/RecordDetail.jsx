@@ -1869,6 +1869,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // clone_project_report_template RPC to copy the PRT plus all PRTS rows
   // atomically; lands the user on the new clone via onNavigateToRecord.
   const [cloningTemplate, setCloningTemplate] = useState(false)
+  const [previewingPdf, setPreviewingPdf] = useState(false)
   // Publish/unpublish/archive/restore in flight — disables status buttons
   // and shows a 'wait' cursor while the RPC is round-tripping.
   const [statusChanging, setStatusChanging] = useState(false)
@@ -2076,6 +2077,77 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const handleUnpublish = useCallback(() => runStatusRpc('unpublish_project_report_template', 'Unpublished — back to Draft'), [runStatusRpc])
   const handleArchive   = useCallback(() => runStatusRpc('archive_project_report_template',   'Archived'),                    [runStatusRpc])
   const handleRestore   = useCallback(() => runStatusRpc('restore_project_report_template',   'Restored to Draft'),           [runStatusRpc])
+
+  // ─── Preview PDF (project_report_templates only) ──────────────────────────
+  // Renders the template against a synthetic in-memory project graph and
+  // opens the resulting PDF in a new browser tab. Bypasses the Active-only
+  // status gate, so authors can preview Drafts and Archived templates while
+  // iterating. No documents row is created and no storage upload happens —
+  // the edge function returns the PDF binary directly.
+  //
+  // We can't use `supabase.functions.invoke()` here because supabase-js
+  // assumes a JSON response — for a binary PDF we need raw fetch + blob.
+  const handlePreviewPdf = useCallback(async () => {
+    if (previewingPdf) return
+    if (tableName !== 'project_report_templates') return
+    setPreviewingPdf(true)
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error('Supabase is not configured (missing env vars).')
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData?.session?.access_token
+      if (!accessToken) throw new Error('Not signed in — please refresh and log in.')
+
+      const resp = await fetch(`${supabaseUrl}/functions/v1/generate-project-report`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': supabaseAnonKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ preview: true, prt_id: recordId }),
+      })
+
+      if (!resp.ok) {
+        // Edge function returns JSON for errors and PDF binary for success.
+        let detail = `HTTP ${resp.status}`
+        try {
+          const j = await resp.json()
+          if (j?.error) detail = j.error
+        } catch { /* response wasn't JSON, keep HTTP code */ }
+        throw new Error(detail)
+      }
+
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      // Open in a new tab. Browsers with PDF viewers will render inline; the
+      // rest will trigger a download. We deliberately don't revoke the URL
+      // immediately — Safari needs the URL to remain valid while the new tab
+      // is loading. Browsers clean these up on page unload.
+      const win = window.open(url, '_blank', 'noopener,noreferrer')
+      if (!win) {
+        // Pop-up blocked — fall back to triggering a download.
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${data?.record?.prt_record_number || 'template'}_preview.pdf`
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        toast.success('Preview downloaded — pop-ups are blocked.')
+      } else {
+        const pageCount = resp.headers.get('X-Anura-Page-Count')
+        toast.success(pageCount ? `Preview opened — ${pageCount} pages` : 'Preview opened')
+      }
+    } catch (err) {
+      toast.error(`Preview failed — ${err.message || String(err)}`)
+    } finally {
+      setPreviewingPdf(false)
+    }
+  }, [previewingPdf, tableName, recordId, data, toast])
 
   const handleSave = async () => {
     setSaving(true)
@@ -2359,6 +2431,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 )}
                 {tableName === 'project_report_templates' && (
                   <button
+                    onClick={handlePreviewPdf}
+                    disabled={previewingPdf}
+                    aria-label="Preview PDF"
+                    title="Preview PDF (sample data)"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: previewingPdf ? 'wait' : 'pointer', color: '#0369a1',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44, opacity: previewingPdf ? 0.6 : 1,
+                    }}
+                  >
+                    <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" size={18} color="currentColor" />
+                  </button>
+                )}
+                {tableName === 'project_report_templates' && (
+                  <button
                     onClick={handleCloneTemplate}
                     disabled={cloningTemplate}
                     aria-label="Clone Template"
@@ -2502,6 +2590,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   >
                     <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={13} color={C.emerald} />
                     Generate Report
+                  </button>
+                )}
+                {tableName === 'project_report_templates' && (
+                  <button
+                    onClick={handlePreviewPdf}
+                    disabled={previewingPdf}
+                    title="Render this template against sample data and open the PDF in a new tab — works in any status, doesn't save anything"
+                    style={{ background: previewingPdf ? '#e0f2fe' : C.page, color: '#0369a1', border: `1px solid #bae6fd`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: previewingPdf ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: previewingPdf ? 0.85 : 1 }}
+                    onMouseEnter={(e) => { if (!previewingPdf) e.currentTarget.style.background = '#f0f9ff' }}
+                    onMouseLeave={(e) => { if (!previewingPdf) e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" size={13} color="#0369a1" />
+                    {previewingPdf ? 'Rendering…' : 'Preview PDF'}
                   </button>
                 )}
                 {tableName === 'project_report_templates' && (
