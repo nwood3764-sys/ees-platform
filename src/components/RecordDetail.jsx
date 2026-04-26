@@ -4,6 +4,7 @@ import { Badge, Icon } from './UI'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
 import ActivityTimeline from './ActivityTimeline'
+import FileGalleryWidget from './FileGallery'
 import {
   loadRecordDetailData,
   saveRecord,
@@ -223,19 +224,19 @@ function validateBeforeSave(tableName, fields, evidenceLabelById) {
 }
 
 // Build the ordered list of tab names from the loaded sections.
-// Details first, Related second (if any section has related_list widgets),
-// Activity third (always shown on existing records), then any custom tabs
-// alphabetical after.
+// Details first, Related second (if any section has related_list or
+// file_gallery widgets), Activity third (always shown on existing records),
+// then any custom tabs alphabetical after.
 function buildOrderedTabs(sections, { includeActivity = true } = {}) {
   const names = new Set()
-  let hasRelatedList = false
+  let hasRelated = false
   for (const sec of sections || []) {
     names.add(sec.section_tab || 'Details')
-    if ((sec.widgets || []).some(w => w.widget_type === 'related_list')) {
-      hasRelatedList = true
+    if ((sec.widgets || []).some(w => w.widget_type === 'related_list' || w.widget_type === 'file_gallery')) {
+      hasRelated = true
     }
   }
-  if (hasRelatedList) names.add('Related')
+  if (hasRelated) names.add('Related')
   if (includeActivity) names.add('Activity')
   const rank = (t) => t === 'Details' ? 0 : t === 'Related' ? 1 : t === 'Activity' ? 2 : 3
   return [...names].sort((a, b) => {
@@ -2063,6 +2064,21 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   console.error('Related list refresh failed', err)
                 }
               }}
+            />
+          ))}
+
+        {/* File galleries — photos and documents widgets. Self-contained:
+            each widget loads its own data, owns its own upload/delete UI,
+            and refreshes after mutations without going back through the
+            page-layout loader. */}
+        {!isInsertMode && activeTab === 'Related' && sections
+          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'file_gallery'))
+          .map(w => (
+            <FileGalleryWidget
+              key={w.id}
+              widget={w}
+              parentTable={tableName}
+              parentRecordId={recordId}
             />
           ))}
 

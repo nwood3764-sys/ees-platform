@@ -16,16 +16,48 @@ import {
 // immediately open the appropriate contents editor.
 // ---------------------------------------------------------------------------
 
+// Each picker entry maps a UI choice to a row in page_layout_widgets:
+//   widgetType   → widget_type column value
+//   config       → widget_config default (already in DB-shape — no transform)
+//   placeholder  → suggested title for the input
+//
+// Field Group and Related List are the foundational widget types; Photos
+// and Documents are the file_gallery widget specialised by config.target.
+// They share a widget_type so the renderer in RecordDetail dispatches on
+// config.target rather than a separate widget_type per surface.
 const WIDGET_TYPES = [
   {
     value: 'field_group',
+    widgetType: 'field_group',
+    config: {},
     label: 'Field Group',
     hint: 'A set of fields from this object arranged in a grid.',
+    placeholder: 'e.g. Basic Information',
   },
   {
     value: 'related_list',
+    widgetType: 'related_list',
+    config: {},
     label: 'Related List',
     hint: 'Rows from a child table joined by a foreign key.',
+    placeholder: 'e.g. Related Buildings',
+  },
+  {
+    value: 'photos',
+    widgetType: 'file_gallery',
+    config: { target: 'photos', photo_type: 'general', apply_watermark: true },
+    label: 'Photos',
+    hint: 'Photo grid with camera capture and watermarking. ' +
+          'Only valid on Work Orders, Work Steps, and Vehicle Inspections.',
+    placeholder: 'e.g. Site Photos',
+  },
+  {
+    value: 'documents',
+    widgetType: 'file_gallery',
+    config: { target: 'documents', document_type: 'attachment' },
+    label: 'Documents',
+    hint: 'File list for PDFs, spreadsheets, signed forms, and other attachments.',
+    placeholder: 'e.g. Documents',
   },
 ]
 
@@ -54,13 +86,14 @@ export default function AddWidgetModal({
 
   async function submit() {
     if (!title.trim()) { setError('Title is required'); return }
+    const choice = WIDGET_TYPES.find(wt => wt.value === type) || WIDGET_TYPES[0]
     setBusy(true)
     setError(null)
     try {
       const widget = await createWidget(sectionId, {
-        type,
-        title: title.trim(),
-        config: {},
+        type:   choice.widgetType,
+        title:  title.trim(),
+        config: { ...choice.config },
       })
       toast.success(`Added "${title.trim()}" — configure its contents next`)
       onCreated(widget)
@@ -126,7 +159,7 @@ export default function AddWidgetModal({
             value={title}
             onChange={e => setTitle(e.target.value)}
             disabled={busy}
-            placeholder={type === 'field_group' ? 'e.g. Basic Information' : 'e.g. Related Buildings'}
+            placeholder={(WIDGET_TYPES.find(wt => wt.value === type) || WIDGET_TYPES[0]).placeholder}
             style={inputStyle}
             onKeyDown={e => { if (e.key === 'Enter' && title.trim()) submit() }}
           />
