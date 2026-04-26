@@ -13,6 +13,7 @@ import {
   fetchAllPageLayouts,
   fetchWorkPlanTemplates,
   fetchWorkStepTemplates,
+  fetchProjectReportTemplates,
   fetchSkills,
   fetchWorkTypeSkillRequirements,
 } from '../../data/adminService'
@@ -320,6 +321,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'work_types':        return <NodePage title="Work Types"              table="work_types"        fetcher={fetchWorkTypes}         columns={WT_COLS}             newLabel="Work Type"        onOpenRecord={onOpenRecord} />
     case 'work_plan_templates': return <WorkPlanTemplatesPane onOpenRecord={onOpenRecord} />
     case 'work_step_templates': return <NodePage title="Work Step Templates"   table="work_step_templates" fetcher={fetchWorkStepTemplates} columns={WST_COLS}            newLabel="Work Step Template" onOpenRecord={onOpenRecord} />
+    case 'project_report_templates': return <NodePage title="Project Report Templates" table="project_report_templates" fetcher={fetchProjectReportTemplates} columns={PRT_COLS} newLabel="Project Report Template" onOpenRecord={onOpenRecord} />
     case 'service_territories': return <ComingSoonPane label="Service Territories" />
     case 'skills':              return <NodePage title="Skills"                  table="skills"                       fetcher={fetchSkills}                       columns={SKILL_COLS} newLabel="Skill"                       onOpenRecord={onOpenRecord} />
     case 'work_type_skill_requirements': return <NodePage title="Work Type Skill Requirements" table="work_type_skill_requirements" fetcher={fetchWorkTypeSkillRequirements} columns={WTSR_COLS}  newLabel="Skill Requirement"           onOpenRecord={onOpenRecord} />
@@ -549,6 +551,19 @@ const WST_COLS = [
   { field: 'evidenceType', label: 'Evidence',      type: 'text',   sortable: true, filterable: true },
   { field: 'ownerRole',    label: 'Owner Role',    type: 'text',   sortable: true, filterable: true },
   { field: 'status',       label: 'Status',        type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
+]
+
+const PRT_COLS = [
+  { field: 'id',                   label: 'Record #',     type: 'text',   sortable: true, filterable: false },
+  { field: 'name',                 label: 'Template',     type: 'text',   sortable: true, filterable: true  },
+  { field: 'description',          label: 'Description',  type: 'text',   sortable: false, filterable: true },
+  { field: 'status',               label: 'Status',       type: 'select', sortable: true, filterable: true, options: ['Draft', 'Active', 'Archived'] },
+  { field: 'orientation',          label: 'Orient.',      type: 'select', sortable: true, filterable: true, options: ['Portrait', 'Landscape'] },
+  { field: 'paperSize',            label: 'Paper',        type: 'text',   sortable: true, filterable: true  },
+  { field: 'sectionCount',         label: 'Sections',     type: 'text',   sortable: true, filterable: false },
+  { field: 'assignmentCount',      label: 'Assignments',  type: 'text',   sortable: true, filterable: false },
+  { field: 'isDefaultForUnmapped', label: 'Fallback',     type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'] },
+  { field: 'version',              label: 'Version',      type: 'text',   sortable: true, filterable: false },
 ]
 
 const SKILL_COLS = [

@@ -6,6 +6,7 @@ import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
+import { supabase } from '../lib/supabase'
 import {
   loadRecordDetailData,
   saveRecord,
@@ -41,6 +42,7 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
     case 'datetime':   return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
     case 'boolean':    return raw ? 'Yes' : 'No'
     case 'number':     return raw != null ? Number(raw).toLocaleString() : '—'
+    case 'json':       return typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)
     default:           return String(raw)
   }
 }
@@ -401,9 +403,75 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts }) {
     case 'datetime':
       return <span style={{ fontSize: 13, color: C.textMuted, fontStyle: 'italic' }}>Read-only</span>
 
+    case 'json':
+      return <JsonField value={value} onChange={(parsed) => onChange(field.name, parsed)} />
+
     default:
       return <input type="text" style={inputBase} value={v} onChange={e => onChange(field.name, e.target.value)} />
   }
+}
+
+// JsonField — textarea bound to a JSON value. Stores the raw text locally so
+// users can type intermediate (invalid) states without us clobbering the
+// draft, but only forwards a parsed object to the parent draft when the text
+// parses successfully. A validity pill below shows current parse status.
+function JsonField({ value, onChange }) {
+  const initial = value == null
+    ? ''
+    : (typeof value === 'string' ? value : JSON.stringify(value, null, 2))
+  const [text, setText] = useState(initial)
+  const [parseErr, setParseErr] = useState(null)
+
+  // Re-sync from the parent if the draft is reset externally (Cancel, etc.)
+  useEffect(() => {
+    const next = value == null
+      ? ''
+      : (typeof value === 'string' ? value : JSON.stringify(value, null, 2))
+    setText(next)
+    setParseErr(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value === null || value === undefined ? '' : (typeof value === 'string' ? value : JSON.stringify(value))])
+
+  const handleChange = (next) => {
+    setText(next)
+    if (next.trim() === '') {
+      setParseErr(null)
+      onChange({})  // empty → empty object (jsonb NOT NULL columns default this)
+      return
+    }
+    try {
+      const parsed = JSON.parse(next)
+      setParseErr(null)
+      onChange(parsed)
+    } catch (e) {
+      setParseErr(e.message)
+      // Don't forward — keep last valid value in draft
+    }
+  }
+
+  return (
+    <div>
+      <textarea
+        style={{
+          ...inputBase, minHeight: 96, resize: 'vertical',
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5,
+          borderColor: parseErr ? '#fca5a5' : undefined,
+        }}
+        value={text}
+        onChange={(e) => handleChange(e.target.value)}
+        spellCheck={false}
+      />
+      {parseErr ? (
+        <div style={{ marginTop: 4, fontSize: 11, color: '#b03a2e' }}>
+          Invalid JSON: {parseErr}
+        </div>
+      ) : (
+        <div style={{ marginTop: 4, fontSize: 11, color: C.textMuted }}>
+          Valid JSON. Empty saves as <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{'{}'}</code>.
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,21 +1089,36 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
   const [search, setSearch] = useState('')
   const [addingId, setAddingId] = useState(null)
 
+  const toast = useToast()
+  const picker = config?.picker || {}
+
+  // create_only mode: no separate source pool — the "Add" button creates a
+  // new row directly in config.table, wired to the parent via the FK and
+  // auto-incremented order field. Used by direct-child relationships
+  // (e.g. project_report_template_sections) where there's no upstream
+  // template library to pick from. allow_inline_create is implied true.
+  const createOnly = picker.create_only === true && Array.isArray(picker.inline_create_fields)
+
   // Inline-create mode state ------------------------------------------------
-  const [mode, setMode] = useState('pick')        // 'pick' | 'create'
+  const [mode, setMode] = useState(createOnly ? 'create' : 'pick')   // 'pick' | 'create'
   const [draft, setDraft] = useState({})
   const [picklistOpts, setPicklistOpts] = useState({})
   const [lookupOpts, setLookupOpts]     = useState({})
   const [creating, setCreating] = useState(false)
   const [formLoading, setFormLoading] = useState(false)
 
-  const toast = useToast()
-  const picker = config?.picker || {}
-  const inlineCreate = picker.allow_inline_create && Array.isArray(picker.inline_create_fields)
-    ? { fields: picker.inline_create_fields, title: picker.create_modal_title, buttonLabel: picker.create_button_label }
-    : null
+  const inlineCreate = createOnly
+    ? { fields: picker.inline_create_fields, title: picker.create_modal_title, buttonLabel: picker.create_button_label, createOnly: true }
+    : (picker.allow_inline_create && Array.isArray(picker.inline_create_fields)
+        ? { fields: picker.inline_create_fields, title: picker.create_modal_title, buttonLabel: picker.create_button_label, createOnly: false }
+        : null)
 
   const reload = useCallback(async () => {
+    if (createOnly) {
+      // No pool to load. Set loading false so create form can render immediately.
+      setLoading(false)
+      return
+    }
     setLoading(true); setError(null)
     try {
       const c = await fetchPickerCandidates(config, parentRecordId)
@@ -1045,21 +1128,22 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
     } finally {
       setLoading(false)
     }
-  }, [config, parentRecordId])
+  }, [config, parentRecordId, createOnly])
 
   useEffect(() => { reload() }, [reload])
 
   // Close on Escape. In create mode, Escape returns to pick mode first so a
-  // user can back out of a half-filled form without dismissing the dialog.
+  // user can back out of a half-filled form without dismissing the dialog —
+  // unless we're in create_only mode (no pick mode to return to).
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return
-      if (mode === 'create') { setMode('pick'); setDraft({}) }
+      if (mode === 'create' && !createOnly) { setMode('pick'); setDraft({}) }
       else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, mode])
+  }, [onClose, mode, createOnly])
 
   const q = search.trim().toLowerCase()
   const filtered = q
@@ -1098,11 +1182,14 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
     setDraft(initialDraft)
     setFormLoading(true)
     try {
+      // In create_only mode, picklists belong to the child table itself
+      // (config.table); in junction-picker mode they belong to the source pool.
+      const picklistOwnerTable = createOnly ? config.table : picker.source_table
       const pickFields  = inlineCreate.fields.filter(f => f.type === 'picklist').map(f => f.name)
       const lookupFlds  = inlineCreate.fields.filter(f => f.type === 'lookup' && f.lookup_table && f.lookup_field)
       const [pOpts, lOpts] = await Promise.all([
         Promise.all(pickFields.map(fn =>
-          fetchPicklistOptions(picker.source_table, fn).catch(() => []).then(v => [fn, v])
+          fetchPicklistOptions(picklistOwnerTable, fn).catch(() => []).then(v => [fn, v])
         )).then(entries => Object.fromEntries(entries)),
         Promise.all(lookupFlds.map(lf =>
           fetchLookupOptions(lf.lookup_table, lf.lookup_field).catch(() => []).then(v => [lf.name, v])
@@ -1115,9 +1202,22 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
     }
   }
 
-  const cancelCreate = () => { setMode('pick'); setDraft({}) }
+  // In create_only mode, the modal opens straight in create mode — the
+  // useEffect below mirrors enterCreateMode so the form is populated and
+  // its picklists/lookups are loaded without a pick → create transition.
+  useEffect(() => {
+    if (!createOnly) return
+    if (formLoading || Object.keys(picklistOpts).length || Object.keys(lookupOpts).length) return
+    enterCreateMode()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createOnly])
 
-  // Save inline-created source record, then link it to the parent junction
+  const cancelCreate = () => createOnly ? onClose() : (setMode('pick'), setDraft({}))
+
+  // Save inline-created record. In junction mode, the record goes into the
+  // source pool, then a junction row links it to the parent. In create_only
+  // mode, the record IS the parent's child — insert directly into config.table
+  // with the FK and the next order value set on the row itself.
   const handleCreateAndLink = async () => {
     if (creating) return
     // Client-side required-field check against the configured fields list
@@ -1130,13 +1230,13 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
         : `Required fields missing:\n• ${missing.join('\n• ')}`)
       return
     }
-    // Cross-field sanity validation. Build an id->label map for the
-    // evidence-type picklist so the validator can read its semantic meaning
-    // (e.g. "Photo" implies Photos Required > 0).
+    // Cross-field sanity validation runs against the table being inserted
+    // into (source_table for junctions, config.table for create_only).
+    const insertTable = createOnly ? config.table : picker.source_table
     const evidenceLabelById = new Map(
       (picklistOpts.wst_required_evidence_type_id || []).map(o => [o.value, o.label])
     )
-    const sanityErrors = validateBeforeSave(picker.source_table, draft, evidenceLabelById)
+    const sanityErrors = validateBeforeSave(insertTable, draft, evidenceLabelById)
     if (sanityErrors.length) {
       toast.error(sanityErrors.length === 1
         ? sanityErrors[0]
@@ -1146,6 +1246,37 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
     setCreating(true)
     try {
       const userId = await getCurrentUserId()
+
+      if (createOnly) {
+        // Auto-increment order field by computing max+1 against existing
+        // non-deleted siblings on the same parent.
+        const orderField = config.order_field
+        const fk = config.fk
+        const deletedCol = config.is_deleted_col
+        let nextOrder = 1
+        if (orderField) {
+          let q = supabase.from(config.table).select(orderField).eq(fk, parentRecordId).order(orderField, { ascending: false }).limit(1)
+          if (deletedCol) q = q.eq(deletedCol, false)
+          const { data: maxRows, error: maxErr } = await q
+          if (maxErr) throw maxErr
+          nextOrder = Number(maxRows?.[0]?.[orderField] || 0) + 1
+        }
+        const payload = applyInsertDefaults(config.table, { ...draft }, userId)
+        for (const [k, v] of Object.entries(payload)) if (v === '') payload[k] = null
+        payload[fk] = parentRecordId
+        if (orderField) payload[orderField] = nextOrder
+
+        const created = await insertRecord(config.table, payload)
+        const labelField = picker.row_label_field
+        const label = (labelField && created?.[labelField]) || `Item ${nextOrder}`
+
+        toast.success(`Created ${label}`)
+        if (onAdded) await onAdded()
+        onClose()
+        return
+      }
+
+      // Junction-picker mode (existing path)
       const fields = applyInsertDefaults(picker.source_table, { ...draft }, userId)
       for (const [k, v] of Object.entries(fields)) if (v === '') fields[k] = null
 
@@ -1193,7 +1324,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
         }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {mode === 'create' && (
+            {mode === 'create' && !createOnly && (
               <button
                 onClick={cancelCreate}
                 title="Back to picker"
@@ -1411,7 +1542,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
                 onMouseEnter={(e) => { if (!creating && !formLoading) e.currentTarget.style.background = '#2aab72' }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
               >
-                {creating ? 'Saving…' : 'Save and Add'}
+                {creating ? 'Saving…' : (createOnly ? 'Save' : 'Save and Add')}
               </button>
             </div>
           </>

@@ -60,6 +60,7 @@ export const SETUP_TREE = [
       { id: 'work_types',                label: 'Work Types' },
       { id: 'work_plan_templates',       label: 'Work Plan Templates' },
       { id: 'work_step_templates',       label: 'Work Step Templates' },
+      { id: 'project_report_templates',  label: 'Project Report Templates' },
       { id: 'work_type_skill_requirements', label: 'Work Type Skill Requirements' },
       { id: 'service_territories',       label: 'Service Territories' },
       { id: 'skills',                    label: 'Skills' },

@@ -844,3 +844,70 @@ export async function fetchWorkTypeSkillRequirements() {
     minLevel: r.wtsr_minimum_level ?? 1,
   }))
 }
+
+// ---------------------------------------------------------------------------
+// Project Report Templates (Project Report Template Builder)
+// ---------------------------------------------------------------------------
+//
+// List shell for the Builder pane. Returns one row per active template with
+// rolled-up section count and assignment count so admins can see at a glance
+// which templates are wired up. Click-through opens the standard RecordDetail
+// page driven by PL-RD-PRT.
+// ---------------------------------------------------------------------------
+
+export async function fetchProjectReportTemplates() {
+  // 1. Headers — including resolved status/orientation/paper picklist labels
+  const { data: prts, error: prtErr } = await supabase
+    .from('project_report_templates')
+    .select(`
+      id, prt_record_number, prt_name, prt_description, prt_version,
+      prt_is_default_for_unmapped,
+      status:prt_status ( picklist_label ),
+      orientation:prt_orientation ( picklist_label ),
+      paper:prt_paper_size ( picklist_label )
+    `)
+    .eq('prt_is_deleted', false)
+    .order('prt_name', { ascending: true })
+  if (prtErr) throw prtErr
+  if (!prts || prts.length === 0) return []
+
+  const ids = prts.map(p => p.id)
+
+  // 2. Section count per template
+  const { data: sections, error: sErr } = await supabase
+    .from('project_report_template_sections')
+    .select('prt_id')
+    .in('prt_id', ids)
+    .eq('prts_is_deleted', false)
+  if (sErr) throw sErr
+  const sectionCount = new Map()
+  for (const s of (sections || [])) {
+    sectionCount.set(s.prt_id, (sectionCount.get(s.prt_id) || 0) + 1)
+  }
+
+  // 3. Assignment count per template
+  const { data: assigns, error: aErr } = await supabase
+    .from('project_report_template_record_type_assignments')
+    .select('prt_id')
+    .in('prt_id', ids)
+    .eq('prtrta_is_deleted', false)
+  if (aErr) throw aErr
+  const assignCount = new Map()
+  for (const a of (assigns || [])) {
+    assignCount.set(a.prt_id, (assignCount.get(a.prt_id) || 0) + 1)
+  }
+
+  return prts.map(p => ({
+    id: p.prt_record_number || p.id.slice(0, 8).toUpperCase(),
+    _id: p.id,
+    name: p.prt_name,
+    description: p.prt_description || '—',
+    status: p.status?.picklist_label || '—',
+    orientation: p.orientation?.picklist_label || '—',
+    paperSize: p.paper?.picklist_label || '—',
+    version: p.prt_version,
+    isDefaultForUnmapped: p.prt_is_default_for_unmapped ? 'Yes' : 'No',
+    sectionCount: sectionCount.get(p.id) || 0,
+    assignmentCount: assignCount.get(p.id) || 0,
+  }))
+}
