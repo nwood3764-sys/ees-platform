@@ -11,13 +11,19 @@
 // picks it up automatically.
 //
 // Template resolution order:
-//   1. explicit prt_id passed in the request
-//   2. PRTRTA assignment whose project_record_type matches this project
+//   1. explicit prtsn_id → load from project_report_template_snapshots
+//      (frozen JSON; bypasses Active-only gate since the snapshot WAS
+//      Active when published)
+//   2. explicit prt_id passed in the request
+//   3. PRTRTA assignment whose project_record_type matches this project
 //      and prtrta_is_default = true
-//   3. PRT row with prt_is_default_for_unmapped = true (the seeded fallback)
+//   4. PRT row with prt_is_default_for_unmapped = true (the seeded fallback)
 //
 // Active-only status gate: only PRTs with prt_status = "Active" can generate
 // real reports. Drafts and Archived templates are rejected with a 400.
+// Skipped when the source is a snapshot (prtsn_id provided) — the snapshot
+// represents a moment when the template WAS Active, regardless of where
+// the live row sits now.
 //
 // ── Preview mode (preview: true) ──────────────────────────────────────────
 // Renders the same PDF against a synthetic in-memory project graph. No
@@ -25,9 +31,27 @@
 // upload happens — the PDF is returned as a binary `application/pdf`
 // response so the browser can open it in a new tab.
 //
-// Preview requires `prt_id` (the template being previewed) but not
-// `project_id`. The Active-only status gate is bypassed so authors can
-// preview Draft and Archived templates while iterating.
+// Preview requires either `prt_id` (live template) or `prtsn_id` (frozen
+// snapshot) but not `project_id`. The Active-only status gate is bypassed
+// in both cases so authors can preview Draft/Archived templates and
+// historical snapshots while iterating.
+//
+// ── Snapshot source (prtsn_id) ────────────────────────────────────────────
+// project_report_template_snapshots stores a frozen jsonb copy of the PRT
+// row + its non-deleted PRTS sections at publish time. Passing `prtsn_id`
+// in the request body — works in both modes — hydrates the renderer from
+// the JSON instead of querying the live PRT/PRTS tables. This is what
+// makes "regenerate the old version of this report" possible: the live
+// template may have been edited, re-published, archived, or deleted since
+// the snapshot was written, but the JSON blobs preserve exactly what the
+// template looked like at publish time.
+//
+// In preview mode, when prtsn_id is used, the response stamps:
+//   X-Anura-Source: snapshot
+//   X-Anura-Prtsn-Id: <uuid>
+//   X-Anura-Prtsn-Version: <int>
+// In generate mode, the JSON response includes:
+//   { "source": "snapshot", "snapshot": { "prtsn_id": ..., "prtsn_version": ... } }
 //
 // Renderer support: cover_page, project_summary, work_orders_overview,
 // work_order_section, custom_text, page_break, footer. Other section types
@@ -1045,6 +1069,57 @@ async function resolveTemplateById(client: SupabaseClient, prtId: string): Promi
   return { prt, sections }
 }
 
+// Snapshot-mode template loader. Hydrates a frozen PRT + PRTS array from a
+// project_report_template_snapshots row, NOT from the live PRT/PRTS tables.
+// This is what makes "regenerate the old version of this report" possible:
+// the live template may have been edited, re-published, archived, or even
+// soft-deleted since the snapshot was written, but the JSON blobs preserve
+// exactly what the template looked like at publish time.
+//
+// prtsn_template_json holds a full PRT row (to_jsonb of the template at
+// publish time). prtsn_sections_json holds a jsonb array of PRTS rows
+// already ordered by prts_section_order ascending, with deleted sections
+// excluded — which means consumers can iterate in array order without
+// re-sorting.
+//
+// section_type_value still resolves through the live picklist_values table
+// because section types are seeded reference data that we don't snapshot.
+// In practice section types don't change, but if a future migration ever
+// renames one the snapshot will resolve to the new value — that's the
+// correct behavior for the renderer's switch statement (which keys off
+// the picklist_value, not the picklist_label).
+async function resolveTemplateBySnapshotId(
+  client: SupabaseClient,
+  prtsnId: string,
+): Promise<{ prt: PRT, sections: PRTS[], snapshotVersion: number, snapshotId: string }> {
+  const r = await client.from("project_report_template_snapshots")
+    .select("id, prt_id, prtsn_version, prtsn_template_json, prtsn_sections_json")
+    .eq("id", prtsnId).eq("prtsn_is_deleted", false).maybeSingle()
+  if (r.error) throw new Error(`PRTSN lookup failed: ${r.error.message}`)
+  const row = r.data as {
+    id: string
+    prt_id: string
+    prtsn_version: number
+    prtsn_template_json: any
+    prtsn_sections_json: any[]
+  } | null
+  if (!row) throw new Error(`Snapshot ${prtsnId} not found (or has been soft-deleted).`)
+
+  const prt = row.prtsn_template_json as PRT
+  if (!prt || !prt.id) {
+    throw new Error(`Snapshot ${prtsnId} has malformed prtsn_template_json — missing id.`)
+  }
+
+  const rawSections = Array.isArray(row.prtsn_sections_json) ? row.prtsn_sections_json : []
+  const picklistMap = await loadAllPicklists(client)
+  const sections: PRTS[] = rawSections.map((s: any) => ({
+    ...s,
+    section_type_value: picklistMap.get(s.prts_section_type)?.picklist_value || "unknown",
+  }))
+
+  return { prt, sections, snapshotVersion: row.prtsn_version, snapshotId: row.id }
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Merge fields — {{path.to.field}} substitution for custom_text sections.
 //
@@ -1242,15 +1317,19 @@ Deno.serve(async (req: Request) => {
     const previewMode: boolean = body?.preview === true
     const projectId: string | undefined = body?.project_id
     const explicitPrtId: string | undefined = body?.prt_id
+    const prtsnId: string | undefined = body?.prtsn_id
     const watermarkChoice: "watermarked" | "original" =
       body?.use_watermarked === false ? "original" : "watermarked"
 
-    // Per-mode argument validation. Preview mode requires prt_id (we're
-    // previewing a specific template, server-side template resolution from
-    // a project doesn't apply). Generate mode requires project_id.
+    // Per-mode argument validation. prtsn_id (snapshot id) is an alternative
+    // to prt_id everywhere — the same template content lives in the snapshot
+    // JSON, just frozen at publish time. Generate mode still needs a project,
+    // since a snapshot is template-only and has no graph data on its own.
     if (previewMode) {
-      if (!explicitPrtId) {
-        return jsonResponse({ error: "prt_id is required when preview=true" }, 400)
+      if (!explicitPrtId && !prtsnId) {
+        return jsonResponse({
+          error: "prt_id or prtsn_id is required when preview=true",
+        }, 400)
       }
     } else {
       if (!projectId) return jsonResponse({ error: "project_id is required" }, 400)
@@ -1322,18 +1401,44 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── Template resolution ─────────────────────────────────────────────
-    // Preview mode always uses the explicit prt_id (validated above) and
-    // skips the record-type assignment / unmapped-default cascade — the
-    // user is looking at a specific PRT and wants to see THAT PRT render.
-    const { prt, sections } = previewMode
-      ? await resolveTemplateById(client, explicitPrtId!)
-      : await resolveTemplate(client, project, explicitPrtId)
+    // Three dispatch paths, in priority order:
+    //   1. prtsn_id present  → resolveTemplateBySnapshotId (frozen JSON)
+    //   2. preview mode      → resolveTemplateById (live PRT, no cascade)
+    //   3. otherwise         → resolveTemplate (project record-type cascade)
+    //
+    // When the source is a snapshot we also skip the Active-only gate
+    // below — the snapshot was Active when it was published, even if the
+    // live template has since been unpublished or archived.
+    let prt: PRT
+    let sections: PRTS[]
+    let templateFromSnapshot = false
+    let snapshotVersion: number | null = null
+    let snapshotId: string | null = null
+    if (prtsnId) {
+      const resolved = await resolveTemplateBySnapshotId(client, prtsnId)
+      prt              = resolved.prt
+      sections         = resolved.sections
+      templateFromSnapshot = true
+      snapshotVersion  = resolved.snapshotVersion
+      snapshotId       = resolved.snapshotId
+    } else if (previewMode) {
+      const resolved = await resolveTemplateById(client, explicitPrtId!)
+      prt = resolved.prt
+      sections = resolved.sections
+    } else {
+      const resolved = await resolveTemplate(client, project, explicitPrtId)
+      prt = resolved.prt
+      sections = resolved.sections
+    }
 
     // Status gate — only Active templates can be used for real generation.
     // Drafts are unpublished and may have unresolved issues; Archived
     // templates are retired. Preview mode bypasses this gate so authors can
-    // see what a Draft renders to before publishing.
-    if (!previewMode) {
+    // see what a Draft renders to before publishing. Snapshot-sourced
+    // templates also bypass it — the snapshot represents a moment when
+    // the template WAS Active; the live status now is irrelevant to whether
+    // we can render the frozen content.
+    if (!previewMode && !templateFromSnapshot) {
       const prtStatusValue = prt.prt_status ? picklistById.get(prt.prt_status)?.picklist_value : null
       if (prtStatusValue !== "Active") {
         const label = prt.prt_record_number || prt.prt_name || "template"
@@ -1388,9 +1493,10 @@ Deno.serve(async (req: Request) => {
     if (footer) await renderFooter(ctx, footer)
 
     const titlePrefix = previewMode ? "PREVIEW — " : ""
+    const snapshotSuffix = templateFromSnapshot ? ` • SNAPSHOT v${snapshotVersion}` : ""
     pdf.setTitle(`${titlePrefix}${project.project_record_number || ""} ${project.project_name || "Project Report"}`.trim())
     pdf.setProducer("Anura")
-    pdf.setCreator(`Anura • ${prt.prt_name} (${prt.prt_record_number} v${prt.prt_version})${previewMode ? " • PREVIEW" : ""}`)
+    pdf.setCreator(`Anura • ${prt.prt_name} (${prt.prt_record_number} v${prt.prt_version})${previewMode ? " • PREVIEW" : ""}${snapshotSuffix}`)
     pdf.setCreationDate(ctx.generatedAt)
 
     const pdfBytes = await pdf.save()
@@ -1398,18 +1504,35 @@ Deno.serve(async (req: Request) => {
     // ── Preview short-circuit: return binary PDF, no upload, no DB write ─
     if (previewMode) {
       const datePart = ctx.generatedAt.toISOString().slice(0, 10)
-      const previewFileName = `${prt.prt_record_number || "template"}_preview_${datePart}.pdf`
+      // File name reflects the source: snapshots get the snapshot id and
+      // version, live templates get prt_record_number alone.
+      const previewFileName = templateFromSnapshot
+        ? `${prt.prt_record_number || "template"}_snapshot_v${snapshotVersion}_${datePart}.pdf`
+        : `${prt.prt_record_number || "template"}_preview_${datePart}.pdf`
+      // Always stamp prt_id/prt_version (the underlying template). Stamp
+      // prtsn_id/prtsn_version only when the source was a snapshot, so the
+      // client can render "Previewing snapshot PRTSN-… v…" when those
+      // headers are present and fall back to the live-template banner
+      // otherwise.
+      const previewHeaders: Record<string, string> = {
+        ...corsHeaders,
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="${previewFileName}"`,
+        "X-Anura-Mode": "preview",
+        "X-Anura-Prt-Id": prt.id,
+        "X-Anura-Prt-Version": String(prt.prt_version),
+        "X-Anura-Page-Count": String(cur.pages.length),
+      }
+      if (templateFromSnapshot && snapshotId && snapshotVersion !== null) {
+        previewHeaders["X-Anura-Prtsn-Id"] = snapshotId
+        previewHeaders["X-Anura-Prtsn-Version"] = String(snapshotVersion)
+        previewHeaders["X-Anura-Source"] = "snapshot"
+      } else {
+        previewHeaders["X-Anura-Source"] = "live"
+      }
       return new Response(pdfBytes, {
         status: 200,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `inline; filename="${previewFileName}"`,
-          "X-Anura-Mode": "preview",
-          "X-Anura-Prt-Id": prt.id,
-          "X-Anura-Prt-Version": String(prt.prt_version),
-          "X-Anura-Page-Count": String(cur.pages.length),
-        },
+        headers: previewHeaders,
       })
     }
 
@@ -1425,13 +1548,27 @@ Deno.serve(async (req: Request) => {
     })
     if (upload.error) throw new Error(`PDF upload failed: ${upload.error.message}`)
 
+    // Document name carries snapshot version when applicable so users can
+    // distinguish "regenerated from a frozen old version" reports from
+    // current-template reports in the project's Documents widget.
+    const docName = templateFromSnapshot
+      ? `${project.project_name || "Project"} — Project Report (${datePart}, snapshot v${snapshotVersion})`
+      : `${project.project_name || "Project"} — Project Report (${datePart})`
+
+    // Until documents.prtsn_id is added (deferred — wider schema change),
+    // we keep the snapshot version as a suffix on the category column so
+    // it's discoverable in the documents list.
+    const docCategory = templateFromSnapshot
+      ? `${prt.prt_record_number} (snapshot v${snapshotVersion})`
+      : prt.prt_record_number
+
     const insertRow = {
       id: docId,
       storage_bucket: "property-documents",
       storage_path: path,
-      name: `${project.project_name || "Project"} — Project Report (${datePart})`,
+      name: docName,
       document_type: "project_report",
-      category: prt.prt_record_number,
+      category: docCategory,
       file_size_bytes: pdfBytes.byteLength,
       mime_type: "application/pdf",
       related_object: "projects",
@@ -1452,6 +1589,10 @@ Deno.serve(async (req: Request) => {
       file_size_bytes: pdfBytes.byteLength,
       page_count: cur.pages.length,
       template: { prt_id: prt.id, prt_record_number: prt.prt_record_number, prt_name: prt.prt_name, prt_version: prt.prt_version },
+      source: templateFromSnapshot ? "snapshot" : "live",
+      // Only present when source === "snapshot"; null otherwise so the
+      // frontend can do a simple truthy check.
+      snapshot: templateFromSnapshot ? { prtsn_id: snapshotId, prtsn_version: snapshotVersion } : null,
       watermark_variant: watermarkChoice,
     }, 200)
   } catch (e) {
