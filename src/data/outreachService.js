@@ -357,3 +357,54 @@ export async function fetchEnrollments() {
     }
   })
 }
+
+// ---------------------------------------------------------------------------
+// Accounts — unified org/household table (Salesforce-style).
+//
+// Replaces the old fetchPropertyOwners as the canonical org list. Returns
+// every account regardless of record type, with the record-type label
+// surfaced as a column so the user can filter (Property Owner vs PMC vs
+// Partner Org vs Customer Household vs EES-WI Internal, etc.).
+//
+// fetchPropertyOwners() above is kept around as a back-compat shim that
+// returns only the property_owner subset for callers that haven't been
+// migrated yet (e.g., property-detail dropdowns).
+// ---------------------------------------------------------------------------
+export async function fetchAccounts() {
+  const { data, error } = await supabase
+    .from('accounts')
+    .select(`
+      id,
+      account_record_number,
+      account_name,
+      account_organization_name,
+      account_phone,
+      account_email,
+      account_website,
+      billing_city,
+      billing_state,
+      billing_zip,
+      record_type:account_record_type ( picklist_label ),
+      type_pl:account_type            ( picklist_label ),
+      status_pl:account_status        ( picklist_label )
+    `)
+    .eq('account_is_deleted', false)
+    .order('account_name', { ascending: true })
+
+  if (error) throw error
+
+  return (data || []).map(r => ({
+    id: r.account_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id: r.id,
+    name: r.account_name || '—',
+    orgName: r.account_organization_name || '—',
+    recordType: r.record_type?.picklist_label || '—',
+    type: r.type_pl?.picklist_label || '—',
+    status: r.status_pl?.picklist_label || '—',
+    phone: r.account_phone || '—',
+    email: r.account_email || '—',
+    website: r.account_website || '—',
+    city: r.billing_city || '—',
+    state: r.billing_state || '—',
+  }))
+}

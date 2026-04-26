@@ -5,11 +5,12 @@ import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorStat
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { OPPORTUNITIES, PROPERTIES, BUILDINGS, CONTACTS, ENROLLMENTS } from '../data/mockData'
-import { fetchProperties, fetchBuildings, fetchUnits, fetchOpportunities, fetchContacts, fetchEnrollments } from '../data/outreachService'
+import { fetchProperties, fetchBuildings, fetchUnits, fetchOpportunities, fetchContacts, fetchEnrollments, fetchAccounts } from '../data/outreachService'
 
 const SECTIONS = [
   { id: 'home',       label: 'Home'         },
   { id: 'opps',       label: 'Opportunities' },
+  { id: 'accounts',   label: 'Accounts'      },
   { id: 'properties', label: 'Properties'    },
   { id: 'buildings',  label: 'Buildings'     },
   { id: 'units',      label: 'Units'         },
@@ -29,6 +30,17 @@ const OPP_COLS = [
   { field:'units',     label:'Units',      type:'text',   sortable:true,  filterable:false  },
   { field:'closeDate', label:'Close Date', type:'date',   sortable:true,  filterable:true   },
   { field:'state',     label:'State',      type:'select', sortable:true,  filterable:true,  options:['WI','NC','CO','MI'] },
+]
+const ACCOUNT_COLS = [
+  { field:'id',         label:'Record #',     type:'text',   sortable:true, filterable:false },
+  { field:'name',       label:'Account',      type:'text',   sortable:true, filterable:true  },
+  { field:'recordType', label:'Record Type',  type:'select', sortable:true, filterable:true, options:['Property Owner','Property Management Company','Partner Organization','Customer Household','EES-WI Internal','Utility','Program Administrator','Government Agency','Distributor','Standard'] },
+  { field:'type',       label:'Type',         type:'select', sortable:true, filterable:true, options:['Customer','Partner','Vendor','Internal','Prospect'] },
+  { field:'status',     label:'Status',       type:'select', sortable:true, filterable:true, options:['Active','Prospect','Inactive','Archived'] },
+  { field:'phone',      label:'Phone',        type:'text',   sortable:false, filterable:true },
+  { field:'email',      label:'Email',        type:'text',   sortable:false, filterable:true },
+  { field:'city',       label:'City',         type:'text',   sortable:true, filterable:true  },
+  { field:'state',      label:'State',        type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI','IL'] },
 ]
 const PROP_COLS = [
   { field:'id',        label:'Record #', type:'text',   sortable:true, filterable:false },
@@ -94,6 +106,12 @@ const ENR_COLS = [
 // Saved views
 const OPP_VIEWS  = [{ id:'OV-01', name:'All Opportunities',    filters:[], sortField:'closeDate', sortDir:'asc' }, { id:'OV-02', name:'Reservation Obtained', filters:[{ field:'stage', label:'Stage', op:'equals', value:'Opportunity — Reservation Obtained' }], sortField:'closeDate', sortDir:'asc' }, { id:'OV-03', name:'Application Submitted', filters:[{ field:'stage', label:'Stage', op:'equals', value:'Opportunity — Application Submitted' }], sortField:'closeDate', sortDir:'asc' }]
 const PROP_VIEWS = [{ id:'PV-01', name:'All Properties',  filters:[], sortField:'name', sortDir:'asc' }, { id:'PV-02', name:'Enrolled',        filters:[{ field:'status', label:'Status', op:'equals', value:'Enrolled' }],        sortField:'name', sortDir:'asc' }, { id:'PV-03', name:'Outreach Active', filters:[{ field:'status', label:'Status', op:'equals', value:'Outreach Active' }], sortField:'name', sortDir:'asc' }]
+const ACC_VIEWS  = [
+  { id:'AV-01', name:'All Accounts',          filters:[], sortField:'name', sortDir:'asc' },
+  { id:'AV-02', name:'Property Owners',       filters:[{ field:'recordType', label:'Record Type', op:'equals', value:'Property Owner' }],              sortField:'name', sortDir:'asc' },
+  { id:'AV-03', name:'Property Mgmt Cos',     filters:[{ field:'recordType', label:'Record Type', op:'equals', value:'Property Management Company' }], sortField:'name', sortDir:'asc' },
+  { id:'AV-04', name:'Partner Organizations', filters:[{ field:'recordType', label:'Record Type', op:'equals', value:'Partner Organization' }],         sortField:'name', sortDir:'asc' },
+]
 const BLDG_VIEWS = [{ id:'BV-01', name:'All Buildings', filters:[], sortField:'name', sortDir:'asc' }]
 const UNIT_VIEWS = [{ id:'UV-01', name:'All Units', filters:[], sortField:'unit', sortDir:'asc' }]
 const CONT_VIEWS = [{ id:'CV-01', name:'All Contacts', filters:[], sortField:'name', sortDir:'asc' }]
@@ -328,6 +346,7 @@ export default function OutreachModule() {
   // Map section ID → Supabase table name for record detail
   const SEC_TABLE_MAP = {
     opps: 'opportunities',
+    accounts: 'accounts',
     properties: 'properties',
     buildings: 'buildings',
     units: 'units',
@@ -343,13 +362,14 @@ export default function OutreachModule() {
 
   const closeRecord = () => setSelectedRecord(null)
 
-  // All six datasets are live from Supabase.
+  // All seven datasets are live from Supabase.
   const [properties, setProperties] = useState([])
   const [buildings, setBuildings] = useState([])
   const [units, setUnits] = useState([])
   const [opportunities, setOpportunities] = useState([])
   const [contacts, setContacts] = useState([])
   const [enrollments, setEnrollments] = useState([])
+  const [accounts, setAccounts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -360,13 +380,14 @@ export default function OutreachModule() {
     if (showLoader) { setLoading(true) }
     setError(null)
     try {
-      const [p, b, u, o, c, e] = await Promise.all([
+      const [p, b, u, o, c, e, a] = await Promise.all([
         fetchProperties(),
         fetchBuildings(),
         fetchUnits(),
         fetchOpportunities(),
         fetchContacts(),
         fetchEnrollments(),
+        fetchAccounts(),
       ])
       setProperties(p)
       setBuildings(b)
@@ -374,6 +395,7 @@ export default function OutreachModule() {
       setOpportunities(o)
       setContacts(c)
       setEnrollments(e)
+      setAccounts(a)
     } catch (err) {
       setError(err)
     } finally {
@@ -388,13 +410,15 @@ export default function OutreachModule() {
     ;(async () => {
       setLoading(true); setError(null)
       try {
-        const [p, b, u, o, c, e] = await Promise.all([
+        const [p, b, u, o, c, e, a] = await Promise.all([
           fetchProperties(), fetchBuildings(), fetchUnits(),
           fetchOpportunities(), fetchContacts(), fetchEnrollments(),
+          fetchAccounts(),
         ])
         if (cancelled) return
         setProperties(p); setBuildings(b); setUnits(u)
         setOpportunities(o); setContacts(c); setEnrollments(e)
+        setAccounts(a)
       } catch (err) {
         if (!cancelled) setError(err)
       } finally {
@@ -407,6 +431,7 @@ export default function OutreachModule() {
   const hafUrgent = enrollments.filter(e => e.hafAgreement === 'Pending').length
   const counts = {
     opps: opportunities.length,
+    accounts: accounts.length,
     properties: properties.length,
     buildings: buildings.length,
     units: units.length,
@@ -443,6 +468,7 @@ export default function OutreachModule() {
         ) : (<>
         {sec === 'home'       && <OutreachHome setSec={setSec} properties={properties} opportunities={opportunities} enrollments={enrollments} contacts={contacts} />}
         {sec === 'opps'       && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'accounts'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={accounts}      columns={ACCOUNT_COLS} systemViews={ACC_VIEWS}  defaultViewId="AV-01" newLabel="Account"     onNew={() => setSelectedRecord({ table: 'accounts',      id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec === 'properties' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={properties}   columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec === 'buildings'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={buildings}    columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec === 'units'      && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={units}        columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
