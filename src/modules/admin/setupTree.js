@@ -49,6 +49,7 @@ export const SETUP_TREE = [
     children: [
       { id: 'email_templates',    label: 'Email Templates' },
       { id: 'document_templates', label: 'Document Templates' },
+      { id: 'envelopes',          label: 'Envelopes' },
     ],
   },
   {

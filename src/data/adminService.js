@@ -160,6 +160,39 @@ export async function fetchDocumentTemplates() {
 }
 
 // ---------------------------------------------------------------------------
+// Envelopes (DocuSign envelope tracking)
+// ---------------------------------------------------------------------------
+
+export async function fetchEnvelopes() {
+  const { data, error } = await supabase
+    .from('envelopes')
+    .select(`
+      id, env_record_number, env_name, env_parent_object, env_parent_record_id,
+      env_provider_envelope_id, env_sent_at, env_completed_at, env_failed_at,
+      template:document_template_id ( name ),
+      status:env_status   ( picklist_label, picklist_value ),
+      provider:env_provider ( picklist_label )
+    `)
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+
+  return (data || []).map(r => ({
+    id: r.env_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id: r.id,
+    name: r.env_name,
+    template: r.template?.name || '—',
+    parentObject: r.env_parent_object || '—',
+    provider: r.provider?.picklist_label || '—',
+    providerEnvelopeId: r.env_provider_envelope_id || '—',
+    sentAt: r.env_sent_at ? new Date(r.env_sent_at).toLocaleString() : '—',
+    completedAt: r.env_completed_at ? new Date(r.env_completed_at).toLocaleString() : '—',
+    status: r.status?.picklist_label || '—',
+  }))
+}
+
+// ---------------------------------------------------------------------------
 // Automation rules (Automation Builder — Salesforce Flow Builder equivalent)
 // ---------------------------------------------------------------------------
 

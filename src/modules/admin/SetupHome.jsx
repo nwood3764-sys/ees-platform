@@ -7,7 +7,7 @@ import { SETUP_TREE } from './setupTree'
 import UsersPane from './UsersPane'
 import {
   fetchRoles, fetchPrograms, fetchWorkTypes,
-  fetchEmailTemplates, fetchDocumentTemplates,
+  fetchEmailTemplates, fetchDocumentTemplates, fetchEnvelopes,
   fetchAutomationRules, fetchValidationRules,
   fetchPicklistValues, fetchAuditLog,
   fetchAllPageLayouts,
@@ -317,6 +317,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'saved_list_views':  return <ComingSoonPane label="Saved List Views" />
     case 'email_templates':   return <NodePage title="Email Templates"         table="email_templates"   fetcher={fetchEmailTemplates}    columns={ET_COLS}             newLabel="Email Template"   onOpenRecord={onOpenRecord} />
     case 'document_templates':return <NodePage title="Document Templates"      table="document_templates" fetcher={fetchDocumentTemplates} columns={DT_COLS}            newLabel="Document Template" onOpenRecord={onOpenRecord} />
+    case 'envelopes':         return <NodePage title="Envelopes"               table="envelopes"         fetcher={fetchEnvelopes}         columns={ENV_COLS}            newLabel={null}             onOpenRecord={onOpenRecord} />
     case 'programs':          return <NodePage title="Programs"                table="programs"          fetcher={fetchPrograms}          columns={PROG_COLS}           newLabel="Program"          onOpenRecord={onOpenRecord} />
     case 'work_types':        return <NodePage title="Work Types"              table="work_types"        fetcher={fetchWorkTypes}         columns={WT_COLS}             newLabel="Work Type"        onOpenRecord={onOpenRecord} />
     case 'work_plan_templates': return <WorkPlanTemplatesPane onOpenRecord={onOpenRecord} />
@@ -606,6 +607,17 @@ const DT_COLS = [
   { field: 'automated',         label: 'Auto',             type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'] },
   { field: 'version',           label: 'Version',          type: 'number', sortable: true, filterable: false },
   { field: 'status',            label: 'Status',           type: 'select', sortable: true, filterable: true, options: ['Draft', 'Active', 'Archived', '—'] },
+]
+
+const ENV_COLS = [
+  { field: 'id',                 label: 'Record #',     type: 'text', sortable: true, filterable: false },
+  { field: 'name',               label: 'Envelope',     type: 'text', sortable: true, filterable: true },
+  { field: 'template',           label: 'Template',     type: 'text', sortable: true, filterable: true },
+  { field: 'parentObject',       label: 'Parent',       type: 'text', sortable: true, filterable: true },
+  { field: 'provider',           label: 'Provider',     type: 'text', sortable: true, filterable: true },
+  { field: 'sentAt',             label: 'Sent',         type: 'text', sortable: true, filterable: false },
+  { field: 'completedAt',        label: 'Completed',    type: 'text', sortable: true, filterable: false },
+  { field: 'status',             label: 'Status',       type: 'select', sortable: true, filterable: true, options: ['Draft','Sent — Awaiting Signature','Delivered to First Signer','Completed — All Signed','Declined','Voided','Failed to Send','—'] },
 ]
 
 const AR_COLS = [

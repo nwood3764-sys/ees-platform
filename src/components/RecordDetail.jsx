@@ -12,6 +12,11 @@ import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfi
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
 import { MERGE_FIELD_OBJECTS, loadFieldsForObject } from '../data/mergeFieldCatalog'
 import {
+  uploadDocumentTemplateAsset,
+  signedDocumentTemplateAssetUrl,
+  copyDocumentTemplateAsset,
+} from '../data/storageService'
+import {
   loadRecordDetailData,
   saveRecord,
   insertRecord,
@@ -467,6 +472,14 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts }) {
     case 'merge_textarea':
       return <MergeFieldTextarea value={v} onChange={(next) => onChange(field.name, next)} />
 
+    case 'docx_upload':
+      // Edit-mode rendering: needs the parent record id (for uploads) and a
+      // refresh callback. Both are threaded in via a separate component path
+      // — this case is unreachable today because FieldGroupWidget short-
+      // circuits docx_upload before EditField is consulted. Falling back to
+      // a read-only string keeps the dispatcher exhaustive.
+      return <span style={{ fontSize: 13, color: C.textMuted, fontStyle: 'italic' }}>—</span>
+
     case 'json':
       return <JsonField value={value} onChange={(parsed) => onChange(field.name, parsed)} />
 
@@ -533,6 +546,124 @@ function JsonField({ value, onChange }) {
         <div style={{ marginTop: 4, fontSize: 11, color: C.textMuted }}>
           Valid JSON. Empty saves as <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{'{}'}</code>.
         </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// DocxUploadField — single-file slot for a document_template's .docx asset
+// ---------------------------------------------------------------------------
+// Renders the current asset (if any) as a download link plus a Replace
+// button. When no asset is present, shows a Choose File button. Bypasses
+// the standard draft/save flow — uploads go directly to Supabase Storage
+// and update document_templates.dt_template_asset_path on the row. After
+// success, calls onRefreshRecord so the parent re-fetches and the new
+// path appears in the UI.
+//
+// The lock trigger on document_templates blocks this when the template is
+// Active. The error message from the trigger surfaces in the toast.
+function DocxUploadField({ recordId, value, onRefreshRecord, disabled, disabledReason }) {
+  const [busy, setBusy]       = useState(false)
+  const [error, setError]     = useState(null)
+  const [downloadHref, setDownloadHref] = useState(null)
+  const fileInputRef = useRef(null)
+
+  // Resolve a signed URL for the current asset so the user can download it
+  // for review. Re-fetched whenever the path changes.
+  useEffect(() => {
+    let cancelled = false
+    if (!value) { setDownloadHref(null); return }
+    signedDocumentTemplateAssetUrl(value)
+      .then(url => { if (!cancelled) setDownloadHref(url) })
+      .catch(() => { if (!cancelled) setDownloadHref(null) })
+    return () => { cancelled = true }
+  }, [value])
+
+  const handlePick = () => {
+    setError(null)
+    fileInputRef.current?.click()
+  }
+
+  const handleFile = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''  // allow same file to be re-picked later
+    if (!file) return
+    setBusy(true)
+    setError(null)
+    try {
+      await uploadDocumentTemplateAsset(recordId, file)
+      if (onRefreshRecord) onRefreshRecord()
+    } catch (err) {
+      setError(err.message || String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Resolve the displayed filename from the current path. Storage path is
+  // `document_templates/{id}/{timestamp}-{safe_name}` — strip everything
+  // before the timestamp dash.
+  const filename = value
+    ? (value.split('/').pop() || value).replace(/^\d+-/, '')
+    : null
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        style={{ display: 'none' }}
+        onChange={handleFile}
+      />
+
+      {filename ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={14} color={C.emerald} />
+          {downloadHref ? (
+            <a href={downloadHref} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 13, color: '#1a5a8a', textDecoration: 'underline', wordBreak: 'break-word' }}>
+              {filename}
+            </a>
+          ) : (
+            <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>
+              {filename}
+            </span>
+          )}
+          {!disabled && (
+            <button onClick={handlePick} disabled={busy}
+              style={{
+                background: 'transparent', border: `1px solid ${C.border}`, color: C.emerald,
+                borderRadius: 5, padding: '4px 10px', fontSize: 12, cursor: busy ? 'wait' : 'pointer',
+              }}
+            >
+              {busy ? 'Uploading…' : 'Replace'}
+            </button>
+          )}
+        </div>
+      ) : (
+        !disabled ? (
+          <button onClick={handlePick} disabled={busy}
+            style={{
+              alignSelf: 'flex-start',
+              background: C.page, border: `1px solid ${C.border}`, color: C.emerald,
+              borderRadius: 5, padding: '6px 12px', fontSize: 12.5, cursor: busy ? 'wait' : 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <Icon path="M12 4v16m8-8H4" size={14} color={C.emerald} />
+            {busy ? 'Uploading…' : 'Choose .docx file'}
+          </button>
+        ) : (
+          <span style={{ fontSize: 12.5, color: C.textMuted, fontStyle: 'italic' }}>
+            {disabledReason || 'No file uploaded'}
+          </span>
+        )
+      )}
+
+      {error && (
+        <div style={{ fontSize: 11.5, color: '#b03a2e' }}>{error}</div>
       )}
     </div>
   )
@@ -1207,7 +1338,7 @@ const tdStyle = { padding: '10px 14px', color: C.textPrimary, verticalAlign: 'mi
 // FieldGroup widget — view mode OR edit mode
 // ---------------------------------------------------------------------------
 
-function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts }) {
+function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons }) {
   const fields = widget.widget_config?.fields || []
   if (fields.length === 0) return null
 
@@ -1219,6 +1350,33 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         const isLink = f.type === 'email' || f.type === 'lookup'
         const hasLookupOpts = f.type === 'lookup' && allLookupOpts?.[f.name]?.length > 0
         const isEditable = editing && (f.type !== 'datetime') && (f.type !== 'lookup' || hasLookupOpts)
+
+        // docx_upload renders the same component in both edit and view modes
+        // because uploads happen out-of-band (direct to storage + DB) rather
+        // than through the draft → save flow. The component reads the live
+        // path off the record (not the draft) and triggers a parent reload
+        // after a successful upload via onRefreshRecord.
+        if (f.type === 'docx_upload') {
+          const livePath = record[f.name] || null
+          const fieldDisabled = fieldDisabledReasons?.[f.name] || null
+          return (
+            <div key={f.name} style={{
+              padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}>
+              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                {f.label}
+              </span>
+              <DocxUploadField
+                recordId={recordId}
+                value={livePath}
+                onRefreshRecord={onRefreshRecord}
+                disabled={!!fieldDisabled}
+                disabledReason={fieldDisabled}
+              />
+            </div>
+          )
+        }
 
         return (
           <div key={f.name} style={{
@@ -2532,7 +2690,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 // Section
 // ---------------------------------------------------------------------------
 
-function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName }) {
+function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons }) {
   const isMobile = useIsMobile()
   const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
   // Render any widgets that live inside a section card. Today: field_group,
@@ -2552,7 +2710,8 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
       {!collapsed && sectionWidgets.map(w => {
         if (w.widget_type === 'field_group') {
           return <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
-            editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} />
+            editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts}
+            onRefreshRecord={onRefreshRecord} recordId={recordId} fieldDisabledReasons={fieldDisabledReasons} />
         }
         if (w.widget_type === 'section_config_editor') {
           return <SectionConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
@@ -2739,7 +2898,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // table-specific clone RPC from TEMPLATE_LIFECYCLES, which atomically
   // copies the template (and any child rows the RPC chooses to copy, e.g.
   // sections for PRT). Resets the clone to Draft + version 1 and navigates
-  // to it.
+  // to it. For document_templates, the RPC NULLs out the asset path on
+  // the clone (storage operations don't belong in an SQL RPC); we follow
+  // up with a storage.copy() here so docx-mode clones don't lose their
+  // asset and require manual re-upload.
   const handleCloneTemplate = useCallback(async () => {
     if (cloningTemplate) return
     const lifecycle = TEMPLATE_LIFECYCLES[tableName]
@@ -2753,6 +2915,21 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       })
       if (error) throw error
       if (!newId) throw new Error('Clone returned no id')
+
+      // For document_templates, copy the source asset to the new row's
+      // path. Failure here is non-fatal — the row is already cloned and
+      // the user can re-upload manually.
+      if (tableName === 'document_templates') {
+        const sourceAssetPath = data?.record?.dt_template_asset_path
+        if (sourceAssetPath) {
+          try {
+            await copyDocumentTemplateAsset(sourceAssetPath, newId)
+          } catch (assetErr) {
+            toast.warning(`Cloned, but asset copy failed: ${assetErr.message || String(assetErr)}`)
+          }
+        }
+      }
+
       toast.success(`Cloned ${sourceName}`)
       if (onNavigateToRecord) {
         onNavigateToRecord({ table: tableName, id: newId })
@@ -3538,14 +3715,42 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           </div>
         )}
 
-        {/* Sections — field groups only. Filter by active tab. */}
+        {/* Sections — field groups only. Filter by active tab. For
+            document_templates we also skip the Document Content section
+            when authoring mode is "docx" (the body_html field is
+            irrelevant in that mode — the .docx asset replaces it). */}
         {sections
           .filter(sec => (sec.section_tab || 'Details') === activeTab)
-          .map(sec => (
-            <Section key={sec.id} section={sec} record={record} picklists={picklists} lookups={lookups}
-              editing={editing} draft={draft} onChange={handleFieldChange}
-              allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName} />
-          ))}
+          .filter(sec => {
+            if (tableName !== 'document_templates') return true
+            if (sec.section_label !== 'Document Content') return true
+            const modeId = data?.record?.dt_authoring_mode
+            const modeValue = modeId ? data?.picklists?.valueById?.get(modeId) : null
+            return modeValue !== 'docx'
+          })
+          .map(sec => {
+            // Per-field disabled reasons. For document_templates we mark
+            // dt_template_asset_path inactive when mode is HTML so the
+            // upload UI explicitly says "switch to docx mode first" rather
+            // than letting users upload a file the renderer will ignore.
+            let fieldDisabledReasons = null
+            if (tableName === 'document_templates') {
+              const modeId = data?.record?.dt_authoring_mode
+              const modeValue = modeId ? data?.picklists?.valueById?.get(modeId) : null
+              if (modeValue !== 'docx') {
+                fieldDisabledReasons = {
+                  dt_template_asset_path: 'Set Authoring Mode to "Word Document (.docx)" before uploading.',
+                }
+              }
+            }
+            return (
+              <Section key={sec.id} section={sec} record={record} picklists={picklists} lookups={lookups}
+                editing={editing} draft={draft} onChange={handleFieldChange}
+                allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName}
+                onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
+                fieldDisabledReasons={fieldDisabledReasons} />
+            )
+          })}
 
         {/* Related lists — standalone Salesforce-style cards, shown only on
             the Related tab regardless of which section they came from. */}

@@ -479,3 +479,100 @@ export async function hydrateDocumentUrls(documents) {
       : null,
   }))
 }
+
+// ─── Document Template Assets (docx) ───────────────────────────────────
+// Authoring-mode .docx files for document_templates. One file per template,
+// stored at:
+//
+//   templates/document_templates/{dt_id}/{timestamp}-{safe_name}
+//
+// Each upload creates a NEW path (timestamp-prefixed) — we never overwrite.
+// Old paths remain in storage and stay valid references for any
+// document_template_snapshots that pinned them at publish time. The live
+// document_templates.dt_template_asset_path column always points to the
+// most recent upload.
+//
+// Because the lock trigger blocks dt_template_asset_path updates while the
+// template is Active, callers must unpublish before re-uploading. The error
+// from the trigger surfaces back to the UI naturally.
+
+const DOCX_TEMPLATE_BUCKET = 'templates'
+
+export async function uploadDocumentTemplateAsset(documentTemplateId, file) {
+  if (!documentTemplateId) throw new Error('documentTemplateId required')
+  if (!file) throw new Error('file required')
+  const ext = fileExt(file.name)
+  if (ext !== 'docx') {
+    throw new Error(`Only .docx files are supported (got .${ext || 'unknown'})`)
+  }
+
+  const path = `document_templates/${documentTemplateId}/${Date.now()}-${safeName(file.name)}`
+  const { error: uploadError } = await supabase.storage
+    .from(DOCX_TEMPLATE_BUCKET)
+    .upload(path, file, {
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      upsert: false,
+    })
+  if (uploadError) throw uploadError
+
+  const userId = await getCurrentUserId()
+  const { error: rowError } = await supabase
+    .from('document_templates')
+    .update({
+      dt_template_asset_path: path,
+      updated_by: userId,
+    })
+    .eq('id', documentTemplateId)
+  if (rowError) {
+    // Best-effort cleanup: remove the just-uploaded blob so we don't leave
+    // orphaned storage when the row update fails (lock trigger on Active
+    // templates is the most common cause).
+    try { await supabase.storage.from(DOCX_TEMPLATE_BUCKET).remove([path]) } catch { /* noop */ }
+    throw rowError
+  }
+
+  return { path, bucket: DOCX_TEMPLATE_BUCKET }
+}
+
+export async function signedDocumentTemplateAssetUrl(path, ttl = DEFAULT_SIGNED_URL_TTL_SECONDS) {
+  if (!path) return null
+  return signedUrl(DOCX_TEMPLATE_BUCKET, path, ttl)
+}
+
+/**
+ * Copy a document_template_asset to a new path under a different
+ * document_template id. Used by the clone flow: after clone_document_template
+ * RPC creates the cloned row (with NULL asset path), the FE calls this to
+ * mirror the source's asset to the clone, then updates the clone's
+ * dt_template_asset_path to the new path.
+ *
+ * Storage.from().copy() runs server-side so this doesn't transfer bytes
+ * through the client.
+ */
+export async function copyDocumentTemplateAsset(sourcePath, targetDocumentTemplateId) {
+  if (!sourcePath || !targetDocumentTemplateId) {
+    throw new Error('sourcePath and targetDocumentTemplateId required')
+  }
+  const filename = sourcePath.split('/').pop() || 'template.docx'
+  const targetPath = `document_templates/${targetDocumentTemplateId}/${Date.now()}-${filename}`
+
+  const { error: copyError } = await supabase.storage
+    .from(DOCX_TEMPLATE_BUCKET)
+    .copy(sourcePath, targetPath)
+  if (copyError) throw copyError
+
+  const userId = await getCurrentUserId()
+  const { error: rowError } = await supabase
+    .from('document_templates')
+    .update({
+      dt_template_asset_path: targetPath,
+      updated_by: userId,
+    })
+    .eq('id', targetDocumentTemplateId)
+  if (rowError) {
+    try { await supabase.storage.from(DOCX_TEMPLATE_BUCKET).remove([targetPath]) } catch { /* noop */ }
+    throw rowError
+  }
+
+  return { path: targetPath, bucket: DOCX_TEMPLATE_BUCKET }
+}
