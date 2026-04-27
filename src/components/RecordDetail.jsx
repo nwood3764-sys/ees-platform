@@ -482,17 +482,37 @@ function JsonField({ value, onChange }) {
 
 // ---------------------------------------------------------------------------
 // MergeFieldTextarea — textarea + Insert Merge Field popover. Used by the
-// `merge_textarea` field type. The popover is grouped by section
-// (Project / Property / Account / Report / User / Today) and inserts the
-// `{{path}}` token at the textarea's caret position. The token text and
-// resolution are validated server-side at render time; this UI is a
-// convenience picker only — authors can still type tokens directly.
+// `merge_textarea` field type. The popover is a Salesforce-style two-pane
+// picker: left pane is the object selector (Project / Property / Account /
+// Report / User / Today), right pane is the field list for the selected
+// object. Clicking a field inserts the `{{path}}` token at the textarea's
+// caret position. The token text and resolution are validated server-side
+// at render time; this UI is a convenience picker only — authors can still
+// type tokens directly.
 // ---------------------------------------------------------------------------
 
 function MergeFieldTextarea({ value, onChange }) {
   const taRef = useRef(null)
+  const popoverRef = useRef(null)
   const [open, setOpen] = useState(false)
+  const [activeGroup, setActiveGroup] = useState(MERGE_FIELD_CATALOG[0]?.group ?? '')
   const text = value == null ? '' : String(value)
+
+  // Close on outside click / Escape — popover stays open while users move
+  // between the object pane and the field pane (mouseLeave was too eager).
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) setOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
 
   const insertToken = (path) => {
     const ta = taRef.current
@@ -516,6 +536,9 @@ function MergeFieldTextarea({ value, onChange }) {
     })
     setOpen(false)
   }
+
+  const activeItems =
+    MERGE_FIELD_CATALOG.find(g => g.group === activeGroup)?.items ?? []
 
   return (
     <div>
@@ -551,24 +574,72 @@ function MergeFieldTextarea({ value, onChange }) {
         </span>
         {open && (
           <div
+            ref={popoverRef}
             style={{
               position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50,
               background: C.card, border: `1px solid ${C.borderDark}`, borderRadius: 8,
               boxShadow: '0 4px 16px rgba(13, 26, 46, 0.12)',
-              minWidth: 320, maxWidth: 460, maxHeight: 360, overflow: 'auto',
+              width: 520, maxWidth: '90vw',
+              display: 'flex', overflow: 'hidden',
             }}
-            onMouseLeave={() => setOpen(false)}
           >
-            {MERGE_FIELD_CATALOG.map(g => (
-              <div key={g.group}>
-                <div style={{
-                  padding: '8px 14px 4px', fontSize: 10.5, fontWeight: 600,
-                  color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
-                  background: '#fafbfd',
-                }}>
-                  {g.group}
+            {/* Left pane — object selector */}
+            <div
+              style={{
+                width: 170, flexShrink: 0,
+                background: '#fafbfd', borderRight: `1px solid ${C.border}`,
+                maxHeight: 360, overflowY: 'auto',
+              }}
+            >
+              <div style={{
+                padding: '8px 12px 6px', fontSize: 10.5, fontWeight: 600,
+                color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
+                borderBottom: `1px solid ${C.border}`,
+              }}>
+                Object
+              </div>
+              {MERGE_FIELD_CATALOG.map(g => {
+                const isActive = g.group === activeGroup
+                return (
+                  <button
+                    key={g.group}
+                    type="button"
+                    onClick={() => setActiveGroup(g.group)}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      width: '100%', textAlign: 'left',
+                      padding: '8px 12px', fontSize: 12,
+                      color: isActive ? C.textPrimary : C.textSecondary,
+                      fontWeight: isActive ? 600 : 400,
+                      background: isActive ? C.card : 'transparent',
+                      borderLeft: `3px solid ${isActive ? C.emerald : 'transparent'}`,
+                      borderTop: 'none', borderRight: 'none', borderBottom: `1px solid ${C.border}`,
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f3f8' }}
+                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <span>{g.group}</span>
+                    <Icon path="M9 5l7 7-7 7" size={11} color={isActive ? C.textPrimary : C.textMuted} />
+                  </button>
+                )
+              })}
+            </div>
+            {/* Right pane — field list for the selected object */}
+            <div style={{ flex: 1, maxHeight: 360, overflowY: 'auto' }}>
+              <div style={{
+                padding: '8px 14px 6px', fontSize: 10.5, fontWeight: 600,
+                color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
+                borderBottom: `1px solid ${C.border}`,
+              }}>
+                Field
+              </div>
+              {activeItems.length === 0 ? (
+                <div style={{ padding: '12px 14px', fontSize: 12, color: C.textMuted }}>
+                  No fields available.
                 </div>
-                {g.items.map(item => (
+              ) : (
+                activeItems.map(item => (
                   <button
                     key={item.path}
                     type="button"
@@ -576,8 +647,9 @@ function MergeFieldTextarea({ value, onChange }) {
                     style={{
                       display: 'block', width: '100%', textAlign: 'left',
                       padding: '8px 14px', fontSize: 12, color: C.textPrimary,
-                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      background: 'transparent', border: 'none',
                       borderBottom: `1px solid ${C.border}`,
+                      cursor: 'pointer',
                     }}
                     onMouseEnter={e => { e.currentTarget.style.background = '#f0f6f3' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
@@ -587,9 +659,9 @@ function MergeFieldTextarea({ value, onChange }) {
                       {`{{${item.path}}}`}
                     </code>
                   </button>
-                ))}
-              </div>
-            ))}
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>

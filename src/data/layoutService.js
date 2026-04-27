@@ -395,7 +395,15 @@ export function applyInsertDefaults(tableName, fields, userId) {
     'unit', 'assessment', 'vehicle', 'product', 'equipment', 'account', 'skill',
   ]
   for (const p of prefixes) {
-    if (tableName.startsWith(p) || tableName === p + 's' || tableName === p + 'ies') {
+    // Match the table name exactly to its singular or pluralized form.
+    // Using startsWith() here would collide with longer table names that
+    // share a prefix — e.g. `project_report_template_sections` would match
+    // the `project` branch and apply project_* defaults to a prts_* table.
+    // Affected long-prefix tables: project_report_templates,
+    // project_report_template_sections, project_report_template_record_type_assignments,
+    // project_report_template_snapshots, project_payment_requests, account_contact_relations,
+    // contact_skills. Each of these has its own explicit branch below.
+    if (tableName === p || tableName === p + 's' || tableName === p + 'ies') {
       if (!fields[`${p}_record_number`]) fields[`${p}_record_number`] = 'NEW'
       if (!fields[`${p}_owner`])         fields[`${p}_owner`]         = userId
       if (!fields[`${p}_created_by`])    fields[`${p}_created_by`]    = userId
