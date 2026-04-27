@@ -1,9 +1,0 @@
-# Supabase project config (function-specific overrides only). The CLI
-# and dashboard are the source of truth for everything else.
-
-# docusign-webhook is invoked by DocuSign Connect, not by an authenticated
-# Supabase user, so it cannot verify a Supabase JWT. We instead verify the
-# HMAC signature on the request body inside the function itself (see
-# DOCUSIGN_CONNECT_HMAC_KEY secret).
-[functions.docusign-webhook]
-verify_jwt = false

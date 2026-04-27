@@ -9,12 +9,12 @@
 //      looks like with real data filled in. POST { document_template_id,
 //      parent_object, parent_record_id, preview: true } and a docx blob
 //      comes back for download.
-//   2. Send-for-signature — the docusign-send-envelope function calls us
-//      internally to get the merged docx, then uploads it to DocuSign as
-//      the envelope document. In this mode we resolve the template via
-//      document_template_snapshot_id (the snapshot pinned at envelope
-//      send time) so the merged content reflects exactly what was Active
-//      when the envelope was created.
+//   2. Send-for-signature — the send-envelope function calls us internally
+//      to get the merged docx, which it then converts to PDF (via mammoth
+//      → pdf-lib) and stores as the envelope's unsigned PDF. In this mode
+//      we resolve the template via document_template_snapshot_id (the
+//      snapshot pinned at envelope send time) so the merged content
+//      reflects exactly what was Active when the envelope was created.
 //
 // Template resolution order:
 //   1. document_template_snapshot_id → load from document_template_snapshots
@@ -23,9 +23,10 @@
 //   2. document_template_id → live row, must be Active (or preview=true
 //      bypasses the gate)
 //
-// Authoring-mode requirement: only docx-mode templates render. HTML-mode
-// templates return a 400 — they're for email bodies and HTML-based PDFs,
-// neither of which uses this endpoint.
+// Authoring-mode requirement: only docx-mode templates render here. HTML-
+// mode templates render via the body_html → pdf-lib path inside the
+// send-envelope function — they don't go through docxtemplater because
+// the body is already in HTML, ready for the PDF pipeline.
 //
 // All authentication piggybacks on the caller's JWT (verify_jwt = true).
 // RLS already grants `authenticated` SELECT on every table we read here.

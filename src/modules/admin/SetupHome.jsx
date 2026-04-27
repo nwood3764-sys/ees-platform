@@ -614,7 +614,6 @@ const ENV_COLS = [
   { field: 'name',               label: 'Envelope',     type: 'text', sortable: true, filterable: true },
   { field: 'template',           label: 'Template',     type: 'text', sortable: true, filterable: true },
   { field: 'parentObject',       label: 'Parent',       type: 'text', sortable: true, filterable: true },
-  { field: 'provider',           label: 'Provider',     type: 'text', sortable: true, filterable: true },
   { field: 'sentAt',             label: 'Sent',         type: 'text', sortable: true, filterable: false },
   { field: 'completedAt',        label: 'Completed',    type: 'text', sortable: true, filterable: false },
   { field: 'status',             label: 'Status',       type: 'select', sortable: true, filterable: true, options: ['Draft','Sent — Awaiting Signature','Delivered to First Signer','Completed — All Signed','Declined','Voided','Failed to Send','—'] },
