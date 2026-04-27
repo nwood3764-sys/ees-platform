@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
 import ProjectReportModal from './ProjectReportModal'
@@ -481,64 +482,90 @@ function JsonField({ value, onChange }) {
 }
 
 // ---------------------------------------------------------------------------
-// MergeFieldTextarea — textarea + Insert Merge Field popover. Used by the
-// `merge_textarea` field type. The popover is a Salesforce-style two-pane
-// picker: left pane is the object selector (Project / Property / Account /
-// Report / User / Today), right pane is the field list for the selected
-// object. Clicking a field inserts the `{{path}}` token at the textarea's
-// caret position. The token text and resolution are validated server-side
-// at render time; this UI is a convenience picker only — authors can still
-// type tokens directly.
+// MergeFieldTextarea — textarea + Insert Merge Field picker. Used by the
+// `merge_textarea` field type. The picker is a portal'd modal (rendered to
+// document.body) with a Salesforce-style two-pane layout: left pane is the
+// object selector (Project / Property / Account / Report / User / Today),
+// right pane is the field list for the selected object. Clicking a field
+// inserts the `{{path}}` token at the textarea's caret position. Modal
+// avoids clipping when the textarea is rendered in narrow page-layout
+// columns (e.g. 3-column section grid). The token text and resolution are
+// validated server-side at render time; this UI is a convenience picker
+// only — authors can still type tokens directly.
 // ---------------------------------------------------------------------------
 
 function MergeFieldTextarea({ value, onChange }) {
   const taRef = useRef(null)
-  const popoverRef = useRef(null)
   const [open, setOpen] = useState(false)
   const [activeGroup, setActiveGroup] = useState(MERGE_FIELD_CATALOG[0]?.group ?? '')
+  // Caret position is captured when the picker opens; if the textarea loses
+  // focus during modal interaction we still insert at the user's last caret.
+  const caretRef = useRef({ start: 0, end: 0 })
   const text = value == null ? '' : String(value)
 
-  // Close on outside click / Escape — popover stays open while users move
-  // between the object pane and the field pane (mouseLeave was too eager).
+  // Close on Escape
   useEffect(() => {
     if (!open) return
-    const onDown = (e) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target)) setOpen(false)
-    }
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
+    return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
-  const insertToken = (path) => {
+  const openPicker = () => {
     const ta = taRef.current
-    const token = `{{${path}}}`
-    if (!ta) {
-      onChange(`${text}${token}`)
-      setOpen(false)
-      return
+    if (ta) {
+      caretRef.current = {
+        start: ta.selectionStart ?? text.length,
+        end:   ta.selectionEnd   ?? text.length,
+      }
+    } else {
+      caretRef.current = { start: text.length, end: text.length }
     }
-    const start = ta.selectionStart ?? text.length
-    const end = ta.selectionEnd ?? text.length
+    setOpen(true)
+  }
+
+  const insertToken = (path) => {
+    const token = `{{${path}}}`
+    const { start, end } = caretRef.current
     const next = text.slice(0, start) + token + text.slice(end)
     onChange(next)
+    setOpen(false)
     // Restore caret position after the inserted token.
     requestAnimationFrame(() => {
-      const ta2 = taRef.current
-      if (!ta2) return
+      const ta = taRef.current
+      if (!ta) return
       const pos = start + token.length
-      ta2.focus()
-      ta2.setSelectionRange(pos, pos)
+      ta.focus()
+      ta.setSelectionRange(pos, pos)
     })
-    setOpen(false)
   }
 
   const activeItems =
     MERGE_FIELD_CATALOG.find(g => g.group === activeGroup)?.items ?? []
+
+  // Modal styles match ProjectReportModal so the look is consistent across
+  // the app (same backdrop, same card border / shadow, same z-index band).
+  const overlay = {
+    position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 1100, padding: 16,
+  }
+  const card = {
+    width: '100%', maxWidth: 640, background: C.card,
+    border: `1px solid ${C.border}`, borderRadius: 10,
+    boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+    overflow: 'hidden',
+    display: 'flex', flexDirection: 'column',
+    maxHeight: 'min(560px, 90vh)',
+  }
+  const headerStyle = {
+    padding: '14px 18px', borderBottom: `1px solid ${C.border}`,
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  }
+  const footerStyle = {
+    padding: '10px 18px', borderTop: `1px solid ${C.border}`,
+    background: C.page, fontSize: 11, color: C.textMuted,
+  }
 
   return (
     <div>
@@ -554,15 +581,16 @@ function MergeFieldTextarea({ value, onChange }) {
           lineHeight: 1.5,
         }}
       />
-      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
+      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <button
           type="button"
-          onClick={() => setOpen(o => !o)}
+          onClick={openPicker}
           style={{
             padding: '5px 12px', fontSize: 12, fontWeight: 500,
             background: C.card, border: `1px solid ${C.borderDark}`,
             borderRadius: 4, cursor: 'pointer', color: C.textPrimary,
             display: 'inline-flex', alignItems: 'center', gap: 6,
+            whiteSpace: 'nowrap', flexShrink: 0,
           }}
         >
           <Icon path="M12 4v16m8-8H4" size={13} color={C.textPrimary} />
@@ -572,99 +600,130 @@ function MergeFieldTextarea({ value, onChange }) {
           Tokens use <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{`{{path}}`}</code> syntax.
           Unknown tokens render as <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>[unknown: …]</code>.
         </span>
-        {open && (
-          <div
-            ref={popoverRef}
-            style={{
-              position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50,
-              background: C.card, border: `1px solid ${C.borderDark}`, borderRadius: 8,
-              boxShadow: '0 4px 16px rgba(13, 26, 46, 0.12)',
-              width: 520, maxWidth: '90vw',
-              display: 'flex', overflow: 'hidden',
-            }}
-          >
-            {/* Left pane — object selector */}
-            <div
-              style={{
-                width: 170, flexShrink: 0,
-                background: '#fafbfd', borderRight: `1px solid ${C.border}`,
-                maxHeight: 360, overflowY: 'auto',
-              }}
-            >
-              <div style={{
-                padding: '8px 12px 6px', fontSize: 10.5, fontWeight: 600,
-                color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
-                borderBottom: `1px solid ${C.border}`,
-              }}>
-                Object
-              </div>
-              {MERGE_FIELD_CATALOG.map(g => {
-                const isActive = g.group === activeGroup
-                return (
-                  <button
-                    key={g.group}
-                    type="button"
-                    onClick={() => setActiveGroup(g.group)}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      width: '100%', textAlign: 'left',
-                      padding: '8px 12px', fontSize: 12,
-                      color: isActive ? C.textPrimary : C.textSecondary,
-                      fontWeight: isActive ? 600 : 400,
-                      background: isActive ? C.card : 'transparent',
-                      borderLeft: `3px solid ${isActive ? C.emerald : 'transparent'}`,
-                      borderTop: 'none', borderRight: 'none', borderBottom: `1px solid ${C.border}`,
-                      cursor: 'pointer',
-                    }}
-                    onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f3f8' }}
-                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <span>{g.group}</span>
-                    <Icon path="M9 5l7 7-7 7" size={11} color={isActive ? C.textPrimary : C.textMuted} />
-                  </button>
-                )
-              })}
-            </div>
-            {/* Right pane — field list for the selected object */}
-            <div style={{ flex: 1, maxHeight: 360, overflowY: 'auto' }}>
-              <div style={{
-                padding: '8px 14px 6px', fontSize: 10.5, fontWeight: 600,
-                color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
-                borderBottom: `1px solid ${C.border}`,
-              }}>
-                Field
-              </div>
-              {activeItems.length === 0 ? (
-                <div style={{ padding: '12px 14px', fontSize: 12, color: C.textMuted }}>
-                  No fields available.
+      </div>
+      {open && createPortal(
+        <div style={overlay} onClick={() => setOpen(false)}>
+          <div style={card} onClick={e => e.stopPropagation()}>
+            <div style={headerStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: 6,
+                  background: '#ecfdf5', border: '1px solid #a7f3d0',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Icon path="M12 4v16m8-8H4" size={15} color={C.emerald} />
                 </div>
-              ) : (
-                activeItems.map(item => (
-                  <button
-                    key={item.path}
-                    type="button"
-                    onClick={() => insertToken(item.path)}
-                    style={{
-                      display: 'block', width: '100%', textAlign: 'left',
-                      padding: '8px 14px', fontSize: 12, color: C.textPrimary,
-                      background: 'transparent', border: 'none',
-                      borderBottom: `1px solid ${C.border}`,
-                      cursor: 'pointer',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = '#f0f6f3' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <div>{item.label}</div>
-                    <code style={{ fontSize: 10.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>
-                      {`{{${item.path}}}`}
-                    </code>
-                  </button>
-                ))
-              )}
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>Insert Merge Field</div>
+                  <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 1 }}>
+                    Pick an object on the left, then a field on the right.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close"
+                style={{
+                  width: 28, height: 28, borderRadius: 6,
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: C.textMuted,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.page }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <Icon path="M6 18L18 6M6 6l12 12" size={16} color={C.textSecondary} />
+              </button>
+            </div>
+            <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+              {/* Left pane — object selector */}
+              <div
+                style={{
+                  width: 180, flexShrink: 0,
+                  background: '#fafbfd', borderRight: `1px solid ${C.border}`,
+                  overflowY: 'auto',
+                }}
+              >
+                <div style={{
+                  padding: '10px 14px 6px', fontSize: 10.5, fontWeight: 600,
+                  color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
+                  borderBottom: `1px solid ${C.border}`,
+                }}>
+                  Object
+                </div>
+                {MERGE_FIELD_CATALOG.map(g => {
+                  const isActive = g.group === activeGroup
+                  return (
+                    <button
+                      key={g.group}
+                      type="button"
+                      onClick={() => setActiveGroup(g.group)}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        width: '100%', textAlign: 'left',
+                        padding: '9px 14px', fontSize: 12.5,
+                        color: isActive ? C.textPrimary : C.textSecondary,
+                        fontWeight: isActive ? 600 : 400,
+                        background: isActive ? C.card : 'transparent',
+                        borderLeft: `3px solid ${isActive ? C.emerald : 'transparent'}`,
+                        borderTop: 'none', borderRight: 'none', borderBottom: `1px solid ${C.border}`,
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f3f8' }}
+                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <span>{g.group}</span>
+                      <Icon path="M9 5l7 7-7 7" size={11} color={isActive ? C.textPrimary : C.textMuted} />
+                    </button>
+                  )
+                })}
+              </div>
+              {/* Right pane — field list for the selected object */}
+              <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
+                <div style={{
+                  padding: '10px 16px 6px', fontSize: 10.5, fontWeight: 600,
+                  color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
+                  borderBottom: `1px solid ${C.border}`,
+                }}>
+                  Field
+                </div>
+                {activeItems.length === 0 ? (
+                  <div style={{ padding: '14px 16px', fontSize: 12.5, color: C.textMuted }}>
+                    No fields available.
+                  </div>
+                ) : (
+                  activeItems.map(item => (
+                    <button
+                      key={item.path}
+                      type="button"
+                      onClick={() => insertToken(item.path)}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        padding: '10px 16px', fontSize: 12.5, color: C.textPrimary,
+                        background: 'transparent', border: 'none',
+                        borderBottom: `1px solid ${C.border}`,
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#f0f6f3' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <div>{item.label}</div>
+                      <code style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>
+                        {`{{${item.path}}}`}
+                      </code>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+            <div style={footerStyle}>
+              Click a field to insert <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{`{{path}}`}</code> at the cursor. Press Esc to close.
             </div>
           </div>
-        )}
-      </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
