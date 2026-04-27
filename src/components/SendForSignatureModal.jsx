@@ -378,11 +378,38 @@ function SentStep({ result }) {
   const copyUrl = (url) => {
     try { navigator.clipboard.writeText(url) } catch {}
   }
+  // Email send results from send-envelope v2 — one entry per recipient that
+  // was attempted (currently only recipient #1; the rest get emailed by
+  // signing-portal-submit when their predecessor signs).
+  const emailResults = result.email_send_results || []
+  const firstResult  = emailResults.find(r => r.order === 1) || null
+
   return (
     <>
       <div style={{ padding: 14, background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 6, marginBottom: 14, fontSize: 13, color: '#065f46' }}>
-        Envelope <b>{result.env_record_number}</b> created. Email delivery isn't wired yet — copy each signing link below and send it to the recipient.
+        Envelope <b>{result.env_record_number}</b> created.
       </div>
+
+      {/* Email send banner — green if Outlook delivered to recipient #1, amber
+          if no Outlook connection (user can copy the URL below as fallback),
+          red if the send attempt failed. */}
+      {firstResult && firstResult.status === 'sent' && (
+        <div style={{ padding: 10, background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#065f46' }}>
+          ✓ Signing request emailed to <b>{(result.signing_urls || []).find(u => u.order === 1)?.email || 'recipient'}</b> via your Outlook. A copy is saved on this record.
+          {result.signing_urls?.length > 1 && ' The next signer will be emailed automatically when this one completes.'}
+        </div>
+      )}
+      {firstResult && firstResult.status === 'not_connected' && (
+        <div style={{ padding: 10, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#92400e' }}>
+          <b>Outlook isn't connected.</b> Copy the signing link below and send it manually. Connect Outlook from the user menu (Integrations) so future signing requests email out automatically.
+        </div>
+      )}
+      {firstResult && firstResult.status === 'failed' && (
+        <div style={{ padding: 10, background: '#fdecea', border: '1px solid #f3b9b3', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#8a2c20' }}>
+          <b>Email send failed.</b> Copy the signing link below and send it manually. {firstResult.failure_reason && <span style={{ display: 'block', marginTop: 4, fontSize: 11.5, fontFamily: 'monospace' }}>{firstResult.failure_reason}</span>}
+        </div>
+      )}
+
       {result.dropped_anchors?.length > 0 && (
         <div style={{ padding: 10, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#92400e' }}>
           <b>Note:</b> {result.dropped_anchors.length} anchor{result.dropped_anchors.length === 1 ? ' was' : 's were'} skipped because no recipient matched their order: {result.dropped_anchors.join(', ')}

@@ -3,6 +3,8 @@ import { Sidebar, MobileHeader, ComingSoon } from './components/UI'
 import AuthGate from './components/AuthGate'
 import { ToastProvider } from './components/Toast'
 import PasswordChangeModal from './components/PasswordChangeModal'
+import IntegrationsModal from './components/IntegrationsModal'
+import OutlookCallback from './pages/OutlookCallback'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
@@ -57,6 +59,8 @@ function AuthedApp({ session }) {
   // than inside Sidebar/UserMenu because the modal is a full-screen overlay
   // and shouldn't be clipped by the sidebar's container.
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
+  // Integrations modal — Outlook Connect/Disconnect today, room for more later.
+  const [integrationsOpen, setIntegrationsOpen] = useState(false)
   // Desktop sidebar collapse state. Persisted to localStorage so the choice
   // survives reloads. Ignored on mobile (the drawer is always full-width).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -141,6 +145,7 @@ function AuthedApp({ session }) {
         userEmail={session?.user?.email}
         onSignOut={handleSignOut}
         onChangePassword={() => setPasswordModalOpen(true)}
+        onOpenIntegrations={() => setIntegrationsOpen(true)}
         mobileOpen={mobileMenuOpen}
         onMobileClose={() => setMobileMenuOpen(false)}
         collapsed={sidebarCollapsed}
@@ -163,16 +168,35 @@ function AuthedApp({ session }) {
           onClose={() => setPasswordModalOpen(false)}
         />
       )}
+
+      {integrationsOpen && (
+        <IntegrationsModal
+          onClose={() => setIntegrationsOpen(false)}
+        />
+      )}
     </div>
   )
 }
 
 export default function App() {
+  // /auth/outlook-callback bypasses the module chrome (no sidebar) but still
+  // runs inside AuthGate — the callback edge fn requires the user's Supabase
+  // JWT. ToastProvider is included so the success page can use toasts later
+  // if we add them.
+  const isOutlookCallback = typeof window !== 'undefined'
+    && window.location.pathname === '/auth/outlook-callback'
+
   return (
     <AuthGate>
       {(session) => (
         <ToastProvider>
-          <AuthedApp session={session} />
+          {isOutlookCallback
+            ? (
+              <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, -apple-system, sans-serif', background: C.page }}>
+                <OutlookCallback />
+              </div>
+            )
+            : <AuthedApp session={session} />}
         </ToastProvider>
       )}
     </AuthGate>

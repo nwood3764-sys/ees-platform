@@ -16,6 +16,7 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { fetchActivityTimeline } from '../data/activityService'
+import { supabase } from '../lib/supabase'
 
 // Relative time: "just now", "5 min ago", "2 hr ago", "yesterday", or full date
 function relativeTime(iso) {
@@ -49,6 +50,30 @@ const KIND_STYLES = {
   soft_delete:  { label: 'Deleted',      bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
   restore:      { label: 'Restored',     bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
   hard_delete:  { label: 'Hard Deleted', bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
+  email:        { label: 'Email Sent',   bg: '#eef4fc', color: '#2557a7', dot: '#2557a7' },
+  email_failed: { label: 'Email Failed', bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
+}
+
+// Convert a row from list_email_sends_for_record() RPC into a TimelineEntry
+// with kind='email' (or 'email_failed' on Failed status). The body_html is
+// kept on entry.email so EmailEntryBody can render it inside the entry card.
+function toEmailEntry(row) {
+  const failed = row.status === 'Failed'
+  return {
+    id: `email_${row.id}`,
+    timestamp: row.sent_at || row.created_at,
+    kind: failed ? 'email_failed' : 'email',
+    actorName: row.sent_by_name || row.sender_email || 'System',
+    changes: [],
+    email: {
+      subject: row.subject,
+      recipients_to: row.recipients_to,
+      body_html: row.body_html,
+      status: row.status,
+      failure_reason: row.failure_reason,
+      record_number: row.email_send_record_number,
+    },
+  }
 }
 
 // Convert a name into initials, e.g. "Nicholas Wood" → "NW"
@@ -151,7 +176,63 @@ function TimelineEntry({ entry, isLast }) {
             {entry.changes.map((c, i) => <ChangeRow key={`${c.field}-${i}`} change={c} />)}
           </div>
         )}
+
+        {entry.email && <EmailEntryBody email={entry.email} />}
       </div>
+    </div>
+  )
+}
+
+// Renders the email-specific block inside a TimelineEntry. Subject + recipient
+// list + collapsible body preview. Body is shown plain-text by default; users
+// can expand to see the actual HTML rendering of what was sent.
+function EmailEntryBody({ email }) {
+  const [expanded, setExpanded] = useState(false)
+  const recipients = Array.isArray(email.recipients_to) ? email.recipients_to : []
+  const recipientLabel = recipients.length === 0
+    ? '(no recipients)'
+    : recipients.length === 1
+      ? `${recipients[0].name || recipients[0].email}`
+      : `${recipients[0].name || recipients[0].email} +${recipients.length - 1} other${recipients.length === 2 ? '' : 's'}`
+
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
+      padding: '8px 12px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 12, color: C.textSecondary, marginBottom: 4 }}>
+        <span style={{ color: C.textMuted }}>To:</span>
+        <span style={{ color: C.textPrimary, fontWeight: 500 }}>{recipientLabel}</span>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, marginBottom: 4 }}>
+        {email.subject || '(no subject)'}
+      </div>
+      {email.status === 'Failed' && email.failure_reason && (
+        <div style={{ fontSize: 11, color: '#8a2c20', background: '#fdecea', border: '1px solid #f3b9b3', borderRadius: 4, padding: '4px 8px', marginBottom: 6, fontFamily: 'monospace' }}>
+          {email.failure_reason}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        style={{
+          background: 'transparent', border: 'none', color: C.sky,
+          fontSize: 11.5, fontWeight: 500, cursor: 'pointer', padding: 0,
+          textDecoration: 'underline',
+        }}
+      >
+        {expanded ? 'Hide message' : 'Show message'}
+      </button>
+      {expanded && email.body_html && (
+        <div style={{
+          marginTop: 8, padding: 10, background: '#fff',
+          border: `1px solid ${C.border}`, borderRadius: 4,
+          maxHeight: 400, overflow: 'auto', fontSize: 13,
+        }}>
+          {/* eslint-disable-next-line react/no-danger */}
+          <div dangerouslySetInnerHTML={{ __html: email.body_html }} />
+        </div>
+      )}
     </div>
   )
 }
@@ -225,16 +306,29 @@ export default function ActivityTimeline({ tableName, recordId }) {
   const [filterId, setFilterId] = useState('all')
 
   // Initial load — also resets everything when the record changes.
+  // Fetches activity timeline and email sends in parallel, then merges them
+  // by timestamp. Email entries come from the email_sends table (every email
+  // Anura sent through Outlook on behalf of any user, threaded onto the
+  // parent record); they sit alongside field-history entries in one feed.
   useEffect(() => {
     let cancelled = false
     setEntries(null)
     setHasMore(false)
     setError(null)
     setFilterId('all')
-    fetchActivityTimeline(tableName, recordId)
-      .then(({ entries, hasMore }) => {
+    Promise.all([
+      fetchActivityTimeline(tableName, recordId),
+      supabase.rpc('list_email_sends_for_record', {
+        p_parent_object: tableName,
+        p_parent_record_id: recordId,
+      }).then(({ data, error: rpcErr }) => rpcErr ? [] : (data || [])),
+    ])
+      .then(([{ entries: activityEntries, hasMore }, emailRows]) => {
         if (cancelled) return
-        setEntries(entries)
+        const emailEntries = emailRows.map(toEmailEntry)
+        const merged = [...activityEntries, ...emailEntries]
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        setEntries(merged)
         setHasMore(hasMore)
       })
       .catch(err => { if (!cancelled) setError(err.message || String(err)) })

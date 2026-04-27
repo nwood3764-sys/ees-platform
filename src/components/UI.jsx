@@ -277,6 +277,7 @@ export function Sidebar({
   userEmail,
   onSignOut,
   onChangePassword,
+  onOpenIntegrations,
   user = { name: 'Nicholas Wood', role: 'Admin', initials: 'NW' },
   mobileOpen = false,
   onMobileClose,
@@ -406,6 +407,7 @@ export function Sidebar({
         userEmail={userEmail}
         onSignOut={onSignOut}
         onChangePassword={onChangePassword}
+        onOpenIntegrations={onOpenIntegrations}
         isMobile={isMobile}
         isCollapsed={isCollapsed}
       />
