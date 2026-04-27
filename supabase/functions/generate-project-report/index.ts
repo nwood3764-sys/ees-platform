@@ -381,6 +381,21 @@ interface RenderCtx {
   userNamesById: Map<string, string>
   property: any | null
   account: any | null
+  // ── Expanded relationship rows (for merge field resolution) ──────────
+  // These are fetched in loadProjectGraph (or stamped null/empty in
+  // buildSyntheticGraph) so resolveMergeField can dispatch every supported
+  // {{root}} token without re-querying. Scalars may be null when the
+  // relationship isn't set (e.g. project has no opportunity); collections
+  // are always arrays, possibly empty.
+  propertyOwnerAccount: any | null      // properties.property_account_id           → accounts
+  propertyManagerAccount: any | null    // properties.property_managing_account_id  → accounts
+  projectAccount: any | null            // projects.project_account_id              → accounts (alias of `account` above)
+  opportunity: any | null               // projects.opportunity_id                  → opportunities
+  opportunityAccount: any | null        // opportunities.opportunity_account_id     → accounts
+  buildings: any[]                      // buildings where property_id = project.property_id
+  units: any[]                          // units where building_id IN buildings.id
+  workStepsAll: WorkStep[]              // flattened workStepsByWO, sorted by work_step_record_number
+  opportunityLineItems: any[]           // opportunity_line_items where opportunity_id = project.opportunity_id
   generatedAt: Date
   generatedByName: string
   generatedByEmail: string | null   // raw caller email for {{user.email}} merge
@@ -864,10 +879,66 @@ async function loadProjectGraph(client: SupabaseClient, projectId: string) {
     const r = await client.from("properties").select("*").eq("id", project.property_id).maybeSingle()
     if (!r.error) property = r.data
   }
+  // `account` here is the project's account (projects.project_account_id).
+  // Kept on RenderCtx as both `account` (legacy) and `projectAccount` for
+  // clarity in the new merge-field dispatch map.
   let account: any = null
   if (project.project_account_id) {
     const r = await client.from("accounts").select("*").eq("id", project.project_account_id).maybeSingle()
     if (!r.error) account = r.data
+  }
+
+  // ── Expanded scalar parents ──────────────────────────────────────────
+  // Property Owner: properties.property_account_id → accounts
+  let propertyOwnerAccount: any = null
+  if (property?.property_account_id) {
+    const r = await client.from("accounts").select("*").eq("id", property.property_account_id).maybeSingle()
+    if (!r.error) propertyOwnerAccount = r.data
+  }
+  // Property Manager: properties.property_managing_account_id → accounts
+  let propertyManagerAccount: any = null
+  if (property?.property_managing_account_id) {
+    const r = await client.from("accounts").select("*").eq("id", property.property_managing_account_id).maybeSingle()
+    if (!r.error) propertyManagerAccount = r.data
+  }
+  // Source opportunity: projects.opportunity_id → opportunities
+  let opportunity: any = null
+  if (project.opportunity_id) {
+    const r = await client.from("opportunities").select("*").eq("id", project.opportunity_id).maybeSingle()
+    if (!r.error) opportunity = r.data
+  }
+  // Opportunity account: opportunities.opportunity_account_id → accounts
+  let opportunityAccount: any = null
+  if (opportunity?.opportunity_account_id) {
+    const r = await client.from("accounts").select("*").eq("id", opportunity.opportunity_account_id).maybeSingle()
+    if (!r.error) opportunityAccount = r.data
+  }
+
+  // ── Expanded collections ─────────────────────────────────────────────
+  // Buildings hang off properties (buildings.property_id), not projects.
+  let buildings: any[] = []
+  if (property?.id) {
+    const r = await client.from("buildings").select("*")
+      .eq("property_id", property.id).eq("building_is_deleted", false)
+      .order("building_record_number", { ascending: true })
+    if (!r.error) buildings = r.data || []
+  }
+  // Units hang off buildings.
+  let units: any[] = []
+  if (buildings.length > 0) {
+    const buildingIds = buildings.map(b => b.id)
+    const r = await client.from("units").select("*")
+      .in("building_id", buildingIds).eq("unit_is_deleted", false)
+      .order("unit_record_number", { ascending: true })
+    if (!r.error) units = r.data || []
+  }
+  // Opportunity line items hang off the source opportunity.
+  let opportunityLineItems: any[] = []
+  if (opportunity?.id) {
+    const r = await client.from("opportunity_line_items").select("*")
+      .eq("opportunity_id", opportunity.id).eq("oli_is_deleted", false)
+      .order("oli_record_number", { ascending: true })
+    if (!r.error) opportunityLineItems = r.data || []
   }
 
   const { data: workOrders, error: woErr } = await client.from("work_orders")
@@ -919,6 +990,12 @@ async function loadProjectGraph(client: SupabaseClient, projectId: string) {
     if (!workStepsByWO.has(s.work_order_id)) workStepsByWO.set(s.work_order_id, [])
     workStepsByWO.get(s.work_order_id)!.push(s)
   }
+  // Flat list ordered by work_step_record_number ASC for the {{work_step.first.<col>}}
+  // collection root. Distinct from workStepsByWO (which is grouped + ordered by
+  // execution_order within each work order — used by the section renderers).
+  const workStepsAll = [...workSteps].sort((a, b) =>
+    (a.work_step_record_number || "").localeCompare(b.work_step_record_number || "")
+  )
   const photosByStep = new Map<string, Photo[]>()
   const photosByWO = new Map<string, Photo[]>()
   for (const p of photos) {
@@ -935,7 +1012,23 @@ async function loadProjectGraph(client: SupabaseClient, projectId: string) {
     }
   }
 
-  return { project: project as Project, property, account, workOrders: (workOrders as WorkOrder[]) || [], workStepsByWO, photosByStep, photosByWO }
+  return {
+    project: project as Project,
+    property,
+    account,
+    propertyOwnerAccount,
+    propertyManagerAccount,
+    opportunity,
+    opportunityAccount,
+    buildings,
+    units,
+    opportunityLineItems,
+    workOrders: (workOrders as WorkOrder[]) || [],
+    workStepsByWO,
+    workStepsAll,
+    photosByStep,
+    photosByWO,
+  }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1063,7 +1156,47 @@ function buildSyntheticGraph(picklistById: Map<string, Picklist>, callerUserId: 
   const photosByStep = new Map<string, Photo[]>()
   const photosByWO   = new Map<string, Photo[]>()
 
-  return { project, property, account, workOrders, workStepsByWO, photosByStep, photosByWO }
+  // Flat preview-step list mirrors the workStepsAll field on RenderCtx so
+  // {{work_step.first.<col>}} resolves cleanly in preview mode.
+  const workStepsAll: WorkStep[] = []
+  for (const arr of workStepsByWO.values()) workStepsAll.push(...arr)
+  workStepsAll.sort((a, b) =>
+    (a.work_step_record_number || "").localeCompare(b.work_step_record_number || "")
+  )
+
+  // Minimal fixtures for the new merge-field roots so the preview picker
+  // resolves cleanly. Anything not stamped here resolves to "—" via the
+  // resolver's null-row guard, which is acceptable for preview output.
+  const previewBuilding = {
+    id: "00000000-0000-0000-0000-0000000000B1",
+    building_record_number: "BLDG-PREVIEW-1",
+    building_name: "Building A",
+    property_id: previewPropertyId,
+  }
+  const previewUnit = {
+    id: "00000000-0000-0000-0000-0000000000U1",
+    unit_record_number: "UNIT-PREVIEW-101",
+    unit_name: "Unit 101",
+    building_id: previewBuilding.id,
+  }
+
+  return {
+    project,
+    property,
+    account,
+    propertyOwnerAccount: account,    // synthetic: re-use the same account
+    propertyManagerAccount: null,
+    opportunity: null,
+    opportunityAccount: null,
+    buildings: [previewBuilding],
+    units: [previewUnit],
+    opportunityLineItems: [],
+    workOrders,
+    workStepsByWO,
+    workStepsAll,
+    photosByStep,
+    photosByWO,
+  }
 }
 
 async function resolveTemplate(client: SupabaseClient, project: Project, explicitPrtId?: string): Promise<{ prt: PRT, sections: PRTS[] }> {
@@ -1228,32 +1361,71 @@ function resolveMergeField(ctx: RenderCtx, path: string): { value: string, found
   const root = segs[0]
   const rest = segs.slice(1).join(".")
 
-  // Helper: read a column off a row, auto-resolving picklist UUIDs to labels.
+  // Helper: read a column off a row, auto-resolving picklist UUIDs to labels
+  // and user UUIDs to "First Last". Real string fields (names, addresses)
+  // won't collide because they aren't valid UUIDs.
   const readField = (row: any, col: string): { value: string, found: boolean } => {
     if (!row || !(col in row)) return { value: `[unknown: {{${path}}}]`, found: false }
     const v = row[col]
-    // Auto-resolve picklist UUIDs to labels. Heuristic: any value that's a
-    // UUID string AND is present in the picklist map gets swapped for its
-    // picklist_label. Real string fields (names, addresses) won't collide
-    // because they aren't in the picklist map.
     if (typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) {
       const pl = ctx.picklistById.get(v)
       if (pl) return { value: pl.picklist_label || pl.picklist_value || "—", found: true }
+      const userName = ctx.userNamesById.get(v)
+      if (userName) return { value: userName, found: true }
     }
     return { value: fmtVal(v), found: true }
   }
 
-  if (root === "project") {
-    if (rest === "full_record") {
+  // ── Collection roots ────────────────────────────────────────────────
+  // Supported tokens:
+  //   {{<root>.count}}            → array length
+  //   {{<root>.first.<column>}}   → readField on the first row (lowest record_number)
+  //
+  // Each collection is fetched in loadProjectGraph (or stamped in
+  // buildSyntheticGraph for preview) and pre-sorted by record_number ASC.
+  const collectionRoots: Record<string, any[]> = {
+    building:              ctx.buildings,
+    unit:                  ctx.units,
+    work_order:            ctx.workOrders,
+    work_step:             ctx.workStepsAll,
+    opportunity_line_item: ctx.opportunityLineItems,
+  }
+  if (root in collectionRoots) {
+    const list = collectionRoots[root] || []
+    if (rest === "count") return { value: String(list.length), found: true }
+    if (rest.startsWith("first.")) {
+      const col = rest.slice("first.".length)
+      const row = list[0]
+      if (!row) return { value: "—", found: true }
+      return readField(row, col)
+    }
+    return { value: `[unknown: {{${path}}}]`, found: false }
+  }
+
+  // ── Scalar roots ────────────────────────────────────────────────────
+  // `account` is kept as an alias of `project_account` for backwards
+  // compatibility with PRTs and PRTSN snapshots authored before the
+  // expanded relationship map (which used the ambiguous "Account" label
+  // for what is really the project's account).
+  const scalarRoots: Record<string, any | null> = {
+    project:              ctx.project,
+    property:             ctx.property,
+    property_owner:       ctx.propertyOwnerAccount,
+    property_manager:     ctx.propertyManagerAccount,
+    project_account:      ctx.projectAccount,
+    account:              ctx.projectAccount,   // legacy alias
+    opportunity:          ctx.opportunity,
+    opportunity_account:  ctx.opportunityAccount,
+  }
+  if (root in scalarRoots) {
+    // Computed extras — values that aren't single-column lookups.
+    if (root === "project" && rest === "full_record") {
       const num = ctx.project.project_record_number
       const name = ctx.project.project_name
       const combined = [num, name].filter(Boolean).join(" — ") || "—"
       return { value: combined, found: true }
     }
-    return readField(ctx.project, rest)
-  }
-  if (root === "property") {
-    if (rest === "full_address") {
+    if (root === "property" && rest === "full_address") {
       if (!ctx.property) return { value: "—", found: true }
       const parts = [
         ctx.property.property_address_line_1,
@@ -1262,11 +1434,13 @@ function resolveMergeField(ctx: RenderCtx, path: string): { value: string, found
       ].filter(Boolean)
       return { value: parts.length ? parts.join(", ") : "—", found: true }
     }
-    return readField(ctx.property, rest)
+    const row = scalarRoots[root]
+    // Scalar parent not loaded (project has no opportunity, property has no
+    // managing account, etc.). Found-but-empty so the report renders cleanly.
+    if (!row) return { value: "—", found: true }
+    return readField(row, rest)
   }
-  if (root === "account") {
-    return readField(ctx.account, rest)
-  }
+
   if (root === "report") {
     let totalSteps = 0
     for (const arr of ctx.workStepsByWO.values()) totalSteps += arr.length
@@ -1439,27 +1613,51 @@ Deno.serve(async (req: Request) => {
     let project: Project, property: any, account: any
     let workOrders: WorkOrder[]
     let workStepsByWO: Map<string, WorkStep[]>
+    let workStepsAll: WorkStep[]
     let photosByStep: Map<string, Photo[]>
     let photosByWO: Map<string, Photo[]>
+    let propertyOwnerAccount: any | null
+    let propertyManagerAccount: any | null
+    let opportunity: any | null
+    let opportunityAccount: any | null
+    let buildings: any[]
+    let units: any[]
+    let opportunityLineItems: any[]
 
     if (previewMode) {
       const synthetic = buildSyntheticGraph(picklistById, userId)
-      project       = synthetic.project
-      property      = synthetic.property
-      account       = synthetic.account
-      workOrders    = synthetic.workOrders
-      workStepsByWO = synthetic.workStepsByWO
-      photosByStep  = synthetic.photosByStep
-      photosByWO    = synthetic.photosByWO
+      project                = synthetic.project
+      property               = synthetic.property
+      account                = synthetic.account
+      propertyOwnerAccount   = synthetic.propertyOwnerAccount
+      propertyManagerAccount = synthetic.propertyManagerAccount
+      opportunity            = synthetic.opportunity
+      opportunityAccount     = synthetic.opportunityAccount
+      buildings              = synthetic.buildings
+      units                  = synthetic.units
+      opportunityLineItems   = synthetic.opportunityLineItems
+      workOrders             = synthetic.workOrders
+      workStepsByWO          = synthetic.workStepsByWO
+      workStepsAll           = synthetic.workStepsAll
+      photosByStep           = synthetic.photosByStep
+      photosByWO             = synthetic.photosByWO
     } else {
       const real = await loadProjectGraph(client, projectId!)
-      project       = real.project
-      property      = real.property
-      account       = real.account
-      workOrders    = real.workOrders
-      workStepsByWO = real.workStepsByWO
-      photosByStep  = real.photosByStep
-      photosByWO    = real.photosByWO
+      project                = real.project
+      property               = real.property
+      account                = real.account
+      propertyOwnerAccount   = real.propertyOwnerAccount
+      propertyManagerAccount = real.propertyManagerAccount
+      opportunity            = real.opportunity
+      opportunityAccount     = real.opportunityAccount
+      buildings              = real.buildings
+      units                  = real.units
+      opportunityLineItems   = real.opportunityLineItems
+      workOrders             = real.workOrders
+      workStepsByWO          = real.workStepsByWO
+      workStepsAll           = real.workStepsAll
+      photosByStep           = real.photosByStep
+      photosByWO             = real.photosByWO
     }
 
     // ── Template resolution ─────────────────────────────────────────────
@@ -1511,16 +1709,49 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // User-name map: project_owner + step_owner + photo.taken_by.
-    // All owner-FK columns reference public.users.id, so this lookup resolves
-    // correctly in both real Generate and Preview modes (the synthetic graph
-    // stamps the caller's resolved publicUserId, not auth.uid()).
-    const userIds: string[] = []
-    if (project.project_owner) userIds.push(project.project_owner)
-    for (const arr of workStepsByWO.values()) for (const s of arr) if (s.work_step_owner) userIds.push(s.work_step_owner)
-    for (const arr of photosByStep.values()) for (const p of arr) if (p.taken_by) userIds.push(p.taken_by)
-    for (const arr of photosByWO.values())   for (const p of arr) if (p.taken_by) userIds.push(p.taken_by)
-    const userNamesById = await loadUserNames(client, userIds)
+    // User-name map: project_owner + step_owner + photo.taken_by + every
+    // user UUID found on any loaded row. resolveMergeField auto-resolves
+    // user UUIDs via this map, so it must cover every user FK that any
+    // merge-field path could land on (project owners, building owners,
+    // unit owners, work-order owners, opportunity owners, etc.).
+    //
+    // Approach: best-effort scan. We harvest UUID-shaped strings out of
+    // every loaded row and try to resolve them in one batch lookup. The
+    // batch is bounded by the number of UUID columns we have in memory,
+    // so this isn't an unbounded fan-out.
+    const userIdSet = new Set<string>()
+    if (project.project_owner) userIdSet.add(project.project_owner)
+    for (const arr of workStepsByWO.values()) for (const s of arr) if (s.work_step_owner) userIdSet.add(s.work_step_owner)
+    for (const arr of photosByStep.values()) for (const p of arr) if (p.taken_by) userIdSet.add(p.taken_by)
+    for (const arr of photosByWO.values())   for (const p of arr) if (p.taken_by) userIdSet.add(p.taken_by)
+
+    // Sweep every UUID-shaped value off every scalar parent + first row of
+    // every collection. Picklist UUIDs are filtered out before the user
+    // lookup so we don't fan out to non-user UUIDs unnecessarily.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const harvestUuids = (row: any) => {
+      if (!row) return
+      for (const k in row) {
+        const v = row[k]
+        if (typeof v === "string" && UUID_RE.test(v)) {
+          if (!picklistById.has(v)) userIdSet.add(v)
+        }
+      }
+    }
+    harvestUuids(project)
+    harvestUuids(property)
+    harvestUuids(account)
+    harvestUuids(propertyOwnerAccount)
+    harvestUuids(propertyManagerAccount)
+    harvestUuids(opportunity)
+    harvestUuids(opportunityAccount)
+    if (buildings.length > 0)            harvestUuids(buildings[0])
+    if (units.length > 0)                harvestUuids(units[0])
+    if (workOrders.length > 0)           harvestUuids(workOrders[0])
+    if (workStepsAll.length > 0)         harvestUuids(workStepsAll[0])
+    if (opportunityLineItems.length > 0) harvestUuids(opportunityLineItems[0])
+
+    const userNamesById = await loadUserNames(client, Array.from(userIdSet))
 
     // Build PDF
     const pdf = await PDFDocument.create()
@@ -1531,6 +1762,15 @@ Deno.serve(async (req: Request) => {
     const ctx: RenderCtx = {
       cur, client, project, workOrders, workStepsByWO, photosByStep, photosByWO,
       picklistById, userNamesById, property, account,
+      propertyOwnerAccount,
+      propertyManagerAccount,
+      projectAccount: account,            // alias for clarity in the dispatch map
+      opportunity,
+      opportunityAccount,
+      buildings,
+      units,
+      workStepsAll,
+      opportunityLineItems,
       generatedAt: new Date(),
       generatedByName,
       generatedByEmail: userEmail,

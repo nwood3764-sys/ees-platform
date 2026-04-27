@@ -10,7 +10,7 @@ import FileGalleryWidget from './FileGallery'
 import { supabase } from '../lib/supabase'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
-import { MERGE_FIELD_CATALOG } from '../data/mergeFieldCatalog'
+import { MERGE_FIELD_OBJECTS, loadFieldsForObject } from '../data/mergeFieldCatalog'
 import {
   loadRecordDetailData,
   saveRecord,
@@ -497,11 +497,38 @@ function JsonField({ value, onChange }) {
 function MergeFieldTextarea({ value, onChange }) {
   const taRef = useRef(null)
   const [open, setOpen] = useState(false)
-  const [activeGroup, setActiveGroup] = useState(MERGE_FIELD_CATALOG[0]?.group ?? '')
+  const [activeKey, setActiveKey] = useState(MERGE_FIELD_OBJECTS[0]?.key ?? '')
+  // Per-session cache: object key → { items?, error?, loading? }
+  // Persists across modal open/close so re-opening the picker is instant
+  // for objects whose schema we already fetched.
+  const [fieldsByKey, setFieldsByKey] = useState({})
   // Caret position is captured when the picker opens; if the textarea loses
   // focus during modal interaction we still insert at the user's last caret.
   const caretRef = useRef({ start: 0, end: 0 })
   const text = value == null ? '' : String(value)
+
+  const activeObj = MERGE_FIELD_OBJECTS.find(o => o.key === activeKey)
+  const activeEntry = fieldsByKey[activeKey]
+
+  // Lazy-load fields whenever an object is selected for the first time.
+  // describe_object_columns is the bottleneck here (one RPC per table, not
+  // per render); the cache keeps subsequent activations instant.
+  useEffect(() => {
+    if (!open) return
+    if (fieldsByKey[activeKey]) return
+    let cancelled = false
+    setFieldsByKey(prev => ({ ...prev, [activeKey]: { loading: true } }))
+    loadFieldsForObject(activeKey)
+      .then(items => {
+        if (cancelled) return
+        setFieldsByKey(prev => ({ ...prev, [activeKey]: { items } }))
+      })
+      .catch(err => {
+        if (cancelled) return
+        setFieldsByKey(prev => ({ ...prev, [activeKey]: { error: err?.message || String(err) } }))
+      })
+    return () => { cancelled = true }
+  }, [open, activeKey, fieldsByKey])
 
   // Close on Escape
   useEffect(() => {
@@ -540,9 +567,6 @@ function MergeFieldTextarea({ value, onChange }) {
     })
   }
 
-  const activeItems =
-    MERGE_FIELD_CATALOG.find(g => g.group === activeGroup)?.items ?? []
-
   // Modal styles match ProjectReportModal so the look is consistent across
   // the app (same backdrop, same card border / shadow, same z-index band).
   const overlay = {
@@ -551,12 +575,12 @@ function MergeFieldTextarea({ value, onChange }) {
     zIndex: 1100, padding: 16,
   }
   const card = {
-    width: '100%', maxWidth: 640, background: C.card,
+    width: '100%', maxWidth: 720, background: C.card,
     border: `1px solid ${C.border}`, borderRadius: 10,
     boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
     overflow: 'hidden',
     display: 'flex', flexDirection: 'column',
-    maxHeight: 'min(560px, 90vh)',
+    maxHeight: 'min(620px, 92vh)',
   }
   const headerStyle = {
     padding: '14px 18px', borderBottom: `1px solid ${C.border}`,
@@ -640,7 +664,7 @@ function MergeFieldTextarea({ value, onChange }) {
               {/* Left pane — object selector */}
               <div
                 style={{
-                  width: 180, flexShrink: 0,
+                  width: 220, flexShrink: 0,
                   background: '#fafbfd', borderRight: `1px solid ${C.border}`,
                   overflowY: 'auto',
                 }}
@@ -652,13 +676,17 @@ function MergeFieldTextarea({ value, onChange }) {
                 }}>
                   Object
                 </div>
-                {MERGE_FIELD_CATALOG.map(g => {
-                  const isActive = g.group === activeGroup
+                {MERGE_FIELD_OBJECTS.map(g => {
+                  const isActive = g.key === activeKey
+                  const kindBadge =
+                    g.kind === 'collection' ? 'list' :
+                    g.kind === 'synthetic'  ? 'sys'  : null
                   return (
                     <button
-                      key={g.group}
+                      key={g.key}
                       type="button"
-                      onClick={() => setActiveGroup(g.group)}
+                      onClick={() => setActiveKey(g.key)}
+                      title={g.description || ''}
                       style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                         width: '100%', textAlign: 'left',
@@ -668,13 +696,28 @@ function MergeFieldTextarea({ value, onChange }) {
                         background: isActive ? C.card : 'transparent',
                         borderLeft: `3px solid ${isActive ? C.emerald : 'transparent'}`,
                         borderTop: 'none', borderRight: 'none', borderBottom: `1px solid ${C.border}`,
-                        cursor: 'pointer',
+                        cursor: 'pointer', gap: 6,
                       }}
                       onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f3f8' }}
                       onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
                     >
-                      <span>{g.group}</span>
-                      <Icon path="M9 5l7 7-7 7" size={11} color={isActive ? C.textPrimary : C.textMuted} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {g.label}
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        {kindBadge && (
+                          <span style={{
+                            fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em',
+                            textTransform: 'uppercase',
+                            color: C.textMuted, background: '#eef2f7',
+                            border: `1px solid ${C.border}`, borderRadius: 3,
+                            padding: '1px 5px',
+                          }}>
+                            {kindBadge}
+                          </span>
+                        )}
+                        <Icon path="M9 5l7 7-7 7" size={11} color={isActive ? C.textPrimary : C.textMuted} />
+                      </span>
                     </button>
                   )
                 })}
@@ -685,15 +728,32 @@ function MergeFieldTextarea({ value, onChange }) {
                   padding: '10px 16px 6px', fontSize: 10.5, fontWeight: 600,
                   color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
                   borderBottom: `1px solid ${C.border}`,
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 }}>
-                  Field
+                  <span>Field</span>
+                  {activeObj?.kind === 'collection' && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 500, textTransform: 'none',
+                      letterSpacing: 'normal', color: C.textMuted,
+                    }}>
+                      First-row tokens resolve to the lowest record number
+                    </span>
+                  )}
                 </div>
-                {activeItems.length === 0 ? (
+                {!activeEntry || activeEntry.loading ? (
+                  <div style={{ padding: '14px 16px', fontSize: 12.5, color: C.textMuted }}>
+                    Loading fields…
+                  </div>
+                ) : activeEntry.error ? (
+                  <div style={{ padding: '14px 16px', fontSize: 12.5, color: C.danger }}>
+                    {activeEntry.error}
+                  </div>
+                ) : (activeEntry.items || []).length === 0 ? (
                   <div style={{ padding: '14px 16px', fontSize: 12.5, color: C.textMuted }}>
                     No fields available.
                   </div>
                 ) : (
-                  activeItems.map(item => (
+                  (activeEntry.items || []).map(item => (
                     <button
                       key={item.path}
                       type="button"
