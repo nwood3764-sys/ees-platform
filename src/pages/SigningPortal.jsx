@@ -200,19 +200,33 @@ function SigningPortal() {
   if (!data) return null
 
   return (
-    <PortalLayout
-      data={data}
-      tabValues={tabValues}
-      activeTabId={activeTabId}
-      consent={consent}
-      submitting={submitting}
-      onTabClick={setActiveTabId}
-      onTabUpdate={(id, val) => setTabValues(v => ({ ...v, [id]: val }))}
-      onSetConsent={setConsent}
-      onSubmit={handleSubmit}
-      onShowDecline={() => setShowDecline(true)}
-    />
-  ) ?? null
+    <>
+      <PortalLayout
+        data={data}
+        tabValues={tabValues}
+        activeTabId={activeTabId}
+        consent={consent}
+        submitting={submitting}
+        onTabClick={setActiveTabId}
+        onTabUpdate={(id, val) => setTabValues(v => ({ ...v, [id]: val }))}
+        onSetConsent={setConsent}
+        onSubmit={handleSubmit}
+        onShowDecline={() => setShowDecline(true)}
+      />
+      {/* Decline modal — opt-in via the Decline button on the submit bar.
+          Captures a reason (optional) and posts to signing-portal-submit
+          with decline:{reason}. The submit handler marks the recipient
+          AND envelope Declined, fires Declined event, and stops the flow. */}
+      <DeclineConfirm
+        open={showDecline}
+        recipientName={data.recipient.name}
+        envelopeName={data.envelope.name}
+        submitting={submitting}
+        onCancel={() => setShowDecline(false)}
+        onConfirm={handleDecline}
+      />
+    </>
+  )
 }
 
 // ─── Full-page status message (loading / error / success) ──────────────
@@ -363,12 +377,6 @@ function PortalLayout({ data, tabValues, activeTabId, consent, submitting, onTab
           onCancel={() => onTabClick(null)}
         />
       )}
-
-      {/* Decline modal */}
-      <DeclineConfirm
-        open={false}
-        // The decline modal is owned by the parent — we wire it via window.confirm for simplicity
-      />
     </div>
   )
 }
@@ -736,9 +744,80 @@ function TextEditor({ initialValue, onSave, onCancel }) {
   )
 }
 
-// Decline modal — currently uses window.prompt for simplicity. Can be
-// upgraded to a styled modal in a follow-up.
-function DeclineConfirm() { return null }
+// Decline confirmation modal — shown when the recipient clicks the Decline
+// button in the submit bar. The reason field is optional but captured on
+// the audit trail when provided. Confirming POSTs decline:{reason} to
+// signing-portal-submit, which marks the recipient + envelope Declined
+// and fires a Declined event. Once dismissed the recipient lands on the
+// "Declined" success screen and the link can no longer be used.
+function DeclineConfirm({ open, recipientName, envelopeName, submitting, onCancel, onConfirm }) {
+  const [reason, setReason] = useState('')
+
+  // Reset the reason whenever the modal opens fresh
+  useEffect(() => { if (open) setReason('') }, [open])
+
+  if (!open) return null
+  return (
+    <div onClick={submitting ? undefined : onCancel} style={{
+      position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1100, padding: 12,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 10, width: '100%', maxWidth: 520,
+        padding: 22, boxShadow: '0 12px 40px rgba(0,0,0,0.30)',
+      }}>
+        <div style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, marginBottom: 6 }}>
+          Decline to sign
+        </div>
+        <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16, lineHeight: 1.5 }}>
+          You're about to decline <b>{envelopeName}</b> on behalf of <b>{recipientName}</b>. The sender will be notified and this link will no longer be usable. This action cannot be undone.
+        </div>
+        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: C.textSecondary, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 5 }}>
+          Reason (optional)
+        </label>
+        <textarea
+          value={reason}
+          onChange={e => setReason(e.target.value)}
+          rows={3}
+          maxLength={2000}
+          placeholder="Briefly explain why you're declining…"
+          disabled={submitting}
+          style={{
+            width: '100%', padding: '10px 12px', fontSize: 13,
+            border: `1px solid ${C.border}`, borderRadius: 5,
+            boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit',
+            color: C.textPrimary, background: submitting ? C.page : '#fff',
+          }}
+        />
+        <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+          <button
+            onClick={onCancel}
+            disabled={submitting}
+            style={{
+              background: '#fff', border: `1px solid ${C.borderDark}`, color: C.textSecondary,
+              padding: '9px 18px', fontSize: 13, borderRadius: 5,
+              cursor: submitting ? 'wait' : 'pointer',
+            }}
+          >
+            Keep signing
+          </button>
+          <button
+            onClick={() => onConfirm(reason)}
+            disabled={submitting}
+            style={{
+              background: '#b03a2e', border: 'none', color: '#fff',
+              padding: '9px 20px', fontSize: 13, fontWeight: 600, borderRadius: 5,
+              cursor: submitting ? 'wait' : 'pointer', opacity: submitting ? 0.7 : 1,
+            }}
+          >
+            {submitting ? 'Submitting…' : 'Decline document'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ─── Shared button styles ──────────────────────────────────────────────
 
