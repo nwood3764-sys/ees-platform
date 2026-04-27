@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
 import ProjectReportModal from './ProjectReportModal'
+import SendForSignatureModal from './SendForSignatureModal'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
 import ActivityTimeline from './ActivityTimeline'
@@ -2921,6 +2922,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
+  // Send-for-signature modal: shown on parent records (projects, properties,
+  // opportunities, work_orders) where a Document Template can be sent against
+  // the parent. The modal builds an envelope, calls send-envelope, and
+  // returns the magic-link signing URLs for the user to distribute.
+  const [showSendSignatureModal, setShowSendSignatureModal] = useState(false)
   const [reloadTick, setReloadTick] = useState(0)
   // Deep-clone state — only used on project_report_templates. Uses the
   // clone_project_report_template RPC to copy the PRT plus all PRTS rows
@@ -3511,6 +3517,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={18} color="currentColor" />
                   </button>
                 )}
+                {['projects', 'properties', 'opportunities', 'work_orders'].includes(tableName) && (
+                  <button
+                    onClick={() => setShowSendSignatureModal(true)}
+                    aria-label="Send for Signature"
+                    title="Send a document for e-signature against this record"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: 'pointer', color: C.emerald,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44,
+                    }}
+                  >
+                    {/* feather: edit-3 (a pen-on-paper signing affordance) */}
+                    <Icon path="M12 20h9 M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" size={18} color="currentColor" />
+                  </button>
+                )}
                 {tableName === 'project_report_templates' && (
                   <button
                     onClick={handlePreviewPdf}
@@ -3672,6 +3694,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   >
                     <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={13} color={C.emerald} />
                     Generate Report
+                  </button>
+                )}
+                {['projects', 'properties', 'opportunities', 'work_orders'].includes(tableName) && (
+                  <button
+                    onClick={() => setShowSendSignatureModal(true)}
+                    title="Send a document for e-signature against this record"
+                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#ecfdf5' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M12 20h9 M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" size={13} color={C.emerald} />
+                    Send for Signature
                   </button>
                 )}
                 {tableName === 'project_report_templates' && (
@@ -4058,6 +4092,21 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           project={record}
           onClose={() => setShowReportModal(false)}
           onComplete={() => { setReloadTick(t => t + 1) }}
+        />
+      )}
+
+      {/* Send-for-Signature modal — opt-in via toolbar button on signable
+          parent records. Reads template state directly from Supabase, calls
+          send-envelope, displays signing URLs. After successful send the
+          envelope row exists; the parent's Documents related-list will
+          show the signed PDF after the last recipient signs. */}
+      {showSendSignatureModal && ['projects', 'properties', 'opportunities', 'work_orders'].includes(tableName) && (
+        <SendForSignatureModal
+          open
+          parentObject={tableName}
+          parentRecordId={recordId}
+          parentRecordLabel={record?.name || record?.project_record_number || record?.property_record_number || record?.opportunity_record_number || record?.work_order_record_number || null}
+          onClose={() => setShowSendSignatureModal(false)}
         />
       )}
     </div>

@@ -1,0 +1,14 @@
+# Supabase project config (function-specific overrides only). The CLI
+# and dashboard are the source of truth for everything else.
+
+# signing-portal-load and signing-portal-submit are invoked by recipients
+# who are NOT Anura users and have no Supabase session. The signing token
+# in the URL IS the auth — both functions validate it against
+# envelope_recipients.recipient_signing_token internally before doing
+# anything sensitive. They use the service role key to read/write under
+# RLS-protected tables.
+[functions.signing-portal-load]
+verify_jwt = false
+
+[functions.signing-portal-submit]
+verify_jwt = false
