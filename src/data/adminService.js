@@ -95,26 +95,30 @@ export async function fetchEmailTemplates() {
   const { data, error } = await supabase
     .from('email_templates')
     .select(`
-      id, name, description, subject, state, related_object, record_type,
-      trigger_status, is_manual, is_automated, status
+      id, et_record_number, name, description, subject, state, related_object,
+      trigger_status, is_manual, is_automated, version,
+      record_type:record_type ( picklist_label ),
+      status:status ( picklist_label )
     `)
+    .eq('is_deleted', false)
     .order('name', { ascending: true })
 
   if (error) throw error
 
   return (data || []).map(r => ({
-    id: r.id.slice(0, 8).toUpperCase(),
+    id: r.et_record_number || r.id.slice(0, 8).toUpperCase(),
     _id: r.id,
     name: r.name,
     description: r.description || '—',
     subject: r.subject,
     state: r.state || '—',
     relatedObject: r.related_object || '—',
-    recordType: r.record_type || '—',
+    recordType: r.record_type?.picklist_label || '—',
     triggerStatus: r.trigger_status || '—',
     manual: r.is_manual ? 'Yes' : 'No',
     automated: r.is_automated ? 'Yes' : 'No',
-    status: r.status,
+    version: r.version,
+    status: r.status?.picklist_label || '—',
   }))
 }
 
@@ -126,28 +130,32 @@ export async function fetchDocumentTemplates() {
   const { data, error } = await supabase
     .from('document_templates')
     .select(`
-      id, name, description, template_type, state, related_object, record_type,
-      requires_signature, signer_role, trigger_status, is_manual, is_automated, status
+      id, dt_record_number, name, description, template_type, state, related_object,
+      requires_signature, signer_role, trigger_status, is_manual, is_automated, version,
+      record_type:record_type ( picklist_label ),
+      status:status ( picklist_label )
     `)
+    .eq('is_deleted', false)
     .order('name', { ascending: true })
 
   if (error) throw error
 
   return (data || []).map(r => ({
-    id: r.id.slice(0, 8).toUpperCase(),
+    id: r.dt_record_number || r.id.slice(0, 8).toUpperCase(),
     _id: r.id,
     name: r.name,
     description: r.description || '—',
     templateType: r.template_type,
     state: r.state || '—',
     relatedObject: r.related_object || '—',
-    recordType: r.record_type || '—',
+    recordType: r.record_type?.picklist_label || '—',
     requiresSignature: r.requires_signature ? 'Yes' : 'No',
     signerRole: r.signer_role || '—',
     triggerStatus: r.trigger_status || '—',
     manual: r.is_manual ? 'Yes' : 'No',
     automated: r.is_automated ? 'Yes' : 'No',
-    status: r.status,
+    version: r.version,
+    status: r.status?.picklist_label || '—',
   }))
 }
 

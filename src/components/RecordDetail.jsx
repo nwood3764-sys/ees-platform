@@ -32,6 +32,63 @@ import {
 } from '../data/layoutService'
 
 // ---------------------------------------------------------------------------
+// Template lifecycle registry
+// ---------------------------------------------------------------------------
+// Tables that participate in the Anura "Builder template" lifecycle (Draft →
+// Active → Archived) all share the same publish / unpublish / archive /
+// restore / clone workflow. The DB triggers and RPCs are nearly identical
+// per-object — only the column prefix and RPC argument names change. This
+// registry lets RecordDetail render the same lifecycle UI for every such
+// table without per-table conditionals scattered through the component.
+//
+// To onboard another lifecycle-bearing table, add an entry here and ensure
+// the matching RPCs + lock trigger + status picklist exist server-side.
+const TEMPLATE_LIFECYCLES = {
+  project_report_templates: {
+    statusColumn:        'prt_status',
+    nameColumn:          'prt_name',
+    recordNumberColumn:  'prt_record_number',
+    rpcIdParam:          'p_prt_id',
+    cloneIdParam:        'p_source_prt_id',
+    publishRpc:          'publish_project_report_template',
+    unpublishRpc:        'unpublish_project_report_template',
+    archiveRpc:          'archive_project_report_template',
+    restoreRpc:          'restore_project_report_template',
+    cloneRpc:            'clone_project_report_template',
+    childrenTable:       'project_report_template_sections',
+    childrenLabel:       'sections',
+  },
+  email_templates: {
+    statusColumn:        'status',
+    nameColumn:          'name',
+    recordNumberColumn:  'et_record_number',
+    rpcIdParam:          'p_email_template_id',
+    cloneIdParam:        'p_source_email_template_id',
+    publishRpc:          'publish_email_template',
+    unpublishRpc:        'unpublish_email_template',
+    archiveRpc:          'archive_email_template',
+    restoreRpc:          'restore_email_template',
+    cloneRpc:            'clone_email_template',
+    childrenTable:       null,
+    childrenLabel:       null,
+  },
+  document_templates: {
+    statusColumn:        'status',
+    nameColumn:          'name',
+    recordNumberColumn:  'dt_record_number',
+    rpcIdParam:          'p_document_template_id',
+    cloneIdParam:        'p_source_document_template_id',
+    publishRpc:          'publish_document_template',
+    unpublishRpc:        'unpublish_document_template',
+    archiveRpc:          'archive_document_template',
+    restoreRpc:          'restore_document_template',
+    cloneRpc:            'clone_document_template',
+    childrenTable:       null,
+    childrenLabel:       null,
+  },
+}
+
+// ---------------------------------------------------------------------------
 // Field value formatter
 // ---------------------------------------------------------------------------
 
@@ -2678,24 +2735,27 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     setEditing(true)
   }, [data, recordId, loadAllEditOpts])
 
-  // Deep clone for project_report_templates — atomic copy of the PRT plus all
-  // its sections via the clone_project_report_template RPC. Resets the clone
-  // to Draft + version 1 + not-default-for-unmapped, then navigates to it.
+  // Deep clone for any lifecycle template (PRT / ET / DT) — calls the
+  // table-specific clone RPC from TEMPLATE_LIFECYCLES, which atomically
+  // copies the template (and any child rows the RPC chooses to copy, e.g.
+  // sections for PRT). Resets the clone to Draft + version 1 and navigates
+  // to it.
   const handleCloneTemplate = useCallback(async () => {
     if (cloningTemplate) return
-    if (tableName !== 'project_report_templates') return
+    const lifecycle = TEMPLATE_LIFECYCLES[tableName]
+    if (!lifecycle) return
     setCloningTemplate(true)
     try {
-      const sourceName = data?.record?.prt_name || 'Template'
-      const { data: newId, error } = await supabase.rpc('clone_project_report_template', {
-        p_source_prt_id: recordId,
+      const sourceName = data?.record?.[lifecycle.nameColumn] || 'Template'
+      const { data: newId, error } = await supabase.rpc(lifecycle.cloneRpc, {
+        [lifecycle.cloneIdParam]: recordId,
         p_new_name: `${sourceName} (Clone)`,
       })
       if (error) throw error
       if (!newId) throw new Error('Clone returned no id')
       toast.success(`Cloned ${sourceName}`)
       if (onNavigateToRecord) {
-        onNavigateToRecord({ table: 'project_report_templates', id: newId })
+        onNavigateToRecord({ table: tableName, id: newId })
       }
     } catch (err) {
       toast.error(`Clone failed — ${err.message || String(err)}`)
@@ -2704,30 +2764,34 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
   }, [cloningTemplate, tableName, recordId, data, onNavigateToRecord, toast])
 
-  // ─── Publish workflow (project_report_templates only) ─────────────────────
+  // ─── Lifecycle workflow (project_report_templates / email_templates /
+  //     document_templates) ───────────────────────────────────────────────
   // Resolve the current template status FROM the loaded record. Picklist map
   // is populated by the page-layout loader at fetchPageLayout time. We read
   // the picklist's machine value (not label) so logic is locale-stable.
-  const prtStatusValue = (() => {
-    if (tableName !== 'project_report_templates') return null
-    const sid = data?.record?.prt_status
+  const lifecycle = TEMPLATE_LIFECYCLES[tableName] || null
+  const lifecycleStatusValue = (() => {
+    if (!lifecycle) return null
+    const sid = data?.record?.[lifecycle.statusColumn]
     if (!sid) return null
     return data?.picklists?.valueById?.get(sid) || null
   })()
-  // Locked = read-only across header fields, body templates, sections related
-  // list, and the Edit button. Drafts are unlocked. Archived templates are
-  // locked the same way Active ones are; users go through Restore to edit.
-  const prtIsLocked = prtStatusValue === 'Active' || prtStatusValue === 'Archived'
+  // Locked = read-only across header fields, body templates, child rows, and
+  // the Edit button. Drafts are unlocked. Archived templates are locked the
+  // same way Active ones are; users go through Restore to edit.
+  const lifecycleIsLocked = lifecycleStatusValue === 'Active' || lifecycleStatusValue === 'Archived'
 
   // Generic helper — DRY across publish/unpublish/archive/restore. Wraps the
   // RPC call with toast feedback and a reload tick so the page picks up the
-  // new status, version, and prt_published_at without a manual refresh.
+  // new status, version, and *_published_at without a manual refresh.
   const runStatusRpc = useCallback(async (rpcName, successMsg) => {
     if (statusChanging) return
-    if (tableName !== 'project_report_templates') return
+    if (!lifecycle) return
     setStatusChanging(true)
     try {
-      const { data: result, error } = await supabase.rpc(rpcName, { p_prt_id: recordId })
+      const { data: result, error } = await supabase.rpc(rpcName, {
+        [lifecycle.rpcIdParam]: recordId,
+      })
       if (error) throw error
       const newStatus = result?.new_status
       const newVersion = result?.new_version
@@ -2747,12 +2811,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     } finally {
       setStatusChanging(false)
     }
-  }, [statusChanging, tableName, recordId, toast])
+  }, [statusChanging, lifecycle, recordId, toast])
 
-  const handlePublish   = useCallback(() => runStatusRpc('publish_project_report_template',   'Published'),                   [runStatusRpc])
-  const handleUnpublish = useCallback(() => runStatusRpc('unpublish_project_report_template', 'Unpublished — back to Draft'), [runStatusRpc])
-  const handleArchive   = useCallback(() => runStatusRpc('archive_project_report_template',   'Archived'),                    [runStatusRpc])
-  const handleRestore   = useCallback(() => runStatusRpc('restore_project_report_template',   'Restored to Draft'),           [runStatusRpc])
+  const handlePublish   = useCallback(() => lifecycle && runStatusRpc(lifecycle.publishRpc,   'Published'),                   [runStatusRpc, lifecycle])
+  const handleUnpublish = useCallback(() => lifecycle && runStatusRpc(lifecycle.unpublishRpc, 'Unpublished — back to Draft'), [runStatusRpc, lifecycle])
+  const handleArchive   = useCallback(() => lifecycle && runStatusRpc(lifecycle.archiveRpc,   'Archived'),                    [runStatusRpc, lifecycle])
+  const handleRestore   = useCallback(() => lifecycle && runStatusRpc(lifecycle.restoreRpc,   'Restored to Draft'),           [runStatusRpc, lifecycle])
 
   // ─── Preview PDF (project_report_templates only) ──────────────────────────
   // Renders the template against a synthetic in-memory project graph and
@@ -3121,12 +3185,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" size={18} color="currentColor" />
                   </button>
                 )}
-                {tableName === 'project_report_templates' && (
+                {lifecycle && (
                   <button
                     onClick={handleCloneTemplate}
                     disabled={cloningTemplate}
                     aria-label="Clone Template"
-                    title="Clone Template (with sections)"
+                    title={lifecycle.childrenTable ? `Clone Template (with ${lifecycle.childrenLabel})` : 'Clone Template'}
                     style={{
                       background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
                       cursor: cloningTemplate ? 'wait' : 'pointer', color: C.emerald,
@@ -3137,7 +3201,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={18} color="currentColor" />
                   </button>
                 )}
-                {tableName === 'project_report_templates' && prtStatusValue === 'Draft' && (
+                {lifecycle && lifecycleStatusValue === 'Draft' && (
                   <button
                     onClick={handlePublish}
                     disabled={statusChanging}
@@ -3153,7 +3217,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M5 13l4 4L19 7" size={18} color="#fff" />
                   </button>
                 )}
-                {tableName === 'project_report_templates' && prtStatusValue === 'Active' && (
+                {lifecycle && lifecycleStatusValue === 'Active' && (
                   <button
                     onClick={handleUnpublish}
                     disabled={statusChanging}
@@ -3169,7 +3233,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={18} color="currentColor" />
                   </button>
                 )}
-                {tableName === 'project_report_templates' && prtStatusValue === 'Archived' && (
+                {lifecycle && lifecycleStatusValue === 'Archived' && (
                   <button
                     onClick={handleRestore}
                     disabled={statusChanging}
@@ -3185,7 +3249,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={18} color="currentColor" />
                   </button>
                 )}
-                {!prtIsLocked && (
+                {!lifecycleIsLocked && (
                   <button
                     onClick={startEditing}
                     aria-label="Edit"
@@ -3281,11 +3345,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     {previewingPdf ? 'Rendering…' : 'Preview PDF'}
                   </button>
                 )}
-                {tableName === 'project_report_templates' && (
+                {lifecycle && (
                   <button
                     onClick={handleCloneTemplate}
                     disabled={cloningTemplate}
-                    title="Duplicate this template AND all its sections, reset to Draft / version 1"
+                    title={lifecycle.childrenTable
+                      ? `Duplicate this template AND all its ${lifecycle.childrenLabel}, reset to Draft / version 1`
+                      : 'Duplicate this template, reset to Draft / version 1'}
                     style={{ background: cloningTemplate ? '#86efac' : C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: cloningTemplate ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: cloningTemplate ? 0.85 : 1 }}
                     onMouseEnter={(e) => { if (!cloningTemplate) e.currentTarget.style.background = '#ecfdf5' }}
                     onMouseLeave={(e) => { if (!cloningTemplate) e.currentTarget.style.background = C.page }}
@@ -3294,7 +3360,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     {cloningTemplate ? 'Cloning…' : 'Clone Template'}
                   </button>
                 )}
-                {tableName === 'project_report_templates' && prtStatusValue === 'Draft' && (
+                {lifecycle && lifecycleStatusValue === 'Draft' && (
                   <button
                     onClick={handlePublish}
                     disabled={statusChanging}
@@ -3305,7 +3371,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     {statusChanging ? 'Publishing…' : 'Publish'}
                   </button>
                 )}
-                {tableName === 'project_report_templates' && prtStatusValue === 'Active' && (
+                {lifecycle && lifecycleStatusValue === 'Active' && (
                   <>
                     <button
                       onClick={handleUnpublish}
@@ -3327,7 +3393,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     </button>
                   </>
                 )}
-                {tableName === 'project_report_templates' && prtStatusValue === 'Archived' && (
+                {lifecycle && lifecycleStatusValue === 'Archived' && (
                   <button
                     onClick={handleRestore}
                     disabled={statusChanging}
@@ -3338,7 +3404,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     {statusChanging ? '…' : 'Restore to Draft'}
                   </button>
                 )}
-                {!prtIsLocked && (
+                {!lifecycleIsLocked && (
                   <button onClick={startEditing} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Edit</button>
                 )}
                 <button
@@ -3439,32 +3505,33 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         )}
 
         {/* Locked-state banner — shown above sections for Active/Archived
-            project_report_templates. Communicates why fields read-only and
-            points the user to the right path forward. */}
-        {prtIsLocked && (
+            templates of any lifecycle-bearing type (PRT / ET / DT).
+            Communicates why fields are read-only and points the user to the
+            right path forward. */}
+        {lifecycleIsLocked && (
           <div style={{
-            background: prtStatusValue === 'Archived' ? '#f3f4f6' : '#fffbeb',
-            border: `1px solid ${prtStatusValue === 'Archived' ? '#d1d5db' : '#fde68a'}`,
+            background: lifecycleStatusValue === 'Archived' ? '#f3f4f6' : '#fffbeb',
+            border: `1px solid ${lifecycleStatusValue === 'Archived' ? '#d1d5db' : '#fde68a'}`,
             borderLeftWidth: 4,
-            borderLeftColor: prtStatusValue === 'Archived' ? '#6b7280' : '#d97706',
+            borderLeftColor: lifecycleStatusValue === 'Archived' ? '#6b7280' : '#d97706',
             borderRadius: 8, padding: '12px 16px', marginBottom: 14,
             display: 'flex', alignItems: 'flex-start', gap: 10,
           }}>
             <Icon
-              path={prtStatusValue === 'Archived'
+              path={lifecycleStatusValue === 'Archived'
                 ? 'M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4'
                 : 'M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3l-6.93-12a2 2 0 00-3.48 0L3.34 16a2 2 0 001.73 3z'}
               size={16}
-              color={prtStatusValue === 'Archived' ? '#4b5563' : '#b45309'}
+              color={lifecycleStatusValue === 'Archived' ? '#4b5563' : '#b45309'}
             />
-            <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5, color: prtStatusValue === 'Archived' ? '#374151' : '#78350f' }}>
-              {prtStatusValue === 'Active' ? (
+            <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5, color: lifecycleStatusValue === 'Archived' ? '#374151' : '#78350f' }}>
+              {lifecycleStatusValue === 'Active' ? (
                 <>
-                  <strong>This template is published and locked.</strong> Header fields, sections, body templates, and configuration are read-only while a template is Active. To make changes: <em>Unpublish</em> back to Draft, or use <em>Clone Template</em> to start a new draft from this one. Re-publishing increments the version.
+                  <strong>This template is published and locked.</strong> Header fields{lifecycle?.childrenLabel ? `, ${lifecycle.childrenLabel}` : ''}, body{lifecycle?.childrenLabel ? ' templates' : ''}, and configuration are read-only while a template is Active. To make changes: <em>Unpublish</em> back to Draft, or use <em>Clone Template</em> to start a new draft from this one. Re-publishing increments the version.
                 </>
               ) : (
                 <>
-                  <strong>This template is archived.</strong> It cannot be used to generate reports and its contents are read-only. Use <em>Restore to Draft</em> to bring it back into editable state, or use <em>Clone Template</em> to start fresh.
+                  <strong>This template is archived.</strong> It cannot be used and its contents are read-only. Use <em>Restore to Draft</em> to bring it back into editable state, or use <em>Clone Template</em> to start fresh.
                 </>
               )}
             </div>
@@ -3485,15 +3552,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         {!isInsertMode && activeTab === 'Related' && sections
           .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'related_list'))
           .map(w => {
-            // Lock the Sections related_list when the parent PRT is Active or
-            // Archived. The Record Type Assignments related_list (different
-            // child table) stays editable — assignments are independent of
-            // template lock state. We force editable=false on the widget
-            // copy so the Add button + drag handles + remove buttons all
-            // disappear; the trigger is the ultimate enforcement layer.
-            const isLockedSectionsList = prtIsLocked
-              && w.widget_config?.table === 'project_report_template_sections'
-            const effectiveWidget = isLockedSectionsList
+            // Lock child related_lists when the parent template is Active or
+            // Archived. We match the widget's table against the lifecycle's
+            // childrenTable (e.g. project_report_template_sections for PRT).
+            // Sibling related_lists (record-type assignments, etc.) stay
+            // editable. We force editable=false on the widget copy so the
+            // Add button + drag handles + remove buttons all disappear; the
+            // trigger is the ultimate enforcement layer.
+            const isLockedChildrenList = lifecycleIsLocked
+              && lifecycle?.childrenTable
+              && w.widget_config?.table === lifecycle.childrenTable
+            const effectiveWidget = isLockedChildrenList
               ? { ...w, widget_config: { ...w.widget_config, editable: false } }
               : w
             return (

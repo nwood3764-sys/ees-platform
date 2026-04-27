@@ -592,7 +592,8 @@ const ET_COLS = [
   { field: 'state',         label: 'State',         type: 'select', sortable: true, filterable: true, options: ['WI', 'NC', 'CO', 'MI', 'IN', '—'] },
   { field: 'triggerStatus', label: 'Trigger Status',type: 'text', sortable: true, filterable: true },
   { field: 'automated',     label: 'Auto',          type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'] },
-  { field: 'status',        label: 'Status',        type: 'text', sortable: true, filterable: true },
+  { field: 'version',       label: 'Version',       type: 'number', sortable: true, filterable: false },
+  { field: 'status',        label: 'Status',        type: 'select', sortable: true, filterable: true, options: ['Draft', 'Active', 'Archived', '—'] },
 ]
 
 const DT_COLS = [
@@ -603,7 +604,8 @@ const DT_COLS = [
   { field: 'requiresSignature', label: 'Signature',        type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'] },
   { field: 'signerRole',        label: 'Signer Role',      type: 'text', sortable: true, filterable: true },
   { field: 'automated',         label: 'Auto',             type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'] },
-  { field: 'status',            label: 'Status',           type: 'text', sortable: true, filterable: true },
+  { field: 'version',           label: 'Version',          type: 'number', sortable: true, filterable: false },
+  { field: 'status',            label: 'Status',           type: 'select', sortable: true, filterable: true, options: ['Draft', 'Active', 'Archived', '—'] },
 ]
 
 const AR_COLS = [

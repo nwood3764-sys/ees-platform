@@ -465,6 +465,19 @@ export function applyInsertDefaults(tableName, fields, userId) {
     // PRTS has no owner column — sections belong to their parent PRT.
     if (!fields.prts_record_number) fields.prts_record_number = 'NEW'
     if (!fields.prts_created_by)    fields.prts_created_by    = userId
+  } else if (tableName === 'email_templates') {
+    // Bare-column table — record_number uses et_ short prefix per the
+    // BEFORE INSERT trigger (trg_et_rn). Owner / created_by are the bare
+    // columns owner_id / created_by because the table predates the
+    // prefixed-column convention.
+    if (!fields.et_record_number) fields.et_record_number = 'NEW'
+    if (!fields.owner_id)         fields.owner_id         = userId
+    if (!fields.created_by)       fields.created_by       = userId
+  } else if (tableName === 'document_templates') {
+    // Same shape as email_templates but with dt_ short prefix on record_number.
+    if (!fields.dt_record_number) fields.dt_record_number = 'NEW'
+    if (!fields.owner_id)         fields.owner_id         = userId
+    if (!fields.created_by)       fields.created_by       = userId
   }
   return fields
 }
