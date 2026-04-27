@@ -670,39 +670,33 @@ function DocxUploadField({ recordId, value, onRefreshRecord, disabled, disabledR
 }
 
 // ---------------------------------------------------------------------------
-// MergeFieldTextarea — textarea + Insert Merge Field picker. Used by the
-// `merge_textarea` field type. The picker is a portal'd modal (rendered to
-// document.body) with a Salesforce-style two-pane layout: left pane is the
-// object selector (Project / Property / Account / Report / User / Today),
-// right pane is the field list for the selected object. Clicking a field
-// inserts the `{{path}}` token at the textarea's caret position. Modal
-// avoids clipping when the textarea is rendered in narrow page-layout
-// columns (e.g. 3-column section grid). The token text and resolution are
-// validated server-side at render time; this UI is a convenience picker
-// only — authors can still type tokens directly.
+// MergeFieldPickerBody — shared two-pane picker UI used in both insert mode
+// (textarea companion) and copy mode (reference panel for docx authoring).
+//
+// In insert mode the right-pane click invokes onPick(token) with the
+// already-formatted token text (e.g. "{{property.property_name}}" or the
+// raw "\sig1\" anchor) so the parent can splice it at the textarea caret.
+//
+// In copy mode each row shows the token in monospace and a copy button.
+// onPick is not used; the body owns the clipboard write and the brief
+// "Copied" pip that fades out.
+//
+// Self-contained: owns its activeKey + per-object field cache. The cache
+// persists across mounts only via the parent's React state, so passing a
+// ref or callback is unnecessary — the cost is one describe_object_columns
+// RPC per object per panel mount, which is cheap.
 // ---------------------------------------------------------------------------
 
-function MergeFieldTextarea({ value, onChange }) {
-  const taRef = useRef(null)
-  const [open, setOpen] = useState(false)
+function MergeFieldPickerBody({ mode, onPick }) {
   const [activeKey, setActiveKey] = useState(MERGE_FIELD_OBJECTS[0]?.key ?? '')
-  // Per-session cache: object key → { items?, error?, loading? }
-  // Persists across modal open/close so re-opening the picker is instant
-  // for objects whose schema we already fetched.
   const [fieldsByKey, setFieldsByKey] = useState({})
-  // Caret position is captured when the picker opens; if the textarea loses
-  // focus during modal interaction we still insert at the user's last caret.
-  const caretRef = useRef({ start: 0, end: 0 })
-  const text = value == null ? '' : String(value)
+  const [copiedPath, setCopiedPath] = useState(null)
+  const copiedTimerRef = useRef(null)
 
-  const activeObj = MERGE_FIELD_OBJECTS.find(o => o.key === activeKey)
+  const activeObj   = MERGE_FIELD_OBJECTS.find(o => o.key === activeKey)
   const activeEntry = fieldsByKey[activeKey]
 
-  // Lazy-load fields whenever an object is selected for the first time.
-  // describe_object_columns is the bottleneck here (one RPC per table, not
-  // per render); the cache keeps subsequent activations instant.
   useEffect(() => {
-    if (!open) return
     if (fieldsByKey[activeKey]) return
     let cancelled = false
     setFieldsByKey(prev => ({ ...prev, [activeKey]: { loading: true } }))
@@ -716,9 +710,230 @@ function MergeFieldTextarea({ value, onChange }) {
         setFieldsByKey(prev => ({ ...prev, [activeKey]: { error: err?.message || String(err) } }))
       })
     return () => { cancelled = true }
-  }, [open, activeKey, fieldsByKey])
+  }, [activeKey, fieldsByKey])
 
-  // Close on Escape
+  // Format an item's path into the token actually inserted/copied. Anchors
+  // (noBraces) are literal — no curly-brace wrapping.
+  const formatToken = (item) => item.noBraces ? item.path : `{{${item.path}}}`
+
+  const handleCopy = async (item) => {
+    const token = formatToken(item)
+    try {
+      await navigator.clipboard.writeText(token)
+      setCopiedPath(item.path)
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+      copiedTimerRef.current = setTimeout(() => setCopiedPath(null), 1500)
+    } catch {
+      // Fallback for browsers without clipboard permission — fall back to
+      // the deprecated execCommand path. Failure here is silent; the user
+      // can still type the visible token by hand.
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = token
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+        setCopiedPath(item.path)
+        if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+        copiedTimerRef.current = setTimeout(() => setCopiedPath(null), 1500)
+      } catch { /* noop */ }
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+      {/* Left pane — object selector */}
+      <div
+        style={{
+          width: 220, flexShrink: 0,
+          background: '#fafbfd', borderRight: `1px solid ${C.border}`,
+          overflowY: 'auto',
+        }}
+      >
+        <div style={{
+          padding: '10px 14px 6px', fontSize: 10.5, fontWeight: 600,
+          color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
+          borderBottom: `1px solid ${C.border}`,
+        }}>
+          Object
+        </div>
+        {MERGE_FIELD_OBJECTS.map(g => {
+          const isActive = g.key === activeKey
+          const kindBadge =
+            g.kind === 'collection'     ? 'list'   :
+            g.kind === 'synthetic'      ? 'sys'    :
+            g.kind === 'signing_anchor' ? 'anchor' : null
+          return (
+            <button
+              key={g.key}
+              type="button"
+              onClick={() => setActiveKey(g.key)}
+              title={g.description || ''}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                width: '100%', textAlign: 'left',
+                padding: '9px 14px', fontSize: 12.5,
+                color: isActive ? C.textPrimary : C.textSecondary,
+                fontWeight: isActive ? 600 : 400,
+                background: isActive ? C.card : 'transparent',
+                borderLeft: `3px solid ${isActive ? C.emerald : 'transparent'}`,
+                borderTop: 'none', borderRight: 'none', borderBottom: `1px solid ${C.border}`,
+                cursor: 'pointer', gap: 6,
+              }}
+              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f3f8' }}
+              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+            >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {g.label}
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                {kindBadge && (
+                  <span style={{
+                    fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    color: C.textMuted, background: '#eef2f7',
+                    border: `1px solid ${C.border}`, borderRadius: 3,
+                    padding: '1px 5px',
+                  }}>
+                    {kindBadge}
+                  </span>
+                )}
+                <Icon path="M9 5l7 7-7 7" size={11} color={isActive ? C.textPrimary : C.textMuted} />
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Right pane — field list */}
+      <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
+        <div style={{
+          padding: '10px 16px 6px', fontSize: 10.5, fontWeight: 600,
+          color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
+          borderBottom: `1px solid ${C.border}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span>Field</span>
+          {activeObj?.kind === 'collection' && (
+            <span style={{
+              fontSize: 10, fontWeight: 500, textTransform: 'none',
+              letterSpacing: 'normal', color: C.textMuted,
+            }}>
+              First-row tokens resolve to the lowest record number
+            </span>
+          )}
+          {activeObj?.kind === 'signing_anchor' && (
+            <span style={{
+              fontSize: 10, fontWeight: 500, textTransform: 'none',
+              letterSpacing: 'normal', color: C.textMuted,
+            }}>
+              Type the literal string in your .docx wherever the signer should sign
+            </span>
+          )}
+        </div>
+        {!activeEntry || activeEntry.loading ? (
+          <div style={{ padding: '14px 16px', fontSize: 12.5, color: C.textMuted }}>
+            Loading fields…
+          </div>
+        ) : activeEntry.error ? (
+          <div style={{ padding: '14px 16px', fontSize: 12.5, color: '#b03a2e' }}>
+            {activeEntry.error}
+          </div>
+        ) : (activeEntry.items || []).length === 0 ? (
+          <div style={{ padding: '14px 16px', fontSize: 12.5, color: C.textMuted }}>
+            No fields available.
+          </div>
+        ) : (
+          (activeEntry.items || []).map(item => {
+            const token = formatToken(item)
+            if (mode === 'copy') {
+              const isCopied = copiedPath === item.path
+              return (
+                <div
+                  key={item.path}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                    padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12.5, color: C.textPrimary }}>{item.label}</div>
+                    <code style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', wordBreak: 'break-all' }}>
+                      {token}
+                    </code>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(item)}
+                    style={{
+                      flexShrink: 0,
+                      padding: '4px 10px', fontSize: 11.5, fontWeight: 500,
+                      background: isCopied ? '#ecfdf5' : C.card,
+                      color: isCopied ? '#1a7a4e' : C.emerald,
+                      border: `1px solid ${isCopied ? '#a7f3d0' : C.border}`,
+                      borderRadius: 4, cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                    }}
+                  >
+                    {isCopied ? (
+                      <>
+                        <Icon path="M5 13l4 4L19 7" size={11} color="#1a7a4e" />
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <Icon path="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" size={11} color={C.emerald} />
+                        Copy
+                      </>
+                    )}
+                  </button>
+                </div>
+              )
+            }
+            return (
+              <button
+                key={item.path}
+                type="button"
+                onClick={() => onPick && onPick(token)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '10px 16px', fontSize: 12.5, color: C.textPrimary,
+                  background: 'transparent', border: 'none',
+                  borderBottom: `1px solid ${C.border}`,
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#f0f6f3' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <div>{item.label}</div>
+                <code style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', wordBreak: 'break-all' }}>
+                  {token}
+                </code>
+              </button>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// MergeFieldTextarea — textarea + Insert Merge Field picker. Used by the
+// `merge_textarea` field type. The picker is a portal'd modal (rendered to
+// document.body) with a Salesforce-style two-pane layout: left pane is the
+// object selector, right pane is the field list. Clicking a field inserts
+// the token at the textarea's caret position. Modal avoids clipping when
+// the textarea is rendered in narrow page-layout columns.
+// ---------------------------------------------------------------------------
+
+function MergeFieldTextarea({ value, onChange }) {
+  const taRef = useRef(null)
+  const [open, setOpen] = useState(false)
+  const caretRef = useRef({ start: 0, end: 0 })
+  const text = value == null ? '' : String(value)
+
   useEffect(() => {
     if (!open) return
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
@@ -739,13 +954,11 @@ function MergeFieldTextarea({ value, onChange }) {
     setOpen(true)
   }
 
-  const insertToken = (path) => {
-    const token = `{{${path}}}`
+  const insertToken = (token) => {
     const { start, end } = caretRef.current
     const next = text.slice(0, start) + token + text.slice(end)
     onChange(next)
     setOpen(false)
-    // Restore caret position after the inserted token.
     requestAnimationFrame(() => {
       const ta = taRef.current
       if (!ta) return
@@ -755,8 +968,6 @@ function MergeFieldTextarea({ value, onChange }) {
     })
   }
 
-  // Modal styles match ProjectReportModal so the look is consistent across
-  // the app (same backdrop, same card border / shadow, same z-index band).
   const overlay = {
     position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -848,129 +1059,71 @@ function MergeFieldTextarea({ value, onChange }) {
                 <Icon path="M6 18L18 6M6 6l12 12" size={16} color={C.textSecondary} />
               </button>
             </div>
-            <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-              {/* Left pane — object selector */}
-              <div
-                style={{
-                  width: 220, flexShrink: 0,
-                  background: '#fafbfd', borderRight: `1px solid ${C.border}`,
-                  overflowY: 'auto',
-                }}
-              >
-                <div style={{
-                  padding: '10px 14px 6px', fontSize: 10.5, fontWeight: 600,
-                  color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
-                  borderBottom: `1px solid ${C.border}`,
-                }}>
-                  Object
-                </div>
-                {MERGE_FIELD_OBJECTS.map(g => {
-                  const isActive = g.key === activeKey
-                  const kindBadge =
-                    g.kind === 'collection' ? 'list' :
-                    g.kind === 'synthetic'  ? 'sys'  : null
-                  return (
-                    <button
-                      key={g.key}
-                      type="button"
-                      onClick={() => setActiveKey(g.key)}
-                      title={g.description || ''}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        width: '100%', textAlign: 'left',
-                        padding: '9px 14px', fontSize: 12.5,
-                        color: isActive ? C.textPrimary : C.textSecondary,
-                        fontWeight: isActive ? 600 : 400,
-                        background: isActive ? C.card : 'transparent',
-                        borderLeft: `3px solid ${isActive ? C.emerald : 'transparent'}`,
-                        borderTop: 'none', borderRight: 'none', borderBottom: `1px solid ${C.border}`,
-                        cursor: 'pointer', gap: 6,
-                      }}
-                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f3f8' }}
-                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
-                    >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {g.label}
-                      </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                        {kindBadge && (
-                          <span style={{
-                            fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em',
-                            textTransform: 'uppercase',
-                            color: C.textMuted, background: '#eef2f7',
-                            border: `1px solid ${C.border}`, borderRadius: 3,
-                            padding: '1px 5px',
-                          }}>
-                            {kindBadge}
-                          </span>
-                        )}
-                        <Icon path="M9 5l7 7-7 7" size={11} color={isActive ? C.textPrimary : C.textMuted} />
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-              {/* Right pane — field list for the selected object */}
-              <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
-                <div style={{
-                  padding: '10px 16px 6px', fontSize: 10.5, fontWeight: 600,
-                  color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em',
-                  borderBottom: `1px solid ${C.border}`,
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                }}>
-                  <span>Field</span>
-                  {activeObj?.kind === 'collection' && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 500, textTransform: 'none',
-                      letterSpacing: 'normal', color: C.textMuted,
-                    }}>
-                      First-row tokens resolve to the lowest record number
-                    </span>
-                  )}
-                </div>
-                {!activeEntry || activeEntry.loading ? (
-                  <div style={{ padding: '14px 16px', fontSize: 12.5, color: C.textMuted }}>
-                    Loading fields…
-                  </div>
-                ) : activeEntry.error ? (
-                  <div style={{ padding: '14px 16px', fontSize: 12.5, color: C.danger }}>
-                    {activeEntry.error}
-                  </div>
-                ) : (activeEntry.items || []).length === 0 ? (
-                  <div style={{ padding: '14px 16px', fontSize: 12.5, color: C.textMuted }}>
-                    No fields available.
-                  </div>
-                ) : (
-                  (activeEntry.items || []).map(item => (
-                    <button
-                      key={item.path}
-                      type="button"
-                      onClick={() => insertToken(item.path)}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left',
-                        padding: '10px 16px', fontSize: 12.5, color: C.textPrimary,
-                        background: 'transparent', border: 'none',
-                        borderBottom: `1px solid ${C.border}`,
-                        cursor: 'pointer',
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#f0f6f3' }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-                    >
-                      <div>{item.label}</div>
-                      <code style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>
-                        {`{{${item.path}}}`}
-                      </code>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
+            <MergeFieldPickerBody mode="insert" onPick={insertToken} />
             <div style={footerStyle}>
-              Click a field to insert <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{`{{path}}`}</code> at the cursor. Press Esc to close.
+              Click a field to insert at the cursor. Press Esc to close.
             </div>
           </div>
         </div>,
         document.body
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// MergeFieldReferenceWidget — read-only, copy-friendly merge-field reference
+// rendered inline as a section widget. Lives next to the docx upload widget
+// on the document_templates page so authors who are round-tripping (download
+// .docx → edit in Word → re-upload) can copy tokens without leaving the
+// template detail page.
+//
+// Same two-pane component as the modal picker, just rendered inline with a
+// fixed height and copy buttons instead of insert-into-textarea behavior.
+// Collapsible — collapsed by default so the parent section stays compact;
+// authors expand only when they need to look up tokens.
+// ---------------------------------------------------------------------------
+
+function MergeFieldReferenceWidget({ widget }) {
+  const isMobile = useIsMobile()
+  // Default-collapsed unless widget_config explicitly opens it. Stored
+  // here so the section's own collapse state isn't overloaded.
+  const startOpen = !!widget?.widget_config?.start_open
+  const [open, setOpen] = useState(startOpen)
+  const height = isMobile ? 320 : 420
+  return (
+    <div style={{ borderTop: `1px solid ${C.border}` }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', textAlign: 'left',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          padding: isMobile ? '10px 14px' : '12px 16px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = '#fafbfd' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Icon path="M12 4v16m8-8H4" size={13} color={C.emerald} />
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary }}>
+            {widget?.widget_title || 'Available Merge Fields'}
+          </span>
+          <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 400 }}>
+            Browse and copy tokens for use in your .docx template
+          </span>
+        </span>
+        <Icon path={open ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} size={13} color={C.textMuted} />
+      </button>
+      {open && (
+        <div style={{
+          display: 'flex', flexDirection: 'column',
+          height, borderTop: `1px solid ${C.border}`,
+          background: C.card,
+        }}>
+          <MergeFieldPickerBody mode="copy" />
+        </div>
       )}
     </div>
   )
@@ -2690,15 +2843,24 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 // Section
 // ---------------------------------------------------------------------------
 
-function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons }) {
+function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes }) {
   const isMobile = useIsMobile()
   const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
   // Render any widgets that live inside a section card. Today: field_group,
-  // section_config_editor, and filter_config_editor. Related lists, file
-  // galleries, prtsn history, and the activity timeline render as their own
-  // standalone cards outside sections.
-  const inSectionTypes = new Set(['field_group', 'section_config_editor', 'filter_config_editor'])
-  const sectionWidgets = (section.widgets || []).filter(w => inSectionTypes.has(w.widget_type))
+  // section_config_editor, filter_config_editor, and merge_field_reference.
+  // Related lists, file galleries, prtsn history, and the activity timeline
+  // render as their own standalone cards outside sections.
+  const inSectionTypes = new Set(['field_group', 'section_config_editor', 'filter_config_editor', 'merge_field_reference'])
+  // hiddenWidgetTypes is a Set of widget_type values to suppress at render
+  // time — used by the parent to hide context-dependent widgets (e.g.
+  // merge_field_reference is only relevant when document_templates is in
+  // docx authoring mode, so the parent passes {'merge_field_reference'}
+  // to hide it in html mode).
+  const sectionWidgets = (section.widgets || []).filter(w => {
+    if (!inSectionTypes.has(w.widget_type)) return false
+    if (hiddenWidgetTypes && hiddenWidgetTypes.has(w.widget_type)) return false
+    return true
+  })
   if (sectionWidgets.length === 0) return null
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
@@ -2720,6 +2882,9 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
         if (w.widget_type === 'filter_config_editor') {
           return <FilterConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
             editing={editing} draft={draft} onChange={onChange} />
+        }
+        if (w.widget_type === 'merge_field_reference') {
+          return <MergeFieldReferenceWidget key={w.id} widget={w} />
         }
         return null
       })}
@@ -3733,7 +3898,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             // dt_template_asset_path inactive when mode is HTML so the
             // upload UI explicitly says "switch to docx mode first" rather
             // than letting users upload a file the renderer will ignore.
+            // The merge_field_reference widget is also docx-only — no
+            // point in browsing tokens for the inline HTML editor since
+            // it has its own merge field picker built in.
             let fieldDisabledReasons = null
+            let hiddenWidgetTypes = null
             if (tableName === 'document_templates') {
               const modeId = data?.record?.dt_authoring_mode
               const modeValue = modeId ? data?.picklists?.valueById?.get(modeId) : null
@@ -3741,6 +3910,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 fieldDisabledReasons = {
                   dt_template_asset_path: 'Set Authoring Mode to "Word Document (.docx)" before uploading.',
                 }
+                hiddenWidgetTypes = new Set(['merge_field_reference'])
               }
             }
             return (
@@ -3748,7 +3918,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 editing={editing} draft={draft} onChange={handleFieldChange}
                 allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName}
                 onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
-                fieldDisabledReasons={fieldDisabledReasons} />
+                fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes} />
             )
           })}
 

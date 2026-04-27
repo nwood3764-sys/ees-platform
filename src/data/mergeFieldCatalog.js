@@ -61,6 +61,13 @@ export const MERGE_FIELD_OBJECTS = [
   { key: 'report',               label: 'Report',               kind: 'synthetic' },
   { key: 'user',                 label: 'User',                 kind: 'synthetic' },
   { key: 'today',                label: 'Today',                kind: 'synthetic' },
+
+  // Signing anchors — NOT merge fields. Literal strings the author types
+  // into the .docx at every position where a signer's signature, initials,
+  // date, or text input should appear. Survive the docxtemplater merge
+  // unchanged (no {{}} delimiters), then get scanned out of the rendered
+  // PDF by the signing-portal pipeline to position each signing tab.
+  { key: 'signing_anchor',       label: 'Signing Anchors',      kind: 'signing_anchor' },
 ]
 
 // Synthetic field lists (no DB lookup possible).
@@ -88,6 +95,29 @@ const SYNTHETIC_FIELDS = {
     { path: 'today.iso',   label: 'Today (ISO YYYY-MM-DD)' },
   ],
 }
+
+// Signing anchors. Each anchor's `path` is the LITERAL string the author
+// places in the .docx — already including the leading/trailing backslashes
+// that bracket the anchor token. The picker MUST NOT wrap these in {{}}.
+// Five of each kind is the supported ceiling per envelope; multi-signer
+// envelopes beyond five recipients would be unusual.
+const SIGNING_ANCHOR_FIELDS = [
+  { path: '\\sig1\\',     label: 'Signer 1 — Signature',  noBraces: true },
+  { path: '\\sig2\\',     label: 'Signer 2 — Signature',  noBraces: true },
+  { path: '\\sig3\\',     label: 'Signer 3 — Signature',  noBraces: true },
+  { path: '\\sig4\\',     label: 'Signer 4 — Signature',  noBraces: true },
+  { path: '\\sig5\\',     label: 'Signer 5 — Signature',  noBraces: true },
+  { path: '\\initial1\\', label: 'Signer 1 — Initials',   noBraces: true },
+  { path: '\\initial2\\', label: 'Signer 2 — Initials',   noBraces: true },
+  { path: '\\initial3\\', label: 'Signer 3 — Initials',   noBraces: true },
+  { path: '\\initial4\\', label: 'Signer 4 — Initials',   noBraces: true },
+  { path: '\\initial5\\', label: 'Signer 5 — Initials',   noBraces: true },
+  { path: '\\date1\\',    label: 'Signer 1 — Date Signed', noBraces: true },
+  { path: '\\date2\\',    label: 'Signer 2 — Date Signed', noBraces: true },
+  { path: '\\date3\\',    label: 'Signer 3 — Date Signed', noBraces: true },
+  { path: '\\date4\\',    label: 'Signer 4 — Date Signed', noBraces: true },
+  { path: '\\date5\\',    label: 'Signer 5 — Date Signed', noBraces: true },
+]
 
 // Computed (non-column) paths offered alongside a table's real columns.
 const COMPUTED_FIELDS = {
@@ -172,6 +202,10 @@ export async function loadFieldsForObject(key) {
 
   if (obj.kind === 'synthetic') {
     return SYNTHETIC_FIELDS[obj.key] || []
+  }
+
+  if (obj.kind === 'signing_anchor') {
+    return SIGNING_ANCHOR_FIELDS
   }
 
   const items = []
