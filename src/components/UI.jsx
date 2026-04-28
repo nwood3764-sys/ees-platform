@@ -96,7 +96,7 @@ export function Topbar({ breadcrumb, onReports }) {
 export function SectionTabs({ sections, active, onChange, counts = {}, urgentSections = {} }) {
   const isMobile = useIsMobile();
   return (
-    <div className={isMobile ? 'anura-hscroll' : ''} style={{
+    <div className={isMobile ? 'ees-hscroll' : ''} style={{
       background: C.card, borderBottom: `1px solid ${C.border}`,
       padding: isMobile ? '0 12px' : '0 24px',
       display: 'flex', alignItems: 'center', flexShrink: 0,
@@ -167,7 +167,7 @@ export function LoadingState() {
           width: 26, height: 26, borderRadius: '50%',
           border: `2.5px solid ${C.border}`,
           borderTopColor: C.emerald,
-          animation: 'anura-spin 0.7s linear infinite',
+          animation: 'ees-spin 0.7s linear infinite',
         }} />
         <div style={{ fontSize: 13 }}>Loading…</div>
       </div>
@@ -191,14 +191,14 @@ export function LoadingState() {
                 width: '28%', height: 10, borderRadius: 3,
                 background: 'linear-gradient(90deg, #f0f3f8 0%, #e4e9f2 50%, #f0f3f8 100%)',
                 backgroundSize: '200% 100%',
-                animation: 'anura-shimmer 1.4s ease-in-out infinite',
+                animation: 'ees-shimmer 1.4s ease-in-out infinite',
                 marginBottom: 8,
               }} />
               <div style={{
                 width: '70%', height: 14, borderRadius: 3,
                 background: 'linear-gradient(90deg, #f0f3f8 0%, #e4e9f2 50%, #f0f3f8 100%)',
                 backgroundSize: '200% 100%',
-                animation: 'anura-shimmer 1.4s ease-in-out infinite',
+                animation: 'ees-shimmer 1.4s ease-in-out infinite',
                 animationDelay: '0.1s',
               }} />
             </div>
@@ -206,7 +206,7 @@ export function LoadingState() {
               width: 56, height: 20, borderRadius: 10, flexShrink: 0,
               background: 'linear-gradient(90deg, #f0f3f8 0%, #e4e9f2 50%, #f0f3f8 100%)',
               backgroundSize: '200% 100%',
-              animation: 'anura-shimmer 1.4s ease-in-out infinite',
+              animation: 'ees-shimmer 1.4s ease-in-out infinite',
               animationDelay: '0.2s',
             }} />
           </div>
@@ -339,7 +339,7 @@ export function Sidebar({
           <div style={{ width: 28, height: 28, borderRadius: 6, background: C.emerald, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
           </div>
-          {!isCollapsed && <span style={{ color: C.navActive, fontWeight: 600, fontSize: 15 }}>Anura</span>}
+          {!isCollapsed && <span style={{ color: C.navActive, fontWeight: 600, fontSize: 15 }}>Energy Efficiency Services</span>}
         </div>
       )}
 
@@ -350,7 +350,7 @@ export function Sidebar({
             <div style={{ width: 28, height: 28, borderRadius: 6, background: C.emerald, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </div>
-            <span style={{ color: C.navActive, fontWeight: 600, fontSize: 16 }}>Anura</span>
+            <span style={{ color: C.navActive, fontWeight: 600, fontSize: 16 }}>Energy Efficiency Services</span>
           </div>
           <button
             onClick={onMobileClose}
@@ -475,7 +475,7 @@ export function Sidebar({
         onClick={onMobileClose}
         style={{
           position: 'fixed', inset: 0, background: 'rgba(7, 17, 31, 0.55)',
-          zIndex: 450, animation: 'anura-fade-in 200ms ease',
+          zIndex: 450, animation: 'ees-fade-in 200ms ease',
         }}
       />
       {/* Drawer */}
@@ -488,7 +488,7 @@ export function Sidebar({
           width: 'min(86vw, 320px)', background: C.sidebar,
           display: 'flex', flexDirection: 'column', zIndex: 460,
           boxShadow: '2px 0 24px rgba(0,0,0,0.35)',
-          animation: 'anura-slide-in-left 220ms ease',
+          animation: 'ees-slide-in-left 220ms ease',
           overscrollBehavior: 'contain',
           ...swipe.style,
         }}
@@ -540,7 +540,7 @@ export function MobileHeader({ onOpenMenu, moduleLabel, moduleIcon }) {
           color: C.navActive, fontWeight: 600, fontSize: 17,
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>
-          {moduleLabel || 'Anura'}
+          {moduleLabel || 'Energy Efficiency Services'}
         </span>
       </div>
     </div>

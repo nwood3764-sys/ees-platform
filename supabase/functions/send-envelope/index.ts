@@ -1,36 +1,19 @@
 // =============================================================================
-// send-envelope
+// send-envelope (v3 — Outlook email integration + EES branding)
 //
-// Native (in-Anura) e-signature: creates an envelope, renders the merged
-// PDF, scans for anchor strings, generates per-recipient signing tokens,
-// stores everything, and returns the magic-link signing URLs to the FE.
+// Same as v2, plus: rebranded email body footer from "via Anura" to
+// "from Energy Efficiency Services" so external recipients see the company
+// name they recognize.
 //
-// No external e-signature provider involved. The signing portal lives at
-// /sign/{env_record_number}/{token} inside the same Vite app that serves
-// the Anura UI. Recipients are NOT Anura users; the token is the auth.
-//
-// Email delivery is intentionally out of scope for this function — we
-// fire `Sent` and return the signing URLs. The caller (Send-for-Signature
-// modal) displays the URLs so an internal user can copy/paste into their
-// own email until SMTP/SendGrid integration lands. Each token is
-// recorded in envelope_events.event_metadata so the magic links can also
-// be retrieved from the audit log later.
-//
-// Inputs (POST JSON):
-//   {
-//     document_template_id: uuid,
-//     parent_object: text,
-//     parent_record_id: uuid,
-//     recipients: [{ name, email, role?, order, contact_id? }, ...],
-//     subject?, message?, env_name?
-//   }
-//
-// Outputs (200 JSON):
-//   {
-//     envelope_id, env_record_number,
-//     signing_urls: [{ recipient_id, name, email, order, signing_url }, ...],
-//     unsigned_pdf_signed_url   // hour-long signed URL for previewing
-//   }
+// What this function does:
+//   1. Validates the document template, locates the latest published snapshot
+//   2. Inserts an envelope row + per-recipient rows with unique signing tokens
+//   3. Calls render-document-template-pdf to merge fields and discover anchors
+//   4. Stores the unsigned PDF in storage; persists tab positions per recipient
+//   5. Audits with Created + Sent envelope_events
+//   6. Sends recipient #1 a notification email through the calling user's
+//      Outlook (via send-email-via-graph). Falls back to copy-paste URLs in
+//      the FE response if Outlook isn't connected.
 // =============================================================================
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
@@ -61,7 +44,8 @@ interface ReqBody {
   subject?: string
   message?: string
   env_name?: string
-  signing_base_url?: string  // optional; defaults to the request's Origin
+  signing_base_url?: string
+  attach_unsigned_pdf?: boolean
 }
 
 Deno.serve(async (req) => {
@@ -88,7 +72,6 @@ Deno.serve(async (req) => {
   const callerUserId = await resolveCallerUserId(supabase)
   if (!callerUserId) return json({ error: "Could not resolve caller's user id" }, 401)
 
-  // ── Validate template ───────────────────────────────────────────────
   const { data: dt, error: dtErr } = await supabase
     .from("document_templates")
     .select(`
@@ -103,7 +86,6 @@ Deno.serve(async (req) => {
   if ((dt as any).status?.picklist_value !== "Active")
     return json({ error: `Template must be Active (currently ${(dt as any).status?.picklist_value || "Draft"})` }, 400)
 
-  // ── Find latest snapshot ────────────────────────────────────────────
   const { data: snapshot, error: snapErr } = await supabase
     .from("document_template_snapshots")
     .select("id, dtsn_version")
@@ -113,7 +95,6 @@ Deno.serve(async (req) => {
     .maybeSingle()
   if (snapErr || !snapshot) return json({ error: "No published snapshot — re-publish the template first" }, 400)
 
-  // ── Resolve picklist ids we'll need ─────────────────────────────────
   const [
     standardEnvRtId, standardRecRtId, standardTabRtId, standardEventRtId,
     draftStatusId, sentStatusId, failedStatusId,
@@ -135,7 +116,6 @@ Deno.serve(async (req) => {
   if (!draftStatusId || !sentStatusId || !standardEnvRtId)
     return json({ error: "Required picklist seeds missing — contact admin" }, 500)
 
-  // ── Insert envelopes row in Draft ───────────────────────────────────
   const envName = body.env_name || `${dt.name} — ${body.parent_record_id.slice(0, 8)}`
   const subject = body.subject || `Please sign: ${dt.name}`
 
@@ -163,7 +143,6 @@ Deno.serve(async (req) => {
 
   const envelopeId = envelopeRow.id
 
-  // ── Insert recipients with signing tokens ───────────────────────────
   const tokenExpiresAt = new Date()
   tokenExpiresAt.setDate(tokenExpiresAt.getDate() + TOKEN_EXPIRY_DAYS)
 
@@ -194,7 +173,6 @@ Deno.serve(async (req) => {
   const recipientByOrder = new Map<number, typeof insertedRecips[number]>()
   for (const r of insertedRecips) recipientByOrder.set(r.recipient_order, r)
 
-  // ── Render the merged PDF + anchors ─────────────────────────────────
   let renderResult: { pdf_base64: string, anchors: any[], page_count: number, template_name: string }
   try {
     const renderResp = await fetch(`${supabaseUrl}/functions/v1/render-document-template-pdf`, {
@@ -213,7 +191,6 @@ Deno.serve(async (req) => {
     return json({ error: `Render failed: ${(e as Error).message}`, envelope_id: envelopeId }, 500)
   }
 
-  // ── Upload unsigned PDF ─────────────────────────────────────────────
   const pdfBytes = atobBytes(renderResult.pdf_base64)
   const unsignedPath = `envelopes/${envelopeId}/unsigned.pdf`
   const { error: uploadErr } = await supabase.storage
@@ -229,10 +206,6 @@ Deno.serve(async (req) => {
     updated_by: callerUserId,
   }).eq("id", envelopeId)
 
-  // ── Insert envelope_tabs from anchor scan ───────────────────────────
-  // Each anchor's `ordinal` (the digit after "sig"/"initial"/"date"/"text")
-  // identifies which recipient owns the tab. If a template uses \sig5\
-  // but no recipient has order=5, the tab is dropped with a warning event.
   const tabRows = []
   const droppedAnchors: string[] = []
   for (const a of renderResult.anchors) {
@@ -271,7 +244,6 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ── Build signing URLs ──────────────────────────────────────────────
   const signingBase = body.signing_base_url
     || req.headers.get("Origin")
     || req.headers.get("Referer")?.split("/").slice(0, 3).join("/")
@@ -287,7 +259,6 @@ Deno.serve(async (req) => {
       signing_url:  `${signingBase}/sign/${envelopeRow.env_record_number}/${r.recipient_signing_token}`,
     }))
 
-  // ── Mark recipient #1 as Sent (others stay Created until advanced) ──
   const firstRecip = insertedRecips.find(r => r.recipient_order === 1)
   if (firstRecip && sentRecStatId) {
     await supabase.from("envelope_recipients").update({
@@ -297,7 +268,6 @@ Deno.serve(async (req) => {
     }).eq("id", firstRecip.id)
   }
 
-  // ── Audit events: Created + Sent ────────────────────────────────────
   if (eventCreatedId) {
     await supabase.from("envelope_events").insert({
       event_record_number: "",
@@ -327,14 +297,67 @@ Deno.serve(async (req) => {
     })
   }
 
-  // ── Mark envelope Sent ──────────────────────────────────────────────
   await supabase.from("envelopes").update({
     env_status: sentStatusId,
     env_sent_at: new Date().toISOString(),
     updated_by: callerUserId,
   }).eq("id", envelopeId)
 
-  // ── Build a signed URL so the FE can preview the unsigned PDF ───────
+  // ── Send email to recipient #1 via Outlook ────────────────────
+  const emailSendResults: any[] = []
+  if (firstRecip) {
+    const senderName = await getCallerDisplayName(supabase) || "Energy Efficiency Services"
+    const firstRecipUrl = signingUrls.find(u => u.order === 1)!.signing_url
+    const emailHtml = renderEmailHtml({
+      recipientName: firstRecip.recipient_name,
+      senderName,
+      templateName:  dt.name,
+      customMessage: body.message || null,
+      signingUrl:    firstRecipUrl,
+    })
+    const emailText = renderEmailText({
+      recipientName: firstRecip.recipient_name,
+      senderName,
+      templateName:  dt.name,
+      customMessage: body.message || null,
+      signingUrl:    firstRecipUrl,
+    })
+
+    try {
+      const sendResp = await fetch(`${supabaseUrl}/functions/v1/send-email-via-graph`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": authHeader },
+        body: JSON.stringify({
+          parent_object:    body.parent_object,
+          parent_record_id: body.parent_record_id,
+          recipients_to:    [{ name: firstRecip.recipient_name, email: firstRecip.recipient_email }],
+          subject,
+          body_html: emailHtml,
+          body_text: emailText,
+          attachment_paths: body.attach_unsigned_pdf
+            ? [{ storage_bucket: SIGNATURES_BUCKET, storage_path: unsignedPath, name: `${dt.name}.pdf`, content_type: "application/pdf" }]
+            : [],
+          related_envelope_id:  envelopeId,
+          related_recipient_id: firstRecip.id,
+        }),
+      })
+      const j = await sendResp.json()
+      emailSendResults.push({
+        recipient_id: firstRecip.id,
+        order: 1,
+        status: j.ok ? "sent" : (j.code === "not_connected" ? "not_connected" : "failed"),
+        email_send_id: j.email_send_id || null,
+        failure_reason: j.failure_reason || j.error || null,
+      })
+    } catch (e) {
+      emailSendResults.push({
+        recipient_id: firstRecip.id, order: 1,
+        status: "failed",
+        failure_reason: (e as Error).message,
+      })
+    }
+  }
+
   const { data: signedUrlData } = await supabase.storage
     .from(SIGNATURES_BUCKET)
     .createSignedUrl(unsignedPath, 3600)
@@ -345,10 +368,11 @@ Deno.serve(async (req) => {
     signing_urls: signingUrls,
     unsigned_pdf_signed_url: signedUrlData?.signedUrl || null,
     dropped_anchors: droppedAnchors,
+    email_send_results: emailSendResults,
   }, 200)
 })
 
-// ─── helpers ────────────────────────────────────────────────────────────
+// ─── helpers ───────────────────────────────────────────────────────────────
 
 function validate(b: ReqBody): string | null {
   if (!b.document_template_id) return "document_template_id required"
@@ -369,6 +393,18 @@ async function resolveCallerUserId(supabase: SupabaseClient): Promise<string | n
   const { data, error } = await supabase.rpc("current_app_user_id")
   if (error || !data) return null
   return data as string
+}
+
+async function getCallerDisplayName(supabase: SupabaseClient): Promise<string | null> {
+  const { data: idRow } = await supabase.rpc("current_app_user_id")
+  if (!idRow) return null
+  const { data } = await supabase.from("users")
+    .select("user_first_name, user_last_name, user_name")
+    .eq("id", idRow as string)
+    .maybeSingle()
+  if (!data) return null
+  const full = [(data as any).user_first_name, (data as any).user_last_name].filter(Boolean).join(" ").trim()
+  return full || (data as any).user_name || null
 }
 
 async function picklistId(
@@ -399,7 +435,6 @@ async function markEnvelopeFailed(
   }).eq("id", envelopeId)
 }
 
-// 32-byte cryptographically random token, base64url-encoded for URL safety
 function generateToken(): string {
   const bytes = new Uint8Array(32)
   crypto.getRandomValues(bytes)
@@ -419,4 +454,37 @@ function json(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status, headers: { ...cors, "Content-Type": "application/json" },
   })
+}
+
+// HTML/text email templates — single source of truth so send-envelope and
+// signing-portal-submit produce identical-looking emails (the AdvancedToNext
+// path duplicates these inline).
+function renderEmailHtml(p: {
+  recipientName: string, senderName: string, templateName: string,
+  customMessage: string | null, signingUrl: string,
+}): string {
+  const safe = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  const customBlock = p.customMessage
+    ? `<p style="white-space:pre-wrap;">${safe(p.customMessage)}</p>`
+    : `<p>You have a document waiting for your signature: <strong>${safe(p.templateName)}</strong>.</p>`
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.55;color:#1a202c;max-width:600px;margin:0 auto;padding:24px;background:#fff;">
+<p style="font-size:15px;">Hi ${safe(p.recipientName.split(" ")[0] || p.recipientName)},</p>
+<div style="font-size:14px;">${customBlock}</div>
+<div style="margin:28px 0;">
+  <a href="${p.signingUrl}" style="background:#1f7ae0;color:#fff;padding:13px 28px;text-decoration:none;border-radius:6px;font-weight:600;display:inline-block;font-size:14px;">Review and Sign</a>
+</div>
+<p style="font-size:12px;color:#666;">If the button doesn't work, paste this URL into your browser:<br><a href="${p.signingUrl}" style="color:#1f7ae0;word-break:break-all;">${p.signingUrl}</a></p>
+<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
+<p style="font-size:11px;color:#888;">Sent on behalf of ${safe(p.senderName)} from Energy Efficiency Services. This signing link is unique to you and will expire in 30 days.</p>
+</body></html>`
+}
+
+function renderEmailText(p: {
+  recipientName: string, senderName: string, templateName: string,
+  customMessage: string | null, signingUrl: string,
+}): string {
+  const greeting = `Hi ${p.recipientName.split(" ")[0] || p.recipientName},`
+  const intro = p.customMessage || `You have a document waiting for your signature: ${p.templateName}.`
+  return `${greeting}\n\n${intro}\n\nReview and sign:\n${p.signingUrl}\n\n—\nSent on behalf of ${p.senderName} from Energy Efficiency Services. This signing link is unique to you and will expire in 30 days.`
 }

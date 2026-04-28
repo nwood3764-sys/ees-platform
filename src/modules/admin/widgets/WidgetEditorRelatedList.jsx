@@ -5,7 +5,7 @@ import { useToast } from '../../../components/Toast'
 import { useIsMobile } from '../../../lib/useMediaQuery'
 import { describeObject, describeIncomingFKs } from '../../../data/adminService'
 import { updateWidget } from '../../../data/pageLayoutBuilderService'
-import { deriveAnuraFieldType, humanizeColumnName } from './anuraFieldTypes'
+import { deriveEesFieldType, humanizeColumnName } from './eesFieldTypes'
 import {
   FormField,
   inputStyle,
@@ -338,7 +338,7 @@ export default function WidgetEditorRelatedList({
                           padding: '1px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.04em',
                           border: `1px solid ${C.border}`, flexShrink: 0,
                         }}>
-                          {deriveAnuraFieldType(c)}
+                          {deriveEesFieldType(c)}
                         </span>
                       </label>
                     )

@@ -3,7 +3,7 @@
 //
 // Mounted at /sign/{env_record_number}/{signing_token} via path-based
 // routing in main.jsx (no react-router dependency). The recipient is NOT
-// an Anura user — the token in the URL is the only auth.
+// an Energy Efficiency Services user — the token in the URL is the only auth.
 //
 // Flow:
 //   1. POST to signing-portal-load with the token, get envelope/recipient
@@ -21,7 +21,7 @@
 //   5. Submit calls signing-portal-submit. Server overlays the PDF,
 //      advances to next recipient or finalizes.
 //
-// No Anura chrome (sidebar/topbar) — this page stands alone with its
+// No Energy Efficiency Services chrome (sidebar/topbar) — this page stands alone with its
 // own minimal header. Designed to render correctly on mobile.
 // =============================================================================
 
@@ -249,7 +249,7 @@ function FullPageMessage({ title, message, variant }) {
         boxShadow: '0 6px 24px rgba(13, 26, 46, 0.06)',
       }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: C.emerald, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 8 }}>
-          Anura Signing
+          Energy Efficiency Services Signing
         </div>
         <div style={{ fontSize: 22, fontWeight: 600, color, marginBottom: 10 }}>{title}</div>
         {message && <div style={{ fontSize: 14, color: C.textSecondary, lineHeight: 1.5 }}>{message}</div>}
@@ -281,7 +281,7 @@ function PortalLayout({ data, tabValues, activeTabId, consent, submitting, onTab
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
       }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: C.emerald, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Anura Signing</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: C.emerald, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Energy Efficiency Services Signing</div>
           <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>{data.envelope.name}</div>
           {data.envelope.subject && <div style={{ fontSize: 12, color: C.textSecondary }}>{data.envelope.subject}</div>}
         </div>

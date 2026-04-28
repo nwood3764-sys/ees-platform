@@ -17,7 +17,7 @@ import { C } from '../data/constants'
 //     redirects back to /auth/outlook-callback, which finishes the dance
 //     by calling outlook-oauth-callback and lands the user back here.
 //
-// State key in sessionStorage: 'anura.outlook.oauth.state' — the value
+// State key in sessionStorage: 'ees.outlook.oauth.state' — the value
 // round-trips through Microsoft and is validated by OutlookCallback.jsx.
 // CSRF protection on the callback comes from the user's Supabase JWT
 // being required to invoke outlook-oauth-callback (only the right
@@ -25,10 +25,10 @@ import { C } from '../data/constants'
 //
 // Why the connection lives at user-level (not project-level): emails go
 // out from the user's actual Outlook mailbox, so the Microsoft account
-// is intrinsically tied to the Anura user, not to any single record.
+// is intrinsically tied to the Energy Efficiency Services user, not to any single record.
 // ---------------------------------------------------------------------------
 
-const STATE_STORAGE_KEY = 'anura.outlook.oauth.state'
+const STATE_STORAGE_KEY = 'ees.outlook.oauth.state'
 
 export default function OutlookConnectionCard() {
   const [status, setStatus] = useState(null)         // null = loading; {} = loaded
@@ -53,7 +53,7 @@ export default function OutlookConnectionCard() {
   // localStorage flag we pick up to refresh status without a manual reload.
   useEffect(() => {
     const onStorage = (e) => {
-      if (e.key === 'anura.outlook.connection.changed') refresh()
+      if (e.key === 'ees.outlook.connection.changed') refresh()
     }
     window.addEventListener('storage', onStorage)
     // Also poll once when the tab regains focus, since same-tab callbacks
@@ -91,7 +91,7 @@ export default function OutlookConnectionCard() {
   }
 
   const handleDisconnect = async () => {
-    if (!window.confirm('Disconnect your Outlook account? Anura will no longer send emails on your behalf, and signing notifications will fall back to copy-paste URLs until you reconnect.')) return
+    if (!window.confirm('Disconnect your Outlook account? Energy Efficiency Services will no longer send emails on your behalf, and signing notifications will fall back to copy-paste URLs until you reconnect.')) return
     setBusy(true)
     setError(null)
     try {

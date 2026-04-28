@@ -1,4 +1,4 @@
-// Static catalog that categorizes every public table in Anura's database
+// Static catalog that categorizes every public table in the database
 // into a module group with a human-readable label. This powers the Object
 // Manager list view — without it, admins would just see a flat list of
 // raw table names, which is useless for a 89-table schema.
@@ -73,7 +73,7 @@ export const OBJECT_CATALOG = [
   { table: 'asset_assignments',             label: 'Asset Assignment',            pluralLabel: 'Asset Assignments',            module: 'Fleet',                 description: 'Who currently has this vehicle / equipment / phone.' },
 
   // ─── PEOPLE ────────────────────────────────────────────────────────────
-  { table: 'users',                         label: 'User',                        pluralLabel: 'Users',                        module: 'People',                description: 'Anura login account — auth + role + permissions. Linked to a contact via contacts.contact_user_id.' },
+  { table: 'users',                         label: 'User',                        pluralLabel: 'Users',                        module: 'People',                description: 'Energy Efficiency Services login account — auth + role + permissions. Linked to a contact via contacts.contact_user_id.' },
   { table: 'skills',                        label: 'Skill',                       pluralLabel: 'Skills',                       module: 'People',                description: 'Master catalog of skills (Salesforce Field Service: Skill). E.g., BPI Building Analyst, EPA 608, OSHA 30.' },
   { table: 'contact_skills',                label: 'Contact Skill',               pluralLabel: 'Contact Skills',               module: 'People',                description: 'Junction (FSL ServiceResourceSkill) — a contact has a skill, with effective dates that handle cert expiry.' },
   { table: 'work_type_skill_requirements',  label: 'Work Type Skill Requirement', pluralLabel: 'Work Type Skill Requirements', module: 'People',                description: 'Junction (FSL SkillRequirement) — skills required to perform a Work Type. Drives the assignment matching engine.' },

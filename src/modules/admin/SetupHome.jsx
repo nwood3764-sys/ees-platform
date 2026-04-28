@@ -255,7 +255,7 @@ function TreePane({ search, setSearch, filteredTree, expanded, setExpanded, sele
 function WelcomePane({ onOpenObjectManager }) {
   const quickLinks = [
     { label: 'Object Manager',    hint: 'Manage tables, fields, page layouts',        onClick: onOpenObjectManager,  highlight: true },
-    { label: 'Users',             hint: 'Anura user accounts',                        nodeId: 'users' },
+    { label: 'Users',             hint: 'Energy Efficiency Services user accounts',                        nodeId: 'users' },
     { label: 'Roles',             hint: 'Row-level and field-level security roles',   nodeId: 'roles' },
     { label: 'Picklist Value Sets', hint: 'Central dictionary for every dropdown',    nodeId: 'picklist_values' },
     { label: 'Page Layouts',      hint: 'Record detail layouts',                      nodeId: 'page_layouts' },
@@ -268,7 +268,7 @@ function WelcomePane({ onOpenObjectManager }) {
     <div style={{ padding: '28px 32px', overflow: 'auto', flex: 1 }}>
       <div style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary }}>Setup</div>
       <div style={{ fontSize: 12.5, color: C.textMuted, marginTop: 4, marginBottom: 24 }}>
-        System configuration, automation, security, and metadata. Manage everything Anura Admin controls from here.
+        System configuration, automation, security, and metadata. Manage everything Energy Efficiency Services Admin controls from here.
       </div>
 
       <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, marginBottom: 10 }}>Most Visited</div>
@@ -415,7 +415,7 @@ function RecordTypesNodePane({ onOpenObjectManager }) {
     <div style={{ padding: '28px 32px', overflow: 'auto', flex: 1 }}>
       <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Record Types</div>
       <div style={{ fontSize: 12.5, color: C.textMuted, marginTop: 6, maxWidth: 640, lineHeight: 1.5 }}>
-        Record types in Anura are defined per-object via picklist values with{' '}
+        Record types in Energy Efficiency Services are defined per-object via picklist values with{' '}
         <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, background: C.page, padding: '1px 5px', borderRadius: 3 }}>picklist_field = 'record_type'</code>.
         To view or manage record types for a specific object, open that object in the Object Manager
         and go to the Record Types sub-tab.

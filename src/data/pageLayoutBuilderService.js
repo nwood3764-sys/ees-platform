@@ -12,7 +12,7 @@
 //     column. page_layout_sections has no such column.
 //   * page_layouts, page_layout_widgets, and page_layout_sections all support
 //     soft-delete via is_deleted / deletion_reason. The builder never hard-
-//     deletes anything — consistent with Anura's enterprise philosophy.
+//     deletes anything — consistent with the enterprise philosophy.
 //   * The clone_page_layout Postgres function handles atomic layout+sections+
 //     widgets copy in a single round trip. Thin JS wrapper below.
 //   * Uniqueness of the default layout per (object, type, role, record_type)

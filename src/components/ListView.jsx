@@ -212,7 +212,7 @@ function MobileFilterSheet({
         onClick={onClose}
         style={{
           position: 'fixed', inset: 0, background: 'rgba(7, 17, 31, 0.55)',
-          zIndex: 500, animation: 'anura-fade-in 180ms ease',
+          zIndex: 500, animation: 'ees-fade-in 180ms ease',
         }}
       />
       {/* Sheet */}
@@ -226,7 +226,7 @@ function MobileFilterSheet({
           maxHeight: '85vh',
           display: 'flex', flexDirection: 'column',
           boxShadow: '0 -8px 32px rgba(0,0,0,0.25)',
-          animation: 'anura-slide-up 220ms ease',
+          animation: 'ees-slide-up 220ms ease',
           ...swipe.style,
         }}
       >
@@ -913,7 +913,7 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
                 width: 24, height: 24, borderRadius: '50%',
                 border: `2px solid ${C.border}`,
                 borderTopColor: pullToRefresh.pullDistance >= pullToRefresh.threshold || pullToRefresh.refreshing ? C.emerald : C.borderDark,
-                animation: pullToRefresh.refreshing ? 'anura-spin 0.7s linear infinite' : undefined,
+                animation: pullToRefresh.refreshing ? 'ees-spin 0.7s linear infinite' : undefined,
                 transform: pullToRefresh.refreshing
                   ? undefined
                   : `rotate(${Math.min(1, pullToRefresh.pullDistance / pullToRefresh.threshold) * 360}deg)`,

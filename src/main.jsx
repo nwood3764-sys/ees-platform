@@ -6,7 +6,7 @@ import SigningPortalRoot from './pages/SigningPortal.jsx'
 
 // ─── Path-based routing (no router library) ──────────────────────────────────
 // The signing portal is publicly accessible at /sign/{env_record_number}/{token}
-// without authentication. Recipients are not Anura users; the token is the
+// without authentication. Recipients are not Energy Efficiency Services users; the token is the
 // auth. We can't render this through the normal App tree because that tree
 // gates everything behind <AuthGate>. Detecting the path here and dispatching
 // to a separate component avoids both the auth gate and the chrome (sidebar/

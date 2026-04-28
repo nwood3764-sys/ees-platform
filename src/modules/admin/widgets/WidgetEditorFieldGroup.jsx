@@ -5,7 +5,7 @@ import { useToast } from '../../../components/Toast'
 import { useIsMobile } from '../../../lib/useMediaQuery'
 import { describeObject } from '../../../data/adminService'
 import { updateWidget } from '../../../data/pageLayoutBuilderService'
-import { deriveAnuraFieldType, buildFieldEntryFromColumn } from './anuraFieldTypes'
+import { deriveEesFieldType, buildFieldEntryFromColumn } from './eesFieldTypes'
 import {
   FormField,
   inputStyle,
@@ -307,7 +307,7 @@ export default function WidgetEditorFieldGroup({
 
 function ColumnPickRow({ column, onAdd }) {
   const [hover, setHover] = useState(false)
-  const type = deriveAnuraFieldType(column)
+  const type = deriveEesFieldType(column)
   return (
     <div
       onClick={onAdd}

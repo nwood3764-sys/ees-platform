@@ -65,7 +65,7 @@ export default function IntegrationsModal({ onClose }) {
               Integrations
             </div>
             <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.5 }}>
-              Connect external services that Anura can act on your behalf.
+              Connect external services that Energy Efficiency Services can act on your behalf.
             </div>
           </div>
           <button

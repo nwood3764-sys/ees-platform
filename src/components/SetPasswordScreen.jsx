@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
 
 /**
- * SetPasswordScreen — shown when a user lands on Anura via a Supabase Auth
+ * SetPasswordScreen — shown when a user lands on Energy Efficiency Services via a Supabase Auth
  * invite or password-recovery link. The link puts the access/refresh tokens
  * in the URL hash; AuthGate picks them up, establishes a session, and then
  * renders this screen so the user can set a password before being dropped
@@ -80,7 +80,7 @@ export default function SetPasswordScreen({ email, mode, onComplete }) {
     onComplete?.()
   }
 
-  const heading      = mode === 'recovery' ? 'Reset your password' : 'Welcome to Anura'
+  const heading      = mode === 'recovery' ? 'Reset your password' : 'Welcome to Energy Efficiency Services'
   const subheading   = mode === 'recovery' ? 'Choose a new password to continue.' : 'Set a password to finish creating your account.'
   const submitLabel  = mode === 'recovery' ? 'Reset Password' : 'Set Password'
   const submittingLb = mode === 'recovery' ? 'Resetting…' : 'Setting…'

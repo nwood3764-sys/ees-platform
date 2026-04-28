@@ -58,7 +58,7 @@ export async function getCurrentUserProfile() {
 
 /**
  * Extract the record-type value from a record (or prefill draft) regardless of
- * column-naming convention. Anura business tables use a {prefix}_record_type
+ * column-naming convention. Energy Efficiency Services business tables use a {prefix}_record_type
  * column (e.g. property_record_type, account_record_type, ia_record_type) that
  * holds a uuid FK to picklist_values.id; a few legacy tables still use a
  * generic `record_type` text column. This finds the first matching key on
@@ -375,7 +375,7 @@ export async function insertRecord(tableName, fields) {
 }
 
 /**
- * Apply the standard Anura insert-time defaults to a draft record. Fills in
+ * Apply the standard Energy Efficiency Services insert-time defaults to a draft record. Fills in
  * `<prefix>_record_number = 'NEW'` (the BEFORE-INSERT auto-number trigger
  * overwrites it), `<prefix>_owner = userId`, and `<prefix>_created_by = userId`
  * based on the table's naming convention. Mutates and returns `fields`.
@@ -572,7 +572,7 @@ export async function deleteRecord(tableName, recordId) {
 //   • an order field    (widget_config.order_field)
 //   • a soft-delete col (widget_config.is_deleted_col)
 //   • a <prefix>_record_number column auto-assigned by a BEFORE INSERT
-//     trigger — the Anura convention is to pass '' so the trigger fires.
+//     trigger — the Energy Efficiency Services convention is to pass '' so the trigger fires.
 //
 // The order field's prefix (e.g. "wpte" from "wpte_execution_order") is
 // reused to discover sibling columns (<prefix>_name, <prefix>_created_by).
@@ -736,7 +736,7 @@ export async function addJunctionRow(config, parentRecordId, sourceRecordId, sou
     [orderField]: nextOrder,
   }
 
-  // Trigger-assigned record number — Anura convention: pass ''.
+  // Trigger-assigned record number — Energy Efficiency Services convention: pass ''.
   const recordNumberCol = `${prefix}_record_number`
   if (await _tableHasColumn(junctionTable, recordNumberCol)) {
     payload[recordNumberCol] = ''

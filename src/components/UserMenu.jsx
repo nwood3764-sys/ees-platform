@@ -210,7 +210,7 @@ export default function UserMenu({
             boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
             padding: 6,
             zIndex: 500,
-            animation: 'anura-fade-in 140ms ease',
+            animation: 'ees-fade-in 140ms ease',
           }}
         >
           {/* Account summary — not interactive, just context. */}

@@ -43,7 +43,7 @@ function ModuleLoader() {
         width: 28, height: 28, borderRadius: '50%',
         border: `2.5px solid ${C.border}`,
         borderTopColor: C.emerald,
-        animation: 'anura-spin 0.7s linear infinite',
+        animation: 'ees-spin 0.7s linear infinite',
       }} />
       <div style={{ fontSize: 13 }}>Loading…</div>
     </div>
@@ -65,10 +65,10 @@ function AuthedApp({ session }) {
   // survives reloads. Ignored on mobile (the drawer is always full-width).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
-    try { return localStorage.getItem('anura.sidebar.collapsed') === '1' } catch { return false }
+    try { return localStorage.getItem('ees.sidebar.collapsed') === '1' } catch { return false }
   })
   useEffect(() => {
-    try { localStorage.setItem('anura.sidebar.collapsed', sidebarCollapsed ? '1' : '0') } catch { /* storage disabled */ }
+    try { localStorage.setItem('ees.sidebar.collapsed', sidebarCollapsed ? '1' : '0') } catch { /* storage disabled */ }
   }, [sidebarCollapsed])
 
   // Global: when an input focuses on a touch device, scroll it into view
@@ -154,7 +154,7 @@ function AuthedApp({ session }) {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         <MobileHeader
           onOpenMenu={() => setMobileMenuOpen(true)}
-          moduleLabel={NAV_MODULES.find(m => m.id === activeModule)?.label || 'Anura'}
+          moduleLabel={NAV_MODULES.find(m => m.id === activeModule)?.label || 'Energy Efficiency Services'}
           moduleIcon={NAV_MODULES.find(m => m.id === activeModule)?.icon}
         />
         <Suspense fallback={<ModuleLoader />}>

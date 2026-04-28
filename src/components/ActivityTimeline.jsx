@@ -308,7 +308,7 @@ export default function ActivityTimeline({ tableName, recordId }) {
   // Initial load — also resets everything when the record changes.
   // Fetches activity timeline and email sends in parallel, then merges them
   // by timestamp. Email entries come from the email_sends table (every email
-  // Anura sent through Outlook on behalf of any user, threaded onto the
+  // Energy Efficiency Services sent through Outlook on behalf of any user, threaded onto the
   // parent record); they sit alongside field-history entries in one feed.
   useEffect(() => {
     let cancelled = false

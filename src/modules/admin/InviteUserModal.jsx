@@ -235,7 +235,7 @@ export default function InviteUserModal({
             />
           </FormField>
 
-          <FormField label="Role" required hint="Determines which Anura modules and fields the user can see.">
+          <FormField label="Role" required hint="Determines which Energy Efficiency Services modules and fields the user can see.">
             <select
               value={roleId}
               onChange={e => setRoleId(e.target.value)}

@@ -158,7 +158,7 @@ function humanizeColumn(columnName, tablePrefix) {
     .join(' ')
 }
 
-// Singular column-prefix for a table. Anura's column naming is mostly
+// Singular column-prefix for a table. the column naming is mostly
 // regular (projects → project_*, properties → property_*) but a few
 // tables use an abbreviated prefix that doesn't match a naive
 // depluralization rule.

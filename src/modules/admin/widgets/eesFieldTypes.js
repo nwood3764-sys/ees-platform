@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Anura field-type derivation — JS mirror of the Postgres function
+// Energy Efficiency Services field-type derivation — JS mirror of the Postgres function
 // public._pick_anura_field_type(p_col, p_data_type, p_is_fk). Keeping these
 // two in sync means fields added via the Page Layout Builder's field_group
 // editor produce the same `type` value as the seeded widget_config.fields
@@ -16,11 +16,11 @@ const NUMERIC_TYPES = new Set([
 ])
 
 /**
- * Given a column from describeObject, return the Anura field type string
+ * Given a column from describeObject, return the Energy Efficiency Services field type string
  * that the field_group runtime uses: one of 'lookup', 'date', 'datetime',
  * 'boolean', 'number', 'textarea', 'text'.
  */
-export function deriveAnuraFieldType(col) {
+export function deriveEesFieldType(col) {
   if (!col) return 'text'
   const name = col.column_name || ''
   const dt = col.data_type || ''
@@ -41,7 +41,7 @@ export function deriveAnuraFieldType(col) {
  * can resolve the display value without another round trip.
  */
 export function buildFieldEntryFromColumn(col, overrides = {}) {
-  const type = deriveAnuraFieldType(col)
+  const type = deriveEesFieldType(col)
   const entry = {
     name: col.column_name,
     type,

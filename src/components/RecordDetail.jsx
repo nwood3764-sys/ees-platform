@@ -40,7 +40,7 @@ import {
 // ---------------------------------------------------------------------------
 // Template lifecycle registry
 // ---------------------------------------------------------------------------
-// Tables that participate in the Anura "Builder template" lifecycle (Draft →
+// Tables that participate in the Energy Efficiency Services "Builder template" lifecycle (Draft →
 // Active → Archived) all share the same publish / unpublish / archive /
 // restore / clone workflow. The DB triggers and RPCs are nearly identical
 // per-object — only the column prefix and RPC argument names change. This
@@ -3227,7 +3227,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         a.remove()
         toast.success('Preview downloaded — pop-ups are blocked.')
       } else {
-        const pageCount = resp.headers.get('X-Anura-Page-Count')
+        const pageCount = resp.headers.get('X-Energy Efficiency Services-Page-Count')
         toast.success(pageCount ? `Preview opened — ${pageCount} pages` : 'Preview opened')
       }
     } catch (err) {
@@ -3848,7 +3848,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             on the active tab. On mobile, horizontally scrolls with snap. */}
         {orderedTabs.length > 1 && (
           <div
-            className={isMobile ? 'anura-hscroll' : ''}
+            className={isMobile ? 'ees-hscroll' : ''}
             style={{
               background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
               padding: isMobile ? '0 4px' : '0 16px',

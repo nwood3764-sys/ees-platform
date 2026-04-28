@@ -157,7 +157,7 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
       <div onClick={e => e.stopPropagation()} style={modalCardStyle}>
         <header style={modalHeaderStyle}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: C.emerald, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Anura Signing</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: C.emerald, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Energy Efficiency Services Signing</div>
             <div style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary }}>Send for Signature</div>
             <div style={{ fontSize: 12, color: C.textSecondary }}>{parentRecordLabel || `${parentObject} ${parentRecordId.slice(0, 8)}`}</div>
           </div>

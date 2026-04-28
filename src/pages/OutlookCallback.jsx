@@ -11,8 +11,8 @@ import { C } from '../data/constants'
 // Flow:
 //   1. Read code + state from the URL
 //   2. Validate state matches the value we stashed in sessionStorage
-//      under 'anura.outlook.oauth.state' before redirecting to Microsoft.
-//      (The Anura JWT requirement on the callback edge fn is the real
+//      under 'ees.outlook.oauth.state' before redirecting to Microsoft.
+//      (The Energy Efficiency Services JWT requirement on the callback edge fn is the real
 //      CSRF protection — state is just an OAuth hygiene check.)
 //   3. Call outlook-oauth-callback edge fn with the user's Supabase JWT;
 //      that fn exchanges the code for tokens and persists them to
@@ -27,8 +27,8 @@ import { C } from '../data/constants'
 // we cannot bypass AuthGate the way the public signing portal does.
 // ---------------------------------------------------------------------------
 
-const STATE_STORAGE_KEY     = 'anura.outlook.oauth.state'
-const CHANGED_STORAGE_KEY   = 'anura.outlook.connection.changed'
+const STATE_STORAGE_KEY     = 'ees.outlook.oauth.state'
+const CHANGED_STORAGE_KEY   = 'ees.outlook.connection.changed'
 
 export default function OutlookCallback() {
   const [phase, setPhase] = useState('working')   // 'working' | 'success' | 'error'
@@ -125,13 +125,13 @@ export default function OutlookCallback() {
               </div>
             )}
             <div style={{ fontSize: 12, color: C.textMuted, marginTop: 14, lineHeight: 1.5 }}>
-              Anura can now send signing requests and other client emails through your Outlook mailbox. A copy of every message is saved to the related record.
+              Energy Efficiency Services can now send signing requests and other client emails through your Outlook mailbox. A copy of every message is saved to the related record.
             </div>
             <button
               onClick={handleDone}
               style={primaryButton}
             >
-              Continue to Anura
+              Continue to Energy Efficiency Services
             </button>
           </>
         )}
@@ -153,7 +153,7 @@ export default function OutlookCallback() {
               onClick={handleDone}
               style={primaryButton}
             >
-              Back to Anura
+              Back to Energy Efficiency Services
             </button>
           </>
         )}
@@ -177,7 +177,7 @@ function Spinner() {
       width: 32, height: 32, borderRadius: '50%',
       border: `3px solid ${C.border}`,
       borderTopColor: C.emerald,
-      animation: 'anura-spin 0.7s linear infinite',
+      animation: 'ees-spin 0.7s linear infinite',
       margin: '0 auto',
     }} />
   )

@@ -5,7 +5,7 @@ import { OBJECT_CATALOG, MODULE_ORDER, getObjectsGrouped } from './objectCatalog
 import { fetchRecordCount } from '../../data/adminService'
 
 // ---------------------------------------------------------------------------
-// Object Manager — searchable list of every Anura object, grouped by module.
+// Object Manager — searchable list of every Energy Efficiency Services object, grouped by module.
 // Clicking an object opens ObjectDetail for it.
 // ---------------------------------------------------------------------------
 

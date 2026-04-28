@@ -8,7 +8,7 @@ import { C } from '../data/constants'
  * This screen is the first thing an unauthenticated user sees. On successful
  * login the parent AuthGate observes the auth state change and swaps this
  * component out for the main application. There is no signup flow here —
- * user accounts are created by an Admin in Anura Admin, per the project's
+ * user accounts are created by an Admin in Energy Efficiency Services Admin, per the project's
  * role-based access model (no self-signup from the public internet).
  */
 export default function LoginScreen() {
@@ -90,7 +90,7 @@ export default function LoginScreen() {
               letterSpacing: '-0.01em',
             }}
           >
-            Anura
+            Energy Efficiency Services
           </h1>
           <div
             style={{

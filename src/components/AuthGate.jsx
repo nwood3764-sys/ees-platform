@@ -5,7 +5,7 @@ import LoginScreen from './LoginScreen'
 import SetPasswordScreen from './SetPasswordScreen'
 
 /**
- * AuthGate — the root authentication boundary for Anura.
+ * AuthGate — the root authentication boundary for Energy Efficiency Services.
  *
  * Three terminal states:
  *

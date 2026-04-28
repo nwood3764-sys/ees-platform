@@ -28,11 +28,11 @@ export default function AdminModule() {
   // expectation upfront rather than pretending the mobile experience is good.
   const [desktopNoticeDismissed, setDesktopNoticeDismissed] = useState(() => {
     if (typeof window === 'undefined') return false
-    try { return localStorage.getItem('anura.admin.desktopNotice.dismissed') === '1' } catch { return false }
+    try { return localStorage.getItem('ees.admin.desktopNotice.dismissed') === '1' } catch { return false }
   })
   const dismissDesktopNotice = () => {
     setDesktopNoticeDismissed(true)
-    try { localStorage.setItem('anura.admin.desktopNotice.dismissed', '1') } catch { /* storage disabled */ }
+    try { localStorage.setItem('ees.admin.desktopNotice.dismissed', '1') } catch { /* storage disabled */ }
   }
 
   const openObjectManager = () => {

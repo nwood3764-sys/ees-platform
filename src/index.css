@@ -27,7 +27,7 @@ button {
 }
 
 /* Keyboard focus ring — only visible when the user is navigating via keyboard.
-   :focus-visible is supported everywhere Anura targets. Mouse/touch users
+   :focus-visible is supported everywhere Energy Efficiency Services targets. Mouse/touch users
    never see it. Uses the emerald accent for brand consistency. */
 button:focus-visible,
 a:focus-visible,
@@ -88,31 +88,31 @@ input, select, textarea {
 
 /* ─── Utility: horizontal scroll with no visible scrollbar ─────────────────
    Used for mobile section tabs and similar horizontal nav strips */
-.anura-hscroll {
+.ees-hscroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
-.anura-hscroll::-webkit-scrollbar { display: none; }
+.ees-hscroll::-webkit-scrollbar { display: none; }
 
 /* ─── Mobile drawer animations ─────────────────────────────────────────── */
-@keyframes anura-fade-in {
+@keyframes ees-fade-in {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-@keyframes anura-slide-in-left {
+@keyframes ees-slide-in-left {
   from { transform: translateX(-100%); }
   to   { transform: translateX(0); }
 }
-@keyframes anura-slide-up {
+@keyframes ees-slide-up {
   from { transform: translateY(100%); }
   to   { transform: translateY(0); }
 }
-@keyframes anura-spin {
+@keyframes ees-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
-@keyframes anura-shimmer {
+@keyframes ees-shimmer {
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
