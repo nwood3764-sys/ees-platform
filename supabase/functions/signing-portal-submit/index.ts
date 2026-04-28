@@ -1,10 +1,20 @@
 // =============================================================================
-// signing-portal-submit (v5 — surface silent failures from documents insert)
+// signing-portal-submit (v8 — decline notifies envelope owner)
 //
 // Public (verify_jwt = false). Same token-based auth as signing-portal-load.
-// Same flow as v2, plus: rebranded email body footer from "via Anura" to
-// "from Energy Efficiency Services" so external recipients see the company
-// name they recognize.
+//
+// Cumulative changes through v8:
+//   v2 — auto-emails next signer on AdvancedToNext via owner's Outlook
+//   v5 — rebrand "via Anura" -> "from Energy Efficiency Services"
+//   v6 — sends completion email with signed PDF + Certificate of Completion
+//   v7 — hardened documents insert: surfaces silent failures into envelope
+//        Completed event metadata so we never lose track of a doc-insert error
+//   v8 — when a recipient declines, send a notification email through the
+//        envelope owner's Outlook addressed to the owner themselves. Subject
+//        "Declined: <env_name>". Body shows who declined, when, and the
+//        reason text the recipient supplied. Persisted to email_sends with
+//        related_envelope_id + related_recipient_id so the activity timeline
+//        on the parent record surfaces it next to the lifecycle event.
 // =============================================================================
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
@@ -138,7 +148,40 @@ Deno.serve(async (req) => {
         event_user_agent: ua,
       })
     }
-    return json({ ok: true, completed: false, advanced: false, declined: true }, 200)
+
+    // v8: notify the envelope owner via their own Outlook. Owner emails
+    // themselves so the message lands in their Inbox (saveToSentItems also
+    // gives them a Sent-folder copy). We do not block the response on the
+    // email outcome — the user-facing portal already has its acknowledgement;
+    // the email is a notification side-effect with full audit on email_sends.
+    let declineNotice: { status: string, email_send_id?: string, failure_reason?: string } | null = null
+    if (env.env_owner) {
+      try {
+        declineNotice = await sendDeclineNotificationEmail(supabase, {
+          envelopeOwnerUserId: env.env_owner,
+          envelopeId:          env.id,
+          envRecordNumber:     env.env_record_number,
+          envName:             env.env_name,
+          parentObject:        env.env_parent_object,
+          parentRecordId:      env.env_parent_record_id,
+          recipientId:         recipient.id,
+          recipientName:       recipient.recipient_name,
+          recipientEmail:      recipient.recipient_email,
+          declineReason:       reason,
+          declinedAt:          new Date().toISOString(),
+        })
+      } catch (e) {
+        // Swallow — the decline itself succeeded, the notification is best-effort.
+        // The failure is captured on the email_sends row inside the helper.
+        console.error("decline notification email threw:", (e as Error).message)
+        declineNotice = { status: "failed", failure_reason: (e as Error).message }
+      }
+    }
+
+    return json({
+      ok: true, completed: false, advanced: false, declined: true,
+      decline_notification: declineNotice,
+    }, 200)
   }
 
   if (!body.consent) return json({ error: "ESIGN consent required to sign" }, 400)
@@ -537,11 +580,6 @@ async function refreshAccessToken(
   return j
 }
 
-// Sends the envelope completion email — distributes the signed PDF and
-// certificate of completion to all signers, CCing the envelope owner.
-// Uses the envelope owner's Outlook connection (same identity that sent the
-// original signing-request emails, so threads stay coherent in their inbox).
-// Persists an email_sends row for audit, even on failure.
 async function sendCompletionEmail(
   supabase: SupabaseClient,
   p: {
@@ -587,9 +625,6 @@ async function sendCompletionEmail(
     }
   }
 
-  // Resolve the envelope owner's name + email so we can CC them and use their
-  // name in the email signature. The mailbox sends as conn.account_email
-  // regardless, but the visible "Sent on behalf of" text uses the user record.
   let senderName: string | null = null
   let senderEmail: string | null = null
   const { data: u } = await supabase.from("users")
@@ -601,9 +636,6 @@ async function sendCompletionEmail(
     senderEmail = (u as any).user_email || null
   }
 
-  // Pull both attachments from storage. If the signed PDF is missing we abort —
-  // there is nothing meaningful to send. The certificate is best-effort; a
-  // missing cert just means the email goes out with the signed PDF only.
   const attachments: any[] = []
   const attachmentsMeta: any[] = []
   const { data: signedBlob, error: signedErr } = await supabase
@@ -650,10 +682,6 @@ async function sendCompletionEmail(
     signers: p.signers,
   })
 
-  // CC the envelope owner so they always get a copy in their own inbox even
-  // though they're sending from that mailbox. (saveToSentItems already gives
-  // them a Sent-folder copy, but a Cc puts it in their Inbox too — useful when
-  // the owner is also one of the signers, or just for archival reflex.)
   const ccList = senderEmail ? [{ name: senderName || senderEmail, email: senderEmail }] : []
 
   const { data: emailRow, error: insErr } = await supabase
@@ -955,8 +983,6 @@ function json(payload: unknown, status = 200): Response {
   })
 }
 
-// Chunked base64 encoder for binary blobs. btoa() can't take a typed array,
-// and String.fromCharCode.apply hits a 64KB call-stack limit, so we slice.
 function bytesToBase64(bytes: Uint8Array): string {
   const CHUNK = 0x8000
   let s = ""
@@ -993,4 +1019,207 @@ function formatDate(v: string): string {
     if (Number.isNaN(d.getTime())) return v
     return d.toLocaleDateString("en-US")
   } catch { return v }
+}
+
+// =============================================================================
+// v8 — decline notification email
+//
+// Notifies the envelope owner that a recipient declined to sign. Sent through
+// the owner's own Outlook (the same identity that originally sent the
+// signing-request emails) addressed to themselves, so the message appears in
+// their Inbox and is threaded with the rest of the envelope's correspondence.
+// Full audit row on email_sends with related_envelope_id + related_recipient_id
+// — surfaced in the activity timeline alongside the Declined lifecycle event.
+//
+// Failure modes (all return a non-throwing status object so the caller can
+// log a non-fatal warning and still succeed the user-facing decline action):
+//   - OUTLOOK_* env vars missing                  -> not_configured
+//   - Owner has no active Outlook connection      -> not_connected
+//   - Owner's refresh token won't refresh         -> refresh_failed
+//   - Graph sendMail returns non-202              -> failed (with response body)
+//   - Owner's user row has no email on file       -> no_recipient_email
+// =============================================================================
+async function sendDeclineNotificationEmail(
+  supabase: SupabaseClient,
+  p: {
+    envelopeOwnerUserId: string
+    envelopeId:          string
+    envRecordNumber:     string
+    envName:             string
+    parentObject:        string
+    parentRecordId:      string
+    recipientId:         string
+    recipientName:       string
+    recipientEmail:      string
+    declineReason:       string | null
+    declinedAt:          string
+  },
+): Promise<{ status: string, email_send_id?: string, failure_reason?: string }> {
+  const clientId     = Deno.env.get("OUTLOOK_CLIENT_ID")
+  const clientSecret = Deno.env.get("OUTLOOK_CLIENT_SECRET")
+  const tenantId     = Deno.env.get("OUTLOOK_TENANT_ID")
+  if (!clientId || !clientSecret || !tenantId)
+    return { status: "not_configured", failure_reason: "OUTLOOK_* env vars not set" }
+
+  const { data: conn } = await supabase
+    .from("user_outlook_connections")
+    .select("id, account_email, access_token, refresh_token, token_expires_at, is_active")
+    .eq("user_id", p.envelopeOwnerUserId)
+    .maybeSingle()
+  if (!conn || !conn.is_active)
+    return { status: "not_connected", failure_reason: "Envelope owner has no active Outlook connection" }
+
+  let accessToken = conn.access_token
+  if (new Date(conn.token_expires_at).getTime() - Date.now() < REFRESH_HORIZON_MS) {
+    try {
+      const refreshed = await refreshAccessToken(tenantId, clientId, clientSecret, conn.refresh_token)
+      accessToken = refreshed.access_token
+      await supabase.from("user_outlook_connections").update({
+        access_token: refreshed.access_token,
+        refresh_token: refreshed.refresh_token || conn.refresh_token,
+        token_expires_at: new Date(Date.now() + (refreshed.expires_in * 1000) - 60_000).toISOString(),
+        last_refreshed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", conn.id)
+    } catch (e) {
+      return { status: "refresh_failed", failure_reason: (e as Error).message }
+    }
+  }
+
+  // Recipient is the envelope owner themselves. Use the connection's
+  // account_email (which is what Graph will use as the From: address anyway)
+  // so the To: matches the From: cleanly and the message lands in the owner's
+  // own Inbox via Outlook's standard self-email behaviour.
+  const ownerEmail = conn.account_email
+  if (!ownerEmail)
+    return { status: "no_recipient_email", failure_reason: "Owner's Outlook connection has no account_email" }
+
+  let ownerDisplayName: string | null = null
+  const { data: u } = await supabase.from("users")
+    .select("user_first_name, user_last_name, user_name")
+    .eq("id", p.envelopeOwnerUserId).maybeSingle()
+  if (u) {
+    const full = [(u as any).user_first_name, (u as any).user_last_name].filter(Boolean).join(" ").trim()
+    ownerDisplayName = full || (u as any).user_name || null
+  }
+
+  const subject = `Declined: ${p.envName} (${p.envRecordNumber})`
+  const bodyHtml = renderDeclineNotificationHtml({
+    envName: p.envName, envRecordNumber: p.envRecordNumber,
+    recipientName: p.recipientName, recipientEmail: p.recipientEmail,
+    declineReason: p.declineReason, declinedAt: p.declinedAt,
+  })
+  const bodyText = renderDeclineNotificationText({
+    envName: p.envName, envRecordNumber: p.envRecordNumber,
+    recipientName: p.recipientName, recipientEmail: p.recipientEmail,
+    declineReason: p.declineReason, declinedAt: p.declinedAt,
+  })
+
+  const { data: emailRow, error: insErr } = await supabase
+    .from("email_sends")
+    .insert({
+      email_send_record_number: "",
+      parent_object:    p.parentObject,
+      parent_record_id: p.parentRecordId,
+      sent_by_user_id:  p.envelopeOwnerUserId,
+      sent_via:         "graph_outlook",
+      sender_email:     ownerEmail,
+      subject,
+      body_html:        bodyHtml,
+      body_text:        bodyText,
+      recipients_to:    [{ name: ownerDisplayName || ownerEmail, email: ownerEmail }],
+      status:           "Pending",
+      related_envelope_id:  p.envelopeId,
+      related_recipient_id: p.recipientId,
+      created_by:       p.envelopeOwnerUserId,
+      updated_by:       p.envelopeOwnerUserId,
+    })
+    .select("id")
+    .single()
+  if (insErr || !emailRow) return { status: "failed", failure_reason: `email_sends insert failed: ${insErr?.message}` }
+
+  let sendOk = false
+  let failureReason: string | null = null
+  try {
+    const sendResp = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: "HTML", content: bodyHtml },
+          toRecipients: [{ emailAddress: { address: ownerEmail, name: ownerDisplayName || ownerEmail } }],
+        },
+        saveToSentItems: true,
+      }),
+    })
+    if (sendResp.status === 202) {
+      sendOk = true
+    } else {
+      const errText = await sendResp.text()
+      failureReason = `Graph sendMail returned ${sendResp.status}: ${errText.slice(0, 1500)}`
+    }
+  } catch (e) {
+    failureReason = `Graph sendMail threw: ${(e as Error).message}`.slice(0, 1500)
+  }
+
+  await supabase.from("email_sends").update({
+    status: sendOk ? "Sent" : "Failed",
+    sent_at: sendOk ? new Date().toISOString() : null,
+    failure_reason: failureReason,
+    updated_at: new Date().toISOString(),
+  }).eq("id", emailRow.id)
+
+  return { status: sendOk ? "Sent" : "Failed", email_send_id: emailRow.id, failure_reason: failureReason || undefined }
+}
+
+function renderDeclineNotificationHtml(p: {
+  envName: string, envRecordNumber: string,
+  recipientName: string, recipientEmail: string,
+  declineReason: string | null, declinedAt: string,
+}): string {
+  const safe = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  const reasonBlock = p.declineReason
+    ? `<p style="margin-top:14px;"><strong>Reason given:</strong></p><blockquote style="margin:6px 0 0 0;padding:10px 14px;background:#f8fafc;border-left:3px solid #e11d48;color:#0f172a;white-space:pre-wrap;">${safe(p.declineReason)}</blockquote>`
+    : `<p style="margin-top:14px;color:#475569;font-style:italic;">No reason was provided.</p>`
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.55;color:#1a202c;max-width:600px;margin:0 auto;padding:24px;background:#fff;">
+<p style="font-size:16px;margin:0 0 14px 0;"><strong style="color:#be123c;">A recipient declined to sign.</strong></p>
+<table style="width:100%;font-size:14px;border-collapse:collapse;margin-bottom:8px;">
+  <tr><td style="padding:4px 0;color:#475569;width:140px;">Document</td><td style="padding:4px 0;"><strong>${safe(p.envName)}</strong></td></tr>
+  <tr><td style="padding:4px 0;color:#475569;">Envelope</td><td style="padding:4px 0;font-family:'JetBrains Mono',monospace;">${safe(p.envRecordNumber)}</td></tr>
+  <tr><td style="padding:4px 0;color:#475569;">Declined by</td><td style="padding:4px 0;">${safe(p.recipientName)} &lt;${safe(p.recipientEmail)}&gt;</td></tr>
+  <tr><td style="padding:4px 0;color:#475569;">Declined at</td><td style="padding:4px 0;">${safe(p.declinedAt)}</td></tr>
+</table>
+${reasonBlock}
+<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
+<p style="font-size:12px;color:#666;">The envelope is now in <strong>Declined</strong> status. No further signatures can be collected. To pursue this document further, send a fresh envelope from the parent record.</p>
+<p style="font-size:11px;color:#888;margin-top:12px;">Automated notification from Energy Efficiency Services.</p>
+</body></html>`
+}
+
+function renderDeclineNotificationText(p: {
+  envName: string, envRecordNumber: string,
+  recipientName: string, recipientEmail: string,
+  declineReason: string | null, declinedAt: string,
+}): string {
+  const reason = p.declineReason
+    ? `Reason given:\n${p.declineReason}`
+    : `No reason was provided.`
+  return [
+    `A recipient declined to sign.`,
+    ``,
+    `Document:    ${p.envName}`,
+    `Envelope:    ${p.envRecordNumber}`,
+    `Declined by: ${p.recipientName} <${p.recipientEmail}>`,
+    `Declined at: ${p.declinedAt}`,
+    ``,
+    reason,
+    ``,
+    `—`,
+    `The envelope is now in Declined status. No further signatures can be collected.`,
+    `To pursue this document further, send a fresh envelope from the parent record.`,
+    ``,
+    `Automated notification from Energy Efficiency Services.`,
+  ].join("\n")
 }

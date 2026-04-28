@@ -384,6 +384,98 @@ function DeleteConfirmModal({ objectLabel, recordName, onConfirm, onCancel, busy
 }
 
 // ---------------------------------------------------------------------------
+// VoidEnvelopeModal — confirmation modal for the Void action on an envelope
+// record. Differs from DeleteConfirmModal in that it requires a free-text
+// reason (not optional) which gets passed to void_envelope() and persisted on
+// the Voided envelope_event for audit. The button stays disabled until the
+// reason has at least 3 non-whitespace characters.
+// ---------------------------------------------------------------------------
+function VoidEnvelopeModal({ envelopeRecordNumber, onConfirm, onCancel, busy }) {
+  const [reason, setReason] = useState('')
+  const trimmed = reason.trim()
+  const canSubmit = trimmed.length >= 3 && !busy
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 600,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: C.card, borderRadius: 10, padding: 26, width: 460,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: '50%',
+            background: '#fffbeb', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Icon path="M18.36 5.64a9 9 0 1 1-12.72 0M5.64 5.64l12.72 12.72"
+              size={15} color="#b45309" />
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>
+              Void envelope {envelopeRecordNumber}?
+            </div>
+            <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
+              This invalidates all outstanding signing links and moves the envelope to <strong>Voided</strong> status.
+              Recipients who haven't signed yet will get an expired-link error if they try to use their email.
+              The reason is recorded on the audit trail.
+            </div>
+          </div>
+        </div>
+
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: C.textSecondary, marginBottom: 6 }}>
+          Reason for voiding (required)
+        </label>
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          disabled={busy}
+          autoFocus
+          rows={3}
+          placeholder="e.g. Replaced by a corrected envelope; recipient asked to start over."
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            border: `1px solid ${C.border}`, borderRadius: 6,
+            padding: '8px 10px', fontSize: 13, fontFamily: 'inherit',
+            color: C.textPrimary, background: busy ? '#f3f4f6' : '#fff',
+            resize: 'vertical', minHeight: 70,
+          }}
+        />
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          <button
+            onClick={() => canSubmit && onConfirm(trimmed)}
+            disabled={!canSubmit}
+            style={{
+              flex: 1,
+              background: canSubmit ? '#b45309' : '#d4a574',
+              color: '#fff', border: 'none', borderRadius: 6,
+              padding: '9px 0', fontSize: 13, fontWeight: 600,
+              cursor: canSubmit ? 'pointer' : (busy ? 'wait' : 'not-allowed'),
+              opacity: canSubmit ? 1 : 0.8,
+            }}
+          >
+            {busy ? 'Voiding…' : 'Void Envelope'}
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            style={{
+              flex: 1, background: C.page, color: C.textSecondary,
+              border: `1px solid ${C.border}`, borderRadius: 6,
+              padding: '9px 0', fontSize: 13, cursor: busy ? 'wait' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // EditField — renders the right input for a field type
 // ---------------------------------------------------------------------------
 
@@ -2940,6 +3032,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // and shows a 'wait' cursor while the RPC is round-tripping.
   const [statusChanging, setStatusChanging] = useState(false)
 
+  // Envelope-specific actions: Void + Resend signing email. Only relevant when
+  // tableName === 'envelopes'. Both gated on the resolved env_status picklist
+  // value — Void allowed from Draft/Sent/Delivered/Failed, Resend from
+  // Sent/Delivered. envelopeBusy is shared by both since neither should run
+  // concurrently.
+  const [envelopeBusy, setEnvelopeBusy] = useState(false)
+  const [showVoidConfirm, setShowVoidConfirm] = useState(false)
+
   // Query whether any Active document template targets this table. Drives
   // the visibility of the Send for Signature button — keeps the gate in
   // sync with seed data without code changes when new templates are
@@ -3189,6 +3289,87 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const handleUnpublish = useCallback(() => lifecycle && runStatusRpc(lifecycle.unpublishRpc, 'Unpublished — back to Draft'), [runStatusRpc, lifecycle])
   const handleArchive   = useCallback(() => lifecycle && runStatusRpc(lifecycle.archiveRpc,   'Archived'),                    [runStatusRpc, lifecycle])
   const handleRestore   = useCallback(() => lifecycle && runStatusRpc(lifecycle.restoreRpc,   'Restored to Draft'),           [runStatusRpc, lifecycle])
+
+  // ─── Envelope actions: Void + Resend ─────────────────────────────────────
+  // Resolve the envelope's current status value (only meaningful when
+  // tableName === 'envelopes'). Mirrors the lifecycleStatusValue pattern —
+  // reads the FK on the record, looks up the picklist text by id.
+  const envelopeStatusValue = (() => {
+    if (tableName !== 'envelopes') return null
+    const sid = data?.record?.env_status
+    if (!sid) return null
+    return data?.picklists?.valueById?.get(sid) || null
+  })()
+  const envelopeIsVoidable   = ['Draft','Sent','Delivered','Failed'].includes(envelopeStatusValue || '')
+  const envelopeIsResendable = ['Sent','Delivered'].includes(envelopeStatusValue || '')
+
+  // Resend — calls the resend-envelope-email edge function with the current
+  // record id. The edge function picks the lowest-order pending recipient
+  // and re-sends the original signing-request email through the envelope
+  // owner's Outlook. We pass window.location.origin as signing_base_url so
+  // the magic link resolves to whatever host the user is on (dev/prod).
+  const handleResendEnvelope = useCallback(async () => {
+    if (envelopeBusy) return
+    if (tableName !== 'envelopes') return
+    setEnvelopeBusy(true)
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+      if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase is not configured (missing env vars).')
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData?.session?.access_token
+      if (!accessToken) throw new Error('Not signed in — please refresh and log in.')
+      const resp = await fetch(`${supabaseUrl}/functions/v1/resend-envelope-email`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': supabaseAnonKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          envelope_id:      recordId,
+          signing_base_url: window.location.origin,
+        }),
+      })
+      const j = await resp.json().catch(() => ({}))
+      if (!resp.ok || j.ok === false) {
+        throw new Error(j.error || j.failure_reason || `Resend failed (${resp.status})`)
+      }
+      toast.success(`Signing email resent (attempt ${j.attempt_n || '?'})`)
+      setReloadTick(t => t + 1)
+    } catch (err) {
+      toast.error(err.message || String(err))
+    } finally {
+      setEnvelopeBusy(false)
+    }
+  }, [envelopeBusy, tableName, recordId, toast])
+
+  // Void — opens the confirm modal. Actual RPC call lives in handleConfirmVoid.
+  const handleVoidEnvelope = useCallback(() => {
+    if (envelopeBusy) return
+    if (tableName !== 'envelopes') return
+    setShowVoidConfirm(true)
+  }, [envelopeBusy, tableName])
+
+  const handleConfirmVoid = useCallback(async (reason) => {
+    if (envelopeBusy) return
+    if (tableName !== 'envelopes') return
+    setEnvelopeBusy(true)
+    try {
+      const { data: result, error } = await supabase.rpc('void_envelope', {
+        p_envelope_id: recordId,
+        p_reason:      reason,
+      })
+      if (error) throw error
+      toast.success(`Voided ${result?.env_record_number || 'envelope'}`)
+      setShowVoidConfirm(false)
+      setReloadTick(t => t + 1)
+    } catch (err) {
+      toast.error(err.message || String(err))
+    } finally {
+      setEnvelopeBusy(false)
+    }
+  }, [envelopeBusy, tableName, recordId, toast])
 
   // ─── Preview PDF (project_report_templates only) ──────────────────────────
   // Renders the template against a synthetic in-memory project graph and
@@ -3557,6 +3738,40 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z M16 8L2 22 M17.5 15H9" size={18} color="currentColor" />
                   </button>
                 )}
+                {tableName === 'envelopes' && envelopeIsResendable && (
+                  <button
+                    onClick={handleResendEnvelope}
+                    disabled={envelopeBusy}
+                    aria-label="Resend Signing Email"
+                    title="Resend the signing-request email to the current pending signer"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: envelopeBusy ? 'wait' : 'pointer', color: '#0369a1',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44, opacity: envelopeBusy ? 0.6 : 1,
+                    }}
+                  >
+                    {/* lucide: send-horizontal */}
+                    <Icon path="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a1 1 0 0 0-1.4 1.05L3.5 11l13.5 1L3.5 13l-1.5 6.35a1 1 0 0 0 1.4 1.05z" size={18} color="currentColor" />
+                  </button>
+                )}
+                {tableName === 'envelopes' && envelopeIsVoidable && (
+                  <button
+                    onClick={handleVoidEnvelope}
+                    disabled={envelopeBusy}
+                    aria-label="Void Envelope"
+                    title="Void this envelope — invalidates outstanding signing links"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: envelopeBusy ? 'wait' : 'pointer', color: '#b45309',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44, opacity: envelopeBusy ? 0.6 : 1,
+                    }}
+                  >
+                    {/* lucide: ban — circle with diagonal slash */}
+                    <Icon path="M18.36 5.64a9 9 0 1 1-12.72 0M5.64 5.64l12.72 12.72" size={18} color="currentColor" />
+                  </button>
+                )}
                 {tableName === 'project_report_templates' && (
                   <button
                     onClick={handlePreviewPdf}
@@ -3730,6 +3945,32 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   >
                     <Icon path="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z M16 8L2 22 M17.5 15H9" size={13} color={C.emerald} />
                     Send for Signature
+                  </button>
+                )}
+                {tableName === 'envelopes' && envelopeIsResendable && (
+                  <button
+                    onClick={handleResendEnvelope}
+                    disabled={envelopeBusy}
+                    title="Resend the signing-request email to the current pending signer"
+                    style={{ background: envelopeBusy ? '#e0f2fe' : C.page, color: '#0369a1', border: `1px solid #bae6fd`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: envelopeBusy ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: envelopeBusy ? 0.85 : 1 }}
+                    onMouseEnter={(e) => { if (!envelopeBusy) e.currentTarget.style.background = '#f0f9ff' }}
+                    onMouseLeave={(e) => { if (!envelopeBusy) e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a1 1 0 0 0-1.4 1.05L3.5 11l13.5 1L3.5 13l-1.5 6.35a1 1 0 0 0 1.4 1.05z" size={13} color="#0369a1" />
+                    {envelopeBusy ? 'Resending…' : 'Resend Email'}
+                  </button>
+                )}
+                {tableName === 'envelopes' && envelopeIsVoidable && (
+                  <button
+                    onClick={handleVoidEnvelope}
+                    disabled={envelopeBusy}
+                    title="Void this envelope — invalidates outstanding signing links"
+                    style={{ background: C.page, color: '#b45309', border: '1px solid #fcd34d', borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: envelopeBusy ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: envelopeBusy ? 0.7 : 1 }}
+                    onMouseEnter={(e) => { if (!envelopeBusy) e.currentTarget.style.background = '#fffbeb' }}
+                    onMouseLeave={(e) => { if (!envelopeBusy) e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M18.36 5.64a9 9 0 1 1-12.72 0M5.64 5.64l12.72 12.72" size={13} color="#b45309" />
+                    Void
                   </button>
                 )}
                 {tableName === 'project_report_templates' && (
@@ -4106,6 +4347,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           busy={deleting}
           onConfirm={handleDelete}
           onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+
+      {/* Void envelope confirmation — only mounted on envelope records when
+          status allows void. Captures a required reason and calls the
+          void_envelope RPC, which updates env_status, expires outstanding
+          tokens, and logs a Voided envelope_event with the reason. */}
+      {showVoidConfirm && tableName === 'envelopes' && (
+        <VoidEnvelopeModal
+          envelopeRecordNumber={data?.record?.env_record_number || ''}
+          busy={envelopeBusy}
+          onConfirm={handleConfirmVoid}
+          onCancel={() => setShowVoidConfirm(false)}
         />
       )}
 
