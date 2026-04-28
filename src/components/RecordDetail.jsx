@@ -2922,11 +2922,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
-  // Send-for-signature modal: shown on parent records (projects, properties,
-  // opportunities, work_orders) where a Document Template can be sent against
-  // the parent. The modal builds an envelope, calls send-envelope, and
-  // returns the magic-link signing URLs for the user to distribute.
+  // Send-for-signature modal: shown on any record whose table has at least one
+  // Active document template (document_templates.related_object = tableName).
+  // The DocuSign / Conga model — gating is data-driven, not hardcoded. The
+  // modal builds an envelope, calls send-envelope, and returns the magic-link
+  // signing URLs for the user to distribute. Re-checked when tableName changes
+  // so navigating between record types updates the icon visibility.
   const [showSendSignatureModal, setShowSendSignatureModal] = useState(false)
+  const [hasActiveTemplate, setHasActiveTemplate] = useState(false)
   const [reloadTick, setReloadTick] = useState(0)
   // Deep-clone state — only used on project_report_templates. Uses the
   // clone_project_report_template RPC to copy the PRT plus all PRTS rows
@@ -2936,6 +2939,27 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Publish/unpublish/archive/restore in flight — disables status buttons
   // and shows a 'wait' cursor while the RPC is round-tripping.
   const [statusChanging, setStatusChanging] = useState(false)
+
+  // Query whether any Active document template targets this table. Drives
+  // the visibility of the Send for Signature button — keeps the gate in
+  // sync with seed data without code changes when new templates are
+  // published or archived.
+  useEffect(() => {
+    let cancelled = false
+    if (!tableName) { setHasActiveTemplate(false); return }
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('document_templates')
+        .select('id, status:status ( picklist_value )')
+        .eq('related_object', tableName)
+        .eq('is_deleted', false)
+      if (cancelled) return
+      if (error) { setHasActiveTemplate(false); return }
+      const anyActive = (data || []).some(r => r?.status?.picklist_value === 'Active')
+      setHasActiveTemplate(anyActive)
+    })()
+    return () => { cancelled = true }
+  }, [tableName])
 
   useEffect(() => {
     let cancelled = false
@@ -3517,7 +3541,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={18} color="currentColor" />
                   </button>
                 )}
-                {['projects', 'properties', 'opportunities', 'work_orders'].includes(tableName) && (
+                {hasActiveTemplate && (
                   <button
                     onClick={() => setShowSendSignatureModal(true)}
                     aria-label="Send for Signature"
@@ -3696,7 +3720,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     Generate Report
                   </button>
                 )}
-                {['projects', 'properties', 'opportunities', 'work_orders'].includes(tableName) && (
+                {hasActiveTemplate && (
                   <button
                     onClick={() => setShowSendSignatureModal(true)}
                     title="Send a document for e-signature against this record"
@@ -4100,7 +4124,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           send-envelope, displays signing URLs. After successful send the
           envelope row exists; the parent's Documents related-list will
           show the signed PDF after the last recipient signs. */}
-      {showSendSignatureModal && ['projects', 'properties', 'opportunities', 'work_orders'].includes(tableName) && (
+      {showSendSignatureModal && hasActiveTemplate && (
         <SendForSignatureModal
           open
           parentObject={tableName}
