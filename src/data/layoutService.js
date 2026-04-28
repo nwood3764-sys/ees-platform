@@ -487,7 +487,7 @@ export function applyInsertDefaults(tableName, fields, userId) {
  * referenced table. Used for <select> dropdowns on lookup fields.
  *
  * Soft-deleted rows are excluded automatically when the target table has
- * a discoverable `*_is_deleted` column (via anura_table_metadata). We do
+ * a discoverable `*_is_deleted` column (via ees_table_metadata). We do
  * NOT filter by `*_is_active` — keeping inactive rows in the option list
  * means an existing record whose lookup currently points at an inactive
  * target still shows the right value in edit mode rather than appearing
@@ -521,7 +521,7 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
 
 /**
  * Fetch table metadata (required fields, soft-delete column, is-active column)
- * via the anura_table_metadata(text) Postgres RPC. Results are cached in-memory
+ * via the ees_table_metadata(text) Postgres RPC. Results are cached in-memory
  * for the life of the page load since the schema doesn't change at runtime.
  *
  * Returns { required_fields: string[], is_active_column: string|null,
@@ -530,7 +530,7 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
 const _metadataCache = new Map()
 export async function fetchTableMetadata(tableName) {
   if (_metadataCache.has(tableName)) return _metadataCache.get(tableName)
-  const { data, error } = await supabase.rpc('anura_table_metadata', { p_table: tableName })
+  const { data, error } = await supabase.rpc('ees_table_metadata', { p_table: tableName })
   if (error) throw error
   const meta = data || { required_fields: [], is_active_column: null, is_deleted_column: null }
   // Normalise — the RPC may return nulls for the array fields

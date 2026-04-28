@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Energy Efficiency Services field-type derivation — JS mirror of the Postgres function
-// public._pick_anura_field_type(p_col, p_data_type, p_is_fk). Keeping these
+// public._pick_ees_field_type(p_col, p_data_type, p_is_fk). Keeping these
 // two in sync means fields added via the Page Layout Builder's field_group
 // editor produce the same `type` value as the seeded widget_config.fields
 // entries. If the DB function ever changes, update this to match.

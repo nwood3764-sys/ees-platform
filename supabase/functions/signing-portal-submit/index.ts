@@ -227,7 +227,7 @@ Deno.serve(async (req) => {
     const signingBase =
       req.headers.get("Origin") ||
       (req.headers.get("Referer")?.split("/").slice(0, 3).join("/")) ||
-      "https://anura-ops.netlify.app"
+      "https://ees-ops.netlify.app"
     const nextSigningUrl = `${signingBase}/sign/${env.env_record_number}/${nextRecipient.recipient_signing_token}`
 
     if (eventAdvancedId) {

@@ -3227,7 +3227,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         a.remove()
         toast.success('Preview downloaded — pop-ups are blocked.')
       } else {
-        const pageCount = resp.headers.get('X-Energy Efficiency Services-Page-Count')
+        const pageCount = resp.headers.get('X-Anura-Page-Count')
         toast.success(pageCount ? `Preview opened — ${pageCount} pages` : 'Preview opened')
       }
     } catch (err) {
