@@ -1,5 +1,5 @@
 // =============================================================================
-// signing-portal-submit (v3 — EES branding in email templates)
+// signing-portal-submit (v4 — completion email with signed PDF + cert)
 //
 // Public (verify_jwt = false). Same token-based auth as signing-portal-load.
 // Same flow as v2, plus: rebranded email body footer from "via Anura" to
@@ -318,6 +318,38 @@ Deno.serve(async (req) => {
     })
   }
 
+  // Send the completion email — distributes the signed PDF + certificate to
+  // every signer and CCs the envelope owner. Wrapped in try/catch so a Graph
+  // failure does NOT roll back the envelope completion (the envelope IS
+  // legally complete; the email is a courtesy distribution). Failures are
+  // captured in the email_sends row's failure_reason for follow-up.
+  try {
+    const { data: allRecipientsForCompletion } = await supabase
+      .from("envelope_recipients")
+      .select("id, recipient_name, recipient_email, recipient_signed_at")
+      .eq("envelope_id", env.id)
+      .eq("is_deleted", false)
+      .order("recipient_order", { ascending: true })
+    const signers = (allRecipientsForCompletion || [])
+      .filter((r: any) => r.recipient_signed_at)
+      .map((r: any) => ({ name: r.recipient_name, email: r.recipient_email }))
+    if (signers.length > 0) {
+      await sendCompletionEmail(supabase, {
+        envelopeOwnerUserId: env.env_owner,
+        envelopeId:      env.id,
+        parentObject:    env.env_parent_object,
+        parentRecordId:  env.env_parent_record_id,
+        envName:         env.env_name,
+        envRecordNumber: env.env_record_number,
+        signedPdfPath:   overlayPath.path,
+        certPdfPath:     certPath || null,
+        signers,
+      })
+    }
+  } catch (e) {
+    console.error("Completion email failed (non-fatal):", (e as Error).message)
+  }
+
   return json({ ok: true, completed: true, advanced: false }, 200)
 })
 
@@ -477,6 +509,225 @@ async function refreshAccessToken(
   const j = await resp.json()
   if (!resp.ok) throw new Error(j.error_description || j.error || `HTTP ${resp.status}`)
   return j
+}
+
+// Sends the envelope completion email — distributes the signed PDF and
+// certificate of completion to all signers, CCing the envelope owner.
+// Uses the envelope owner's Outlook connection (same identity that sent the
+// original signing-request emails, so threads stay coherent in their inbox).
+// Persists an email_sends row for audit, even on failure.
+async function sendCompletionEmail(
+  supabase: SupabaseClient,
+  p: {
+    envelopeOwnerUserId: string
+    envelopeId:     string
+    parentObject:   string
+    parentRecordId: string
+    envName:        string
+    envRecordNumber: string
+    signedPdfPath:  string
+    certPdfPath:    string | null
+    signers:        Array<{ name: string, email: string }>
+  },
+): Promise<{ status: string, email_send_id?: string, failure_reason?: string }> {
+  const clientId     = Deno.env.get("OUTLOOK_CLIENT_ID")
+  const clientSecret = Deno.env.get("OUTLOOK_CLIENT_SECRET")
+  const tenantId     = Deno.env.get("OUTLOOK_TENANT_ID")
+  if (!clientId || !clientSecret || !tenantId)
+    return { status: "not_configured", failure_reason: "OUTLOOK_* env vars not set" }
+
+  const { data: conn } = await supabase
+    .from("user_outlook_connections")
+    .select("id, account_email, access_token, refresh_token, token_expires_at, is_active")
+    .eq("user_id", p.envelopeOwnerUserId)
+    .maybeSingle()
+  if (!conn || !conn.is_active)
+    return { status: "not_connected", failure_reason: "Envelope owner has no active Outlook connection" }
+
+  let accessToken = conn.access_token
+  if (new Date(conn.token_expires_at).getTime() - Date.now() < REFRESH_HORIZON_MS) {
+    try {
+      const refreshed = await refreshAccessToken(tenantId, clientId, clientSecret, conn.refresh_token)
+      accessToken = refreshed.access_token
+      await supabase.from("user_outlook_connections").update({
+        access_token: refreshed.access_token,
+        refresh_token: refreshed.refresh_token || conn.refresh_token,
+        token_expires_at: new Date(Date.now() + (refreshed.expires_in * 1000) - 60_000).toISOString(),
+        last_refreshed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", conn.id)
+    } catch (e) {
+      return { status: "refresh_failed", failure_reason: (e as Error).message }
+    }
+  }
+
+  // Resolve the envelope owner's name + email so we can CC them and use their
+  // name in the email signature. The mailbox sends as conn.account_email
+  // regardless, but the visible "Sent on behalf of" text uses the user record.
+  let senderName: string | null = null
+  let senderEmail: string | null = null
+  const { data: u } = await supabase.from("users")
+    .select("user_first_name, user_last_name, user_name, user_email")
+    .eq("id", p.envelopeOwnerUserId).maybeSingle()
+  if (u) {
+    const full = [(u as any).user_first_name, (u as any).user_last_name].filter(Boolean).join(" ").trim()
+    senderName  = full || (u as any).user_name || null
+    senderEmail = (u as any).user_email || null
+  }
+
+  // Pull both attachments from storage. If the signed PDF is missing we abort —
+  // there is nothing meaningful to send. The certificate is best-effort; a
+  // missing cert just means the email goes out with the signed PDF only.
+  const attachments: any[] = []
+  const attachmentsMeta: any[] = []
+  const { data: signedBlob, error: signedErr } = await supabase
+    .storage.from(SIGNATURES_BUCKET).download(p.signedPdfPath)
+  if (signedErr || !signedBlob)
+    return { status: "failed", failure_reason: `Signed PDF download failed: ${signedErr?.message}` }
+  const signedBytes = new Uint8Array(await signedBlob.arrayBuffer())
+  attachments.push({
+    "@odata.type": "#microsoft.graph.fileAttachment",
+    name:          `${p.envRecordNumber} — Signed.pdf`,
+    contentType:   "application/pdf",
+    contentBytes:  bytesToBase64(signedBytes),
+  })
+  attachmentsMeta.push({ storage_path: p.signedPdfPath, size: signedBytes.length, status: "included" })
+
+  if (p.certPdfPath) {
+    const { data: certBlob, error: certErr } = await supabase
+      .storage.from(SIGNATURES_BUCKET).download(p.certPdfPath)
+    if (!certErr && certBlob) {
+      const certBytes = new Uint8Array(await certBlob.arrayBuffer())
+      attachments.push({
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        name:          `${p.envRecordNumber} — Certificate of Completion.pdf`,
+        contentType:   "application/pdf",
+        contentBytes:  bytesToBase64(certBytes),
+      })
+      attachmentsMeta.push({ storage_path: p.certPdfPath, size: certBytes.length, status: "included" })
+    } else {
+      attachmentsMeta.push({ storage_path: p.certPdfPath, status: "download_failed", error: certErr?.message })
+    }
+  }
+
+  const subject = `Completed: ${p.envName}`
+  const bodyHtml = renderCompletionEmailHtml({
+    senderName: senderName || "Energy Efficiency Services",
+    envName: p.envName,
+    envRecordNumber: p.envRecordNumber,
+    signers: p.signers,
+  })
+  const bodyText = renderCompletionEmailText({
+    senderName: senderName || "Energy Efficiency Services",
+    envName: p.envName,
+    envRecordNumber: p.envRecordNumber,
+    signers: p.signers,
+  })
+
+  // CC the envelope owner so they always get a copy in their own inbox even
+  // though they're sending from that mailbox. (saveToSentItems already gives
+  // them a Sent-folder copy, but a Cc puts it in their Inbox too — useful when
+  // the owner is also one of the signers, or just for archival reflex.)
+  const ccList = senderEmail ? [{ name: senderName || senderEmail, email: senderEmail }] : []
+
+  const { data: emailRow, error: insErr } = await supabase
+    .from("email_sends")
+    .insert({
+      email_send_record_number: "",
+      parent_object:    p.parentObject,
+      parent_record_id: p.parentRecordId,
+      sent_by_user_id:  p.envelopeOwnerUserId,
+      sent_via:         "graph_outlook",
+      sender_email:     conn.account_email,
+      subject,
+      body_html:        bodyHtml,
+      body_text:        bodyText,
+      recipients_to:    p.signers,
+      recipients_cc:    ccList.length ? ccList : null,
+      attachments_meta: attachmentsMeta,
+      status:           "Pending",
+      related_envelope_id:  p.envelopeId,
+      created_by:       p.envelopeOwnerUserId,
+      updated_by:       p.envelopeOwnerUserId,
+    })
+    .select("id")
+    .single()
+  if (insErr || !emailRow) return { status: "failed", failure_reason: `email_sends insert failed: ${insErr?.message}` }
+
+  let sendOk = false
+  let failureReason: string | null = null
+  try {
+    const sendResp = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: "HTML", content: bodyHtml },
+          toRecipients:  p.signers.map(s => ({ emailAddress: { address: s.email, name: s.name || s.email } })),
+          ccRecipients:  ccList.map(c => ({ emailAddress: { address: c.email, name: c.name } })),
+          attachments,
+        },
+        saveToSentItems: true,
+      }),
+    })
+    if (sendResp.status === 202) {
+      sendOk = true
+    } else {
+      const errText = await sendResp.text()
+      failureReason = `Graph sendMail returned ${sendResp.status}: ${errText.slice(0, 1500)}`
+    }
+  } catch (e) {
+    failureReason = `Graph sendMail threw: ${(e as Error).message}`.slice(0, 1500)
+  }
+
+  await supabase.from("email_sends").update({
+    status: sendOk ? "Sent" : "Failed",
+    sent_at: sendOk ? new Date().toISOString() : null,
+    failure_reason: failureReason,
+    updated_at: new Date().toISOString(),
+  }).eq("id", emailRow.id)
+
+  return { status: sendOk ? "Sent" : "Failed", email_send_id: emailRow.id, failure_reason: failureReason || undefined }
+}
+
+function renderCompletionEmailHtml(p: {
+  senderName: string, envName: string, envRecordNumber: string,
+  signers: Array<{ name: string, email: string }>,
+}): string {
+  const safe = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  const signerList = p.signers
+    .map(s => `<li>${safe(s.name || s.email)} &lt;${safe(s.email)}&gt;</li>`)
+    .join("")
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.55;color:#1a202c;max-width:600px;margin:0 auto;padding:24px;background:#fff;">
+<p style="font-size:15px;">All parties have signed.</p>
+<div style="font-size:14px;">
+  <p><strong>${safe(p.envName)}</strong> (${safe(p.envRecordNumber)}) is now complete. The signed PDF and a Certificate of Completion are attached for your records.</p>
+  <p style="margin-top:18px;">Signed by:</p>
+  <ul style="margin-top:4px;padding-left:20px;">${signerList}</ul>
+</div>
+<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
+<p style="font-size:11px;color:#888;">Sent on behalf of ${safe(p.senderName)} from Energy Efficiency Services. The Certificate of Completion is the official record of all signing activity, including timestamps and IP addresses.</p>
+</body></html>`
+}
+
+function renderCompletionEmailText(p: {
+  senderName: string, envName: string, envRecordNumber: string,
+  signers: Array<{ name: string, email: string }>,
+}): string {
+  const lines = [
+    "All parties have signed.",
+    "",
+    `${p.envName} (${p.envRecordNumber}) is now complete. The signed PDF and a Certificate of Completion are attached for your records.`,
+    "",
+    "Signed by:",
+    ...p.signers.map(s => `  - ${s.name || s.email} <${s.email}>`),
+    "",
+    "—",
+    `Sent on behalf of ${p.senderName} from Energy Efficiency Services. The Certificate of Completion is the official record of all signing activity, including timestamps and IP addresses.`,
+  ]
+  return lines.join("\n")
 }
 
 function renderEmailHtml(p: {
@@ -676,6 +927,17 @@ function json(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status, headers: { ...cors, "Content-Type": "application/json" },
   })
+}
+
+// Chunked base64 encoder for binary blobs. btoa() can't take a typed array,
+// and String.fromCharCode.apply hits a 64KB call-stack limit, so we slice.
+function bytesToBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000
+  let s = ""
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    s += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)))
+  }
+  return btoa(s)
 }
 
 function clientIp(req: Request): string | null {

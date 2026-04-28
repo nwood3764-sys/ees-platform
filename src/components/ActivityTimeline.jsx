@@ -52,6 +52,19 @@ const KIND_STYLES = {
   hard_delete:  { label: 'Hard Deleted', bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
   email:        { label: 'Email Sent',   bg: '#eef4fc', color: '#2557a7', dot: '#2557a7' },
   email_failed: { label: 'Email Failed', bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
+  // Envelope lifecycle entries — populated by list_envelope_events_for_record().
+  // Created/Sent are envelope-scoped (no recipient); Opened/Viewed/ConsentGranted/
+  // Signed/Declined are recipient-scoped; Completed/Voided are envelope-scoped
+  // again. Color coding: emerald for forward progress, amber for soft-warn
+  // (Viewed/Opened/ConsentGranted), red for terminal-bad (Declined/Voided).
+  envelope_sent:      { label: 'Envelope Sent',      bg: '#eef4fc', color: '#2557a7', dot: '#2557a7' },
+  envelope_opened:    { label: 'Envelope Opened',    bg: '#fef3c7', color: '#92400e', dot: C.amber },
+  envelope_viewed:    { label: 'Envelope Viewed',    bg: '#fef3c7', color: '#92400e', dot: C.amber },
+  envelope_consent:   { label: 'Consent Granted',    bg: '#fef3c7', color: '#92400e', dot: C.amber },
+  envelope_signed:    { label: 'Signed',             bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
+  envelope_completed: { label: 'Envelope Completed', bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
+  envelope_declined:  { label: 'Envelope Declined',  bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
+  envelope_voided:    { label: 'Envelope Voided',    bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
 }
 
 // Convert a row from list_email_sends_for_record() RPC into a TimelineEntry
@@ -72,6 +85,43 @@ function toEmailEntry(row) {
       status: row.status,
       failure_reason: row.failure_reason,
       record_number: row.email_send_record_number,
+    },
+  }
+}
+
+// Convert a row from list_envelope_events_for_record() RPC into a TimelineEntry.
+// Maps the picklist event_type to a UI kind, prefers the recipient name as the
+// actor when present (Opened/Signed/etc.), and falls back to "System" for
+// envelope-scoped events. The envelope record number is stashed on entry.envelope
+// so the renderer can show "ENV-00004" inline. Created events are suppressed —
+// they're redundant with the Sent event at the same timestamp.
+function toEnvelopeEventEntry(row) {
+  const kindByType = {
+    Created:        null,
+    Sent:           'envelope_sent',
+    Opened:         'envelope_opened',
+    Viewed:         'envelope_viewed',
+    ConsentGranted: 'envelope_consent',
+    Signed:         'envelope_signed',
+    Completed:      'envelope_completed',
+    Declined:       'envelope_declined',
+    Voided:         'envelope_voided',
+    Failed:         'envelope_voided',
+  }
+  const kind = kindByType[row.event_type]
+  if (!kind) return null
+  return {
+    id: `envev_${row.id}`,
+    timestamp: row.created_at,
+    kind,
+    actorName: row.recipient_name || 'System',
+    changes: [],
+    envelope: {
+      record_number: row.envelope_record_number,
+      name:          row.envelope_name,
+      event_type:    row.event_type,
+      recipient_email: row.recipient_email,
+      event_record_number: row.event_record_number,
     },
   }
 }
@@ -178,6 +228,7 @@ function TimelineEntry({ entry, isLast }) {
         )}
 
         {entry.email && <EmailEntryBody email={entry.email} />}
+        {entry.envelope && <EnvelopeEntryBody envelope={entry.envelope} />}
       </div>
     </div>
   )
@@ -232,6 +283,30 @@ function EmailEntryBody({ email }) {
           {/* eslint-disable-next-line react/no-danger */}
           <div dangerouslySetInnerHTML={{ __html: email.body_html }} />
         </div>
+      )}
+    </div>
+  )
+}
+
+// Envelope lifecycle entry body. Shows the envelope record number + name
+// inline so the timeline tells the full story without making the user click
+// into the envelope detail. Kept intentionally compact — the badge label
+// already says what happened, this just anchors it to the right envelope.
+function EnvelopeEntryBody({ envelope }) {
+  return (
+    <div style={{
+      fontSize: 12, color: C.textSecondary,
+      display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'baseline',
+      marginTop: 2,
+    }}>
+      <span style={{
+        fontFamily: 'JetBrains Mono, monospace', fontSize: 11,
+        background: C.page, padding: '1px 6px', borderRadius: 3,
+        color: C.textPrimary,
+      }}>{envelope.record_number}</span>
+      <span style={{ color: C.textPrimary }}>{envelope.name}</span>
+      {envelope.recipient_email && (
+        <span style={{ color: C.textMuted }}>· {envelope.recipient_email}</span>
       )}
     </div>
   )
@@ -322,11 +397,16 @@ export default function ActivityTimeline({ tableName, recordId }) {
         p_parent_object: tableName,
         p_parent_record_id: recordId,
       }).then(({ data, error: rpcErr }) => rpcErr ? [] : (data || [])),
+      supabase.rpc('list_envelope_events_for_record', {
+        p_parent_object: tableName,
+        p_parent_record_id: recordId,
+      }).then(({ data, error: rpcErr }) => rpcErr ? [] : (data || [])),
     ])
-      .then(([{ entries: activityEntries, hasMore }, emailRows]) => {
+      .then(([{ entries: activityEntries, hasMore }, emailRows, envEventRows]) => {
         if (cancelled) return
         const emailEntries = emailRows.map(toEmailEntry)
-        const merged = [...activityEntries, ...emailEntries]
+        const envEventEntries = envEventRows.map(toEnvelopeEventEntry).filter(Boolean)
+        const merged = [...activityEntries, ...emailEntries, ...envEventEntries]
           .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         setEntries(merged)
         setHasMore(hasMore)
