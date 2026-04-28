@@ -3553,8 +3553,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                       minWidth: 44, minHeight: 44,
                     }}
                   >
-                    {/* feather: edit-3 (a pen-on-paper signing affordance) */}
-                    <Icon path="M12 20h9 M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" size={18} color="currentColor" />
+                    {/* lucide: feather — a quill, instantly read as 'sign here' and visually distinct from the Edit pencil */}
+                    <Icon path="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z M16 8L2 22 M17.5 15H9" size={18} color="currentColor" />
                   </button>
                 )}
                 {tableName === 'project_report_templates' && (
@@ -3728,7 +3728,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     onMouseEnter={(e) => { e.currentTarget.style.background = '#ecfdf5' }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
                   >
-                    <Icon path="M12 20h9 M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" size={13} color={C.emerald} />
+                    <Icon path="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z M16 8L2 22 M17.5 15H9" size={13} color={C.emerald} />
                     Send for Signature
                   </button>
                 )}
