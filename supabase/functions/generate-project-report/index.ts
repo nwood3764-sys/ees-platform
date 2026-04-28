@@ -47,9 +47,9 @@
 // template looked like at publish time.
 //
 // In preview mode, when prtsn_id is used, the response stamps:
-//   X-Anura-Source: snapshot
-//   X-Anura-Prtsn-Id: <uuid>
-//   X-Anura-Prtsn-Version: <int>
+//   X-EES-Source: snapshot
+//   X-EES-Prtsn-Id: <uuid>
+//   X-EES-Prtsn-Version: <int>
 // In generate mode, the JSON response includes:
 //   { "source": "snapshot", "snapshot": { "prtsn_id": ..., "prtsn_version": ... } }
 //
@@ -1797,8 +1797,8 @@ Deno.serve(async (req: Request) => {
     const titlePrefix = previewMode ? "PREVIEW — " : ""
     const snapshotSuffix = templateFromSnapshot ? ` • SNAPSHOT v${snapshotVersion}` : ""
     pdf.setTitle(`${titlePrefix}${project.project_record_number || ""} ${project.project_name || "Project Report"}`.trim())
-    pdf.setProducer("Anura")
-    pdf.setCreator(`Anura • ${prt.prt_name} (${prt.prt_record_number} v${prt.prt_version})${previewMode ? " • PREVIEW" : ""}${snapshotSuffix}`)
+    pdf.setProducer("Energy Efficiency Services")
+    pdf.setCreator(`Energy Efficiency Services • ${prt.prt_name} (${prt.prt_record_number} v${prt.prt_version})${previewMode ? " • PREVIEW" : ""}${snapshotSuffix}`)
     pdf.setCreationDate(ctx.generatedAt)
 
     const pdfBytes = await pdf.save()
@@ -1820,17 +1820,17 @@ Deno.serve(async (req: Request) => {
         ...corsHeaders,
         "Content-Type": "application/pdf",
         "Content-Disposition": `inline; filename="${previewFileName}"`,
-        "X-Anura-Mode": "preview",
-        "X-Anura-Prt-Id": prt.id,
-        "X-Anura-Prt-Version": String(prt.prt_version),
-        "X-Anura-Page-Count": String(cur.pages.length),
+        "X-EES-Mode": "preview",
+        "X-EES-Prt-Id": prt.id,
+        "X-EES-Prt-Version": String(prt.prt_version),
+        "X-EES-Page-Count": String(cur.pages.length),
       }
       if (templateFromSnapshot && snapshotId && snapshotVersion !== null) {
-        previewHeaders["X-Anura-Prtsn-Id"] = snapshotId
-        previewHeaders["X-Anura-Prtsn-Version"] = String(snapshotVersion)
-        previewHeaders["X-Anura-Source"] = "snapshot"
+        previewHeaders["X-EES-Prtsn-Id"] = snapshotId
+        previewHeaders["X-EES-Prtsn-Version"] = String(snapshotVersion)
+        previewHeaders["X-EES-Source"] = "snapshot"
       } else {
-        previewHeaders["X-Anura-Source"] = "live"
+        previewHeaders["X-EES-Source"] = "live"
       }
       return new Response(pdfBytes, {
         status: 200,
