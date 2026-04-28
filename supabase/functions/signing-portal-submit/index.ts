@@ -1,5 +1,5 @@
 // =============================================================================
-// signing-portal-submit (v4 — completion email with signed PDF + cert)
+// signing-portal-submit (v5 — surface silent failures from documents insert)
 //
 // Public (verify_jwt = false). Same token-based auth as signing-portal-load.
 // Same flow as v2, plus: rebranded email body footer from "via Anura" to
@@ -285,25 +285,46 @@ Deno.serve(async (req) => {
     env_certificate_path: certPath || null,
   }).eq("id", env.id)
 
-  const { data: docRow } = await supabase.from("documents").insert({
-    document_number: "",
-    name: `Signed: ${env.env_name}.pdf`,
-    document_type: "Signed Document",
-    category: "envelope_signed",
-    mime_type: "application/pdf",
-    related_object: env.env_parent_object,
-    related_id:     env.env_parent_record_id,
-    requires_signature: true,
-    signed_at: new Date().toISOString(),
-    signature_status: "Completed",
-    uploaded_by: env.env_owner,
-    storage_bucket: SIGNATURES_BUCKET,
-    storage_path:   overlayPath.path,
-  }).select("id").maybeSingle()
-  if (docRow) {
-    await supabase.from("envelopes").update({
-      env_signed_document_id: docRow.id,
+  // Insert the signed-document row that the Related tab + activity timeline
+  // pull from. Use .single() (not .maybeSingle()) so a database error surfaces
+  // as an exception rather than silently returning null. If the insert fails
+  // (RLS, unique constraint, missing column, etc.), the envelope IS still
+  // Completed — the signed PDF is in storage and the legal record exists in
+  // the envelope itself. We just lose the documents-list surfacing. Log
+  // visibly and persist the error into the Completed event's metadata so it
+  // shows up in the audit trail for follow-up.
+  let docRowId: string | null = null
+  let docInsertError: string | null = null
+  try {
+    const { data: docRow, error: docErr } = await supabase.from("documents").insert({
+      document_number: "",
+      name: `Signed: ${env.env_name}.pdf`,
+      document_type: "Signed Document",
+      category: "envelope_signed",
+      mime_type: "application/pdf",
+      related_object: env.env_parent_object,
+      related_id:     env.env_parent_record_id,
+      requires_signature: true,
+      signed_at: new Date().toISOString(),
+      signature_status: "Completed",
+      uploaded_by: env.env_owner,
+      storage_bucket: SIGNATURES_BUCKET,
+      storage_path:   overlayPath.path,
+    }).select("id").single()
+    if (docErr) throw docErr
+    docRowId = docRow?.id || null
+  } catch (e) {
+    docInsertError = (e as Error).message || String(e)
+    console.error(`[signing-portal-submit] documents insert failed for envelope ${env.env_record_number}: ${docInsertError}`)
+  }
+
+  if (docRowId) {
+    const { error: linkErr } = await supabase.from("envelopes").update({
+      env_signed_document_id: docRowId,
     }).eq("id", env.id)
+    if (linkErr) {
+      console.error(`[signing-portal-submit] envelope ${env.env_record_number} document link failed: ${linkErr.message}`)
+    }
   }
 
   if (eventCompletedId) {
@@ -312,7 +333,12 @@ Deno.serve(async (req) => {
       envelope_id: env.id,
       event_record_type: standardEventRtId,
       event_type: eventCompletedId,
-      event_metadata: { signed_document_id: docRow?.id || null, certificate_path: certPath },
+      event_metadata: {
+        signed_document_id: docRowId,
+        certificate_path:   certPath,
+        document_insert_error: docInsertError,
+        certificate_generation_skipped: certPath === null,
+      },
       event_ip_address: ip,
       event_user_agent: ua,
     })
