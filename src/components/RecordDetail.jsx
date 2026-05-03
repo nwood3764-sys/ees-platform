@@ -102,7 +102,8 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
   if (raw === null || raw === undefined) return '—'
   switch (fieldDef.type) {
     case 'picklist':   return picklists.byId.get(raw) || String(raw)
-    case 'lookup':     {
+    case 'lookup':
+    case 'polymorphic_lookup': {
       const entry = lookups.get(raw)
       // resolveLookups returns { label, table } objects. Tolerate the older
       // plain-string shape during the in-flight transition.
@@ -1664,22 +1665,37 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
       {fields.map(f => {
         const raw = editing ? draft[f.name] : record[f.name]
         const display = formatFieldValue(raw, f, picklists, lookups)
-        const isLink = f.type === 'email' || f.type === 'lookup'
+        const isLookupLike = f.type === 'lookup' || f.type === 'polymorphic_lookup'
+        const isLink = f.type === 'email' || isLookupLike
         const hasLookupOpts = f.type === 'lookup' && allLookupOpts?.[f.name]?.length > 0
-        const isEditable = editing && (f.type !== 'datetime') && (f.type !== 'lookup' || hasLookupOpts)
+        // polymorphic_lookup is read-only in edit mode for now — there's no
+        // UI for picking both the parent table and the parent record from a
+        // single field, and these fields are typically system-set anyway
+        // (Send for Signature populates env_parent_object/env_parent_record_id).
+        const isEditable = editing
+          && (f.type !== 'datetime')
+          && (f.type !== 'polymorphic_lookup')
+          && (f.type !== 'lookup' || hasLookupOpts)
 
         // Lookup hyperlinking — turn populated lookup fields into clickable
         // links to the parent record (Salesforce parity). Three things must
         // line up: (1) we're not in edit mode, (2) the value is non-null and
-        // resolved, (3) we have a destination table for it. The destination
-        // table comes preferentially from the widget config (f.lookup_table),
-        // and falls back to whatever resolveLookups discovered. The handler
-        // is the same `onNavigateToRecord` used by related lists, so URL/
-        // history behavior is consistent across all in-app navigation.
+        // resolved, (3) we have a destination table for it.
+        //
+        // For static `lookup`: target table comes preferentially from the
+        // widget config (f.lookup_table), and falls back to whatever
+        // resolveLookups discovered. For `polymorphic_lookup`: target table
+        // comes ONLY from the resolved lookup entry — the widget config
+        // doesn't know the destination, that's the whole point of the type.
         let lookupLinkTarget = null
-        if (!editing && f.type === 'lookup' && raw && onNavigateToRecord) {
+        if (!editing && isLookupLike && raw && onNavigateToRecord) {
           const entry = lookups.get(raw)
-          const targetTable = f.lookup_table || (typeof entry === 'object' ? entry?.table : null)
+          let targetTable = null
+          if (f.type === 'lookup') {
+            targetTable = f.lookup_table || (typeof entry === 'object' ? entry?.table : null)
+          } else {
+            targetTable = (typeof entry === 'object' ? entry?.table : null)
+          }
           if (targetTable) lookupLinkTarget = { table: targetTable, id: raw, mode: 'view' }
         }
 

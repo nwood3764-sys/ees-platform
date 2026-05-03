@@ -250,6 +250,87 @@ export async function resolveLookups(lookupRequests) {
   return resolved
 }
 
+// ─── Polymorphic lookup support ─────────────────────────────────────────────
+// Some FK columns don't have a fixed parent — `envelopes.env_parent_record_id`
+// can point at projects, properties, opportunities, etc. The table name is
+// stored in a sibling column (`env_parent_object`). The renderer needs to
+// resolve these at load time and turn the UUID into a hyperlink to the right
+// place. Same shape as `resolveLookups` so callers can merge the results.
+//
+// Each request: { object_value: 'projects', value: '<uuid>' }. Returns the
+// same Map<uuid, { label, table }> shape as resolveLookups.
+//
+// The display column per table comes from POLY_DISPLAY_COL — a small registry
+// that mirrors the nameColumn/recordNumberColumn intent in RecordDetail's
+// TABLE_META. It lives here rather than imported from RecordDetail because
+// layoutService.js is a leaf and the cyclic import is undesirable. When a new
+// table needs to be a polymorphic-lookup target, add a row to this map.
+const POLY_DISPLAY_COL = {
+  // Outreach
+  accounts:                 'account_name',
+  contacts:                 'contact_name',
+  properties:               'property_name',
+  buildings:                'building_name',
+  units:                    'unit_name',
+  opportunities:            'opportunity_name',
+  // Field
+  projects:                 'project_name',
+  work_orders:              'work_order_name',
+  envelopes:                'env_name',
+  // Qualification
+  assessments:              'assessment_name',
+  incentive_applications:   'ia_name',
+  // Stock / Fleet
+  products:                 'product_name',
+  equipment:                'equipment_name',
+  vehicles:                 'vehicle_name',
+  // Admin (record-number-as-name where there's no narrative name field)
+  email_templates:          'name',
+  document_templates:       'name',
+  project_report_templates: 'prt_name',
+  skills:                   'skill_name',
+}
+
+/**
+ * Resolve polymorphic lookups. Each request: { object_value, value }.
+ * Returns Map<uuid, { label, table }> — same shape as resolveLookups, so the
+ * caller can merge both maps into one `lookups` map for the renderer.
+ */
+export async function resolvePolymorphicLookups(requests) {
+  const resolved = new Map()
+  if (!requests || requests.length === 0) return resolved
+
+  // Group by target table — the table comes from the runtime row data, not
+  // the layout, so we can't pre-batch this the way we do for static lookups.
+  const byTable = new Map()
+  for (const req of requests) {
+    if (!req.value || !req.object_value) continue
+    const tbl = req.object_value
+    if (!POLY_DISPLAY_COL[tbl]) continue  // table we can't display — skip
+    if (!byTable.has(tbl)) byTable.set(tbl, new Set())
+    byTable.get(tbl).add(req.value)
+  }
+
+  for (const [table, idSet] of byTable) {
+    const displayCol = POLY_DISPLAY_COL[table]
+    const idArr = Array.from(idSet)
+    try {
+      const { data } = await supabase
+        .from(table)
+        .select(`id, ${displayCol}`)
+        .in('id', idArr)
+      for (const row of data || []) {
+        resolved.set(row.id, { label: row[displayCol] || String(row.id).slice(0, 8), table })
+      }
+    } catch {
+      // RLS denies, table doesn't exist, etc. Skip silently — the renderer
+      // falls back to displaying the raw UUID.
+    }
+  }
+
+  return resolved
+}
+
 /**
  * Fetch related records for a related_list widget.
  */
@@ -297,8 +378,15 @@ export async function loadRecordDetailData(tableName, recordId) {
     return { record, layout: null, sections: [], picklists, lookups: new Map() }
   }
 
-  // Collect lookup requests from all field_group widgets
+  // Collect lookup requests from all field_group widgets.
+  // Two flavors are gathered side-by-side:
+  //   • static lookups (type='lookup') — target table fixed in widget config
+  //   • polymorphic lookups (type='polymorphic_lookup') — target table read
+  //     from a sibling column on the record (e.g. env_parent_object names
+  //     the table for env_parent_record_id). The sibling column is given
+  //     by widget_config.fields[].object_field.
   const lookupRequests = []
+  const polyRequests = []
   for (const sec of layoutData.sections) {
     for (const w of sec.widgets) {
       if (w.widget_type === 'field_group' && w.widget_config?.fields) {
@@ -309,13 +397,25 @@ export async function loadRecordDetailData(tableName, recordId) {
               lookup_field: f.lookup_field,
               value: record[f.name],
             })
+          } else if (f.type === 'polymorphic_lookup' && record[f.name] && f.object_field) {
+            polyRequests.push({
+              object_value: record[f.object_field],
+              value: record[f.name],
+            })
           }
         }
       }
     }
   }
 
-  const lookups = await resolveLookups(lookupRequests)
+  // Resolve both flavors in parallel and merge into a single Map. Callers
+  // (formatFieldValue, FieldGroupWidget, Breadcrumbs) read both kinds out
+  // of the same `lookups` map without caring which kind a UUID came from.
+  const [staticLookups, polyLookups] = await Promise.all([
+    resolveLookups(lookupRequests),
+    resolvePolymorphicLookups(polyRequests),
+  ])
+  const lookups = new Map([...staticLookups, ...polyLookups])
 
   // Pre-fetch related list data
   for (const sec of layoutData.sections) {

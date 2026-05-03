@@ -72,6 +72,7 @@ const TABLE_MODULE_MAP = {
   work_type_skill_requirements: 'admin',
   email_templates: 'admin',
   document_templates: 'admin',
+  document_template_snapshots: 'admin',
   automation_rules: 'admin',
   validation_rules: 'admin',
   roles: 'admin',
