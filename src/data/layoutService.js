@@ -86,6 +86,44 @@ export function getRecordTypeValue(obj) {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
+ * Batch field-permission resolver. For an object and a list of field names,
+ * returns a Map<fieldName, { visible, editable }> by calling the
+ * app_user_field_permissions RPC. Single round-trip per layout fetch.
+ *
+ * Empty fields list short-circuits to an empty Map (no RPC call).
+ *
+ * On RPC failure: returns an empty Map. fetchPageLayout treats that as
+ * "no overrides" (default visible+editable) so a transient permissions error
+ * never blanks the page — the safety net is RLS, not the UI filter.
+ */
+export async function fetchFieldPermissions(objectName, fields) {
+  if (!objectName || !fields || fields.length === 0) return new Map()
+  // De-dupe — same field can appear in multiple widgets across sections.
+  const unique = Array.from(new Set(fields.filter(Boolean)))
+  if (unique.length === 0) return new Map()
+
+  const { data, error } = await supabase.rpc('app_user_field_permissions', {
+    p_object: objectName,
+    p_fields: unique,
+  })
+  if (error) {
+    console.warn('app_user_field_permissions failed:', error.message)
+    return new Map()
+  }
+
+  const map = new Map()
+  if (data && typeof data === 'object') {
+    for (const [name, perm] of Object.entries(data)) {
+      map.set(name, {
+        visible: perm?.visible !== false,
+        editable: perm?.editable !== false,
+      })
+    }
+  }
+  return map
+}
+
+/**
  * Fetch the page layout configuration for a given object.
  * Returns { layout, sections: [{ ...section, widgets: [...] }] }
  *
@@ -99,8 +137,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *
  * If neither resolves, falls back to the master layout
  * (record_type_id IS NULL).
+ *
+ * After loading the layout, applies field-level permissions to every
+ * field_group widget: invisible fields are stripped from widget_config.fields,
+ * and remaining fields are annotated with `_editable` (true unless the
+ * resolver explicitly says otherwise). The frontend renderer treats
+ * `_editable === false` as read-only in edit mode.
+ *
+ * Pass `{ skipPermissions: true }` to bypass — used by admin tooling that
+ * needs to see the unfiltered layout (Page Layout Builder).
  */
-export async function fetchPageLayout(objectName, recordTypeValue = null) {
+export async function fetchPageLayout(objectName, recordTypeValue = null, options = {}) {
+  const { skipPermissions = false } = options
   // Step 1 — resolve the record_type_id if a value was supplied.
   let recordTypeId = null
   if (recordTypeValue != null && recordTypeValue !== '') {
@@ -182,9 +230,58 @@ export async function fetchPageLayout(objectName, recordTypeValue = null) {
     if (sec) sec.widgets.push(w)
   }
 
+  const sectionList = Array.from(sectionMap.values())
+
+  // Apply field-level permissions to every field_group widget. We collect
+  // every referenced field name across all field_group widgets, batch-resolve
+  // visibility+editability in one RPC call, then mutate widget_config.fields
+  // in place: drop invisible fields, annotate the rest with `_editable`.
+  //
+  // Skipped when `skipPermissions: true` is passed (admin Page Layout Builder
+  // needs the unfiltered view to author layouts) or when no field_group
+  // widgets exist (charts-only or related-list-only layouts).
+  if (!skipPermissions) {
+    const fieldNames = []
+    for (const sec of sectionList) {
+      for (const w of sec.widgets) {
+        if (w.widget_type === 'field_group' && Array.isArray(w.widget_config?.fields)) {
+          for (const f of w.widget_config.fields) {
+            if (f?.name) fieldNames.push(f.name)
+          }
+        }
+      }
+    }
+
+    if (fieldNames.length > 0) {
+      const perms = await fetchFieldPermissions(objectName, fieldNames)
+      // perms is empty when (a) the user has no app-level row, (b) the RPC
+      // failed, or (c) Admin (Admin returns explicit visible+editable=true
+      // for every requested field, so this branch only catches a/b). In all
+      // three cases we leave the layout untouched — the resolver returns no
+      // entries for fields with no override, which means default visible.
+      if (perms.size > 0) {
+        for (const sec of sectionList) {
+          for (const w of sec.widgets) {
+            if (w.widget_type !== 'field_group' || !Array.isArray(w.widget_config?.fields)) continue
+            const filtered = []
+            for (const f of w.widget_config.fields) {
+              const p = f?.name ? perms.get(f.name) : null
+              if (p && p.visible === false) continue  // strip invisible
+              filtered.push(p ? { ...f, _editable: p.editable } : f)
+            }
+            // Mutate widget_config (cloning to avoid sharing references with
+            // the page-layout cache — page_layout_widgets rows are read-only
+            // from this code path but defensive cloning costs nothing).
+            w.widget_config = { ...w.widget_config, fields: filtered }
+          }
+        }
+      }
+    }
+  }
+
   return {
     layout,
-    sections: Array.from(sectionMap.values()),
+    sections: sectionList,
   }
 }
 

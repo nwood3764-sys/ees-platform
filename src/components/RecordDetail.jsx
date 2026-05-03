@@ -1672,10 +1672,17 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // UI for picking both the parent table and the parent record from a
         // single field, and these fields are typically system-set anyway
         // (Send for Signature populates env_parent_object/env_parent_record_id).
+        //
+        // f._editable === false comes from the field-permission resolver
+        // (app_user_field_permissions): the user can read this field but the
+        // role/pset says they can't write it. View mode still shows the
+        // value; edit mode renders the read-only display in place of the
+        // input.
         const isEditable = editing
           && (f.type !== 'datetime')
           && (f.type !== 'polymorphic_lookup')
           && (f.type !== 'lookup' || hasLookupOpts)
+          && (f._editable !== false)
 
         // Lookup hyperlinking — turn populated lookup fields into clickable
         // links to the parent record (Salesforce parity). Three things must
