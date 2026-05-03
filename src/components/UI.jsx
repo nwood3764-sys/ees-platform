@@ -501,18 +501,22 @@ export function Sidebar({
 
 // ─── MobileHeader ────────────────────────────────────────────────────────────
 // A 52px app bar that appears above all module content on mobile only.
-// Holds the hamburger trigger + the active module name. Renders nothing on
-// desktop. Intentionally replaces per-module topbars on mobile to reclaim
-// vertical space.
+// Holds the hamburger trigger + the active module name + an optional search
+// icon. Renders nothing on desktop. Intentionally replaces per-module topbars
+// on mobile to reclaim vertical space.
+//
+// onOpenSearch — if provided, a magnifier icon button is rendered on the
+//                right edge that triggers the global search modal. Same modal
+//                that desktop opens via Cmd/Ctrl+K or the inline search bar.
 // ─────────────────────────────────────────────────────────────────────────────
-export function MobileHeader({ onOpenMenu, moduleLabel, moduleIcon }) {
+export function MobileHeader({ onOpenMenu, moduleLabel, moduleIcon, onOpenSearch }) {
   const isMobile = useIsMobile();
   if (!isMobile) return null;
 
   return (
     <div style={{
       height: 52, flexShrink: 0, background: C.sidebar,
-      display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px 0 4px',
+      display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px 0 4px',
       borderBottom: '1px solid rgba(255,255,255,0.07)',
     }}>
       <button
@@ -543,6 +547,26 @@ export function MobileHeader({ onOpenMenu, moduleLabel, moduleIcon }) {
           {moduleLabel || 'Energy Efficiency Services'}
         </span>
       </div>
+
+      {onOpenSearch && (
+        <button
+          onClick={onOpenSearch}
+          aria-label="Search"
+          style={{
+            flexShrink: 0,
+            background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+            cursor: 'pointer', color: C.navActive,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            minWidth: 44, minHeight: 44,
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

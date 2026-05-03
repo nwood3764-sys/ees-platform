@@ -5,6 +5,7 @@ import { ToastProvider } from './components/Toast'
 import PasswordChangeModal from './components/PasswordChangeModal'
 import IntegrationsModal from './components/IntegrationsModal'
 import OutlookCallback from './pages/OutlookCallback'
+import { GlobalSearchTrigger, GlobalSearchModal } from './components/GlobalSearch'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
@@ -76,6 +77,11 @@ function AuthedApp({ session }) {
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   // Integrations modal — Outlook Connect/Disconnect today, room for more later.
   const [integrationsOpen, setIntegrationsOpen] = useState(false)
+  // Global search modal — opens via top-bar trigger, mobile header magnifier,
+  // or Cmd/Ctrl+K. Lives at the app root so the modal portal can sit above
+  // every module and the keyboard shortcut works regardless of which module
+  // is currently mounted.
+  const [searchOpen, setSearchOpen] = useState(false)
   // Desktop sidebar collapse state. Persisted to localStorage so the choice
   // survives reloads. Ignored on mobile (the drawer is always full-width).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -133,6 +139,24 @@ function AuthedApp({ session }) {
     }
   }, [mobileMenuOpen])
 
+  // Global Cmd/Ctrl+K shortcut to open universal search. Mirrors the
+  // ubiquitous spotlight/quick-find pattern (Salesforce, Linear, Notion,
+  // GitHub). Listens at document level so the shortcut works regardless of
+  // which module is mounted or which element is focused. preventDefault
+  // suppresses the browser's "search bookmarks" default on Firefox.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onKey = (e) => {
+      const isMod = e.metaKey || e.ctrlKey
+      if (isMod && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
   const handleSignOut = async () => {
     await supabase.auth.signOut()
   }
@@ -183,11 +207,21 @@ function AuthedApp({ session }) {
           onOpenMenu={() => setMobileMenuOpen(true)}
           moduleLabel={NAV_MODULES.find(m => m.id === activeModule)?.label || 'Energy Efficiency Services'}
           moduleIcon={NAV_MODULES.find(m => m.id === activeModule)?.icon}
+          onOpenSearch={() => setSearchOpen(true)}
         />
+        <GlobalSearchTrigger onOpen={() => setSearchOpen(true)} />
         <Suspense fallback={<ModuleLoader />}>
           {renderModule()}
         </Suspense>
       </div>
+
+      {searchOpen && (
+        <GlobalSearchModal
+          open={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onNavigate={navigateToRecord}
+        />
+      )}
 
       {passwordModalOpen && (
         <PasswordChangeModal
