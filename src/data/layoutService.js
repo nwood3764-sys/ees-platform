@@ -206,7 +206,19 @@ export async function fetchRecord(tableName, recordId) {
 
 /**
  * Resolve lookup fields — given an array of { lookup_table, lookup_field, value (uuid) },
- * batch-fetch display values. Returns a Map<uuid, displayValue>.
+ * batch-fetch display values. Returns a Map<uuid, { label, table }>. The
+ * `table` is the parent table the FK points at, so the renderer can turn the
+ * value into a clickable hyperlink that navigates to the parent record.
+ *
+ * Map values used to be plain strings — Map.get(id) returned a label. The
+ * shape change is non-breaking because callers either:
+ *   • use `lookups.get(id)` for display (now returns an object — handled by
+ *     formatFieldValue and friends, which read `.label`), or
+ *   • use `lookups.has(id)` for existence checks (still works).
+ *
+ * To keep the formatFieldValue path simple, this function ALSO mirrors a
+ * label-only string under a parallel Map keyed `${id}__label`, but the
+ * canonical entry is the object. Callers updated below read `.label`.
  */
 export async function resolveLookups(lookupRequests) {
   const resolved = new Map()
@@ -231,7 +243,7 @@ export async function resolveLookups(lookupRequests) {
       .in('id', idArr)
 
     for (const row of data || []) {
-      resolved.set(row.id, row[field])
+      resolved.set(row.id, { label: row[field], table })
     }
   }
 
@@ -478,6 +490,23 @@ export function applyInsertDefaults(tableName, fields, userId) {
     if (!fields.dt_record_number) fields.dt_record_number = 'NEW'
     if (!fields.owner_id)         fields.owner_id         = userId
     if (!fields.created_by)       fields.created_by       = userId
+  } else if (tableName === 'envelopes') {
+    // env_record_number is populated by the BEFORE INSERT auto-numbering trigger.
+    // env_status has a column DEFAULT pointing at the Draft picklist UUID, so we
+    // intentionally do NOT pre-fill it here — Postgres handles it. The Draft
+    // default also makes env_status excluded from required_fields metadata.
+    if (!fields.env_record_number) fields.env_record_number = 'NEW'
+    if (!fields.env_owner)         fields.env_owner         = userId
+    if (!fields.created_by)        fields.created_by        = userId
+  } else if (tableName === 'envelope_recipients') {
+    if (!fields.recipient_record_number) fields.recipient_record_number = 'NEW'
+    if (!fields.created_by)              fields.created_by              = userId
+  } else if (tableName === 'envelope_tabs') {
+    if (!fields.tab_record_number) fields.tab_record_number = 'NEW'
+    if (!fields.created_by)        fields.created_by        = userId
+  } else if (tableName === 'envelope_events') {
+    if (!fields.event_record_number) fields.event_record_number = 'NEW'
+    if (!fields.created_by)          fields.created_by          = userId
   }
   return fields
 }

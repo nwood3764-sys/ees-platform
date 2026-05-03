@@ -102,7 +102,14 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
   if (raw === null || raw === undefined) return '—'
   switch (fieldDef.type) {
     case 'picklist':   return picklists.byId.get(raw) || String(raw)
-    case 'lookup':     return lookups.get(raw) || String(raw).slice(0, 8) + '…'
+    case 'lookup':     {
+      const entry = lookups.get(raw)
+      // resolveLookups returns { label, table } objects. Tolerate the older
+      // plain-string shape during the in-flight transition.
+      if (entry == null) return String(raw).slice(0, 8) + '…'
+      if (typeof entry === 'string') return entry
+      return entry.label || (String(raw).slice(0, 8) + '…')
+    }
     case 'currency':   return `$${Number(raw).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
     case 'percent':    return `${Number(raw)}%`
     case 'date':       return raw ? new Date(raw + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -129,54 +136,106 @@ const monoInput = { ...inputBase, fontFamily: 'JetBrains Mono, monospace' }
 // Breadcrumb — Salesforce-style hierarchy path
 // ---------------------------------------------------------------------------
 
+// Per-table display metadata. `nameColumn` and `recordNumberColumn` drive the
+// detail-page header (replacing the long hard-coded `record.foo || record.bar
+// || ...` fallback chains that used to live inline). `parents` lists FK columns
+// in breadcrumb order — innermost (most specific) parent first. `parentTables`
+// gives the table for each parent FK so the breadcrumb crumbs are clickable.
+// Adding a new object to Anura now just means adding one row here.
 const TABLE_META = {
-  accounts:                  { module: 'Outreach',       label: 'Accounts',             parents: ['parent_account_id'] },
-  contacts:                  { module: 'Outreach',       label: 'Contacts',             parents: ['contact_account_id'] },
-  account_contact_relations: { module: 'Outreach',       label: 'Account Contact Roles', parents: ['account_id', 'contact_id'] },
-  properties:                { module: 'Outreach',       label: 'Properties',           parents: ['property_account_id'] },
-  buildings:                 { module: 'Outreach',       label: 'Buildings',            parents: ['property_id'] },
-  units:                     { module: 'Outreach',       label: 'Units',                parents: ['building_id', 'property_id'] },
-  opportunities:             { module: 'Outreach',       label: 'Opportunities',        parents: ['property_id', 'opportunity_account_id'] },
-  property_programs:         { module: 'Outreach',       label: 'Enrollment',           parents: ['property_id'] },
-  work_orders:               { module: 'Field',          label: 'Work Orders',          parents: ['project_id', 'property_id', 'building_id'] },
-  projects:                  { module: 'Field',          label: 'Projects',             parents: ['property_id'] },
-  assessments:               { module: 'Qualification',  label: 'Assessments',          parents: ['property_id', 'building_id'] },
-  incentive_applications:    { module: 'Qualification',  label: 'Applications',         parents: ['property_id'] },
-  efr_reports:               { module: 'Qualification',  label: 'EFR Reports',          parents: ['property_id'] },
-  project_payment_requests:  { module: 'Incentives',     label: 'Payment Requests',     parents: ['project_id', 'property_id'] },
-  payment_receipts:          { module: 'Incentives',     label: 'Payment Receipts',     parents: [] },
-  products:                  { module: 'Stock',          label: 'Product Catalog',      parents: [] },
-  product_items:             { module: 'Stock',          label: 'Inventory On-Hand',    parents: [] },
-  materials_requests:        { module: 'Stock',          label: 'Materials Requests',   parents: ['project_id'] },
-  equipment:                 { module: 'Stock',          label: 'Equipment',            parents: [] },
-  vehicles:                  { module: 'Fleet',          label: 'Vehicles',             parents: [] },
-  vehicle_activities:        { module: 'Fleet',          label: 'Activities',           parents: ['vehicle_id'] },
-  equipment_containers:      { module: 'Fleet',          label: 'Vehicle Kits',         parents: ['issued_to_vehicle_id'] },
-  users:                     { module: 'People',         label: 'Users',                parents: [] },
-  skills:                    { module: 'People',         label: 'Skills',               parents: [] },
-  contact_skills:            { module: 'People',         label: 'Contact Skills',       parents: ['contact_id', 'skill_id'] },
-  work_type_skill_requirements: { module: 'Admin',       label: 'Skill Requirements',   parents: ['work_type_id', 'skill_id'] },
-  time_sheets:               { module: 'People',         label: 'Time Sheets',          parents: ['contact_id'] },
-  programs:                  { module: 'Admin',          label: 'Programs',             parents: [] },
-  work_types:                { module: 'Admin',          label: 'Work Types',           parents: [] },
-  email_templates:           { module: 'Admin',          label: 'Email Templates',      parents: [] },
-  document_templates:        { module: 'Admin',          label: 'Document Templates',   parents: [] },
-  automation_rules:          { module: 'Admin',          label: 'Automation Rules',     parents: [] },
-  validation_rules:          { module: 'Admin',          label: 'Validation Rules',     parents: [] },
-  roles:                     { module: 'Admin',          label: 'Roles',                parents: [] },
-  picklist_values:           { module: 'Admin',          label: 'Picklist Values',      parents: [] },
-  portal_users:              { module: 'Portal',         label: 'Portal Users',         parents: ['portal_user_account_id'] },
+  accounts:                  { module: 'Outreach',       label: 'Accounts',             nameColumn: 'account_name',           recordNumberColumn: 'account_record_number',           statusColumn: 'account_status',           parents: ['parent_account_id'],                              parentTables: ['accounts'] },
+  contacts:                  { module: 'Outreach',       label: 'Contacts',             nameColumn: 'contact_name',           recordNumberColumn: 'contact_record_number',           statusColumn: 'contact_status',           parents: ['contact_account_id'],                             parentTables: ['accounts'] },
+  account_contact_relations: { module: 'Outreach',       label: 'Account Contact Roles',nameColumn: null,                     recordNumberColumn: 'acr_record_number',               statusColumn: null,                       parents: ['account_id', 'contact_id'],                       parentTables: ['accounts', 'contacts'] },
+  properties:                { module: 'Outreach',       label: 'Properties',           nameColumn: 'property_name',          recordNumberColumn: 'property_record_number',          statusColumn: 'property_status',          parents: ['property_account_id'],                            parentTables: ['accounts'] },
+  buildings:                 { module: 'Outreach',       label: 'Buildings',            nameColumn: 'building_name',          recordNumberColumn: 'building_record_number',          statusColumn: 'building_status',          parents: ['property_id'],                                    parentTables: ['properties'] },
+  units:                     { module: 'Outreach',       label: 'Units',                nameColumn: 'unit_name',              recordNumberColumn: 'unit_record_number',              statusColumn: 'unit_status',              parents: ['building_id', 'property_id'],                     parentTables: ['buildings', 'properties'] },
+  opportunities:             { module: 'Outreach',       label: 'Opportunities',        nameColumn: 'opportunity_name',       recordNumberColumn: 'opportunity_record_number',       statusColumn: 'opportunity_status',       parents: ['property_id', 'opportunity_account_id'],          parentTables: ['properties', 'accounts'] },
+  property_programs:         { module: 'Outreach',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
+  work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'property_id', 'building_id'],       parentTables: ['projects', 'properties', 'buildings'] },
+  projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id'],                                    parentTables: ['properties'] },
+  assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id'],                     parentTables: ['properties', 'buildings'] },
+  incentive_applications:    { module: 'Qualification',  label: 'Applications',         nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['property_id'],                                    parentTables: ['properties'] },
+  efr_reports:               { module: 'Qualification',  label: 'EFR Reports',          nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
+  project_payment_requests:  { module: 'Incentives',     label: 'Payment Requests',     nameColumn: null,                     recordNumberColumn: 'ppr_record_number',               statusColumn: 'ppr_status',               parents: ['project_id', 'property_id'],                      parentTables: ['projects', 'properties'] },
+  payment_receipts:          { module: 'Incentives',     label: 'Payment Receipts',     nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  products:                  { module: 'Stock',          label: 'Product Catalog',      nameColumn: 'product_name',           recordNumberColumn: 'product_record_number',           statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  product_items:             { module: 'Stock',          label: 'Inventory On-Hand',    nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  materials_requests:        { module: 'Stock',          label: 'Materials Requests',   nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['project_id'],                                     parentTables: ['projects'] },
+  equipment:                 { module: 'Stock',          label: 'Equipment',            nameColumn: 'equipment_name',         recordNumberColumn: 'equipment_record_number',         statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  vehicles:                  { module: 'Fleet',          label: 'Vehicles',             nameColumn: 'vehicle_name',           recordNumberColumn: 'vehicle_record_number',           statusColumn: 'vehicle_status',           parents: [],                                                 parentTables: [] },
+  vehicle_activities:        { module: 'Fleet',          label: 'Activities',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['vehicle_id'],                                     parentTables: ['vehicles'] },
+  equipment_containers:      { module: 'Fleet',          label: 'Vehicle Kits',         nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['issued_to_vehicle_id'],                           parentTables: ['vehicles'] },
+  users:                     { module: 'People',         label: 'Users',                nameColumn: 'user_name',              recordNumberColumn: 'user_record_number',              statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  skills:                    { module: 'People',         label: 'Skills',               nameColumn: 'skill_name',             recordNumberColumn: 'skill_record_number',             statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  contact_skills:            { module: 'People',         label: 'Contact Skills',       nameColumn: null,                     recordNumberColumn: 'cs_record_number',                statusColumn: null,                       parents: ['contact_id', 'skill_id'],                         parentTables: ['contacts', 'skills'] },
+  work_type_skill_requirements: { module: 'Admin',       label: 'Skill Requirements',   nameColumn: null,                     recordNumberColumn: 'wtsr_record_number',              statusColumn: null,                       parents: ['work_type_id', 'skill_id'],                       parentTables: ['work_types', 'skills'] },
+  time_sheets:               { module: 'People',         label: 'Time Sheets',          nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['contact_id'],                                     parentTables: ['contacts'] },
+  programs:                  { module: 'Admin',          label: 'Programs',             nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  work_types:                { module: 'Admin',          label: 'Work Types',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  email_templates:           { module: 'Admin',          label: 'Email Templates',      nameColumn: 'name',                   recordNumberColumn: 'et_record_number',                statusColumn: 'status',                   parents: [],                                                 parentTables: [] },
+  document_templates:        { module: 'Admin',          label: 'Document Templates',   nameColumn: 'name',                   recordNumberColumn: 'dt_record_number',                statusColumn: 'status',                   parents: [],                                                 parentTables: [] },
+  automation_rules:          { module: 'Admin',          label: 'Automation Rules',     nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  validation_rules:          { module: 'Admin',          label: 'Validation Rules',     nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  roles:                     { module: 'Admin',          label: 'Roles',                nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  picklist_values:           { module: 'Admin',          label: 'Picklist Values',      nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  portal_users:              { module: 'Portal',         label: 'Portal Users',         nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['portal_user_account_id'],                         parentTables: ['accounts'] },
+  // Envelope family — added to fix the "Record" header bug on envelope pages.
+  envelopes:                 { module: 'Field',          label: 'Envelopes',            nameColumn: 'env_name',               recordNumberColumn: 'env_record_number',               statusColumn: 'env_status',               parents: [],                                                 parentTables: [] },
+  envelope_recipients:       { module: 'Field',          label: 'Envelope Recipients',  nameColumn: 'recipient_name',         recordNumberColumn: 'recipient_record_number',         statusColumn: 'recipient_status',         parents: ['envelope_id'],                                    parentTables: ['envelopes'] },
+  envelope_tabs:             { module: 'Field',          label: 'Envelope Tabs',        nameColumn: null,                     recordNumberColumn: 'tab_record_number',               statusColumn: null,                       parents: ['envelope_id', 'recipient_id'],                    parentTables: ['envelopes', 'envelope_recipients'] },
+  envelope_events:           { module: 'Field',          label: 'Envelope Events',      nameColumn: null,                     recordNumberColumn: 'event_record_number',             statusColumn: null,                       parents: ['envelope_id', 'recipient_id'],                    parentTables: ['envelopes', 'envelope_recipients'] },
+  // Project Report Template family
+  project_report_templates:                          { module: 'Admin', label: 'Project Report Templates',          nameColumn: 'prt_name',  recordNumberColumn: 'prt_record_number',    statusColumn: 'prt_status',  parents: [],            parentTables: [] },
+  project_report_template_sections:                  { module: 'Admin', label: 'PRT Sections',                      nameColumn: null,        recordNumberColumn: 'prts_record_number',   statusColumn: null,          parents: ['prt_id'],    parentTables: ['project_report_templates'] },
+  project_report_template_record_type_assignments:   { module: 'Admin', label: 'PRT RT Assignments',                nameColumn: null,        recordNumberColumn: 'prtrta_record_number', statusColumn: null,          parents: ['prt_id'],    parentTables: ['project_report_templates'] },
+  project_report_template_snapshots:                 { module: 'Admin', label: 'PRT Snapshots',                     nameColumn: null,        recordNumberColumn: 'prtsn_record_number',  statusColumn: null,          parents: ['prt_id'],    parentTables: ['project_report_templates'] },
 }
 
-function Breadcrumbs({ tableName, record, lookups, onBack }) {
-  const meta = TABLE_META[tableName] || { module: '—', label: tableName, parents: [] }
+// Resolve a record's display name following the TABLE_META.nameColumn lookup.
+// Falls back to the record_number, then to a short slice of the UUID. Used by
+// the detail-page header and by lookup hyperlink rendering. Centralizing this
+// stops the long `record.foo || record.bar || record.baz` chains from drifting.
+function getRecordDisplayName(tableName, record) {
+  if (!record) return ''
+  const meta = TABLE_META[tableName]
+  if (meta?.nameColumn && record[meta.nameColumn]) return record[meta.nameColumn]
+  // Special case: contacts have first/last but no contact_name on legacy rows.
+  if (tableName === 'contacts' && record.contact_first_name) {
+    return `${record.contact_first_name} ${record.contact_last_name || ''}`.trim()
+  }
+  if (meta?.recordNumberColumn && record[meta.recordNumberColumn]) return record[meta.recordNumberColumn]
+  if (record.id) return String(record.id).slice(0, 8).toUpperCase()
+  return 'Record'
+}
 
-  // Build parent chain from resolved lookups
+function getRecordNumber(tableName, record) {
+  if (!record) return ''
+  const meta = TABLE_META[tableName]
+  if (meta?.recordNumberColumn && record[meta.recordNumberColumn]) return record[meta.recordNumberColumn]
+  if (record.id) return String(record.id).slice(0, 8).toUpperCase()
+  return ''
+}
+
+function Breadcrumbs({ tableName, record, lookups, onBack, onNavigateToRecord }) {
+  const meta = TABLE_META[tableName] || { module: '—', label: tableName, parents: [], parentTables: [] }
+
+  // Parent crumbs — innermost first. Each crumb carries the FK target so the
+  // user can click through to the parent record. `parentTables` aligns
+  // positionally with `parents`; if it's missing or short (legacy entries),
+  // the crumb still renders as plain text.
   const parentCrumbs = []
-  for (const fk of meta.parents) {
+  for (let i = 0; i < meta.parents.length; i += 1) {
+    const fk = meta.parents[i]
+    const parentTable = (meta.parentTables || [])[i] || null
     const val = record[fk]
     if (val && lookups.has(val)) {
-      parentCrumbs.push(lookups.get(val))
+      const entry = lookups.get(val)
+      const label = typeof entry === 'string' ? entry : (entry?.label || '')
+      // Prefer the parent table from TABLE_META metadata; fall back to whatever
+      // resolveLookups discovered from the widget config (works for tables not
+      // listed in TABLE_META).
+      const tbl = parentTable || (typeof entry === 'object' ? entry?.table : null)
+      parentCrumbs.push({ id: val, label, table: tbl })
     }
   }
 
@@ -189,10 +248,22 @@ function Breadcrumbs({ tableName, record, lookups, onBack }) {
       <button onClick={onBack} style={{ fontSize: 12, color: '#1a5a8a', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
         {meta.label}
       </button>
-      {parentCrumbs.map((name, i) => (
+      {parentCrumbs.map((c, i) => (
         <span key={i} style={{ display: 'flex', alignItems: 'center' }}>
           {sep}
-          <span style={{ fontSize: 12, color: C.textSecondary }}>{name}</span>
+          {c.table && onNavigateToRecord ? (
+            <button
+              onClick={() => onNavigateToRecord({ table: c.table, id: c.id, mode: 'view' })}
+              style={{
+                fontSize: 12, color: '#1a5a8a', background: 'none', border: 'none',
+                cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2,
+              }}
+            >
+              {c.label}
+            </button>
+          ) : (
+            <span style={{ fontSize: 12, color: C.textSecondary }}>{c.label}</span>
+          )}
         </span>
       ))}
     </div>
@@ -1584,7 +1655,7 @@ const tdStyle = { padding: '10px 14px', color: C.textPrimary, verticalAlign: 'mi
 // FieldGroup widget — view mode OR edit mode
 // ---------------------------------------------------------------------------
 
-function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons }) {
+function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons, onNavigateToRecord }) {
   const fields = widget.widget_config?.fields || []
   if (fields.length === 0) return null
 
@@ -1596,6 +1667,21 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         const isLink = f.type === 'email' || f.type === 'lookup'
         const hasLookupOpts = f.type === 'lookup' && allLookupOpts?.[f.name]?.length > 0
         const isEditable = editing && (f.type !== 'datetime') && (f.type !== 'lookup' || hasLookupOpts)
+
+        // Lookup hyperlinking — turn populated lookup fields into clickable
+        // links to the parent record (Salesforce parity). Three things must
+        // line up: (1) we're not in edit mode, (2) the value is non-null and
+        // resolved, (3) we have a destination table for it. The destination
+        // table comes preferentially from the widget config (f.lookup_table),
+        // and falls back to whatever resolveLookups discovered. The handler
+        // is the same `onNavigateToRecord` used by related lists, so URL/
+        // history behavior is consistent across all in-app navigation.
+        let lookupLinkTarget = null
+        if (!editing && f.type === 'lookup' && raw && onNavigateToRecord) {
+          const entry = lookups.get(raw)
+          const targetTable = f.lookup_table || (typeof entry === 'object' ? entry?.table : null)
+          if (targetTable) lookupLinkTarget = { table: targetTable, id: raw, mode: 'view' }
+        }
 
         // docx_upload renders the same component in both edit and view modes
         // because uploads happen out-of-band (direct to storage + DB) rather
@@ -1636,6 +1722,20 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             {isEditable ? (
               <EditField field={f} value={draft[f.name]} onChange={onChange}
                 picklistOpts={allPicklistOpts?.[f.name]} lookupOpts={allLookupOpts?.[f.name]} />
+            ) : lookupLinkTarget ? (
+              <button
+                type="button"
+                onClick={() => onNavigateToRecord(lookupLinkTarget)}
+                style={{
+                  fontSize: 13, color: '#1a5a8a', background: 'none', border: 'none',
+                  padding: 0, textAlign: 'left', cursor: 'pointer',
+                  textDecoration: 'underline', textUnderlineOffset: 2,
+                  fontFamily: 'inherit', wordBreak: 'break-word',
+                }}
+                title={`Open ${display}`}
+              >
+                {display}
+              </button>
             ) : (
               <span style={{
                 fontSize: 13,
@@ -2936,7 +3036,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 // Section
 // ---------------------------------------------------------------------------
 
-function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes }) {
+function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes, onNavigateToRecord }) {
   const isMobile = useIsMobile()
   const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
   // Render any widgets that live inside a section card. Today: field_group,
@@ -2966,7 +3066,8 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
         if (w.widget_type === 'field_group') {
           return <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
             editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts}
-            onRefreshRecord={onRefreshRecord} recordId={recordId} fieldDisabledReasons={fieldDisabledReasons} />
+            onRefreshRecord={onRefreshRecord} recordId={recordId} fieldDisabledReasons={fieldDisabledReasons}
+            onNavigateToRecord={onNavigateToRecord} />
         }
         if (w.widget_type === 'section_config_editor') {
           return <SectionConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
@@ -3580,25 +3681,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const orderedTabs = buildOrderedTabs(sections, { includeActivity: !isInsertMode })
 
   const objectLabel = TABLE_META[tableName]?.label || tableName
+  // Header values driven from TABLE_META so adding a new object only requires
+  // one row of metadata. Previously these were 9-fallback `||` chains that
+  // grew with every new table — the envelope page rendered "Record" + a
+  // partial UUID because env_name / env_record_number weren't on the chain.
   const displayName = isCreate
     ? `New ${objectLabel.replace(/s$/, '')}`
-    : (record.contact_first_name
-        ? `${record.contact_first_name} ${record.contact_last_name || ''}`.trim()
-        : record.property_name || record.opportunity_name || record.work_order_name || record.project_name
-          || record.building_name || record.unit_name || record.vehicle_name
-          || record.account_name || record.skill_name
-          || record.product_name || record.equipment_name || record.name || 'Record')
+    : getRecordDisplayName(tableName, record)
 
-  const recordNumber = record.contact_record_number || record.property_record_number
-    || record.opportunity_record_number || record.work_order_record_number || record.project_record_number
-    || record.building_record_number || record.vehicle_record_number
-    || record.account_record_number || record.skill_record_number
-    || record.product_record_number || record.equipment_record_number
-    || record.id?.slice(0, 8).toUpperCase() || ''
+  const recordNumber = !isCreate ? getRecordNumber(tableName, record) : ''
 
-  const statusRaw = record.contact_status || record.property_status || record.opportunity_status
-    || record.work_order_status || record.project_status || record.building_status
-    || record.vehicle_status || record.account_status
+  const statusColumn = TABLE_META[tableName]?.statusColumn || null
+  const statusRaw = statusColumn ? record[statusColumn] : null
   const statusLabel = statusRaw ? (picklists.byId.get(statusRaw) || statusRaw) : null
 
   if (!layout) return (
@@ -3608,7 +3702,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       padding: isMobile ? '12px' : '20px 24px',
       paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom))' : '20px',
     }}>
-      {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} />}
+      {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
       {isMobile && (
         <button
           onClick={onBack}
@@ -3906,7 +4000,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         paddingBottom: isMobile && editing ? 'calc(80px + env(safe-area-inset-bottom))' : isMobile ? 'calc(24px + env(safe-area-inset-bottom))' : undefined,
       }}>
         {/* Desktop breadcrumbs (hidden on mobile — the sticky header handles back navigation) */}
-        {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} />}
+        {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
 
         {/* Desktop header card (mobile already shows this info in the sticky bar above — mobile shows a compact title + status chip instead) */}
         {!isMobile ? (
@@ -4217,7 +4311,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 editing={editing} draft={draft} onChange={handleFieldChange}
                 allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName}
                 onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
-                fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes} />
+                fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes}
+                onNavigateToRecord={onNavigateToRecord} />
             )
           })}
 
