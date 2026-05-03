@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { C } from '../../../data/constants'
 import { LoadingState, ErrorState } from '../../../components/UI'
 import { ListView } from '../../../components/ListView'
+import HelpIcon from '../../../components/help/HelpIcon'
 import {
   fetchPermissionSetsList, createPermissionSet,
 } from '../../../data/permissionsService'
@@ -71,7 +72,17 @@ export default function PermissionSetsPane() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ padding: '14px 24px 10px', background: C.card, borderBottom: `1px solid ${C.border}` }}>
-        <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Permission Sets</div>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Permission Sets</div>
+          <HelpIcon
+            anchors={[
+              { type: 'route',   route: '/admin/permission-sets' },
+              { type: 'object',  object: 'permission_sets' },
+              { type: 'concept', concept: 'permission-set' },
+            ]}
+            title="Permission Sets"
+          />
+        </div>
         <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
           {loading
             ? 'Loading…'

@@ -6,6 +6,8 @@ import PasswordChangeModal from './components/PasswordChangeModal'
 import IntegrationsModal from './components/IntegrationsModal'
 import OutlookCallback from './pages/OutlookCallback'
 import { GlobalSearchInline } from './components/GlobalSearch'
+import { HelpProvider } from './components/help/HelpProvider'
+import HelpPanel from './components/help/HelpPanel'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
@@ -274,13 +276,17 @@ export default function App() {
     <AuthGate>
       {(session) => (
         <ToastProvider>
-          {isOutlookCallback
-            ? (
-              <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, -apple-system, sans-serif', background: C.page }}>
-                <OutlookCallback />
-              </div>
-            )
-            : <AuthedApp session={session} />}
+          <HelpProvider>
+            {isOutlookCallback
+              ? (
+                <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, -apple-system, sans-serif', background: C.page }}>
+                  <OutlookCallback />
+                </div>
+              )
+              : <AuthedApp session={session} />}
+            {/* Global help side panel — opened by any HelpIcon anywhere in the tree. */}
+            <HelpPanel />
+          </HelpProvider>
         </ToastProvider>
       )}
     </AuthGate>

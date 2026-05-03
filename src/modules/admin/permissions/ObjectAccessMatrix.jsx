@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../../../data/constants'
 import { OBJECT_CATALOG } from '../objectCatalog'
 import { LoadingState } from '../../../components/UI'
+import HelpIcon from '../../../components/help/HelpIcon'
 import {
   buttonPrimaryStyle, buttonSecondaryStyle, hintBoxStyle,
 } from '../adminStyles'
@@ -158,12 +159,14 @@ export default function ObjectAccessMatrix({
               <strong>Role baseline.</strong> A user with this role gets the access checked
               below by default. Any permission sets assigned to that user can grant
               additional access on top — they cannot take role access away here.
+              <HelpIcon concept="object-access" title="Object Access" size={12} />
             </>
           ) : (
             <>
               <strong>Permission set grant.</strong> Object access checked here is added
               on top of whatever the user&rsquo;s base role already grants. To revoke role
               access, edit the role.
+              <HelpIcon concept="object-access" title="Object Access" size={12} />
             </>
           )}
         </div>

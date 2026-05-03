@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { C } from '../../../data/constants'
 import { LoadingState, ErrorState } from '../../../components/UI'
 import { ListView } from '../../../components/ListView'
+import HelpIcon from '../../../components/help/HelpIcon'
 import { fetchRoles } from '../../../data/adminService'
 import RolePermissionsEditor from './RolePermissionsEditor'
 
@@ -55,7 +56,17 @@ export default function RolesPane() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ padding: '14px 24px 10px', background: C.card, borderBottom: `1px solid ${C.border}` }}>
-        <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Roles</div>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Roles</div>
+          <HelpIcon
+            anchors={[
+              { type: 'route', route: '/admin/roles' },
+              { type: 'object', object: 'roles' },
+              { type: 'concept', concept: 'role' },
+            ]}
+            title="Roles"
+          />
+        </div>
         <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
           {loading ? 'Loading…' : `${data.length} role${data.length === 1 ? '' : 's'} — click a row to edit object and field-level access`}
         </div>

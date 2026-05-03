@@ -11,6 +11,7 @@ export const SETUP_TREE = [
       { id: 'users',            label: 'Users' },
       { id: 'roles',            label: 'Roles' },
       { id: 'permission_sets',  label: 'Permission Sets' },
+      { id: 'help_articles',    label: 'Help Articles' },
     ],
   },
   {

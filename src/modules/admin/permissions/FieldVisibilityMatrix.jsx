@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../../../data/constants'
 import { OBJECT_CATALOG } from '../objectCatalog'
 import { LoadingState } from '../../../components/UI'
+import HelpIcon from '../../../components/help/HelpIcon'
 import { fetchObjectFields } from '../../../data/permissionsService'
 import {
   buttonPrimaryStyle, buttonSecondaryStyle, hintBoxStyle, inputStyle,
@@ -270,7 +271,10 @@ export default function FieldVisibilityMatrix({
                       <th style={{ ...thStyle, width: '46%', textAlign: 'left' }}>Field</th>
                       <th style={{ ...thStyle, width: '14%' }}>Visible</th>
                       <th style={{ ...thStyle, width: '14%' }}>Editable</th>
-                      <th style={{ ...thStyle, width: '26%', textAlign: 'left' }}>Financial Tier</th>
+                      <th style={{ ...thStyle, width: '26%', textAlign: 'left' }}>
+                        Financial Tier
+                        <HelpIcon concept="financial-tier" title="Financial Tiers" size={12} />
+                      </th>
                     </tr>
                   </thead>
                   <tbody>

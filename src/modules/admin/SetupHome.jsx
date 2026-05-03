@@ -7,6 +7,7 @@ import { SETUP_TREE } from './setupTree'
 import UsersPane from './UsersPane'
 import RolesPane from './permissions/RolesPane'
 import PermissionSetsPane from './permissions/PermissionSetsPane'
+import HelpArticlesPane from './help/HelpArticlesPane'
 import {
   fetchPrograms, fetchWorkTypes,
   fetchEmailTemplates, fetchDocumentTemplates, fetchEnvelopes,
@@ -310,6 +311,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'users':             return <UsersPane onOpenRecord={onOpenRecord} />
     case 'roles':             return <RolesPane />
     case 'permission_sets':   return <PermissionSetsPane />
+    case 'help_articles':     return <HelpArticlesPane />
     case 'picklist_values':   return <NodePage title="Picklist Value Sets"     table="picklist_values"   fetcher={fetchPicklistValues}    columns={PL_COLS}             newLabel="Picklist Value"   onOpenRecord={onOpenRecord} />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'automation_rules':  return <NodePage title="Flows (Automation Rules)" table="automation_rules" fetcher={fetchAutomationRules}   columns={AR_COLS}             newLabel="Automation Rule"  onOpenRecord={onOpenRecord} />
