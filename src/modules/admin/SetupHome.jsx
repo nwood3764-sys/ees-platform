@@ -5,8 +5,10 @@ import { ListView } from '../../components/ListView'
 import { useIsMobile } from '../../lib/useMediaQuery'
 import { SETUP_TREE } from './setupTree'
 import UsersPane from './UsersPane'
+import RolesPane from './permissions/RolesPane'
+import PermissionSetsPane from './permissions/PermissionSetsPane'
 import {
-  fetchRoles, fetchPrograms, fetchWorkTypes,
+  fetchPrograms, fetchWorkTypes,
   fetchEmailTemplates, fetchDocumentTemplates, fetchEnvelopes,
   fetchAutomationRules, fetchValidationRules,
   fetchPicklistValues, fetchAuditLog,
@@ -306,9 +308,8 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
   // Each node is rendered by a dedicated component that loads its own data.
   switch (nodeId) {
     case 'users':             return <UsersPane onOpenRecord={onOpenRecord} />
-    case 'roles':             return <NodePage title="Roles"                   table="roles"             fetcher={fetchRoles}             columns={ROLE_COLS}           newLabel="Role"             onOpenRecord={onOpenRecord} />
-    case 'permissions':       return <PermissionsPane onOpenObjectManager={onOpenObjectManager} />
-    case 'field_permissions': return <FieldPermissionsPane onOpenObjectManager={onOpenObjectManager} />
+    case 'roles':             return <RolesPane />
+    case 'permission_sets':   return <PermissionSetsPane />
     case 'picklist_values':   return <NodePage title="Picklist Value Sets"     table="picklist_values"   fetcher={fetchPicklistValues}    columns={PL_COLS}             newLabel="Picklist Value"   onOpenRecord={onOpenRecord} />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'automation_rules':  return <NodePage title="Flows (Automation Rules)" table="automation_rules" fetcher={fetchAutomationRules}   columns={AR_COLS}             newLabel="Automation Rule"  onOpenRecord={onOpenRecord} />
@@ -372,40 +373,6 @@ function NodePage({ title, table, fetcher, columns, newLabel, onOpenRecord }) {
           onOpenRecord={onOpenRecord ? row => row?._id && onOpenRecord({ table, id: row._id, name: row.name || row.id }) : undefined}
         />
       )}
-    </div>
-  )
-}
-
-function PermissionsPane({ onOpenObjectManager }) {
-  return (
-    <div style={{ padding: '28px 32px', overflow: 'auto', flex: 1 }}>
-      <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Permissions</div>
-      <div style={{ fontSize: 12.5, color: C.textMuted, marginTop: 6, maxWidth: 640, lineHeight: 1.5 }}>
-        Named permissions (module / object / action) assigned to roles via the role_permissions
-        junction table. Permission editing UI is in the build queue — for now, view the underlying
-        table in Object Manager.
-      </div>
-      <button onClick={onOpenObjectManager} style={{
-        marginTop: 18, background: C.emerald, color: '#fff', border: 'none',
-        padding: '8px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
-      }}>Open in Object Manager</button>
-    </div>
-  )
-}
-
-function FieldPermissionsPane({ onOpenObjectManager }) {
-  return (
-    <div style={{ padding: '28px 32px', overflow: 'auto', flex: 1 }}>
-      <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Field-Level Security</div>
-      <div style={{ fontSize: 12.5, color: C.textMuted, marginTop: 6, maxWidth: 640, lineHeight: 1.5 }}>
-        Per-role, per-field visibility and edit permissions. The financial tier (Tier 1, 2, 3)
-        system is implemented through this table. A dedicated per-object permission matrix editor
-        is in the build queue.
-      </div>
-      <button onClick={onOpenObjectManager} style={{
-        marginTop: 18, background: C.emerald, color: '#fff', border: 'none',
-        padding: '8px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
-      }}>Open field_permissions in Object Manager</button>
     </div>
   )
 }
@@ -504,13 +471,8 @@ function ComingSoonPane({ label }) {
 // ─── Column definitions for each list view ─────────────────────────────
 // Note: Users columns live with UsersPane (their own pane handles invite
 // flow and an extra Sign-In column), so they're not declared here.
-
-const ROLE_COLS = [
-  { field: 'id',          label: 'Record #',    type: 'text',   sortable: true, filterable: false },
-  { field: 'name',        label: 'Role',        type: 'text',   sortable: true, filterable: true },
-  { field: 'description', label: 'Description', type: 'text',   sortable: false, filterable: true },
-  { field: 'status',      label: 'Status',      type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
-]
+// Roles columns moved to permissions/RolesPane.jsx alongside the permission
+// editor that consumes them.
 
 const PROG_COLS = [
   { field: 'id',                label: 'Short Name',     type: 'text', sortable: true, filterable: false },
