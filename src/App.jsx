@@ -1,14 +1,15 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { Sidebar, MobileHeader, ComingSoon } from './components/UI'
 import AuthGate from './components/AuthGate'
 import { ToastProvider } from './components/Toast'
 import PasswordChangeModal from './components/PasswordChangeModal'
 import IntegrationsModal from './components/IntegrationsModal'
 import OutlookCallback from './pages/OutlookCallback'
-import { GlobalSearchTrigger, GlobalSearchModal } from './components/GlobalSearch'
+import { GlobalSearchInline } from './components/GlobalSearch'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
+import { useIsMobile } from './lib/useMediaQuery'
 import { useUrlNavigation } from './lib/urlNav'
 
 // ─── Lazy-loaded modules ─────────────────────────────────────────────────────
@@ -81,11 +82,15 @@ function AuthedApp({ session }) {
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   // Integrations modal — Outlook Connect/Disconnect today, room for more later.
   const [integrationsOpen, setIntegrationsOpen] = useState(false)
-  // Global search modal — opens via top-bar trigger, mobile header magnifier,
-  // or Cmd/Ctrl+K. Lives at the app root so the modal portal can sit above
-  // every module and the keyboard shortcut works regardless of which module
-  // is currently mounted.
-  const [searchOpen, setSearchOpen] = useState(false)
+  // Mobile search slide-down. Desktop's search bar is always visible so it
+  // doesn't need a flag — just focus the input. On mobile the input is
+  // hidden until the user taps the magnifier in MobileHeader.
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+  // Ref to the inline search input so the global Cmd/Ctrl+K listener can
+  // focus it directly on desktop. On mobile the same listener flips
+  // mobileSearchOpen and the component auto-focuses on mount.
+  const searchInputRef = useRef(null)
+  const isMobile = useIsMobile()
   // Desktop sidebar collapse state. Persisted to localStorage so the choice
   // survives reloads. Ignored on mobile (the drawer is always full-width).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -143,23 +148,25 @@ function AuthedApp({ session }) {
     }
   }, [mobileMenuOpen])
 
-  // Global Cmd/Ctrl+K shortcut to open universal search. Mirrors the
-  // ubiquitous spotlight/quick-find pattern (Salesforce, Linear, Notion,
-  // GitHub). Listens at document level so the shortcut works regardless of
-  // which module is mounted or which element is focused. preventDefault
-  // suppresses the browser's "search bookmarks" default on Firefox.
+  // Global Cmd/Ctrl+K shortcut. Mirrors the ubiquitous spotlight/quick-find
+  // pattern (Salesforce, Linear, Notion, GitHub). On desktop the search
+  // bar is always visible — focus its input. On mobile the bar is hidden
+  // by default — open the slide-down (component auto-focuses on mount).
+  // preventDefault suppresses the browser's "search bookmarks" default on
+  // Firefox.
   useEffect(() => {
     if (typeof window === 'undefined') return
     const onKey = (e) => {
       const isMod = e.metaKey || e.ctrlKey
       if (isMod && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault()
-        setSearchOpen(true)
+        if (isMobile) setMobileSearchOpen(true)
+        else searchInputRef.current?.focus()
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [])
+  }, [isMobile])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -219,22 +226,25 @@ function AuthedApp({ session }) {
           onOpenMenu={() => setMobileMenuOpen(true)}
           moduleLabel={NAV_MODULES.find(m => m.id === activeModule)?.label || 'Energy Efficiency Services'}
           moduleIcon={NAV_MODULES.find(m => m.id === activeModule)?.icon}
-          onOpenSearch={() => setSearchOpen(true)}
+          onOpenSearch={() => setMobileSearchOpen(true)}
         />
-        <GlobalSearchTrigger onOpen={() => setSearchOpen(true)} />
+        {/* Inline universal search — real input on desktop (always visible),
+            slide-down below MobileHeader on mobile (gated by mobileSearchOpen).
+            Hidden on the search results page itself, which already has its
+            own dedicated input — two would just be confusing. */}
+        {activeModule !== 'search' && (
+          <GlobalSearchInline
+            inputRef={searchInputRef}
+            mobileOpen={mobileSearchOpen}
+            onCloseMobile={() => setMobileSearchOpen(false)}
+            onNavigate={navigateToRecord}
+            onViewAll={(q) => navigateToSearch(q)}
+          />
+        )}
         <Suspense fallback={<ModuleLoader />}>
           {renderModule()}
         </Suspense>
       </div>
-
-      {searchOpen && (
-        <GlobalSearchModal
-          open={searchOpen}
-          onClose={() => setSearchOpen(false)}
-          onNavigate={navigateToRecord}
-          onViewAll={(q) => navigateToSearch(q)}
-        />
-      )}
 
       {passwordModalOpen && (
         <PasswordChangeModal

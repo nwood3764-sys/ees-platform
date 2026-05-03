@@ -1,37 +1,53 @@
 /**
  * Global Search — Salesforce-style universal search across all major Anura
- * objects. Backed by the public.global_search RPC which returns up to N
- * matches per object type (5 in the modal, 25 on the dedicated results
- * page) from 17 tables.
+ * objects. Backed by the public.global_search RPC which returns up to 5
+ * matches per object type (in the dropdown) or up to 200 (on the dedicated
+ * results page) from 17 tables.
  *
- * Three exports for the entry surfaces:
- *   • GlobalSearchTrigger — desktop-only inline bar (renders nothing on mobile;
- *                           the mobile MobileHeader has its own search icon).
- *   • GlobalSearchModal   — the modal itself; rendered always at App level so
- *                           Cmd/Ctrl+K and the mobile header trigger both
- *                           land in one place.
- *   • SEARCH_OBJECT_ICONS — exported for tests / future reuse.
+ * UI shape: a real text input the user clicks into and types directly,
+ * with results appearing in a dropdown panel anchored below the bar.
+ * Salesforce, GitHub, Linear all use this pattern. Earlier iterations of
+ * this file used a click-to-open modal — that was replaced because users
+ * found the constant overlay disruptive.
  *
- * Plus a few exports the SearchResultsPage module reuses so the two
- * surfaces stay visually identical:
- *   • ObjectIcon, SearchResultRow — render an object icon / hit row
- *   • SEARCH_GROUP_ORDER, SEARCH_GROUP_LABELS, SEARCH_OBJECT_TABLES
+ * Exports:
+ *   • GlobalSearchInline    — the bar + dropdown component. Always rendered
+ *                             on desktop; on mobile it's a slide-down below
+ *                             MobileHeader, gated by the `mobileOpen` prop.
+ *   • SEARCH_OBJECT_ICONS, ObjectIcon, SearchResultRow,
+ *     SEARCH_GROUP_ORDER, SEARCH_GROUP_LABELS, SEARCH_OBJECT_TABLES
+ *                           — exported helpers reused by the dedicated
+ *                             SearchResultsPage so both surfaces render hits
+ *                             identically.
  *
- * State convention (lifted to App):
- *   const [searchOpen, setSearchOpen] = useState(false)
- *   <GlobalSearchTrigger onOpen={() => setSearchOpen(true)} />
- *   <GlobalSearchModal
- *     open={searchOpen}
- *     onClose={() => setSearchOpen(false)}
+ * Wiring (App.jsx):
+ *   const searchInputRef = useRef(null)
+ *   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+ *
+ *   // Cmd/Ctrl+K → focus input on desktop, slide-down on mobile.
+ *   useEffect(() => {
+ *     const onKey = e => {
+ *       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+ *         e.preventDefault()
+ *         if (isMobile) setMobileSearchOpen(true)
+ *         else searchInputRef.current?.focus()
+ *       }
+ *     }
+ *     document.addEventListener('keydown', onKey)
+ *     return () => document.removeEventListener('keydown', onKey)
+ *   }, [isMobile])
+ *
+ *   <GlobalSearchInline
+ *     inputRef={searchInputRef}
+ *     mobileOpen={mobileSearchOpen}
+ *     onCloseMobile={() => setMobileSearchOpen(false)}
  *     onNavigate={navigateToRecord}
- *     onViewAll={(q) => navigateToSearch(q)}   // optional CTA → /search?q=...
+ *     onViewAll={(q) => navigateToSearch(q)}
  *   />
- *   useEffect → bind Cmd/Ctrl+K → setSearchOpen(true)
  *
- * Result navigation: passes { table, id, mode: 'view' } to onNavigate, which
- * is the same shape urlNav.useUrlNavigation().navigateToRecord accepts. The
- * RPC returns the raw table_name (e.g. 'work_orders') which already matches
- * the URL-table convention in TABLE_MODULE_MAP.
+ * Result navigation: passes { table, id, mode: 'view' } to onNavigate, the
+ * shape urlNav.useUrlNavigation().navigateToRecord accepts. The RPC's
+ * table_name column already matches TABLE_MODULE_MAP keys.
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
@@ -219,126 +235,143 @@ function KeyHint({ children }) {
 const IS_MAC = typeof navigator !== 'undefined'
   && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || '')
 
-// ─── Desktop trigger ─────────────────────────────────────────────────────────
-// Renders nothing on mobile — MobileHeader supplies its own search button so
-// we don't double-up the affordance.
-export function GlobalSearchTrigger({ onOpen }) {
-  const isMobile = useIsMobile()
-  if (isMobile) return null
-
-  return (
-    <div style={{
-      flexShrink: 0,
-      height: 44,
-      background: C.card,
-      borderBottom: `1px solid ${C.border}`,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '0 16px',
-    }}>
-      <button
-        onClick={onOpen}
-        aria-label="Search Anura"
-        style={{
-          width: '100%', maxWidth: 560, height: 30,
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '0 10px',
-          background: C.page,
-          border: `1px solid ${C.border}`,
-          borderRadius: 6,
-          cursor: 'pointer',
-          color: C.textMuted,
-          fontSize: 13,
-          textAlign: 'left',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = C.borderDark }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = C.border }}
-      >
-        <ObjectIcon type="" size={14} color={C.textMuted} />
-        {/* Inline magnifier — small enough to avoid loading a second icon */}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-          stroke={C.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"
-          style={{ marginLeft: -22 }}>
-          <circle cx="11" cy="11" r="7" />
-          <path d="M21 21l-4.35-4.35" />
-        </svg>
-        <span style={{ flex: 1, marginLeft: 6 }}>Search accounts, projects, work orders, properties…</span>
-        <KeyHint>{IS_MAC ? '⌘' : 'Ctrl'}</KeyHint>
-        <KeyHint>K</KeyHint>
-      </button>
-    </div>
-  )
-}
-
-// ─── Modal ───────────────────────────────────────────────────────────────────
-// Always mounted at App level; visible only when `open` is true. The query
-// state lives inside so opening + closing fully resets the search session.
+// ─── Inline search bar ───────────────────────────────────────────────────────
+// One component for both desktop and mobile. Replaces the old click-to-open-
+// modal pattern: the user clicks directly into the input and types. Results
+// appear in a dropdown panel anchored below the bar (portal + position:fixed
+// so the parent overflow:hidden doesn't clip it).
 //
-// onViewAll(query) — optional. When provided, the modal renders a "View
-// all results" button that takes the user to the full grouped results
-// page. Closing the modal is the caller's responsibility (it's standard
-// to close the modal as part of the navigation transition).
-export function GlobalSearchModal({ open, onClose, onNavigate, onViewAll }) {
+// On desktop the bar is always rendered (44px below the MobileHeader slot).
+// On mobile the bar slides down only when `mobileOpen` is true — the
+// MobileHeader's magnifier icon toggles it.
+//
+// Props:
+//   inputRef       — optional. Caller (App.jsx) keeps a ref so a global
+//                    Cmd/Ctrl+K listener can focus the input directly.
+//   mobileOpen     — only meaningful on mobile. Controls slide-down
+//                    visibility. Ignored on desktop (always visible).
+//   onCloseMobile  — called when the user dismisses the mobile slide-down
+//                    via the X button or Esc.
+//   onNavigate     — { table, id, mode } — pass to urlNav.navigateToRecord.
+//   onViewAll      — (query) => void. Hooked to the "View all results"
+//                    CTA at the bottom of the dropdown.
+export function GlobalSearchInline({
+  inputRef: inputRefProp,
+  mobileOpen = false,
+  onCloseMobile,
+  onNavigate,
+  onViewAll,
+}) {
   const isMobile = useIsMobile()
-  const inputRef = useRef(null)
+  const internalInputRef = useRef(null)
+  const inputRef = inputRefProp || internalInputRef
+  const barRef = useRef(null)
+  const dropdownRef = useRef(null)
 
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])     // raw rows from RPC
+  const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [activeIdx, setActiveIdx] = useState(0)  // flat index across all groups
+  const [activeIdx, setActiveIdx] = useState(0)
+  const [open, setOpen] = useState(false)   // dropdown visibility
+  const [barRect, setBarRect] = useState(null)
 
-  // Debounced + abortable search. Each keystroke replaces the in-flight call
-  // so we never display stale results from a slower earlier query.
+  // Debounced + abortable search.
   const debounceRef = useRef(null)
   const reqIdRef = useRef(0)
 
-  // Reset everything when the modal closes; leave the close fast — the user
-  // expects ESC to feel instant.
-  useEffect(() => {
-    if (!open) {
-      setQuery('')
-      setResults([])
-      setError(null)
-      setActiveIdx(0)
-      setLoading(false)
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-    }
-  }, [open])
-
-  // Autofocus on open. Slight delay to let the modal mount and animations
-  // settle — focusing during the same tick fights the portal mount.
+  // ─── Dropdown positioning ─────────────────────────────────────────────────
+  // The bar lives inside a flex column with overflow:hidden, so a normal
+  // absolutely-positioned dropdown would get clipped. Instead the dropdown
+  // is portaled to body with position:fixed using the bar's viewport rect.
+  // Recompute on open and on window resize. No scroll listener — the bar
+  // itself doesn't scroll (it's in the fixed app-chrome region), only the
+  // inner module does.
   useEffect(() => {
     if (!open) return
-    const t = setTimeout(() => inputRef.current?.focus(), 30)
-    return () => clearTimeout(t)
+    const measure = () => {
+      if (barRef.current) setBarRect(barRef.current.getBoundingClientRect())
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
   }, [open])
 
-  // Keyboard: Esc to close. Up/Down to move selection. Enter to navigate.
-  // Bound at the document level so the input doesn't have to dispatch them.
+  // Close dropdown when sidebar collapse / window-resize / mobile-toggle
+  // changes the bar size out from under us. Same effect as the resize
+  // listener above but also fires when the bar mounts/unmounts.
+  useEffect(() => {
+    if (!barRef.current || !open) return
+    const ro = new ResizeObserver(() => {
+      if (barRef.current) setBarRect(barRef.current.getBoundingClientRect())
+    })
+    ro.observe(barRef.current)
+    return () => ro.disconnect()
+  }, [open])
+
+  // ─── Click outside to close ───────────────────────────────────────────────
+  // Bar click and dropdown click both keep the dropdown open. Anywhere else
+  // closes it. The input itself stays focused — only the dropdown hides.
+  useEffect(() => {
+    if (!open) return
+    const handler = (e) => {
+      if (barRef.current?.contains(e.target)) return
+      if (dropdownRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  // ─── Keyboard ─────────────────────────────────────────────────────────────
+  // Esc closes dropdown (and on mobile, dismisses the slide-down too).
+  // Up/Down move selection within the result list. Enter opens the active
+  // hit. Listening on document is fine because we only act when open.
   useEffect(() => {
     if (!open) return
     const onKey = (e) => {
-      if (e.key === 'Escape') { onClose(); return }
-      if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, Math.max(results.length - 1, 0))); return }
-      if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); return }
-      if (e.key === 'Enter') {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        inputRef.current?.blur()
+        if (isMobile) onCloseMobile?.()
+        return
+      }
+      if (e.key === 'ArrowDown') {
         e.preventDefault()
+        setActiveIdx(i => Math.min(i + 1, Math.max(results.length - 1, 0)))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setActiveIdx(i => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === 'Enter') {
         const r = results[activeIdx]
         if (r) {
-          onNavigate?.({ table: r.table_name, id: r.id, mode: 'view' })
-          onClose()
+          e.preventDefault()
+          handleSelectRow(r)
         }
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open, results, activeIdx, onClose, onNavigate])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, results, activeIdx, isMobile])
 
-  // Run the RPC. Debounced 180ms so a typist's keystrokes coalesce into a
-  // single network round-trip. Empty/short queries clear results but don't
-  // hit the wire.
+  // ─── Mobile: focus input as the slide-down opens ──────────────────────────
   useEffect(() => {
-    if (!open) return
+    if (isMobile && mobileOpen) {
+      const t = setTimeout(() => inputRef.current?.focus(), 30)
+      return () => clearTimeout(t)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, mobileOpen])
+
+  // ─── Run the search ───────────────────────────────────────────────────────
+  // 180ms debounce so a typist's keystrokes coalesce into a single round
+  // trip. Stale-response guard via reqIdRef.
+  useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     const trimmed = query.trim()
     if (trimmed.length < 2) {
@@ -354,7 +387,6 @@ export function GlobalSearchModal({ open, onClose, onNavigate, onViewAll }) {
         p_query: trimmed,
         p_limit_per_object: 5,
       })
-      // Guard: if a newer request already started, drop this response.
       if (myReq !== reqIdRef.current) return
       if (error) {
         setError(error.message || 'Search failed')
@@ -362,19 +394,15 @@ export function GlobalSearchModal({ open, onClose, onNavigate, onViewAll }) {
         setLoading(false)
         return
       }
-      // The RPC already orders within each object_type by match_rank then
-      // primary_label. We only need to keep the rows in arrival order.
       setResults(Array.isArray(data) ? data : [])
       setActiveIdx(0)
       setLoading(false)
       setError(null)
     }, 180)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query, open])
+  }, [query])
 
-  // Group results by object_type for rendering. GROUP_ORDER drives display
-  // order; any type returned by the RPC but missing from GROUP_ORDER falls
-  // to the bottom in alphabetical order.
+  // Group results for display. Same logic the modal used.
   const groups = useMemo(() => {
     if (!results.length) return []
     const byType = new Map()
@@ -383,8 +411,8 @@ export function GlobalSearchModal({ open, onClose, onNavigate, onViewAll }) {
       arr.push(r)
       byType.set(r.object_type, arr)
     }
-    const known = GROUP_ORDER.filter(t => byType.has(t))
-    const extras = [...byType.keys()].filter(t => !GROUP_ORDER.includes(t)).sort()
+    const known = SEARCH_GROUP_ORDER.filter(t => byType.has(t))
+    const extras = [...byType.keys()].filter(t => !SEARCH_GROUP_ORDER.includes(t)).sort()
     return [...known, ...extras].map(type => ({
       type,
       label: byType.get(type)[0]?.object_label || type,
@@ -393,223 +421,272 @@ export function GlobalSearchModal({ open, onClose, onNavigate, onViewAll }) {
     }))
   }, [results])
 
-  // Flat row index across groups — needed for keyboard navigation since the
-  // user moves through one logical list, not per-group lists.
   const flatRows = useMemo(() => groups.flatMap(g => g.rows), [groups])
-  // results state IS the same flat list because the RPC returns ungrouped
-  // rows in CTE order. Keep activeIdx scoped to flatRows.length for safety.
   const safeActiveIdx = Math.min(activeIdx, Math.max(flatRows.length - 1, 0))
 
-  if (!open) return null
+  const handleSelectRow = (r) => {
+    onNavigate?.({ table: r.table_name, id: r.id, mode: 'view' })
+    // Close the dropdown but keep the query — user might want to refine.
+    setOpen(false)
+    if (isMobile) onCloseMobile?.()
+  }
 
-  // ─── Modal layout ─────────────────────────────────────────────────────────
-  // Desktop: centered card pinned ~80px from top. Mobile: full-screen sheet.
-  const overlay = (
+  const handleViewAll = () => {
+    const trimmed = query.trim()
+    if (!trimmed) return
+    onViewAll?.(trimmed)
+    setOpen(false)
+    if (isMobile) onCloseMobile?.()
+  }
+
+  // ─── Mobile gating ────────────────────────────────────────────────────────
+  // On mobile we only render when the user has opened the slide-down via
+  // MobileHeader's magnifier. Desktop renders the bar inline always.
+  if (isMobile && !mobileOpen) return null
+
+  // The bar itself (input + magnifier + spinner). Rendered both desktop
+  // and mobile; only the surrounding chrome differs.
+  const bar = (
     <div
-      onClick={onClose}
+      ref={barRef}
       style={{
-        position: 'fixed', inset: 0, zIndex: 10000,
-        background: 'rgba(7, 17, 31, 0.45)',
-        display: 'flex',
-        alignItems: isMobile ? 'stretch' : 'flex-start',
-        justifyContent: 'center',
-        padding: isMobile ? 0 : '80px 16px 16px',
-        animation: 'ees-fade-in 120ms ease',
+        flexShrink: 0,
+        height: 44,
+        background: C.card,
+        borderBottom: `1px solid ${C.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: isMobile ? '0 8px' : '0 16px',
       }}
     >
-      <div
-        onClick={e => e.stopPropagation()}
-        role="dialog"
-        aria-label="Search"
-        style={{
-          width: isMobile ? '100%' : '100%',
-          maxWidth: isMobile ? 'none' : 640,
-          maxHeight: isMobile ? '100%' : 'calc(100vh - 96px)',
-          background: C.card,
-          borderRadius: isMobile ? 0 : 10,
-          border: `1px solid ${C.border}`,
-          boxShadow: '0 20px 50px rgba(7,17,31,0.18)',
-          display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
-          animation: isMobile ? 'none' : 'ees-rise 140ms ease',
-        }}
-      >
-        {/* Input row */}
-        <div style={{
-          flexShrink: 0,
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: isMobile ? '12px 12px' : '12px 16px',
-          borderBottom: `1px solid ${C.border}`,
-          background: C.card,
-        }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-            stroke={C.textSecondary} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="7" />
-            <path d="M21 21l-4.35-4.35" />
-          </svg>
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search Anura…"
-            style={{
-              flex: 1, border: 'none', outline: 'none', background: 'transparent',
-              fontSize: 16, color: C.textPrimary,
-              fontFamily: 'inherit',
-            }}
-          />
-          {loading && (
-            <div style={{
-              width: 14, height: 14, borderRadius: '50%',
-              border: `2px solid ${C.border}`, borderTopColor: C.emerald,
-              animation: 'ees-spin 0.7s linear infinite',
-            }} />
-          )}
+      <div style={{
+        width: '100%', maxWidth: isMobile ? 'none' : 560, height: 30,
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '0 10px',
+        background: C.page,
+        border: `1px solid ${C.border}`,
+        borderRadius: 6,
+      }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke={C.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="7" />
+          <path d="M21 21l-4.35-4.35" />
+        </svg>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={e => { setQuery(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          placeholder={isMobile
+            ? 'Search Anura…'
+            : 'Search accounts, projects, work orders, properties…'}
+          aria-label="Search Anura"
+          style={{
+            flex: 1,
+            border: 'none', outline: 'none', background: 'transparent',
+            fontSize: 13.5, color: C.textPrimary,
+            fontFamily: 'inherit',
+            minWidth: 0,
+          }}
+        />
+        {loading && (
+          <div style={{
+            width: 12, height: 12, borderRadius: '50%',
+            border: `2px solid ${C.border}`, borderTopColor: C.emerald,
+            animation: 'ees-spin 0.7s linear infinite',
+            flexShrink: 0,
+          }} />
+        )}
+        {/* Clear button when there's a query */}
+        {query && (
           <button
-            onClick={onClose}
-            aria-label="Close search"
+            onClick={() => { setQuery(''); inputRef.current?.focus(); setOpen(true) }}
+            aria-label="Clear search"
+            tabIndex={-1}
             style={{
               flexShrink: 0,
               background: 'transparent', border: 'none', cursor: 'pointer',
-              padding: 4, color: C.textMuted, lineHeight: 0,
+              padding: 2, color: C.textMuted, lineHeight: 0,
             }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6L6 18 M6 6l12 12" />
             </svg>
           </button>
-        </div>
-
-        {/* Body */}
-        <div style={{ flex: 1, overflowY: 'auto', background: C.page }}>
-          {/* Empty / hint state */}
-          {query.trim().length < 2 && !loading && (
-            <div style={{
-              padding: isMobile ? '32px 16px' : '40px 24px',
-              textAlign: 'center', color: C.textMuted, fontSize: 13,
-            }}>
-              <div style={{ marginBottom: 6, color: C.textSecondary, fontWeight: 500, fontSize: 14 }}>
-                Search across all of Anura
-              </div>
-              Type at least 2 characters to find accounts, contacts, properties,
-              opportunities, projects, work orders, incentive applications, and more.
-              <div style={{ marginTop: 14, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
-                <ExampleChip text="PROJ-00001" onClick={() => setQuery('PROJ-00001')} />
-                <ExampleChip text="willow" onClick={() => setQuery('willow')} />
-                <ExampleChip text="IRA HOMES" onClick={() => setQuery('IRA HOMES')} />
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div style={{ padding: 16, color: C.danger, fontSize: 13 }}>
-              {error}
-            </div>
-          )}
-
-          {/* No results */}
-          {query.trim().length >= 2 && !loading && !error && groups.length === 0 && (
-            <div style={{
-              padding: '40px 24px', textAlign: 'center',
-              color: C.textMuted, fontSize: 13,
-            }}>
-              <div style={{ color: C.textSecondary, fontWeight: 500, fontSize: 14, marginBottom: 4 }}>
-                No matches for “{query}”
-              </div>
-              Check spelling or search by record number (e.g. PROJ-00001).
-            </div>
-          )}
-
-          {/* Grouped results */}
-          {groups.map(group => (
-            <ResultGroup
-              key={group.type}
-              group={group}
-              flatRows={flatRows}
-              activeIdx={safeActiveIdx}
-              onSelect={(r) => {
-                onNavigate?.({ table: r.table_name, id: r.id, mode: 'view' })
-                onClose()
-              }}
-              onHover={(idx) => setActiveIdx(idx)}
-            />
-          ))}
-
-          {/* View all results — full-width CTA below the grouped hits.
-              Top-N-per-object results in the modal are intentionally
-              capped low; this button opens the dedicated results page
-              where the user can browse everything grouped by object,
-              filter to a single object type, etc. Shown on mobile and
-              desktop alike since the per-object cap is the same. */}
-          {groups.length > 0 && onViewAll && (
-            <button
-              onClick={() => {
-                onViewAll(query.trim())
-                onClose()
-              }}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                gap: 8,
-                width: '100%',
-                padding: '12px 16px',
-                background: C.card,
-                border: 'none',
-                borderTop: `1px solid ${C.border}`,
-                color: C.emerald,
-                fontSize: 13, fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = '#f4fbf7' }}
-              onMouseLeave={e => { e.currentTarget.style.background = C.card }}
-            >
-              View all results for "{query.trim()}"
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14 M12 5l7 7-7 7" />
-              </svg>
-            </button>
-          )}
-        </div>
-
-        {/* Footer hint */}
-        {!isMobile && (
-          <div style={{
-            flexShrink: 0,
-            padding: '8px 14px',
-            background: C.card,
-            borderTop: `1px solid ${C.border}`,
-            display: 'flex', alignItems: 'center', gap: 14,
-            fontSize: 11, color: C.textMuted,
-          }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <KeyHint>↑</KeyHint><KeyHint>↓</KeyHint> navigate
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <KeyHint>↵</KeyHint> open
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <KeyHint>esc</KeyHint> close
-            </span>
-            <span style={{ marginLeft: 'auto' }}>
-              {flatRows.length > 0 && `${flatRows.length} result${flatRows.length === 1 ? '' : 's'}`}
-            </span>
-          </div>
+        )}
+        {/* Cmd/Ctrl+K hint pills only on desktop, only when not focused */}
+        {!isMobile && !open && !query && (
+          <>
+            <KeyHint>{IS_MAC ? '⌘' : 'Ctrl'}</KeyHint>
+            <KeyHint>K</KeyHint>
+          </>
+        )}
+        {/* Mobile close button — dismisses the slide-down entirely */}
+        {isMobile && (
+          <button
+            onClick={() => { setOpen(false); onCloseMobile?.() }}
+            aria-label="Close search"
+            style={{
+              flexShrink: 0,
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              padding: 2, color: C.textMuted, lineHeight: 0,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18 M6 6l12 12" />
+            </svg>
+          </button>
         )}
       </div>
-
-      {/* Local keyframes — don't pollute global stylesheet for a one-off use. */}
-      <style>{`
-        @keyframes ees-fade-in { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes ees-rise { from { transform: translateY(-8px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
-        @keyframes ees-spin { to { transform: rotate(360deg) } }
-      `}</style>
     </div>
   )
 
-  return createPortal(overlay, document.body)
+  // The dropdown panel — portaled to body, position:fixed, anchored to
+  // the bar's viewport coordinates. Only rendered when open AND we have
+  // measurements. For mobile the dropdown is full-width across the
+  // viewport rather than tied to a maxWidth.
+  const dropdown = open && barRect ? createPortal(
+    <div
+      ref={dropdownRef}
+      role="listbox"
+      style={{
+        position: 'fixed',
+        top: barRect.bottom + 4,
+        left: isMobile ? 8 : barRect.left + (barRect.width - Math.min(barRect.width, 560)) / 2,
+        width: isMobile ? 'calc(100vw - 16px)' : Math.min(barRect.width - 32, 560),
+        maxHeight: 'min(70vh, 540px)',
+        background: C.card,
+        borderRadius: 10,
+        border: `1px solid ${C.border}`,
+        boxShadow: '0 14px 38px rgba(7,17,31,0.14), 0 2px 6px rgba(7,17,31,0.06)',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+        zIndex: 9000,
+        animation: 'ees-rise 120ms ease',
+      }}
+    >
+      {/* Body */}
+      <div style={{ flex: 1, overflowY: 'auto', background: C.page }}>
+        {/* Empty / hint state */}
+        {query.trim().length < 2 && !loading && (
+          <div style={{
+            padding: '24px 20px',
+            textAlign: 'center', color: C.textMuted, fontSize: 13,
+          }}>
+            <div style={{ marginBottom: 6, color: C.textSecondary, fontWeight: 500, fontSize: 13.5 }}>
+              Start typing to search
+            </div>
+            Type at least 2 characters to find accounts, contacts, properties,
+            opportunities, projects, work orders, and more.
+            <div style={{ marginTop: 12, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <ExampleChip text="PROJ-00001" onClick={() => { setQuery('PROJ-00001'); inputRef.current?.focus() }} />
+              <ExampleChip text="willow" onClick={() => { setQuery('willow'); inputRef.current?.focus() }} />
+              <ExampleChip text="IRA HOMES" onClick={() => { setQuery('IRA HOMES'); inputRef.current?.focus() }} />
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div style={{ padding: 14, color: C.danger, fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+
+        {/* No results */}
+        {query.trim().length >= 2 && !loading && !error && groups.length === 0 && (
+          <div style={{
+            padding: '32px 20px', textAlign: 'center',
+            color: C.textMuted, fontSize: 13,
+          }}>
+            <div style={{ color: C.textSecondary, fontWeight: 500, fontSize: 13.5, marginBottom: 4 }}>
+              No matches for "{query.trim()}"
+            </div>
+            Check spelling or search by record number (e.g. PROJ-00001).
+          </div>
+        )}
+
+        {/* Grouped results */}
+        {groups.map(group => (
+          <ResultGroup
+            key={group.type}
+            group={group}
+            flatRows={flatRows}
+            activeIdx={safeActiveIdx}
+            onSelect={handleSelectRow}
+            onHover={(idx) => setActiveIdx(idx)}
+          />
+        ))}
+
+        {/* View all results CTA */}
+        {groups.length > 0 && onViewAll && (
+          <button
+            onClick={handleViewAll}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 8,
+              width: '100%',
+              padding: '12px 16px',
+              background: C.card,
+              border: 'none',
+              borderTop: `1px solid ${C.border}`,
+              color: C.emerald,
+              fontSize: 13, fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#f4fbf7' }}
+            onMouseLeave={e => { e.currentTarget.style.background = C.card }}
+          >
+            View all results for "{query.trim()}"
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12h14 M12 5l7 7-7 7" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* Footer kbd hints — desktop only */}
+      {!isMobile && groups.length > 0 && (
+        <div style={{
+          flexShrink: 0,
+          padding: '7px 14px',
+          background: C.card,
+          borderTop: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', gap: 14,
+          fontSize: 11, color: C.textMuted,
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <KeyHint>↑</KeyHint><KeyHint>↓</KeyHint> navigate
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <KeyHint>↵</KeyHint> open
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <KeyHint>esc</KeyHint> close
+          </span>
+          <span style={{ marginLeft: 'auto' }}>
+            {flatRows.length > 0 && `${flatRows.length} result${flatRows.length === 1 ? '' : 's'}`}
+          </span>
+        </div>
+      )}
+    </div>,
+    document.body
+  ) : null
+
+  return (
+    <>
+      {bar}
+      {dropdown}
+      {/* Local keyframes — same names as elsewhere in the app */}
+      <style>{`
+        @keyframes ees-rise { from { transform: translateY(-6px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+        @keyframes ees-spin { to { transform: rotate(360deg) } }
+      `}</style>
+    </>
+  )
 }
 
 // ─── Result group ────────────────────────────────────────────────────────────
