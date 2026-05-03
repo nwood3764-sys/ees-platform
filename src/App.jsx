@@ -8,6 +8,7 @@ import OutlookCallback from './pages/OutlookCallback'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
+import { useUrlNavigation } from './lib/urlNav'
 
 // ─── Lazy-loaded modules ─────────────────────────────────────────────────────
 // Each module becomes its own webpack/rollup chunk. Only the active module's
@@ -51,7 +52,21 @@ function ModuleLoader() {
 }
 
 function AuthedApp({ session }) {
-  const [activeModule, setActiveModule] = useState('home')
+  // URL-driven navigation. Replaces what used to be a local activeModule
+  // useState — now `activeModule` and `selectedRecord` come from the URL,
+  // which means every record has a stable shareable address. See
+  // src/lib/urlNav.js for the URL scheme and the table-to-module map.
+  const {
+    activeModule,
+    selectedRecord,
+    sectionFromUrl,
+    navigateToModule,
+    navigateToSection,
+    navigateToRecord,
+    closeRecord,
+    replaceRecord,
+  } = useUrlNavigation()
+
   // Mobile menu drawer state. Desktop ignores this entirely — the Sidebar
   // component only honors mobileOpen when useIsMobile() is true.
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -123,16 +138,28 @@ function AuthedApp({ session }) {
   }
 
   const renderModule = () => {
+    // All modules accept the same nav-prop bundle so any of them can drive
+    // record-detail open/close via the URL. Modules without a record-detail
+    // surface (HomeModule, PortalModule today) ignore them; the prop is
+    // harmless to receive.
+    const navProps = {
+      selectedRecord,
+      sectionFromUrl,
+      onNavigateToRecord: navigateToRecord,
+      onCloseRecord: closeRecord,
+      onSectionChange: navigateToSection,
+      onReplaceRecord: replaceRecord,
+    }
     switch (activeModule) {
-      case 'home':          return <HomeModule onNavigate={setActiveModule} />
-      case 'outreach':      return <OutreachModule />
-      case 'qualification': return <QualificationModule />
-      case 'field':         return <FieldModule />
-      case 'incentives':    return <IncentivesModule />
-      case 'stock':         return <StockModule />
-      case 'fleet':         return <FleetModule />
-      case 'admin':         return <AdminModule />
-      case 'portal':        return <PortalModule />
+      case 'home':          return <HomeModule onNavigate={navigateToModule} />
+      case 'outreach':      return <OutreachModule {...navProps} />
+      case 'qualification': return <QualificationModule {...navProps} />
+      case 'field':         return <FieldModule {...navProps} />
+      case 'incentives':    return <IncentivesModule {...navProps} />
+      case 'stock':         return <StockModule {...navProps} />
+      case 'fleet':         return <FleetModule {...navProps} />
+      case 'admin':         return <AdminModule {...navProps} />
+      case 'portal':        return <PortalModule {...navProps} />
       default:              return <ComingSoon label={activeModule.charAt(0).toUpperCase() + activeModule.slice(1)} />
     }
   }
@@ -141,7 +168,7 @@ function AuthedApp({ session }) {
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, -apple-system, sans-serif', background: C.page, overflow: 'hidden' }}>
       <Sidebar
         activeModule={activeModule}
-        onModuleChange={setActiveModule}
+        onModuleChange={navigateToModule}
         userEmail={session?.user?.email}
         onSignOut={handleSignOut}
         onChangePassword={() => setPasswordModalOpen(true)}

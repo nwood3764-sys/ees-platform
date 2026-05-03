@@ -479,9 +479,33 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
   return <ListView data={data} {...rest} />
 }
 
-export default function FieldModule() {
-  const [sec, setSec] = useState('home')
-  const [selectedRecord, setSelectedRecord] = useState(null)
+export default function FieldModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord } = {}) {
+  // Navigation is URL-driven when App passes nav props (the default in the
+  // shipping app). The local-state fallback path remains so this module can
+  // still mount in isolation (tests, storybooks, future embeds).
+  const urlDriven = !!onNavigateToRecord
+  const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
+  const sec = sectionFromUrl || secLocal
+  const setSec = (s) => {
+    if (urlDriven && onSectionChange) onSectionChange(s)
+    setSecLocal(s)  // keep local mirror so the home tab's setSec() side-paths still work
+  }
+
+  const [selectedRecordLocal, setSelectedRecordLocal] = useState(null)
+  const selectedRecord = urlDriven ? navSelectedRecord : selectedRecordLocal
+  const setSelectedRecord = (rec) => {
+    if (urlDriven) {
+      if (rec) onNavigateToRecord(rec)
+      else onCloseRecord()
+    } else {
+      setSelectedRecordLocal(rec)
+    }
+  }
+  const replaceSelectedRecord = (rec) => {
+    if (urlDriven && onReplaceRecord) onReplaceRecord(rec)
+    else setSelectedRecordLocal(rec)
+  }
+
   const [projects, setProjects] = useState([])
   const [workOrders, setWorkOrders] = useState([])
   const [paymentRequests, setPaymentRequests] = useState([])
@@ -511,7 +535,7 @@ export default function FieldModule() {
     credentials: 'contact_skills',
     timesheets:  'time_sheets',
   }
-  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
+  const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, mode: 'view', name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
 
   useEffect(() => {
@@ -633,7 +657,7 @@ export default function FieldModule() {
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })}
+            onRecordCreated={(r) => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>

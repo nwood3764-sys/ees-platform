@@ -17,10 +17,33 @@ import ObjectDetail from './ObjectDetail'
 // Both tabs can open individual record detail pages (contacts, templates, etc.)
 // ---------------------------------------------------------------------------
 
-export default function AdminModule() {
-  const [tab, setTab] = useState('setup')               // 'setup' | 'objects'
+export default function AdminModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord } = {}) {
+  // Admin uses 'setup' / 'objects' rather than the section-name pattern of
+  // the other modules, so we map the URL section to the local tab. Only
+  // 'objects' is exposed via URL today; everything else stays on 'setup'.
+  const urlDriven = !!onNavigateToRecord
+  const [tabLocal, setTabLocal] = useState(() => sectionFromUrl === 'objects' ? 'objects' : 'setup')
+  const tab = sectionFromUrl ? (sectionFromUrl === 'objects' ? 'objects' : 'setup') : tabLocal
+  const setTab = (t) => {
+    if (urlDriven && onSectionChange) onSectionChange(t === 'objects' ? 'objects' : '')
+    setTabLocal(t)
+  }
   const [selectedObject, setSelectedObject] = useState(null)   // catalog entry from ObjectManager
-  const [selectedRecord, setSelectedRecord] = useState(null)   // { table, id, name?, mode?, prefill? }
+
+  const [selectedRecordLocal, setSelectedRecordLocal] = useState(null)
+  const selectedRecord = urlDriven ? navSelectedRecord : selectedRecordLocal
+  const setSelectedRecord = (rec) => {
+    if (urlDriven) {
+      if (rec) onNavigateToRecord(rec)
+      else onCloseRecord()
+    } else {
+      setSelectedRecordLocal(rec)
+    }
+  }
+  const replaceSelectedRecord = (rec) => {
+    if (urlDriven && onReplaceRecord) onReplaceRecord(rec)
+    else setSelectedRecordLocal(rec)
+  }
   const isMobile = useIsMobile()
   // Dismissible "use desktop" banner. Persisted so the user only sees it once
   // per device. Admin tools like the object manager and page layout editor
@@ -167,7 +190,7 @@ export default function AdminModule() {
             recordId={selectedRecord.id}
             onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={r => setSelectedRecord({ table: r.table, id: r.id })}
+            onRecordCreated={r => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
             prefill={selectedRecord.prefill}
             onNavigateToRecord={r => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })}
           />

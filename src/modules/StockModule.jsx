@@ -231,9 +231,33 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 // Default export
 // ---------------------------------------------------------------------------
 
-export default function StockModule() {
-  const [sec, setSec] = useState('home')
-  const [selectedRecord, setSelectedRecord] = useState(null)
+export default function StockModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord } = {}) {
+  // Navigation is URL-driven when App passes nav props (the default in the
+  // shipping app). The local-state fallback path remains so this module can
+  // still mount in isolation (tests, future embeds).
+  const urlDriven = !!onNavigateToRecord
+  const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
+  const sec = sectionFromUrl || secLocal
+  const setSec = (s) => {
+    if (urlDriven && onSectionChange) onSectionChange(s)
+    setSecLocal(s)
+  }
+
+  const [selectedRecordLocal, setSelectedRecordLocal] = useState(null)
+  const selectedRecord = urlDriven ? navSelectedRecord : selectedRecordLocal
+  const setSelectedRecord = (rec) => {
+    if (urlDriven) {
+      if (rec) onNavigateToRecord(rec)
+      else onCloseRecord()
+    } else {
+      setSelectedRecordLocal(rec)
+    }
+  }
+  const replaceSelectedRecord = (rec) => {
+    if (urlDriven && onReplaceRecord) onReplaceRecord(rec)
+    else setSelectedRecordLocal(rec)
+  }
+
   const SEC_TABLE = {'inventory': 'product_items', 'products': 'products', 'requests': 'materials_requests', 'equipment': 'equipment'}
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
@@ -295,7 +319,7 @@ export default function StockModule() {
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => setSelectedRecord({ table: r.table, id: r.id })}
+            onRecordCreated={(r) => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
