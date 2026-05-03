@@ -11,6 +11,10 @@
  *   /m/<module>/<section>          → Module section list (e.g. /m/field/projects)
  *   /<table>/<id>                  → Record detail (e.g. /projects/<uuid>)
  *   /<table>/new                   → Create form (e.g. /work_orders/new)
+ *   /search?q=<term>&type=<obj>    → Universal search results page (full
+ *                                    grouped view, like Salesforce search
+ *                                    results). type= is optional and filters
+ *                                    to a single object_type.
  *
  * The module is implied by the table on record URLs — TABLE_MODULE_MAP
  * tells the App which module to activate when a user opens a deep link.
@@ -94,14 +98,17 @@ const TABLE_MODULE_MAP = {
 // RecordDetail.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// Module IDs that App.jsx knows how to render.
+// Module IDs that App.jsx knows how to render. 'search' is a synthetic
+// module — not a navigable item in the sidebar; activated only when the
+// user lands on /search?q=... (typically from the search modal's "View
+// all results" footer button or a shared link).
 const KNOWN_MODULES = new Set([
   'home', 'outreach', 'qualification', 'field', 'incentives',
-  'stock', 'fleet', 'admin', 'portal',
+  'stock', 'fleet', 'admin', 'portal', 'search',
 ])
 
 /**
- * Parse a pathname into { activeModule, selectedRecord }.
+ * Parse a pathname (and optional search string) into navigation state.
  * Returns null for selectedRecord when the URL doesn't address a record.
  *
  * Examples:
@@ -110,50 +117,85 @@ const KNOWN_MODULES = new Set([
  *   '/m/field/projects'          → { activeModule: 'field', selectedRecord: null, section: 'projects' }
  *   '/projects/<uuid>'           → { activeModule: 'field', selectedRecord: { table: 'projects', id: <uuid>, mode: 'view' } }
  *   '/work_orders/new'           → { activeModule: 'field', selectedRecord: { table: 'work_orders', id: null, mode: 'create' } }
+ *   '/search?q=willow'           → { activeModule: 'search', searchQuery: 'willow' }
+ *   '/search?q=willow&type=project' → { activeModule: 'search', searchQuery: 'willow', searchType: 'project' }
  *   '/garbage/foo'               → { activeModule: 'home', selectedRecord: null }   ← unknown table, no record-detail attempt
  */
-export function parsePath(pathname) {
+export function parsePath(pathname, search = '') {
   const clean = (pathname || '/').replace(/\/+$/, '') || '/'
   const parts = clean.split('/').filter(Boolean)
 
+  // Default empty navigation state — every return path overlays its own
+  // fields on top of this so consumers always get the same shape.
+  const base = {
+    activeModule: 'home',
+    selectedRecord: null,
+    section: null,
+    searchQuery: null,
+    searchType: null,
+  }
+
   // /
-  if (parts.length === 0) return { activeModule: 'home', selectedRecord: null, section: null }
+  if (parts.length === 0) return base
+
+  // /search?q=<term>&type=<object_type>
+  // Reads the search string for q/type. type is optional. An empty/missing
+  // q still routes to the search page — the page itself handles the empty
+  // state by showing the search input and a hint.
+  if (parts[0] === 'search') {
+    const params = new URLSearchParams(search || '')
+    return {
+      ...base,
+      activeModule: 'search',
+      searchQuery: params.get('q') || '',
+      searchType: params.get('type') || null,
+    }
+  }
 
   // /m/<module>[/<section>]
   if (parts[0] === 'm') {
     const mod = parts[1]
-    if (KNOWN_MODULES.has(mod)) {
-      return { activeModule: mod, selectedRecord: null, section: parts[2] || null }
+    if (KNOWN_MODULES.has(mod) && mod !== 'search') {
+      return { ...base, activeModule: mod, section: parts[2] || null }
     }
-    return { activeModule: 'home', selectedRecord: null, section: null }
+    return base
   }
 
   // /<table>/<id>  or  /<table>/new
   if (parts.length === 2) {
     const [table, id] = parts
     const mod = TABLE_MODULE_MAP[table]
-    if (!mod) return { activeModule: 'home', selectedRecord: null, section: null }
+    if (!mod) return base
     if (id === 'new') {
-      return { activeModule: mod, selectedRecord: { table, id: null, mode: 'create' }, section: null }
+      return { ...base, activeModule: mod, selectedRecord: { table, id: null, mode: 'create' } }
     }
     if (UUID_RE.test(id)) {
-      return { activeModule: mod, selectedRecord: { table, id, mode: 'view' }, section: null }
+      return { ...base, activeModule: mod, selectedRecord: { table, id, mode: 'view' } }
     }
     // Unknown id format — drop to module home rather than 404.
-    return { activeModule: mod, selectedRecord: null, section: null }
+    return { ...base, activeModule: mod }
   }
 
   // Anything else — fall through to home.
-  return { activeModule: 'home', selectedRecord: null, section: null }
+  return base
 }
 
 /**
- * Build a pathname for the given navigation state. Inverse of parsePath.
+ * Build a pathname (+ optional search string) for the given navigation
+ * state. Inverse of parsePath. Returns the full path including any query
+ * string the search route needs.
  */
-export function buildPath({ activeModule, selectedRecord, section }) {
+export function buildPath({ activeModule, selectedRecord, section, searchQuery, searchType }) {
   if (selectedRecord?.table) {
     if (selectedRecord.mode === 'create') return `/${selectedRecord.table}/new`
     if (selectedRecord.id) return `/${selectedRecord.table}/${selectedRecord.id}`
+  }
+  if (activeModule === 'search') {
+    const params = new URLSearchParams()
+    if (searchQuery) params.set('q', searchQuery)
+    if (searchType) params.set('type', searchType)
+    const qs = params.toString()
+    return qs ? `/search?${qs}` : '/search'
   }
   if (section) return `/m/${activeModule}/${section}`
   if (activeModule && activeModule !== 'home') return `/m/${activeModule}`
@@ -170,9 +212,12 @@ export function buildPath({ activeModule, selectedRecord, section }) {
  *                          can use this to set their internal sec on first
  *                          mount; subsequent section changes are pushed via
  *                          navigateToSection)
+ *   searchQuery         — the q= param when on /search
+ *   searchType          — the type= param when on /search (object_type filter)
  *   navigateToModule    — switch active module (clears selectedRecord)
  *   navigateToSection   — switch module section
  *   navigateToRecord    — open a record detail
+ *   navigateToSearch    — open the universal search results page
  *   closeRecord         — close current record (back to module/section)
  *   replaceRecord       — replace current URL without history push (used after
  *                          a successful create transitions create → view)
@@ -181,21 +226,27 @@ export function buildPath({ activeModule, selectedRecord, section }) {
  * App.jsx exact-path checks): /sign/* and /auth/outlook-callback.
  */
 export function useUrlNavigation() {
-  const [state, setState] = useState(() => parsePath(window.location.pathname))
+  const [state, setState] = useState(() => parsePath(window.location.pathname, window.location.search))
 
   // popstate fires on browser back/forward. Re-parse and re-hydrate state
   // from the URL — the URL is the source of truth.
   useEffect(() => {
-    const onPop = () => setState(parsePath(window.location.pathname))
+    const onPop = () => setState(parsePath(window.location.pathname, window.location.search))
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+
+  // Compare a target path (which may include ?queryString) against the
+  // current full URL. We must include search here because /search?q=foo
+  // and /search?q=bar share the same pathname — comparing pathname only
+  // would skip the pushState and the URL bar would lie.
+  const currentFullPath = () => window.location.pathname + window.location.search
 
   // Internal: push a new URL + sync state. We keep the title slot empty
   // because the document title is owned by the active record/component.
   const push = useCallback((next) => {
     const path = buildPath(next)
-    if (path !== window.location.pathname) {
+    if (path !== currentFullPath()) {
       window.history.pushState(null, '', path)
     }
     setState(next)
@@ -203,21 +254,21 @@ export function useUrlNavigation() {
 
   const replace = useCallback((next) => {
     const path = buildPath(next)
-    if (path !== window.location.pathname) {
+    if (path !== currentFullPath()) {
       window.history.replaceState(null, '', path)
     }
     setState(next)
   }, [])
 
   const navigateToModule = useCallback((moduleId) => {
-    push({ activeModule: moduleId, selectedRecord: null, section: null })
+    push({ activeModule: moduleId, selectedRecord: null, section: null, searchQuery: null, searchType: null })
   }, [push])
 
   const navigateToSection = useCallback((sectionId) => {
     setState((prev) => {
-      const next = { ...prev, section: sectionId, selectedRecord: null }
+      const next = { ...prev, section: sectionId, selectedRecord: null, searchQuery: null, searchType: null }
       const path = buildPath(next)
-      if (path !== window.location.pathname) window.history.pushState(null, '', path)
+      if (path !== currentFullPath()) window.history.pushState(null, '', path)
       return next
     })
   }, [])
@@ -227,18 +278,40 @@ export function useUrlNavigation() {
     if (!rec?.table) return
     setState((prev) => {
       const mod = TABLE_MODULE_MAP[rec.table] || prev.activeModule
-      const next = { activeModule: mod, selectedRecord: { ...rec }, section: null }
+      const next = { activeModule: mod, selectedRecord: { ...rec }, section: null, searchQuery: null, searchType: null }
       const path = buildPath(next)
-      if (path !== window.location.pathname) window.history.pushState(null, '', path)
+      if (path !== currentFullPath()) window.history.pushState(null, '', path)
       return next
     })
   }, [])
 
+  // Open the universal search results page. Called from the search
+  // modal's "View all results" footer button and any deep-link sources.
+  // typeFilter is optional — pass null/undefined to show all object types.
+  // useReplace=true rewrites the current URL instead of pushing a new
+  // history entry; the search page uses this for in-page query refinement
+  // so the back button doesn't accumulate one entry per keystroke.
+  const navigateToSearch = useCallback((query, typeFilter = null, { useReplace = false } = {}) => {
+    const next = {
+      activeModule: 'search',
+      selectedRecord: null,
+      section: null,
+      searchQuery: query || '',
+      searchType: typeFilter || null,
+    }
+    const path = buildPath(next)
+    if (path !== currentFullPath()) {
+      if (useReplace) window.history.replaceState(null, '', path)
+      else            window.history.pushState(null, '', path)
+    }
+    setState(next)
+  }, [])
+
   const closeRecord = useCallback(() => {
     setState((prev) => {
-      const next = { activeModule: prev.activeModule, selectedRecord: null, section: prev.section }
+      const next = { activeModule: prev.activeModule, selectedRecord: null, section: prev.section, searchQuery: null, searchType: null }
       const path = buildPath(next)
-      if (path !== window.location.pathname) window.history.pushState(null, '', path)
+      if (path !== currentFullPath()) window.history.pushState(null, '', path)
       return next
     })
   }, [])
@@ -246,9 +319,9 @@ export function useUrlNavigation() {
   const replaceRecord = useCallback((rec) => {
     setState((prev) => {
       const mod = TABLE_MODULE_MAP[rec?.table] || prev.activeModule
-      const next = { activeModule: mod, selectedRecord: rec ? { ...rec } : null, section: null }
+      const next = { activeModule: mod, selectedRecord: rec ? { ...rec } : null, section: null, searchQuery: null, searchType: null }
       const path = buildPath(next)
-      if (path !== window.location.pathname) window.history.replaceState(null, '', path)
+      if (path !== currentFullPath()) window.history.replaceState(null, '', path)
       return next
     })
   }, [])
@@ -257,9 +330,12 @@ export function useUrlNavigation() {
     activeModule: state.activeModule,
     selectedRecord: state.selectedRecord,
     sectionFromUrl: state.section,
+    searchQuery: state.searchQuery,
+    searchType: state.searchType,
     navigateToModule,
     navigateToSection,
     navigateToRecord,
+    navigateToSearch,
     closeRecord,
     replaceRecord,
   }

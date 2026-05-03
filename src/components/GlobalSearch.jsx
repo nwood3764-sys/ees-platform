@@ -1,9 +1,10 @@
 /**
  * Global Search — Salesforce-style universal search across all major Anura
- * objects. Backed by the public.global_search RPC which returns up to 5
- * matches per object type from 17 tables.
+ * objects. Backed by the public.global_search RPC which returns up to N
+ * matches per object type (5 in the modal, 25 on the dedicated results
+ * page) from 17 tables.
  *
- * Three exports:
+ * Three exports for the entry surfaces:
  *   • GlobalSearchTrigger — desktop-only inline bar (renders nothing on mobile;
  *                           the mobile MobileHeader has its own search icon).
  *   • GlobalSearchModal   — the modal itself; rendered always at App level so
@@ -11,11 +12,20 @@
  *                           land in one place.
  *   • SEARCH_OBJECT_ICONS — exported for tests / future reuse.
  *
+ * Plus a few exports the SearchResultsPage module reuses so the two
+ * surfaces stay visually identical:
+ *   • ObjectIcon, SearchResultRow — render an object icon / hit row
+ *   • SEARCH_GROUP_ORDER, SEARCH_GROUP_LABELS, SEARCH_OBJECT_TABLES
+ *
  * State convention (lifted to App):
  *   const [searchOpen, setSearchOpen] = useState(false)
  *   <GlobalSearchTrigger onOpen={() => setSearchOpen(true)} />
- *   <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)}
- *                      onNavigate={navigateToRecord} />
+ *   <GlobalSearchModal
+ *     open={searchOpen}
+ *     onClose={() => setSearchOpen(false)}
+ *     onNavigate={navigateToRecord}
+ *     onViewAll={(q) => navigateToSearch(q)}   // optional CTA → /search?q=...
+ *   />
  *   useEffect → bind Cmd/Ctrl+K → setSearchOpen(true)
  *
  * Result navigation: passes { table, id, mode: 'view' } to onNavigate, which
@@ -56,14 +66,69 @@ export const SEARCH_OBJECT_ICONS = {
 
 // Keep group order stable across renders. Mirrors the user's mental model:
 // people / places / pipeline / execution / financial / inventory / admin.
-const GROUP_ORDER = [
+// Exported for reuse by the full SearchResultsPage module — both surfaces
+// must show object types in the same order.
+export const SEARCH_GROUP_ORDER = [
   'account', 'contact', 'property', 'building', 'unit',
   'opportunity', 'project', 'work_order', 'service_appointment',
   'incentive_application', 'assessment', 'envelope',
   'program', 'vehicle', 'equipment', 'product_item', 'user',
 ]
 
-function ObjectIcon({ type, size = 14, color = C.textSecondary }) {
+// Backwards-compatible alias for the old internal name. Once nothing else
+// in this file references GROUP_ORDER, this can be removed.
+const GROUP_ORDER = SEARCH_GROUP_ORDER
+
+// Display label fallback when a row has no object_label but we know its type.
+// The RPC always sets object_label, but the SearchResultsPage builds the
+// sidebar from a static list — it needs labels even for types with zero
+// matching rows so that the user can click in to see "no matches" cleanly.
+export const SEARCH_GROUP_LABELS = {
+  account:               'Accounts',
+  contact:               'Contacts',
+  property:              'Properties',
+  building:              'Buildings',
+  unit:                  'Units',
+  opportunity:           'Opportunities',
+  project:               'Projects',
+  work_order:            'Work Orders',
+  service_appointment:   'Service Appointments',
+  incentive_application: 'Incentive Applications',
+  assessment:            'Assessments',
+  envelope:              'Signature Envelopes',
+  program:               'Programs',
+  vehicle:               'Vehicles',
+  equipment:             'Equipment',
+  product_item:          'Product Items',
+  user:                  'Users',
+}
+
+// Mapping object_type → table_name (matches the RPC's table_name column).
+// Used by the SearchResultsPage when it needs to navigate to a record but
+// only has the object_type (e.g. from URL ?type=). The RPC itself always
+// includes table_name on every row, so this map is only consulted when
+// nothing has been fetched yet.
+export const SEARCH_OBJECT_TABLES = {
+  account:               'accounts',
+  contact:               'contacts',
+  property:              'properties',
+  building:              'buildings',
+  unit:                  'units',
+  opportunity:           'opportunities',
+  project:               'projects',
+  work_order:            'work_orders',
+  service_appointment:   'service_appointments',
+  incentive_application: 'incentive_applications',
+  assessment:            'assessments',
+  envelope:              'envelopes',
+  program:               'programs',
+  vehicle:               'vehicles',
+  equipment:             'equipment',
+  product_item:          'product_items',
+  user:                  'users',
+}
+
+export function ObjectIcon({ type, size = 14, color = C.textSecondary }) {
   const path = SEARCH_OBJECT_ICONS[type]
   if (!path) return null
   // Multi-segment paths (e.g. envelope) need to be split on "M" runs so each
@@ -75,6 +140,65 @@ function ObjectIcon({ type, size = 14, color = C.textSecondary }) {
       stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       {parts.map((d, i) => <path key={i} d={d} />)}
     </svg>
+  )
+}
+
+// Shared row renderer. Both the modal and the SearchResultsPage render
+// individual hits this way so the user sees the same visual record across
+// surfaces. `active` toggles the selected highlight (used only in the
+// modal's keyboard nav). `compact` shrinks padding for the modal density.
+export function SearchResultRow({ row, active = false, compact = false, onSelect, onMouseEnter }) {
+  return (
+    <div
+      role="option"
+      aria-selected={active}
+      onClick={() => onSelect?.(row)}
+      onMouseEnter={onMouseEnter}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: compact ? '10px 16px' : '12px 16px',
+        background: active ? '#e9f7ef' : C.card,
+        borderLeft: active ? `3px solid ${C.emerald}` : '3px solid transparent',
+        cursor: 'pointer',
+        transition: 'background 80ms',
+      }}
+    >
+      <div style={{
+        width: 28, height: 28, borderRadius: 6,
+        background: C.page, border: `1px solid ${C.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        <ObjectIcon type={row.object_type} size={14} color={C.textSecondary} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          color: C.textPrimary, fontSize: 13.5, fontWeight: 500,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          {row.primary_label || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Unnamed</span>}
+        </div>
+        {row.secondary_label && (
+          <div style={{
+            color: C.textMuted, fontSize: 12, marginTop: 1,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {row.secondary_label}
+          </div>
+        )}
+      </div>
+      {row.record_number && (
+        <span style={{
+          flexShrink: 0,
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: 11, color: C.textSecondary,
+          background: C.page, border: `1px solid ${C.border}`,
+          padding: '2px 7px', borderRadius: 4,
+        }}>
+          {row.record_number}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -148,7 +272,12 @@ export function GlobalSearchTrigger({ onOpen }) {
 // ─── Modal ───────────────────────────────────────────────────────────────────
 // Always mounted at App level; visible only when `open` is true. The query
 // state lives inside so opening + closing fully resets the search session.
-export function GlobalSearchModal({ open, onClose, onNavigate }) {
+//
+// onViewAll(query) — optional. When provided, the modal renders a "View
+// all results" button that takes the user to the full grouped results
+// page. Closing the modal is the caller's responsibility (it's standard
+// to close the modal as part of the navigation transition).
+export function GlobalSearchModal({ open, onClose, onNavigate, onViewAll }) {
   const isMobile = useIsMobile()
   const inputRef = useRef(null)
 
@@ -407,6 +536,42 @@ export function GlobalSearchModal({ open, onClose, onNavigate }) {
               onHover={(idx) => setActiveIdx(idx)}
             />
           ))}
+
+          {/* View all results — full-width CTA below the grouped hits.
+              Top-N-per-object results in the modal are intentionally
+              capped low; this button opens the dedicated results page
+              where the user can browse everything grouped by object,
+              filter to a single object type, etc. Shown on mobile and
+              desktop alike since the per-object cap is the same. */}
+          {groups.length > 0 && onViewAll && (
+            <button
+              onClick={() => {
+                onViewAll(query.trim())
+                onClose()
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                gap: 8,
+                width: '100%',
+                padding: '12px 16px',
+                background: C.card,
+                border: 'none',
+                borderTop: `1px solid ${C.border}`,
+                color: C.emerald,
+                fontSize: 13, fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f4fbf7' }}
+              onMouseLeave={e => { e.currentTarget.style.background = C.card }}
+            >
+              View all results for "{query.trim()}"
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14 M12 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Footer hint */}

@@ -29,6 +29,7 @@ const StockModule         = lazy(() => import('./modules/StockModule'))
 const FleetModule         = lazy(() => import('./modules/FleetModule'))
 const AdminModule         = lazy(() => import('./modules/admin'))
 const PortalModule        = lazy(() => import('./modules/PortalModule'))
+const SearchResultsPage   = lazy(() => import('./modules/SearchResultsPage'))
 
 // ─── Module loading fallback ─────────────────────────────────────────────────
 // Shown while a lazy chunk is in flight. Minimal + branded so the user sees
@@ -61,9 +62,12 @@ function AuthedApp({ session }) {
     activeModule,
     selectedRecord,
     sectionFromUrl,
+    searchQuery,
+    searchType,
     navigateToModule,
     navigateToSection,
     navigateToRecord,
+    navigateToSearch,
     closeRecord,
     replaceRecord,
   } = useUrlNavigation()
@@ -184,6 +188,14 @@ function AuthedApp({ session }) {
       case 'fleet':         return <FleetModule {...navProps} />
       case 'admin':         return <AdminModule {...navProps} />
       case 'portal':        return <PortalModule {...navProps} />
+      case 'search':        return (
+        <SearchResultsPage
+          searchQuery={searchQuery}
+          searchType={searchType}
+          onNavigateToRecord={navigateToRecord}
+          onNavigateToSearch={navigateToSearch}
+        />
+      )
       default:              return <ComingSoon label={activeModule.charAt(0).toUpperCase() + activeModule.slice(1)} />
     }
   }
@@ -220,6 +232,7 @@ function AuthedApp({ session }) {
           open={searchOpen}
           onClose={() => setSearchOpen(false)}
           onNavigate={navigateToRecord}
+          onViewAll={(q) => navigateToSearch(q)}
         />
       )}
 
