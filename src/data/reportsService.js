@@ -424,3 +424,179 @@ export async function saveReport({ id, report, filters, groupings, calculatedFie
 
   return reportId
 }
+
+// ─── Report runner — Phase 2c ─────────────────────────────────────────────
+// Executes a saved report's query against Postgres via PostgREST and
+// returns the result rows. Phase 2c.1: tabular reports with AND-only
+// filters and direct + one-hop fields. Summary/matrix layouts and
+// nested OR/NOT logic come in 2c.2.
+//
+// Returns:
+//   {
+//     rows:    [...],          // raw rows from PostgREST, with via_path nested objects intact
+//     columns: [...],          // ordered selected_fields for layout
+//     groupings: [...],        // groupings (for summary/matrix layout)
+//     calculatedFields: [...], // for evaluator
+//     format:  'tabular'|'summary'|'matrix',
+//     primaryObject: 'projects',
+//   }
+
+export async function runReport(reportId) {
+  const loaded = await loadReport(reportId)
+  if (!loaded) throw new Error('Report not found')
+  const r = loaded.report
+
+  // Build the PostgREST select string. Direct fields are listed by name;
+  // related-object fields use embedded resource syntax: 'foreign_table(field)'.
+  // We group fields by their FK column so multiple fields from the same
+  // related table share a single embed.
+  const directFields = []
+  const embedMap = {}  // fk_column → { table, fields: [...] }
+
+  for (const f of (r.rpt_selected_fields || [])) {
+    if (!f.via_path || f.via_path.length === 0) {
+      directFields.push(f.name)
+    } else if (f.via_path.length === 1) {
+      const fk = f.via_path[0]
+      if (!embedMap[fk]) embedMap[fk] = { table: f.table, fields: [] }
+      embedMap[fk].fields.push(f.name)
+    } else {
+      // Multi-hop FK chains not yet supported — skip silently for now
+      console.warn(`Multi-hop via_path not supported in runner v1: ${f.name}`)
+    }
+  }
+
+  // Always include `id` so rows have a stable key
+  if (!directFields.includes('id')) directFields.unshift('id')
+
+  const selectParts = [...directFields]
+  for (const [fk, embed] of Object.entries(embedMap)) {
+    selectParts.push(`${fk}:${embed.table}(${embed.fields.join(', ')})`)
+  }
+  // Also include any field used in groupings/filters that wasn't explicitly selected
+  for (const g of (loaded.groupings || [])) {
+    if (!g.rgr_field_via_path && g.rgr_field_name && !selectParts.includes(g.rgr_field_name)) {
+      selectParts.push(g.rgr_field_name)
+    }
+  }
+
+  const selectStr = selectParts.join(', ')
+
+  let query = supabase.from(r.rpt_primary_object).select(selectStr)
+
+  // Soft-delete filter — every business table has either is_deleted or
+  // a prefixed equivalent. Use a try/catch path: prefer plain is_deleted,
+  // skip silently if the table doesn't have one.
+  query = query.eq('is_deleted', false)
+
+  // Apply filters — AND-only for v1.
+  for (const f of (loaded.filters || [])) {
+    if (f.rfilt_is_cross_filter) continue  // cross-filters in 2c.2
+    if (!f.rfilt_field_name || !f.rfilt_operator) continue
+    const col = (f.rfilt_field_via_path && f.rfilt_field_via_path.length > 0)
+      ? `${f.rfilt_field_via_path[0]}.${f.rfilt_field_name}`
+      : f.rfilt_field_name
+    const v = f.rfilt_value
+    switch (f.rfilt_operator) {
+      case 'equals':            query = query.eq(col, v); break
+      case 'not_equals':        query = query.neq(col, v); break
+      case 'greater_than':      query = query.gt(col, v); break
+      case 'less_than':         query = query.lt(col, v); break
+      case 'greater_or_equal':  query = query.gte(col, v); break
+      case 'less_or_equal':     query = query.lte(col, v); break
+      case 'in':                query = query.in(col, Array.isArray(v) ? v : String(v).split(',').map(s => s.trim())); break
+      case 'not_in':            query = query.not(col, 'in', `(${(Array.isArray(v) ? v : String(v).split(',').map(s => s.trim())).map(x => `"${x}"`).join(',')})`); break
+      case 'contains':          query = query.ilike(col, `%${v}%`); break
+      case 'starts_with':       query = query.ilike(col, `${v}%`); break
+      case 'ends_with':         query = query.ilike(col, `%${v}`); break
+      case 'is_null':           query = query.is(col, null); break
+      case 'is_not_null':       query = query.not(col, 'is', null); break
+      case 'in_last_n_days': {
+        const n = parseInt(v, 10)
+        if (Number.isFinite(n) && n > 0) {
+          const cutoff = new Date(Date.now() - n * 86400000).toISOString()
+          query = query.gte(col, cutoff)
+        }
+        break
+      }
+      case 'this_month': {
+        const now = new Date()
+        const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+        const end   = new Date(now.getFullYear(), now.getMonth()+1, 1).toISOString()
+        query = query.gte(col, start).lt(col, end)
+        break
+      }
+      case 'this_year': {
+        const now = new Date()
+        const start = new Date(now.getFullYear(), 0, 1).toISOString()
+        const end   = new Date(now.getFullYear()+1, 0, 1).toISOString()
+        query = query.gte(col, start).lt(col, end)
+        break
+      }
+      default:
+        console.warn(`Unsupported operator: ${f.rfilt_operator}`)
+    }
+  }
+
+  // Apply sort — sort_config is an array of { name, direction, table?, via_path? }
+  const sortConfig = r.rpt_sort_config || []
+  for (const s of sortConfig) {
+    if (!s.name) continue
+    const col = (s.via_path && s.via_path.length > 0)
+      ? `${s.via_path[0]}.${s.name}`
+      : s.name
+    query = query.order(col, { ascending: s.direction !== 'desc' })
+  }
+
+  // Cap rows defensively — full pagination later
+  query = query.limit(2000)
+
+  const { data, error } = await query
+  if (error) throw error
+
+  // Mark this report as run for "Last Run" display
+  const userId = await getCurrentUserId()
+  await supabase.from('reports').update({
+    rpt_last_run_at: new Date().toISOString(),
+    rpt_last_run_by: userId,
+  }).eq('id', reportId)
+
+  return {
+    rows: data || [],
+    columns: r.rpt_selected_fields || [],
+    groupings: (loaded.groupings || []).map(g => ({
+      field_name:        g.rgr_field_name,
+      field_label:       g.rgr_field_label || g.rgr_field_name,
+      field_via_path:    g.rgr_field_via_path,
+      sort_direction:    g.rgr_sort_direction,
+      show_subtotal:     g.rgr_show_subtotal,
+      date_granularity:  g.rgr_date_granularity,
+    })),
+    calculatedFields: (loaded.calculatedFields || []).map(c => ({
+      label:           c.rcf_label,
+      scope:           c.rcf_scope,
+      expression:      c.rcf_expression,
+      data_type:       c.rcf_data_type,
+      grouping_level:  c.rcf_grouping_level,
+    })),
+    format:        r.rpt_format,
+    primaryObject: r.rpt_primary_object,
+    name:          r.rpt_name,
+  }
+}
+
+/**
+ * Resolve a value at a path within a row — handles direct fields and
+ * one-hop via_path nested objects. Returns null if the path doesn't
+ * resolve (e.g. the FK was null, so the embed is null).
+ */
+export function getRowValue(row, field) {
+  if (!row || !field) return null
+  if (!field.via_path || field.via_path.length === 0) {
+    return row[field.name] ?? null
+  }
+  // One-hop: row[fk_column] is the nested object
+  const nested = row[field.via_path[0]]
+  if (!nested) return null
+  return nested[field.name] ?? null
+}

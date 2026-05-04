@@ -5,6 +5,7 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchReportFolders, fetchReports, fetchScheduledReports } from '../data/reportsService'
 import ReportBuilder from './ReportBuilder'
+import ReportRunner from './ReportRunner'
 
 // ─── Section definitions ──────────────────────────────────────────────────
 
@@ -233,17 +234,25 @@ export default function ReportsModule({
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
           selectedRecord.table === 'reports' ? (
-            <ReportBuilder
-              reportId={selectedRecord.id || 'new'}
-              onClose={closeRecord}
-              onSaved={(newId) => {
-                // Refresh the list and switch the URL to the saved report's id
-                loadAll()
-                if (selectedRecord.id !== newId) {
+            // New report or explicit edit mode → Builder.
+            // Existing report opened from the list → run it.
+            (selectedRecord.id === null || selectedRecord.id === 'new' || selectedRecord.mode === 'edit') ? (
+              <ReportBuilder
+                reportId={selectedRecord.id || 'new'}
+                onClose={closeRecord}
+                onSaved={(newId) => {
+                  loadAll()
+                  // After saving, drop into runner mode for the freshly-saved report
                   replaceSelectedRecord({ table:'reports', id:newId, mode:'view' })
-                }
-              }}
-            />
+                }}
+              />
+            ) : (
+              <ReportRunner
+                reportId={selectedRecord.id}
+                onClose={closeRecord}
+                onEdit={() => replaceSelectedRecord({ table:'reports', id:selectedRecord.id, mode:'edit' })}
+              />
+            )
           ) : (
             <RecordDetail
               tableName={selectedRecord.table}
