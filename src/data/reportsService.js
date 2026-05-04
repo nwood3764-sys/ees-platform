@@ -706,10 +706,47 @@ function evalFilterOnRow(f, row, fkLookup, primaryObject) {
   return true
 }
 
-export async function runReport(reportId) {
+/**
+ * Return the list of runtime-prompt filters for a report. Each entry has
+ * the filter index (used as the override key), the label shown to the
+ * user, the operator, and the saved default value. The runner uses this
+ * to render a "Run with parameters" modal before executing the query.
+ */
+export async function getReportPrompts(reportId) {
+  if (!reportId || reportId === 'new') return []
+  const { data, error } = await supabase
+    .from('report_filters')
+    .select('rfilt_filter_index, rfilt_runtime_label, rfilt_field_name, rfilt_operator, rfilt_value, rfilt_is_runtime_prompt')
+    .eq('rfilt_report_id', reportId)
+    .eq('rfilt_is_runtime_prompt', true)
+    .eq('is_deleted', false)
+    .order('rfilt_filter_index')
+  if (error) throw error
+  return (data || []).map(f => ({
+    index:        f.rfilt_filter_index,
+    label:        f.rfilt_runtime_label || f.rfilt_field_name || `Prompt ${f.rfilt_filter_index}`,
+    field_name:   f.rfilt_field_name,
+    operator:     f.rfilt_operator,
+    default_value: f.rfilt_value,
+  }))
+}
+
+export async function runReport(reportId, promptValues = null) {
   const loaded = await loadReport(reportId)
   if (!loaded) throw new Error('Report not found')
   const r = loaded.report
+
+  // If this report has runtime prompts and the caller provided values,
+  // override each prompted filter's value before evaluating filters.
+  // promptValues is a map keyed by rfilt_filter_index → value.
+  if (promptValues && (loaded.filters || []).length > 0) {
+    loaded.filters = loaded.filters.map(f => {
+      if (f.rfilt_is_runtime_prompt && promptValues[f.rfilt_filter_index] !== undefined) {
+        return { ...f, rfilt_value: promptValues[f.rfilt_filter_index] }
+      }
+      return f
+    })
+  }
 
   // We need to know which columns on the primary object (and any expanded
   // related object) are FKs, so we can auto-embed the parent record's

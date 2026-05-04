@@ -513,36 +513,62 @@ function FiltersTab({ report, updateReport, filters, setFilters, primaryObject, 
         ) : (
           <>
             {filters.map((f, idx) => (
-              <div key={idx} style={{
-                display:'grid', gridTemplateColumns:'30px 1fr 140px 1fr 30px',
-                gap:8, marginBottom:8, alignItems:'center',
-              }}>
-                <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
-                <select
-                  value={f.field_name || ''}
-                  onChange={e => updateFilter(idx, { field_name: e.target.value })}
-                  style={inputStyle()}
-                >
-                  <option value="">— Field —</option>
-                  {fieldTree?.primary?.columns.map(c => (
-                    <option key={c.name} value={c.name}>{c.name}</option>
-                  ))}
-                </select>
-                <select
-                  value={f.operator}
-                  onChange={e => updateFilter(idx, { operator: e.target.value })}
-                  style={inputStyle()}
-                >
-                  {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
-                </select>
-                <input
-                  type="text"
-                  value={f.value || ''}
-                  onChange={e => updateFilter(idx, { value: e.target.value })}
-                  placeholder="Value"
-                  style={inputStyle()}
-                />
-                <button onClick={() => removeFilter(idx)} style={miniBtn(true)}>×</button>
+              <div key={idx} style={{ marginBottom:12, paddingBottom:8, borderBottom:`1px solid ${C.border}` }}>
+                <div style={{
+                  display:'grid', gridTemplateColumns:'30px 1fr 140px 1fr 30px',
+                  gap:8, alignItems:'center',
+                }}>
+                  <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
+                  <select
+                    value={f.field_name || ''}
+                    onChange={e => updateFilter(idx, { field_name: e.target.value })}
+                    style={inputStyle()}
+                  >
+                    <option value="">— Field —</option>
+                    {fieldTree?.primary?.columns.map(c => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={f.operator}
+                    onChange={e => updateFilter(idx, { operator: e.target.value })}
+                    style={inputStyle()}
+                  >
+                    {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
+                  </select>
+                  <input
+                    type="text"
+                    value={f.value || ''}
+                    onChange={e => updateFilter(idx, { value: e.target.value })}
+                    placeholder={f.is_runtime_prompt ? 'Default value (optional)' : 'Value'}
+                    style={inputStyle()}
+                  />
+                  <button onClick={() => removeFilter(idx)} style={miniBtn(true)}>×</button>
+                </div>
+                <div style={{
+                  display:'grid', gridTemplateColumns:'30px auto 1fr 30px',
+                  gap:8, alignItems:'center', marginTop:6,
+                }}>
+                  <div></div>
+                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:C.textSecondary, cursor:'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!f.is_runtime_prompt}
+                      onChange={e => updateFilter(idx, { is_runtime_prompt: e.target.checked })}
+                    />
+                    Prompt at runtime
+                  </label>
+                  {f.is_runtime_prompt && (
+                    <input
+                      type="text"
+                      value={f.runtime_label || ''}
+                      onChange={e => updateFilter(idx, { runtime_label: e.target.value })}
+                      placeholder="Label shown to user (e.g. 'Date Range')"
+                      style={{ ...inputStyle(), fontSize:11 }}
+                    />
+                  )}
+                  <div></div>
+                </div>
               </div>
             ))}
 

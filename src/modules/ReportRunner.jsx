@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
-import { runReport, getRowValue } from '../data/reportsService'
+import { runReport, getRowValue, getReportPrompts } from '../data/reportsService'
 import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } from '../lib/reportFormulaEval'
 
 // ─── Report Runner ────────────────────────────────────────────────────────
@@ -15,14 +15,16 @@ import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } f
 // underlying data has changed).
 
 export default function ReportRunner({ reportId, onClose, onEdit }) {
-  const [result, setResult]   = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState(null)
+  const [result, setResult]     = useState(null)
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState(null)
+  const [prompts, setPrompts]   = useState(null)        // null = not yet checked, [] = none
+  const [promptValues, setPromptValues] = useState({})  // collected user input
 
-  const run = async () => {
+  const run = async (overrides = null) => {
     setLoading(true); setError(null)
     try {
-      const r = await runReport(reportId)
+      const r = await runReport(reportId, overrides)
       setResult(r)
     } catch (err) {
       setError(err)
@@ -31,13 +33,85 @@ export default function ReportRunner({ reportId, onClose, onEdit }) {
     }
   }
 
+  // On mount: check whether the report has any runtime prompts. If yes,
+  // surface them in a modal first; the user supplies values and then
+  // we call run(). If no, run immediately.
   useEffect(() => {
-    run()
+    let cancelled = false
+    setLoading(true); setError(null)
+    getReportPrompts(reportId)
+      .then(p => {
+        if (cancelled) return
+        setPrompts(p)
+        if (p.length === 0) {
+          run(null)
+        } else {
+          // Initialize promptValues with saved defaults
+          const init = {}
+          for (const pr of p) init[pr.index] = pr.default_value ?? ''
+          setPromptValues(init)
+          setLoading(false)
+        }
+      })
+      .catch(err => { if (!cancelled) { setError(err); setLoading(false) } })
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId])
 
+  // Prompt-collection modal: shown when prompts exist and we haven't run yet.
+  const showingPrompts = prompts && prompts.length > 0 && !result && !loading && !error
+
   if (loading) return <LoadingState />
-  if (error)   return <ErrorState error={error} onRetry={run} />
+  if (error)   return <ErrorState error={error} onRetry={() => run(promptValues)} />
+
+  if (showingPrompts) {
+    return (
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', background:C.page }}>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:20, width:480, maxWidth:'92vw' }}>
+          <div style={{ fontSize:16, fontWeight:600, color:C.textPrimary, marginBottom:6 }}>Run with parameters</div>
+          <div style={{ fontSize:12, color:C.textMuted, marginBottom:16 }}>
+            This report has runtime prompts. Provide values, then click Run.
+          </div>
+          {prompts.map(pr => (
+            <div key={pr.index} style={{ marginBottom:12 }}>
+              <label style={{
+                display:'block', fontSize:11, fontWeight:500, color:C.textSecondary,
+                marginBottom:4, textTransform:'uppercase', letterSpacing:0.5,
+              }}>
+                {pr.label}
+                <span style={{ color:C.textMuted, marginLeft:6, textTransform:'none' }}>
+                  ({pr.field_name} {pr.operator})
+                </span>
+              </label>
+              <input
+                type="text"
+                value={promptValues[pr.index] ?? ''}
+                onChange={e => setPromptValues(prev => ({ ...prev, [pr.index]: e.target.value }))}
+                style={{
+                  width:'100%', padding:'8px 10px', fontSize:13,
+                  background:C.card, color:C.textPrimary,
+                  border:`1px solid ${C.border}`, borderRadius:6, font:'inherit',
+                  boxSizing:'border-box',
+                }}
+              />
+            </div>
+          ))}
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:16 }}>
+            <button onClick={onClose} style={btnSecondary()}>Cancel</button>
+            <button
+              onClick={() => run(promptValues)}
+              style={{
+                padding:'8px 14px', fontSize:13, fontWeight:500,
+                background:C.emerald, color:'#fff',
+                border:'none', borderRadius:6, cursor:'pointer',
+              }}
+            >Run</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (!result) return null
 
   return (
@@ -55,7 +129,17 @@ export default function ReportRunner({ reportId, onClose, onEdit }) {
           </div>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-          <button onClick={run}    style={btnSecondary()}>Run Again</button>
+          <button
+            onClick={() => {
+              if (prompts && prompts.length > 0) {
+                // Clear result so the prompt modal shows again
+                setResult(null)
+              } else {
+                run(null)
+              }
+            }}
+            style={btnSecondary()}
+          >Run Again</button>
           <button onClick={() => exportCsv(result)}   style={btnSecondary()}>CSV</button>
           <button onClick={() => exportExcel(result)} style={btnSecondary()}>Excel</button>
           <button onClick={() => exportPdf(result)}   style={btnSecondary()}>PDF</button>
