@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
 import { runReport, getRowValue } from '../data/reportsService'
-import { evaluateRowExpression } from '../lib/reportFormulaEval'
+import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } from '../lib/reportFormulaEval'
 
 // ─── Report Runner ────────────────────────────────────────────────────────
 //
@@ -145,13 +145,24 @@ function TabularLayout({ result }) {
 // ─── Summary layout (Phase 2c.2) ──────────────────────────────────────────
 
 function SummaryLayout({ result }) {
-  const { rows, columns, groupings } = result
+  const { rows, columns, groupings, calculatedFields } = result
   if (groupings.length === 0) {
     return <EmptyState message="Summary reports require at least one grouping. Edit the report to add groupings." />
   }
   if (rows.length === 0) {
     return <EmptyState message="No matching rows." />
   }
+
+  // Summary-scope calculated fields show on group subtotal rows and the
+  // grand total row. They use SUM_<field>/COUNT_<field>/AVG_<field>/
+  // MIN_<field>/MAX_<field> aggregate identifiers, computed per group
+  // before the expression is evaluated.
+  const summaryCalcFields = (calculatedFields || []).filter(c => c.scope === 'summary')
+
+  // Numeric column names (from the selected fields) used to build the
+  // aggregates the summary expression can reference. Columns keep their
+  // raw name regardless of label, since expressions reference column names.
+  const aggregableColumnNames = columns.map(c => c.name)
 
   // Group rows iteratively by each grouping level. Output is a tree of
   // { value, level, rows, children, subtotal }
@@ -168,8 +179,17 @@ function SummaryLayout({ result }) {
           </tr>
         </thead>
         <tbody>
-          <SummaryTreeRows nodes={tree} columns={columns} groupings={groupings} depth={0} ctx={result} />
-          <SummaryTotalRow rows={rows} columns={columns} />
+          <SummaryTreeRows
+            nodes={tree} columns={columns} groupings={groupings} depth={0}
+            ctx={result} summaryCalcFields={summaryCalcFields}
+            aggregableColumnNames={aggregableColumnNames}
+          />
+          <SummaryTotalRow
+            rows={rows} columns={columns}
+            summaryCalcFields={summaryCalcFields}
+            aggregableColumnNames={aggregableColumnNames}
+            ctx={result}
+          />
         </tbody>
       </table>
     </div>
@@ -207,7 +227,7 @@ function buildGroupTree(rows, columns, groupings, level = 0, ctx = null) {
   }
 }
 
-function SummaryTreeRows({ nodes, columns, groupings, depth, ctx }) {
+function SummaryTreeRows({ nodes, columns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames }) {
   if (!nodes.children) {
     return nodes.leafRows.map((row, idx) => (
       <tr key={`leaf-${idx}`} style={{ borderTop:`1px solid ${C.border}` }}>
@@ -220,12 +240,16 @@ function SummaryTreeRows({ nodes, columns, groupings, depth, ctx }) {
     ))
   }
   return nodes.children.map((node, ni) => (
-    <SummaryGroupNode key={`g-${depth}-${ni}`}
-      node={node} columns={columns} groupings={groupings} depth={depth} ctx={ctx} />
+    <SummaryGroupNode
+      key={`g-${depth}-${ni}`}
+      node={node} columns={columns} groupings={groupings} depth={depth}
+      ctx={ctx} summaryCalcFields={summaryCalcFields}
+      aggregableColumnNames={aggregableColumnNames}
+    />
   ))
 }
 
-function SummaryGroupNode({ node, columns, groupings, depth, ctx }) {
+function SummaryGroupNode({ node, columns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames }) {
   const grouping = groupings[depth]
   const showSubtotal = grouping.show_subtotal !== false
   return (
@@ -235,26 +259,93 @@ function SummaryGroupNode({ node, columns, groupings, depth, ctx }) {
           {grouping.field_label}: {String(node.value)} <span style={{ color:C.textMuted, fontWeight:400 }}>({node.rows.length})</span>
         </td>
       </tr>
-      <SummaryTreeRows nodes={node.child} columns={columns} groupings={groupings} depth={depth + 1} ctx={ctx} />
+      <SummaryTreeRows
+        nodes={node.child} columns={columns} groupings={groupings} depth={depth + 1}
+        ctx={ctx} summaryCalcFields={summaryCalcFields}
+        aggregableColumnNames={aggregableColumnNames}
+      />
       {showSubtotal && (
-        <tr style={{ background: '#f0f3f8', borderTop:`1px solid ${C.borderDark}` }}>
-          <td colSpan={columns.length} style={{ ...cellStyle(), fontWeight:500, fontStyle:'italic', color:C.textSecondary, paddingLeft: 12 + depth * 16 }}>
-            Subtotal — {grouping.field_label}: {String(node.value)} ({node.rows.length} rows)
-          </td>
-        </tr>
+        <SummarySubtotalRow
+          groupValue={node.value} grouping={grouping} groupRows={node.rows}
+          columns={columns} depth={depth} ctx={ctx}
+          summaryCalcFields={summaryCalcFields}
+          aggregableColumnNames={aggregableColumnNames}
+          // Per-grouping-level calc fields: only render those with no
+          // grouping_level filter, OR those whose grouping_level matches.
+          gradeLevel={depth + 1}
+        />
       )}
     </>
   )
 }
 
-function SummaryTotalRow({ rows, columns }) {
+function SummarySubtotalRow({ groupValue, grouping, groupRows, columns, depth, ctx, summaryCalcFields, aggregableColumnNames, gradeLevel }) {
+  // Subtotal label spans roughly the leftmost cells; calc-field values
+  // populate trailing columns in the order they appear in summaryCalcFields.
+  const applicableCalc = (summaryCalcFields || []).filter(cf =>
+    cf.grouping_level == null || cf.grouping_level === gradeLevel
+  )
+  const aggs = computeAggregates(buildResolvedRows(groupRows, columns, ctx), aggregableColumnNames)
   return (
-    <tr style={{ background: C.borderDark, borderTop:`2px solid ${C.textSecondary}` }}>
-      <td colSpan={columns.length} style={{ ...cellStyle(), fontWeight:700, color:C.textPrimary }}>
-        Grand Total — {rows.length} rows
+    <tr style={{ background: '#f0f3f8', borderTop:`1px solid ${C.borderDark}` }}>
+      <td style={{ ...cellStyle(), fontWeight:500, fontStyle:'italic', color:C.textSecondary, paddingLeft: 12 + depth * 16 }}>
+        Subtotal — {grouping.field_label}: {String(groupValue)} ({groupRows.length} rows)
       </td>
+      {/* Fill across remaining columns. Calc-field values fill rightmost
+          cells; intermediate cells stay blank. */}
+      {Array.from({ length: Math.max(0, columns.length - 1 - applicableCalc.length) }, (_, i) => (
+        <td key={`fill-${i}`} style={cellStyle()} />
+      ))}
+      {applicableCalc.map((cf, idx) => {
+        const v = evaluateSummaryExpression(cf.expression, aggs)
+        return (
+          <td key={`calc-${idx}`} style={{ ...cellStyle(), fontWeight:500, color:C.textPrimary }} title={`${cf.label} (${cf.expression})`}>
+            {formatCellValue(v, cf.data_type)}
+          </td>
+        )
+      })}
     </tr>
   )
+}
+
+function SummaryTotalRow({ rows, columns, summaryCalcFields, aggregableColumnNames, ctx }) {
+  // Grand total — apply summary calc fields with grouping_level === null
+  // (or unspecified) since they apply at the top level.
+  const grandTotalCalc = (summaryCalcFields || []).filter(cf => cf.grouping_level == null)
+  const aggs = computeAggregates(buildResolvedRows(rows, columns, ctx), aggregableColumnNames)
+  return (
+    <tr style={{ background: C.borderDark, borderTop:`2px solid ${C.textSecondary}` }}>
+      <td style={{ ...cellStyle(), fontWeight:700, color:C.textPrimary }}>
+        Grand Total — {rows.length} rows
+      </td>
+      {Array.from({ length: Math.max(0, columns.length - 1 - grandTotalCalc.length) }, (_, i) => (
+        <td key={`gfill-${i}`} style={cellStyle()} />
+      ))}
+      {grandTotalCalc.map((cf, idx) => {
+        const v = evaluateSummaryExpression(cf.expression, aggs)
+        return (
+          <td key={`gcalc-${idx}`} style={{ ...cellStyle(), fontWeight:700, color:C.textPrimary }} title={`${cf.label} (${cf.expression})`}>
+            {formatCellValue(v, cf.data_type)}
+          </td>
+        )
+      })}
+    </tr>
+  )
+}
+
+/**
+ * Build flat row objects keyed by column.name with resolved values.
+ * Used as input to computeAggregates so that expressions can reference
+ * the underlying column names regardless of via_path.
+ */
+function buildResolvedRows(rows, columns, ctx) {
+  return rows.map(row => {
+    const out = {}
+    for (const c of columns) {
+      out[c.name] = getRowValue(row, c, ctx)
+    }
+    return out
+  })
 }
 
 // ─── Matrix layout (row × column pivot) ──────────────────────────────────

@@ -159,17 +159,20 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
   // ─── Helpers ───────────────────────────────────────────────────────────
   const updateReport = (patch) => setReport(prev => ({ ...prev, ...patch }))
 
-  const handleExpandRelated = async (fkColumn, table) => {
-    if (expandedRelated[fkColumn]) {
-      // Already expanded → collapse
+  const handleExpandRelated = async (viaPath, table) => {
+    // viaPath is the full FK chain to this node, e.g. ['property_id'] or
+    // ['property_id', 'account_id']. Keying on the joined path lets multiple
+    // levels of expansion coexist. Toggling collapses.
+    const key = viaPath.join('.')
+    if (expandedRelated[key]) {
       const next = { ...expandedRelated }
-      delete next[fkColumn]
+      delete next[key]
       setExpandedRelated(next)
       return
     }
     try {
-      const obj = await loadRelatedObjectFields(table, [fkColumn])
-      setExpandedRelated(prev => ({ ...prev, [fkColumn]: obj }))
+      const obj = await loadRelatedObjectFields(table, viaPath)
+      setExpandedRelated(prev => ({ ...prev, [key]: obj }))
     } catch (err) {
       console.warn('related fields load failed:', err)
     }
@@ -359,29 +362,15 @@ function FieldsTab({
                     Related Objects
                   </div>
                   {fieldTree.related.map(rel => (
-                    <div key={rel.fk_column} style={{ marginBottom:6 }}>
-                      <button
-                        onClick={() => onExpandRelated(rel.fk_column, rel.table)}
-                        style={{
-                          width:'100%', textAlign:'left', padding:'6px 8px',
-                          background: expandedRelated[rel.fk_column] ? C.cardSecondary : 'transparent',
-                          border:`1px solid ${C.border}`, borderRadius:6,
-                          fontSize:12, color:C.textPrimary, cursor:'pointer',
-                          display:'flex', justifyContent:'space-between', alignItems:'center',
-                        }}
-                      >
-                        <span>{rel.label} <span style={{ color:C.textMuted }}>({rel.table})</span></span>
-                        <span>{expandedRelated[rel.fk_column] ? '−' : '+'}</span>
-                      </button>
-                      {expandedRelated[rel.fk_column] && (
-                        <div style={{ paddingLeft:12, marginTop:4 }}>
-                          {expandedRelated[rel.fk_column].columns.map(col => (
-                            <FieldRow key={col.name} column={col}
-                              onAdd={() => addField(col, rel.table, [rel.fk_column])} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <RelatedObjectNode
+                      key={rel.fk_column}
+                      rel={rel}
+                      viaPath={[rel.fk_column]}
+                      expandedRelated={expandedRelated}
+                      onExpandRelated={onExpandRelated}
+                      addField={addField}
+                      depth={0}
+                    />
                   ))}
                 </div>
               )}
@@ -418,6 +407,62 @@ function FieldsTab({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function RelatedObjectNode({ rel, viaPath, expandedRelated, onExpandRelated, addField, depth }) {
+  const key = viaPath.join('.')
+  const isExpanded = !!expandedRelated[key]
+  const node = expandedRelated[key]
+  // Cap depth at 3 to prevent runaway expansion (FK graph contains cycles).
+  // Users can still expand 3 levels of related objects from the primary —
+  // more than enough for any realistic report.
+  const maxDepth = 3
+  return (
+    <div style={{ marginBottom:6 }}>
+      <button
+        onClick={() => onExpandRelated(viaPath, rel.table)}
+        style={{
+          width:'100%', textAlign:'left', padding:'6px 8px',
+          background: isExpanded ? C.cardSecondary : 'transparent',
+          border:`1px solid ${C.border}`, borderRadius:6,
+          fontSize:12, color:C.textPrimary, cursor:'pointer',
+          display:'flex', justifyContent:'space-between', alignItems:'center',
+        }}
+      >
+        <span>{rel.label} <span style={{ color:C.textMuted }}>({rel.table})</span></span>
+        <span>{isExpanded ? '−' : '+'}</span>
+      </button>
+      {isExpanded && node && (
+        <div style={{ paddingLeft:12, marginTop:4 }}>
+          {node.columns.map(col => (
+            <FieldRow
+              key={col.name}
+              column={col}
+              onAdd={() => addField(col, rel.table, viaPath)}
+            />
+          ))}
+          {depth + 1 < maxDepth && node.related && node.related.length > 0 && (
+            <div style={{ marginTop:8 }}>
+              <div style={{ fontSize:10, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5, marginBottom:4 }}>
+                Related to {rel.label}
+              </div>
+              {node.related.map(childRel => (
+                <RelatedObjectNode
+                  key={childRel.fk_column}
+                  rel={childRel}
+                  viaPath={[...viaPath, childRel.fk_column]}
+                  expandedRelated={expandedRelated}
+                  onExpandRelated={onExpandRelated}
+                  addField={addField}
+                  depth={depth + 1}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

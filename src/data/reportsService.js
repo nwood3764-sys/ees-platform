@@ -200,12 +200,16 @@ export async function loadFieldTree(primaryObject) {
 }
 
 /**
- * Pull columns for a related object (lazy-loaded when the user expands a
- * related-object node in the field tree). The via_path lets the Builder
- * record where this column came from when adding it to the report.
+ * Pull columns AND outgoing FKs for a related object (lazy-loaded when
+ * the user expands a related-object node in the field tree). The via_path
+ * lets the Builder record where this node came from. Including the FKs
+ * lets the Builder render a recursive tree — pick any column at any depth.
  */
 export async function loadRelatedObjectFields(viaTable, viaPath) {
-  const columns = await describeColumns(viaTable)
+  const [columns, fks] = await Promise.all([
+    describeColumns(viaTable),
+    describeOutgoingFKs(viaTable),
+  ])
   return {
     table: viaTable,
     via_path: viaPath,
@@ -213,6 +217,11 @@ export async function loadRelatedObjectFields(viaTable, viaPath) {
       name: c.column_name,
       type: c.data_type,
       nullable: c.is_nullable === 'YES',
+    })),
+    related: fks.map(f => ({
+      fk_column: f.column_name,
+      table: f.references_table,
+      label: humanizeFkLabel(f.column_name, f.references_table),
     })),
   }
 }
@@ -642,10 +651,15 @@ function applyFilterLogic(rows, filters, expression, fkLookup, primaryObject) {
 }
 
 function evalFilterOnRow(f, row, fkLookup, primaryObject) {
-  // Resolve the value at the filter's column path
+  // Resolve the value at the filter's column path — supports arbitrary
+  // via_path depth.
   let v
   if (f.rfilt_field_via_path && f.rfilt_field_via_path.length > 0) {
-    const nested = row[f.rfilt_field_via_path[0]]
+    let nested = row
+    for (const fk of f.rfilt_field_via_path) {
+      if (!nested) break
+      nested = nested[fk]
+    }
     v = nested ? nested[f.rfilt_field_name] : null
   } else {
     v = row[f.rfilt_field_name]
@@ -707,21 +721,39 @@ export async function runReport(reportId) {
   )
 
   // Build the PostgREST select string. Direct fields are listed by name;
-  // related-object fields use embedded resource syntax: 'foreign_table(field)'.
-  // We group fields by their FK column so multiple fields from the same
-  // related table share a single embed.
-  // FK columns get a name-label embed auto-attached so the runner can show
-  // 'Acme Corp' instead of 'a1b2c3d4-...' in cells.
+  // related-object fields use embedded resource syntax with arbitrary
+  // depth: 'fk1:t1(fk2:t2(field))'.
+  //
+  // We build an embed tree keyed by FK chain, then serialize. This handles
+  // multi-hop via_paths uniformly with single-hop. The Builder UI only
+  // supports single-hop expansion today, but the runner is ready when it
+  // catches up.
+  // FK columns on the primary object get a name-label embed auto-attached
+  // so the runner can show 'Acme Corp' instead of 'a1b2c3d4-...' in cells.
+
   const directFields = []
-  const embedMap = {}  // fk_column → { table, fields: [...] }
-  // Auto-embeds for FK label resolution: keyed by alias to avoid clashing
-  // with explicit user-selected embeds on the same fk_column.
+  // embedTree: nested object. embedTree[fk] = { table, fields: [...], children: { fk2: {...} } }
+  const embedTree = {}
   const labelEmbeds = []  // { alias, fk_column, table, name_column }
+
+  function ensureEmbedNode(viaPath, leafTable) {
+    let node = embedTree
+    for (let i = 0; i < viaPath.length; i++) {
+      const fk = viaPath[i]
+      if (!node[fk]) node[fk] = { table: i === viaPath.length - 1 ? leafTable : null, fields: [], children: {} }
+      if (i === viaPath.length - 1 && leafTable) node[fk].table = leafTable
+      // Move to the children for the next hop
+      if (i < viaPath.length - 1) node = node[fk].children
+    }
+    // Return reference to the deepest node so caller can push fields
+    let cur = embedTree
+    for (let i = 0; i < viaPath.length - 1; i++) cur = cur[viaPath[i]].children
+    return cur[viaPath[viaPath.length - 1]]
+  }
 
   for (const f of (r.rpt_selected_fields || [])) {
     if (!f.via_path || f.via_path.length === 0) {
       directFields.push(f.name)
-      // If this is a FK column on the primary object, queue a label embed
       const fkInfo = fkLookup[`${r.rpt_primary_object}.${f.name}`]
       if (fkInfo && fkInfo.name_column) {
         labelEmbeds.push({
@@ -731,21 +763,28 @@ export async function runReport(reportId) {
           name_column: fkInfo.name_column,
         })
       }
-    } else if (f.via_path.length === 1) {
-      const fk = f.via_path[0]
-      if (!embedMap[fk]) embedMap[fk] = { table: f.table, fields: [] }
-      embedMap[fk].fields.push(f.name)
     } else {
-      console.warn(`Multi-hop via_path not supported in runner v1: ${f.name}`)
+      const node = ensureEmbedNode(f.via_path, f.table)
+      if (!node.fields.includes(f.name)) node.fields.push(f.name)
     }
   }
 
   if (!directFields.includes('id')) directFields.unshift('id')
 
-  const selectParts = [...directFields]
-  for (const [fk, embed] of Object.entries(embedMap)) {
-    selectParts.push(`${fk}:${embed.table}(${embed.fields.join(', ')})`)
+  // Serialize the embed tree depth-first into PostgREST nested-embed syntax.
+  function serializeEmbeds(tree) {
+    const parts = []
+    for (const [fk, node] of Object.entries(tree)) {
+      const innerParts = [...node.fields]
+      const childSerialized = serializeEmbeds(node.children)
+      innerParts.push(...childSerialized)
+      const tableSegment = node.table ? `:${node.table}` : ''
+      parts.push(`${fk}${tableSegment}(${innerParts.join(', ')})`)
+    }
+    return parts
   }
+
+  const selectParts = [...directFields, ...serializeEmbeds(embedTree)]
   // Auto-embeds for FK labels — separate alias so they don't collide with
   // user-selected embeds on the same FK column
   for (const le of labelEmbeds) {
@@ -905,10 +944,10 @@ export async function runReport(reportId) {
 
 /**
  * Resolve a value at a path within a row — handles direct fields and
- * one-hop via_path nested objects. For direct FK fields, looks for an
- * auto-embedded label first (prefix '_lbl_<colname>') and returns the
- * resolved name when present. For picklist FK fields, looks up the
- * label in the optional picklistMap.
+ * nested via_path objects of arbitrary depth. For direct FK fields,
+ * looks for an auto-embedded label first (prefix '_lbl_<colname>') and
+ * returns the resolved name when present. For picklist FK fields, looks
+ * up the label in the optional picklistMap.
  *
  * Returns null if the path doesn't resolve.
  */
@@ -936,8 +975,12 @@ export function getRowValue(row, field, ctx = null) {
     }
     return row[field.name] ?? null
   }
-  // One-hop: row[fk_column] is the nested object
-  const nested = row[field.via_path[0]]
+  // Walk via_path of arbitrary depth.
+  let nested = row
+  for (const fk of field.via_path) {
+    if (!nested) return null
+    nested = nested[fk]
+  }
   if (!nested) return null
   return nested[field.name] ?? null
 }
