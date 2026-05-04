@@ -295,6 +295,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
             filters={filters} setFilters={setFilters}
             primaryObject={report.rpt_primary_object}
             fieldTree={fieldTree}
+            primaryOptions={primaryOptions}
           />
         )}
         {tab === 'groupings' && (
@@ -492,9 +493,17 @@ const FILTER_OPS = [
   'is_null','is_not_null','in_last_n_days','this_month','this_year',
 ]
 
-function FiltersTab({ report, updateReport, filters, setFilters, primaryObject, fieldTree }) {
+function FiltersTab({ report, updateReport, filters, setFilters, primaryObject, fieldTree, primaryOptions }) {
   const addFilter = () => {
     setFilters([...filters, { field_name:'', field_table:primaryObject, operator:'equals', value:'' }])
+  }
+  const addCrossFilter = () => {
+    setFilters([...filters, {
+      is_cross_filter: true,
+      cross_object:    '',
+      cross_match:     'with',
+      cross_subfilters: [],
+    }])
   }
   const updateFilter = (idx, patch) => {
     setFilters(filters.map((f, i) => i === idx ? { ...f, ...patch } : f))
@@ -505,70 +514,36 @@ function FiltersTab({ report, updateReport, filters, setFilters, primaryObject, 
     <div style={card()}>
       <div style={cardHeader()}>
         <span>Filters ({filters.length})</span>
-        <button onClick={addFilter} style={btnSecondary(false, 'small')}>+ Add Filter</button>
+        <div style={{ display:'flex', gap:6 }}>
+          <button onClick={addFilter}      style={btnSecondary(false, 'small')}>+ Filter</button>
+          <button onClick={addCrossFilter} style={btnSecondary(false, 'small')}>+ Cross-Filter</button>
+        </div>
       </div>
       <div style={{ padding:12 }}>
         {filters.length === 0 ? (
-          <div style={emptyState()}>No filters yet. Click "Add Filter" to add one.</div>
+          <div style={emptyState()}>No filters yet. Click "+ Filter" to add a field filter, or "+ Cross-Filter" to filter by related records.</div>
         ) : (
           <>
             {filters.map((f, idx) => (
               <div key={idx} style={{ marginBottom:12, paddingBottom:8, borderBottom:`1px solid ${C.border}` }}>
-                <div style={{
-                  display:'grid', gridTemplateColumns:'30px 1fr 140px 1fr 30px',
-                  gap:8, alignItems:'center',
-                }}>
-                  <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
-                  <select
-                    value={f.field_name || ''}
-                    onChange={e => updateFilter(idx, { field_name: e.target.value })}
-                    style={inputStyle()}
-                  >
-                    <option value="">— Field —</option>
-                    {fieldTree?.primary?.columns.map(c => (
-                      <option key={c.name} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={f.operator}
-                    onChange={e => updateFilter(idx, { operator: e.target.value })}
-                    style={inputStyle()}
-                  >
-                    {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
-                  </select>
-                  <input
-                    type="text"
-                    value={f.value || ''}
-                    onChange={e => updateFilter(idx, { value: e.target.value })}
-                    placeholder={f.is_runtime_prompt ? 'Default value (optional)' : 'Value'}
-                    style={inputStyle()}
+                {f.is_cross_filter ? (
+                  <CrossFilterRow
+                    filter={f}
+                    idx={idx}
+                    primaryObject={primaryObject}
+                    primaryOptions={primaryOptions}
+                    onUpdate={(patch) => updateFilter(idx, patch)}
+                    onRemove={() => removeFilter(idx)}
                   />
-                  <button onClick={() => removeFilter(idx)} style={miniBtn(true)}>×</button>
-                </div>
-                <div style={{
-                  display:'grid', gridTemplateColumns:'30px auto 1fr 30px',
-                  gap:8, alignItems:'center', marginTop:6,
-                }}>
-                  <div></div>
-                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:C.textSecondary, cursor:'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={!!f.is_runtime_prompt}
-                      onChange={e => updateFilter(idx, { is_runtime_prompt: e.target.checked })}
-                    />
-                    Prompt at runtime
-                  </label>
-                  {f.is_runtime_prompt && (
-                    <input
-                      type="text"
-                      value={f.runtime_label || ''}
-                      onChange={e => updateFilter(idx, { runtime_label: e.target.value })}
-                      placeholder="Label shown to user (e.g. 'Date Range')"
-                      style={{ ...inputStyle(), fontSize:11 }}
-                    />
-                  )}
-                  <div></div>
-                </div>
+                ) : (
+                  <RegularFilterRow
+                    filter={f}
+                    idx={idx}
+                    fieldTree={fieldTree}
+                    onUpdate={(patch) => updateFilter(idx, patch)}
+                    onRemove={() => removeFilter(idx)}
+                  />
+                )}
               </div>
             ))}
 
@@ -587,6 +562,157 @@ function FiltersTab({ report, updateReport, filters, setFilters, primaryObject, 
             </div>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Filter row components ────────────────────────────────────────────────
+
+function RegularFilterRow({ filter: f, idx, fieldTree, onUpdate, onRemove }) {
+  return (
+    <>
+      <div style={{
+        display:'grid', gridTemplateColumns:'30px 1fr 140px 1fr 30px',
+        gap:8, alignItems:'center',
+      }}>
+        <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
+        <select
+          value={f.field_name || ''}
+          onChange={e => onUpdate({ field_name: e.target.value })}
+          style={inputStyle()}
+        >
+          <option value="">— Field —</option>
+          {fieldTree?.primary?.columns.map(c => (
+            <option key={c.name} value={c.name}>{c.name}</option>
+          ))}
+        </select>
+        <select
+          value={f.operator}
+          onChange={e => onUpdate({ operator: e.target.value })}
+          style={inputStyle()}
+        >
+          {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
+        </select>
+        <input
+          type="text"
+          value={f.value || ''}
+          onChange={e => onUpdate({ value: e.target.value })}
+          placeholder={f.is_runtime_prompt ? 'Default value (optional)' : 'Value'}
+          style={inputStyle()}
+        />
+        <button onClick={onRemove} style={miniBtn(true)}>×</button>
+      </div>
+      <div style={{
+        display:'grid', gridTemplateColumns:'30px auto 1fr 30px',
+        gap:8, alignItems:'center', marginTop:6,
+      }}>
+        <div></div>
+        <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:C.textSecondary, cursor:'pointer' }}>
+          <input
+            type="checkbox"
+            checked={!!f.is_runtime_prompt}
+            onChange={e => onUpdate({ is_runtime_prompt: e.target.checked })}
+          />
+          Prompt at runtime
+        </label>
+        {f.is_runtime_prompt && (
+          <input
+            type="text"
+            value={f.runtime_label || ''}
+            onChange={e => onUpdate({ runtime_label: e.target.value })}
+            placeholder="Label shown to user (e.g. 'Date Range')"
+            style={{ ...inputStyle(), fontSize:11 }}
+          />
+        )}
+        <div></div>
+      </div>
+    </>
+  )
+}
+
+function CrossFilterRow({ filter: f, idx, primaryObject, primaryOptions, onUpdate, onRemove }) {
+  const subfilters = f.cross_subfilters || []
+  const addSubfilter = () => {
+    onUpdate({ cross_subfilters: [...subfilters, { field_name:'', operator:'equals', value:'' }] })
+  }
+  const updateSubfilter = (sIdx, patch) => {
+    onUpdate({ cross_subfilters: subfilters.map((s, i) => i === sIdx ? { ...s, ...patch } : s) })
+  }
+  const removeSubfilter = (sIdx) => {
+    onUpdate({ cross_subfilters: subfilters.filter((_, i) => i !== sIdx) })
+  }
+
+  return (
+    <div style={{ background: C.cardSecondary, borderRadius:6, padding:10 }}>
+      <div style={{
+        display:'grid', gridTemplateColumns:'30px 100px 1fr 30px',
+        gap:8, alignItems:'center',
+      }}>
+        <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
+        <select
+          value={f.cross_match || 'with'}
+          onChange={e => onUpdate({ cross_match: e.target.value })}
+          style={inputStyle()}
+        >
+          <option value="with">with</option>
+          <option value="without">without</option>
+        </select>
+        <select
+          value={f.cross_object || ''}
+          onChange={e => onUpdate({ cross_object: e.target.value })}
+          style={inputStyle()}
+        >
+          <option value="">— Related Object —</option>
+          {(primaryOptions || []).filter(o => o.table !== primaryObject).map(o => (
+            <option key={o.table} value={o.table}>{o.label}</option>
+          ))}
+        </select>
+        <button onClick={onRemove} style={miniBtn(true)}>×</button>
+      </div>
+
+      <div style={{ marginTop:8, paddingLeft:38 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
+          <div style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5 }}>
+            Sub-filters on {f.cross_object || '...'}
+          </div>
+          <button onClick={addSubfilter} disabled={!f.cross_object} style={btnSecondary(!f.cross_object, 'small')}>
+            + Sub-filter
+          </button>
+        </div>
+        {subfilters.length === 0 ? (
+          <div style={{ fontSize:11, color:C.textMuted, fontStyle:'italic', padding:'4px 0' }}>
+            No sub-filters. Will match any {f.cross_object || 'related'} record.
+          </div>
+        ) : subfilters.map((sf, sIdx) => (
+          <div key={sIdx} style={{
+            display:'grid', gridTemplateColumns:'1fr 130px 1fr 30px',
+            gap:6, marginBottom:6, alignItems:'center',
+          }}>
+            <input
+              type="text"
+              value={sf.field_name || ''}
+              onChange={e => updateSubfilter(sIdx, { field_name: e.target.value })}
+              placeholder="Field name"
+              style={{ ...inputStyle(), fontSize:11 }}
+            />
+            <select
+              value={sf.operator || 'equals'}
+              onChange={e => updateSubfilter(sIdx, { operator: e.target.value })}
+              style={{ ...inputStyle(), fontSize:11 }}
+            >
+              {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
+            </select>
+            <input
+              type="text"
+              value={sf.value || ''}
+              onChange={e => updateSubfilter(sIdx, { value: e.target.value })}
+              placeholder="Value"
+              style={{ ...inputStyle(), fontSize:11 }}
+            />
+            <button onClick={() => removeSubfilter(sIdx)} style={miniBtn(true)}>×</button>
+          </div>
+        ))}
       </div>
     </div>
   )

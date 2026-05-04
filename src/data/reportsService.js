@@ -731,6 +731,54 @@ export async function getReportPrompts(reportId) {
   }))
 }
 
+/**
+ * Apply a single (field, operator, value) tuple to a Supabase query
+ * builder. Same operator vocabulary as the runner's main filter loop;
+ * extracted so cross-filter sub-filters reuse the same semantics.
+ */
+function applySimpleFilter(query, fieldName, operator, value) {
+  switch (operator) {
+    case 'equals':           return query.eq(fieldName, value)
+    case 'not_equals':       return query.neq(fieldName, value)
+    case 'greater_than':     return query.gt(fieldName, value)
+    case 'less_than':        return query.lt(fieldName, value)
+    case 'greater_or_equal': return query.gte(fieldName, value)
+    case 'less_or_equal':    return query.lte(fieldName, value)
+    case 'in':
+      return query.in(fieldName,
+        Array.isArray(value) ? value : String(value).split(',').map(s => s.trim()))
+    case 'not_in':
+      return query.not(fieldName, 'in',
+        `(${(Array.isArray(value) ? value : String(value).split(',').map(s => s.trim())).map(x => `"${x}"`).join(',')})`)
+    case 'contains':    return query.ilike(fieldName, `%${value}%`)
+    case 'starts_with': return query.ilike(fieldName, `${value}%`)
+    case 'ends_with':   return query.ilike(fieldName, `%${value}`)
+    case 'is_null':     return query.is(fieldName, null)
+    case 'is_not_null': return query.not(fieldName, 'is', null)
+    case 'in_last_n_days': {
+      const n = parseInt(value, 10)
+      if (Number.isFinite(n) && n > 0) {
+        const cutoff = new Date(Date.now() - n * 86400000).toISOString()
+        return query.gte(fieldName, cutoff)
+      }
+      return query
+    }
+    case 'this_month': {
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+      const end   = new Date(now.getFullYear(), now.getMonth()+1, 1).toISOString()
+      return query.gte(fieldName, start).lt(fieldName, end)
+    }
+    case 'this_year': {
+      const now = new Date()
+      const start = new Date(now.getFullYear(), 0, 1).toISOString()
+      const end   = new Date(now.getFullYear()+1, 0, 1).toISOString()
+      return query.gte(fieldName, start).lt(fieldName, end)
+    }
+  }
+  return query
+}
+
 export async function runReport(reportId, promptValues = null) {
   const loaded = await loadReport(reportId)
   if (!loaded) throw new Error('Report not found')
@@ -842,6 +890,53 @@ export async function runReport(reportId, promptValues = null) {
   // skip silently if the table doesn't have one.
   query = query.eq('is_deleted', false)
 
+  // Cross-filters: pre-compute sets of primary-object IDs that match
+  // each cross-filter. After the main query returns, filter rows by
+  // intersection (or difference for 'without') with these sets.
+  //
+  // Cross-filter shape on report_filters rows:
+  //   rfilt_is_cross_filter: true
+  //   rfilt_cross_object:    'work_orders'
+  //   rfilt_cross_match:     'with' | 'without'
+  //   rfilt_cross_subfilters: jsonb array of additional filters scoped
+  //                            to the cross object
+  //
+  // Discovery: cross_object must have a FK column pointing at the primary
+  // object. We pick the first FK whose references_table === primaryObject.
+  const crossFilterRows = (loaded.filters || []).filter(f => f.rfilt_is_cross_filter)
+  const crossFilterSets = []  // [{ match: 'with'|'without', ids: Set<uuid> }]
+
+  for (const cf of crossFilterRows) {
+    if (!cf.rfilt_cross_object) continue
+    try {
+      const crossCols = await describeColumns(cf.rfilt_cross_object)
+      const linkCol = crossCols.find(c =>
+        c.is_foreign_key && c.references_table === r.rpt_primary_object
+      )
+      if (!linkCol) {
+        console.warn(`No FK from ${cf.rfilt_cross_object} to ${r.rpt_primary_object} — skipping cross-filter`)
+        continue
+      }
+      let crossQuery = supabase.from(cf.rfilt_cross_object).select(linkCol.column_name).eq('is_deleted', false)
+      for (const sf of (cf.rfilt_cross_subfilters || [])) {
+        if (!sf.field_name || !sf.operator) continue
+        crossQuery = applySimpleFilter(crossQuery, sf.field_name, sf.operator, sf.value)
+      }
+      const { data: crossData, error: crossErr } = await crossQuery.limit(50000)
+      if (crossErr) {
+        console.warn('Cross-filter query failed:', crossErr.message)
+        continue
+      }
+      const ids = new Set((crossData || []).map(row => row[linkCol.column_name]).filter(Boolean))
+      crossFilterSets.push({
+        match: cf.rfilt_cross_match || 'with',
+        ids,
+      })
+    } catch (err) {
+      console.warn(`Cross-filter resolution failed for ${cf.rfilt_cross_object}:`, err.message)
+    }
+  }
+
   // When the report uses non-trivial filter logic (anything other than
   // 'all' AND-of-everything), skip server-side filter pushdown — the
   // filter logic is evaluated client-side after the query returns. Reports
@@ -920,6 +1015,17 @@ export async function runReport(reportId, promptValues = null) {
 
   let { data, error } = await query
   if (error) throw error
+
+  // Apply cross-filter sets. For 'with' matches, keep rows whose id is
+  // in the set. For 'without', keep rows whose id is NOT in the set.
+  for (const cs of crossFilterSets) {
+    if (!data) break
+    if (cs.match === 'with') {
+      data = data.filter(row => cs.ids.has(row.id))
+    } else {
+      data = data.filter(row => !cs.ids.has(row.id))
+    }
+  }
 
   // Client-side filter logic evaluation if expression is non-trivial.
   if (hasComplexLogic && data && (loaded.filters || []).length > 0) {
