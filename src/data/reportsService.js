@@ -441,39 +441,134 @@ export async function saveReport({ id, report, filters, groupings, calculatedFie
 //     primaryObject: 'projects',
 //   }
 
+// Map of well-known label columns per table, in priority order. The runner
+// uses this to auto-embed an FK column's parent record name so users see
+// 'Acme Corp' instead of a UUID. If a table isn't here, no label is
+// resolved (cell falls back to the truncated UUID display).
+const TABLE_NAME_COLUMNS = {
+  accounts:               ['account_name'],
+  contacts:               ['contact_name', 'contact_first_name'],
+  properties:             ['property_name'],
+  buildings:              ['building_name'],
+  units:                  ['unit_name'],
+  opportunities:          ['opportunity_name'],
+  projects:               ['project_name'],
+  work_orders:            ['work_order_name'],
+  work_steps:             ['work_step_name'],
+  work_plans:             ['work_plan_name'],
+  work_types:             ['name', 'work_type_name'],
+  work_plan_templates:    ['wpt_name'],
+  work_step_templates:    ['wst_name'],
+  incentive_applications: ['ia_name'],
+  programs:               ['name'],
+  users:                  ['user_name'],
+  roles:                  ['role_name'],
+  vehicles:               ['vehicle_name'],
+  equipment:              ['equipment_name'],
+  products:               ['product_name'],
+  envelopes:              ['env_name'],
+  document_templates:     ['name'],
+  email_templates:        ['name'],
+  picklist_values:        ['picklist_label', 'picklist_value'],
+  skills:                 ['skill_name'],
+  service_territories:    ['name'],
+  report_folders:         ['rf_name'],
+  reports:                ['rpt_name'],
+  portals:                ['portal_name'],
+  chat_threads:           ['chat_subject'],
+}
+
+/**
+ * For a list of tables, return a map of "{table}.{column}" → FK metadata
+ * with the resolved name column for the referenced table. Skipped FKs:
+ * picklist_values (handled via picklist label resolution separately;
+ * Phase 2c.4 follow-up), audit user FKs (*_by), and any FK whose
+ * referenced table doesn't have a known name column.
+ */
+async function buildFKLookup(primaryTable, alsoTables) {
+  const allTables = Array.from(new Set([primaryTable, ...(alsoTables || [])])).filter(Boolean)
+  const out = {}
+  for (const tbl of allTables) {
+    const cols = await describeColumns(tbl)
+    for (const c of cols) {
+      if (!c.is_foreign_key || !c.references_table) continue
+      if (c.column_name.endsWith('_by')) continue
+      // Picklist label resolution will be its own thing later; skip here
+      if (c.references_table === 'picklist_values') continue
+      const candidates = TABLE_NAME_COLUMNS[c.references_table]
+      if (!candidates) continue
+      // Pick the first candidate that exists on the referenced table
+      const refCols = await describeColumns(c.references_table)
+      const nameCol = candidates.find(n => refCols.some(rc => rc.column_name === n))
+      if (!nameCol) continue
+      out[`${tbl}.${c.column_name}`] = {
+        references_table: c.references_table,
+        name_column:      nameCol,
+      }
+    }
+  }
+  return out
+}
+
 export async function runReport(reportId) {
   const loaded = await loadReport(reportId)
   if (!loaded) throw new Error('Report not found')
   const r = loaded.report
 
+  // We need to know which columns on the primary object (and any expanded
+  // related object) are FKs, so we can auto-embed the parent record's
+  // name field for label display. Cached per call.
+  const fkLookup = await buildFKLookup(r.rpt_primary_object,
+    Array.from(new Set((r.rpt_selected_fields || [])
+      .filter(f => f.via_path && f.via_path.length === 1)
+      .map(f => f.table)))
+  )
+
   // Build the PostgREST select string. Direct fields are listed by name;
   // related-object fields use embedded resource syntax: 'foreign_table(field)'.
   // We group fields by their FK column so multiple fields from the same
   // related table share a single embed.
+  // FK columns get a name-label embed auto-attached so the runner can show
+  // 'Acme Corp' instead of 'a1b2c3d4-...' in cells.
   const directFields = []
   const embedMap = {}  // fk_column → { table, fields: [...] }
+  // Auto-embeds for FK label resolution: keyed by alias to avoid clashing
+  // with explicit user-selected embeds on the same fk_column.
+  const labelEmbeds = []  // { alias, fk_column, table, name_column }
 
   for (const f of (r.rpt_selected_fields || [])) {
     if (!f.via_path || f.via_path.length === 0) {
       directFields.push(f.name)
+      // If this is a FK column on the primary object, queue a label embed
+      const fkInfo = fkLookup[`${r.rpt_primary_object}.${f.name}`]
+      if (fkInfo && fkInfo.name_column) {
+        labelEmbeds.push({
+          alias:       `_lbl_${f.name}`,
+          fk_column:   f.name,
+          table:       fkInfo.references_table,
+          name_column: fkInfo.name_column,
+        })
+      }
     } else if (f.via_path.length === 1) {
       const fk = f.via_path[0]
       if (!embedMap[fk]) embedMap[fk] = { table: f.table, fields: [] }
       embedMap[fk].fields.push(f.name)
     } else {
-      // Multi-hop FK chains not yet supported — skip silently for now
       console.warn(`Multi-hop via_path not supported in runner v1: ${f.name}`)
     }
   }
 
-  // Always include `id` so rows have a stable key
   if (!directFields.includes('id')) directFields.unshift('id')
 
   const selectParts = [...directFields]
   for (const [fk, embed] of Object.entries(embedMap)) {
     selectParts.push(`${fk}:${embed.table}(${embed.fields.join(', ')})`)
   }
-  // Also include any field used in groupings/filters that wasn't explicitly selected
+  // Auto-embeds for FK labels — separate alias so they don't collide with
+  // user-selected embeds on the same FK column
+  for (const le of labelEmbeds) {
+    selectParts.push(`${le.alias}:${le.fk_column}(${le.name_column})`)
+  }
   for (const g of (loaded.groupings || [])) {
     if (!g.rgr_field_via_path && g.rgr_field_name && !selectParts.includes(g.rgr_field_name)) {
       selectParts.push(g.rgr_field_name)
@@ -587,12 +682,23 @@ export async function runReport(reportId) {
 
 /**
  * Resolve a value at a path within a row — handles direct fields and
- * one-hop via_path nested objects. Returns null if the path doesn't
- * resolve (e.g. the FK was null, so the embed is null).
+ * one-hop via_path nested objects. For direct FK fields, looks for an
+ * auto-embedded label first (prefix '_lbl_<colname>') and returns the
+ * resolved name when present.
+ *
+ * Returns null if the path doesn't resolve.
  */
 export function getRowValue(row, field) {
   if (!row || !field) return null
   if (!field.via_path || field.via_path.length === 0) {
+    // Direct field: check for an auto-resolved FK label first
+    const labelEmbed = row[`_lbl_${field.name}`]
+    if (labelEmbed && typeof labelEmbed === 'object') {
+      // Pick the first non-null property — there's only ever one (the name col)
+      for (const k of Object.keys(labelEmbed)) {
+        if (labelEmbed[k] != null) return labelEmbed[k]
+      }
+    }
     return row[field.name] ?? null
   }
   // One-hop: row[fk_column] is the nested object

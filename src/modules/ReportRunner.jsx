@@ -55,6 +55,7 @@ export default function ReportRunner({ reportId, onClose, onEdit }) {
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
           <button onClick={run}    style={btnSecondary()}>Run Again</button>
+          <button onClick={() => exportCsv(result)} style={btnSecondary()}>Export CSV</button>
           <button onClick={onEdit} style={btnSecondary()}>Edit</button>
           <button onClick={onClose} style={btnSecondary()}>Close</button>
         </div>
@@ -73,8 +74,17 @@ export default function ReportRunner({ reportId, onClose, onEdit }) {
 // ─── Tabular layout ───────────────────────────────────────────────────────
 
 function TabularLayout({ result }) {
-  const { rows, columns } = result
-  if (columns.length === 0) {
+  const { rows, columns, calculatedFields } = result
+  // Row-scope calculated fields appear as additional columns alongside the
+  // selected fields. Summary-scope calculated fields show on the totals
+  // row in SummaryLayout — not relevant for tabular.
+  const rowCalcFields = (calculatedFields || []).filter(c => c.scope === 'row')
+  const allColumns = [
+    ...columns,
+    ...rowCalcFields.map(c => ({ ...c, _calc: true, label: c.label || '(calc)' })),
+  ]
+
+  if (allColumns.length === 0) {
     return <EmptyState message="No fields selected. Edit the report to add fields." />
   }
   if (rows.length === 0) {
@@ -85,8 +95,11 @@ function TabularLayout({ result }) {
       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
         <thead style={{ background:C.cardSecondary, position:'sticky', top:0, zIndex:1 }}>
           <tr>
-            {columns.map((c, idx) => (
-              <th key={`h-${idx}`} style={cellHeaderStyle()}>{c.label}</th>
+            {allColumns.map((c, idx) => (
+              <th key={`h-${idx}`} style={cellHeaderStyle()}>
+                {c.label}
+                {c._calc && <span style={{ marginLeft:4, fontSize:10, color:C.emerald }}>ƒ</span>}
+              </th>
             ))}
           </tr>
         </thead>
@@ -95,7 +108,16 @@ function TabularLayout({ result }) {
             <tr key={row.id || rowIdx} style={{
               borderTop: `1px solid ${C.border}`,
             }}>
-              {columns.map((c, idx) => {
+              {allColumns.map((c, idx) => {
+                if (c._calc) {
+                  return (
+                    <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
+                      <span style={{ color:C.textMuted, fontStyle:'italic', fontSize:11 }}>
+                        evaluator pending
+                      </span>
+                    </td>
+                  )
+                }
                 const v = getRowValue(row, c)
                 return (
                   <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
@@ -261,6 +283,38 @@ function formatCellValue(v, type) {
     </span>
   }
   return String(v)
+}
+
+// ─── CSV export ───────────────────────────────────────────────────────────
+
+function exportCsv(result) {
+  const { rows, columns, name } = result
+  if (!rows || rows.length === 0) return
+
+  const escape = (v) => {
+    if (v == null) return ''
+    const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"'
+    }
+    return s
+  }
+
+  const header = columns.map(c => escape(c.label)).join(',')
+  const dataRows = rows.map(row =>
+    columns.map(c => escape(getRowValue(row, c))).join(',')
+  )
+  const csv = [header, ...dataRows].join('\n')
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${(name || 'report').replace(/[^a-z0-9_-]/gi, '_')}_${new Date().toISOString().slice(0, 10)}.csv`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 
 // ─── Style helpers ────────────────────────────────────────────────────────
