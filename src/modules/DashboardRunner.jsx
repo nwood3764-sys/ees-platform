@@ -172,17 +172,49 @@ function WidgetBody({ widget, result }) {
 
 // ─── Widget renderers ─────────────────────────────────────────────────────
 
-function MetricWidget({ result }) {
-  // Single big number — count of rows by default. Custom numeric column
-  // via widget_config.metric_column (sums it).
-  const count = result.rows.length
+function MetricWidget({ result, widget }) {
+  // Configurable single number. With no measure config, defaults to row count.
+  // widget_config: { measure_type, measure_field, label }
+  const cfg          = widget.dw_widget_config || {}
+  const measureType  = cfg.measure_type  || 'count'
+  const measureField = cfg.measure_field || null
+
+  let value, displayLabel
+  if (measureType === 'count' || !measureField) {
+    value = result.rows.length
+    displayLabel = cfg.label || 'rows'
+  } else {
+    const nums = []
+    for (const row of result.rows) {
+      const v = getRowValue(row, { name: measureField }, result)
+      if (v == null || v === '') continue
+      const n = typeof v === 'number' ? v : parseFloat(v)
+      if (Number.isFinite(n)) nums.push(n)
+    }
+    if (nums.length === 0) value = 0
+    else switch (measureType) {
+      case 'sum': value = nums.reduce((a,b) => a+b, 0); break
+      case 'avg': value = nums.reduce((a,b) => a+b, 0) / nums.length; break
+      case 'min': value = Math.min(...nums); break
+      case 'max': value = Math.max(...nums); break
+      default:    value = nums.length
+    }
+    displayLabel = cfg.label || `${measureType} of ${measureField}`
+  }
+
+  // Format integers cleanly, decimals to 1 place
+  const isInt = Number.isInteger(value)
+  const display = isInt
+    ? value.toLocaleString()
+    : value.toLocaleString(undefined, { maximumFractionDigits: 1 })
+
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%' }}>
       <div style={{ fontSize:48, fontWeight:700, color:C.textPrimary, lineHeight:1 }}>
-        {count.toLocaleString()}
+        {display}
       </div>
       <div style={{ fontSize:12, color:C.textMuted, marginTop:6, textTransform:'uppercase', letterSpacing:0.5 }}>
-        rows
+        {displayLabel}
       </div>
     </div>
   )
@@ -223,17 +255,70 @@ function TableWidget({ result }) {
   )
 }
 
-// Group rows for a chart by their first selected field, count by default.
+// Build chart data from a report result based on the widget's group_by
+// and measure config. Each {name, value} pair becomes one bar/slice/point.
+//
+// widget_config shape (all optional):
+//   group_by:      column name on the report (defaults to first column)
+//   measure_type:  'count' | 'sum' | 'avg' | 'min' | 'max'  (default 'count')
+//   measure_field: column name to aggregate (required when measure_type != 'count')
+//   sort_by:       'value_desc' (default) | 'value_asc' | 'name'
+//   limit:         max categories to show (default 20 — keeps charts legible)
 function buildChartData(result, widget) {
-  const cfg = widget.dw_widget_config || {}
-  const groupCol = cfg.group_by || (result.columns?.[0]?.name) || null
+  const cfg          = widget.dw_widget_config || {}
+  const groupCol     = cfg.group_by      || (result.columns?.[0]?.name) || null
+  const measureType  = cfg.measure_type  || 'count'
+  const measureField = cfg.measure_field || null
+  const sortBy       = cfg.sort_by       || 'value_desc'
+  const limit        = cfg.limit         || 20
   if (!groupCol) return []
-  const groupCount = new Map()
+
+  // Group rows by the resolved value of groupCol (FK labels and picklist
+  // labels already substituted by getRowValue).
+  const buckets = new Map()
   for (const row of result.rows) {
-    const v = getRowValue(row, { name: groupCol }, result) ?? '—'
-    groupCount.set(v, (groupCount.get(v) || 0) + 1)
+    const k = getRowValue(row, { name: groupCol }, result) ?? '—'
+    const key = String(k)
+    if (!buckets.has(key)) buckets.set(key, [])
+    buckets.get(key).push(row)
   }
-  return Array.from(groupCount, ([name, value]) => ({ name: String(name), value }))
+
+  // Apply the measure to each bucket.
+  const aggregated = []
+  for (const [name, bucketRows] of buckets) {
+    let value
+    if (measureType === 'count' || !measureField) {
+      value = bucketRows.length
+    } else {
+      // Pull resolved values for the measure field; coerce to numbers
+      const nums = []
+      for (const row of bucketRows) {
+        const v = getRowValue(row, { name: measureField }, result)
+        if (v == null || v === '') continue
+        const n = typeof v === 'number' ? v : parseFloat(v)
+        if (Number.isFinite(n)) nums.push(n)
+      }
+      if (nums.length === 0) { value = 0 }
+      else switch (measureType) {
+        case 'sum': value = nums.reduce((a,b) => a+b, 0); break
+        case 'avg': value = nums.reduce((a,b) => a+b, 0) / nums.length; break
+        case 'min': value = Math.min(...nums); break
+        case 'max': value = Math.max(...nums); break
+        default:    value = nums.length
+      }
+    }
+    aggregated.push({ name, value })
+  }
+
+  // Sort + limit
+  if (sortBy === 'name') {
+    aggregated.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+  } else if (sortBy === 'value_asc') {
+    aggregated.sort((a, b) => a.value - b.value)
+  } else {
+    aggregated.sort((a, b) => b.value - a.value)
+  }
+  return aggregated.slice(0, limit)
 }
 
 function BarWidget({ result, widget }) {
@@ -299,16 +384,42 @@ function FunnelWidget({ result, widget }) {
 }
 
 function GaugeWidget({ result, widget }) {
-  // Simple "progress toward target" gauge. widget_config.target sets the
-  // denominator; numerator is the row count.
-  const cfg = widget.dw_widget_config || {}
-  const target = cfg.target || 100
-  const value = result.rows.length
-  const pct = Math.min(100, (value / target) * 100)
+  // Progress toward target. widget_config.target is the denominator;
+  // numerator is the configured measure (defaults to row count).
+  const cfg          = widget.dw_widget_config || {}
+  const target       = cfg.target        || 100
+  const measureType  = cfg.measure_type  || 'count'
+  const measureField = cfg.measure_field || null
+
+  let value
+  if (measureType === 'count' || !measureField) {
+    value = result.rows.length
+  } else {
+    const nums = []
+    for (const row of result.rows) {
+      const v = getRowValue(row, { name: measureField }, result)
+      if (v == null || v === '') continue
+      const n = typeof v === 'number' ? v : parseFloat(v)
+      if (Number.isFinite(n)) nums.push(n)
+    }
+    if (nums.length === 0) value = 0
+    else switch (measureType) {
+      case 'sum': value = nums.reduce((a,b) => a+b, 0); break
+      case 'avg': value = nums.reduce((a,b) => a+b, 0) / nums.length; break
+      case 'min': value = Math.min(...nums); break
+      case 'max': value = Math.max(...nums); break
+      default:    value = nums.length
+    }
+  }
+
+  const pct = target > 0 ? Math.min(100, (value / target) * 100) : 0
+  const isInt = Number.isInteger(value) && Number.isInteger(target)
+  const fmt = (n) => isInt ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 1 })
+
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%' }}>
       <div style={{ fontSize:32, fontWeight:700, color:C.textPrimary, lineHeight:1 }}>
-        {value.toLocaleString()} / {target.toLocaleString()}
+        {fmt(value)} / {fmt(target)}
       </div>
       <div style={{
         marginTop:14, width:'80%', height:10, borderRadius:5,

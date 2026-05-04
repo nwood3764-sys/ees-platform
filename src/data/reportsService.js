@@ -300,6 +300,26 @@ export async function listPrimaryObjectOptions() {
 
 // ─── Save / load report definitions ───────────────────────────────────────
 
+/**
+ * Lightweight helper for the Dashboard Editor: returns just a report's
+ * selected-fields array without loading filters/groupings/calc fields.
+ * Used to populate per-widget group_by / measure_field dropdowns without
+ * a round-trip to schema introspection.
+ *
+ * Returns: array of { name, table, label, via_path, type }
+ */
+export async function getReportSelectedFields(reportId) {
+  if (!reportId || reportId === 'new') return []
+  const { data, error } = await supabase
+    .from('reports')
+    .select('rpt_selected_fields')
+    .eq('id', reportId)
+    .eq('is_deleted', false)
+    .single()
+  if (error) return []
+  return data?.rpt_selected_fields || []
+}
+
 export async function loadReport(reportId) {
   if (!reportId || reportId === 'new') return null
 

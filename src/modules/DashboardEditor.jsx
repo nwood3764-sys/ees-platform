@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
-import { loadDashboard, saveDashboard, fetchReports } from '../data/reportsService'
+import { loadDashboard, saveDashboard, fetchReports, getReportSelectedFields } from '../data/reportsService'
 import { supabase } from '../lib/supabase'
 
 const WIDGET_TYPES = [
@@ -197,42 +197,156 @@ export default function DashboardEditor({ dashboardId, onClose, onSaved }) {
             {widgets.length === 0 ? (
               <div style={emptyState()}>No widgets yet. Click "Add Widget" to attach a saved report.</div>
             ) : widgets.map((w, idx) => (
-              <div key={idx} style={{
-                background:C.cardSecondary, borderRadius:6, padding:12, marginBottom:10,
-              }}>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 100px 30px', gap:8, alignItems:'center', marginBottom:8 }}>
-                  <select value={w.report_id || ''}
-                    onChange={e => updateWidget(idx, { report_id: e.target.value })}
-                    style={inputStyle()}>
-                    <option value="">— Report —</option>
-                    {reports.map(r => (
-                      <option key={r._id} value={r._id}>{r.name}</option>
-                    ))}
-                  </select>
-                  <select value={w.widget_type || 'table'}
-                    onChange={e => updateWidget(idx, { widget_type: e.target.value })}
-                    style={inputStyle()}>
-                    {WIDGET_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                  <select value={w.width || 1}
-                    onChange={e => updateWidget(idx, { width: parseInt(e.target.value, 10) })}
-                    style={inputStyle()}>
-                    <option value={1}>1 col</option>
-                    <option value={2}>2 cols</option>
-                    <option value={3}>3 cols</option>
-                    <option value={4}>4 cols</option>
-                  </select>
-                  <button onClick={() => removeWidget(idx)} style={miniBtn(true)}>×</button>
-                </div>
-                <input type="text" value={w.title || ''}
-                  onChange={e => updateWidget(idx, { title: e.target.value })}
-                  placeholder="Widget title (optional — defaults to report name)"
-                  style={{ ...inputStyle(), fontSize:12 }} />
-              </div>
+              <WidgetEditorRow
+                key={idx}
+                widget={w}
+                idx={idx}
+                reports={reports}
+                onUpdate={(patch) => updateWidget(idx, patch)}
+                onRemove={() => removeWidget(idx)}
+              />
             ))}
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Widget editor row ────────────────────────────────────────────────────
+//
+// A single widget within the dashboard editor. Owns the lazily-loaded
+// columns of the widget's selected report so the group_by and
+// measure_field dropdowns can be populated without round-trips to
+// schema introspection.
+
+const MEASURES = [
+  { value: 'count', label: 'Count of records' },
+  { value: 'sum',   label: 'Sum of' },
+  { value: 'avg',   label: 'Average of' },
+  { value: 'min',   label: 'Min of' },
+  { value: 'max',   label: 'Max of' },
+]
+
+// Which widget types use group_by + measure config vs just measure config
+// vs neither. Tables don't need measures (they show raw rows).
+const NEEDS_GROUP_BY = new Set(['bar','line','pie','donut','funnel'])
+const NEEDS_MEASURE  = new Set(['bar','line','pie','donut','funnel','metric','gauge'])
+const NEEDS_TARGET   = new Set(['gauge'])
+
+function WidgetEditorRow({ widget: w, idx, reports, onUpdate, onRemove }) {
+  const [reportFields, setReportFields] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!w.report_id) { setReportFields([]); return }
+    getReportSelectedFields(w.report_id)
+      .then(fields => { if (!cancelled) setReportFields(fields) })
+      .catch(err => { if (!cancelled) { console.warn('report fields load failed:', err); setReportFields([]) } })
+    return () => { cancelled = true }
+  }, [w.report_id])
+
+  const cfg = w.widget_config || {}
+  const updateConfig = (patch) => onUpdate({ widget_config: { ...cfg, ...patch } })
+
+  const widgetType   = w.widget_type || 'table'
+  const showGroupBy  = NEEDS_GROUP_BY.has(widgetType)
+  const showMeasure  = NEEDS_MEASURE.has(widgetType)
+  const showTarget   = NEEDS_TARGET.has(widgetType)
+  const measureType  = cfg.measure_type || 'count'
+  const measureNeedsField = measureType !== 'count'
+
+  return (
+    <div style={{ background:C.cardSecondary, borderRadius:6, padding:12, marginBottom:10 }}>
+      {/* Top row: report + chart type + width + remove */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 100px 30px', gap:8, alignItems:'center', marginBottom:8 }}>
+        <select value={w.report_id || ''}
+          onChange={e => onUpdate({ report_id: e.target.value })}
+          style={inputStyle()}>
+          <option value="">— Report —</option>
+          {reports.map(r => (
+            <option key={r._id} value={r._id}>{r.name}</option>
+          ))}
+        </select>
+        <select value={widgetType}
+          onChange={e => onUpdate({ widget_type: e.target.value })}
+          style={inputStyle()}>
+          {WIDGET_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+        <select value={w.width || 1}
+          onChange={e => onUpdate({ width: parseInt(e.target.value, 10) })}
+          style={inputStyle()}>
+          <option value={1}>1 col</option>
+          <option value={2}>2 cols</option>
+          <option value={3}>3 cols</option>
+          <option value={4}>4 cols</option>
+        </select>
+        <button onClick={onRemove} style={miniBtn(true)}>×</button>
+      </div>
+
+      {/* Title input */}
+      <input type="text" value={w.title || ''}
+        onChange={e => onUpdate({ title: e.target.value })}
+        placeholder="Widget title (optional — defaults to report name)"
+        style={{ ...inputStyle(), fontSize:12, marginBottom:8 }} />
+
+      {/* Chart-specific config */}
+      {(showGroupBy || showMeasure || showTarget) && w.report_id && (
+        <div style={{
+          padding:8, background:C.card, border:`1px solid ${C.border}`,
+          borderRadius:4, display:'grid', gap:6,
+        }}>
+          {showGroupBy && (
+            <div style={{ display:'grid', gridTemplateColumns:'100px 1fr', gap:6, alignItems:'center' }}>
+              <label style={{ fontSize:11, color:C.textSecondary }}>Group by</label>
+              <select value={cfg.group_by || ''}
+                onChange={e => updateConfig({ group_by: e.target.value })}
+                style={{ ...inputStyle(), fontSize:11 }}>
+                <option value="">— First column (default) —</option>
+                {reportFields.map((f, fi) => (
+                  <option key={`${f.name}-${fi}`} value={f.name}>
+                    {f.label || f.name}{f.via_path?.length ? ` (${f.via_path.join('.')})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {showMeasure && (
+            <div style={{ display:'grid', gridTemplateColumns:'100px 1fr 1fr', gap:6, alignItems:'center' }}>
+              <label style={{ fontSize:11, color:C.textSecondary }}>Measure</label>
+              <select value={measureType}
+                onChange={e => updateConfig({ measure_type: e.target.value })}
+                style={{ ...inputStyle(), fontSize:11 }}>
+                {MEASURES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              {measureNeedsField ? (
+                <select value={cfg.measure_field || ''}
+                  onChange={e => updateConfig({ measure_field: e.target.value })}
+                  style={{ ...inputStyle(), fontSize:11 }}>
+                  <option value="">— Field —</option>
+                  {reportFields.map((f, fi) => (
+                    <option key={`m-${f.name}-${fi}`} value={f.name}>
+                      {f.label || f.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div style={{ fontSize:11, color:C.textMuted, fontStyle:'italic', alignSelf:'center' }}>
+                  Counts all rows in the report.
+                </div>
+              )}
+            </div>
+          )}
+          {showTarget && (
+            <div style={{ display:'grid', gridTemplateColumns:'100px 1fr', gap:6, alignItems:'center' }}>
+              <label style={{ fontSize:11, color:C.textSecondary }}>Target</label>
+              <input type="number" value={cfg.target ?? 100}
+                onChange={e => updateConfig({ target: parseFloat(e.target.value) || 0 })}
+                style={{ ...inputStyle(), fontSize:11 }} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
