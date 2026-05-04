@@ -255,12 +255,188 @@ function SummaryTotalRow({ rows, columns }) {
   )
 }
 
-// ─── Matrix layout (Phase 2c.2 — minimal) ────────────────────────────────
+// ─── Matrix layout (row × column pivot) ──────────────────────────────────
 
 function MatrixLayout({ result }) {
+  const { rows, groupings, primaryObject } = result
+  // Column groupings live on the report's rpt_column_groupings jsonb;
+  // result includes rpt_column_groupings on result.report.rpt_column_groupings,
+  // but we only thread the result through the runner — so look it up there.
+  // The runner attaches it as result.columnGroupings in the patch below.
+  const colGroupings = result.columnGroupings || []
+  const measure = result.measure || { type: 'count', field: null }
+
+  if (groupings.length === 0) {
+    return <EmptyState message="Matrix reports need at least one row grouping." />
+  }
+  if (colGroupings.length === 0) {
+    return <EmptyState message="Matrix reports need at least one column grouping. Edit the report and add one in the Groupings tab." />
+  }
+  if (rows.length === 0) {
+    return <EmptyState message="No matching rows." />
+  }
+
+  // Build the row-axis tree and column-axis tree using getRowValue so FK
+  // labels and picklist labels are reflected in headers.
+  const rowAxis = buildAxisTree(rows, groupings.map(g => ({ name: g.field_name, via_path: g.field_via_path, label: g.field_label, sort: g.sort_direction })), result, 0)
+  const colAxis = buildAxisTree(rows, colGroupings.map(c => ({ name: c.name, via_path: c.via_path, label: c.label || c.name, sort: c.sort_direction })), result, 0)
+
+  // Flatten the leaf paths of both axes to drive the table layout
+  const rowLeaves = flattenAxisLeaves(rowAxis)
+  const colLeaves = flattenAxisLeaves(colAxis)
+
+  // Compute cell values: for each (rowLeaf, colLeaf), filter rows that
+  // match all axis values, then apply the measure.
+  const cellMap = new Map()
+  for (const rl of rowLeaves) {
+    for (const cl of colLeaves) {
+      const cellRows = rows.filter(row => {
+        for (let i = 0; i < rl.values.length; i++) {
+          const v = getRowValue(row, { name: groupings[i].field_name, via_path: groupings[i].field_via_path }, result)
+          if ((v ?? '(blank)') !== rl.values[i]) return false
+        }
+        for (let i = 0; i < cl.values.length; i++) {
+          const v = getRowValue(row, { name: colGroupings[i].name, via_path: colGroupings[i].via_path }, result)
+          if ((v ?? '(blank)') !== cl.values[i]) return false
+        }
+        return true
+      })
+      const key = rl.values.join('||') + '###' + cl.values.join('||')
+      cellMap.set(key, applyMeasure(cellRows, measure, result))
+    }
+  }
+
+  // Render
+  const headerRowCount = colGroupings.length
+  const labelColCount  = groupings.length
+
   return (
-    <EmptyState message="Matrix reports — full row × column pivot rendering coming in the next pass. For now, switch the report to Summary or Tabular format to view results." />
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'auto' }}>
+      <table style={{ borderCollapse:'collapse', fontSize:13 }}>
+        <thead>
+          {/* Column header rows — one row per column-grouping level */}
+          {Array.from({ length: headerRowCount }, (_, hLvl) => (
+            <tr key={`ch-${hLvl}`}>
+              {/* Empty corner cells for the row-grouping label columns */}
+              {hLvl === 0 && (
+                <th colSpan={labelColCount} rowSpan={headerRowCount}
+                    style={{ ...cellHeaderStyle(), borderRight:`1px solid ${C.border}`, background:C.cardSecondary }}>
+                  {groupings.map(g => g.field_label || g.field_name).join(' / ')}
+                </th>
+              )}
+              {/* Walk the column axis at this level */}
+              {emitAxisHeaderCells(colAxis, hLvl)}
+            </tr>
+          ))}
+        </thead>
+        <tbody>
+          {rowLeaves.map((rl, ri) => (
+            <tr key={`rl-${ri}`} style={{ borderTop:`1px solid ${C.border}` }}>
+              {rl.values.map((v, vi) => (
+                <td key={vi} style={{ ...cellStyle(), fontWeight:500, background:C.cardSecondary }}>
+                  {String(v)}
+                </td>
+              ))}
+              {colLeaves.map((cl, ci) => {
+                const key = rl.values.join('||') + '###' + cl.values.join('||')
+                const cellVal = cellMap.get(key)
+                return (
+                  <td key={`c-${ci}`} style={{ ...cellStyle(), textAlign:'right' }}>
+                    {cellVal == null ? <span style={{ color:C.textMuted }}>—</span> : formatCellValue(cellVal, 'number')}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
+}
+
+function buildAxisTree(rows, groupings, ctx, level) {
+  if (level >= groupings.length) {
+    return { leafRows: rows }
+  }
+  const g = groupings[level]
+  const buckets = new Map()
+  for (const row of rows) {
+    const v = getRowValue(row, { name: g.name, via_path: g.via_path }, ctx)
+    const k = v ?? '(blank)'
+    if (!buckets.has(k)) buckets.set(k, [])
+    buckets.get(k).push(row)
+  }
+  const sorted = Array.from(buckets.entries()).sort((a, b) => {
+    const dir = g.sort === 'desc' ? -1 : 1
+    if (a[0] === b[0]) return 0
+    return a[0] < b[0] ? -1 * dir : 1 * dir
+  })
+  return {
+    level,
+    children: sorted.map(([key, rs]) => ({
+      key, level, child: buildAxisTree(rs, groupings, ctx, level + 1),
+    })),
+  }
+}
+
+function flattenAxisLeaves(node, prefix = []) {
+  if (node.leafRows) return [{ values: prefix }]
+  if (!node.children) return [{ values: prefix }]
+  const out = []
+  for (const c of node.children) {
+    out.push(...flattenAxisLeaves(c.child, [...prefix, c.key]))
+  }
+  return out
+}
+
+function emitAxisHeaderCells(node, targetLevel) {
+  // Returns React elements: at the targetLevel, emit a <th> per node with
+  // colSpan = number of leaf descendants. Above the target level, recurse.
+  if (!node.children) return null
+  if (node.children[0]?.level === targetLevel) {
+    return node.children.map((c, i) => {
+      const span = countLeaves(c.child)
+      return (
+        <th key={`hh-${targetLevel}-${i}`} colSpan={span} style={{
+          ...cellHeaderStyle(),
+          borderLeft:`1px solid ${C.border}`,
+          textAlign:'center',
+        }}>
+          {String(c.key)}
+        </th>
+      )
+    })
+  }
+  // Recurse deeper
+  return node.children.flatMap((c, i) =>
+    emitAxisHeaderCells(c.child, targetLevel)?.map((el, j) => ({ ...el, key: `hh-${targetLevel}-${i}-${j}` })) || []
+  )
+}
+
+function countLeaves(node) {
+  if (node.leafRows) return 1
+  if (!node.children) return 1
+  return node.children.reduce((sum, c) => sum + countLeaves(c.child), 0)
+}
+
+function applyMeasure(cellRows, measure, ctx) {
+  if (cellRows.length === 0) return null
+  if (measure.type === 'count') return cellRows.length
+  const values = cellRows
+    .map(r => {
+      const v = ctx ? getRowValue(r, { name: measure.field }, ctx) : r[measure.field]
+      const n = typeof v === 'number' ? v : parseFloat(v)
+      return Number.isFinite(n) ? n : null
+    })
+    .filter(v => v != null)
+  if (values.length === 0) return null
+  switch (measure.type) {
+    case 'sum': return values.reduce((a, b) => a + b, 0)
+    case 'avg': return values.reduce((a, b) => a + b, 0) / values.length
+    case 'min': return Math.min(...values)
+    case 'max': return Math.max(...values)
+  }
+  return null
 }
 
 // ─── Cell formatting ──────────────────────────────────────────────────────

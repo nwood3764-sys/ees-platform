@@ -593,12 +593,109 @@ function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree
 
         {formatLabel === 'matrix' && (
           <div style={{ marginTop:24, paddingTop:16, borderTop:`1px solid ${C.border}` }}>
-            <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary, marginBottom:8 }}>
-              Column Groupings (Matrix only — up to 3)
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+              <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>
+                Column Groupings (Matrix only — up to 3)
+              </div>
+              <button
+                onClick={() => {
+                  const cols = report.rpt_column_groupings || []
+                  if (cols.length >= 3) { alert('Maximum 3 column groupings.'); return }
+                  updateReport({
+                    rpt_column_groupings: [
+                      ...cols,
+                      { name: '', sort_direction: 'asc' },
+                    ],
+                  })
+                }}
+                style={btnSecondary(false, 'small')}
+              >+ Add Column Grouping</button>
             </div>
-            <div style={{ fontSize:11, color:C.textMuted }}>
-              Column groupings configuration coming in a follow-up — for now, edit the
-              rpt_column_groupings JSON directly via the database if needed.
+
+            {(report.rpt_column_groupings || []).length === 0 ? (
+              <div style={emptyState()}>
+                No column groupings yet. A Matrix report needs at least one
+                column grouping to pivot.
+              </div>
+            ) : (
+              (report.rpt_column_groupings || []).map((cg, idx) => (
+                <div key={idx} style={{
+                  display:'grid', gridTemplateColumns:'30px 1fr 100px 30px',
+                  gap:8, marginBottom:8, alignItems:'center',
+                }}>
+                  <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
+                  <select
+                    value={cg.name}
+                    onChange={e => {
+                      const cols = [...(report.rpt_column_groupings || [])]
+                      cols[idx] = { ...cols[idx], name: e.target.value }
+                      updateReport({ rpt_column_groupings: cols })
+                    }}
+                    style={inputStyle()}
+                  >
+                    <option value="">— Field —</option>
+                    {fieldTree?.primary?.columns.map(c => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={cg.sort_direction || 'asc'}
+                    onChange={e => {
+                      const cols = [...(report.rpt_column_groupings || [])]
+                      cols[idx] = { ...cols[idx], sort_direction: e.target.value }
+                      updateReport({ rpt_column_groupings: cols })
+                    }}
+                    style={inputStyle()}
+                  >
+                    <option value="asc">Asc</option>
+                    <option value="desc">Desc</option>
+                  </select>
+                  <button onClick={() => {
+                    const cols = (report.rpt_column_groupings || []).filter((_, i) => i !== idx)
+                    updateReport({ rpt_column_groupings: cols })
+                  }} style={miniBtn(true)}>×</button>
+                </div>
+              ))
+            )}
+
+            <div style={{ marginTop:16, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
+              <label style={fieldLabel()}>Summary Measure</label>
+              <div style={{ display:'grid', gridTemplateColumns:'140px 1fr', gap:8 }}>
+                <select
+                  value={(report.rpt_charts?.[0]?.measure_type) || 'count'}
+                  onChange={e => {
+                    const charts = report.rpt_charts || []
+                    const first = { ...(charts[0] || {}), measure_type: e.target.value }
+                    updateReport({ rpt_charts: [first, ...charts.slice(1)] })
+                  }}
+                  style={inputStyle()}
+                >
+                  <option value="count">Count</option>
+                  <option value="sum">Sum of</option>
+                  <option value="avg">Average of</option>
+                  <option value="min">Min of</option>
+                  <option value="max">Max of</option>
+                </select>
+                <select
+                  value={(report.rpt_charts?.[0]?.measure_field) || ''}
+                  disabled={(report.rpt_charts?.[0]?.measure_type) === 'count' || !report.rpt_charts?.[0]?.measure_type}
+                  onChange={e => {
+                    const charts = report.rpt_charts || []
+                    const first = { ...(charts[0] || {}), measure_field: e.target.value }
+                    updateReport({ rpt_charts: [first, ...charts.slice(1)] })
+                  }}
+                  style={inputStyle()}
+                >
+                  <option value="">— Field (not needed for Count) —</option>
+                  {fieldTree?.primary?.columns.map(c => (
+                    <option key={c.name} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ fontSize:11, color:C.textMuted, marginTop:4 }}>
+                What goes in each cell of the matrix. Count is the row count;
+                Sum/Avg/Min/Max apply to a numeric field.
+              </div>
             </div>
           </div>
         )}

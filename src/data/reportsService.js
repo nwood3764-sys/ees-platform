@@ -731,6 +731,10 @@ export async function runReport(reportId) {
       show_subtotal:     g.rgr_show_subtotal,
       date_granularity:  g.rgr_date_granularity,
     })),
+    columnGroupings:  r.rpt_column_groupings || [],
+    measure:          (r.rpt_charts && r.rpt_charts[0] && r.rpt_charts[0].measure_type)
+      ? { type: r.rpt_charts[0].measure_type, field: r.rpt_charts[0].measure_field || null }
+      : { type: 'count', field: null },
     calculatedFields: (loaded.calculatedFields || []).map(c => ({
       label:           c.rcf_label,
       scope:           c.rcf_scope,
