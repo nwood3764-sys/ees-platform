@@ -101,6 +101,30 @@ export default function DashboardEditor({ dashboardId, onClose, onSaved }) {
     setWidgets(widgets.map((w, i) => i === idx ? { ...w, ...patch } : w))
   }
   const removeWidget = (idx) => setWidgets(widgets.filter((_, i) => i !== idx))
+  const moveWidget = (idx, dir) => {
+    // Reorder by array position. position_row/col are recomputed at save
+    // time based on the array order plus the dashboard's column count.
+    const target = idx + dir
+    if (target < 0 || target >= widgets.length) return
+    const next = [...widgets]
+    const [moved] = next.splice(idx, 1)
+    next.splice(target, 0, moved)
+    setWidgets(next)
+  }
+
+  const addFilter = () => {
+    setFilters([...filters, {
+      label:         '',
+      field_name:    '',
+      operator:      'equals',
+      default_value: '',
+      options:       [],
+    }])
+  }
+  const updateFilter = (idx, patch) => {
+    setFilters(filters.map((f, i) => i === idx ? { ...f, ...patch } : f))
+  }
+  const removeFilter = (idx) => setFilters(filters.filter((_, i) => i !== idx))
 
   const handleSave = async () => {
     if (!dashboard.dash_name) { alert('Dashboard name is required.'); return }
@@ -201,13 +225,90 @@ export default function DashboardEditor({ dashboardId, onClose, onSaved }) {
                 key={idx}
                 widget={w}
                 idx={idx}
+                isFirst={idx === 0}
+                isLast={idx === widgets.length - 1}
                 reports={reports}
                 onUpdate={(patch) => updateWidget(idx, patch)}
                 onRemove={() => removeWidget(idx)}
+                onMoveUp={() => moveWidget(idx, -1)}
+                onMoveDown={() => moveWidget(idx, 1)}
               />
             ))}
           </div>
         </div>
+
+        {/* Dashboard filters — propagate to every widget at runtime when
+            the widget's report has the named column. */}
+        <div style={{ ...card(), marginTop:16 }}>
+          <div style={cardHeader()}>
+            <span>Dashboard Filters ({filters.length})</span>
+            <button onClick={addFilter} style={btnSecondary(false, 'small')}>+ Add Filter</button>
+          </div>
+          <div style={{ padding:12 }}>
+            {filters.length === 0 ? (
+              <div style={emptyState()}>
+                No dashboard filters. Add one to let viewers narrow every widget at once
+                — e.g. by date range, state, or program.
+              </div>
+            ) : filters.map((f, idx) => (
+              <DashboardFilterRow
+                key={idx}
+                filter={f}
+                idx={idx}
+                onUpdate={(patch) => updateFilter(idx, patch)}
+                onRemove={() => removeFilter(idx)}
+              />
+            ))}
+            {filters.length > 0 && (
+              <div style={{ fontSize:11, color:C.textMuted, marginTop:8, fontStyle:'italic' }}>
+                Each filter applies to widgets whose underlying report includes the named field.
+                Reports without the field are unaffected.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Dashboard filter row ─────────────────────────────────────────────────
+
+const FILTER_OPS = [
+  'equals','not_equals','greater_than','less_than','greater_or_equal','less_or_equal',
+  'in','not_in','contains','starts_with','ends_with',
+  'is_null','is_not_null','in_last_n_days','this_month','this_year',
+]
+
+function DashboardFilterRow({ filter: f, idx, onUpdate, onRemove }) {
+  return (
+    <div style={{ background:C.cardSecondary, borderRadius:6, padding:10, marginBottom:8 }}>
+      <div style={{
+        display:'grid', gridTemplateColumns:'30px 1fr 1fr 130px 1fr 30px',
+        gap:8, alignItems:'center',
+      }}>
+        <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
+        <input type="text"
+          value={f.label || ''}
+          onChange={e => onUpdate({ label: e.target.value })}
+          placeholder="Label (e.g. 'Date Range')"
+          style={{ ...inputStyle(), fontSize:12 }} />
+        <input type="text"
+          value={f.field_name || ''}
+          onChange={e => onUpdate({ field_name: e.target.value })}
+          placeholder="Field name on reports"
+          style={{ ...inputStyle(), fontSize:12 }} />
+        <select value={f.operator || 'equals'}
+          onChange={e => onUpdate({ operator: e.target.value })}
+          style={{ ...inputStyle(), fontSize:12 }}>
+          {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
+        </select>
+        <input type="text"
+          value={f.default_value || ''}
+          onChange={e => onUpdate({ default_value: e.target.value })}
+          placeholder="Default value (optional)"
+          style={{ ...inputStyle(), fontSize:12 }} />
+        <button onClick={onRemove} style={miniBtn(true)} title="Remove">×</button>
       </div>
     </div>
   )
@@ -234,7 +335,7 @@ const NEEDS_GROUP_BY = new Set(['bar','line','pie','donut','funnel'])
 const NEEDS_MEASURE  = new Set(['bar','line','pie','donut','funnel','metric','gauge'])
 const NEEDS_TARGET   = new Set(['gauge'])
 
-function WidgetEditorRow({ widget: w, idx, reports, onUpdate, onRemove }) {
+function WidgetEditorRow({ widget: w, idx, isFirst, isLast, reports, onUpdate, onRemove, onMoveUp, onMoveDown }) {
   const [reportFields, setReportFields] = useState([])
 
   useEffect(() => {
@@ -258,8 +359,20 @@ function WidgetEditorRow({ widget: w, idx, reports, onUpdate, onRemove }) {
 
   return (
     <div style={{ background:C.cardSecondary, borderRadius:6, padding:12, marginBottom:10 }}>
-      {/* Top row: report + chart type + width + remove */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 100px 30px', gap:8, alignItems:'center', marginBottom:8 }}>
+      {/* Order controls + position label */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+        <div style={{ fontSize:11, color:C.textMuted, fontWeight:500 }}>
+          Widget #{idx + 1}
+        </div>
+        <div style={{ display:'flex', gap:4 }}>
+          <button onClick={onMoveUp}   disabled={isFirst} style={miniBtn(false, isFirst)} title="Move up">↑</button>
+          <button onClick={onMoveDown} disabled={isLast}  style={miniBtn(false, isLast)}  title="Move down">↓</button>
+          <button onClick={onRemove} style={miniBtn(true)} title="Remove">×</button>
+        </div>
+      </div>
+
+      {/* Top row: report + chart type + width */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 100px', gap:8, alignItems:'center', marginBottom:8 }}>
         <select value={w.report_id || ''}
           onChange={e => onUpdate({ report_id: e.target.value })}
           style={inputStyle()}>
@@ -281,7 +394,6 @@ function WidgetEditorRow({ widget: w, idx, reports, onUpdate, onRemove }) {
           <option value={3}>3 cols</option>
           <option value={4}>4 cols</option>
         </select>
-        <button onClick={onRemove} style={miniBtn(true)}>×</button>
       </div>
 
       {/* Title input */}
@@ -381,10 +493,12 @@ function btnSecondary(disabled, size) { return {
   border:`1px solid ${C.borderDark}`, borderRadius:6,
   cursor: disabled ? 'default' : 'pointer',
 } }
-function miniBtn(danger) { return {
+function miniBtn(danger, disabled) { return {
   width:24, height:24, fontSize:14, fontWeight:600,
   background: danger ? '#fee' : C.card, color: danger ? '#c33' : C.textPrimary,
-  border:`1px solid ${danger ? '#fcc' : C.border}`, borderRadius:4, cursor:'pointer',
+  border:`1px solid ${danger ? '#fcc' : C.border}`, borderRadius:4,
+  cursor: disabled ? 'default' : 'pointer',
+  opacity: disabled ? 0.4 : 1,
 } }
 function emptyState() { return {
   padding:'24px 12px', textAlign:'center',

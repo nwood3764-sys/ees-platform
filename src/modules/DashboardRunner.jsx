@@ -15,10 +15,42 @@ import { runReport, loadDashboard, getRowValue } from '../data/reportsService'
 // (table / metric / bar / line / pie / donut / funnel / gauge).
 
 export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenReport }) {
-  const [data, setData]       = useState(null)        // { dashboard, widgets, filters }
-  const [results, setResults] = useState({})          // widget.id → run result
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState(null)
+  const [data, setData]                 = useState(null)        // { dashboard, widgets, filters }
+  const [results, setResults]           = useState({})          // widget.id → run result
+  const [loading, setLoading]           = useState(true)
+  const [error, setError]               = useState(null)
+  const [filterValues, setFilterValues] = useState({})          // dfilt id → current value
+
+  // Build the extraFilters array for runReport from the current filter
+  // values. Empty values mean the filter is not applied this run.
+  function buildExtraFilters(dashboardFilters, values) {
+    const out = []
+    for (const f of (dashboardFilters || [])) {
+      const v = values[f.id]
+      if (v === undefined || v === null || v === '') continue
+      out.push({
+        field_name: f.dfilt_field_name,
+        operator:   f.dfilt_operator || 'equals',
+        value:      v,
+      })
+    }
+    return out
+  }
+
+  const runWidgets = async (dashboardData, currentFilterValues) => {
+    const extra = buildExtraFilters(dashboardData.filters, currentFilterValues)
+    const widgetResults = await Promise.all(
+      (dashboardData.widgets || []).map(async w => {
+        try {
+          const r = await runReport(w.dw_report_id, null, extra)
+          return [w.id, r]
+        } catch (err) {
+          return [w.id, { error: err }]
+        }
+      })
+    )
+    setResults(Object.fromEntries(widgetResults))
+  }
 
   const refresh = async () => {
     setLoading(true); setError(null)
@@ -26,20 +58,32 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
       const d = await loadDashboard(dashboardId)
       if (!d) throw new Error('Dashboard not found')
       setData(d)
-      // Fan out report runs in parallel. Slow widgets don't block fast ones.
-      const widgetResults = await Promise.all(
-        (d.widgets || []).map(async w => {
-          try {
-            const r = await runReport(w.dw_report_id)
-            return [w.id, r]
-          } catch (err) {
-            return [w.id, { error: err }]
-          }
-        })
-      )
-      setResults(Object.fromEntries(widgetResults))
+
+      // Initialize filter values from each filter's default
+      const initialValues = {}
+      for (const f of (d.filters || [])) {
+        const dv = f.dfilt_default_value
+        // jsonb default may be null, a string, or a wrapped value
+        if (dv == null) { initialValues[f.id] = ''; continue }
+        if (typeof dv === 'object' && 'value' in dv) initialValues[f.id] = dv.value ?? ''
+        else initialValues[f.id] = dv
+      }
+      setFilterValues(initialValues)
+
+      await runWidgets(d, initialValues)
     } catch (err) {
       setError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Re-run all widgets when filter values change (after initial load).
+  const applyFilters = async () => {
+    if (!data) return
+    setLoading(true)
+    try {
+      await runWidgets(data, filterValues)
     } finally {
       setLoading(false)
     }
@@ -50,11 +94,12 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardId])
 
-  if (loading) return <LoadingState />
-  if (error)   return <ErrorState error={error} onRetry={refresh} />
-  if (!data)   return null
+  if (loading && !data) return <LoadingState />
+  if (error && !data)   return <ErrorState error={error} onRetry={refresh} />
+  if (!data)            return null
 
   const cols = data.dashboard.dash_columns || 3
+  const hasFilters = (data.filters || []).length > 0
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:C.page }}>
@@ -75,6 +120,46 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
           <button onClick={onClose} style={btnSecondary()}>Close</button>
         </div>
       </div>
+
+      {hasFilters && (
+        <div style={{
+          background:C.card, borderBottom:`1px solid ${C.border}`,
+          padding:'10px 24px', display:'flex', gap:12, alignItems:'flex-end', flexWrap:'wrap',
+        }}>
+          {data.filters.map(f => (
+            <div key={f.id} style={{ display:'flex', flexDirection:'column', gap:2, minWidth:160 }}>
+              <label style={{
+                fontSize:10, fontWeight:500, color:C.textSecondary,
+                textTransform:'uppercase', letterSpacing:0.5,
+              }}>
+                {f.dfilt_label}
+                <span style={{ color:C.textMuted, marginLeft:6, textTransform:'none' }}>
+                  ({f.dfilt_field_name} {f.dfilt_operator})
+                </span>
+              </label>
+              <input type="text"
+                value={filterValues[f.id] ?? ''}
+                onChange={e => setFilterValues(prev => ({ ...prev, [f.id]: e.target.value }))}
+                style={{
+                  padding:'6px 8px', fontSize:12,
+                  background:C.card, color:C.textPrimary,
+                  border:`1px solid ${C.border}`, borderRadius:4, font:'inherit',
+                }} />
+            </div>
+          ))}
+          <button
+            onClick={applyFilters}
+            disabled={loading}
+            style={{
+              padding:'6px 14px', fontSize:12, fontWeight:500,
+              background: loading ? C.borderDark : C.emerald, color:'#fff',
+              border:'none', borderRadius:4,
+              cursor: loading ? 'default' : 'pointer',
+            }}>
+            {loading ? 'Applying…' : 'Apply'}
+          </button>
+        </div>
+      )}
 
       <div style={{ flex:1, overflow:'auto', padding:'16px 24px' }}>
         {data.widgets.length === 0 ? (

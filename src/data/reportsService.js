@@ -819,7 +819,27 @@ function applySimpleFilter(query, fieldName, operator, value) {
   return query
 }
 
-export async function runReport(reportId, promptValues = null) {
+/**
+ * Run a saved report and return its rows + columns.
+ *
+ * @param {string} reportId
+ * @param {Object|null} promptValues  - Map of rfilt_filter_index → value
+ *                                      for runtime prompts. Overrides the
+ *                                      saved default value of each prompt
+ *                                      filter that has a value supplied.
+ * @param {Array|null}  extraFilters  - Additional filter rows to apply on
+ *                                      top of the report's saved filters.
+ *                                      Each entry: { field_name, operator,
+ *                                      value }. Used by the Dashboard
+ *                                      Runner to apply dashboard-level
+ *                                      filters to each widget's report.
+ *                                      Filters whose field_name doesn't
+ *                                      exist on the primary object are
+ *                                      silently skipped — that's how a
+ *                                      dashboard filter that only some
+ *                                      reports support degrades.
+ */
+export async function runReport(reportId, promptValues = null, extraFilters = null) {
   const loaded = await loadReport(reportId)
   if (!loaded) throw new Error('Report not found')
   const r = loaded.report
@@ -834,6 +854,29 @@ export async function runReport(reportId, promptValues = null) {
       }
       return f
     })
+  }
+
+  // Append any extraFilters whose field_name is a real column on the
+  // primary object. Filters targeting fields the report doesn't have
+  // are silently dropped — this is how dashboard-level filters apply
+  // to some reports and not others without erroring on the misses.
+  if (extraFilters && extraFilters.length > 0) {
+    const primaryCols = await describeColumns(r.rpt_primary_object)
+    const primaryColNames = new Set(primaryCols.map(c => c.column_name))
+    const applicable = extraFilters.filter(ef => primaryColNames.has(ef.field_name))
+    if (applicable.length > 0) {
+      const existingCount = (loaded.filters || []).length
+      const synthesized = applicable.map((ef, i) => ({
+        rfilt_filter_index:      existingCount + i + 1,
+        rfilt_field_name:        ef.field_name,
+        rfilt_field_via_path:    null,
+        rfilt_operator:          ef.operator || 'equals',
+        rfilt_value:             ef.value,
+        rfilt_is_cross_filter:   false,
+        rfilt_is_runtime_prompt: false,
+      }))
+      loaded.filters = [...(loaded.filters || []), ...synthesized]
+    }
   }
 
   // Build a lookup of FKs across the primary object plus every related
@@ -1342,13 +1385,18 @@ export async function saveDashboard({ id, dashboard, widgets, filters }) {
   }
 
   if (widgets?.length) {
+    // Position is derived from the array order plus the dashboard's column
+    // count — reordering in the editor (move up/down in the list) is the
+    // single source of truth. Per-widget position_row/col fields are
+    // ignored on save and recomputed from index here.
+    const cols = Math.max(1, dashboard.dash_columns || 3)
     const rows = widgets.map((w, idx) => ({
       dw_dashboard_id:  dashId,
       dw_report_id:     w.report_id,
       dw_title:         w.title || null,
       dw_widget_type:   w.widget_type || 'table',
-      dw_position_row:  w.position_row ?? Math.floor(idx / 3),
-      dw_position_col:  w.position_col ?? (idx % 3),
+      dw_position_row:  Math.floor(idx / cols),
+      dw_position_col:  idx % cols,
       dw_width:         w.width || 1,
       dw_height:        w.height || 1,
       dw_widget_config: w.widget_config || {},
