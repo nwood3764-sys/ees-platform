@@ -816,12 +816,13 @@ export async function runReport(reportId, promptValues = null) {
     })
   }
 
-  // We need to know which columns on the primary object (and any expanded
-  // related object) are FKs, so we can auto-embed the parent record's
-  // name field for label display. Cached per call.
+  // Build a lookup of FKs across the primary object plus every related
+  // object that any selected field traverses (single- or multi-hop). This
+  // is what powers (a) auto-embedded FK-label resolution and (b) picklist
+  // detection for fields living on related objects.
   const fkLookup = await buildFKLookup(r.rpt_primary_object,
     Array.from(new Set((r.rpt_selected_fields || [])
-      .filter(f => f.via_path && f.via_path.length === 1)
+      .filter(f => f.via_path && f.via_path.length > 0 && f.table)
       .map(f => f.table)))
   )
 
@@ -1052,16 +1053,22 @@ export async function runReport(reportId, promptValues = null) {
     data = applyFilterLogic(data, loaded.filters || [], logicExpr, fkLookup, r.rpt_primary_object)
   }
 
-  // Picklist label resolution — second pass. For every selected field that
-  // is a picklist FK on the primary object, batch-fetch the label rows.
+  // Picklist label resolution — second pass. For every selected field
+  // that is a picklist FK (either on the primary object or on any related
+  // object reached via a via_path), batch-fetch the label rows. Each
+  // (object, field) pair the resolution targets goes into the load.
   const picklistFields = (r.rpt_selected_fields || []).filter(f => {
-    if (f.via_path && f.via_path.length > 0) return false  // related-object picklists not handled in v1
-    return fkLookup[`${r.rpt_primary_object}.${f.name}`]?.is_picklist
+    const fieldTable = (f.via_path && f.via_path.length > 0) ? f.table : r.rpt_primary_object
+    if (!fieldTable) return false
+    return fkLookup[`${fieldTable}.${f.name}`]?.is_picklist
   })
   let picklistMap = new Map()
   if (picklistFields.length > 0) {
     picklistMap = await loadPicklistLabels(
-      picklistFields.map(f => ({ object: r.rpt_primary_object, field: f.name }))
+      picklistFields.map(f => {
+        const fieldTable = (f.via_path && f.via_path.length > 0) ? f.table : r.rpt_primary_object
+        return { object: fieldTable, field: f.name }
+      })
     )
   }
 
@@ -1074,11 +1081,15 @@ export async function runReport(reportId, promptValues = null) {
 
   return {
     rows: data || [],
-    columns: (r.rpt_selected_fields || []).map(f => ({
-      ...f,
-      // Mark picklist columns so getRowValue knows to look up the label
-      _is_picklist: !f.via_path && fkLookup[`${r.rpt_primary_object}.${f.name}`]?.is_picklist,
-    })),
+    columns: (r.rpt_selected_fields || []).map(f => {
+      const fieldTable = (f.via_path && f.via_path.length > 0) ? f.table : r.rpt_primary_object
+      return {
+        ...f,
+        // Mark picklist columns so getRowValue knows to look up the
+        // label — works for direct fields AND fields reached via_path.
+        _is_picklist: !!(fieldTable && fkLookup[`${fieldTable}.${f.name}`]?.is_picklist),
+      }
+    }),
     picklistMap,
     groupings: (loaded.groupings || []).map(g => ({
       field_name:        g.rgr_field_name,
@@ -1145,7 +1156,17 @@ export function getRowValue(row, field, ctx = null) {
     nested = nested[fk]
   }
   if (!nested) return null
-  return nested[field.name] ?? null
+  const rawValue = nested[field.name] ?? null
+
+  // Picklist resolution at the via_path leaf — works the same way as
+  // direct fields. The column was flagged _is_picklist if its (table,
+  // field) pair pointed at picklist_values, regardless of via_path depth.
+  if (field._is_picklist && ctx?.picklistMap && rawValue) {
+    const entry = ctx.picklistMap.get(rawValue)
+    if (entry) return entry.label
+  }
+
+  return rawValue
 }
 
 // ─── Dashboards ───────────────────────────────────────────────────────────
