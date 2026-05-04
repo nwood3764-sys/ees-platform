@@ -690,6 +690,191 @@ function DocumentTemplatePreviewModal({
 }
 
 // ---------------------------------------------------------------------------
+// EmailTemplatePreviewModal — pick a parent record, render merged HTML inline
+// ---------------------------------------------------------------------------
+// Different shape from the document template modal:
+//   • Wider (640px) to fit the rendered email body
+//   • Two phases: pick-record (small) → result (taller, with iframe)
+//   • Reset button on the result phase to swap parent records without
+//     closing/reopening
+//   • iframe sandbox keeps the email's HTML/CSS isolated from the app's
+//     surrounding styles — looks closer to how a real mail client would
+//     render it.
+
+function EmailTemplatePreviewModal({
+  templateName, relatedObject, options, loadingOptions,
+  selected, onSelectedChange, rendering, result,
+  onCancel, onGenerate, onClearResult,
+}) {
+  const canSubmit = !!selected && !rendering && !loadingOptions
+  const showingResult = !!result
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 600,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: C.card, borderRadius: 10, padding: 26,
+        width: showingResult ? 640 : 480,
+        maxHeight: '88vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: '50%',
+            background: '#f0f9ff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Icon path="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+              size={15} color="#0369a1" />
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>
+              {showingResult ? `Preview — ${templateName}` : `Preview “${templateName}”`}
+            </div>
+            <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
+              {showingResult
+                ? 'Rendered subject and body shown below — nothing has been sent.'
+                : `Pick a ${relatedObject.replace(/_/g, ' ').replace(/\bs$/, '')} record to merge against. The rendered email shows below — nothing is saved or sent.`}
+            </div>
+          </div>
+        </div>
+
+        {!showingResult && (
+          <>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: C.textSecondary, marginBottom: 6 }}>
+              Record to preview against
+            </label>
+            {loadingOptions ? (
+              <div style={{
+                padding: '10px 12px', border: `1px solid ${C.border}`, borderRadius: 6,
+                background: '#f9fafb', fontSize: 13, color: C.textMuted,
+              }}>
+                Loading {relatedObject.replace(/_/g, ' ')}…
+              </div>
+            ) : options.length === 0 ? (
+              <div style={{
+                padding: '10px 12px', border: `1px solid ${C.border}`, borderRadius: 6,
+                background: '#fffbeb', fontSize: 13, color: '#92400e',
+              }}>
+                No {relatedObject.replace(/_/g, ' ')} records found. Create one first.
+              </div>
+            ) : (
+              <select
+                value={selected}
+                onChange={(e) => onSelectedChange(e.target.value)}
+                disabled={rendering}
+                autoFocus
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  border: `1px solid ${C.border}`, borderRadius: 6,
+                  padding: '8px 10px', fontSize: 13, fontFamily: 'inherit',
+                  color: C.textPrimary, background: rendering ? '#f3f4f6' : '#fff',
+                }}
+              >
+                <option value="">— Select —</option>
+                {options.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            )}
+            {options.length === 50 && !loadingOptions && (
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6, fontStyle: 'italic' }}>
+                Showing the first 50 records.
+              </div>
+            )}
+          </>
+        )}
+
+        {showingResult && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+            <div style={{
+              padding: '8px 10px', background: '#f9fafb',
+              border: `1px solid ${C.border}`, borderRadius: 6, marginBottom: 10,
+              display: 'flex', alignItems: 'baseline', gap: 8,
+            }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Subject
+              </span>
+              <span style={{ fontSize: 13, color: C.textPrimary, fontWeight: 500 }}>
+                {result.subject || '(empty subject)'}
+              </span>
+            </div>
+            <div style={{
+              flex: 1, minHeight: 280, overflow: 'hidden',
+              border: `1px solid ${C.border}`, borderRadius: 6, background: '#fff',
+            }}>
+              <iframe
+                title="email preview"
+                sandbox=""
+                srcDoc={result.body_html || '<p style="font:12px sans-serif;color:#888;padding:20px">(empty body)</p>'}
+                style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+              />
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+          {showingResult ? (
+            <>
+              <button
+                onClick={onClearResult}
+                style={{
+                  flex: 1,
+                  background: C.page, color: C.textPrimary,
+                  border: `1px solid ${C.border}`, borderRadius: 6,
+                  padding: '9px 0', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                }}
+              >
+                Try a different record
+              </button>
+              <button
+                onClick={onCancel}
+                style={{
+                  flex: 1,
+                  background: '#0369a1', color: '#fff', border: 'none', borderRadius: 6,
+                  padding: '9px 0', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                Done
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => canSubmit && onGenerate()}
+                disabled={!canSubmit}
+                style={{
+                  flex: 1,
+                  background: canSubmit ? '#0369a1' : '#7eb3e8',
+                  color: '#fff', border: 'none', borderRadius: 6,
+                  padding: '9px 0', fontSize: 13, fontWeight: 600,
+                  cursor: canSubmit ? 'pointer' : (rendering ? 'wait' : 'not-allowed'),
+                  opacity: canSubmit ? 1 : 0.8,
+                }}
+              >
+                {rendering ? 'Rendering…' : 'Generate Preview'}
+              </button>
+              <button
+                onClick={onCancel}
+                disabled={rendering}
+                style={{
+                  flex: 1, background: C.page, color: C.textSecondary,
+                  border: `1px solid ${C.border}`, borderRadius: 6,
+                  padding: '9px 0', fontSize: 13, cursor: rendering ? 'wait' : 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // EditField — renders the right input for a field type
 // ---------------------------------------------------------------------------
 
@@ -3305,6 +3490,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [docPreviewParentOptions, setDocPreviewParentOptions] = useState([])
   const [docPreviewParentRecord, setDocPreviewParentRecord] = useState('')
   const [docPreviewRendering, setDocPreviewRendering]       = useState(false)
+  // Email Template Preview state — same shape as document template preview
+  // but the result is rendered inline in a modal with an iframe (no PDF
+  // tab) since email templates are HTML-only.
+  const [emailPreviewOpen, setEmailPreviewOpen]                       = useState(false)
+  const [emailPreviewLoadingOpts, setEmailPreviewLoadingOpts]         = useState(false)
+  const [emailPreviewParentOptions, setEmailPreviewParentOptions]     = useState([])
+  const [emailPreviewParentRecord, setEmailPreviewParentRecord]       = useState('')
+  const [emailPreviewRendering, setEmailPreviewRendering]             = useState(false)
+  const [emailPreviewResult, setEmailPreviewResult]                   = useState(null)
   // Publish/unpublish/archive/restore in flight — disables status buttons
   // and shows a 'wait' cursor while the RPC is round-tripping.
   const [statusChanging, setStatusChanging] = useState(false)
@@ -3826,6 +4020,88 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       setDocPreviewRendering(false)
     }
   }, [docPreviewRendering, docPreviewParentRecord, recordId, data, toast])
+
+  // ─── Email Template Preview ───────────────────────────────────────────────
+  // Same parent-record-picker UX as document templates. On Generate we hit
+  // the render-email-template edge function (separate from the document one
+  // because emails return JSON {subject, body_html} not PDF binary). Result
+  // appears inline in the modal with an iframe so the HTML body renders
+  // exactly as it would in a mail client, isolated from the surrounding app
+  // styles.
+  const openEmailPreview = useCallback(async () => {
+    if (tableName !== 'email_templates') return
+    const relatedObject = data?.record?.related_object
+    if (!relatedObject) {
+      toast.error('This template has no related object set — pick one in Template Information first.')
+      return
+    }
+    setEmailPreviewOpen(true)
+    setEmailPreviewParentRecord('')
+    setEmailPreviewResult(null)
+    setEmailPreviewLoadingOpts(true)
+    try {
+      const parentMeta = TABLE_META[relatedObject]
+      const nameCol = parentMeta?.nameColumn || 'id'
+      const opts = await fetchLookupOptions(relatedObject, nameCol)
+      setEmailPreviewParentOptions(opts)
+    } catch (err) {
+      toast.error(`Couldn't load ${relatedObject} list — ${err.message || String(err)}`)
+      setEmailPreviewParentOptions([])
+    } finally {
+      setEmailPreviewLoadingOpts(false)
+    }
+  }, [tableName, data, toast])
+
+  const closeEmailPreview = useCallback(() => {
+    if (emailPreviewRendering) return
+    setEmailPreviewOpen(false)
+    setEmailPreviewParentRecord('')
+    setEmailPreviewParentOptions([])
+    setEmailPreviewResult(null)
+  }, [emailPreviewRendering])
+
+  const generateEmailPreview = useCallback(async () => {
+    if (emailPreviewRendering) return
+    if (!emailPreviewParentRecord) { toast.error('Pick a record first.'); return }
+    const relatedObject = data?.record?.related_object
+    if (!relatedObject) return
+    setEmailPreviewRendering(true)
+    setEmailPreviewResult(null)
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+      if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase is not configured (missing env vars).')
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData?.session?.access_token
+      if (!accessToken) throw new Error('Not signed in — please refresh and log in.')
+
+      const resp = await fetch(`${supabaseUrl}/functions/v1/render-email-template`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey':        supabaseAnonKey,
+          'Content-Type':  'application/json',
+        },
+        body: JSON.stringify({
+          email_template_id: recordId,
+          parent_object:     relatedObject,
+          parent_record_id:  emailPreviewParentRecord,
+          preview:           true,
+        }),
+      })
+      if (!resp.ok) {
+        let detail = `HTTP ${resp.status}`
+        try { const j = await resp.json(); if (j?.error) detail = j.error } catch { /* not JSON */ }
+        throw new Error(detail)
+      }
+      const result = await resp.json()
+      setEmailPreviewResult(result)
+    } catch (err) {
+      toast.error(`Preview failed — ${err.message || String(err)}`)
+    } finally {
+      setEmailPreviewRendering(false)
+    }
+  }, [emailPreviewRendering, emailPreviewParentRecord, recordId, data, toast])
 
   const handleSave = async () => {
     setSaving(true)
@@ -4377,6 +4653,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     Preview PDF
                   </button>
                 )}
+                {tableName === 'email_templates' && data?.record?.related_object && (
+                  <button
+                    onClick={openEmailPreview}
+                    disabled={emailPreviewOpen || emailPreviewRendering}
+                    title="Render this email against a real record and view the merged result inline — works in any status, doesn't send anything"
+                    style={{ background: (emailPreviewOpen || emailPreviewRendering) ? '#e0f2fe' : C.page, color: '#0369a1', border: `1px solid #bae6fd`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: (emailPreviewOpen || emailPreviewRendering) ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                    onMouseEnter={(e) => { if (!emailPreviewOpen && !emailPreviewRendering) e.currentTarget.style.background = '#f0f9ff' }}
+                    onMouseLeave={(e) => { if (!emailPreviewOpen && !emailPreviewRendering) e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" size={13} color="#0369a1" />
+                    Preview Email
+                  </button>
+                )}
                 {lifecycle && (
                   <button
                     onClick={handleCloneTemplate}
@@ -4786,6 +5075,26 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           rendering={docPreviewRendering}
           onCancel={closeDocPreview}
           onGenerate={generateDocPreview}
+        />
+      )}
+
+      {/* Email template preview — same parent picker, plus an inline iframe
+          showing the rendered HTML body. No external tab; the modal grows
+          to accommodate the result so authors can compare merge fields
+          against what they expected. */}
+      {emailPreviewOpen && tableName === 'email_templates' && (
+        <EmailTemplatePreviewModal
+          templateName={data?.record?.name || 'Untitled Template'}
+          relatedObject={data?.record?.related_object || ''}
+          options={emailPreviewParentOptions}
+          loadingOptions={emailPreviewLoadingOpts}
+          selected={emailPreviewParentRecord}
+          onSelectedChange={setEmailPreviewParentRecord}
+          rendering={emailPreviewRendering}
+          result={emailPreviewResult}
+          onCancel={closeEmailPreview}
+          onGenerate={generateEmailPreview}
+          onClearResult={() => setEmailPreviewResult(null)}
         />
       )}
 
