@@ -494,6 +494,27 @@ export async function cloneDashboard(sourceDashboardId, { newName = null, newFol
 }
 
 /**
+ * Salesforce-parity Save As / Clone for scheduled reports. Calls
+ * clone_scheduled_report which copies the schedule but with two
+ * intentional resets:
+ *   • sr_is_active is always false on the clone (manual confirmation
+ *     required before the clone starts firing)
+ *   • sr_last_sent_at and sr_next_send_at are nulled (the clone has
+ *     no send history; next_send_at is recomputed on first save)
+ *
+ * Returns the new schedule id so the Editor can reload onto the clone.
+ */
+export async function cloneScheduledReport(sourceScheduleId, { newName = null } = {}) {
+  const { data, error } = await supabase.rpc('clone_scheduled_report', {
+    p_source_schedule_id: sourceScheduleId,
+    p_new_name:           newName,
+  })
+  if (error) throw error
+  if (!data) throw new Error('clone_scheduled_report returned no id')
+  return data
+}
+
+/**
  * Save (insert or update) a report and its child rows. The child tables
  * (filters, groupings, calculated_fields) use a delete-and-reinsert
  * strategy on save — simpler than diffing and matches how Salesforce

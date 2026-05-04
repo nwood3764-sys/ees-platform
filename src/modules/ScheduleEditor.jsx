@@ -4,6 +4,7 @@ import { LoadingState, ErrorState } from '../components/UI'
 import {
   loadSchedule, saveSchedule, fetchReports,
   dispatchScheduleNow, fetchScheduleRunHistory,
+  cloneScheduledReport,
 } from '../data/reportsService'
 import { supabase } from '../lib/supabase'
 
@@ -170,6 +171,33 @@ export default function ScheduleEditor({ scheduleId, onClose, onSaved }) {
     }
   }
 
+  // ─── Save As (Clone) ───────────────────────────────────────────────────
+  // Two-step like ReportBuilder/DashboardEditor: persist current edits to
+  // the source first so they aren't lost, then call clone_scheduled_report.
+  // The RPC starts the clone INACTIVE with last/next-send timestamps
+  // cleared — see header in the migration.
+  const handleSaveAs = async () => {
+    if (isNew) return
+    if (!schedule.sr_name)         { alert('Schedule name is required.'); return }
+    if (!schedule.sr_report_id)    { alert('Pick a report.'); return }
+    if (!schedule.sr_subject_line) { alert('Subject line is required.'); return }
+    setSaving(true); setError(null)
+    try {
+      const emails = emailsInput.split(',').map(s => s.trim()).filter(Boolean)
+      await saveSchedule({
+        id: scheduleId,
+        schedule: { ...schedule, sr_recipient_emails: emails },
+      })
+      const newId = await cloneScheduledReport(scheduleId)
+      setSavedAt(new Date())
+      onSaved?.(newId)
+    } catch (err) {
+      setError(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} />
 
@@ -196,6 +224,16 @@ export default function ScheduleEditor({ scheduleId, onClose, onSaved }) {
             </button>
           )}
           <button onClick={onClose} style={btnSecondary()}>Close</button>
+          {!isNew && (
+            <button
+              onClick={handleSaveAs}
+              disabled={saving}
+              title="Save current changes, then create a copy. The copy starts INACTIVE so you can review before it begins firing."
+              style={btnSecondary()}
+            >
+              {saving ? '…' : 'Save As'}
+            </button>
+          )}
           <button onClick={handleSave} disabled={saving} style={btnPrimary(saving)}>
             {saving ? 'Saving…' : 'Save'}
           </button>
