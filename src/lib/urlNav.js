@@ -89,6 +89,13 @@ const TABLE_MODULE_MAP = {
   project_report_template_snapshots: 'admin',
   // Portal
   portal_users: 'portal',
+  // Reports
+  reports: 'reports',
+  report_folders: 'reports',
+  report_filters: 'reports',
+  report_groupings: 'reports',
+  report_calculated_fields: 'reports',
+  scheduled_reports: 'reports',
 }
 
 // Regex matching a UUID v4 — the only ID format we accept in record URLs.
