@@ -131,6 +131,22 @@ export async function fetchScheduledReports() {
 const _columnsCache = new Map()
 const _fkOutgoingCache = new Map()
 
+/**
+ * Public column discovery for the Builder UI. Used by cross-filter
+ * sub-filter rows to populate a field dropdown for the chosen cross
+ * object. Returns the same shape as primary fields: [{name, type, nullable}].
+ */
+export async function listObjectColumns(tableName) {
+  const cols = await describeColumns(tableName)
+  return cols
+    .filter(c => !['created_at','updated_at','created_by','updated_by','deleted_at','deleted_by','is_deleted','deletion_reason'].includes(c.column_name))
+    .map(c => ({
+      name: c.column_name,
+      type: c.data_type,
+      nullable: c.is_nullable === 'YES',
+    }))
+}
+
 async function describeColumns(tableName) {
   if (_columnsCache.has(tableName)) return _columnsCache.get(tableName)
   const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
@@ -388,6 +404,8 @@ export async function saveReport({ id, report, filters, groupings, calculatedFie
       rfilt_cross_subfilters:  f.cross_subfilters || [],
       rfilt_is_runtime_prompt: !!f.is_runtime_prompt,
       rfilt_runtime_label:     f.runtime_label || null,
+      rfilt_prompt_input_type: f.prompt_input_type || 'text',
+      rfilt_prompt_options:    f.prompt_options || [],
       created_by:              userId,
       updated_by:              userId,
     }))
@@ -716,7 +734,7 @@ export async function getReportPrompts(reportId) {
   if (!reportId || reportId === 'new') return []
   const { data, error } = await supabase
     .from('report_filters')
-    .select('rfilt_filter_index, rfilt_runtime_label, rfilt_field_name, rfilt_operator, rfilt_value, rfilt_is_runtime_prompt')
+    .select('rfilt_filter_index, rfilt_runtime_label, rfilt_field_name, rfilt_operator, rfilt_value, rfilt_is_runtime_prompt, rfilt_prompt_input_type, rfilt_prompt_options')
     .eq('rfilt_report_id', reportId)
     .eq('rfilt_is_runtime_prompt', true)
     .eq('is_deleted', false)
@@ -728,6 +746,8 @@ export async function getReportPrompts(reportId) {
     field_name:   f.rfilt_field_name,
     operator:     f.rfilt_operator,
     default_value: f.rfilt_value,
+    input_type:   f.rfilt_prompt_input_type || 'text',
+    options:      f.rfilt_prompt_options || [],
   }))
 }
 

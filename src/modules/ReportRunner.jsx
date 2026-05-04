@@ -83,16 +83,10 @@ export default function ReportRunner({ reportId, onClose, onEdit }) {
                   ({pr.field_name} {pr.operator})
                 </span>
               </label>
-              <input
-                type="text"
+              <PromptInput
+                prompt={pr}
                 value={promptValues[pr.index] ?? ''}
-                onChange={e => setPromptValues(prev => ({ ...prev, [pr.index]: e.target.value }))}
-                style={{
-                  width:'100%', padding:'8px 10px', fontSize:13,
-                  background:C.card, color:C.textPrimary,
-                  border:`1px solid ${C.border}`, borderRadius:6, font:'inherit',
-                  boxSizing:'border-box',
-                }}
+                onChange={(v) => setPromptValues(prev => ({ ...prev, [pr.index]: v }))}
               />
             </div>
           ))}
@@ -774,5 +768,54 @@ function EmptyState({ message }) {
     }}>
       {message}
     </div>
+  )
+}
+
+// ─── Runtime-prompt input ────────────────────────────────────────────────
+//
+// Renders the right input control for a runtime prompt's input_type.
+// All variants emit a string value via onChange so the rest of the
+// runner can treat prompt values uniformly.
+//
+// Supported input_types (configured in the Builder per-filter):
+//   text      — plain text input (default)
+//   number    — numeric input, value emitted as string
+//   date      — HTML5 date picker (YYYY-MM-DD)
+//   datetime  — HTML5 datetime-local picker (YYYY-MM-DDTHH:MM)
+//   select    — <select> populated from prompt.options[]
+
+function PromptInput({ prompt, value, onChange }) {
+  const inputType = prompt?.input_type || 'text'
+  const baseStyle = {
+    width:'100%', padding:'8px 10px', fontSize:13,
+    background:C.card, color:C.textPrimary,
+    border:`1px solid ${C.border}`, borderRadius:6, font:'inherit',
+    boxSizing:'border-box',
+  }
+
+  if (inputType === 'select') {
+    const opts = Array.isArray(prompt.options) ? prompt.options : []
+    return (
+      <select value={value} onChange={e => onChange(e.target.value)} style={baseStyle}>
+        <option value="">— Select —</option>
+        {opts.map(opt => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    )
+  }
+
+  // Native input. Map our input_type to the right HTML input type.
+  const htmlType = inputType === 'datetime' ? 'datetime-local'
+    : (inputType === 'date' || inputType === 'number' || inputType === 'text') ? inputType
+    : 'text'
+
+  return (
+    <input
+      type={htmlType}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      style={baseStyle}
+    />
   )
 }

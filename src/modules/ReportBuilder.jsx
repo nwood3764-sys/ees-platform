@@ -5,6 +5,7 @@ import {
   loadReport, saveReport,
   loadFieldTree, loadRelatedObjectFields,
   listPrimaryObjectOptions,
+  listObjectColumns,
 } from '../data/reportsService'
 import { supabase } from '../lib/supabase'
 
@@ -114,6 +115,8 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
             cross_subfilters:  f.rfilt_cross_subfilters,
             is_runtime_prompt: f.rfilt_is_runtime_prompt,
             runtime_label:     f.rfilt_runtime_label,
+            prompt_input_type: f.rfilt_prompt_input_type || 'text',
+            prompt_options:    f.rfilt_prompt_options || [],
           })))
           setGroupings((loaded.groupings || []).map(g => ({
             field_name:         g.rgr_field_name,
@@ -627,12 +630,58 @@ function RegularFilterRow({ filter: f, idx, fieldTree, onUpdate, onRemove }) {
         )}
         <div></div>
       </div>
+      {f.is_runtime_prompt && (
+        <div style={{
+          display:'grid', gridTemplateColumns:'30px 140px 1fr 30px',
+          gap:8, alignItems:'center', marginTop:6,
+        }}>
+          <div></div>
+          <select
+            value={f.prompt_input_type || 'text'}
+            onChange={e => onUpdate({ prompt_input_type: e.target.value })}
+            style={{ ...inputStyle(), fontSize:11 }}
+          >
+            <option value="text">Text</option>
+            <option value="number">Number</option>
+            <option value="date">Date</option>
+            <option value="datetime">Date & Time</option>
+            <option value="select">Select (preset values)</option>
+          </select>
+          {f.prompt_input_type === 'select' ? (
+            <input
+              type="text"
+              value={(f.prompt_options || []).join(', ')}
+              onChange={e => onUpdate({ prompt_options: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+              placeholder="Preset values (comma-separated, e.g. open, closed, in_progress)"
+              style={{ ...inputStyle(), fontSize:11 }}
+            />
+          ) : (
+            <div style={{ fontSize:10, color:C.textMuted, fontStyle:'italic', alignSelf:'center' }}>
+              Input type for the runtime prompt modal.
+            </div>
+          )}
+          <div></div>
+        </div>
+      )}
     </>
   )
 }
 
 function CrossFilterRow({ filter: f, idx, primaryObject, primaryOptions, onUpdate, onRemove }) {
   const subfilters = f.cross_subfilters || []
+  // Lazy-loaded columns of the chosen cross object — used to populate
+  // each sub-filter's field dropdown. Reloaded whenever cross_object
+  // changes; cleared when the user picks a different one.
+  const [crossColumns, setCrossColumns] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    if (!f.cross_object) { setCrossColumns([]); return }
+    listObjectColumns(f.cross_object)
+      .then(cols => { if (!cancelled) setCrossColumns(cols) })
+      .catch(err => { if (!cancelled) { console.warn('cross object columns load failed:', err); setCrossColumns([]) } })
+    return () => { cancelled = true }
+  }, [f.cross_object])
+
   const addSubfilter = () => {
     onUpdate({ cross_subfilters: [...subfilters, { field_name:'', operator:'equals', value:'' }] })
   }
@@ -689,13 +738,17 @@ function CrossFilterRow({ filter: f, idx, primaryObject, primaryOptions, onUpdat
             display:'grid', gridTemplateColumns:'1fr 130px 1fr 30px',
             gap:6, marginBottom:6, alignItems:'center',
           }}>
-            <input
-              type="text"
+            <select
               value={sf.field_name || ''}
               onChange={e => updateSubfilter(sIdx, { field_name: e.target.value })}
-              placeholder="Field name"
               style={{ ...inputStyle(), fontSize:11 }}
-            />
+              disabled={crossColumns.length === 0}
+            >
+              <option value="">{crossColumns.length === 0 ? 'Loading…' : '— Field —'}</option>
+              {crossColumns.map(c => (
+                <option key={c.name} value={c.name}>{c.name}</option>
+              ))}
+            </select>
             <select
               value={sf.operator || 'equals'}
               onChange={e => updateSubfilter(sIdx, { operator: e.target.value })}
