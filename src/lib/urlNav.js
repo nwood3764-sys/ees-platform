@@ -96,6 +96,7 @@ const TABLE_MODULE_MAP = {
   report_groupings: 'reports',
   report_calculated_fields: 'reports',
   scheduled_reports: 'reports',
+  scheduled_report_runs: 'reports',
   dashboards: 'reports',
   dashboard_folders: 'reports',
   dashboard_widgets: 'reports',

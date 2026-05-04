@@ -11,6 +11,7 @@ import ReportBuilder from './ReportBuilder'
 import ReportRunner from './ReportRunner'
 import DashboardRunner from './DashboardRunner'
 import DashboardEditor from './DashboardEditor'
+import ScheduleEditor from './ScheduleEditor'
 
 // ─── Section definitions ──────────────────────────────────────────────────
 
@@ -333,6 +334,18 @@ export default function ReportsModule({
                 onOpenReport={(reportId) => setSelectedRecord({ table:'reports', id:reportId, mode:'view' })}
               />
             )
+          ) : selectedRecord.table === 'scheduled_reports' ? (
+            // Schedule editor — single screen (no separate runner; the
+            // dispatcher fires schedules in the background). New or
+            // existing both go to ScheduleEditor.
+            <ScheduleEditor
+              scheduleId={selectedRecord.id || 'new'}
+              onClose={closeRecord}
+              onSaved={(newId) => {
+                loadAll()
+                replaceSelectedRecord({ table:'scheduled_reports', id:newId, mode:'view' })
+              }}
+            />
           ) : (
             <RecordDetail
               tableName={selectedRecord.table}

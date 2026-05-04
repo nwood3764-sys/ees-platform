@@ -89,6 +89,98 @@ export async function fetchReports({ folderId = null } = {}) {
 
 // ─── Scheduled reports ────────────────────────────────────────────────────
 
+// ─── Scheduled report editor helpers ──────────────────────────────────────
+
+export async function loadSchedule(scheduleId) {
+  if (!scheduleId || scheduleId === 'new') return null
+  const { data, error } = await supabase
+    .from('scheduled_reports')
+    .select('*')
+    .eq('id', scheduleId)
+    .eq('is_deleted', false)
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function saveSchedule({ id, schedule }) {
+  const isNew = !id || id === 'new'
+  const userId = await getCurrentUserId()
+
+  // Compute initial sr_next_send_at via the DB helper so the schedule
+  // becomes due at the right moment immediately after save.
+  const { data: nextSend, error: nextErr } = await supabase.rpc('compute_next_send_at', {
+    p_frequency:    schedule.sr_frequency,
+    p_day_of_week:  schedule.sr_day_of_week ?? null,
+    p_day_of_month: schedule.sr_day_of_month ?? null,
+    p_send_time:    schedule.sr_send_time,
+    p_timezone:     schedule.sr_timezone,
+    p_anchor:       new Date().toISOString(),
+  })
+  if (nextErr) throw nextErr
+
+  const payload = {
+    sr_report_id:           schedule.sr_report_id,
+    sr_name:                schedule.sr_name,
+    sr_frequency:           schedule.sr_frequency,
+    sr_day_of_week:         schedule.sr_day_of_week ?? null,
+    sr_day_of_month:        schedule.sr_day_of_month ?? null,
+    sr_send_time:           schedule.sr_send_time,
+    sr_timezone:            schedule.sr_timezone,
+    sr_format:              schedule.sr_format || 'csv',
+    sr_subject_line:        schedule.sr_subject_line,
+    sr_message_body:        schedule.sr_message_body || null,
+    sr_recipient_user_ids:  schedule.sr_recipient_user_ids || [],
+    sr_recipient_role_ids:  schedule.sr_recipient_role_ids || [],
+    sr_recipient_emails:    schedule.sr_recipient_emails || [],
+    sr_is_active:           schedule.sr_is_active !== false,
+    sr_next_send_at:        nextSend,
+    updated_by:             userId,
+  }
+
+  if (isNew) {
+    payload.sr_record_number = ''
+    payload.sr_owner_user_id = userId
+    payload.created_by       = userId
+    const { data, error } = await supabase
+      .from('scheduled_reports').insert(payload).select('id').single()
+    if (error) throw error
+    return data.id
+  } else {
+    const { error } = await supabase
+      .from('scheduled_reports').update(payload).eq('id', id)
+    if (error) throw error
+    return id
+  }
+}
+
+/**
+ * Manually fire the dispatcher for one schedule — useful from the
+ * editor's 'Test send' action without waiting for the cron.
+ */
+export async function dispatchScheduleNow(scheduleId, { dryRunForce = false } = {}) {
+  const { data, error } = await supabase.functions.invoke('dispatch-scheduled-reports', {
+    body: { schedule_id: scheduleId, dry_run_force: dryRunForce },
+  })
+  if (error) throw error
+  return data
+}
+
+/**
+ * Fetch the latest run history for a schedule — used in the editor's
+ * History tab so authors can confirm sends are happening.
+ */
+export async function fetchScheduleRunHistory(scheduleId, { limit = 25 } = {}) {
+  const { data, error } = await supabase
+    .from('scheduled_report_runs')
+    .select('*')
+    .eq('srr_scheduled_report_id', scheduleId)
+    .order('srr_started_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return data || []
+}
+
 export async function fetchScheduledReports() {
   const { data, error } = await supabase
     .from('scheduled_reports')
