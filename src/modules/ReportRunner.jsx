@@ -56,8 +56,10 @@ export default function ReportRunner({ reportId, onClose, onEdit }) {
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
           <button onClick={run}    style={btnSecondary()}>Run Again</button>
-          <button onClick={() => exportCsv(result)} style={btnSecondary()}>Export CSV</button>
-          <button onClick={onEdit} style={btnSecondary()}>Edit</button>
+          <button onClick={() => exportCsv(result)}   style={btnSecondary()}>CSV</button>
+          <button onClick={() => exportExcel(result)} style={btnSecondary()}>Excel</button>
+          <button onClick={() => exportPdf(result)}   style={btnSecondary()}>PDF</button>
+          <button onClick={onEdit}  style={btnSecondary()}>Edit</button>
           <button onClick={onClose} style={btnSecondary()}>Close</button>
         </div>
       </div>
@@ -490,15 +492,78 @@ function exportCsv(result) {
   const csv = [header, ...dataRows].join('\n')
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  triggerDownload(blob, `${slugify(name || 'report')}_${todayStr()}.csv`)
+}
+
+// ─── Excel export ─────────────────────────────────────────────────────────
+
+async function exportExcel(result) {
+  const XLSX = await import('xlsx')
+  const { rows, columns, name } = result
+  if (!rows || rows.length === 0) return
+
+  const aoa = [columns.map(c => c.label)]
+  for (const row of rows) {
+    aoa.push(columns.map(c => {
+      const v = getRowValue(row, c, result)
+      if (v == null) return ''
+      if (typeof v === 'object') return JSON.stringify(v)
+      return v
+    }))
+  }
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, sheetSafe(name || 'Report'))
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  triggerDownload(blob, `${slugify(name || 'report')}_${todayStr()}.xlsx`)
+}
+
+// ─── PDF export ───────────────────────────────────────────────────────────
+
+async function exportPdf(result) {
+  const { default: jsPDF } = await import('jspdf')
+  const autoTable = (await import('jspdf-autotable')).default
+  const { rows, columns, name, primaryObject, format } = result
+  if (!rows || rows.length === 0) return
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' })
+  doc.setFontSize(14)
+  doc.text(name || 'Report', 40, 40)
+  doc.setFontSize(9)
+  doc.setTextColor(120)
+  doc.text(`${rows.length.toLocaleString()} rows · ${format} · ${primaryObject} · ${new Date().toLocaleString()}`, 40, 56)
+
+  autoTable(doc, {
+    startY: 70,
+    head: [columns.map(c => c.label)],
+    body: rows.map(row =>
+      columns.map(c => {
+        const v = getRowValue(row, c, result)
+        if (v == null) return ''
+        if (typeof v === 'object') return JSON.stringify(v)
+        return String(v)
+      })
+    ),
+    styles:    { fontSize: 8, cellPadding: 4 },
+    headStyles:{ fillColor: [41, 51, 71], textColor: 255 },
+    margin:    { left: 40, right: 40 },
+  })
+  doc.save(`${slugify(name || 'report')}_${todayStr()}.pdf`)
+}
+
+// ─── Export helpers ───────────────────────────────────────────────────────
+
+function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url
-  a.download = `${(name || 'report').replace(/[^a-z0-9_-]/gi, '_')}_${new Date().toISOString().slice(0, 10)}.csv`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
+  a.href = url; a.download = filename
+  document.body.appendChild(a); a.click(); document.body.removeChild(a)
   URL.revokeObjectURL(url)
 }
+function slugify(s)   { return String(s).replace(/[^a-z0-9_-]/gi, '_') }
+function todayStr()   { return new Date().toISOString().slice(0, 10) }
+function sheetSafe(s) { return String(s).replace(/[\\/?*[\]:]/g, '_').slice(0, 31) }
 
 // ─── Style helpers ────────────────────────────────────────────────────────
 
