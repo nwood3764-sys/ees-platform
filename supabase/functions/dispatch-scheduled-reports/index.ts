@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
   if (schedErr) return json({ error: `failed to load schedules: ${schedErr.message}` }, 500)
 
   const runs: any[] = []
-  let succeeded = 0, failed = 0
+  let succeeded = 0, failed = 0, warned = 0
 
   for (const s of (schedules || []) as ScheduledReport[]) {
     const result = await dispatchOne(supabase, s, {
@@ -113,6 +113,7 @@ Deno.serve(async (req) => {
     })
     runs.push(result)
     if (result.status === "success" || result.status === "success_dry_run") succeeded++
+    else if (result.status === "success_with_warnings") { succeeded++; warned++ }
     else if (result.status === "report_error" || result.status === "send_error") failed++
   }
 
@@ -120,6 +121,7 @@ Deno.serve(async (req) => {
     processed: schedules?.length || 0,
     succeeded,
     failed,
+    warned,
     dry_run:   dryRun,
     runs,
   })
@@ -163,13 +165,15 @@ async function dispatchOne(
 
   // ── Run the report ────────────────────────────────────────────────
   let rows: any[]
-  let columns: { name: string, label: string, via_path?: string[] }[]
+  let columns: { name: string, label: string, via_path?: string[]|null }[]
   let reportName = s.sr_name
+  let warnings: string[] = []
   try {
     const r = await runReportSimple(supabase, s.sr_report_id)
     rows = r.rows
     columns = r.columns
     reportName = r.name || s.sr_name
+    warnings = r.warnings || []
   } catch (err) {
     const msg = (err as Error).message
     await updateRun(supabase, runId, {
@@ -190,10 +194,19 @@ async function dispatchOne(
   const csvBase64 = base64Encode(csvBytes)
   const filename = `${slugify(reportName)}_${new Date().toISOString().slice(0,10)}.csv`
 
+  // Status downgrade: a successful run with soft warnings reports
+  // 'success_with_warnings' instead of 'success'/'success_dry_run' so
+  // the schedule owner sees them surfaced in the run history. Warnings
+  // also go into srr_warnings either way.
+  const hasWarnings = warnings.length > 0
+  const successStatus       = hasWarnings ? "success_with_warnings" : "success"
+  const successDryRunStatus = hasWarnings ? "success_with_warnings" : "success_dry_run"
+  const warningsField = hasWarnings ? { srr_warnings: warnings } : {}
+
   // ── Send (or dry-run) ────────────────────────────────────────────
   if (ctx.dryRun) {
     await updateRun(supabase, runId, {
-      srr_status:               "success_dry_run",
+      srr_status:               successDryRunStatus,
       srr_completed_at:         new Date().toISOString(),
       srr_row_count:            rows.length,
       srr_recipient_count:      recipients.length,
@@ -201,11 +214,13 @@ async function dispatchOne(
       srr_format:               "csv",
       srr_attachment_size:      csvBytes.length,
       srr_email_provider:       "dry_run",
+      ...warningsField,
     })
     await advanceNextSend(supabase, s)
     return {
-      schedule_id: s.id, status: "success_dry_run",
+      schedule_id: s.id, status: successDryRunStatus,
       row_count: rows.length, recipient_count: recipients.length,
+      warnings: hasWarnings ? warnings : undefined,
     }
   }
 
@@ -219,7 +234,7 @@ async function dispatchOne(
       attachment:  { filename, contentBase64: csvBase64, contentType: "text/csv" },
     })
     await updateRun(supabase, runId, {
-      srr_status:              "success",
+      srr_status:              successStatus,
       srr_completed_at:        new Date().toISOString(),
       srr_row_count:           rows.length,
       srr_recipient_count:     recipients.length,
@@ -228,11 +243,13 @@ async function dispatchOne(
       srr_attachment_size:     csvBytes.length,
       srr_email_provider:      "resend",
       srr_provider_message_id: messageId,
+      ...warningsField,
     })
     await advanceNextSend(supabase, s)
     return {
-      schedule_id: s.id, status: "success",
+      schedule_id: s.id, status: successStatus,
       row_count: rows.length, recipient_count: recipients.length,
+      warnings: hasWarnings ? warnings : undefined,
     }
   } catch (err) {
     const msg = (err as Error).message
@@ -245,6 +262,7 @@ async function dispatchOne(
       srr_recipients:       recipients,
       srr_format:           "csv",
       srr_attachment_size:  csvBytes.length,
+      ...warningsField,
     })
     // Don't advance next_send_at on send error — let it retry next cron tick.
     return { schedule_id: s.id, status: "send_error", error: msg }
@@ -291,18 +309,27 @@ async function resolveRecipients(supabase: SupabaseClient, s: ScheduledReport): 
 }
 
 // ─── Simplified report runner for the dispatcher ─────────────────────────
-// v1 features:
+// Supported features (full fidelity):
 //   • Direct fields and one-hop via_path embeds
-//   • Simple operator filters (no cross-filters, no logic expressions)
-//   • No calculated fields (skipped silently)
+//   • Operator-based filters on the primary object
 //   • Picklist label resolution for primary-object fields
 //   • FK label auto-embeds for primary-object FK columns
-// Deferred:
-//   • Multi-hop via_path
-//   • Cross-filters
-//   • Filter logic expressions ('1 AND (2 OR 3)')
-//   • Calculated fields
-//   • Matrix layout
+//   • Sort by primary-object columns
+//
+// Soft-degraded with warnings (run still succeeds, warnings recorded):
+//   • Multi-hop via_path (length > 1) — column rendered but value will be
+//     null since the dispatcher's runner doesn't traverse beyond one hop
+//   • Related-field filters (rfilt_field_via_path set) — silently dropped,
+//     output may include rows that don't match
+//   • Sort by related-object column — silently dropped
+//
+// Hard-incompatible (run fails with report_error before any query work):
+//   • Cross-filters (rfilt_is_cross_filter) — without pre-querying the
+//     cross-object set, the dispatcher would produce strictly wrong rows
+//   • Filter logic expressions other than 'all' or 'any' — without the
+//     parser, '1 AND (2 OR 3)' would silently AND everything
+//   • Calculated fields (report_calculated_fields) — without the formula
+//     evaluator, calc columns would be missing or wrong
 
 interface SimpleField {
   name: string
@@ -312,7 +339,84 @@ interface SimpleField {
   type?: string
 }
 
-async function runReportSimple(supabase: SupabaseClient, reportId: string) {
+interface RunResult {
+  rows:     any[]
+  columns:  { name: string, label: string, via_path?: string[]|null }[]
+  name:     string
+  warnings: string[]
+}
+
+// Inspect a report's definition + filter rows + calc fields. If any
+// hard-incompatible feature is used, throw with a clear message that
+// becomes the audit row's srr_error_message. Otherwise return the
+// list of soft warnings to emit alongside a successful run.
+async function validateReport(
+  supabase: SupabaseClient,
+  report: any,
+  filterRows: any[],
+): Promise<string[]> {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  // Cross-filters — hard incompatible. Producing rows without the cross-
+  // filter applied would silently break "open work orders without a
+  // photo attached" style reports.
+  const crossFilters = filterRows.filter(f => f.rfilt_is_cross_filter)
+  if (crossFilters.length > 0) {
+    errors.push(`This report uses ${crossFilters.length} cross-filter${crossFilters.length === 1 ? '' : 's'} (with/without related records). The scheduled-report dispatcher's runner can't apply cross-filters yet. Either remove them, or run the report manually until the dispatcher supports them.`)
+  }
+
+  // Filter logic — hard incompatible if it's anything other than the
+  // default 'all' or 'any'. Front-end stores parsed expressions like
+  // '1 AND (2 OR 3)' in rpt_filter_logic.
+  const logic = (report.rpt_filter_logic || '').toString().trim().toLowerCase()
+  if (logic && logic !== 'all' && logic !== 'any' && logic !== '') {
+    errors.push(`This report uses a custom filter logic expression ('${report.rpt_filter_logic}'). The dispatcher's runner only supports 'all' (default AND) and 'any' (default OR). Either simplify the logic or run manually.`)
+  }
+
+  // Calculated fields — hard incompatible. Calc columns would be
+  // missing or always-empty in the CSV.
+  const { data: calcRows, error: calcErr } = await supabase
+    .from('report_calculated_fields')
+    .select('id')
+    .eq('rcf_report_id', report.id)
+    .eq('is_deleted', false)
+    .limit(1)
+  if (calcErr) {
+    // Don't fail the report on a metadata-load failure; just warn
+    warnings.push(`Couldn't check for calculated fields: ${calcErr.message}`)
+  } else if ((calcRows || []).length > 0) {
+    errors.push(`This report has calculated fields. The dispatcher's runner can't evaluate formulas yet. Either remove them or run manually.`)
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join(' '))
+  }
+
+  // Soft warnings — multi-hop via_path
+  const fields: SimpleField[] = report.rpt_selected_fields || []
+  const multiHop = fields.filter(f => f.via_path && f.via_path.length > 1)
+  if (multiHop.length > 0) {
+    warnings.push(`${multiHop.length} multi-hop column${multiHop.length === 1 ? '' : 's'} (${multiHop.map(f => f.label || f.name).slice(0, 3).join(', ')}${multiHop.length > 3 ? '…' : ''}) will appear empty — the dispatcher only traverses one FK hop.`)
+  }
+
+  // Soft warnings — related-field filters
+  const relatedFilters = filterRows.filter(f => !f.rfilt_is_cross_filter && f.rfilt_field_via_path?.length)
+  if (relatedFilters.length > 0) {
+    warnings.push(`${relatedFilters.length} filter${relatedFilters.length === 1 ? '' : 's'} target related-object fields and were skipped. Output may include rows that wouldn't pass these filters in the live runner.`)
+  }
+
+  // Soft warnings — related-field sorts
+  const sortConfig = report.rpt_sort_config || []
+  const relatedSorts = sortConfig.filter((s: any) => s.via_path?.length)
+  if (relatedSorts.length > 0) {
+    warnings.push(`${relatedSorts.length} sort criteri${relatedSorts.length === 1 ? 'on' : 'a'} target related-object fields and were skipped — rows ordered by primary-object sorts only.`)
+  }
+
+  return warnings
+}
+
+async function runReportSimple(supabase: SupabaseClient, reportId: string): Promise<RunResult> {
   const { data: r, error: rErr } = await supabase
     .from("reports")
     .select("*")
@@ -329,6 +433,13 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string) {
     .eq("is_deleted", false)
     .order("rfilt_filter_index")
   if (fErr) throw new Error(`filter load failed: ${fErr.message}`)
+
+  // Validate the report's feature usage. Hard-incompatible features
+  // (cross-filters, custom filter logic, calc fields) throw here and
+  // bubble up to dispatchOne as a 'report_error'. Soft-degraded
+  // features (multi-hop via_path, related-field filters/sorts) are
+  // collected as warnings and returned in the result for the audit row.
+  const warnings = await validateReport(supabase, r, filterRows || [])
 
   const selectedFields: SimpleField[] = r.rpt_selected_fields || []
 
@@ -434,7 +545,7 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string) {
     }
   }
 
-  return { rows, columns, name: r.rpt_name }
+  return { rows, columns, name: r.rpt_name, warnings }
 }
 
 function applyFilter(q: any, field: string, op: string, value: any) {

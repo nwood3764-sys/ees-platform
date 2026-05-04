@@ -204,8 +204,18 @@ export default function ScheduleEditor({ scheduleId, onClose, onSaved }) {
       {/* Test result toast */}
       {testResult && (
         <div style={{
-          background: testResult.error ? '#fee' : '#e8f5ec',
-          border: `1px solid ${testResult.error ? '#f99' : '#9c9'}`,
+          background: testResult.error
+            ? '#fee'
+            : (testResult.runs?.[0]?.warnings?.length || testResult.runs?.[0]?.status === 'success_with_warnings')
+              ? '#fff4e0'
+              : '#e8f5ec',
+          border: `1px solid ${
+            testResult.error
+              ? '#f99'
+              : (testResult.runs?.[0]?.warnings?.length || testResult.runs?.[0]?.status === 'success_with_warnings')
+                ? '#f5c469'
+                : '#9c9'
+          }`,
           padding: '8px 24px', fontSize: 12, color: C.textPrimary,
         }}>
           {testResult.error ? (
@@ -215,6 +225,11 @@ export default function ScheduleEditor({ scheduleId, onClose, onSaved }) {
               Test {testResult.runs[0].status}: {testResult.runs[0].row_count ?? 0} rows,
               {' '}{testResult.runs[0].recipient_count ?? 0} recipients
               {testResult.runs[0].error ? ` — error: ${testResult.runs[0].error}` : ''}
+              {testResult.runs[0].warnings?.length ? (
+                <div style={{ marginTop: 4, fontSize: 11, color: '#92400e' }}>
+                  {testResult.runs[0].warnings.map((w, i) => <div key={i}>• {w}</div>)}
+                </div>
+              ) : null}
             </span>
           ) : (
             <span>Test result: {JSON.stringify(testResult)}</span>
@@ -446,23 +461,33 @@ function HistoryTab({ history, loading }) {
               <th style={th()}>Rows</th>
               <th style={th()}>Recipients</th>
               <th style={th()}>Provider</th>
-              <th style={th()}>Error</th>
+              <th style={th()}>Notes</th>
             </tr>
           </thead>
           <tbody>
-            {history.map(r => (
-              <tr key={r.id} style={{ borderTop:`1px solid ${C.border}` }}>
-                <td style={td()}>{new Date(r.srr_started_at).toLocaleString()}</td>
-                <td style={td()}><StatusBadge status={r.srr_status} /></td>
-                <td style={td()}>{r.srr_row_count ?? '—'}</td>
-                <td style={td()}>{r.srr_recipient_count ?? '—'}</td>
-                <td style={td()}>{r.srr_email_provider || '—'}</td>
-                <td style={{ ...td(), color: r.srr_error_message ? '#c33' : C.textMuted, maxWidth:260, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
-                    title={r.srr_error_message || ''}>
-                  {r.srr_error_message || '—'}
-                </td>
-              </tr>
-            ))}
+            {history.map(r => {
+              // Notes column collapses error_message and warnings into a single
+              // user-facing column. Errors win when both are present (shouldn't
+              // happen, but defensive). Warnings join with ' / ' and use amber.
+              const notes = r.srr_error_message
+                ? { text: r.srr_error_message, color: '#c33' }
+                : (r.srr_warnings?.length
+                    ? { text: r.srr_warnings.join(' / '), color: '#92400e' }
+                    : { text: '—', color: C.textMuted })
+              return (
+                <tr key={r.id} style={{ borderTop:`1px solid ${C.border}` }}>
+                  <td style={td()}>{new Date(r.srr_started_at).toLocaleString()}</td>
+                  <td style={td()}><StatusBadge status={r.srr_status} /></td>
+                  <td style={td()}>{r.srr_row_count ?? '—'}</td>
+                  <td style={td()}>{r.srr_recipient_count ?? '—'}</td>
+                  <td style={td()}>{r.srr_email_provider || '—'}</td>
+                  <td style={{ ...td(), color: notes.color, maxWidth:280, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
+                      title={notes.text}>
+                    {notes.text}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -472,13 +497,14 @@ function HistoryTab({ history, loading }) {
 
 function StatusBadge({ status }) {
   const colors = {
-    success:           { bg:'#e8f5ec', fg:'#2a8048' },
-    success_dry_run:   { bg:'#fff7e6', fg:'#a26500' },
-    no_recipients:     { bg:'#f0f3f8', fg:'#4a5e7a' },
-    no_rows:           { bg:'#f0f3f8', fg:'#4a5e7a' },
-    report_error:      { bg:'#fee', fg:'#c33' },
-    send_error:        { bg:'#fee', fg:'#c33' },
-    running:           { bg:'#e8f0ff', fg:'#2a5fa6' },
+    success:               { bg:'#e8f5ec', fg:'#2a8048' },
+    success_with_warnings: { bg:'#fff4e0', fg:'#92400e' },
+    success_dry_run:       { bg:'#fff7e6', fg:'#a26500' },
+    no_recipients:         { bg:'#f0f3f8', fg:'#4a5e7a' },
+    no_rows:               { bg:'#f0f3f8', fg:'#4a5e7a' },
+    report_error:          { bg:'#fee', fg:'#c33' },
+    send_error:            { bg:'#fee', fg:'#c33' },
+    running:               { bg:'#e8f0ff', fg:'#2a5fa6' },
   }
   const { bg, fg } = colors[status] || { bg:C.cardSecondary, fg:C.textSecondary }
   return (
