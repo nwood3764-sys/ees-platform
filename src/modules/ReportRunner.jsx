@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
 import { runReport, getRowValue } from '../data/reportsService'
+import { evaluateRowExpression } from '../lib/reportFormulaEval'
 
 // ─── Report Runner ────────────────────────────────────────────────────────
 //
@@ -110,15 +111,21 @@ function TabularLayout({ result }) {
             }}>
               {allColumns.map((c, idx) => {
                 if (c._calc) {
+                  // Build a flat row of resolved values and evaluate the
+                  // expression. Field names in the expression match the
+                  // column.name (i.e. the original SQL column name).
+                  const resolvedRow = {}
+                  for (const col of columns) {
+                    resolvedRow[col.name] = getRowValue(row, col, result)
+                  }
+                  const v = evaluateRowExpression(c.expression, resolvedRow)
                   return (
                     <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
-                      <span style={{ color:C.textMuted, fontStyle:'italic', fontSize:11 }}>
-                        evaluator pending
-                      </span>
+                      {formatCellValue(v, c.data_type)}
                     </td>
                   )
                 }
-                const v = getRowValue(row, c)
+                const v = getRowValue(row, c, result)
                 return (
                   <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
                     {formatCellValue(v, c.type)}
@@ -146,7 +153,7 @@ function SummaryLayout({ result }) {
 
   // Group rows iteratively by each grouping level. Output is a tree of
   // { value, level, rows, children, subtotal }
-  const tree = buildGroupTree(rows, columns, groupings)
+  const tree = buildGroupTree(rows, columns, groupings, 0, result)
 
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'auto' }}>
@@ -159,7 +166,7 @@ function SummaryLayout({ result }) {
           </tr>
         </thead>
         <tbody>
-          <SummaryTreeRows nodes={tree} columns={columns} groupings={groupings} depth={0} />
+          <SummaryTreeRows nodes={tree} columns={columns} groupings={groupings} depth={0} ctx={result} />
           <SummaryTotalRow rows={rows} columns={columns} />
         </tbody>
       </table>
@@ -167,7 +174,7 @@ function SummaryLayout({ result }) {
   )
 }
 
-function buildGroupTree(rows, columns, groupings, level = 0) {
+function buildGroupTree(rows, columns, groupings, level = 0, ctx = null) {
   if (level >= groupings.length) {
     return { leafRows: rows }
   }
@@ -176,7 +183,7 @@ function buildGroupTree(rows, columns, groupings, level = 0) {
   for (const row of rows) {
     // Lookup the grouping field's value. via_path resolved by getRowValue.
     const fieldDef = { name: g.field_name, via_path: g.field_via_path }
-    const key = getRowValue(row, fieldDef)
+    const key = getRowValue(row, fieldDef, ctx)
     const k = key ?? '(blank)'
     if (!buckets.has(k)) buckets.set(k, [])
     buckets.get(k).push(row)
@@ -193,18 +200,18 @@ function buildGroupTree(rows, columns, groupings, level = 0) {
       value: key,
       level,
       rows: group_rows,
-      child: buildGroupTree(group_rows, columns, groupings, level + 1),
+      child: buildGroupTree(group_rows, columns, groupings, level + 1, ctx),
     })),
   }
 }
 
-function SummaryTreeRows({ nodes, columns, groupings, depth }) {
+function SummaryTreeRows({ nodes, columns, groupings, depth, ctx }) {
   if (!nodes.children) {
     return nodes.leafRows.map((row, idx) => (
       <tr key={`leaf-${idx}`} style={{ borderTop:`1px solid ${C.border}` }}>
         {columns.map((c, ci) => (
           <td key={ci} style={{ ...cellStyle(), paddingLeft: 12 + depth * 16 }}>
-            {formatCellValue(getRowValue(row, c), c.type)}
+            {formatCellValue(getRowValue(row, c, ctx), c.type)}
           </td>
         ))}
       </tr>
@@ -212,11 +219,11 @@ function SummaryTreeRows({ nodes, columns, groupings, depth }) {
   }
   return nodes.children.map((node, ni) => (
     <SummaryGroupNode key={`g-${depth}-${ni}`}
-      node={node} columns={columns} groupings={groupings} depth={depth} />
+      node={node} columns={columns} groupings={groupings} depth={depth} ctx={ctx} />
   ))
 }
 
-function SummaryGroupNode({ node, columns, groupings, depth }) {
+function SummaryGroupNode({ node, columns, groupings, depth, ctx }) {
   const grouping = groupings[depth]
   const showSubtotal = grouping.show_subtotal !== false
   return (
@@ -226,7 +233,7 @@ function SummaryGroupNode({ node, columns, groupings, depth }) {
           {grouping.field_label}: {String(node.value)} <span style={{ color:C.textMuted, fontWeight:400 }}>({node.rows.length})</span>
         </td>
       </tr>
-      <SummaryTreeRows nodes={node.child} columns={columns} groupings={groupings} depth={depth + 1} />
+      <SummaryTreeRows nodes={node.child} columns={columns} groupings={groupings} depth={depth + 1} ctx={ctx} />
       {showSubtotal && (
         <tr style={{ background: '#f0f3f8', borderTop:`1px solid ${C.borderDark}` }}>
           <td colSpan={columns.length} style={{ ...cellStyle(), fontWeight:500, fontStyle:'italic', color:C.textSecondary, paddingLeft: 12 + depth * 16 }}>
@@ -302,7 +309,7 @@ function exportCsv(result) {
 
   const header = columns.map(c => escape(c.label)).join(',')
   const dataRows = rows.map(row =>
-    columns.map(c => escape(getRowValue(row, c))).join(',')
+    columns.map(c => escape(getRowValue(row, c, result))).join(',')
   )
   const csv = [header, ...dataRows].join('\n')
 

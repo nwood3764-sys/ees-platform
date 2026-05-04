@@ -480,9 +480,13 @@ const TABLE_NAME_COLUMNS = {
 
 /**
  * For a list of tables, return a map of "{table}.{column}" → FK metadata
- * with the resolved name column for the referenced table. Skipped FKs:
- * picklist_values (handled via picklist label resolution separately;
- * Phase 2c.4 follow-up), audit user FKs (*_by), and any FK whose
+ * with the resolved name column for the referenced table. Picklist FKs
+ * get a special marker (is_picklist: true) — they're resolved against
+ * picklist_values via a different code path because picklist_values has
+ * a generic shape and the relevant rows depend on the (object, field)
+ * pair, not just the FK target.
+ *
+ * Skipped FKs: audit user FKs (*_by) and any non-picklist FK whose
  * referenced table doesn't have a known name column.
  */
 async function buildFKLookup(primaryTable, alsoTables) {
@@ -493,11 +497,18 @@ async function buildFKLookup(primaryTable, alsoTables) {
     for (const c of cols) {
       if (!c.is_foreign_key || !c.references_table) continue
       if (c.column_name.endsWith('_by')) continue
-      // Picklist label resolution will be its own thing later; skip here
-      if (c.references_table === 'picklist_values') continue
+      if (c.references_table === 'picklist_values') {
+        // Picklist column — resolve via a different path (picklist_values
+        // lookup keyed on object+field). We still record it here so the
+        // runner knows to do the second-pass resolution.
+        out[`${tbl}.${c.column_name}`] = {
+          references_table: 'picklist_values',
+          is_picklist:      true,
+        }
+        continue
+      }
       const candidates = TABLE_NAME_COLUMNS[c.references_table]
       if (!candidates) continue
-      // Pick the first candidate that exists on the referenced table
       const refCols = await describeColumns(c.references_table)
       const nameCol = candidates.find(n => refCols.some(rc => rc.column_name === n))
       if (!nameCol) continue
@@ -508,6 +519,41 @@ async function buildFKLookup(primaryTable, alsoTables) {
     }
   }
   return out
+}
+
+/**
+ * Pull the picklist-values rows that match a list of (table, column) pairs.
+ * Returns a Map keyed by picklist_values.id → { value, label }. The runner
+ * uses this for second-pass UUID-to-label substitution on picklist columns.
+ */
+async function loadPicklistLabels(pairs) {
+  if (!pairs || pairs.length === 0) return new Map()
+  const map = new Map()
+  // Group by picklist_object so we can issue one query per object instead
+  // of N queries. picklist_field is then filtered in-array.
+  const byObject = new Map()
+  for (const p of pairs) {
+    if (!byObject.has(p.object)) byObject.set(p.object, new Set())
+    byObject.get(p.object).add(p.field)
+  }
+  for (const [object, fields] of byObject) {
+    const { data, error } = await supabase
+      .from('picklist_values')
+      .select('id, picklist_field, picklist_value, picklist_label')
+      .eq('picklist_object', object)
+      .in('picklist_field', Array.from(fields))
+    if (error) {
+      console.warn('picklist label load failed for', object, error.message)
+      continue
+    }
+    for (const row of (data || [])) {
+      map.set(row.id, {
+        value: row.picklist_value,
+        label: row.picklist_label || row.picklist_value,
+      })
+    }
+  }
+  return map
 }
 
 export async function runReport(reportId) {
@@ -649,6 +695,19 @@ export async function runReport(reportId) {
   const { data, error } = await query
   if (error) throw error
 
+  // Picklist label resolution — second pass. For every selected field that
+  // is a picklist FK on the primary object, batch-fetch the label rows.
+  const picklistFields = (r.rpt_selected_fields || []).filter(f => {
+    if (f.via_path && f.via_path.length > 0) return false  // related-object picklists not handled in v1
+    return fkLookup[`${r.rpt_primary_object}.${f.name}`]?.is_picklist
+  })
+  let picklistMap = new Map()
+  if (picklistFields.length > 0) {
+    picklistMap = await loadPicklistLabels(
+      picklistFields.map(f => ({ object: r.rpt_primary_object, field: f.name }))
+    )
+  }
+
   // Mark this report as run for "Last Run" display
   const userId = await getCurrentUserId()
   await supabase.from('reports').update({
@@ -658,7 +717,12 @@ export async function runReport(reportId) {
 
   return {
     rows: data || [],
-    columns: r.rpt_selected_fields || [],
+    columns: (r.rpt_selected_fields || []).map(f => ({
+      ...f,
+      // Mark picklist columns so getRowValue knows to look up the label
+      _is_picklist: !f.via_path && fkLookup[`${r.rpt_primary_object}.${f.name}`]?.is_picklist,
+    })),
+    picklistMap,
     groupings: (loaded.groupings || []).map(g => ({
       field_name:        g.rgr_field_name,
       field_label:       g.rgr_field_label || g.rgr_field_name,
@@ -684,17 +748,29 @@ export async function runReport(reportId) {
  * Resolve a value at a path within a row — handles direct fields and
  * one-hop via_path nested objects. For direct FK fields, looks for an
  * auto-embedded label first (prefix '_lbl_<colname>') and returns the
- * resolved name when present.
+ * resolved name when present. For picklist FK fields, looks up the
+ * label in the optional picklistMap.
  *
  * Returns null if the path doesn't resolve.
  */
-export function getRowValue(row, field) {
+export function getRowValue(row, field, ctx = null) {
   if (!row || !field) return null
   if (!field.via_path || field.via_path.length === 0) {
-    // Direct field: check for an auto-resolved FK label first
+    // Direct field
+
+    // Picklist resolution — if this column is flagged as a picklist FK
+    // and we have a picklistMap, substitute the UUID with the label.
+    if (field._is_picklist && ctx?.picklistMap) {
+      const id = row[field.name]
+      if (id) {
+        const entry = ctx.picklistMap.get(id)
+        if (entry) return entry.label
+      }
+    }
+
+    // FK label resolution — prefer auto-embedded label
     const labelEmbed = row[`_lbl_${field.name}`]
     if (labelEmbed && typeof labelEmbed === 'object') {
-      // Pick the first non-null property — there's only ever one (the name col)
       for (const k of Object.keys(labelEmbed)) {
         if (labelEmbed[k] != null) return labelEmbed[k]
       }
