@@ -556,6 +556,142 @@ async function loadPicklistLabels(pairs) {
   return map
 }
 
+/**
+ * Apply a filter-logic expression (e.g. '1 AND (2 OR 3)') to a row set
+ * client-side. Each filter row evaluated per-row produces a boolean,
+ * indexed by rfilt_filter_index. The expression is parsed via shunting-
+ * yard into RPN and evaluated for each row.
+ *
+ * Used only when the report's rpt_filter_logic is non-trivial — pure
+ * AND-of-all-filters reports use PostgREST server-side filters and skip
+ * this code path.
+ */
+function applyFilterLogic(rows, filters, expression, fkLookup, primaryObject) {
+  // Tokenize the logic expression: numbers, AND, OR, NOT, ( )
+  const tokens = []
+  let i = 0
+  while (i < expression.length) {
+    const c = expression[i]
+    if (/\s/.test(c)) { i++; continue }
+    if (/[0-9]/.test(c)) {
+      let j = i
+      while (j < expression.length && /[0-9]/.test(expression[j])) j++
+      tokens.push({ type: 'num', value: parseInt(expression.slice(i, j), 10) })
+      i = j; continue
+    }
+    if (c === '(') { tokens.push({ type: '(' }); i++; continue }
+    if (c === ')') { tokens.push({ type: ')' }); i++; continue }
+    if (/[a-zA-Z]/.test(c)) {
+      let j = i
+      while (j < expression.length && /[a-zA-Z]/.test(expression[j])) j++
+      const word = expression.slice(i, j).toUpperCase()
+      if (word === 'AND' || word === 'OR' || word === 'NOT') tokens.push({ type: word })
+      else throw new Error(`Unexpected token in filter logic: ${word}`)
+      i = j; continue
+    }
+    throw new Error(`Unexpected character in filter logic: ${c}`)
+  }
+
+  // Shunting-yard to RPN
+  const prec = { NOT: 3, AND: 2, OR: 1 }
+  const output = []
+  const stack = []
+  for (const t of tokens) {
+    if (t.type === 'num') output.push(t)
+    else if (t.type === '(') stack.push(t)
+    else if (t.type === ')') {
+      while (stack.length && stack[stack.length-1].type !== '(') output.push(stack.pop())
+      stack.pop()
+    }
+    else { // operator
+      while (stack.length) {
+        const top = stack[stack.length-1]
+        if (top.type === '(') break
+        if ((prec[top.type] || 0) >= (prec[t.type] || 0)) output.push(stack.pop())
+        else break
+      }
+      stack.push(t)
+    }
+  }
+  while (stack.length) output.push(stack.pop())
+
+  // Evaluate per-row. Per-filter evaluation is delegated to a helper.
+  const filterByIdx = new Map()
+  for (const f of filters) filterByIdx.set(f.rfilt_filter_index, f)
+
+  return rows.filter(row => {
+    const evalStack = []
+    for (const t of output) {
+      if (t.type === 'num') {
+        const f = filterByIdx.get(t.value)
+        if (!f) { evalStack.push(false); continue }
+        evalStack.push(evalFilterOnRow(f, row, fkLookup, primaryObject))
+      } else if (t.type === 'NOT') {
+        const a = evalStack.pop()
+        evalStack.push(!a)
+      } else if (t.type === 'AND') {
+        const b = evalStack.pop(), a = evalStack.pop()
+        evalStack.push(a && b)
+      } else if (t.type === 'OR') {
+        const b = evalStack.pop(), a = evalStack.pop()
+        evalStack.push(a || b)
+      }
+    }
+    return !!evalStack[0]
+  })
+}
+
+function evalFilterOnRow(f, row, fkLookup, primaryObject) {
+  // Resolve the value at the filter's column path
+  let v
+  if (f.rfilt_field_via_path && f.rfilt_field_via_path.length > 0) {
+    const nested = row[f.rfilt_field_via_path[0]]
+    v = nested ? nested[f.rfilt_field_name] : null
+  } else {
+    v = row[f.rfilt_field_name]
+  }
+  const target = f.rfilt_value
+  switch (f.rfilt_operator) {
+    case 'equals':           return v == target  // eslint-disable-line eqeqeq
+    case 'not_equals':       return v != target  // eslint-disable-line eqeqeq
+    case 'greater_than':     return parseFloat(v) > parseFloat(target)
+    case 'less_than':        return parseFloat(v) < parseFloat(target)
+    case 'greater_or_equal': return parseFloat(v) >= parseFloat(target)
+    case 'less_or_equal':    return parseFloat(v) <= parseFloat(target)
+    case 'in': {
+      const list = Array.isArray(target) ? target : String(target).split(',').map(s => s.trim())
+      return list.includes(v) || list.includes(String(v))
+    }
+    case 'not_in': {
+      const list = Array.isArray(target) ? target : String(target).split(',').map(s => s.trim())
+      return !(list.includes(v) || list.includes(String(v)))
+    }
+    case 'contains':    return v != null && String(v).toLowerCase().includes(String(target).toLowerCase())
+    case 'starts_with': return v != null && String(v).toLowerCase().startsWith(String(target).toLowerCase())
+    case 'ends_with':   return v != null && String(v).toLowerCase().endsWith(String(target).toLowerCase())
+    case 'is_null':     return v == null || v === ''
+    case 'is_not_null': return v != null && v !== ''
+    case 'in_last_n_days': {
+      const n = parseInt(target, 10)
+      if (!Number.isFinite(n) || !v) return false
+      const d = new Date(v)
+      if (isNaN(d.getTime())) return false
+      return (Date.now() - d.getTime()) <= n * 86400000
+    }
+    case 'this_month': {
+      if (!v) return false
+      const d = new Date(v); const now = new Date()
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+    }
+    case 'this_year': {
+      if (!v) return false
+      const d = new Date(v); const now = new Date()
+      return d.getFullYear() === now.getFullYear()
+    }
+  }
+  return true
+}
+
 export async function runReport(reportId) {
   const loaded = await loadReport(reportId)
   if (!loaded) throw new Error('Report not found')
@@ -630,8 +766,16 @@ export async function runReport(reportId) {
   // skip silently if the table doesn't have one.
   query = query.eq('is_deleted', false)
 
+  // When the report uses non-trivial filter logic (anything other than
+  // 'all' AND-of-everything), skip server-side filter pushdown — the
+  // filter logic is evaluated client-side after the query returns. Reports
+  // with simple AND-only logic keep using PostgREST filters for efficiency.
+  const _logicCheck = (r.rpt_filter_logic || 'all').trim()
+  const _hasComplexLogic = _logicCheck !== 'all' && /[A-Z]+\s*[A-Z]|\(|NOT/i.test(_logicCheck)
+
   // Apply filters — AND-only for v1.
   for (const f of (loaded.filters || [])) {
+    if (_hasComplexLogic) break  // skip server-side; client-side handles it
     if (f.rfilt_is_cross_filter) continue  // cross-filters in 2c.2
     if (!f.rfilt_field_name || !f.rfilt_operator) continue
     const col = (f.rfilt_field_via_path && f.rfilt_field_via_path.length > 0)
@@ -689,11 +833,22 @@ export async function runReport(reportId) {
     query = query.order(col, { ascending: s.direction !== 'desc' })
   }
 
-  // Cap rows defensively — full pagination later
+  // Cap rows defensively — full pagination later.
+  // When a non-trivial filter logic expression is present (contains OR
+  // or NOT), we pull the full filtered server-side set up to this cap,
+  // then evaluate the logic expression client-side. PostgREST's .or()
+  // is flat and can't combine with AND in the same query.
+  const logicExpr = (r.rpt_filter_logic || 'all').trim()
+  const hasComplexLogic = logicExpr !== 'all' && /[A-Z]+\s*[A-Z]|\(|NOT/i.test(logicExpr)
   query = query.limit(2000)
 
-  const { data, error } = await query
+  let { data, error } = await query
   if (error) throw error
+
+  // Client-side filter logic evaluation if expression is non-trivial.
+  if (hasComplexLogic && data && (loaded.filters || []).length > 0) {
+    data = applyFilterLogic(data, loaded.filters || [], logicExpr, fkLookup, r.rpt_primary_object)
+  }
 
   // Picklist label resolution — second pass. For every selected field that
   // is a picklist FK on the primary object, batch-fetch the label rows.
