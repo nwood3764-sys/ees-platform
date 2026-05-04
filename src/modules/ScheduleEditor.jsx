@@ -39,8 +39,9 @@ const TIMEZONES = [
 ]
 
 const FORMATS = [
-  { value: 'csv', label: 'CSV (recommended)' },
-  // PDF and XLSX deferred — dispatcher only emits CSV in v1
+  { value: 'csv',  label: 'CSV — comma-separated values' },
+  { value: 'xlsx', label: 'XLSX — Excel workbook' },
+  // PDF deferred to v3 of the dispatcher — needs page-layout work
 ]
 
 export default function ScheduleEditor({ scheduleId, onClose, onSaved }) {

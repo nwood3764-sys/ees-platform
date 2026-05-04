@@ -186,13 +186,30 @@ async function dispatchOne(
     return { schedule_id: s.id, status: "report_error", error: msg }
   }
 
-  // ── Build CSV ────────────────────────────────────────────────────
-  // v1 supports CSV only. PDF/XLSX in a follow-up — pdf-lib + xlsx
-  // both work in Deno but they're chunky imports for a per-row dispatch.
-  const csv = buildCsv(rows, columns)
-  const csvBytes = new TextEncoder().encode(csv)
-  const csvBase64 = base64Encode(csvBytes)
-  const filename = `${slugify(reportName)}_${new Date().toISOString().slice(0,10)}.csv`
+  // ── Build attachment ──────────────────────────────────────────────
+  // Dispatch on sr_format. CSV is text via TextEncoder; XLSX is binary
+  // via the SheetJS package (esm.sh). PDF is still deferred — it needs
+  // real page layout work and a separate session to do well.
+  const requestedFormat = (s.sr_format || "csv").toLowerCase()
+  let attBytes:  Uint8Array
+  let attMime:   string
+  let attExt:    string
+  try {
+    const built = await buildAttachment(rows, columns, reportName, requestedFormat)
+    attBytes = built.bytes
+    attMime  = built.mime
+    attExt   = built.ext
+  } catch (err) {
+    const msg = `attachment build failed (${requestedFormat}): ${(err as Error).message}`
+    await updateRun(supabase, runId, {
+      srr_status: "report_error", srr_completed_at: new Date().toISOString(),
+      srr_error_message: msg, srr_recipient_count: recipients.length,
+    })
+    await advanceNextSend(supabase, s)
+    return { schedule_id: s.id, status: "report_error", error: msg }
+  }
+  const attBase64 = base64Encode(attBytes)
+  const filename = `${slugify(reportName)}_${new Date().toISOString().slice(0,10)}.${attExt}`
 
   // Status downgrade: a successful run with soft warnings reports
   // 'success_with_warnings' instead of 'success'/'success_dry_run' so
@@ -211,8 +228,8 @@ async function dispatchOne(
       srr_row_count:            rows.length,
       srr_recipient_count:      recipients.length,
       srr_recipients:           recipients,
-      srr_format:               "csv",
-      srr_attachment_size:      csvBytes.length,
+      srr_format:               attExt,
+      srr_attachment_size:      attBytes.length,
       srr_email_provider:       "dry_run",
       ...warningsField,
     })
@@ -231,7 +248,7 @@ async function dispatchOne(
       to:          recipients,
       subject:     s.sr_subject_line,
       bodyText:    buildEmailBody(s, reportName, rows.length, ctx.baseUrl),
-      attachment:  { filename, contentBase64: csvBase64, contentType: "text/csv" },
+      attachment:  { filename, contentBase64: attBase64, contentType: attMime },
     })
     await updateRun(supabase, runId, {
       srr_status:              successStatus,
@@ -239,8 +256,8 @@ async function dispatchOne(
       srr_row_count:           rows.length,
       srr_recipient_count:     recipients.length,
       srr_recipients:          recipients,
-      srr_format:              "csv",
-      srr_attachment_size:     csvBytes.length,
+      srr_format:              attExt,
+      srr_attachment_size:     attBytes.length,
       srr_email_provider:      "resend",
       srr_provider_message_id: messageId,
       ...warningsField,
@@ -260,8 +277,8 @@ async function dispatchOne(
       srr_row_count:        rows.length,
       srr_recipient_count:  recipients.length,
       srr_recipients:       recipients,
-      srr_format:           "csv",
-      srr_attachment_size:  csvBytes.length,
+      srr_format:           attExt,
+      srr_attachment_size:  attBytes.length,
       ...warningsField,
     })
     // Don't advance next_send_at on send error — let it retry next cron tick.
@@ -611,6 +628,116 @@ function buildCsv(rows: any[], columns: any[]): string {
     return escape(row[c.name])
   }).join(","))
   return [header, ...dataRows].join("\n")
+}
+
+// ─── Attachment dispatcher ────────────────────────────────────────────────
+// Single entry point for all output formats. Each format returns
+// { bytes, mime, ext }. The builder for the format is chosen at call time
+// and the package is dynamically imported so unused formats don't hit the
+// per-invocation cold-start of an esm.sh resolution.
+
+async function buildAttachment(
+  rows: any[],
+  columns: any[],
+  reportName: string,
+  format: string,
+): Promise<{ bytes: Uint8Array, mime: string, ext: string }> {
+  switch (format) {
+    case "csv":
+    case "":
+    case undefined as any: {
+      const csv = buildCsv(rows, columns)
+      return {
+        bytes: new TextEncoder().encode(csv),
+        mime:  "text/csv",
+        ext:   "csv",
+      }
+    }
+    case "xlsx": {
+      const bytes = await buildXlsx(rows, columns, reportName)
+      return {
+        bytes,
+        mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ext:  "xlsx",
+      }
+    }
+    case "pdf": {
+      // PDF still deferred — needs page-layout work and a separate session
+      // to do well. Fail loudly here so the schedule's audit row gets a
+      // clear error message rather than a malformed file.
+      throw new Error("PDF format is not supported yet — please pick CSV or XLSX in the schedule editor.")
+    }
+    default:
+      throw new Error(`Unknown format '${format}' — please pick CSV or XLSX in the schedule editor.`)
+  }
+}
+
+// ─── XLSX builder ─────────────────────────────────────────────────────────
+// Uses SheetJS (xlsx package via esm.sh). Produces a single worksheet
+// with header row and one row per record. Same getRowValue logic as CSV
+// (one-hop FK embeds; primary-object picklist labels already substituted
+// into rows by runReportSimple).
+
+async function buildXlsx(rows: any[], columns: any[], reportName: string): Promise<Uint8Array> {
+  // Dynamic import keeps the Deno cold-start cheap when CSV is requested.
+  const XLSX = await import("https://esm.sh/xlsx@0.18.5")
+
+  // Build a 2D array: [headers, ...data rows]. SheetJS aoa_to_sheet
+  // handles all the cell-encoding work and is the path with the
+  // narrowest API surface — JSON-driven sheet construction sometimes
+  // bumps into edge cases with null/undefined values.
+  const headerRow = columns.map(c => c.label || c.name || "")
+  const dataRows = rows.map(row => columns.map(c => {
+    let v: any
+    if (c.via_path?.length) {
+      const nested = row[c.via_path[0]]
+      v = nested ? nested[c.name] : null
+    } else {
+      v = row[c.name]
+    }
+    if (v == null) return ""
+    if (typeof v === "object") return JSON.stringify(v)
+    return v
+  }))
+  const aoa = [headerRow, ...dataRows]
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+
+  // Bold header row + auto-width columns. SheetJS doesn't compute widths
+  // automatically; we estimate from header + sample data lengths.
+  const colWidths: { wch: number }[] = []
+  for (let c = 0; c < columns.length; c++) {
+    let max = String(headerRow[c] || "").length
+    // Sample up to 100 rows to keep this O(small) for big sheets
+    const sample = Math.min(100, dataRows.length)
+    for (let r = 0; r < sample; r++) {
+      const cell = dataRows[r][c]
+      if (cell != null) {
+        const len = String(cell).length
+        if (len > max) max = len
+      }
+    }
+    // Cap at 50 so a single long cell doesn't blow up the layout
+    colWidths.push({ wch: Math.min(50, Math.max(8, max + 2)) })
+  }
+  ws["!cols"] = colWidths
+
+  // Header style — SheetJS supports per-cell style via cell.s when the
+  // package is built with cell-styles; standard esm.sh build doesn't
+  // ship those. Header bolding is a 'nice to have' that we're skipping
+  // to keep the dependency lean. If the user wants a styled header
+  // they can open in Excel and apply a table style in two clicks.
+
+  const wb = XLSX.utils.book_new()
+  // Sheet name has 31-char Excel limit + can't contain :\/?*[]
+  const sheetName = reportName.replace(/[\\/?*\[\]:]/g, "_").slice(0, 31) || "Report"
+  XLSX.utils.book_append_sheet(wb, ws, sheetName)
+
+  // Write to ArrayBuffer → Uint8Array. type: "array" returns a Uint8Array
+  // directly in Deno; type: "buffer" returns a Node Buffer (not available
+  // in Deno's V8 build). Use "array" for portability.
+  const out = XLSX.write(wb, { type: "array", bookType: "xlsx" })
+  return new Uint8Array(out)
 }
 
 // ─── Email sending via Resend ─────────────────────────────────────────────
