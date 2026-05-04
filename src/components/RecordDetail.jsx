@@ -8,6 +8,7 @@ import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
+import { ReportWidget } from './ReportWidget'
 import { supabase } from '../lib/supabase'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
@@ -392,7 +393,7 @@ function buildOrderedTabs(sections, { includeActivity = true } = {}) {
   let hasRelated = false
   for (const sec of sections || []) {
     names.add(sec.section_tab || 'Details')
-    if ((sec.widgets || []).some(w => w.widget_type === 'related_list' || w.widget_type === 'file_gallery' || w.widget_type === 'prtsn_history')) {
+    if ((sec.widgets || []).some(w => w.widget_type === 'related_list' || w.widget_type === 'file_gallery' || w.widget_type === 'prtsn_history' || w.widget_type === 'report')) {
       hasRelated = true
     }
   }
@@ -4423,6 +4424,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               key={w.id}
               widget={w}
               parentRecordId={recordId}
+            />
+          ))}
+
+        {/* Embedded reports — saved reports rendered inline as widgets.
+            Optional context filter narrows the report to rows matching
+            the current record (so a generic 'All Tasks' report becomes
+            'Tasks for THIS record' when embedded). */}
+        {!isInsertMode && activeTab === 'Related' && sections
+          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'report'))
+          .map(w => (
+            <ReportWidget
+              key={w.id}
+              widget={w}
+              parentTable={tableName}
+              parentRecordId={recordId}
+              onOpenRecord={onNavigateToRecord}
             />
           ))}
 
