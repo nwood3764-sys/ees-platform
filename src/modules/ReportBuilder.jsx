@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { Icon, LoadingState, ErrorState } from '../components/UI'
 import {
-  loadReport, saveReport,
+  loadReport, saveReport, cloneReport,
   loadFieldTree, loadRelatedObjectFields,
   listPrimaryObjectOptions,
   listObjectColumns,
@@ -226,6 +226,33 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     }
   }
 
+  // ─── Save As (Clone) ───────────────────────────────────────────────────
+  // Two-step. First persists the current edits to the existing record so
+  // they aren't lost if the user later discards the clone (this matches
+  // Salesforce: Save As never throws away unsaved changes on the source).
+  // Then calls clone_report to produce the copy. Parent navigates to the
+  // new id via onSaved — the Builder will reload onto the freshly-cloned
+  // record. Disabled on a brand-new unsaved report (just hit Save then).
+  const handleSaveAs = async () => {
+    if (isNew) return
+    if (!report.rpt_name) { alert('Report name is required.'); return }
+    if (!report.rpt_primary_object) { alert('Primary object is required.'); return }
+    setSaving(true); setError(null)
+    try {
+      // Step 1 — persist current edits to the source. saveReport handles
+      // both insert and update; for an existing record it updates in place.
+      await saveReport({ id: reportId, report, filters, groupings, calculatedFields })
+      // Step 2 — clone the now-up-to-date source.
+      const newId = await cloneReport(reportId)
+      setSavedAt(new Date())
+      onSaved?.(newId)
+    } catch (err) {
+      setError(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} />
 
@@ -249,6 +276,18 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
             </div>
           )}
           <button onClick={onClose} style={btnSecondary()}>Close</button>
+          {/* Save As — persist current edits, then clone. Hidden on new
+              unsaved reports (no source to clone yet). */}
+          {!isNew && (
+            <button
+              onClick={handleSaveAs}
+              disabled={saving}
+              title="Save current changes, then create a copy you can edit independently"
+              style={btnSecondary()}
+            >
+              {saving ? '…' : 'Save As'}
+            </button>
+          )}
           <button onClick={handleSave} disabled={saving} style={btnPrimary(saving)}>
             {saving ? 'Saving…' : 'Save'}
           </button>

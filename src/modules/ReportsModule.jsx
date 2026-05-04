@@ -313,6 +313,16 @@ export default function ReportsModule({
                 reportId={selectedRecord.id}
                 onClose={closeRecord}
                 onEdit={() => replaceSelectedRecord({ table:'reports', id:selectedRecord.id, mode:'edit' })}
+                onDuplicate={(newId) => {
+                  // After a clone, refresh the list view (so the new
+                  // report appears in the Reports tab if the user
+                  // closes the record) and drop the user straight into
+                  // the Builder for the new copy. Edit mode rather than
+                  // view: the most-likely first action after duplicating
+                  // is to rename and tweak the clone.
+                  loadAll()
+                  replaceSelectedRecord({ table:'reports', id:newId, mode:'edit' })
+                }}
               />
             )
           ) : selectedRecord.table === 'dashboards' ? (

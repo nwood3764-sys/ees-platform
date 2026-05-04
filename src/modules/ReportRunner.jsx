@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
-import { runReport, getRowValue, getReportPrompts } from '../data/reportsService'
+import { runReport, getRowValue, getReportPrompts, cloneReport } from '../data/reportsService'
 import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } from '../lib/reportFormulaEval'
 
 // ─── Report Runner ────────────────────────────────────────────────────────
@@ -14,12 +14,14 @@ import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } f
 // the table render. "Run Again" reruns the same query (useful when the
 // underlying data has changed).
 
-export default function ReportRunner({ reportId, onClose, onEdit }) {
+export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate }) {
   const [result, setResult]     = useState(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(null)
   const [prompts, setPrompts]   = useState(null)        // null = not yet checked, [] = none
   const [promptValues, setPromptValues] = useState({})  // collected user input
+  const [duplicating, setDuplicating] = useState(false)
+  const [duplicateError, setDuplicateError] = useState(null)
 
   const run = async (overrides = null) => {
     setLoading(true); setError(null)
@@ -30,6 +32,24 @@ export default function ReportRunner({ reportId, onClose, onEdit }) {
       setError(err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Duplicate (Save As / Clone). Calls the clone_report RPC, and on
+  // success hands the new id up to the parent so the user lands in the
+  // Builder for the freshly-cloned record. Errors render as a small
+  // banner below the toolbar — same place as runtime errors.
+  const handleDuplicate = async () => {
+    if (duplicating) return
+    setDuplicating(true)
+    setDuplicateError(null)
+    try {
+      const newId = await cloneReport(reportId)
+      if (onDuplicate) onDuplicate(newId)
+    } catch (err) {
+      setDuplicateError(err.message || String(err))
+    } finally {
+      setDuplicating(false)
     }
   }
 
@@ -144,9 +164,39 @@ export default function ReportRunner({ reportId, onClose, onEdit }) {
           <button onClick={() => exportExcel(result)} style={btnSecondary()}>Excel</button>
           <button onClick={() => exportPdf(result)}   style={btnSecondary()}>PDF</button>
           <button onClick={onEdit}  style={btnSecondary()}>Edit</button>
+          {/* Duplicate — Save As / Clone. Hidden when no parent is wired
+              up to handle the new id (defensive for embedded usage). */}
+          {onDuplicate && (
+            <button
+              onClick={handleDuplicate}
+              disabled={duplicating}
+              title="Create a copy of this report you can edit independently"
+              style={{
+                ...btnSecondary(),
+                cursor: duplicating ? 'wait' : 'pointer',
+                opacity: duplicating ? 0.6 : 1,
+              }}
+            >{duplicating ? 'Duplicating…' : 'Duplicate'}</button>
+          )}
           <button onClick={onClose} style={btnSecondary()}>Close</button>
         </div>
       </div>
+
+      {/* Duplicate-error banner. Sits between toolbar and body so it's
+          impossible to miss but doesn't block the report content. */}
+      {duplicateError && (
+        <div style={{
+          padding: '8px 24px', background: '#fee', color: '#c33',
+          borderBottom: `1px solid #f99`, fontSize: 12,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span>Duplicate failed: {duplicateError}</span>
+          <button
+            onClick={() => setDuplicateError(null)}
+            style={{ background:'transparent', border:'none', color:'#c33', cursor:'pointer', fontSize:12 }}
+          >Dismiss</button>
+        </div>
+      )}
 
       {/* Body */}
       <div style={{ flex:1, overflow:'auto', padding:'16px 24px' }}>

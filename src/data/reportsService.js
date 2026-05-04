@@ -448,6 +448,32 @@ export async function getCurrentUserId() {
 }
 
 /**
+ * Salesforce-parity Save As / Clone. Calls the clone_report RPC which
+ * copies the report row plus its filters, groupings, and calculated
+ * fields into a new record owned by the caller. Returns the new id so
+ * the UI can navigate the user to the freshly-cloned record (typically
+ * straight into the Builder so they can rename and tweak before saving).
+ *
+ * Both name and folder are optional — the RPC defaults the name to
+ * "<source name> (Clone)" and lands the new report in the source's
+ * folder. Pass overrides when the user explicitly chose a destination.
+ *
+ * Throws if the source isn't found, isn't readable by the caller, or if
+ * the caller can't write to reports / report_filters / report_groupings /
+ * report_calculated_fields. Errors propagate verbatim from the RPC.
+ */
+export async function cloneReport(sourceReportId, { newName = null, newFolderId = null } = {}) {
+  const { data, error } = await supabase.rpc('clone_report', {
+    p_source_report_id: sourceReportId,
+    p_new_name:         newName,
+    p_new_folder_id:    newFolderId,
+  })
+  if (error) throw error
+  if (!data) throw new Error('clone_report returned no id')
+  return data
+}
+
+/**
  * Save (insert or update) a report and its child rows. The child tables
  * (filters, groupings, calculated_fields) use a delete-and-reinsert
  * strategy on save — simpler than diffing and matches how Salesforce
