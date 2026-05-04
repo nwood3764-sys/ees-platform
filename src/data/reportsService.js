@@ -1127,3 +1127,165 @@ export function getRowValue(row, field, ctx = null) {
   if (!nested) return null
   return nested[field.name] ?? null
 }
+
+// ─── Dashboards ───────────────────────────────────────────────────────────
+
+export async function fetchDashboardFolders() {
+  const { data, error } = await supabase
+    .from('dashboard_folders')
+    .select(`
+      id, df_record_number, df_name, df_description, df_is_public,
+      df_parent_folder_id, df_owner_user_id, updated_at,
+      owner:users!dashboard_folders_df_owner_user_id_fkey(id, user_name)
+    `)
+    .eq('is_deleted', false)
+    .order('df_name', { ascending: true })
+
+  if (error) throw error
+  const rows = data || []
+  const accessLevels = await Promise.all(
+    rows.map(r => supabase.rpc('app_user_dashboard_folder_access', { p_folder_id: r.id }))
+  )
+  return rows.map((r, idx) => {
+    const accessLevel = accessLevels[idx]?.data || null
+    return {
+      id:           r.df_record_number || r.id.slice(0, 8).toUpperCase(),
+      _id:          r.id,
+      name:         r.df_name,
+      description:  r.df_description || '—',
+      isPublic:     r.df_is_public ? 'Public' : 'Private',
+      parentId:     r.df_parent_folder_id,
+      ownerId:      r.df_owner_user_id,
+      ownerName:    r.owner?.user_name || '—',
+      accessLevel,
+      updatedAt:    r.updated_at ? new Date(r.updated_at).toLocaleDateString() : '—',
+    }
+  }).filter(f => f.accessLevel != null)
+}
+
+export async function fetchDashboards({ folderId = null } = {}) {
+  let q = supabase
+    .from('dashboards')
+    .select(`
+      id, dash_record_number, dash_name, dash_description,
+      dash_folder_id, dash_owner_user_id, dash_columns,
+      dash_last_run_at, updated_at,
+      folder:dashboard_folders(id, df_name),
+      owner:users!dashboards_dash_owner_user_id_fkey(id, user_name)
+    `)
+    .eq('is_deleted', false)
+    .order('updated_at', { ascending: false })
+
+  if (folderId) q = q.eq('dash_folder_id', folderId)
+
+  const { data, error } = await q
+  if (error) throw error
+
+  return (data || []).map(d => ({
+    id:          d.dash_record_number || d.id.slice(0, 8).toUpperCase(),
+    _id:         d.id,
+    name:        d.dash_name,
+    description: d.dash_description || '—',
+    folder:      d.folder?.df_name || '—',
+    folderId:    d.dash_folder_id,
+    columns:     d.dash_columns,
+    owner:       d.owner?.user_name || '—',
+    ownerId:     d.dash_owner_user_id,
+    lastRun:     d.dash_last_run_at ? new Date(d.dash_last_run_at).toLocaleString() : 'Never',
+    updatedAt:   d.updated_at ? new Date(d.updated_at).toLocaleDateString() : '—',
+  }))
+}
+
+export async function loadDashboard(dashboardId) {
+  if (!dashboardId || dashboardId === 'new') return null
+  const [dashRes, widgetsRes, filtersRes] = await Promise.all([
+    supabase.from('dashboards').select('*').eq('id', dashboardId).eq('is_deleted', false).single(),
+    supabase.from('dashboard_widgets').select('*').eq('dw_dashboard_id', dashboardId).eq('is_deleted', false).order('dw_position_row').order('dw_position_col'),
+    supabase.from('dashboard_filters').select('*').eq('dfilt_dashboard_id', dashboardId).eq('is_deleted', false).order('dfilt_display_order'),
+  ])
+  if (dashRes.error)    throw dashRes.error
+  if (widgetsRes.error) throw widgetsRes.error
+  if (filtersRes.error) throw filtersRes.error
+  return {
+    dashboard: dashRes.data,
+    widgets:   widgetsRes.data || [],
+    filters:   filtersRes.data || [],
+  }
+}
+
+export async function saveDashboard({ id, dashboard, widgets, filters }) {
+  const isNew = !id || id === 'new'
+  const userId = await getCurrentUserId()
+
+  const dashPayload = {
+    dash_name:           dashboard.dash_name,
+    dash_description:    dashboard.dash_description || null,
+    dash_folder_id:      dashboard.dash_folder_id || null,
+    dash_layout:         dashboard.dash_layout || [],
+    dash_columns:        dashboard.dash_columns || 3,
+    updated_by:          userId,
+  }
+
+  let dashId = id
+  if (isNew) {
+    dashPayload.dash_record_number = ''
+    dashPayload.dash_owner_user_id = userId
+    dashPayload.created_by         = userId
+    const { data, error } = await supabase
+      .from('dashboards')
+      .insert(dashPayload)
+      .select('id')
+      .single()
+    if (error) throw error
+    dashId = data.id
+  } else {
+    const { error } = await supabase
+      .from('dashboards')
+      .update(dashPayload)
+      .eq('id', id)
+    if (error) throw error
+  }
+
+  if (!isNew) {
+    await Promise.all([
+      supabase.from('dashboard_widgets').update({ is_deleted: true }).eq('dw_dashboard_id', dashId),
+      supabase.from('dashboard_filters').update({ is_deleted: true }).eq('dfilt_dashboard_id', dashId),
+    ])
+  }
+
+  if (widgets?.length) {
+    const rows = widgets.map((w, idx) => ({
+      dw_dashboard_id:  dashId,
+      dw_report_id:     w.report_id,
+      dw_title:         w.title || null,
+      dw_widget_type:   w.widget_type || 'table',
+      dw_position_row:  w.position_row ?? Math.floor(idx / 3),
+      dw_position_col:  w.position_col ?? (idx % 3),
+      dw_width:         w.width || 1,
+      dw_height:        w.height || 1,
+      dw_widget_config: w.widget_config || {},
+      created_by:       userId,
+      updated_by:       userId,
+    }))
+    const { error } = await supabase.from('dashboard_widgets').insert(rows)
+    if (error) throw error
+  }
+
+  if (filters?.length) {
+    const rows = filters.map((f, idx) => ({
+      dfilt_dashboard_id:   dashId,
+      dfilt_label:          f.label,
+      dfilt_field_name:     f.field_name,
+      dfilt_operator:       f.operator || 'equals',
+      dfilt_default_value:  f.default_value ?? null,
+      dfilt_options:        f.options || [],
+      dfilt_display_order:  idx,
+      created_by:           userId,
+      updated_by:           userId,
+    }))
+    const { error } = await supabase.from('dashboard_filters').insert(rows)
+    if (error) throw error
+  }
+
+  return dashId
+}

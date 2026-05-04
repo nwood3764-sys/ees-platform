@@ -3,23 +3,32 @@ import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
-import { fetchReportFolders, fetchReports, fetchScheduledReports } from '../data/reportsService'
+import {
+  fetchReportFolders, fetchReports, fetchScheduledReports,
+  fetchDashboardFolders, fetchDashboards,
+} from '../data/reportsService'
 import ReportBuilder from './ReportBuilder'
 import ReportRunner from './ReportRunner'
+import DashboardRunner from './DashboardRunner'
+import DashboardEditor from './DashboardEditor'
 
 // ─── Section definitions ──────────────────────────────────────────────────
 
 const SECTIONS = [
-  { id: 'home',      label: 'Home' },
-  { id: 'folders',   label: 'Folders' },
-  { id: 'reports',   label: 'All Reports' },
-  { id: 'scheduled', label: 'Scheduled' },
+  { id: 'home',           label: 'Home' },
+  { id: 'folders',        label: 'Report Folders' },
+  { id: 'reports',        label: 'All Reports' },
+  { id: 'dashboard_folders', label: 'Dashboard Folders' },
+  { id: 'dashboards',     label: 'All Dashboards' },
+  { id: 'scheduled',      label: 'Scheduled' },
 ]
 
 const SEC_TABLE = {
-  folders:   'report_folders',
-  reports:   'reports',
-  scheduled: 'scheduled_reports',
+  folders:           'report_folders',
+  reports:           'reports',
+  dashboard_folders: 'dashboard_folders',
+  dashboards:        'dashboards',
+  scheduled:         'scheduled_reports',
 }
 
 const FOLDER_COLS = [
@@ -72,6 +81,40 @@ const SCHED_VIEWS = [
   { id:'SV-01', name:'All Schedules', filters:[],                                                                        sortField:'nextSend', sortDir:'asc' },
   { id:'SV-02', name:'Active',        filters:[{ field:'active', label:'Status', op:'equals', value:'Active' }],         sortField:'nextSend', sortDir:'asc' },
   { id:'SV-03', name:'Paused',        filters:[{ field:'active', label:'Status', op:'equals', value:'Paused' }],         sortField:'name',     sortDir:'asc' },
+]
+
+// ─── Dashboard list view configuration ────────────────────────────────────
+
+const DASHBOARD_FOLDER_COLS = [
+  { field:'id',          label:'Folder #',     type:'text',   sortable:true,  filterable:false },
+  { field:'name',        label:'Folder',       type:'text',   sortable:true,  filterable:true  },
+  { field:'description', label:'Description',  type:'text',   sortable:false, filterable:true  },
+  { field:'ownerName',   label:'Owner',        type:'text',   sortable:true,  filterable:true  },
+  { field:'isPublic',    label:'Visibility',   type:'select', sortable:true,  filterable:true,  options:['Public','Private'] },
+  { field:'accessLevel', label:'Your Access',  type:'select', sortable:true,  filterable:true,  options:['viewer','editor','manager'] },
+  { field:'updatedAt',   label:'Updated',      type:'text',   sortable:true,  filterable:false },
+]
+
+const DASHBOARD_COLS = [
+  { field:'id',          label:'Dashboard #', type:'text',   sortable:true,  filterable:false },
+  { field:'name',        label:'Dashboard',   type:'text',   sortable:true,  filterable:true  },
+  { field:'folder',      label:'Folder',      type:'text',   sortable:true,  filterable:true  },
+  { field:'description', label:'Description', type:'text',   sortable:false, filterable:true  },
+  { field:'columns',     label:'Layout',      type:'text',   sortable:true,  filterable:false },
+  { field:'owner',       label:'Owner',       type:'text',   sortable:true,  filterable:true  },
+  { field:'lastRun',     label:'Last Run',    type:'text',   sortable:true,  filterable:false },
+  { field:'updatedAt',   label:'Updated',     type:'text',   sortable:true,  filterable:false },
+]
+
+const DASHBOARD_FOLDER_VIEWS = [
+  { id:'DFV-01', name:'All Folders',    filters:[],                                                                         sortField:'name', sortDir:'asc' },
+  { id:'DFV-02', name:'Public Folders', filters:[{ field:'isPublic', label:'Visibility', op:'equals', value:'Public' }],     sortField:'name', sortDir:'asc' },
+  { id:'DFV-03', name:'My Folders',     filters:[{ field:'isPublic', label:'Visibility', op:'equals', value:'Private' }],    sortField:'name', sortDir:'asc' },
+]
+
+const DASHBOARD_VIEWS = [
+  { id:'DV-01', name:'Recently Updated', filters:[], sortField:'updatedAt', sortDir:'desc' },
+  { id:'DV-02', name:'Recently Run',     filters:[], sortField:'lastRun',   sortDir:'desc' },
 ]
 
 // ─── Home dashboard ──────────────────────────────────────────────────────
@@ -190,19 +233,23 @@ export default function ReportsModule({
   }
   const closeRecord = () => setSelectedRecord(null)
 
-  const [folders, setFolders]     = useState([])
-  const [reports, setReports]     = useState([])
-  const [schedules, setSchedules] = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [error, setError]         = useState(null)
+  const [folders, setFolders]                       = useState([])
+  const [reports, setReports]                       = useState([])
+  const [schedules, setSchedules]                   = useState([])
+  const [dashboardFolders, setDashboardFolders]     = useState([])
+  const [dashboards, setDashboards]                 = useState([])
+  const [loading, setLoading]                       = useState(true)
+  const [error, setError]                           = useState(null)
 
   const loadAll = async () => {
     setError(null)
     try {
-      const [f, r, s] = await Promise.all([
+      const [f, r, s, df, d] = await Promise.all([
         fetchReportFolders(), fetchReports(), fetchScheduledReports(),
+        fetchDashboardFolders(), fetchDashboards(),
       ])
       setFolders(f); setReports(r); setSchedules(s)
+      setDashboardFolders(df); setDashboards(d)
     } catch (err) {
       setError(err)
     }
@@ -211,20 +258,34 @@ export default function ReportsModule({
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
-    Promise.all([fetchReportFolders(), fetchReports(), fetchScheduledReports()])
-      .then(([f, r, s]) => { if (!cancelled) { setFolders(f); setReports(r); setSchedules(s) } })
+    Promise.all([
+      fetchReportFolders(), fetchReports(), fetchScheduledReports(),
+      fetchDashboardFolders(), fetchDashboards(),
+    ])
+      .then(([f, r, s, df, d]) => {
+        if (!cancelled) {
+          setFolders(f); setReports(r); setSchedules(s)
+          setDashboardFolders(df); setDashboards(d)
+        }
+      })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [])
 
-  const counts = { folders: folders.length, reports: reports.length, scheduled: schedules.length }
+  const counts = {
+    folders:           folders.length,
+    reports:           reports.length,
+    dashboard_folders: dashboardFolders.length,
+    dashboards:        dashboards.length,
+    scheduled:         schedules.length,
+  }
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div data-module-topbar="1" style={{ height:54, background:C.card, borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', flexShrink:0 }}>
         <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-          <span style={{ color:C.textMuted }}>Reports</span>
+          <span style={{ color:C.textMuted }}>Reports & Dashboards</span>
           <span style={{ color:C.textMuted }}>/</span>
           <span style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }} onClick={() => selectedRecord && closeRecord()}>{SECTIONS.find(s=>s.id===sec)?.label}</span>
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name || 'Record'}</span></>}
@@ -251,6 +312,25 @@ export default function ReportsModule({
                 reportId={selectedRecord.id}
                 onClose={closeRecord}
                 onEdit={() => replaceSelectedRecord({ table:'reports', id:selectedRecord.id, mode:'edit' })}
+              />
+            )
+          ) : selectedRecord.table === 'dashboards' ? (
+            // Same pattern for dashboards: new or edit → Editor, otherwise Runner
+            (selectedRecord.id === null || selectedRecord.id === 'new' || selectedRecord.mode === 'edit' || selectedRecord.mode === 'create') ? (
+              <DashboardEditor
+                dashboardId={selectedRecord.id || 'new'}
+                onClose={closeRecord}
+                onSaved={(newId) => {
+                  loadAll()
+                  replaceSelectedRecord({ table:'dashboards', id:newId, mode:'view' })
+                }}
+              />
+            ) : (
+              <DashboardRunner
+                dashboardId={selectedRecord.id}
+                onClose={closeRecord}
+                onEdit={() => replaceSelectedRecord({ table:'dashboards', id:selectedRecord.id, mode:'edit' })}
+                onOpenReport={(reportId) => setSelectedRecord({ table:'reports', id:reportId, mode:'view' })}
               />
             )
           ) : (
@@ -280,6 +360,20 @@ export default function ReportsModule({
               data={reports} columns={REPORT_COLS} systemViews={REPORT_VIEWS} defaultViewId="RV-01"
               newLabel="Report"
               onNew={() => setSelectedRecord({ table:'reports', id:null, mode:'create' })}
+              onOpenRecord={openRecord} />
+          )}
+          {sec === 'dashboard_folders' && (
+            <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll}
+              data={dashboardFolders} columns={DASHBOARD_FOLDER_COLS} systemViews={DASHBOARD_FOLDER_VIEWS} defaultViewId="DFV-01"
+              newLabel="Folder"
+              onNew={() => setSelectedRecord({ table:'dashboard_folders', id:null, mode:'create' })}
+              onOpenRecord={openRecord} />
+          )}
+          {sec === 'dashboards' && (
+            <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll}
+              data={dashboards} columns={DASHBOARD_COLS} systemViews={DASHBOARD_VIEWS} defaultViewId="DV-01"
+              newLabel="Dashboard"
+              onNew={() => setSelectedRecord({ table:'dashboards', id:null, mode:'create' })}
               onOpenRecord={openRecord} />
           )}
           {sec === 'scheduled' && (
