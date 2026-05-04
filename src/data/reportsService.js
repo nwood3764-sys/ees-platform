@@ -1027,15 +1027,41 @@ export async function runReport(reportId, promptValues = null) {
 
   // Cap rows defensively — full pagination later.
   // When a non-trivial filter logic expression is present (contains OR
-  // or NOT), we pull the full filtered server-side set up to this cap,
-  // then evaluate the logic expression client-side. PostgREST's .or()
-  // is flat and can't combine with AND in the same query.
+  // or NOT), we pull the full filtered server-side set, then evaluate
+  // the logic expression client-side. PostgREST's .or() is flat and
+  // can't combine with AND in the same query.
   const logicExpr = (r.rpt_filter_logic || 'all').trim()
   const hasComplexLogic = logicExpr !== 'all' && /[A-Z]+\s*[A-Z]|\(|NOT/i.test(logicExpr)
-  query = query.limit(2000)
 
-  let { data, error } = await query
-  if (error) throw error
+  // Pagination loop. PostgREST defaults to 1000 rows per response and
+  // caps each query at the per-request maximum. We iterate with .range()
+  // until we either exhaust the result set or hit the hard ceiling.
+  // Hard ceiling is generous (50k rows) — at that size you should be
+  // running aggregated reports or scheduling exports, not pulling raw
+  // rows into the browser.
+  const PAGE_SIZE = 1000
+  const HARD_CEILING = 50000
+  let data = []
+  let truncated = false
+  let pageStart = 0
+
+  while (pageStart < HARD_CEILING) {
+    const pageEnd = Math.min(pageStart + PAGE_SIZE - 1, HARD_CEILING - 1)
+    const requestedSize = pageEnd - pageStart + 1
+    const { data: pageData, error: pageError } = await query.range(pageStart, pageEnd)
+    if (pageError) throw pageError
+    if (!pageData || pageData.length === 0) break
+    data = data.concat(pageData)
+    if (pageData.length < requestedSize) break  // last page (server returned fewer than asked)
+    pageStart += PAGE_SIZE
+    if (data.length >= HARD_CEILING) {
+      // We filled the buffer up to the cap — there may or may not be
+      // more data beyond. Conservatively flag as truncated so the user
+      // knows to refine the filters.
+      truncated = true
+      break
+    }
+  }
 
   // Apply cross-filter sets. For 'with' matches, keep rows whose id is
   // in the set. For 'without', keep rows whose id is NOT in the set.
@@ -1113,6 +1139,7 @@ export async function runReport(reportId, promptValues = null) {
     format:        r.rpt_format,
     primaryObject: r.rpt_primary_object,
     name:          r.rpt_name,
+    truncated,
   }
 }
 

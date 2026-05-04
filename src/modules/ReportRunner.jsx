@@ -119,7 +119,13 @@ export default function ReportRunner({ reportId, onClose, onEdit }) {
           <div style={{ fontSize:11, color:C.textMuted }}>Report</div>
           <div style={{ fontSize:18, fontWeight:600, color:C.textPrimary }}>{result.name}</div>
           <div style={{ fontSize:11, color:C.textMuted }}>
-            {result.rows.length.toLocaleString()} rows · {result.format} · {result.primaryObject}
+            {result.rows.length.toLocaleString()} rows
+            {result.truncated && (
+              <span style={{ color:C.amber, fontWeight:500, marginLeft:8 }}>
+                · truncated at 50,000 — refine filters or export to see more
+              </span>
+            )}
+            <span> · {result.format} · {result.primaryObject}</span>
           </div>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
