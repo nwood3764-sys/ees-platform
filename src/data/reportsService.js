@@ -969,10 +969,15 @@ export async function runReport(reportId, promptValues = null, extraFilters = nu
 
   let query = supabase.from(r.rpt_primary_object).select(selectStr)
 
-  // Soft-delete filter — every business table has either is_deleted or
-  // a prefixed equivalent. Use a try/catch path: prefer plain is_deleted,
-  // skip silently if the table doesn't have one.
-  query = query.eq('is_deleted', false)
+  // Soft-delete filter — different tables use different column names
+  // ('is_deleted' vs prefixed equivalents like 'property_is_deleted').
+  // ees_table_metadata is the source of truth. If the table doesn't have
+  // a soft-delete column at all, skip the filter.
+  const { data: meta } = await supabase.rpc('ees_table_metadata', { p_table: r.rpt_primary_object })
+  const softDeleteCol = meta?.is_deleted_column
+  if (softDeleteCol) {
+    query = query.eq(softDeleteCol, false)
+  }
 
   // Cross-filters: pre-compute sets of primary-object IDs that match
   // each cross-filter. After the main query returns, filter rows by
@@ -1001,7 +1006,12 @@ export async function runReport(reportId, promptValues = null, extraFilters = nu
         console.warn(`No FK from ${cf.rfilt_cross_object} to ${r.rpt_primary_object} — skipping cross-filter`)
         continue
       }
-      let crossQuery = supabase.from(cf.rfilt_cross_object).select(linkCol.column_name).eq('is_deleted', false)
+      let crossQuery = supabase.from(cf.rfilt_cross_object).select(linkCol.column_name)
+      // Cross object's soft-delete column (different tables use different names)
+      const { data: crossMeta } = await supabase.rpc('ees_table_metadata', { p_table: cf.rfilt_cross_object })
+      if (crossMeta?.is_deleted_column) {
+        crossQuery = crossQuery.eq(crossMeta.is_deleted_column, false)
+      }
       for (const sf of (cf.rfilt_cross_subfilters || [])) {
         if (!sf.field_name || !sf.operator) continue
         crossQuery = applySimpleFilter(crossQuery, sf.field_name, sf.operator, sf.value)
