@@ -19,6 +19,9 @@ import {
   fetchProjectReportTemplates,
   fetchSkills,
   fetchWorkTypeSkillRequirements,
+  fetchPortals,
+  fetchPortalRoleAssignments,
+  fetchObjectChatEnabled,
 } from '../../data/adminService'
 
 // ---------------------------------------------------------------------------
@@ -330,6 +333,9 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'skills':              return <NodePage title="Skills"                  table="skills"                       fetcher={fetchSkills}                       columns={SKILL_COLS} newLabel="Skill"                       onOpenRecord={onOpenRecord} />
     case 'work_type_skill_requirements': return <NodePage title="Work Type Skill Requirements" table="work_type_skill_requirements" fetcher={fetchWorkTypeSkillRequirements} columns={WTSR_COLS}  newLabel="Skill Requirement"           onOpenRecord={onOpenRecord} />
     case 'audit_log':         return <NodePage title="Audit Log"               table="audit_log"         fetcher={fetchAuditLog}          columns={AL_COLS}             newLabel={null}             onOpenRecord={null} />
+    case 'portals':                  return <NodePage title="Portals"                  table="portals"                  fetcher={fetchPortals}                 columns={PORTAL_COLS}     newLabel="Portal"                  onOpenRecord={onOpenRecord} />
+    case 'portal_role_assignments':  return <NodePage title="Portal Role Assignments"  table="portal_role_assignments"  fetcher={fetchPortalRoleAssignments}   columns={PRA_COLS}        newLabel="Role Assignment"         onOpenRecord={onOpenRecord} />
+    case 'object_chat_enabled':      return <NodePage title="Object Chat Settings"     table="object_chat_enabled"      fetcher={fetchObjectChatEnabled}       columns={OCE_COLS}        newLabel="Object Chat Setting"     onOpenRecord={onOpenRecord} />
     default:                  return <ComingSoonPane label={nodeId} />
   }
 }
@@ -629,4 +635,26 @@ const AL_COLS = [
   { field: 'object',    label: 'Object',    type: 'text', sortable: true, filterable: true },
   { field: 'recordId',  label: 'Record',    type: 'text', sortable: false, filterable: false },
   { field: 'notes',     label: 'Notes',     type: 'text', sortable: false, filterable: false },
+]
+
+const PORTAL_COLS = [
+  { field: 'id',          label: 'Record #',     type: 'text',   sortable: true,  filterable: false },
+  { field: 'name',        label: 'Portal',       type: 'text',   sortable: true,  filterable: true  },
+  { field: 'urlPath',     label: 'URL Path',     type: 'text',   sortable: true,  filterable: true  },
+  { field: 'hostname',    label: 'Hostname',     type: 'text',   sortable: true,  filterable: true  },
+  { field: 'description', label: 'Description',  type: 'text',   sortable: false, filterable: false },
+  { field: 'active',      label: 'Status',       type: 'select', sortable: true,  filterable: true, options: ['Active', 'Inactive'] },
+]
+
+const PRA_COLS = [
+  { field: 'id',        label: 'Assignment',  type: 'text',   sortable: true,  filterable: false },
+  { field: 'portal',    label: 'Portal',      type: 'text',   sortable: true,  filterable: true  },
+  { field: 'role',      label: 'Role',        type: 'text',   sortable: true,  filterable: true  },
+  { field: 'isDefault', label: 'Default',     type: 'select', sortable: true,  filterable: true, options: ['Yes', 'No'] },
+]
+
+const OCE_COLS = [
+  { field: 'id',        label: 'Object',     type: 'text',   sortable: true,  filterable: true  },
+  { field: 'enabled',   label: 'Chat',       type: 'select', sortable: true,  filterable: true, options: ['Enabled', 'Disabled'] },
+  { field: 'updatedAt', label: 'Updated',    type: 'text',   sortable: true,  filterable: false },
 ]

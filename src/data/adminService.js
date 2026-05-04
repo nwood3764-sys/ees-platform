@@ -949,3 +949,72 @@ export async function fetchProjectReportTemplates() {
     assignmentCount: assignCount.get(p.id) || 0,
   }))
 }
+
+// ─── Portal Builder ────────────────────────────────────────────────────────
+// Setup-tree fetchers for the three portal-management list views: Portals,
+// Portal Role Assignments, and Object Chat Settings. RLS already enforces
+// who can read these — Admin and any role with the relevant
+// role_object_access entry. Each fetcher follows the existing list-pane
+// shape: returns rows with `id` shown as the leftmost column and `_id`
+// carrying the actual UUID for routing into RecordDetail.
+
+export async function fetchPortals() {
+  const { data, error } = await supabase
+    .from('portals')
+    .select(`
+      id, portal_record_number, portal_name, portal_url_path, portal_hostname,
+      portal_description, portal_is_active, portal_theme_color
+    `)
+    .eq('is_deleted', false)
+    .order('portal_name', { ascending: true })
+
+  if (error) throw error
+
+  return (data || []).map(p => ({
+    id:          p.portal_record_number || p.id.slice(0, 8).toUpperCase(),
+    _id:         p.id,
+    name:        p.portal_name,
+    urlPath:     p.portal_url_path,
+    hostname:    p.portal_hostname || '—',
+    description: p.portal_description || '—',
+    active:      p.portal_is_active ? 'Active' : 'Inactive',
+  }))
+}
+
+export async function fetchPortalRoleAssignments() {
+  const { data, error } = await supabase
+    .from('portal_role_assignments')
+    .select(`
+      id, pra_is_default,
+      portal:portals(id, portal_record_number, portal_name),
+      role:roles(id, role_name)
+    `)
+    .eq('is_deleted', false)
+
+  if (error) throw error
+
+  return (data || []).map(r => ({
+    id:        (r.portal?.portal_record_number || '—') + ' / ' + (r.role?.role_name || '—'),
+    _id:       r.id,
+    portal:    r.portal?.portal_name || '—',
+    role:      r.role?.role_name || '—',
+    isDefault: r.pra_is_default ? 'Yes' : 'No',
+  }))
+}
+
+export async function fetchObjectChatEnabled() {
+  const { data, error } = await supabase
+    .from('object_chat_enabled')
+    .select(`id, oce_object_name, oce_chat_enabled, updated_at`)
+    .order('oce_object_name', { ascending: true })
+
+  if (error) throw error
+
+  return (data || []).map(r => ({
+    id:        r.oce_object_name,
+    _id:       r.id,
+    object:    r.oce_object_name,
+    enabled:   r.oce_chat_enabled ? 'Enabled' : 'Disabled',
+    updatedAt: r.updated_at ? new Date(r.updated_at).toLocaleDateString() : '—',
+  }))
+}

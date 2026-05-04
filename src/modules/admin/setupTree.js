@@ -68,6 +68,16 @@ export const SETUP_TREE = [
     ],
   },
   {
+    id: 'portals',
+    label: 'Portals',
+    icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+    children: [
+      { id: 'portals',                 label: 'Portals' },
+      { id: 'portal_role_assignments', label: 'Portal Role Assignments' },
+      { id: 'object_chat_enabled',     label: 'Object Chat Settings' },
+    ],
+  },
+  {
     id: 'data',
     label: 'Data',
     icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4',
