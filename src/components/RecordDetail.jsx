@@ -573,6 +573,123 @@ function VoidEnvelopeModal({ envelopeRecordNumber, onConfirm, onCancel, busy }) 
 }
 
 // ---------------------------------------------------------------------------
+// DocumentTemplatePreviewModal — pick a parent record, render a merged PDF
+// ---------------------------------------------------------------------------
+// Author clicks Preview on a document_templates record. We open this modal,
+// load up to 50 candidate parent records from the template's related_object
+// table (Projects, Properties, Opportunities, etc.) via fetchLookupOptions,
+// and let them pick one. On Generate we call render-document-template-pdf
+// with preview:true and open the resulting PDF in a new tab.
+
+function DocumentTemplatePreviewModal({
+  templateName, relatedObject, options, loadingOptions,
+  selected, onSelectedChange, rendering, onCancel, onGenerate,
+}) {
+  const canSubmit = !!selected && !rendering && !loadingOptions
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 600,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: C.card, borderRadius: 10, padding: 26, width: 480,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: '50%',
+            background: '#f0f9ff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+              size={15} color="#0369a1" />
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>
+              Preview “{templateName}”
+            </div>
+            <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
+              Pick a {relatedObject.replace(/_/g, ' ').replace(/\bs$/, '')} record to merge against.
+              The PDF opens in a new tab — nothing is saved or sent.
+            </div>
+          </div>
+        </div>
+
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: C.textSecondary, marginBottom: 6 }}>
+          Record to preview against
+        </label>
+        {loadingOptions ? (
+          <div style={{
+            padding: '10px 12px', border: `1px solid ${C.border}`, borderRadius: 6,
+            background: '#f9fafb', fontSize: 13, color: C.textMuted,
+          }}>
+            Loading {relatedObject.replace(/_/g, ' ')}…
+          </div>
+        ) : options.length === 0 ? (
+          <div style={{
+            padding: '10px 12px', border: `1px solid ${C.border}`, borderRadius: 6,
+            background: '#fffbeb', fontSize: 13, color: '#92400e',
+          }}>
+            No {relatedObject.replace(/_/g, ' ')} records found. Create one first.
+          </div>
+        ) : (
+          <select
+            value={selected}
+            onChange={(e) => onSelectedChange(e.target.value)}
+            disabled={rendering}
+            autoFocus
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              border: `1px solid ${C.border}`, borderRadius: 6,
+              padding: '8px 10px', fontSize: 13, fontFamily: 'inherit',
+              color: C.textPrimary, background: rendering ? '#f3f4f6' : '#fff',
+            }}
+          >
+            <option value="">— Select —</option>
+            {options.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        )}
+        {options.length === 50 && !loadingOptions && (
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6, fontStyle: 'italic' }}>
+            Showing the first 50 records. Open the actual record from the list view if you need a different one and want to preview from there.
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+          <button
+            onClick={() => canSubmit && onGenerate()}
+            disabled={!canSubmit}
+            style={{
+              flex: 1,
+              background: canSubmit ? '#0369a1' : '#7eb3e8',
+              color: '#fff', border: 'none', borderRadius: 6,
+              padding: '9px 0', fontSize: 13, fontWeight: 600,
+              cursor: canSubmit ? 'pointer' : (rendering ? 'wait' : 'not-allowed'),
+              opacity: canSubmit ? 1 : 0.8,
+            }}
+          >
+            {rendering ? 'Rendering…' : 'Generate Preview'}
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={rendering}
+            style={{
+              flex: 1, background: C.page, color: C.textSecondary,
+              border: `1px solid ${C.border}`, borderRadius: 6,
+              padding: '9px 0', fontSize: 13, cursor: rendering ? 'wait' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // EditField — renders the right input for a field type
 // ---------------------------------------------------------------------------
 
@@ -3177,6 +3294,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // atomically; lands the user on the new clone via onNavigateToRecord.
   const [cloningTemplate, setCloningTemplate] = useState(false)
   const [previewingPdf, setPreviewingPdf] = useState(false)
+  // Document Template Preview modal state. Opens when the author clicks
+  // 'Preview' on a document_templates record — they pick a parent record
+  // (Project / Property / Opportunity, depending on the template's
+  // related_object) and we render the merged PDF in a new tab via
+  // render-document-template-pdf. No documents row, no envelopes row,
+  // no storage upload — just a quick visual check.
+  const [docPreviewOpen, setDocPreviewOpen]                 = useState(false)
+  const [docPreviewLoadingOpts, setDocPreviewLoadingOpts]   = useState(false)
+  const [docPreviewParentOptions, setDocPreviewParentOptions] = useState([])
+  const [docPreviewParentRecord, setDocPreviewParentRecord] = useState('')
+  const [docPreviewRendering, setDocPreviewRendering]       = useState(false)
   // Publish/unpublish/archive/restore in flight — disables status buttons
   // and shows a 'wait' cursor while the RPC is round-tripping.
   const [statusChanging, setStatusChanging] = useState(false)
@@ -3590,6 +3718,114 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       setPreviewingPdf(false)
     }
   }, [previewingPdf, tableName, recordId, data, toast])
+
+  // ─── Document Template Preview ────────────────────────────────────────────
+  // Two-step flow: open modal → load up to 50 candidate parent records of
+  // the template's related_object → user picks one → render-document-template-pdf
+  // is called with parent_object + parent_record_id and the resulting PDF
+  // opens in a new tab. Bypasses the Active-only status gate (preview: true)
+  // so authors can iterate on Drafts and Archived templates.
+  const openDocPreview = useCallback(async () => {
+    if (tableName !== 'document_templates') return
+    const relatedObject = data?.record?.related_object
+    if (!relatedObject) {
+      toast.error('This template has no related object set — pick one in Template Information first.')
+      return
+    }
+    setDocPreviewOpen(true)
+    setDocPreviewParentRecord('')
+    setDocPreviewLoadingOpts(true)
+    try {
+      // Determine the name column for the parent table from TABLE_META.
+      const parentMeta = TABLE_META[relatedObject]
+      const nameCol = parentMeta?.nameColumn || 'id'
+      const opts = await fetchLookupOptions(relatedObject, nameCol)
+      setDocPreviewParentOptions(opts)
+    } catch (err) {
+      toast.error(`Couldn't load ${relatedObject} list — ${err.message || String(err)}`)
+      setDocPreviewParentOptions([])
+    } finally {
+      setDocPreviewLoadingOpts(false)
+    }
+  }, [tableName, data, toast])
+
+  const closeDocPreview = useCallback(() => {
+    if (docPreviewRendering) return
+    setDocPreviewOpen(false)
+    setDocPreviewParentRecord('')
+    setDocPreviewParentOptions([])
+  }, [docPreviewRendering])
+
+  const generateDocPreview = useCallback(async () => {
+    if (docPreviewRendering) return
+    if (!docPreviewParentRecord) { toast.error('Pick a record first.'); return }
+    const relatedObject = data?.record?.related_object
+    if (!relatedObject) return
+    setDocPreviewRendering(true)
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error('Supabase is not configured (missing env vars).')
+      }
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData?.session?.access_token
+      if (!accessToken) throw new Error('Not signed in — please refresh and log in.')
+
+      const resp = await fetch(`${supabaseUrl}/functions/v1/render-document-template-pdf`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey':        supabaseAnonKey,
+          'Content-Type':  'application/json',
+        },
+        body: JSON.stringify({
+          document_template_id: recordId,
+          parent_object:        relatedObject,
+          parent_record_id:     docPreviewParentRecord,
+          preview:              true,
+        }),
+      })
+
+      if (!resp.ok) {
+        let detail = `HTTP ${resp.status}`
+        try { const j = await resp.json(); if (j?.error) detail = j.error } catch { /* not JSON */ }
+        throw new Error(detail)
+      }
+
+      // render-document-template-pdf returns JSON with a base64-encoded PDF
+      const result = await resp.json()
+      if (!result?.pdf_base64) throw new Error('Edge function returned no PDF data')
+
+      // Decode base64 → Uint8Array → Blob → object URL → open in new tab
+      const binary = atob(result.pdf_base64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      const blob = new Blob([bytes], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      const win = window.open(url, '_blank', 'noopener,noreferrer')
+      if (!win) {
+        // Pop-up blocker — fall back to download
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${result.template_name || data?.record?.name || 'template'}_preview.pdf`
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        toast.success('Preview downloaded — pop-ups are blocked.')
+      } else {
+        toast.success(result.page_count ? `Preview opened — ${result.page_count} page${result.page_count !== 1 ? 's' : ''}` : 'Preview opened')
+      }
+      // Close the modal on success
+      setDocPreviewOpen(false)
+      setDocPreviewParentRecord('')
+      setDocPreviewParentOptions([])
+    } catch (err) {
+      toast.error(`Preview failed — ${err.message || String(err)}`)
+    } finally {
+      setDocPreviewRendering(false)
+    }
+  }, [docPreviewRendering, docPreviewParentRecord, recordId, data, toast])
 
   const handleSave = async () => {
     setSaving(true)
@@ -4128,6 +4364,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     {previewingPdf ? 'Rendering…' : 'Preview PDF'}
                   </button>
                 )}
+                {tableName === 'document_templates' && data?.record?.related_object && (
+                  <button
+                    onClick={openDocPreview}
+                    disabled={docPreviewOpen || docPreviewRendering}
+                    title="Render this template against a real record and open the PDF in a new tab — works in any status, doesn't save anything"
+                    style={{ background: (docPreviewOpen || docPreviewRendering) ? '#e0f2fe' : C.page, color: '#0369a1', border: `1px solid #bae6fd`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: (docPreviewOpen || docPreviewRendering) ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                    onMouseEnter={(e) => { if (!docPreviewOpen && !docPreviewRendering) e.currentTarget.style.background = '#f0f9ff' }}
+                    onMouseLeave={(e) => { if (!docPreviewOpen && !docPreviewRendering) e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" size={13} color="#0369a1" />
+                    Preview PDF
+                  </button>
+                )}
                 {lifecycle && (
                   <button
                     onClick={handleCloneTemplate}
@@ -4519,6 +4768,24 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           busy={envelopeBusy}
           onConfirm={handleConfirmVoid}
           onCancel={() => setShowVoidConfirm(false)}
+        />
+      )}
+
+      {/* Document template preview — pick a parent record (e.g. a Project)
+          to merge against, then render the resulting PDF in a new tab via
+          render-document-template-pdf. No documents row, no envelopes row,
+          no storage upload — just a quick visual check for authors. */}
+      {docPreviewOpen && tableName === 'document_templates' && (
+        <DocumentTemplatePreviewModal
+          templateName={data?.record?.name || 'Untitled Template'}
+          relatedObject={data?.record?.related_object || ''}
+          options={docPreviewParentOptions}
+          loadingOptions={docPreviewLoadingOpts}
+          selected={docPreviewParentRecord}
+          onSelectedChange={setDocPreviewParentRecord}
+          rendering={docPreviewRendering}
+          onCancel={closeDocPreview}
+          onGenerate={generateDocPreview}
         />
       )}
 
