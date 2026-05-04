@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
-import { loadDashboard, saveDashboard, fetchReports, getReportSelectedFields } from '../data/reportsService'
+import { loadDashboard, saveDashboard, cloneDashboard, fetchReports, getReportSelectedFields } from '../data/reportsService'
 import { supabase } from '../lib/supabase'
 
 const WIDGET_TYPES = [
@@ -140,6 +140,27 @@ export default function DashboardEditor({ dashboardId, onClose, onSaved }) {
     }
   }
 
+  // ─── Save As (Clone) ───────────────────────────────────────────────────
+  // Two-step, mirrors ReportBuilder.handleSaveAs. First persists current
+  // edits to the source so they aren't lost if the user later discards
+  // the clone, then calls clone_dashboard. Parent navigates to the new
+  // id via onSaved. Disabled on a brand-new unsaved dashboard.
+  const handleSaveAs = async () => {
+    if (isNew) return
+    if (!dashboard.dash_name) { alert('Dashboard name is required.'); return }
+    setSaving(true); setError(null)
+    try {
+      await saveDashboard({ id: dashboardId, dashboard, widgets, filters })
+      const newId = await cloneDashboard(dashboardId)
+      setSavedAt(new Date())
+      onSaved?.(newId)
+    } catch (err) {
+      setError(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} />
 
@@ -161,6 +182,18 @@ export default function DashboardEditor({ dashboardId, onClose, onSaved }) {
             <div style={{ fontSize:11, color:C.textMuted }}>Saved {savedAt.toLocaleTimeString()}</div>
           )}
           <button onClick={onClose} style={btnSecondary()}>Close</button>
+          {/* Save As — persist current edits, then clone. Hidden on new
+              unsaved dashboards (no source to clone yet). */}
+          {!isNew && (
+            <button
+              onClick={handleSaveAs}
+              disabled={saving}
+              title="Save current changes, then create a copy you can edit independently"
+              style={btnSecondary()}
+            >
+              {saving ? '…' : 'Save As'}
+            </button>
+          )}
           <button onClick={handleSave} disabled={saving} style={btnPrimary(saving)}>
             {saving ? 'Saving…' : 'Save'}
           </button>

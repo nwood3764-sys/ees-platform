@@ -474,6 +474,26 @@ export async function cloneReport(sourceReportId, { newName = null, newFolderId 
 }
 
 /**
+ * Salesforce-parity Save As / Clone for dashboards. Calls the
+ * clone_dashboard RPC which copies the dashboard row plus its widgets
+ * and filters into a new record owned by the caller. Returns the new
+ * id so the Editor can reload onto the cloned record.
+ *
+ * Symmetric to cloneReport — same defaults: name → "<source> (Clone)",
+ * folder → source's folder. Caller becomes owner.
+ */
+export async function cloneDashboard(sourceDashboardId, { newName = null, newFolderId = null } = {}) {
+  const { data, error } = await supabase.rpc('clone_dashboard', {
+    p_source_dashboard_id: sourceDashboardId,
+    p_new_name:            newName,
+    p_new_folder_id:       newFolderId,
+  })
+  if (error) throw error
+  if (!data) throw new Error('clone_dashboard returned no id')
+  return data
+}
+
+/**
  * Save (insert or update) a report and its child rows. The child tables
  * (filters, groupings, calculated_fields) use a delete-and-reinsert
  * strategy on save — simpler than diffing and matches how Salesforce
