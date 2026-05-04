@@ -121,3 +121,306 @@ export async function fetchScheduledReports() {
     ownerId:   s.sr_owner_user_id,
   }))
 }
+
+// ─── Field discovery for the Report Builder ───────────────────────────────
+// Walks the FK graph from a primary object outward. Returns the columns
+// available on the primary object plus the directly-related objects (one
+// hop away via outgoing FKs). The Report Builder calls this on initial
+// load and again whenever the user expands a related-object node.
+
+const _columnsCache = new Map()
+const _fkOutgoingCache = new Map()
+
+async function describeColumns(tableName) {
+  if (_columnsCache.has(tableName)) return _columnsCache.get(tableName)
+  const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
+  if (error) throw error
+  const cols = data || []
+  _columnsCache.set(tableName, cols)
+  return cols
+}
+
+// Outgoing FKs from this table — i.e. columns on this table that are FKs
+// pointing at OTHER tables. describe_object_columns returns these via the
+// is_foreign_key + references_table fields, so we filter the existing
+// column-cache rather than calling another RPC.
+async function describeOutgoingFKs(tableName) {
+  if (_fkOutgoingCache.has(tableName)) return _fkOutgoingCache.get(tableName)
+  const cols = await describeColumns(tableName)
+  const fks = cols
+    .filter(c => {
+      if (!c.is_foreign_key || !c.references_table) return false
+      // Exclude audit-user FKs — created_by/updated_by/deleted_by/etc.
+      if (c.column_name.endsWith('_by') || c.column_name === 'created_by' || c.column_name === 'updated_by' || c.column_name === 'deleted_by') return false
+      // Exclude FKs into picklist_values — these are status/record-type/picklist
+      // columns and don't represent traversable related objects.
+      if (c.references_table === 'picklist_values') return false
+      return true
+    })
+    .map(c => ({
+      column_name:      c.column_name,
+      references_table: c.references_table,
+      references_column: c.references_column || 'id',
+    }))
+  _fkOutgoingCache.set(tableName, fks)
+  return fks
+}
+
+/**
+ * Load the initial field tree for a primary object. Returns:
+ *   {
+ *     primary: { table, columns: [...] },
+ *     related: [{ fk_column, table, label }]   // one hop, lazy-loaded
+ *   }
+ *
+ * The Report Builder renders `related` as expandable nodes; expanding
+ * one calls loadRelatedObjectFields() to pull that object's columns.
+ */
+export async function loadFieldTree(primaryObject) {
+  if (!primaryObject) return { primary: null, related: [] }
+  const [columns, fks] = await Promise.all([
+    describeColumns(primaryObject),
+    describeOutgoingFKs(primaryObject),
+  ])
+  return {
+    primary: {
+      table: primaryObject,
+      columns: columns.map(c => ({
+        name: c.column_name,
+        type: c.data_type,
+        nullable: c.is_nullable === 'YES',
+      })),
+    },
+    related: fks.map(f => ({
+      fk_column: f.column_name,
+      table: f.references_table,
+      label: humanizeFkLabel(f.column_name, f.references_table),
+    })),
+  }
+}
+
+/**
+ * Pull columns for a related object (lazy-loaded when the user expands a
+ * related-object node in the field tree). The via_path lets the Builder
+ * record where this column came from when adding it to the report.
+ */
+export async function loadRelatedObjectFields(viaTable, viaPath) {
+  const columns = await describeColumns(viaTable)
+  return {
+    table: viaTable,
+    via_path: viaPath,
+    columns: columns.map(c => ({
+      name: c.column_name,
+      type: c.data_type,
+      nullable: c.is_nullable === 'YES',
+    })),
+  }
+}
+
+function humanizeFkLabel(fkColumn, referencesTable) {
+  // 'project_account_id' on projects → 'Account'
+  // 'property_id' on work_orders     → 'Property'
+  const table = referencesTable || ''
+  const singular = table.endsWith('s') ? table.slice(0, -1) : table
+  return singular.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+// ─── List of objects available as a primary report object ─────────────────
+// Salesforce calls this the "Object" picker on a new report. We expose every
+// business table that has a record-detail concept — same set used by the
+// universal search index, basically.
+
+export async function listPrimaryObjectOptions() {
+  // Hardcoded curated list for v1 — better than enumerating every table
+  // (which would include junction tables, audit tables, system tables, etc.).
+  // Expanded via Setup → Objects later.
+  return [
+    { table: 'accounts',                label: 'Accounts' },
+    { table: 'contacts',                label: 'Contacts' },
+    { table: 'properties',              label: 'Properties' },
+    { table: 'buildings',               label: 'Buildings' },
+    { table: 'units',                   label: 'Units' },
+    { table: 'opportunities',           label: 'Opportunities' },
+    { table: 'projects',                label: 'Projects' },
+    { table: 'work_orders',             label: 'Work Orders' },
+    { table: 'work_steps',              label: 'Work Steps' },
+    { table: 'work_plans',              label: 'Work Plans' },
+    { table: 'incentive_applications',  label: 'Incentive Applications' },
+    { table: 'incentives',              label: 'Incentives' },
+    { table: 'income_qualifications',   label: 'Income Qualifications' },
+    { table: 'project_payment_requests',label: 'Project Payment Requests' },
+    { table: 'payment_receipts',        label: 'Payment Receipts' },
+    { table: 'assessments',             label: 'Assessments' },
+    { table: 'efr_reports',             label: 'EFR Reports' },
+    { table: 'tasks',                   label: 'Tasks' },
+    { table: 'comments',                label: 'Comments' },
+    { table: 'activities',              label: 'Activities' },
+    { table: 'envelopes',               label: 'Envelopes' },
+    { table: 'documents',               label: 'Documents' },
+    { table: 'photos',                  label: 'Photos' },
+    { table: 'vehicles',                label: 'Vehicles' },
+    { table: 'vehicle_activities',      label: 'Vehicle Activities' },
+    { table: 'equipment',               label: 'Equipment' },
+    { table: 'products',                label: 'Products' },
+    { table: 'materials_requests',      label: 'Materials Requests' },
+    { table: 'job_kits',                label: 'Job Kits' },
+    { table: 'time_sheets',             label: 'Time Sheets' },
+    { table: 'time_sheet_entries',      label: 'Time Sheet Entries' },
+    { table: 'service_appointments',    label: 'Service Appointments' },
+    { table: 'users',                   label: 'Users' },
+    { table: 'programs',                label: 'Programs' },
+    { table: 'chat_threads',            label: 'Chat Threads' },
+  ]
+}
+
+// ─── Save / load report definitions ───────────────────────────────────────
+
+export async function loadReport(reportId) {
+  if (!reportId || reportId === 'new') return null
+
+  const [reportRes, filtersRes, groupingsRes, calcRes] = await Promise.all([
+    supabase.from('reports').select('*').eq('id', reportId).eq('is_deleted', false).single(),
+    supabase.from('report_filters').select('*').eq('rfilt_report_id', reportId).eq('is_deleted', false).order('rfilt_filter_index'),
+    supabase.from('report_groupings').select('*').eq('rgr_report_id', reportId).eq('is_deleted', false).order('rgr_grouping_level'),
+    supabase.from('report_calculated_fields').select('*').eq('rcf_report_id', reportId).eq('is_deleted', false).order('rcf_display_order'),
+  ])
+
+  if (reportRes.error) throw reportRes.error
+  if (filtersRes.error) throw filtersRes.error
+  if (groupingsRes.error) throw groupingsRes.error
+  if (calcRes.error) throw calcRes.error
+
+  return {
+    report:           reportRes.data,
+    filters:          filtersRes.data || [],
+    groupings:        groupingsRes.data || [],
+    calculatedFields: calcRes.data || [],
+  }
+}
+
+export async function getCurrentUserId() {
+  const { data: authData } = await supabase.auth.getUser()
+  if (!authData?.user?.id) return null
+  const { data, error } = await supabase
+    .from('users')
+    .select('id')
+    .eq('auth_user_id', authData.user.id)
+    .single()
+  if (error) return null
+  return data?.id || null
+}
+
+/**
+ * Save (insert or update) a report and its child rows. The child tables
+ * (filters, groupings, calculated_fields) use a delete-and-reinsert
+ * strategy on save — simpler than diffing and matches how Salesforce
+ * persists report metadata.
+ */
+export async function saveReport({ id, report, filters, groupings, calculatedFields }) {
+  const isNew = !id || id === 'new'
+  const userId = await getCurrentUserId()
+
+  const reportPayload = {
+    rpt_name:             report.rpt_name,
+    rpt_description:      report.rpt_description || null,
+    rpt_folder_id:        report.rpt_folder_id || null,
+    rpt_format:           report.rpt_format || 'tabular',
+    rpt_primary_object:   report.rpt_primary_object,
+    rpt_selected_fields:  report.rpt_selected_fields || [],
+    rpt_filter_logic:     report.rpt_filter_logic || 'all',
+    rpt_sort_config:      report.rpt_sort_config || [],
+    rpt_column_groupings: report.rpt_column_groupings || [],
+    rpt_runtime_prompts:  report.rpt_runtime_prompts || [],
+    rpt_charts:           report.rpt_charts || [],
+    updated_by:           userId,
+  }
+
+  let reportId = id
+  if (isNew) {
+    reportPayload.rpt_record_number = ''  // trigger generates the number
+    reportPayload.rpt_owner_user_id  = userId
+    reportPayload.created_by         = userId
+    const { data, error } = await supabase
+      .from('reports')
+      .insert(reportPayload)
+      .select('id')
+      .single()
+    if (error) throw error
+    reportId = data.id
+  } else {
+    const { error } = await supabase
+      .from('reports')
+      .update(reportPayload)
+      .eq('id', id)
+    if (error) throw error
+  }
+
+  // Soft-delete existing children, then re-insert
+  if (!isNew) {
+    await Promise.all([
+      supabase.from('report_filters').update({ is_deleted: true }).eq('rfilt_report_id', reportId),
+      supabase.from('report_groupings').update({ is_deleted: true }).eq('rgr_report_id', reportId),
+      supabase.from('report_calculated_fields').update({ is_deleted: true }).eq('rcf_report_id', reportId),
+    ])
+  }
+
+  if (filters?.length) {
+    const rows = filters.map((f, idx) => ({
+      rfilt_report_id:         reportId,
+      rfilt_filter_index:      idx + 1,
+      rfilt_field_name:        f.field_name || null,
+      rfilt_field_table:       f.field_table || null,
+      rfilt_field_via_path:    f.field_via_path || null,
+      rfilt_operator:          f.operator,
+      rfilt_value:             f.value !== undefined ? f.value : null,
+      rfilt_is_cross_filter:   !!f.is_cross_filter,
+      rfilt_cross_object:      f.cross_object || null,
+      rfilt_cross_match:       f.cross_match || null,
+      rfilt_cross_subfilters:  f.cross_subfilters || [],
+      rfilt_is_runtime_prompt: !!f.is_runtime_prompt,
+      rfilt_runtime_label:     f.runtime_label || null,
+      created_by:              userId,
+      updated_by:              userId,
+    }))
+    const { error } = await supabase.from('report_filters').insert(rows)
+    if (error) throw error
+  }
+
+  if (groupings?.length) {
+    const rows = groupings.map((g, idx) => ({
+      rgr_report_id:         reportId,
+      rgr_grouping_level:    idx + 1,
+      rgr_field_name:        g.field_name,
+      rgr_field_table:       g.field_table || null,
+      rgr_field_via_path:    g.field_via_path || null,
+      rgr_field_label:       g.field_label || null,
+      rgr_sort_direction:    g.sort_direction || 'asc',
+      rgr_sort_by_aggregate: g.sort_by_aggregate || null,
+      rgr_show_subtotal:     g.show_subtotal !== false,
+      rgr_date_granularity:  g.date_granularity || null,
+      created_by:            userId,
+      updated_by:            userId,
+    }))
+    const { error } = await supabase.from('report_groupings').insert(rows)
+    if (error) throw error
+  }
+
+  if (calculatedFields?.length) {
+    const rows = calculatedFields.map((c, idx) => ({
+      rcf_report_id:      reportId,
+      rcf_label:          c.label,
+      rcf_scope:          c.scope || 'row',
+      rcf_expression:     c.expression,
+      rcf_data_type:      c.data_type || 'number',
+      rcf_format_options: c.format_options || {},
+      rcf_display_order:  idx,
+      rcf_grouping_level: c.grouping_level || null,
+      created_by:         userId,
+      updated_by:         userId,
+    }))
+    const { error } = await supabase.from('report_calculated_fields').insert(rows)
+    if (error) throw error
+  }
+
+  return reportId
+}

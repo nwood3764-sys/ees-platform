@@ -4,6 +4,7 @@ import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchReportFolders, fetchReports, fetchScheduledReports } from '../data/reportsService'
+import ReportBuilder from './ReportBuilder'
 
 // ─── Section definitions ──────────────────────────────────────────────────
 
@@ -231,15 +232,29 @@ export default function ReportsModule({
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
-          <RecordDetail
-            tableName={selectedRecord.table}
-            recordId={selectedRecord.id}
-            onBack={closeRecord}
-            mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
-            prefill={selectedRecord.prefill}
-            onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })}
-          />
+          selectedRecord.table === 'reports' ? (
+            <ReportBuilder
+              reportId={selectedRecord.id || 'new'}
+              onClose={closeRecord}
+              onSaved={(newId) => {
+                // Refresh the list and switch the URL to the saved report's id
+                loadAll()
+                if (selectedRecord.id !== newId) {
+                  replaceSelectedRecord({ table:'reports', id:newId, mode:'view' })
+                }
+              }}
+            />
+          ) : (
+            <RecordDetail
+              tableName={selectedRecord.table}
+              recordId={selectedRecord.id}
+              onBack={closeRecord}
+              mode={selectedRecord.mode || 'view'}
+              onRecordCreated={(r) => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
+              prefill={selectedRecord.prefill}
+              onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })}
+            />
+          )
         ) : (<>
           {sec === 'home' && (
             <ReportsHome setSec={setSec} folders={folders} reports={reports} schedules={schedules} />
