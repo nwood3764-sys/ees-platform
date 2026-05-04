@@ -102,6 +102,26 @@ export async function softDeletePermissionSet(psId, reason) {
   if (error) throw error
 }
 
+/**
+ * Salesforce-parity Save As / Clone for a permission set. Calls the
+ * clone_permission_set RPC, which copies the set plus its object-access
+ * and field-visibility children. The clone always starts INACTIVE
+ * (ps_is_active=false) and user assignments are NOT cloned — admins
+ * grant assignments explicitly through the Assigned Users tab on the
+ * new set. See the migration header for the rationale.
+ *
+ * Returns the new permission set's UUID.
+ */
+export async function clonePermissionSet(sourcePsId, { newName = null } = {}) {
+  const { data, error } = await supabase.rpc('clone_permission_set', {
+    p_source_permission_set_id: sourcePsId,
+    p_new_name:                 newName,
+  })
+  if (error) throw error
+  if (!data) throw new Error('clone_permission_set returned no id')
+  return data
+}
+
 // ─── Role: Object Access ───────────────────────────────────────────────────
 
 export async function fetchRoleObjectAccess(roleId) {

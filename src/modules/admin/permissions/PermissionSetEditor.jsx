@@ -3,6 +3,7 @@ import { C } from '../../../data/constants'
 import { LoadingState, ErrorState } from '../../../components/UI'
 import {
   fetchPermissionSetById, updatePermissionSet, softDeletePermissionSet,
+  clonePermissionSet,
   fetchPSObjectAccess, upsertPSObjectAccess,
   fetchPSFieldPermissions, upsertPSFieldPermission, deletePSFieldPermission,
   fetchUsersAssignedToPS, fetchAssignableUsers,
@@ -31,7 +32,7 @@ const TABS = [
   { id: 'users',   label: 'Assigned Users' },
 ]
 
-export default function PermissionSetEditor({ psId, onBack, onChanged }) {
+export default function PermissionSetEditor({ psId, onBack, onChanged, onCloned }) {
   const [ps,      setPS]      = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
@@ -39,6 +40,11 @@ export default function PermissionSetEditor({ psId, onBack, onChanged }) {
 
   const [objectAccess, setObjectAccess] = useState({})
   const [oaLoading,    setOaLoading]    = useState(true)
+
+  // Clone state — a single boolean spinner lock is enough; the RPC is
+  // synchronous and the parent navigates straight to the new set.
+  const [cloning, setCloning] = useState(false)
+  const [cloneError, setCloneError] = useState(null)
 
   const reloadPS = useCallback(() => {
     setLoading(true)
@@ -75,6 +81,33 @@ export default function PermissionSetEditor({ psId, onBack, onChanged }) {
     await upsertPSFieldPermission(psId, objectName, fieldName, perms)
   }, [psId])
 
+  // ─── Clone (Save As) ──────────────────────────────────────────────────
+  // Calls clone_permission_set, which produces an inactive copy of the
+  // current set including its object-access and field-visibility rows.
+  // User assignments are deliberately NOT cloned (see migration header).
+  // Parent reloads the list and switches to the new id via onCloned.
+  const handleClone = useCallback(async () => {
+    if (!ps) return
+    if (cloning) return
+    setCloning(true)
+    setCloneError(null)
+    try {
+      const newId = await clonePermissionSet(psId)
+      onChanged && onChanged()
+      if (onCloned) {
+        onCloned(newId)
+      } else {
+        // No clone-router wired; fall back to going back to the list so the
+        // admin can find the new (inactive) set themselves.
+        onBack && onBack()
+      }
+    } catch (err) {
+      setCloneError(err.message || String(err))
+    } finally {
+      setCloning(false)
+    }
+  }, [ps, psId, cloning, onChanged, onCloned, onBack])
+
   if (loading) return <LoadingState />
   if (error) return <ErrorState error={error} />
   if (!ps) return null
@@ -107,7 +140,7 @@ export default function PermissionSetEditor({ psId, onBack, onChanged }) {
           }}>
             {ps.ps_name?.[0]?.toUpperCase() || 'P'}
           </div>
-          <div>
+          <div style={{ flex: 1 }}>
             <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>{ps.ps_name}</div>
             <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>
               {ps.ps_description || 'No description.'}
@@ -118,7 +151,31 @@ export default function PermissionSetEditor({ psId, onBack, onChanged }) {
               </span>
             </div>
           </div>
+          {/* Clone button — produces an inactive copy of this permission
+              set. User assignments are NOT carried over (see migration). */}
+          <button
+            type="button"
+            onClick={handleClone}
+            disabled={cloning}
+            title="Create a copy of this permission set including its object access and field overrides. The copy starts INACTIVE; user assignments are not carried over."
+            style={{
+              ...buttonSecondaryStyle,
+              opacity: cloning ? 0.55 : 1,
+              cursor: cloning ? 'wait' : 'pointer',
+            }}
+          >
+            {cloning ? '…' : 'Clone'}
+          </button>
         </div>
+        {cloneError && (
+          <div style={{
+            marginTop: 8, padding: '6px 10px',
+            background: '#fee', border: `1px solid #f99`,
+            borderRadius: 4, fontSize: 12, color: '#933',
+          }}>
+            Clone failed: {cloneError}
+          </div>
+        )}
       </div>
 
       {/* Tabs */}

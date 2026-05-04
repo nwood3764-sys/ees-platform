@@ -60,6 +60,10 @@ export default function PermissionSetsPane() {
         psId={openId}
         onBack={() => setOpenId(null)}
         onChanged={reload}
+        // Switch the editor to the freshly-cloned set after a Clone action.
+        // Reload happens via onChanged, which the editor calls before
+        // onCloned, so the list is up-to-date when the user backs out.
+        onCloned={(newId) => setOpenId(newId)}
       />
     )
   }
