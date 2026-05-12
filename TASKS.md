@@ -68,7 +68,7 @@ the next one starts.
 
 ## Completed (chronological, most recent first)
 
-- `pending` Recycle Bin cross-table 'All tables' mode + `fetchDeletedRecordsAcrossTables` helper
+- `ea766b0` Recycle Bin cross-table 'All tables' mode + `fetchDeletedRecordsAcrossTables` helper
 - `39632a3` chore: backfill TASKS.md commit hash for c4da7be
 - `c4da7be` audit triggers on folder + folder-share + help tables (9 tables) — closes the unaudited-tables scan; remaining gaps are skip-by-design
 - `eb07ab6` add TASKS.md — live working task list
