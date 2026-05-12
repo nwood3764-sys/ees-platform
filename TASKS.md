@@ -23,7 +23,7 @@ alternative (separate chore commit *before* the work) leaves a dangling
 
 ### Reports module — dispatcher feature parity
 - [ ] **PDF attachments in scheduled-report dispatcher** — session-sized, needs page-layout work for rendering tabular/summary/matrix reports to PDF. Today the dispatcher throws explicitly when `sr_format='pdf'`.
-- [ ] **Dispatcher runner up to feature parity with in-app runner** — multi-hop via_path, cross-filters, filter logic, calc fields all degrade or fail in the dispatcher's `validateReport()` today (success_with_warnings or report_error). Bringing parity unblocks more reports being scheduled.
+- [~] **Dispatcher runner up to feature parity with in-app runner** — multi-hop via_path done (this commit; dispatcher v6 deployed). Still degrading or failing: cross-filters, custom filter logic, calc fields, related-field filters/sorts. Each is its own sub-unit; none small enough to be the next commit.
 
 ### Permissions & RLS
 - [blocked] **Layered RLS sweep using `app_user_in_scope`** — deferred until first portal user invited. Today all authenticated internal users see all rows on business tables via `authenticated_write_sweep_all_business_tables`.
@@ -56,7 +56,7 @@ alternative (separate chore commit *before* the work) leaves a dangling
 
 ### Setup home
 - [x] Health-summary strip + clickable Most Visited cards (commit `fbb199f`)
-- [x] **`admin_health_summary` recycle-bin total undercounts** (this commit) — RPC was summing across 20 tables but the bin dropdown shows 29; aligned the UNION ALL to all 29. Smoke-tested: total = 14.
+- [x] **`admin_health_summary` recycle-bin total undercounts** (commit `8af706f`) — RPC was summing across 20 tables but the bin dropdown shows 29; aligned the UNION ALL to all 29. Smoke-tested: total = 14.
 
 ### Dispatcher (scheduled reports)
 - [x] CSV attachments (prior session)
@@ -77,7 +77,8 @@ alternative (separate chore commit *before* the work) leaves a dangling
 
 ## Completed (chronological, most recent first)
 
-- `(this commit)` admin_health_summary recycle-bin total aligned with the 29-table dropdown
+- `(this commit)` dispatcher v6 — multi-hop via_path support (recursive embed tree, chain-walk in CSV/XLSX builders, validateReport no longer warns on multi-hop)
+- `8af706f` admin_health_summary recycle-bin total aligned with the 29-table dropdown
 - `6b4d0d2` chore: backfill TASKS.md commit hash for ea766b0
 - `ea766b0` Recycle Bin cross-table 'All tables' mode + `fetchDeletedRecordsAcrossTables` helper
 - `39632a3` chore: backfill TASKS.md commit hash for c4da7be

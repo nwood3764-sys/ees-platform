@@ -327,15 +327,13 @@ async function resolveRecipients(supabase: SupabaseClient, s: ScheduledReport): 
 
 // ─── Simplified report runner for the dispatcher ─────────────────────────
 // Supported features (full fidelity):
-//   • Direct fields and one-hop via_path embeds
+//   • Direct fields and multi-hop via_path embeds (any depth)
 //   • Operator-based filters on the primary object
 //   • Picklist label resolution for primary-object fields
 //   • FK label auto-embeds for primary-object FK columns
 //   • Sort by primary-object columns
 //
 // Soft-degraded with warnings (run still succeeds, warnings recorded):
-//   • Multi-hop via_path (length > 1) — column rendered but value will be
-//     null since the dispatcher's runner doesn't traverse beyond one hop
 //   • Related-field filters (rfilt_field_via_path set) — silently dropped,
 //     output may include rows that don't match
 //   • Sort by related-object column — silently dropped
@@ -410,12 +408,8 @@ async function validateReport(
     throw new Error(errors.join(' '))
   }
 
-  // Soft warnings — multi-hop via_path
-  const fields: SimpleField[] = report.rpt_selected_fields || []
-  const multiHop = fields.filter(f => f.via_path && f.via_path.length > 1)
-  if (multiHop.length > 0) {
-    warnings.push(`${multiHop.length} multi-hop column${multiHop.length === 1 ? '' : 's'} (${multiHop.map(f => f.label || f.name).slice(0, 3).join(', ')}${multiHop.length > 3 ? '…' : ''}) will appear empty — the dispatcher only traverses one FK hop.`)
-  }
+  // Multi-hop via_path is no longer a degrade case — the runner builds
+  // recursive embeds. (Was a soft warning prior to multi-hop support.)
 
   // Soft warnings — related-field filters
   const relatedFilters = filterRows.filter(f => !f.rfilt_is_cross_filter && f.rfilt_field_via_path?.length)
@@ -460,24 +454,68 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
 
   const selectedFields: SimpleField[] = r.rpt_selected_fields || []
 
-  // Build select string with one-hop embeds
+  // ── Build PostgREST select string with multi-hop embed support ────────
+  //
+  // The in-app runner's pattern (src/data/reportsService.js,
+  // ensureEmbedNode + serializeEmbeds) walks a via_path chain of any
+  // depth and produces nested embed syntax: 'fk1:t1(fk2:t2(field))'.
+  // PostgREST supports this natively. Lifted here so the dispatcher
+  // handles the same field shapes the in-app runner does — closing the
+  // 'multi-hop columns appear empty' soft-warning case in
+  // validateReport.
+  //
+  // embedTree shape:
+  //   { [fk]: { table, fields: string[], children: embedTree } }
+  // where 'table' is the joined table at this hop (only meaningful at
+  // the leaf node — intermediate hops get inferred by PostgREST from
+  // the FK constraint).
   const directFields: string[] = []
-  const embedMap: Record<string, { table: string, fields: string[] }> = {}
+  const embedTree: Record<string, { table: string | null, fields: string[], children: any }> = {}
+
+  function ensureEmbedNode(viaPath: string[], leafTable: string | undefined): { table: string | null, fields: string[], children: any } {
+    let cur: any = embedTree
+    for (let i = 0; i < viaPath.length; i++) {
+      const fk = viaPath[i]
+      if (!cur[fk]) {
+        cur[fk] = {
+          table:    i === viaPath.length - 1 ? (leafTable || null) : null,
+          fields:   [],
+          children: {},
+        }
+      }
+      if (i === viaPath.length - 1 && leafTable && !cur[fk].table) {
+        cur[fk].table = leafTable
+      }
+      if (i < viaPath.length - 1) cur = cur[fk].children
+    }
+    let leaf: any = embedTree
+    for (let i = 0; i < viaPath.length - 1; i++) leaf = leaf[viaPath[i]].children
+    return leaf[viaPath[viaPath.length - 1]]
+  }
+
   for (const f of selectedFields) {
     if (!f.via_path || f.via_path.length === 0) {
       directFields.push(f.name)
-    } else if (f.via_path.length === 1 && f.table) {
-      const fk = f.via_path[0]
-      if (!embedMap[fk]) embedMap[fk] = { table: f.table, fields: [] }
-      embedMap[fk].fields.push(f.name)
+    } else {
+      const node = ensureEmbedNode(f.via_path, f.table)
+      if (!node.fields.includes(f.name)) node.fields.push(f.name)
     }
   }
+
   if (!directFields.includes("id")) directFields.unshift("id")
 
-  const selectParts = [...directFields]
-  for (const [fk, embed] of Object.entries(embedMap)) {
-    selectParts.push(`${fk}:${embed.table}(${embed.fields.join(", ")})`)
+  function serializeEmbeds(tree: Record<string, any>): string[] {
+    const parts: string[] = []
+    for (const [fk, node] of Object.entries(tree)) {
+      const innerParts: string[] = [...(node as any).fields]
+      innerParts.push(...serializeEmbeds((node as any).children))
+      const tableSegment = (node as any).table ? `:${(node as any).table}` : ""
+      parts.push(`${fk}${tableSegment}(${innerParts.join(", ")})`)
+    }
+    return parts
   }
+
+  const selectParts: string[] = [...directFields, ...serializeEmbeds(embedTree)]
   const selectStr = selectParts.join(", ")
 
   // Build query
@@ -621,9 +659,15 @@ function buildCsv(rows: any[], columns: any[]): string {
   const header = columns.map(c => escape(c.label)).join(",")
   const dataRows = rows.map(row => columns.map(c => {
     if (c.via_path?.length) {
-      // One-hop: row[fk] is a nested object
-      const nested = row[c.via_path[0]]
-      return escape(nested ? nested[c.name] : null)
+      // Walk the chain. PostgREST nests: row[fk1][fk2]...[fkN][field]. Each
+      // hop is an object (or null if the FK resolved to null), so guard at
+      // every step.
+      let cur: any = row
+      for (const fk of c.via_path) {
+        if (cur == null) break
+        cur = cur[fk]
+      }
+      return escape(cur ? cur[c.name] : null)
     }
     return escape(row[c.name])
   }).join(","))
@@ -690,8 +734,14 @@ async function buildXlsx(rows: any[], columns: any[], reportName: string): Promi
   const dataRows = rows.map(row => columns.map(c => {
     let v: any
     if (c.via_path?.length) {
-      const nested = row[c.via_path[0]]
-      v = nested ? nested[c.name] : null
+      // Walk the chain — same logic as buildCsv. PostgREST nests deeply
+      // on multi-hop embeds; each level is an object or null.
+      let cur: any = row
+      for (const fk of c.via_path) {
+        if (cur == null) break
+        cur = cur[fk]
+      }
+      v = cur ? cur[c.name] : null
     } else {
       v = row[c.name]
     }
