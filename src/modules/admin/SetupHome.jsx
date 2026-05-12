@@ -13,7 +13,7 @@ import {
   fetchEmailTemplates, fetchDocumentTemplates, fetchEnvelopes,
   fetchAutomationRules, fetchValidationRules,
   fetchPicklistValues, fetchAuditLog,
-  fetchDeletedRecords, restoreRecord, purgeRecord,
+  fetchDeletedRecords, fetchDeletedRecordsAcrossTables, restoreRecord, purgeRecord,
   fetchAdminHealthSummary,
   fetchAllPageLayouts,
   fetchWorkPlanTemplates,
@@ -711,8 +711,22 @@ const RECYCLE_BIN_TABLES = [
   { value: 'job_kits',                     label: 'Job Kits' },
 ]
 
+// Sentinel value for the All-Tables option in the dropdown. Not a real
+// table name; the pane checks for this string to switch fetchers.
+const RECYCLE_BIN_ALL_SENTINEL = '__all__'
+
 const RECYCLE_BIN_COLS = [
   { field: 'id',             label: 'Record',         type: 'text', sortable: true,  filterable: false },
+  { field: 'name',           label: 'Name',           type: 'text', sortable: true,  filterable: true  },
+  { field: 'deletedAt',      label: 'Deleted At',     type: 'text', sortable: true,  filterable: false },
+  { field: 'deletedBy',      label: 'Deleted By',     type: 'text', sortable: true,  filterable: true  },
+  { field: 'deletionReason', label: 'Reason',         type: 'text', sortable: false, filterable: true  },
+]
+// In All-Tables mode the table column matters; in single-table mode it's
+// just noise (every row has the same value). Show conditionally.
+const RECYCLE_BIN_COLS_WITH_TABLE = [
+  { field: 'id',             label: 'Record',         type: 'text', sortable: true,  filterable: false },
+  { field: 'table',          label: 'Object',         type: 'text', sortable: true,  filterable: true  },
   { field: 'name',           label: 'Name',           type: 'text', sortable: true,  filterable: true  },
   { field: 'deletedAt',      label: 'Deleted At',     type: 'text', sortable: true,  filterable: false },
   { field: 'deletedBy',      label: 'Deleted By',     type: 'text', sortable: true,  filterable: true  },
@@ -738,29 +752,42 @@ function RecycleBinPane({ onOpenRecord }) {
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchDeletedRecords(selectedTable, { limit: 500 })
+
+    // All-Tables mode fans out across the curated table list with a
+    // per-table cap so a single very-deleted table can't crowd out
+    // others. Single-table mode keeps the larger limit.
+    const isAllMode = selectedTable === RECYCLE_BIN_ALL_SENTINEL
+    const tableList = RECYCLE_BIN_TABLES.map(t => t.value)
+    const promise = isAllMode
+      ? fetchDeletedRecordsAcrossTables(tableList, { perTableLimit: 50 })
+      : fetchDeletedRecords(selectedTable, { limit: 500 })
+
+    promise
       .then(d => { if (!cancelled) setData(d) })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [selectedTable, reloadKey])
 
+  const isAllMode = selectedTable === RECYCLE_BIN_ALL_SENTINEL
   const refresh = () => setReloadKey(k => k + 1)
 
-  // Restore a single row. Salesforce hides the deleted record's
-  // detail page; here we just call the RPC and refresh. If onOpenRecord
-  // is wired, offer to navigate to the restored record so the admin can
-  // verify it.
+  // Restore a single row. In All-Tables mode the row's _table is what
+  // we dispatch to; in single-table mode we honor selectedTable directly
+  // (rows still carry _table after the recent refactor, so we could
+  // use that everywhere — using selectedTable is just a tiny safety
+  // belt against any edge where _table got stripped).
   const handleRestore = async (row) => {
     if (!row?._id || restoreBusy) return
+    const targetTable = row._table || selectedTable
     const ok = window.confirm(
-      `Restore ${row.name || row._id} (${selectedTable})?\n\nThe record will reappear in list views and related-record sections.`
+      `Restore ${row.name || row._id} (${targetTable})?\n\nThe record will reappear in list views and related-record sections.`
     )
     if (!ok) return
     setRestoreBusy(row._id)
     setRestoreNotice(null)
     try {
-      await restoreRecord(selectedTable, row._id)
+      await restoreRecord(targetTable, row._id)
       setRestoreNotice({ type: 'ok', message: `Restored ${row.name || row._id}` })
       refresh()
     } catch (err) {
@@ -790,7 +817,11 @@ function RecycleBinPane({ onOpenRecord }) {
     if (purgeTyped.trim() !== purgeRow.id) return // belt-and-suspenders; button is also disabled
     setPurgeBusy(true)
     try {
-      await purgeRecord(selectedTable, purgeRow._id)
+      // In All-Tables mode the row knows its own table. In single-table
+      // mode it does too (rows always carry _table), but fall back to
+      // selectedTable just in case.
+      const targetTable = purgeRow._table || selectedTable
+      await purgeRecord(targetTable, purgeRow._id)
       setRestoreNotice({ type: 'ok', message: `Purged ${purgeRow.name || purgeRow._id} permanently. A HARD_DELETE row with the full snapshot is in the audit log.` })
       setPurgeRow(null)
       setPurgeTyped('')
@@ -811,7 +842,9 @@ function RecycleBinPane({ onOpenRecord }) {
         <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
           {loading
             ? 'Loading…'
-            : `${data.length} deleted ${selectedTable.replace(/_/g, ' ')}`}
+            : isAllMode
+              ? `${data.length} deleted records across ${RECYCLE_BIN_TABLES.length} objects`
+              : `${data.length} deleted ${selectedTable.replace(/_/g, ' ')}`}
         </div>
 
         <div style={{
@@ -827,6 +860,8 @@ function RecycleBinPane({ onOpenRecord }) {
                 background: '#fff', color: C.textPrimary, fontFamily: 'inherit',
                 minWidth: 260,
               }}>
+              <option value={RECYCLE_BIN_ALL_SENTINEL}>— All tables (up to 50 each) —</option>
+              <option value="" disabled>──────────────</option>
               {RECYCLE_BIN_TABLES.map(t =>
                 <option key={t.value} value={t.value}>{t.label}</option>
               )}
@@ -858,18 +893,20 @@ function RecycleBinPane({ onOpenRecord }) {
       {error && !loading && <ErrorState error={error} />}
       {!loading && !error && data.length === 0 && (
         <div style={{ padding: '32px 24px', color: C.textMuted, fontSize: 13 }}>
-          No deleted {selectedTable.replace(/_/g, ' ')} found.
+          {isAllMode
+            ? 'No deleted records found across any tracked object.'
+            : `No deleted ${selectedTable.replace(/_/g, ' ')} found.`}
         </div>
       )}
       {!loading && !error && data.length > 0 && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <ListView
             data={data}
-            columns={RECYCLE_BIN_COLS}
+            columns={isAllMode ? RECYCLE_BIN_COLS_WITH_TABLE : RECYCLE_BIN_COLS}
             systemViews={systemViews}
             defaultViewId="AV"
             onOpenRecord={onOpenRecord
-              ? row => row?._id && onOpenRecord({ table: selectedTable, id: row._id, name: row.name })
+              ? row => row?._id && onOpenRecord({ table: row._table || selectedTable, id: row._id, name: row.name })
               : undefined}
           />
           {/* Row actions — restoration is a separate button so the row click
@@ -884,7 +921,7 @@ function RecycleBinPane({ onOpenRecord }) {
               Quick Restore
             </div>
             {data.slice(0, 50).map(row => (
-              <div key={row._id} style={{
+              <div key={`${row._table || selectedTable}-${row._id}`} style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '4px 0', fontSize: 12,
               }}>
@@ -892,6 +929,13 @@ function RecycleBinPane({ onOpenRecord }) {
                   fontFamily: 'JetBrains Mono, monospace', color: C.textMuted,
                   minWidth: 100,
                 }}>{row.id}</span>
+                {isAllMode && (
+                  <span style={{
+                    fontSize: 10.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace',
+                    background: C.cardSecondary, padding: '1px 6px', borderRadius: 3,
+                    minWidth: 0, whiteSpace: 'nowrap',
+                  }}>{row._table || row.table}</span>
+                )}
                 <span style={{ flex: 1, color: C.textPrimary }}>{row.name}</span>
                 <span style={{ color: C.textMuted, fontSize: 11 }}>
                   {row.deletedAt} · {row.deletedBy}

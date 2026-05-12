@@ -27,6 +27,7 @@ the next one starts.
 ### Recycle Bin
 - [x] **Phase 1 — view + restore** (commit `293e435` + `4ff648a` for field-history)
 - [x] **Phase 2 — permanent purge with admin gate** (commit `718c37d`)
+- [x] **Cross-table search: 'All Tables' mode** — `fetchDeletedRecordsAcrossTables` fans out across the curated 29-table list in parallel (per-table cap 50), merges + sorts by deletedAt desc. UI gets a new "— All tables —" option in the dropdown that toggles a wider column set with the Object column, and surfaces a small object-name badge in the Quick Restore footer row. Per-row restore/purge dispatches to the row's own `_table`.
 - [ ] **Cascade rule per spec: parent restore restores children together** — investigated this session. Current schema has zero FK CASCADE on delete (everything is NO ACTION), and there's no batch-id tracking. Implementing properly needs either (a) walking parent-child topology in a SECURITY DEFINER function with depth limits, or (b) adding `deletion_batch_id` column on every soft-deletable table. Both are sizeable. Deferring until soft-delete cascade pain is real \u2014 today most soft-deletes are smoke-test artifacts; production usage may not need this.
 
 ### Audit + field history
@@ -67,6 +68,8 @@ the next one starts.
 
 ## Completed (chronological, most recent first)
 
+- `pending` Recycle Bin cross-table 'All tables' mode + `fetchDeletedRecordsAcrossTables` helper
+- `39632a3` chore: backfill TASKS.md commit hash for c4da7be
 - `c4da7be` audit triggers on folder + folder-share + help tables (9 tables) — closes the unaudited-tables scan; remaining gaps are skip-by-design
 - `eb07ab6` add TASKS.md — live working task list
 - `0f6e53c` field-history tracking on PRT + envelope columns (27 columns / 6 tables)

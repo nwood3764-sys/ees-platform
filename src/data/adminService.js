@@ -1070,35 +1070,98 @@ export async function fetchObjectChatEnabled() {
 //   audit trio. Audit log gets a RESTORE row automatically via the
 //   table's trigger. Returns the restored record's id.
 
+// Internal: resolve a set of user ids → display-name map. Single batched
+// SELECT; falls back to email then short id when name fields are empty.
+async function _resolveUserNames(userIds) {
+  if (!userIds || userIds.length === 0) return {}
+  const { data } = await supabase
+    .from('users')
+    .select('id, first_name, last_name, user_email')
+    .in('id', userIds)
+  return (data || []).reduce((acc, u) => {
+    const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim()
+    acc[u.id] = full || u.user_email || u.id.slice(0, 8).toUpperCase()
+    return acc
+  }, {})
+}
+
+// Internal: shape a single RPC row into the UI-friendly object the
+// recycle bin renders. Carries _table so cross-table mode can group +
+// restore correctly.
+function _shapeDeletedRow(row, tableName, nameMap) {
+  return {
+    id:             row.name || (row.id ? String(row.id).slice(0, 8).toUpperCase() : '—'),
+    _id:            row.id,
+    _table:         tableName,
+    table:          tableName,
+    name:           row.name || '—',
+    deletionReason: row.deletion_reason || '—',
+    deletedAt:      row.deleted_at ? new Date(row.deleted_at).toISOString().replace('T', ' ').slice(0, 19) : '—',
+    deletedBy:      row.deleted_by ? (nameMap[row.deleted_by] || 'Unknown user') : '—',
+  }
+}
+
 export async function fetchDeletedRecords(tableName, { limit = 200 } = {}) {
   const { data, error } = await supabase.rpc('fetch_deleted_records', {
     p_table: tableName,
     p_limit: Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000),
   })
   if (error) throw error
-  // Resolve performer names in a single batched lookup
   const rows = data || []
   const userIds = Array.from(new Set(rows.map(r => r.deleted_by).filter(Boolean)))
-  let nameMap = {}
-  if (userIds.length > 0) {
-    const { data: users } = await supabase
-      .from('users')
-      .select('id, first_name, last_name, user_email')
-      .in('id', userIds)
-    nameMap = (users || []).reduce((acc, u) => {
-      const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim()
-      acc[u.id] = full || u.user_email || u.id.slice(0, 8).toUpperCase()
-      return acc
-    }, {})
-  }
-  return rows.map(r => ({
-    id:             r.name || (r.id ? String(r.id).slice(0, 8).toUpperCase() : '—'),
-    _id:            r.id,
-    name:           r.name || '—',
-    deletionReason: r.deletion_reason || '—',
-    deletedAt:      r.deleted_at ? new Date(r.deleted_at).toISOString().replace('T', ' ').slice(0, 19) : '—',
-    deletedBy:      r.deleted_by ? (nameMap[r.deleted_by] || 'Unknown user') : '—',
+  const nameMap = await _resolveUserNames(userIds)
+  return rows.map(r => _shapeDeletedRow(r, tableName, nameMap))
+}
+
+// fetchDeletedRecordsAcrossTables — All-Tables mode for the recycle bin.
+// Fans out fetch_deleted_records across the caller-supplied table list
+// in parallel, merges results, and sorts by deletedAt descending. Each
+// row carries _table so the UI can group + dispatch restore/purge to
+// the right table. Per-table limit caps the depth of any one table so
+// a single very-deleted table can't dominate the result.
+//
+// Failures on individual tables are caught and logged silently so one
+// dead table doesn't poison the whole view (an admin investigating
+// 'where did my record go' shouldn't have the page error out because
+// of an unrelated table).
+export async function fetchDeletedRecordsAcrossTables(tableNames, { perTableLimit = 50 } = {}) {
+  if (!tableNames || tableNames.length === 0) return []
+  const safeLimit = Math.min(Math.max(parseInt(perTableLimit, 10) || 50, 1), 200)
+
+  const results = await Promise.all(tableNames.map(async (t) => {
+    try {
+      const { data, error } = await supabase.rpc('fetch_deleted_records', {
+        p_table: t,
+        p_limit: safeLimit,
+      })
+      if (error) {
+        console.warn(`fetchDeletedRecordsAcrossTables: ${t} failed`, error.message)
+        return { table: t, rows: [] }
+      }
+      return { table: t, rows: data || [] }
+    } catch (err) {
+      console.warn(`fetchDeletedRecordsAcrossTables: ${t} threw`, err)
+      return { table: t, rows: [] }
+    }
   }))
+
+  // Pool every user id from every result for a single batched name lookup.
+  const allUserIds = Array.from(new Set(
+    results.flatMap(r => r.rows.map(row => row.deleted_by).filter(Boolean))
+  ))
+  const nameMap = await _resolveUserNames(allUserIds)
+
+  // Flatten + tag with table, then sort by deletedAt desc. Rows with
+  // null deletedAt land at the bottom — those are pre-trigger records
+  // from before audit-tracking was wired.
+  return results
+    .flatMap(({ table, rows }) => rows.map(r => _shapeDeletedRow(r, table, nameMap)))
+    .sort((a, b) => {
+      if (a.deletedAt === '—' && b.deletedAt === '—') return 0
+      if (a.deletedAt === '—') return 1
+      if (b.deletedAt === '—') return -1
+      return b.deletedAt.localeCompare(a.deletedAt)
+    })
 }
 
 export async function restoreRecord(tableName, recordId) {
