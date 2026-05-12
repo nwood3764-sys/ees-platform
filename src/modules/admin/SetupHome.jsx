@@ -630,11 +630,12 @@ const PAGELAYOUT_COLS = [
 ]
 
 const AL_COLS = [
-  { field: 'timestamp', label: 'Timestamp', type: 'text', sortable: true, filterable: false },
-  { field: 'action',    label: 'Action',    type: 'text', sortable: true, filterable: true },
-  { field: 'object',    label: 'Object',    type: 'text', sortable: true, filterable: true },
-  { field: 'recordId',  label: 'Record',    type: 'text', sortable: false, filterable: false },
-  { field: 'notes',     label: 'Notes',     type: 'text', sortable: false, filterable: false },
+  { field: 'timestamp',   label: 'Timestamp',   type: 'text', sortable: true,  filterable: false },
+  { field: 'action',      label: 'Action',      type: 'text', sortable: true,  filterable: true  },
+  { field: 'object',      label: 'Object',      type: 'text', sortable: true,  filterable: true  },
+  { field: 'recordId',    label: 'Record',      type: 'text', sortable: false, filterable: false },
+  { field: 'performedBy', label: 'Performed By',type: 'text', sortable: true,  filterable: true  },
+  { field: 'notes',       label: 'Notes',       type: 'text', sortable: false, filterable: false },
 ]
 
 const PORTAL_COLS = [

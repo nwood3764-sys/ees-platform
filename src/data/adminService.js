@@ -488,19 +488,58 @@ export async function relinkUser({ existingUserId, roleId, title, phone } = {}) 
 }
 
 // Audit Log — for Administration > Audit Log
-export async function fetchAuditLog(limit = 200) {
-  const { data, error } = await supabase
+//
+// Pulls audit_log rows joined to public.users for the performer's display
+// name. Optional filters narrow the result set without paginating off the
+// end of the list — admins typically know which table or which record they
+// want to investigate.
+//
+// Filters (all optional):
+//   • objectFilter  — exact match on al_object (e.g. 'permission_sets')
+//   • recordFilter  — exact UUID match on al_record_id
+//   • actionFilter  — exact match on al_action (INSERT/UPDATE/SOFT_DELETE/...)
+//   • limit         — hard ceiling, default 200, max 1000
+export async function fetchAuditLog({
+  limit = 200, objectFilter = null, recordFilter = null, actionFilter = null,
+} = {}) {
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000)
+  let q = supabase
     .from('audit_log')
     .select('id, al_action, al_object, al_record_id, al_performed_by, al_performed_at, al_notes')
     .order('al_performed_at', { ascending: false })
-    .limit(limit)
+    .limit(safeLimit)
+  if (objectFilter) q = q.eq('al_object', objectFilter)
+  if (recordFilter) q = q.eq('al_record_id', recordFilter)
+  if (actionFilter) q = q.eq('al_action', actionFilter)
+  const { data, error } = await q
   if (error) throw error
-  return (data || []).map(r => ({
+  const rows = data || []
+
+  // Resolve performer display names in one batched lookup. Audit rows
+  // from service-role calls or pre-trigger seed data have al_performed_by
+  // NULL; show 'System' for those.
+  const userIds = Array.from(new Set(rows.map(r => r.al_performed_by).filter(Boolean)))
+  let nameMap = {}
+  if (userIds.length > 0) {
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, first_name, last_name, user_email')
+      .in('id', userIds)
+    nameMap = (users || []).reduce((acc, u) => {
+      const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim()
+      acc[u.id] = full || u.user_email || u.id.slice(0, 8).toUpperCase()
+      return acc
+    }, {})
+  }
+
+  return rows.map(r => ({
     id: r.id.slice(0, 8).toUpperCase(),
     _id: r.id,
     action: r.al_action || '—',
     object: r.al_object || '—',
     recordId: r.al_record_id ? String(r.al_record_id).slice(0, 8).toUpperCase() : '—',
+    _recordIdFull: r.al_record_id || null,
+    performedBy: r.al_performed_by ? (nameMap[r.al_performed_by] || 'Unknown user') : 'System',
     timestamp: r.al_performed_at ? new Date(r.al_performed_at).toISOString().replace('T', ' ').slice(0, 19) : '—',
     notes: r.al_notes || '—',
   }))
