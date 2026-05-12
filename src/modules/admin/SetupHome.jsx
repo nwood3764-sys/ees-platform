@@ -332,7 +332,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'service_territories': return <ComingSoonPane label="Service Territories" />
     case 'skills':              return <NodePage title="Skills"                  table="skills"                       fetcher={fetchSkills}                       columns={SKILL_COLS} newLabel="Skill"                       onOpenRecord={onOpenRecord} />
     case 'work_type_skill_requirements': return <NodePage title="Work Type Skill Requirements" table="work_type_skill_requirements" fetcher={fetchWorkTypeSkillRequirements} columns={WTSR_COLS}  newLabel="Skill Requirement"           onOpenRecord={onOpenRecord} />
-    case 'audit_log':         return <NodePage title="Audit Log"               table="audit_log"         fetcher={fetchAuditLog}          columns={AL_COLS}             newLabel={null}             onOpenRecord={null} />
+    case 'audit_log':         return <AuditLogPane />
     case 'portals':                  return <NodePage title="Portals"                  table="portals"                  fetcher={fetchPortals}                 columns={PORTAL_COLS}     newLabel="Portal"                  onOpenRecord={onOpenRecord} />
     case 'portal_role_assignments':  return <NodePage title="Portal Role Assignments"  table="portal_role_assignments"  fetcher={fetchPortalRoleAssignments}   columns={PRA_COLS}        newLabel="Role Assignment"         onOpenRecord={onOpenRecord} />
     case 'object_chat_enabled':      return <NodePage title="Object Chat Settings"     table="object_chat_enabled"      fetcher={fetchObjectChatEnabled}       columns={OCE_COLS}        newLabel="Object Chat Setting"     onOpenRecord={onOpenRecord} />
@@ -379,6 +379,164 @@ function NodePage({ title, table, fetcher, columns, newLabel, onOpenRecord }) {
           newLabel={newLabel}
           onNew={newLabel && onOpenRecord ? () => onOpenRecord({ table, id: null, mode: 'create' }) : undefined}
           onOpenRecord={onOpenRecord ? row => row?._id && onOpenRecord({ table, id: row._id, name: row.name || row.id }) : undefined}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── AuditLogPane — dedicated viewer with filter controls ────────────────
+//
+// audit_log gets its own page because (a) the table is large (5k+ rows
+// today, monotonically growing) and an unfiltered list isn't useful, and
+// (b) the typical investigation pattern is 'show me everything for record
+// X' or 'show me every permission_sets change in the last week' — neither
+// of which fits the generic NodePage. fetchAuditLog accepts objectFilter
+// / recordFilter / actionFilter / limit; this pane wires controls for all
+// three plus a manual Refresh button.
+
+const AUDIT_ACTIONS = ['', 'INSERT', 'UPDATE', 'SOFT_DELETE', 'RESTORE', 'HARD_DELETE']
+const AUDIT_LIMITS  = [100, 200, 500, 1000]
+const AUDIT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function AuditLogPane() {
+  const [objectFilter, setObjectFilter] = useState('')
+  const [recordFilter, setRecordFilter] = useState('')
+  const [actionFilter, setActionFilter] = useState('')
+  const [limit,        setLimit]        = useState(200)
+  const [data,         setData]         = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState(null)
+  const [reloadKey,    setReloadKey]    = useState(0)
+
+  // Validate recordFilter: empty is fine; non-empty must be a UUID. Bad
+  // UUIDs would 400 the query, so we hold the filter until it parses.
+  const recordFilterValid = !recordFilter || AUDIT_UUID_RE.test(recordFilter.trim())
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    fetchAuditLog({
+      limit,
+      objectFilter: objectFilter.trim() || null,
+      recordFilter: recordFilterValid && recordFilter.trim() ? recordFilter.trim() : null,
+      actionFilter: actionFilter || null,
+    })
+      .then(d => { if (!cancelled) setData(d) })
+      .catch(err => { if (!cancelled) setError(err) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  // We deliberately don't include the filter values themselves in the dep
+  // array — reload is triggered by Refresh (reloadKey bump). Otherwise
+  // every keystroke would hit the DB.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey])
+
+  const refresh = () => setReloadKey(k => k + 1)
+  const clear   = () => {
+    setObjectFilter('')
+    setRecordFilter('')
+    setActionFilter('')
+    setLimit(200)
+    setReloadKey(k => k + 1)
+  }
+
+  const filtersActive = !!(objectFilter || recordFilter || actionFilter || limit !== 200)
+  const systemViews = [{ id: 'AV', name: 'All', filters: [], sortField: 'timestamp', sortDir: 'desc' }]
+
+  const inputStyle = {
+    fontSize: 12.5, padding: '5px 8px',
+    border: `1px solid ${C.border}`, borderRadius: 4,
+    background: '#fff', color: C.textPrimary,
+    fontFamily: 'inherit',
+  }
+  const labelStyle = { fontSize: 11, color: C.textMuted, fontWeight: 600 }
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 24px 10px', background: C.card, borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Audit Log</div>
+        <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
+          {loading
+            ? 'Loading…'
+            : `${data.length} record${data.length === 1 ? '' : 's'}${filtersActive ? ' (filtered)' : ''}`}
+        </div>
+
+        {/* Filter row */}
+        <div style={{
+          marginTop: 14, display: 'flex', alignItems: 'flex-end',
+          gap: 12, flexWrap: 'wrap',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={labelStyle}>Object</label>
+            <input
+              type="text" value={objectFilter} placeholder="e.g. permission_sets"
+              onChange={e => setObjectFilter(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') refresh() }}
+              style={{ ...inputStyle, width: 180 }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={labelStyle}>Record ID (full UUID)</label>
+            <input
+              type="text" value={recordFilter}
+              placeholder="00000000-0000-0000-0000-000000000000"
+              onChange={e => setRecordFilter(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') refresh() }}
+              style={{
+                ...inputStyle, width: 280,
+                fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5,
+                borderColor: recordFilterValid ? C.border : '#e85a4f',
+              }} />
+            {!recordFilterValid && (
+              <span style={{ fontSize: 10.5, color: '#e85a4f' }}>Not a valid UUID</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={labelStyle}>Action</label>
+            <select value={actionFilter} onChange={e => setActionFilter(e.target.value)}
+              style={{ ...inputStyle, width: 150 }}>
+              {AUDIT_ACTIONS.map(a =>
+                <option key={a} value={a}>{a || '(any)'}</option>
+              )}
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={labelStyle}>Limit</label>
+            <select value={limit} onChange={e => setLimit(parseInt(e.target.value, 10))}
+              style={{ ...inputStyle, width: 90 }}>
+              {AUDIT_LIMITS.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <button onClick={refresh}
+            style={{
+              fontSize: 12.5, padding: '6px 14px',
+              background: C.emerald, color: '#fff',
+              border: 'none', borderRadius: 4, cursor: 'pointer',
+              fontWeight: 500,
+            }}>
+            Apply
+          </button>
+          {filtersActive && (
+            <button onClick={clear}
+              style={{
+                fontSize: 12.5, padding: '6px 12px',
+                background: 'transparent', color: C.textSecondary,
+                border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer',
+              }}>
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+      {loading && <LoadingState />}
+      {error && !loading && <ErrorState error={error} />}
+      {!loading && !error && (
+        <ListView
+          data={data}
+          columns={AL_COLS}
+          systemViews={systemViews}
+          defaultViewId="AV"
         />
       )}
     </div>
