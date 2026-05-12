@@ -1110,3 +1110,30 @@ export async function restoreRecord(tableName, recordId) {
   if (!data) throw new Error('restore_record returned no id')
   return data
 }
+
+// purgeRecord — Recycle Bin Phase 2. Permanently deletes a soft-deleted
+// record. Admin-only (the RPC enforces; UI gates the button additionally).
+// On FK violation the Postgres error message names the referencing table;
+// we surface that as the actionable error so the admin knows what's
+// blocking the purge.
+export async function purgeRecord(tableName, recordId) {
+  const { data, error } = await supabase.rpc('purge_record', {
+    p_table:     tableName,
+    p_record_id: recordId,
+  })
+  if (error) {
+    // foreign_key_violation (23503) is the common case — surface the
+    // referenced table from the error details so the front-end can
+    // show a useful message.
+    if (error.code === '23503') {
+      const refTable = error.details?.match(/from table "([^"]+)"/)?.[1]
+      if (refTable) {
+        const friendly = refTable.replace(/_/g, ' ')
+        throw new Error(`Cannot purge — record is still referenced by ${friendly}. Purge or reassign the dependent records first.`)
+      }
+    }
+    throw error
+  }
+  if (!data) throw new Error('purge_record returned no id')
+  return data
+}

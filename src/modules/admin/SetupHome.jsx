@@ -13,7 +13,7 @@ import {
   fetchEmailTemplates, fetchDocumentTemplates, fetchEnvelopes,
   fetchAutomationRules, fetchValidationRules,
   fetchPicklistValues, fetchAuditLog,
-  fetchDeletedRecords, restoreRecord,
+  fetchDeletedRecords, restoreRecord, purgeRecord,
   fetchAllPageLayouts,
   fetchWorkPlanTemplates,
   fetchWorkStepTemplates,
@@ -613,6 +613,12 @@ function RecycleBinPane({ onOpenRecord }) {
   const [restoreBusy,   setRestoreBusy]   = useState(null) // record id currently being restored
   const [restoreNotice, setRestoreNotice] = useState(null) // { type: 'ok'|'err', message }
   const [reloadKey,     setReloadKey]     = useState(0)
+  // Purge state: which row is queued for purge, what the user has typed
+  // to confirm, and whether the RPC is in flight. The purge confirmation
+  // requires typing the exact record name/id to avoid muscle-memory deletes.
+  const [purgeRow,      setPurgeRow]      = useState(null) // the row being purged
+  const [purgeTyped,    setPurgeTyped]    = useState('')
+  const [purgeBusy,     setPurgeBusy]     = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -647,6 +653,38 @@ function RecycleBinPane({ onOpenRecord }) {
       setRestoreNotice({ type: 'err', message: `Restore failed: ${err.message || err}` })
     } finally {
       setRestoreBusy(null)
+    }
+  }
+
+  // Purge — open the typed-confirmation modal. The modal requires the
+  // admin to type the record's display id (e.g. "RPT-00009") to confirm,
+  // matching the data-standards spec's 'deliberate multi-step confirmation'
+  // requirement.
+  const openPurgeModal = (row) => {
+    if (!row?._id) return
+    setPurgeRow(row)
+    setPurgeTyped('')
+    setRestoreNotice(null)
+  }
+  const closePurgeModal = () => {
+    if (purgeBusy) return
+    setPurgeRow(null)
+    setPurgeTyped('')
+  }
+  const confirmPurge = async () => {
+    if (!purgeRow?._id || purgeBusy) return
+    if (purgeTyped.trim() !== purgeRow.id) return // belt-and-suspenders; button is also disabled
+    setPurgeBusy(true)
+    try {
+      await purgeRecord(selectedTable, purgeRow._id)
+      setRestoreNotice({ type: 'ok', message: `Purged ${purgeRow.name || purgeRow._id} permanently. A HARD_DELETE row with the full snapshot is in the audit log.` })
+      setPurgeRow(null)
+      setPurgeTyped('')
+      refresh()
+    } catch (err) {
+      setRestoreNotice({ type: 'err', message: `Purge failed: ${err.message || err}` })
+    } finally {
+      setPurgeBusy(false)
     }
   }
 
@@ -757,6 +795,22 @@ function RecycleBinPane({ onOpenRecord }) {
                   }}>
                   {restoreBusy === row._id ? '…' : 'Restore'}
                 </button>
+                <button
+                  onClick={() => openPurgeModal(row)}
+                  disabled={restoreBusy === row._id || purgeBusy}
+                  title="Permanently delete this record. Cannot be undone. Admin-only; the full row is preserved in the audit log."
+                  style={{
+                    fontSize: 11.5, padding: '3px 10px',
+                    background: 'transparent',
+                    color: '#933',
+                    border: `1px solid #f99`,
+                    borderRadius: 3,
+                    cursor: (restoreBusy === row._id || purgeBusy) ? 'not-allowed' : 'pointer',
+                    fontWeight: 500,
+                    opacity: (restoreBusy === row._id || purgeBusy) ? 0.5 : 1,
+                  }}>
+                  Purge
+                </button>
               </div>
             ))}
             {data.length > 50 && (
@@ -764,6 +818,87 @@ function RecycleBinPane({ onOpenRecord }) {
                 Showing 50 of {data.length}. Filter the list above to narrow further.
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* Purge confirmation modal — typed-confirmation for an irreversible
+          action. Admin must type the record's display id verbatim. */}
+      {purgeRow && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+          zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+        onClick={closePurgeModal}>
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: C.card, borderRadius: 8, padding: 24,
+              minWidth: 420, maxWidth: 560,
+              boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
+              border: `1px solid ${C.border}`,
+            }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#933', marginBottom: 4 }}>
+              Permanently purge {purgeRow.id}
+            </div>
+            <div style={{ fontSize: 12.5, color: C.textPrimary, marginBottom: 12 }}>
+              <strong>{purgeRow.name}</strong>
+            </div>
+            <div style={{
+              fontSize: 12, color: C.textSecondary, marginBottom: 14, lineHeight: 1.45,
+              padding: 10, background: '#fef5f5', borderRadius: 4, border: '1px solid #fcc',
+            }}>
+              This action <strong>cannot be undone</strong>. The record will be physically
+              deleted from the database. A HARD_DELETE row with the complete record
+              snapshot is preserved in the audit log per the data-standards spec.
+              <br /><br />
+              If the record has dependent records that aren&apos;t soft-deleted, the
+              purge will fail with a referential-integrity error \u2014 purge or reassign
+              the dependents first.
+            </div>
+            <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 6 }}>
+              Type <strong style={{ fontFamily: 'JetBrains Mono, monospace' }}>{purgeRow.id}</strong> to confirm:
+            </div>
+            <input
+              type="text"
+              value={purgeTyped}
+              autoFocus
+              disabled={purgeBusy}
+              onChange={e => setPurgeTyped(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && purgeTyped.trim() === purgeRow.id) confirmPurge()
+                if (e.key === 'Escape') closePurgeModal()
+              }}
+              placeholder={purgeRow.id}
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                padding: '6px 10px', border: `1px solid ${C.border}`,
+                borderRadius: 4, fontSize: 12.5, fontFamily: 'JetBrains Mono, monospace',
+                marginBottom: 14, background: '#fff', color: C.textPrimary,
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={closePurgeModal} disabled={purgeBusy}
+                style={{
+                  fontSize: 12.5, padding: '6px 14px',
+                  background: 'transparent', color: C.textSecondary,
+                  border: `1px solid ${C.border}`, borderRadius: 4,
+                  cursor: purgeBusy ? 'not-allowed' : 'pointer',
+                }}>
+                Cancel
+              </button>
+              <button onClick={confirmPurge}
+                disabled={purgeBusy || purgeTyped.trim() !== purgeRow.id}
+                style={{
+                  fontSize: 12.5, padding: '6px 14px',
+                  background: (purgeTyped.trim() === purgeRow.id && !purgeBusy) ? '#933' : C.cardSecondary,
+                  color: (purgeTyped.trim() === purgeRow.id && !purgeBusy) ? '#fff' : C.textMuted,
+                  border: 'none', borderRadius: 4,
+                  cursor: (purgeTyped.trim() === purgeRow.id && !purgeBusy) ? 'pointer' : 'not-allowed',
+                  fontWeight: 500,
+                }}>
+                {purgeBusy ? 'Purging…' : 'Purge permanently'}
+              </button>
+            </div>
           </div>
         </div>
       )}
