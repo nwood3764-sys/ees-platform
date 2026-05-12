@@ -1057,3 +1057,56 @@ export async function fetchObjectChatEnabled() {
     updatedAt: r.updated_at ? new Date(r.updated_at).toLocaleDateString() : '—',
   }))
 }
+
+// ─── Recycle Bin (Phase 1) ────────────────────────────────────────────────
+//
+// fetchDeletedRecords: pulls soft-deleted rows from a single table via the
+//   fetch_deleted_records RPC. The RPC handles all the prefix-variance
+//   gymnastics (project_is_deleted vs ps_is_deleted vs is_deleted) and
+//   returns a normalized {id, name, deletion_reason, deleted_at, deleted_by}
+//   shape, so the front-end doesn't need a per-table mapping.
+//
+// restoreRecord: flips is_deleted back to false and clears the deletion
+//   audit trio. Audit log gets a RESTORE row automatically via the
+//   table's trigger. Returns the restored record's id.
+
+export async function fetchDeletedRecords(tableName, { limit = 200 } = {}) {
+  const { data, error } = await supabase.rpc('fetch_deleted_records', {
+    p_table: tableName,
+    p_limit: Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000),
+  })
+  if (error) throw error
+  // Resolve performer names in a single batched lookup
+  const rows = data || []
+  const userIds = Array.from(new Set(rows.map(r => r.deleted_by).filter(Boolean)))
+  let nameMap = {}
+  if (userIds.length > 0) {
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, first_name, last_name, user_email')
+      .in('id', userIds)
+    nameMap = (users || []).reduce((acc, u) => {
+      const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim()
+      acc[u.id] = full || u.user_email || u.id.slice(0, 8).toUpperCase()
+      return acc
+    }, {})
+  }
+  return rows.map(r => ({
+    id:             r.name || (r.id ? String(r.id).slice(0, 8).toUpperCase() : '—'),
+    _id:            r.id,
+    name:           r.name || '—',
+    deletionReason: r.deletion_reason || '—',
+    deletedAt:      r.deleted_at ? new Date(r.deleted_at).toISOString().replace('T', ' ').slice(0, 19) : '—',
+    deletedBy:      r.deleted_by ? (nameMap[r.deleted_by] || 'Unknown user') : '—',
+  }))
+}
+
+export async function restoreRecord(tableName, recordId) {
+  const { data, error } = await supabase.rpc('restore_record', {
+    p_table:     tableName,
+    p_record_id: recordId,
+  })
+  if (error) throw error
+  if (!data) throw new Error('restore_record returned no id')
+  return data
+}

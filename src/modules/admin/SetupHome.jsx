@@ -13,6 +13,7 @@ import {
   fetchEmailTemplates, fetchDocumentTemplates, fetchEnvelopes,
   fetchAutomationRules, fetchValidationRules,
   fetchPicklistValues, fetchAuditLog,
+  fetchDeletedRecords, restoreRecord,
   fetchAllPageLayouts,
   fetchWorkPlanTemplates,
   fetchWorkStepTemplates,
@@ -333,6 +334,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'skills':              return <NodePage title="Skills"                  table="skills"                       fetcher={fetchSkills}                       columns={SKILL_COLS} newLabel="Skill"                       onOpenRecord={onOpenRecord} />
     case 'work_type_skill_requirements': return <NodePage title="Work Type Skill Requirements" table="work_type_skill_requirements" fetcher={fetchWorkTypeSkillRequirements} columns={WTSR_COLS}  newLabel="Skill Requirement"           onOpenRecord={onOpenRecord} />
     case 'audit_log':         return <AuditLogPane />
+    case 'recycle_bin':       return <RecycleBinPane onOpenRecord={onOpenRecord} />
     case 'portals':                  return <NodePage title="Portals"                  table="portals"                  fetcher={fetchPortals}                 columns={PORTAL_COLS}     newLabel="Portal"                  onOpenRecord={onOpenRecord} />
     case 'portal_role_assignments':  return <NodePage title="Portal Role Assignments"  table="portal_role_assignments"  fetcher={fetchPortalRoleAssignments}   columns={PRA_COLS}        newLabel="Role Assignment"         onOpenRecord={onOpenRecord} />
     case 'object_chat_enabled':      return <NodePage title="Object Chat Settings"     table="object_chat_enabled"      fetcher={fetchObjectChatEnabled}       columns={OCE_COLS}        newLabel="Object Chat Setting"     onOpenRecord={onOpenRecord} />
@@ -538,6 +540,232 @@ function AuditLogPane() {
           systemViews={systemViews}
           defaultViewId="AV"
         />
+      )}
+    </div>
+  )
+}
+
+// ─── RecycleBinPane — view + restore soft-deleted records ───────────────
+//
+// Phase 1 of the recycle bin spec from anura-data-standards.md. Lets admins
+// pick a table from a curated dropdown, see what's been soft-deleted with
+// who/when/why, and restore individual rows. Permanent purge is deferred
+// to a Phase 2 with cascade-delete + audit-snapshot work.
+//
+// The dropdown is curated rather than driven by ees_table_metadata across
+// all 96 soft-deletable tables: child tables (report_filters,
+// dashboard_widgets, page_layout_widgets, etc.) are managed via their
+// parent's delete cascade and rarely need standalone restoration. Showing
+// them as standalone bin entries would be noisy without serving the real
+// admin workflow ("I deleted a Project — restore it").
+
+const RECYCLE_BIN_TABLES = [
+  // Primary business objects (most-likely restore targets)
+  { value: 'projects',                     label: 'Projects' },
+  { value: 'opportunities',                label: 'Opportunities' },
+  { value: 'work_orders',                  label: 'Work Orders' },
+  { value: 'properties',                   label: 'Properties' },
+  { value: 'buildings',                    label: 'Buildings' },
+  { value: 'units',                        label: 'Units' },
+  { value: 'accounts',                     label: 'Accounts' },
+  { value: 'contacts',                     label: 'Contacts' },
+  { value: 'assessments',                  label: 'Assessments' },
+  { value: 'incentive_applications',       label: 'Incentive Applications' },
+  { value: 'incentives',                   label: 'Incentives' },
+  { value: 'project_payment_requests',     label: 'Project Payment Requests' },
+  { value: 'payment_receipts',             label: 'Payment Receipts' },
+  { value: 'documents',                    label: 'Documents' },
+  // Configuration / builder objects
+  { value: 'work_types',                   label: 'Work Types' },
+  { value: 'work_plan_templates',          label: 'Work Plan Templates' },
+  { value: 'work_step_templates',          label: 'Work Step Templates' },
+  { value: 'programs',                     label: 'Programs' },
+  { value: 'price_books',                  label: 'Price Books' },
+  { value: 'products',                     label: 'Products' },
+  { value: 'document_templates',           label: 'Document Templates' },
+  { value: 'email_templates',              label: 'Email Templates' },
+  { value: 'project_report_templates',     label: 'Project Report Templates' },
+  // Reports module
+  { value: 'reports',                      label: 'Reports' },
+  { value: 'dashboards',                   label: 'Dashboards' },
+  { value: 'scheduled_reports',            label: 'Scheduled Reports' },
+  // Permission Builder
+  { value: 'permission_sets',              label: 'Permission Sets' },
+  // Field operations
+  { value: 'vehicles',                     label: 'Vehicles' },
+  { value: 'equipment',                    label: 'Equipment' },
+  { value: 'job_kits',                     label: 'Job Kits' },
+]
+
+const RECYCLE_BIN_COLS = [
+  { field: 'id',             label: 'Record',         type: 'text', sortable: true,  filterable: false },
+  { field: 'name',           label: 'Name',           type: 'text', sortable: true,  filterable: true  },
+  { field: 'deletedAt',      label: 'Deleted At',     type: 'text', sortable: true,  filterable: false },
+  { field: 'deletedBy',      label: 'Deleted By',     type: 'text', sortable: true,  filterable: true  },
+  { field: 'deletionReason', label: 'Reason',         type: 'text', sortable: false, filterable: true  },
+]
+
+function RecycleBinPane({ onOpenRecord }) {
+  const [selectedTable, setSelectedTable] = useState(RECYCLE_BIN_TABLES[0].value)
+  const [data,          setData]          = useState([])
+  const [loading,       setLoading]       = useState(true)
+  const [error,         setError]         = useState(null)
+  const [restoreBusy,   setRestoreBusy]   = useState(null) // record id currently being restored
+  const [restoreNotice, setRestoreNotice] = useState(null) // { type: 'ok'|'err', message }
+  const [reloadKey,     setReloadKey]     = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    fetchDeletedRecords(selectedTable, { limit: 500 })
+      .then(d => { if (!cancelled) setData(d) })
+      .catch(err => { if (!cancelled) setError(err) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [selectedTable, reloadKey])
+
+  const refresh = () => setReloadKey(k => k + 1)
+
+  // Restore a single row. Salesforce hides the deleted record's
+  // detail page; here we just call the RPC and refresh. If onOpenRecord
+  // is wired, offer to navigate to the restored record so the admin can
+  // verify it.
+  const handleRestore = async (row) => {
+    if (!row?._id || restoreBusy) return
+    const ok = window.confirm(
+      `Restore ${row.name || row._id} (${selectedTable})?\n\nThe record will reappear in list views and related-record sections.`
+    )
+    if (!ok) return
+    setRestoreBusy(row._id)
+    setRestoreNotice(null)
+    try {
+      await restoreRecord(selectedTable, row._id)
+      setRestoreNotice({ type: 'ok', message: `Restored ${row.name || row._id}` })
+      refresh()
+    } catch (err) {
+      setRestoreNotice({ type: 'err', message: `Restore failed: ${err.message || err}` })
+    } finally {
+      setRestoreBusy(null)
+    }
+  }
+
+  const systemViews = [{ id: 'AV', name: 'All', filters: [], sortField: 'deletedAt', sortDir: 'desc' }]
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 24px 12px', background: C.card, borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Recycle Bin</div>
+        <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
+          {loading
+            ? 'Loading…'
+            : `${data.length} deleted ${selectedTable.replace(/_/g, ' ')}`}
+        </div>
+
+        <div style={{
+          marginTop: 14, display: 'flex', alignItems: 'flex-end',
+          gap: 12, flexWrap: 'wrap',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 11, color: C.textMuted, fontWeight: 600 }}>Object</label>
+            <select value={selectedTable} onChange={e => setSelectedTable(e.target.value)}
+              style={{
+                fontSize: 12.5, padding: '5px 8px',
+                border: `1px solid ${C.border}`, borderRadius: 4,
+                background: '#fff', color: C.textPrimary, fontFamily: 'inherit',
+                minWidth: 260,
+              }}>
+              {RECYCLE_BIN_TABLES.map(t =>
+                <option key={t.value} value={t.value}>{t.label}</option>
+              )}
+            </select>
+          </div>
+          <button onClick={refresh}
+            style={{
+              fontSize: 12.5, padding: '6px 14px',
+              background: C.emerald, color: '#fff',
+              border: 'none', borderRadius: 4, cursor: 'pointer',
+              fontWeight: 500,
+            }}>
+            Refresh
+          </button>
+          {restoreNotice && (
+            <div style={{
+              fontSize: 12, padding: '5px 10px', borderRadius: 4,
+              background: restoreNotice.type === 'ok' ? '#e8f5ec' : '#fee',
+              color: restoreNotice.type === 'ok' ? '#1a7a4e' : '#933',
+              border: `1px solid ${restoreNotice.type === 'ok' ? '#9c9' : '#f99'}`,
+              alignSelf: 'center',
+            }}>
+              {restoreNotice.message}
+            </div>
+          )}
+        </div>
+      </div>
+      {loading && <LoadingState />}
+      {error && !loading && <ErrorState error={error} />}
+      {!loading && !error && data.length === 0 && (
+        <div style={{ padding: '32px 24px', color: C.textMuted, fontSize: 13 }}>
+          No deleted {selectedTable.replace(/_/g, ' ')} found.
+        </div>
+      )}
+      {!loading && !error && data.length > 0 && (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <ListView
+            data={data}
+            columns={RECYCLE_BIN_COLS}
+            systemViews={systemViews}
+            defaultViewId="AV"
+            onOpenRecord={onOpenRecord
+              ? row => row?._id && onOpenRecord({ table: selectedTable, id: row._id, name: row.name })
+              : undefined}
+          />
+          {/* Row actions — restoration is a separate button so the row click
+              still navigates to the (restored) record detail. Rendered as a
+              footer panel since ListView doesn't expose a per-row action API. */}
+          <div style={{
+            borderTop: `1px solid ${C.border}`, background: C.card,
+            padding: '10px 24px', display: 'flex', flexDirection: 'column', gap: 6,
+            maxHeight: 200, overflow: 'auto',
+          }}>
+            <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Quick Restore
+            </div>
+            {data.slice(0, 50).map(row => (
+              <div key={row._id} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '4px 0', fontSize: 12,
+              }}>
+                <span style={{
+                  fontFamily: 'JetBrains Mono, monospace', color: C.textMuted,
+                  minWidth: 100,
+                }}>{row.id}</span>
+                <span style={{ flex: 1, color: C.textPrimary }}>{row.name}</span>
+                <span style={{ color: C.textMuted, fontSize: 11 }}>
+                  {row.deletedAt} · {row.deletedBy}
+                </span>
+                <button
+                  onClick={() => handleRestore(row)}
+                  disabled={restoreBusy === row._id}
+                  style={{
+                    fontSize: 11.5, padding: '3px 10px',
+                    background: restoreBusy === row._id ? C.cardSecondary : 'transparent',
+                    color: restoreBusy === row._id ? C.textMuted : C.emerald,
+                    border: `1px solid ${restoreBusy === row._id ? C.border : C.emerald}`,
+                    borderRadius: 3, cursor: restoreBusy === row._id ? 'wait' : 'pointer',
+                    fontWeight: 500,
+                  }}>
+                  {restoreBusy === row._id ? '…' : 'Restore'}
+                </button>
+              </div>
+            ))}
+            {data.length > 50 && (
+              <div style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>
+                Showing 50 of {data.length}. Filter the list above to narrow further.
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
