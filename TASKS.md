@@ -11,6 +11,14 @@ the next one starts.
 - `[ ]` = not started
 - `[blocked]` = blocked on external dependency
 
+**Self-referential hashes:** A commit can't know its own hash in advance, so
+when a TASKS.md update lands in the same commit as the work it describes,
+the entry uses `(this commit)` as a placeholder. A follow-up chore commit
+runs `git log -1 --format=%H` and substitutes the real hash. Twice now this
+has become two commits per change — that's the cost, accept it. The
+alternative (separate chore commit *before* the work) leaves a dangling
+"in progress" entry, which is worse.
+
 ## Active backlog
 
 ### Reports module — dispatcher feature parity
@@ -48,6 +56,7 @@ the next one starts.
 
 ### Setup home
 - [x] Health-summary strip + clickable Most Visited cards (commit `fbb199f`)
+- [x] **`admin_health_summary` recycle-bin total undercounts** (this commit) — RPC was summing across 20 tables but the bin dropdown shows 29; aligned the UNION ALL to all 29. Smoke-tested: total = 14.
 
 ### Dispatcher (scheduled reports)
 - [x] CSV attachments (prior session)
@@ -68,6 +77,8 @@ the next one starts.
 
 ## Completed (chronological, most recent first)
 
+- `(this commit)` admin_health_summary recycle-bin total aligned with the 29-table dropdown
+- `6b4d0d2` chore: backfill TASKS.md commit hash for ea766b0
 - `ea766b0` Recycle Bin cross-table 'All tables' mode + `fetchDeletedRecordsAcrossTables` helper
 - `39632a3` chore: backfill TASKS.md commit hash for c4da7be
 - `c4da7be` audit triggers on folder + folder-share + help tables (9 tables) — closes the unaudited-tables scan; remaining gaps are skip-by-design
