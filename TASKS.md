@@ -22,12 +22,12 @@ the next one starts.
 
 ### Project Report Generator
 - [blocked] **PRG Phase 3 — documents FK columns** — `documents.project_report_template_id` + `documents.project_report_template_snapshot_id` FK columns reverted earlier. Needs Supabase CLI redeploy of the 86KB `generate-project-report` Edge Function (MCP can't redeploy at that size).
-- [ ] **PRG merge field substitution for `custom_text` sections** — PRTSN table exists; merge fields not yet wired in the Edge Function.
+- [x] **PRG merge field substitution for `custom_text` sections** — already implemented in `generate-project-report/index.ts` at `substituteMergeFields()`. `{{path.to.field}}` syntax resolved via `resolveMergeField` against the expanded RenderCtx. Unknown placeholders render inline as `[unknown: {{path}}]` for author visibility.
 
 ### Recycle Bin
 - [x] **Phase 1 — view + restore** (commit `293e435` + `4ff648a` for field-history)
 - [x] **Phase 2 — permanent purge with admin gate** (commit `718c37d`)
-- [ ] **Cascade rule per spec: parent restore restores children together** — currently restoring a parent doesn't auto-restore children that were soft-deleted via the parent's cascade. Spec calls for restore symmetry.
+- [ ] **Cascade rule per spec: parent restore restores children together** — investigated this session. Current schema has zero FK CASCADE on delete (everything is NO ACTION), and there's no batch-id tracking. Implementing properly needs either (a) walking parent-child topology in a SECURITY DEFINER function with depth limits, or (b) adding `deletion_batch_id` column on every soft-deletable table. Both are sizeable. Deferring until soft-delete cascade pain is real \u2014 today most soft-deletes are smoke-test artifacts; production usage may not need this.
 
 ### Audit + field history
 - [x] Audit triggers on Reports + Permission Builder tables (commit `f9fb5ab`)
@@ -36,6 +36,7 @@ the next one starts.
 - [x] Audit triggers on envelope family (commit `05a903b`)
 - [x] Field-history registrations for permission/scope/portal columns (commit `4ff648a`)
 - [x] Field-history registrations for PRT + envelope columns (commit `0f6e53c`)
+- [x] **Audit triggers on folder + folder-share + help tables** (commit pending — 9 tables: report_folders, dashboard_folders, four folder-share junctions, help_articles, help_article_anchors, object_chat_enabled). Final pass; every remaining unaudited table is skip-by-design (audit streams, snapshots, transient OAuth, unbuilt modules).
 - [x] AuditLogPane with object/record/action filters (commit `52b453d`)
 
 ### Save As / Clone parity
@@ -66,6 +67,8 @@ the next one starts.
 
 ## Completed (chronological, most recent first)
 
+- `pending` audit triggers on folder + folder-share + help tables (9 tables) — closes the unaudited-tables scan; remaining gaps are skip-by-design
+- `eb07ab6` add TASKS.md — live working task list
 - `0f6e53c` field-history tracking on PRT + envelope columns (27 columns / 6 tables)
 - `05a903b` audit triggers on envelope family (3 tables)
 - `fbb199f` Setup Home health strip + clickable Most Visited cards
