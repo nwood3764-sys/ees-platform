@@ -14,6 +14,7 @@ import {
   fetchAutomationRules, fetchValidationRules,
   fetchPicklistValues, fetchAuditLog,
   fetchDeletedRecords, restoreRecord, purgeRecord,
+  fetchAdminHealthSummary,
   fetchAllPageLayouts,
   fetchWorkPlanTemplates,
   fetchWorkStepTemplates,
@@ -158,7 +159,7 @@ export default function SetupHome({ onOpenObjectManager, onOpenRecord }) {
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {selectedId
           ? <NodeContent nodeId={selectedId} onOpenRecord={onOpenRecord} onOpenObjectManager={onOpenObjectManager} />
-          : <WelcomePane onOpenObjectManager={onOpenObjectManager} />}
+          : <WelcomePane onOpenObjectManager={onOpenObjectManager} onNavigate={handleSelect} />}
       </div>
     </div>
   )
@@ -259,17 +260,65 @@ function TreePane({ search, setSearch, filteredTree, expanded, setExpanded, sele
 
 // ─── Welcome pane (shown on initial load) ──────────────────────────────
 
-function WelcomePane({ onOpenObjectManager }) {
+function WelcomePane({ onOpenObjectManager, onNavigate }) {
   const quickLinks = [
     { label: 'Object Manager',    hint: 'Manage tables, fields, page layouts',        onClick: onOpenObjectManager,  highlight: true },
     { label: 'Users',             hint: 'Energy Efficiency Services user accounts',                        nodeId: 'users' },
     { label: 'Roles',             hint: 'Row-level and field-level security roles',   nodeId: 'roles' },
+    { label: 'Permission Sets',   hint: 'Additive grants on top of role baseline',    nodeId: 'permission_sets' },
     { label: 'Picklist Value Sets', hint: 'Central dictionary for every dropdown',    nodeId: 'picklist_values' },
     { label: 'Page Layouts',      hint: 'Record detail layouts',                      nodeId: 'page_layouts' },
-    { label: 'Flows',             hint: 'Automation rules that trigger on records',   nodeId: 'automation_rules' },
-    { label: 'Validation Rules',  hint: 'Pre-save rules that block with error msgs',  nodeId: 'validation_rules' },
     { label: 'Email Templates',   hint: 'Outbound email templates with merge fields', nodeId: 'email_templates' },
+    { label: 'Audit Log',         hint: 'Append-only history of system changes',      nodeId: 'audit_log' },
+    { label: 'Recycle Bin',       hint: 'View, restore, or purge deleted records',    nodeId: 'recycle_bin' },
   ]
+
+  // ─── System health summary ───────────────────────────────────────────
+  // Single RPC round-trip on mount. Used to populate the strip of stat
+  // cards above Most Visited. Errors fail silently — health strip is
+  // nice-to-have, not load-bearing for the welcome pane.
+  const [health,        setHealth]        = useState(null)
+  const [healthLoading, setHealthLoading] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    fetchAdminHealthSummary()
+      .then(h => { if (!cancelled) setHealth(h) })
+      .catch(() => { if (!cancelled) setHealth(null) })
+      .finally(() => { if (!cancelled) setHealthLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  const handleQuickLinkClick = (link) => {
+    if (link.onClick) link.onClick()
+    else if (link.nodeId && onNavigate) onNavigate(link.nodeId)
+  }
+
+  const fmtRelativeTime = (date) => {
+    if (!date) return 'never'
+    const diff = (new Date()).getTime() - date.getTime()
+    const minutes = Math.floor(diff / 60000)
+    if (minutes < 1)  return 'just now'
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24)   return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    if (days < 7)     return `${days}d ago`
+    return date.toLocaleDateString()
+  }
+
+  // Stat card styles
+  const statCard = (highlight) => ({
+    background: highlight ? '#fef5f5' : C.card,
+    border: `1px solid ${highlight ? '#fcc' : C.border}`,
+    borderRadius: 8, padding: '12px 14px',
+    minHeight: 68,
+  })
+  const statValue = (highlight) => ({
+    fontSize: 22, fontWeight: 700,
+    color: highlight ? '#933' : C.textPrimary,
+    lineHeight: 1, marginBottom: 4,
+  })
+  const statLabel = { fontSize: 11, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4 }
 
   return (
     <div style={{ padding: '28px 32px', overflow: 'auto', flex: 1 }}>
@@ -278,26 +327,91 @@ function WelcomePane({ onOpenObjectManager }) {
         System configuration, automation, security, and metadata. Manage everything Energy Efficiency Services Admin controls from here.
       </div>
 
+      {/* System health strip — six stat cards in a responsive grid */}
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, marginBottom: 10 }}>
+        System Health
+        {!healthLoading && health && (
+          <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 400, marginLeft: 8 }}>
+            as of {health.generatedAt.toLocaleTimeString()}
+          </span>
+        )}
+      </div>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10,
+        marginBottom: 28,
+      }}>
+        {healthLoading && (
+          <div style={{ ...statCard(false), gridColumn: '1 / -1', textAlign: 'center', color: C.textMuted, fontSize: 12 }}>
+            Loading health stats…
+          </div>
+        )}
+        {!healthLoading && health && (
+          <>
+            <div style={statCard(false)}>
+              <div style={statValue(false)}>{health.activeUsers}</div>
+              <div style={statLabel}>Active Users</div>
+            </div>
+            <div style={statCard(false)}>
+              <div style={statValue(false)}>{health.permissionSets}</div>
+              <div style={statLabel}>Active Permission Sets</div>
+            </div>
+            <div
+              style={{ ...statCard(false), cursor: 'pointer' }}
+              onClick={() => onNavigate && onNavigate('audit_log')}
+              title="Open Audit Log">
+              <div style={statValue(false)}>{health.audit24h}</div>
+              <div style={statLabel}>Audit Events (24h)</div>
+            </div>
+            <div
+              style={{ ...statCard(health.recycleBinTotal > 0), cursor: 'pointer' }}
+              onClick={() => onNavigate && onNavigate('recycle_bin')}
+              title="Open Recycle Bin">
+              <div style={statValue(health.recycleBinTotal > 0)}>{health.recycleBinTotal}</div>
+              <div style={statLabel}>In Recycle Bin</div>
+            </div>
+            <div style={statCard(false)}>
+              <div style={{ ...statValue(false), fontSize: 14, fontWeight: 600 }}>
+                {fmtRelativeTime(health.lastDispatch)}
+              </div>
+              <div style={statLabel}>Last Dispatch Run</div>
+            </div>
+            <div style={statCard(health.dispatchErrors24h > 0)}>
+              <div style={statValue(health.dispatchErrors24h > 0)}>{health.dispatchErrors24h}</div>
+              <div style={statLabel}>Dispatch Errors (24h)</div>
+            </div>
+          </>
+        )}
+        {!healthLoading && !health && (
+          <div style={{ ...statCard(false), gridColumn: '1 / -1', textAlign: 'center', color: C.textMuted, fontSize: 12 }}>
+            Health stats unavailable
+          </div>
+        )}
+      </div>
+
       <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, marginBottom: 10 }}>Most Visited</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-        {quickLinks.map(link => (
-          <div key={link.label}
-            onClick={link.onClick}
-            style={{
-              background: link.highlight ? '#f0f9f5' : C.card,
-              border: `1px solid ${link.highlight ? C.emerald : C.border}`,
-              borderRadius: 8, padding: '12px 14px',
-              cursor: link.onClick ? 'pointer' : 'default',
-            }}
-            onMouseEnter={e => { if (link.onClick) e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)' }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none' }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 600, color: link.highlight ? '#1a7a4e' : C.textPrimary, marginBottom: 3 }}>
-              {link.label}
+        {quickLinks.map(link => {
+          const clickable = !!(link.onClick || (link.nodeId && onNavigate))
+          return (
+            <div key={link.label}
+              onClick={clickable ? () => handleQuickLinkClick(link) : undefined}
+              style={{
+                background: link.highlight ? '#f0f9f5' : C.card,
+                border: `1px solid ${link.highlight ? C.emerald : C.border}`,
+                borderRadius: 8, padding: '12px 14px',
+                cursor: clickable ? 'pointer' : 'default',
+                transition: 'box-shadow 120ms',
+              }}
+              onMouseEnter={e => { if (clickable) e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)' }}
+              onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none' }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600, color: link.highlight ? '#1a7a4e' : C.textPrimary, marginBottom: 3 }}>
+                {link.label}
+              </div>
+              <div style={{ fontSize: 11.5, color: C.textMuted }}>{link.hint}</div>
             </div>
-            <div style={{ fontSize: 11.5, color: C.textMuted }}>{link.hint}</div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       <div style={{ marginTop: 28, fontSize: 12, color: C.textMuted }}>

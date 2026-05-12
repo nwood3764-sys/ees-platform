@@ -1137,3 +1137,21 @@ export async function purgeRecord(tableName, recordId) {
   if (!data) throw new Error('purge_record returned no id')
   return data
 }
+
+// fetchAdminHealthSummary — small dashboard aggregate for the Setup
+// welcome pane. Single RPC round-trip; returns a parsed object with
+// counts and the last dispatch timestamp.
+export async function fetchAdminHealthSummary() {
+  const { data, error } = await supabase.rpc('admin_health_summary')
+  if (error) throw error
+  if (!data) return null
+  return {
+    audit24h:          data.audit_24h ?? 0,
+    recycleBinTotal:   data.recycle_bin_total ?? 0,
+    activeUsers:       data.active_users ?? 0,
+    permissionSets:    data.permission_sets ?? 0,
+    lastDispatch:      data.last_dispatch ? new Date(data.last_dispatch) : null,
+    dispatchErrors24h: data.dispatch_errors_24h ?? 0,
+    generatedAt:       data.generated_at ? new Date(data.generated_at) : new Date(),
+  }
+}
