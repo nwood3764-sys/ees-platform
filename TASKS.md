@@ -36,7 +36,7 @@ the next one starts.
 - [x] Audit triggers on envelope family (commit `05a903b`)
 - [x] Field-history registrations for permission/scope/portal columns (commit `4ff648a`)
 - [x] Field-history registrations for PRT + envelope columns (commit `0f6e53c`)
-- [x] **Audit triggers on folder + folder-share + help tables** (commit pending — 9 tables: report_folders, dashboard_folders, four folder-share junctions, help_articles, help_article_anchors, object_chat_enabled). Final pass; every remaining unaudited table is skip-by-design (audit streams, snapshots, transient OAuth, unbuilt modules).
+- [x] **Audit triggers on folder + folder-share + help tables** (commit `c4da7be` — 9 tables: report_folders, dashboard_folders, four folder-share junctions, help_articles, help_article_anchors, object_chat_enabled). Final pass; every remaining unaudited table is skip-by-design (audit streams, snapshots, transient OAuth, unbuilt modules).
 - [x] AuditLogPane with object/record/action filters (commit `52b453d`)
 
 ### Save As / Clone parity
@@ -67,7 +67,7 @@ the next one starts.
 
 ## Completed (chronological, most recent first)
 
-- `pending` audit triggers on folder + folder-share + help tables (9 tables) — closes the unaudited-tables scan; remaining gaps are skip-by-design
+- `c4da7be` audit triggers on folder + folder-share + help tables (9 tables) — closes the unaudited-tables scan; remaining gaps are skip-by-design
 - `eb07ab6` add TASKS.md — live working task list
 - `0f6e53c` field-history tracking on PRT + envelope columns (27 columns / 6 tables)
 - `05a903b` audit triggers on envelope family (3 tables)
