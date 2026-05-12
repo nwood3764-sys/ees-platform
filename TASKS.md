@@ -23,7 +23,7 @@ alternative (separate chore commit *before* the work) leaves a dangling
 
 ### Reports module — dispatcher feature parity
 - [ ] **PDF attachments in scheduled-report dispatcher** — session-sized, needs page-layout work for rendering tabular/summary/matrix reports to PDF. Today the dispatcher throws explicitly when `sr_format='pdf'`.
-- [~] **Dispatcher runner up to feature parity with in-app runner** — multi-hop via_path done (commit `8034885`; dispatcher v6 deployed). Custom filter logic done (this commit; dispatcher v7 deployed). Still degrading or failing: cross-filters, calc fields, related-field filters/sorts. Each is its own sub-unit.
+- [~] **Dispatcher runner up to feature parity with in-app runner** — multi-hop via_path done (commit `8034885`; dispatcher v6 deployed). Custom filter logic done (commit `9f69b48`; dispatcher v7 deployed). Still degrading or failing: cross-filters, calc fields, related-field filters/sorts. Each is its own sub-unit.
 
 ### Permissions & RLS
 - [blocked] **Layered RLS sweep using `app_user_in_scope`** — deferred until first portal user invited. Today all authenticated internal users see all rows on business tables via `authenticated_write_sweep_all_business_tables`.
@@ -77,7 +77,7 @@ alternative (separate chore commit *before* the work) leaves a dangling
 
 ## Completed (chronological, most recent first)
 
-- `(this commit)` dispatcher v7 — custom filter logic support (slow-path: fetch then evaluate in-memory via ported applyFilterLogic + evalFilterOnRow)
+- `9f69b48` dispatcher v7 — custom filter logic support (slow-path: fetch then evaluate in-memory via ported applyFilterLogic + evalFilterOnRow)
 - `8034885` dispatcher v6 — multi-hop via_path support (recursive embed tree, chain-walk in CSV/XLSX builders, validateReport no longer warns on multi-hop)
 - `8af706f` admin_health_summary recycle-bin total aligned with the 29-table dropdown
 - `6b4d0d2` chore: backfill TASKS.md commit hash for ea766b0
