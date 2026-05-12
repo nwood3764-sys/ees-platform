@@ -381,13 +381,11 @@ async function validateReport(
     errors.push(`This report uses ${crossFilters.length} cross-filter${crossFilters.length === 1 ? '' : 's'} (with/without related records). The scheduled-report dispatcher's runner can't apply cross-filters yet. Either remove them, or run the report manually until the dispatcher supports them.`)
   }
 
-  // Filter logic — hard incompatible if it's anything other than the
-  // default 'all' or 'any'. Front-end stores parsed expressions like
-  // '1 AND (2 OR 3)' in rpt_filter_logic.
-  const logic = (report.rpt_filter_logic || '').toString().trim().toLowerCase()
-  if (logic && logic !== 'all' && logic !== 'any' && logic !== '') {
-    errors.push(`This report uses a custom filter logic expression ('${report.rpt_filter_logic}'). The dispatcher's runner only supports 'all' (default AND) and 'any' (default OR). Either simplify the logic or run manually.`)
-  }
+  // Filter logic — complex expressions ('1 AND (2 OR 3)', NOT, etc.) are
+  // now supported in the runner via applyFilterLogic (ported from the
+  // in-app runner). 'all' (AND) and 'any' (OR) still use the DB-level
+  // fast path; complex logic switches to fetch-then-filter. No error
+  // here anymore.
 
   // Calculated fields — hard incompatible. Calc columns would be
   // missing or always-empty in the CSV.
@@ -529,11 +527,33 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
     q = q.eq(softDeleteCol, false)
   }
 
-  for (const filt of (filterRows || [])) {
-    if (filt.rfilt_is_cross_filter) continue
-    if (filt.rfilt_field_via_path?.length) continue  // related-field filters not supported here
-    q = applyFilter(q, filt.rfilt_field_name, filt.rfilt_operator, filt.rfilt_value)
+  // Filter logic dispatch:
+  //   • 'all' / 'any' / '' → fast path: apply each filter at the DB layer
+  //     (PostgREST handles flat AND via stacked .eq()/etc. and flat OR via
+  //     .or(...)). This is what the dispatcher has always done.
+  //   • Anything else (e.g. '1 AND (2 OR 3)', '1 AND NOT 2') → slow path:
+  //     skip DB-level filters, fetch all rows (subject to soft-delete +
+  //     primary-object operator filters that are simple enough), then
+  //     evaluate filter logic in memory via applyFilterLogic.
+  //
+  // The slow path is bounded by the HARD_CEILING (50k rows) like every
+  // other dispatcher query, so worst case we fetch 50k rows and run a
+  // small RPN evaluator on each. That's fine at this scale.
+  const logicExpr = (r.rpt_filter_logic || "").toString().trim()
+  const logicLower = logicExpr.toLowerCase()
+  const isComplexLogic = logicExpr && logicLower !== "all" && logicLower !== "any"
+
+  if (!isComplexLogic) {
+    // Fast path: DB-level filters.
+    for (const filt of (filterRows || [])) {
+      if (filt.rfilt_is_cross_filter) continue
+      if (filt.rfilt_field_via_path?.length) continue  // related-field filters not supported here
+      q = applyFilter(q, filt.rfilt_field_name, filt.rfilt_operator, filt.rfilt_value)
+    }
   }
+  // Slow path: deliberately leave the query unfiltered apart from
+  // soft-delete. The filter rows themselves get evaluated below after
+  // pagination via applyFilterLogic.
 
   // Sort
   for (const s of (r.rpt_sort_config || [])) {
@@ -545,7 +565,7 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
   // Paginate up to 50k rows
   const PAGE_SIZE = 1000, HARD_CEILING = 50000
   let pageStart = 0
-  const rows: any[] = []
+  let rows: any[] = []
   while (pageStart < HARD_CEILING) {
     const pageEnd = Math.min(pageStart + PAGE_SIZE - 1, HARD_CEILING - 1)
     const requested = pageEnd - pageStart + 1
@@ -556,6 +576,15 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
     if (data.length < requested) break
     pageStart += PAGE_SIZE
     if (rows.length >= HARD_CEILING) break
+  }
+
+  // Slow-path filter logic — apply now in memory.
+  if (isComplexLogic && (filterRows || []).length > 0) {
+    try {
+      rows = applyFilterLogic(rows, filterRows || [], logicExpr)
+    } catch (err) {
+      throw new Error(`filter logic eval failed: ${(err as Error).message}`)
+    }
   }
 
   // Picklist label resolution for primary-object picklist columns
@@ -642,6 +671,146 @@ function applyFilter(q: any, field: string, op: string, value: any) {
     }
   }
   return q
+}
+
+// ─── Filter logic evaluator (slow-path) ─────────────────────────────────
+// Ported from src/data/reportsService.js: applyFilterLogic + evalFilterOnRow.
+// Same tokenizer (numbers, AND, OR, NOT, parens) → shunting-yard RPN →
+// per-row evaluation. Filter rows are indexed by rfilt_filter_index.
+//
+// Used when rpt_filter_logic is something other than 'all' / 'any' / ''.
+// Operates on rows already fetched from PostgREST; via_path traversal
+// happens inside evalFilterOnRow so multi-hop fields are handled the
+// same way they are in CSV/XLSX output.
+
+function applyFilterLogic(rows: any[], filters: any[], expression: string): any[] {
+  const tokens: any[] = []
+  let i = 0
+  while (i < expression.length) {
+    const c = expression[i]
+    if (/\s/.test(c)) { i++; continue }
+    if (/[0-9]/.test(c)) {
+      let j = i
+      while (j < expression.length && /[0-9]/.test(expression[j])) j++
+      tokens.push({ type: 'num', value: parseInt(expression.slice(i, j), 10) })
+      i = j; continue
+    }
+    if (c === '(') { tokens.push({ type: '(' }); i++; continue }
+    if (c === ')') { tokens.push({ type: ')' }); i++; continue }
+    if (/[a-zA-Z]/.test(c)) {
+      let j = i
+      while (j < expression.length && /[a-zA-Z]/.test(expression[j])) j++
+      const word = expression.slice(i, j).toUpperCase()
+      if (word === 'AND' || word === 'OR' || word === 'NOT') tokens.push({ type: word })
+      else throw new Error(`Unexpected token in filter logic: ${word}`)
+      i = j; continue
+    }
+    throw new Error(`Unexpected character in filter logic: ${c}`)
+  }
+
+  // Shunting-yard to RPN
+  const prec: Record<string, number> = { NOT: 3, AND: 2, OR: 1 }
+  const output: any[] = []
+  const stack: any[] = []
+  for (const t of tokens) {
+    if (t.type === 'num') output.push(t)
+    else if (t.type === '(') stack.push(t)
+    else if (t.type === ')') {
+      while (stack.length && stack[stack.length-1].type !== '(') output.push(stack.pop())
+      stack.pop()
+    } else {
+      while (stack.length) {
+        const top = stack[stack.length-1]
+        if (top.type === '(') break
+        if ((prec[top.type] || 0) >= (prec[t.type] || 0)) output.push(stack.pop())
+        else break
+      }
+      stack.push(t)
+    }
+  }
+  while (stack.length) output.push(stack.pop())
+
+  // Index filters by rfilt_filter_index for O(1) lookup
+  const filterByIdx = new Map<number, any>()
+  for (const f of filters) filterByIdx.set(f.rfilt_filter_index, f)
+
+  return rows.filter(row => {
+    const evalStack: boolean[] = []
+    for (const t of output) {
+      if (t.type === 'num') {
+        const f = filterByIdx.get(t.value)
+        if (!f) { evalStack.push(false); continue }
+        evalStack.push(evalFilterOnRow(f, row))
+      } else if (t.type === 'NOT') {
+        const a = evalStack.pop()
+        evalStack.push(!a)
+      } else if (t.type === 'AND') {
+        const b = evalStack.pop(), a = evalStack.pop()
+        evalStack.push(!!a && !!b)
+      } else if (t.type === 'OR') {
+        const b = evalStack.pop(), a = evalStack.pop()
+        evalStack.push(!!a || !!b)
+      }
+    }
+    return !!evalStack[0]
+  })
+}
+
+// Evaluate a single filter against a row. Mirrors evalFilterOnRow in the
+// in-app runner. via_path is supported at arbitrary depth (same chain
+// walk as buildCsv/buildXlsx).
+function evalFilterOnRow(f: any, row: any): boolean {
+  let v: any
+  if (f.rfilt_field_via_path && f.rfilt_field_via_path.length > 0) {
+    let cur: any = row
+    for (const fk of f.rfilt_field_via_path) {
+      if (cur == null) { cur = null; break }
+      cur = cur[fk]
+    }
+    v = cur ? cur[f.rfilt_field_name] : null
+  } else {
+    v = row[f.rfilt_field_name]
+  }
+  const target = f.rfilt_value
+  switch (f.rfilt_operator) {
+    case 'equals':           return v == target
+    case 'not_equals':       return v != target
+    case 'greater_than':     return parseFloat(v) > parseFloat(target)
+    case 'less_than':        return parseFloat(v) < parseFloat(target)
+    case 'greater_or_equal': return parseFloat(v) >= parseFloat(target)
+    case 'less_or_equal':    return parseFloat(v) <= parseFloat(target)
+    case 'in': {
+      const list = Array.isArray(target) ? target : String(target).split(',').map(s => s.trim())
+      return list.includes(v) || list.includes(String(v))
+    }
+    case 'not_in': {
+      const list = Array.isArray(target) ? target : String(target).split(',').map(s => s.trim())
+      return !(list.includes(v) || list.includes(String(v)))
+    }
+    case 'contains':    return v != null && String(v).toLowerCase().includes(String(target).toLowerCase())
+    case 'starts_with': return v != null && String(v).toLowerCase().startsWith(String(target).toLowerCase())
+    case 'ends_with':   return v != null && String(v).toLowerCase().endsWith(String(target).toLowerCase())
+    case 'is_null':     return v == null || v === ''
+    case 'is_not_null': return v != null && v !== ''
+    case 'in_last_n_days': {
+      const n = parseInt(target, 10)
+      if (!Number.isFinite(n) || !v) return false
+      const d = new Date(v)
+      if (isNaN(d.getTime())) return false
+      return (Date.now() - d.getTime()) <= n * 86400000
+    }
+    case 'this_month': {
+      if (!v) return false
+      const d = new Date(v); const now = new Date()
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+    }
+    case 'this_year': {
+      if (!v) return false
+      const d = new Date(v); const now = new Date()
+      return d.getFullYear() === now.getFullYear()
+    }
+  }
+  return true
 }
 
 // ─── CSV builder ──────────────────────────────────────────────────────────
