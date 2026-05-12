@@ -329,20 +329,18 @@ async function resolveRecipients(supabase: SupabaseClient, s: ScheduledReport): 
 // Supported features (full fidelity):
 //   • Direct fields and multi-hop via_path embeds (any depth)
 //   • Operator-based filters on the primary object
+//   • One-hop related-field filters (via PostgREST 'fk.field' syntax)
+//   • Multi-hop related-field filters (slow path: in-memory eval)
+//   • Custom filter logic expressions: '1 AND (2 OR 3)', NOT, parens
+//     (slow path: fetch then evaluate via shunting-yard RPN)
 //   • Picklist label resolution for primary-object fields
 //   • FK label auto-embeds for primary-object FK columns
-//   • Sort by primary-object columns
-//
-// Soft-degraded with warnings (run still succeeds, warnings recorded):
-//   • Related-field filters (rfilt_field_via_path set) — silently dropped,
-//     output may include rows that don't match
-//   • Sort by related-object column — silently dropped
+//   • Sort by primary-object columns and one-hop related-object columns
+//   • Multi-hop sorts (slow path: client-side comparator)
 //
 // Hard-incompatible (run fails with report_error before any query work):
 //   • Cross-filters (rfilt_is_cross_filter) — without pre-querying the
 //     cross-object set, the dispatcher would produce strictly wrong rows
-//   • Filter logic expressions other than 'all' or 'any' — without the
-//     parser, '1 AND (2 OR 3)' would silently AND everything
 //   • Calculated fields (report_calculated_fields) — without the formula
 //     evaluator, calc columns would be missing or wrong
 
@@ -406,21 +404,12 @@ async function validateReport(
     throw new Error(errors.join(' '))
   }
 
-  // Multi-hop via_path is no longer a degrade case — the runner builds
-  // recursive embeds. (Was a soft warning prior to multi-hop support.)
-
-  // Soft warnings — related-field filters
-  const relatedFilters = filterRows.filter(f => !f.rfilt_is_cross_filter && f.rfilt_field_via_path?.length)
-  if (relatedFilters.length > 0) {
-    warnings.push(`${relatedFilters.length} filter${relatedFilters.length === 1 ? '' : 's'} target related-object fields and were skipped. Output may include rows that wouldn't pass these filters in the live runner.`)
-  }
-
-  // Soft warnings — related-field sorts
-  const sortConfig = report.rpt_sort_config || []
-  const relatedSorts = sortConfig.filter((s: any) => s.via_path?.length)
-  if (relatedSorts.length > 0) {
-    warnings.push(`${relatedSorts.length} sort criteri${relatedSorts.length === 1 ? 'on' : 'a'} target related-object fields and were skipped — rows ordered by primary-object sorts only.`)
-  }
+  // Multi-hop via_path on columns is no longer a degrade case — the
+  // runner builds recursive embeds.
+  // Related-field filters/sorts are no longer degrade cases — one-hop
+  // versions go through PostgREST's 'fk.field' syntax in the fast path,
+  // and multi-hop versions trigger the slow-path fetch-then-filter.
+  // (Both were soft warnings prior to v8.)
 
   return warnings
 }
@@ -527,39 +516,59 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
     q = q.eq(softDeleteCol, false)
   }
 
-  // Filter logic dispatch:
-  //   • 'all' / 'any' / '' → fast path: apply each filter at the DB layer
-  //     (PostgREST handles flat AND via stacked .eq()/etc. and flat OR via
-  //     .or(...)). This is what the dispatcher has always done.
-  //   • Anything else (e.g. '1 AND (2 OR 3)', '1 AND NOT 2') → slow path:
-  //     skip DB-level filters, fetch all rows (subject to soft-delete +
-  //     primary-object operator filters that are simple enough), then
-  //     evaluate filter logic in memory via applyFilterLogic.
+  // Filter logic dispatch + related-field filter handling:
   //
-  // The slow path is bounded by the HARD_CEILING (50k rows) like every
-  // other dispatcher query, so worst case we fetch 50k rows and run a
-  // small RPN evaluator on each. That's fine at this scale.
+  // Fast path: simple logic ('all' / 'any' / '') AND all related-field
+  //   filters/sorts are at most one hop deep. We apply everything at
+  //   the DB layer. Related fields use PostgREST's embedded-table
+  //   column syntax: 'fk.field' where 'fk' is via_path[0]. PostgREST
+  //   walks the embed graph automatically. This is the same pattern
+  //   the in-app runner uses for the same case.
+  //
+  // Slow path: complex logic, OR any filter/sort uses a multi-hop
+  //   via_path (length > 1). We fetch all rows with no DB-level filters
+  //   (just soft-delete) and evaluate everything client-side via
+  //   applyFilterLogic / evalFilterOnRow / a sort comparator. Bounded
+  //   by HARD_CEILING (50k rows).
+  //
+  // Detection:
   const logicExpr = (r.rpt_filter_logic || "").toString().trim()
   const logicLower = logicExpr.toLowerCase()
   const isComplexLogic = logicExpr && logicLower !== "all" && logicLower !== "any"
 
-  if (!isComplexLogic) {
-    // Fast path: DB-level filters.
+  const sortConfig = (r.rpt_sort_config || []) as any[]
+  const hasMultiHopFilter = (filterRows || []).some((f: any) =>
+    f.rfilt_field_via_path && f.rfilt_field_via_path.length > 1
+  )
+  const hasMultiHopSort = sortConfig.some(s => s.via_path && s.via_path.length > 1)
+  const useSlowPath = isComplexLogic || hasMultiHopFilter || hasMultiHopSort
+
+  if (!useSlowPath) {
+    // Fast path: DB-level filters, including one-hop related-field
+    // filters via 'fk.field' syntax.
     for (const filt of (filterRows || [])) {
       if (filt.rfilt_is_cross_filter) continue
-      if (filt.rfilt_field_via_path?.length) continue  // related-field filters not supported here
-      q = applyFilter(q, filt.rfilt_field_name, filt.rfilt_operator, filt.rfilt_value)
+      const isRelated = filt.rfilt_field_via_path && filt.rfilt_field_via_path.length === 1
+      const col = isRelated
+        ? `${filt.rfilt_field_via_path[0]}.${filt.rfilt_field_name}`
+        : filt.rfilt_field_name
+      q = applyFilter(q, col, filt.rfilt_operator, filt.rfilt_value)
     }
   }
-  // Slow path: deliberately leave the query unfiltered apart from
-  // soft-delete. The filter rows themselves get evaluated below after
-  // pagination via applyFilterLogic.
+  // Slow path: leave the query unfiltered apart from soft-delete. The
+  // filter rows themselves get evaluated below after pagination.
 
-  // Sort
-  for (const s of (r.rpt_sort_config || [])) {
-    if (!s.name) continue
-    if (s.via_path?.length) continue
-    q = q.order(s.name, { ascending: s.direction !== "desc" })
+  // Sort — fast path handles one-hop related sorts via the same 'fk.field'
+  // syntax. Multi-hop sorts fall through to the slow path (client-side
+  // comparator below).
+  if (!useSlowPath) {
+    for (const s of sortConfig) {
+      if (!s.name) continue
+      const col = (s.via_path && s.via_path.length === 1)
+        ? `${s.via_path[0]}.${s.name}`
+        : s.name
+      q = q.order(col, { ascending: s.direction !== "desc" })
+    }
   }
 
   // Paginate up to 50k rows
@@ -578,12 +587,53 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
     if (rows.length >= HARD_CEILING) break
   }
 
-  // Slow-path filter logic — apply now in memory.
-  if (isComplexLogic && (filterRows || []).length > 0) {
-    try {
-      rows = applyFilterLogic(rows, filterRows || [], logicExpr)
-    } catch (err) {
-      throw new Error(`filter logic eval failed: ${(err as Error).message}`)
+  // Slow-path filter logic + related-field filter + sort — all in memory.
+  if (useSlowPath) {
+    // Filters: complex logic uses applyFilterLogic (which evaluates
+    // every filter row including related-field ones via evalFilterOnRow).
+    // Simple logic with multi-hop filters: just AND all the filter rows
+    // (or OR them if logic is 'any') using evalFilterOnRow directly.
+    if (isComplexLogic && (filterRows || []).length > 0) {
+      try {
+        rows = applyFilterLogic(rows, filterRows || [], logicExpr)
+      } catch (err) {
+        throw new Error(`filter logic eval failed: ${(err as Error).message}`)
+      }
+    } else if ((filterRows || []).length > 0) {
+      // Simple logic, but slow path because of multi-hop filter/sort.
+      // Evaluate each non-cross filter row in turn.
+      const isAny = logicLower === "any"
+      rows = rows.filter((row: any) => {
+        const results = (filterRows || [])
+          .filter((f: any) => !f.rfilt_is_cross_filter)
+          .map((f: any) => evalFilterOnRow(f, row))
+        if (results.length === 0) return true
+        return isAny ? results.some(Boolean) : results.every(Boolean)
+      })
+    }
+
+    // Sort — apply client-side after filtering. Multi-hop sorts walk
+    // the via_path chain; one-hop and direct sorts work too.
+    if (sortConfig.length > 0) {
+      rows.sort((a, b) => {
+        for (const sc of sortConfig) {
+          if (!sc.name) continue
+          let av: any = a, bv: any = b
+          for (const fk of (sc.via_path || [])) {
+            av = av ? av[fk] : null
+            bv = bv ? bv[fk] : null
+          }
+          av = av ? av[sc.name] : null
+          bv = bv ? bv[sc.name] : null
+          const desc = sc.direction === "desc"
+          if (av == null && bv == null) continue
+          if (av == null) return desc ? -1 : 1
+          if (bv == null) return desc ? 1 : -1
+          if (av < bv) return desc ? 1 : -1
+          if (av > bv) return desc ? -1 : 1
+        }
+        return 0
+      })
     }
   }
 
