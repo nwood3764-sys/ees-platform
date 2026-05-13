@@ -335,14 +335,21 @@ async function resolveRecipients(supabase: SupabaseClient, s: ScheduledReport): 
 //     (slow path: fetch then evaluate via shunting-yard RPN)
 //   • Cross-filters (rfilt_is_cross_filter) with 'with' / 'without'
 //     semantics and sub-filters on the cross object
+//   • Row-scope calculated fields (Salesforce-flavored formula evaluator;
+//     arithmetic, comparison, logical, parens, functions like IF / ROUND /
+//     CONCATENATE / DAYS_BETWEEN / etc.)
 //   • Picklist label resolution for primary-object fields
 //   • FK label auto-embeds for primary-object FK columns
 //   • Sort by primary-object columns and one-hop related-object columns
 //   • Multi-hop sorts (slow path: client-side comparator)
 //
-// Hard-incompatible (run fails with report_error before any query work):
-//   • Calculated fields (report_calculated_fields) — without the formula
-//     evaluator, calc columns would be missing or wrong
+// Soft-degraded with warnings:
+//   • Summary-scope calculated fields — dispatcher outputs flat tabular
+//     data; summary calc fields belong to summary/matrix layouts only
+//     and are silently skipped (a warning is recorded in srr_warnings).
+//
+// Hard-incompatible: none. The dispatcher is at full parity with the
+// in-app runner's tabular output.
 
 interface SimpleField {
   name: string
@@ -384,17 +391,27 @@ async function validateReport(
 
   // Calculated fields — hard incompatible. Calc columns would be
   // missing or always-empty in the CSV.
+  // Calculated fields were previously hard-incompatible. They're now
+  // supported via a recursive-descent formula evaluator ported from
+  // src/lib/reportFormulaEval.js. Row-scope calc fields appear as
+  // additional columns in the CSV/XLSX output, evaluated per row after
+  // FK label / picklist resolution. Summary-scope calc fields are
+  // skipped since the dispatcher only outputs flat tabular data.
+  // No error here anymore.
+  // (validateReport keeps the calc-field metadata load so we can warn
+  // about summary-scope fields being skipped if any are present.)
   const { data: calcRows, error: calcErr } = await supabase
     .from('report_calculated_fields')
-    .select('id')
+    .select('rcf_scope, rcf_label')
     .eq('rcf_report_id', report.id)
     .eq('is_deleted', false)
-    .limit(1)
   if (calcErr) {
-    // Don't fail the report on a metadata-load failure; just warn
     warnings.push(`Couldn't check for calculated fields: ${calcErr.message}`)
-  } else if ((calcRows || []).length > 0) {
-    errors.push(`This report has calculated fields. The dispatcher's runner can't evaluate formulas yet. Either remove them or run manually.`)
+  } else {
+    const summaryCalc = (calcRows || []).filter((c: any) => c.rcf_scope === 'summary')
+    if (summaryCalc.length > 0) {
+      warnings.push(`${summaryCalc.length} summary-scope calculated field${summaryCalc.length === 1 ? '' : 's'} skipped \u2014 the dispatcher outputs flat tabular data and summary calc fields belong to summary/matrix layouts only.`)
+    }
   }
 
   if (errors.length > 0) {
@@ -730,7 +747,7 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
   }
 
   // Annotate columns + resolve picklist values inline in rows
-  const columns = selectedFields.map(f => ({
+  const columns: any[] = selectedFields.map(f => ({
     name: f.name,
     label: f.label || f.name,
     via_path: f.via_path,
@@ -745,6 +762,62 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
       if (id && valueMap.has(id)) {
         row[f.name] = valueMap.get(id)
       }
+    }
+  }
+
+  // ── Calculated fields ─────────────────────────────────────────────────
+  //
+  // Fetch row-scope calc fields and evaluate per row. The evaluator is a
+  // port of src/lib/reportFormulaEval.js' evaluateRowExpression — same
+  // tokenizer, parser, and AST evaluator. Supports literals, arithmetic,
+  // comparison, logical ops, parens, and a Salesforce-flavored function
+  // library (IF, ISNULL, ABS, ROUND, MIN/MAX, LEN, UPPER, LOWER, TRIM,
+  // CONCATENATE, TEXT, YEAR/MONTH/DAY, DAYS_BETWEEN, TODAY, NOW).
+  //
+  // Summary-scope calc fields are deliberately skipped — the dispatcher
+  // outputs flat tabular data, not grouped summaries. Summary calc
+  // fields belong to summary/matrix layouts. A warning is emitted in
+  // validateReport if any are present.
+  //
+  // The flat row context for each evaluation is the row itself (with
+  // picklist labels already substituted). Field names in expressions
+  // match the underlying column name (e.g. 'project_amount' not the
+  // human label).
+  const { data: calcFieldsRaw } = await supabase
+    .from("report_calculated_fields")
+    .select("rcf_label, rcf_scope, rcf_expression, rcf_data_type, rcf_display_order")
+    .eq("rcf_report_id", r.id)
+    .eq("is_deleted", false)
+    .eq("rcf_scope", "row")
+    .order("rcf_display_order")
+  const rowCalcFields = calcFieldsRaw || []
+  for (const cf of rowCalcFields) {
+    const colKey = `_calc_${cf.rcf_label || "calc"}_${cf.rcf_display_order || 0}`
+    columns.push({
+      name:  colKey,
+      label: cf.rcf_label || "(calc)",
+      via_path: null,
+      _is_calc: true,
+      _data_type: cf.rcf_data_type,
+    })
+    // Build a flat row context for each row and evaluate.
+    for (const row of rows) {
+      // The expression sees primary-object fields by their original
+      // column name. Picklist substitution has already replaced FK ids
+      // with labels in row[col.name], which matches what the in-app
+      // runner does (it builds resolvedRow from getRowValue).
+      const ctxRow: any = {}
+      for (const sf of selectedFields) {
+        if (sf.via_path && sf.via_path.length > 0) {
+          let cur: any = row
+          for (const fk of sf.via_path) { if (cur == null) break; cur = cur[fk] }
+          ctxRow[sf.name] = cur ? cur[sf.name] : null
+        } else {
+          ctxRow[sf.name] = row[sf.name]
+        }
+      }
+      const v = evaluateRowExpression(cf.rcf_expression, ctxRow)
+      row[colKey] = v
     }
   }
 
@@ -930,6 +1003,288 @@ function evalFilterOnRow(f: any, row: any): boolean {
     }
   }
   return true
+}
+
+// ─── Calculated-field formula evaluator ─────────────────────────────────
+//
+// Port of src/lib/reportFormulaEval.js' evaluateRowExpression. Same
+// recursive-descent parser, same AST evaluator, same function library.
+// No eval(), no Function constructor. Pure parse-and-walk.
+//
+// Supports a Salesforce-flavored subset:
+//   Literals:    numbers, strings (single or double quoted), true/false/null
+//   Identifiers: field names (resolved via row context)
+//   Arithmetic:  + - * / %
+//   Comparison:  == != = <> < > <= >=
+//   Logical:     AND OR NOT, also && || !
+//   Grouping:    ( )
+//   Functions:   TODAY, NOW, IF, ISNULL, ABS, ROUND, MIN, MAX, LEN,
+//                UPPER, LOWER, TRIM, CONCATENATE, TEXT, YEAR, MONTH,
+//                DAY, DAYS_BETWEEN
+
+const CALC_TOK = {
+  NUMBER: "number", STRING: "string", IDENT: "ident", BOOL: "bool", NULL: "null",
+  PLUS: "+", MINUS: "-", STAR: "*", SLASH: "/", PERCENT: "%",
+  LPAREN: "(", RPAREN: ")", COMMA: ",",
+  EQ: "==", NEQ: "!=", LT: "<", GT: ">", LTE: "<=", GTE: ">=",
+  AND: "AND", OR: "OR", NOT: "NOT", EOF: "eof",
+} as const
+
+function calcTokenize(input: string): any[] {
+  const tokens: any[] = []
+  let i = 0
+  while (i < input.length) {
+    const c = input[i]
+    if (/\s/.test(c)) { i++; continue }
+    if (/[0-9]/.test(c) || (c === "." && /[0-9]/.test(input[i+1] || ""))) {
+      let j = i
+      while (j < input.length && /[0-9.]/.test(input[j])) j++
+      tokens.push({ type: CALC_TOK.NUMBER, value: parseFloat(input.slice(i, j)) })
+      i = j; continue
+    }
+    if (c === '"' || c === "'") {
+      const quote = c; let j = i + 1; let s = ""
+      while (j < input.length && input[j] !== quote) {
+        if (input[j] === "\\" && j+1 < input.length) { s += input[j+1]; j += 2 }
+        else { s += input[j]; j++ }
+      }
+      tokens.push({ type: CALC_TOK.STRING, value: s })
+      i = j + 1; continue
+    }
+    if (/[a-zA-Z_]/.test(c)) {
+      let j = i
+      while (j < input.length && /[a-zA-Z0-9_]/.test(input[j])) j++
+      const word = input.slice(i, j); const upper = word.toUpperCase()
+      if (upper === "AND")   tokens.push({ type: CALC_TOK.AND })
+      else if (upper === "OR")  tokens.push({ type: CALC_TOK.OR })
+      else if (upper === "NOT") tokens.push({ type: CALC_TOK.NOT })
+      else if (upper === "TRUE")  tokens.push({ type: CALC_TOK.BOOL, value: true })
+      else if (upper === "FALSE") tokens.push({ type: CALC_TOK.BOOL, value: false })
+      else if (upper === "NULL")  tokens.push({ type: CALC_TOK.NULL })
+      else tokens.push({ type: CALC_TOK.IDENT, value: word })
+      i = j; continue
+    }
+    if (c === "=" && input[i+1] === "=") { tokens.push({ type: CALC_TOK.EQ }); i += 2; continue }
+    if (c === "!" && input[i+1] === "=") { tokens.push({ type: CALC_TOK.NEQ }); i += 2; continue }
+    if (c === "<" && input[i+1] === ">") { tokens.push({ type: CALC_TOK.NEQ }); i += 2; continue }
+    if (c === "<" && input[i+1] === "=") { tokens.push({ type: CALC_TOK.LTE }); i += 2; continue }
+    if (c === ">" && input[i+1] === "=") { tokens.push({ type: CALC_TOK.GTE }); i += 2; continue }
+    if (c === "&" && input[i+1] === "&") { tokens.push({ type: CALC_TOK.AND }); i += 2; continue }
+    if (c === "|" && input[i+1] === "|") { tokens.push({ type: CALC_TOK.OR }); i += 2; continue }
+    switch (c) {
+      case "+": tokens.push({ type: CALC_TOK.PLUS });    i++; continue
+      case "-": tokens.push({ type: CALC_TOK.MINUS });   i++; continue
+      case "*": tokens.push({ type: CALC_TOK.STAR });    i++; continue
+      case "/": tokens.push({ type: CALC_TOK.SLASH });   i++; continue
+      case "%": tokens.push({ type: CALC_TOK.PERCENT }); i++; continue
+      case "(": tokens.push({ type: CALC_TOK.LPAREN });  i++; continue
+      case ")": tokens.push({ type: CALC_TOK.RPAREN });  i++; continue
+      case ",": tokens.push({ type: CALC_TOK.COMMA });   i++; continue
+      case "=": tokens.push({ type: CALC_TOK.EQ });      i++; continue
+      case "<": tokens.push({ type: CALC_TOK.LT });      i++; continue
+      case ">": tokens.push({ type: CALC_TOK.GT });      i++; continue
+      case "!": tokens.push({ type: CALC_TOK.NOT });     i++; continue
+    }
+    throw new Error(`Unexpected character: ${c}`)
+  }
+  tokens.push({ type: CALC_TOK.EOF })
+  return tokens
+}
+
+class CalcParser {
+  tokens: any[]; pos: number
+  constructor(tokens: any[]) { this.tokens = tokens; this.pos = 0 }
+  peek() { return this.tokens[this.pos] }
+  consume() { return this.tokens[this.pos++] }
+  check(t: string) { return this.peek().type === t }
+  match(t: string) { if (this.check(t)) { this.pos++; return true } return false }
+  parse() {
+    const expr = this.parseOr()
+    if (!this.check(CALC_TOK.EOF)) throw new Error("Unexpected trailing tokens")
+    return expr
+  }
+  parseOr(): any { let left = this.parseAnd(); while (this.match(CALC_TOK.OR)) left = { type: "or", left, right: this.parseAnd() }; return left }
+  parseAnd(): any { let left = this.parseNot(); while (this.match(CALC_TOK.AND)) left = { type: "and", left, right: this.parseNot() }; return left }
+  parseNot(): any { if (this.match(CALC_TOK.NOT)) return { type: "not", operand: this.parseNot() }; return this.parseCmp() }
+  parseCmp(): any {
+    const left = this.parseAddSub()
+    const cmpTypes: string[] = [CALC_TOK.EQ, CALC_TOK.NEQ, CALC_TOK.LT, CALC_TOK.GT, CALC_TOK.LTE, CALC_TOK.GTE]
+    if (cmpTypes.includes(this.peek().type)) {
+      const op = this.consume().type
+      return { type: "cmp", op, left, right: this.parseAddSub() }
+    }
+    return left
+  }
+  parseAddSub(): any {
+    let left = this.parseMulDiv()
+    while (this.check(CALC_TOK.PLUS) || this.check(CALC_TOK.MINUS)) {
+      const op = this.consume().type
+      left = { type: "binop", op, left, right: this.parseMulDiv() }
+    }
+    return left
+  }
+  parseMulDiv(): any {
+    let left = this.parseUnary()
+    while ([CALC_TOK.STAR, CALC_TOK.SLASH, CALC_TOK.PERCENT].includes(this.peek().type)) {
+      const op = this.consume().type
+      left = { type: "binop", op, left, right: this.parseUnary() }
+    }
+    return left
+  }
+  parseUnary(): any {
+    if (this.match(CALC_TOK.MINUS)) return { type: "neg", operand: this.parseUnary() }
+    return this.parsePrimary()
+  }
+  parsePrimary(): any {
+    const tk = this.peek()
+    if (tk.type === CALC_TOK.NUMBER) { this.consume(); return { type: "num", value: tk.value } }
+    if (tk.type === CALC_TOK.STRING) { this.consume(); return { type: "str", value: tk.value } }
+    if (tk.type === CALC_TOK.BOOL)   { this.consume(); return { type: "bool", value: tk.value } }
+    if (tk.type === CALC_TOK.NULL)   { this.consume(); return { type: "null" } }
+    if (tk.type === CALC_TOK.LPAREN) {
+      this.consume()
+      const inner = this.parseOr()
+      if (!this.match(CALC_TOK.RPAREN)) throw new Error("Expected closing )")
+      return inner
+    }
+    if (tk.type === CALC_TOK.IDENT) {
+      this.consume()
+      if (this.check(CALC_TOK.LPAREN)) {
+        this.consume()
+        const args: any[] = []
+        if (!this.check(CALC_TOK.RPAREN)) {
+          args.push(this.parseOr())
+          while (this.match(CALC_TOK.COMMA)) args.push(this.parseOr())
+        }
+        if (!this.match(CALC_TOK.RPAREN)) throw new Error("Expected closing ) after function args")
+        return { type: "call", name: tk.value.toUpperCase(), args }
+      }
+      return { type: "ident", name: tk.value }
+    }
+    throw new Error(`Unexpected token: ${tk.type}`)
+  }
+}
+
+function calcEval(node: any, ctx: any): any {
+  switch (node.type) {
+    case "num":  return node.value
+    case "str":  return node.value
+    case "bool": return node.value
+    case "null": return null
+    case "neg":  return -calcToNumber(calcEval(node.operand, ctx))
+    case "not":  return !calcToBool(calcEval(node.operand, ctx))
+    case "and":  return calcToBool(calcEval(node.left, ctx)) && calcToBool(calcEval(node.right, ctx))
+    case "or":   return calcToBool(calcEval(node.left, ctx)) || calcToBool(calcEval(node.right, ctx))
+    case "binop": {
+      const a = calcEval(node.left, ctx)
+      const b = calcEval(node.right, ctx)
+      switch (node.op) {
+        case CALC_TOK.PLUS:    return (typeof a === "string" || typeof b === "string") ? String(a) + String(b) : calcToNumber(a) + calcToNumber(b)
+        case CALC_TOK.MINUS:   return calcToNumber(a) - calcToNumber(b)
+        case CALC_TOK.STAR:    return calcToNumber(a) * calcToNumber(b)
+        case CALC_TOK.SLASH:   { const d = calcToNumber(b); return d === 0 ? null : calcToNumber(a) / d }
+        case CALC_TOK.PERCENT: { const d = calcToNumber(b); return d === 0 ? null : calcToNumber(a) % d }
+      }
+      return null
+    }
+    case "cmp": {
+      const a = calcEval(node.left, ctx); const b = calcEval(node.right, ctx)
+      switch (node.op) {
+        case CALC_TOK.EQ:  return a == b
+        case CALC_TOK.NEQ: return a != b
+        case CALC_TOK.LT:  return calcToComparable(a) < calcToComparable(b)
+        case CALC_TOK.GT:  return calcToComparable(a) > calcToComparable(b)
+        case CALC_TOK.LTE: return calcToComparable(a) <= calcToComparable(b)
+        case CALC_TOK.GTE: return calcToComparable(a) >= calcToComparable(b)
+      }
+      return null
+    }
+    case "ident": {
+      const name = node.name
+      if (ctx.row && Object.prototype.hasOwnProperty.call(ctx.row, name)) return ctx.row[name]
+      return null
+    }
+    case "call": {
+      const args = node.args.map((a: any) => calcEval(a, ctx))
+      return calcCallFunction(node.name, args)
+    }
+  }
+  return null
+}
+
+function calcCallFunction(name: string, args: any[]): any {
+  switch (name) {
+    case "TODAY": return new Date(new Date().toISOString().slice(0, 10))
+    case "NOW":   return new Date()
+    case "IF":    return calcToBool(args[0]) ? args[1] : args[2]
+    case "ISNULL": return args[0] == null
+    case "ABS":   return Math.abs(calcToNumber(args[0]))
+    case "ROUND": {
+      const digits = calcToNumber(args[1] ?? 0)
+      const f = Math.pow(10, digits)
+      return Math.round(calcToNumber(args[0]) * f) / f
+    }
+    case "MIN": return args.length === 0 ? null : Math.min(...args.map(calcToNumber))
+    case "MAX": return args.length === 0 ? null : Math.max(...args.map(calcToNumber))
+    case "LEN":   return String(args[0] ?? "").length
+    case "UPPER": return String(args[0] ?? "").toUpperCase()
+    case "LOWER": return String(args[0] ?? "").toLowerCase()
+    case "TRIM":  return String(args[0] ?? "").trim()
+    case "CONCATENATE": return args.map(a => a == null ? "" : String(a)).join("")
+    case "TEXT":  return args[0] == null ? "" : String(args[0])
+    case "YEAR":  { const d = calcToDate(args[0]); return d ? d.getFullYear() : null }
+    case "MONTH": { const d = calcToDate(args[0]); return d ? d.getMonth() + 1 : null }
+    case "DAY":   { const d = calcToDate(args[0]); return d ? d.getDate() : null }
+    case "DAYS_BETWEEN": {
+      const a = calcToDate(args[0]); const b = calcToDate(args[1])
+      if (!a || !b) return null
+      return Math.floor((a.getTime() - b.getTime()) / 86400000)
+    }
+  }
+  throw new Error(`Unknown function: ${name}`)
+}
+
+function calcToNumber(v: any): number {
+  if (v == null || v === "") return 0
+  if (typeof v === "number") return v
+  if (typeof v === "boolean") return v ? 1 : 0
+  if (v instanceof Date) return v.getTime()
+  const n = parseFloat(v)
+  return Number.isFinite(n) ? n : 0
+}
+function calcToBool(v: any): boolean {
+  if (v == null) return false
+  if (typeof v === "boolean") return v
+  if (typeof v === "number") return v !== 0
+  if (typeof v === "string") return v.length > 0 && v.toLowerCase() !== "false"
+  return !!v
+}
+function calcToComparable(v: any): any {
+  if (v instanceof Date) return v.getTime()
+  if (typeof v === "string") {
+    const d = new Date(v)
+    if (!isNaN(d.getTime()) && /^\d{4}-\d{2}-\d{2}/.test(v)) return d.getTime()
+  }
+  return v
+}
+function calcToDate(v: any): Date | null {
+  if (v == null) return null
+  if (v instanceof Date) return v
+  const d = new Date(v)
+  return isNaN(d.getTime()) ? null : d
+}
+
+// Public entry point. Tokenize, parse, walk. Returns null on any error
+// (logged for the schedule-run audit).
+function evaluateRowExpression(expression: string, row: any): any {
+  try {
+    const tokens = calcTokenize(expression)
+    const ast = new CalcParser(tokens).parse()
+    return calcEval(ast, { row })
+  } catch (err) {
+    console.warn(`Calc-field eval failed for "${expression}":`, (err as Error).message)
+    return null
+  }
 }
 
 // ─── CSV builder ──────────────────────────────────────────────────────────

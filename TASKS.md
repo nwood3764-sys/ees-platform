@@ -23,7 +23,7 @@ alternative (separate chore commit *before* the work) leaves a dangling
 
 ### Reports module — dispatcher feature parity
 - [ ] **PDF attachments in scheduled-report dispatcher** — session-sized, needs page-layout work for rendering tabular/summary/matrix reports to PDF. Today the dispatcher throws explicitly when `sr_format='pdf'`.
-- [~] **Dispatcher runner up to feature parity with in-app runner** — multi-hop via_path done (commit `8034885`; dispatcher v6 deployed). Custom filter logic done (commit `9f69b48`; dispatcher v7 deployed). Related-field filters/sorts done (commit `6857310`; dispatcher v8 deployed). Cross-filters done (commit `05f582f`; dispatcher v9 deployed — pre-query each cross-filter to a Set<uuid>, then `.has(row.id)` for 'with' / `!has` for 'without'). Only calc fields remain hard-incompatible.
+- [~] **Dispatcher runner up to feature parity with in-app runner** — multi-hop via_path done (commit `8034885`; dispatcher v6 deployed). Custom filter logic done (commit `9f69b48`; dispatcher v7 deployed). Related-field filters/sorts done (commit `6857310`; dispatcher v8 deployed). Cross-filters done (commit `05f582f`; dispatcher v9 deployed). Calculated fields done (this commit; dispatcher v10 deployed — row-scope only, summary calc fields skipped with a warning since the dispatcher only outputs flat tabular data). **PARENT TASK CLOSED on next commit.** Full parity achieved with the in-app runner's tabular path.
 
 ### Permissions & RLS
 - [blocked] **Layered RLS sweep using `app_user_in_scope`** — deferred until first portal user invited. Today all authenticated internal users see all rows on business tables via `authenticated_write_sweep_all_business_tables`.
@@ -77,6 +77,8 @@ alternative (separate chore commit *before* the work) leaves a dangling
 
 ## Completed (chronological, most recent first)
 
+- `(this commit)` dispatcher v10 — row-scope calculated field support (full port of `evaluateRowExpression` from `src/lib/reportFormulaEval.js`: tokenizer + recursive-descent parser + AST evaluator + Salesforce-flavored function library). Closes the entire "Dispatcher runner feature parity with in-app runner" backlog item.
+- `542bc82` chore: backfill TASKS.md commit hash for 05f582f
 - `05f582f` dispatcher v9 — cross-filter support (pre-query Set<uuid> via discover-link-FK + sub-filters; with/without filter on primary rows)
 - `11151ab` chore: backfill TASKS.md commit hash for 6857310
 - `6857310` dispatcher v8 — related-field filters/sorts support (one-hop via PostgREST `fk.field` syntax in fast path; multi-hop via slow-path fetch-then-filter + client-side comparator)
