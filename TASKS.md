@@ -22,7 +22,7 @@ alternative (separate chore commit *before* the work) leaves a dangling
 ## Active backlog
 
 ### Reports module — dispatcher feature parity
-- [ ] **PDF attachments in scheduled-report dispatcher** — session-sized, needs page-layout work for rendering tabular/summary/matrix reports to PDF. Today the dispatcher throws explicitly when `sr_format='pdf'`.
+- [x] **PDF attachments in scheduled-report dispatcher** (this commit, dispatcher v11 sha `fe063d8...`) — implemented: pdf-lib via esm.sh, three layout renderers respecting `rpt_format` (tabular | summary | matrix), letter landscape, auto-pagination with header repeat on tabular, recursive group tree with indented headers + subtotals + grand total on summary, multi-level column-axis header band with cell-spanning width math + "+N more columns" truncation on matrix, page numbers stamped on every page. `runReportSimple` extended to return `format`, `groupings`, `columnGroupings`, `measure`, `primaryObject`. `buildAttachment` refactored to take the full `RunResult` instead of `(rows, columns, name, format)`. Soft-degraded: summary-scope calc fields still skipped (same as CSV/XLSX; validateReport already warns). **Deploy:** MCP `deploy_edge_function` accepted the payload after comment-stripping (97.7KB local → 73KB stripped; PRG's 86KB ceiling memory was wrong/conservative). Smoke-tested locally with 5 fixtures (multi-page tabular w/ header repeat, two-level summary w/ subtotals + grand total, matrix pivot, empty result, 25-column wide tabular) — all round-trip through pdf-lib cleanly, magic bytes valid, layouts visually verified via pdftoppm rasterization. **Repo push pending** — sandbox has no GitHub credentials; this commit exists locally only. Production already has the code.
 - [x] **Dispatcher runner up to feature parity with in-app runner** (commits `8034885` v6 multi-hop via_path, `9f69b48` v7 custom filter logic, `6857310` v8 related-field filters/sorts, `05f582f` v9 cross-filters, `8c47b67` v10 row-scope calc fields). Five sub-units, all delivered. The dispatcher's `runReportSimple` now handles everything the in-app runner does on its tabular output path: multi-hop FK embeds, simple + complex filter logic, related-field filters/sorts at one hop (fast path) or multi-hop (slow path), cross-filters with sub-filters, and row-scope calculated fields with a full Salesforce-flavored formula evaluator. Only summary-scope calc fields are soft-degraded (skipped with a warning, since the dispatcher only outputs flat tabular data; summary calc fields belong to summary/matrix layouts).
 
 ### Permissions & RLS
@@ -62,7 +62,7 @@ alternative (separate chore commit *before* the work) leaves a dangling
 - [x] CSV attachments (prior session)
 - [x] XLSX attachments via SheetJS (commit `4b9cb5b`)
 - [x] `validateReport()` fail-loud + soft-warning paths (prior session)
-- [ ] PDF attachments (see "Reports module — dispatcher feature parity" above)
+- [x] PDF attachments (this commit, dispatcher v11 — see "Reports module — dispatcher feature parity" above)
 
 ## Major unbuilt (each is a multi-session commitment)
 

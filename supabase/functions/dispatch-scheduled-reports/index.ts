@@ -164,16 +164,13 @@ async function dispatchOne(
   }
 
   // ── Run the report ────────────────────────────────────────────────
-  let rows: any[]
-  let columns: { name: string, label: string, via_path?: string[]|null }[]
+  let runResult: RunResult
   let reportName = s.sr_name
   let warnings: string[] = []
   try {
-    const r = await runReportSimple(supabase, s.sr_report_id)
-    rows = r.rows
-    columns = r.columns
-    reportName = r.name || s.sr_name
-    warnings = r.warnings || []
+    runResult = await runReportSimple(supabase, s.sr_report_id)
+    reportName = runResult.name || s.sr_name
+    warnings = runResult.warnings || []
   } catch (err) {
     const msg = (err as Error).message
     await updateRun(supabase, runId, {
@@ -185,17 +182,20 @@ async function dispatchOne(
     await advanceNextSend(supabase, s)
     return { schedule_id: s.id, status: "report_error", error: msg }
   }
+  const rows = runResult.rows
+  const columns = runResult.columns
 
   // ── Build attachment ──────────────────────────────────────────────
   // Dispatch on sr_format. CSV is text via TextEncoder; XLSX is binary
-  // via the SheetJS package (esm.sh). PDF is still deferred — it needs
-  // real page layout work and a separate session to do well.
+  // via the SheetJS package (esm.sh); PDF is binary via pdf-lib (also
+  // esm.sh). The PDF builder respects rpt_format (tabular | summary |
+  // matrix); CSV/XLSX always emit flat tabular data regardless.
   const requestedFormat = (s.sr_format || "csv").toLowerCase()
   let attBytes:  Uint8Array
   let attMime:   string
   let attExt:    string
   try {
-    const built = await buildAttachment(rows, columns, reportName, requestedFormat)
+    const built = await buildAttachment(runResult, reportName, requestedFormat)
     attBytes = built.bytes
     attMime  = built.mime
     attExt   = built.ext
@@ -359,11 +359,27 @@ interface SimpleField {
   type?: string
 }
 
+interface ReportGrouping {
+  field_name:     string
+  field_label:    string
+  field_via_path: string[] | null
+  sort_direction: string
+  show_subtotal:  boolean
+}
+
 interface RunResult {
   rows:     any[]
-  columns:  { name: string, label: string, via_path?: string[]|null }[]
+  columns:  { name: string, label: string, via_path?: string[]|null, _is_calc?: boolean, _data_type?: string }[]
   name:     string
   warnings: string[]
+  // Format-dependent fields. CSV/XLSX builders ignore these and render
+  // flat tabular data. The PDF builder dispatches on `format` to
+  // tabular | summary | matrix layouts.
+  format:           string                                 // 'tabular' | 'summary' | 'matrix'
+  groupings:        ReportGrouping[]                       // row-axis (summary + matrix)
+  columnGroupings:  { name: string, label?: string, via_path?: string[]|null, sort_direction?: string }[]  // column-axis (matrix only)
+  measure:          { type: string, field: string | null } // matrix cell measure
+  primaryObject:    string
 }
 
 // Inspect a report's definition + filter rows + calc fields. If any
@@ -821,7 +837,40 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
     }
   }
 
-  return { rows, columns, name: r.rpt_name, warnings }
+  // ── Groupings + column-axis ───────────────────────────────────────────
+  // Used by the PDF builder for summary/matrix layouts. CSV/XLSX
+  // builders ignore these. Same shape as the in-app runner's result
+  // (src/data/reportsService.js — see groupings/columnGroupings/measure).
+  const { data: grpRows } = await supabase
+    .from("report_groupings")
+    .select("rgr_field_name, rgr_field_label, rgr_field_via_path, rgr_sort_direction, rgr_show_subtotal, rgr_grouping_level")
+    .eq("rgr_report_id", r.id)
+    .eq("is_deleted", false)
+    .order("rgr_grouping_level")
+  const groupings: ReportGrouping[] = (grpRows || []).map((g: any) => ({
+    field_name:     g.rgr_field_name,
+    field_label:    g.rgr_field_label || g.rgr_field_name,
+    field_via_path: g.rgr_field_via_path,
+    sort_direction: g.rgr_sort_direction || "asc",
+    show_subtotal:  g.rgr_show_subtotal !== false,
+  }))
+  const columnGroupings = Array.isArray(r.rpt_column_groupings) ? r.rpt_column_groupings : []
+  const firstChart = Array.isArray(r.rpt_charts) ? r.rpt_charts[0] : null
+  const measure = (firstChart && firstChart.measure_type)
+    ? { type: firstChart.measure_type, field: firstChart.measure_field || null }
+    : { type: "count", field: null }
+
+  return {
+    rows,
+    columns,
+    name:            r.rpt_name,
+    warnings,
+    format:          (r.rpt_format || "tabular").toLowerCase(),
+    groupings,
+    columnGroupings,
+    measure,
+    primaryObject:   r.rpt_primary_object,
+  }
 }
 
 function applyFilter(q: any, field: string, op: string, value: any) {
@@ -1320,12 +1369,12 @@ function buildCsv(rows: any[], columns: any[]): string {
 // ─── Attachment dispatcher ────────────────────────────────────────────────
 // Single entry point for all output formats. Each format returns
 // { bytes, mime, ext }. The builder for the format is chosen at call time
-// and the package is dynamically imported so unused formats don't hit the
-// per-invocation cold-start of an esm.sh resolution.
+// and the heavy package (SheetJS for xlsx, pdf-lib for pdf) is dynamically
+// imported so unused formats don't hit the per-invocation cold-start of
+// an esm.sh resolution.
 
 async function buildAttachment(
-  rows: any[],
-  columns: any[],
+  result: RunResult,
   reportName: string,
   format: string,
 ): Promise<{ bytes: Uint8Array, mime: string, ext: string }> {
@@ -1333,7 +1382,7 @@ async function buildAttachment(
     case "csv":
     case "":
     case undefined as any: {
-      const csv = buildCsv(rows, columns)
+      const csv = buildCsv(result.rows, result.columns)
       return {
         bytes: new TextEncoder().encode(csv),
         mime:  "text/csv",
@@ -1341,7 +1390,7 @@ async function buildAttachment(
       }
     }
     case "xlsx": {
-      const bytes = await buildXlsx(rows, columns, reportName)
+      const bytes = await buildXlsx(result.rows, result.columns, reportName)
       return {
         bytes,
         mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1349,13 +1398,15 @@ async function buildAttachment(
       }
     }
     case "pdf": {
-      // PDF still deferred — needs page-layout work and a separate session
-      // to do well. Fail loudly here so the schedule's audit row gets a
-      // clear error message rather than a malformed file.
-      throw new Error("PDF format is not supported yet — please pick CSV or XLSX in the schedule editor.")
+      const bytes = await buildPdf(result, reportName)
+      return {
+        bytes,
+        mime: "application/pdf",
+        ext:  "pdf",
+      }
     }
     default:
-      throw new Error(`Unknown format '${format}' — please pick CSV or XLSX in the schedule editor.`)
+      throw new Error(`Unknown format '${format}' — please pick CSV, XLSX, or PDF in the schedule editor.`)
   }
 }
 
@@ -1431,6 +1482,766 @@ async function buildXlsx(rows: any[], columns: any[], reportName: string): Promi
   // in Deno's V8 build). Use "array" for portability.
   const out = XLSX.write(wb, { type: "array", bookType: "xlsx" })
   return new Uint8Array(out)
+}
+
+// ─── PDF builder ──────────────────────────────────────────────────────────
+// Renders the report as a PDF, respecting rpt_format:
+//   • tabular — flat header + body, header repeats on page break
+//   • summary — group tree with indented headers, subtotal per group, grand total
+//   • matrix  — pivot with multi-level column-axis headers + measure cells
+//
+// Letter landscape (792 × 612 pt). pdf-lib via esm.sh — same package as
+// generate-project-report. Dynamic import keeps CSV/XLSX cold-start
+// unchanged. Page numbers stamped after content layout in a second pass.
+//
+// Soft-degraded: summary-scope calculated fields are not evaluated (same
+// behavior as CSV/XLSX; warning already emitted by validateReport).
+
+const PDF_PAGE_W = 792
+const PDF_PAGE_H = 612
+const PDF_MARGIN = 40
+const PDF_TOP    = 56
+const PDF_BOT    = 44
+const PDF_CW     = PDF_PAGE_W - PDF_MARGIN * 2
+
+// Colors in pdf-lib rgb(0..1). Matches the in-app design palette.
+function rgb01(r: number, g: number, b: number) { return { r, g, b } }
+const PDF_C = {
+  textPrimary:   rgb01(13/255,  26/255,  46/255),
+  textSecondary: rgb01(74/255,  94/255, 122/255),
+  textMuted:     rgb01(143/255, 160/255, 184/255),
+  border:        rgb01(228/255, 233/255, 242/255),
+  borderDark:    rgb01(208/255, 216/255, 232/255),
+  emerald:       rgb01(62/255,  207/255, 142/255),
+  card:          rgb01(247/255, 249/255, 252/255),
+  cardAlt:       rgb01(240/255, 243/255, 248/255),
+  totalsBg:      rgb01(220/255, 228/255, 240/255),
+  white:         rgb01(1, 1, 1),
+}
+
+interface PdfCursor {
+  pdf: any
+  font: any
+  fontBold: any
+  pages: any[]
+  page: any
+  y: number
+  rgb: (r: number, g: number, b: number) => any
+}
+
+function newPdfPage(c: PdfCursor): any {
+  const p = c.pdf.addPage([PDF_PAGE_W, PDF_PAGE_H])
+  c.pages.push(p)
+  c.page = p
+  c.y = PDF_PAGE_H - PDF_TOP
+  return p
+}
+function pdfEnsure(c: PdfCursor, needed: number) {
+  if (c.y - needed < PDF_BOT) newPdfPage(c)
+}
+function pdfRgb(c: PdfCursor, color: {r:number,g:number,b:number}) {
+  return c.rgb(color.r, color.g, color.b)
+}
+
+function pdfWrap(text: string, font: any, size: number, maxW: number): string[] {
+  if (!text) return [""]
+  const out: string[] = []
+  for (const rawLine of String(text).split("\n")) {
+    if (!rawLine) { out.push(""); continue }
+    const words = rawLine.split(/\s+/)
+    let line = ""
+    for (const w of words) {
+      const trial = line ? line + " " + w : w
+      if (font.widthOfTextAtSize(trial, size) <= maxW) {
+        line = trial
+      } else {
+        if (line) out.push(line)
+        if (font.widthOfTextAtSize(w, size) > maxW) {
+          let chunk = ""
+          for (const ch of w) {
+            const t2 = chunk + ch
+            if (font.widthOfTextAtSize(t2, size) <= maxW) chunk = t2
+            else { out.push(chunk); chunk = ch }
+          }
+          line = chunk
+        } else line = w
+      }
+    }
+    out.push(line)
+  }
+  return out
+}
+
+// Truncate to a single line with an ellipsis if it overflows maxW.
+// Used inside table cells where rows must be uniform height.
+function pdfFit(text: string, font: any, size: number, maxW: number): string {
+  if (!text) return ""
+  const s = String(text)
+  if (font.widthOfTextAtSize(s, size) <= maxW) return s
+  const ell = "…"
+  let lo = 0, hi = s.length
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (font.widthOfTextAtSize(s.slice(0, mid) + ell, size) <= maxW) lo = mid
+    else hi = mid - 1
+  }
+  return s.slice(0, lo) + ell
+}
+
+function pdfDrawText(c: PdfCursor, text: string, opts: {
+  size?: number, color?: any, bold?: boolean, x?: number, maxW?: number, lh?: number
+} = {}) {
+  const size = opts.size ?? 10
+  const color = opts.color ?? pdfRgb(c, PDF_C.textPrimary)
+  const font = opts.bold ? c.fontBold : c.font
+  const x = opts.x ?? PDF_MARGIN
+  const maxW = opts.maxW ?? PDF_CW
+  const lh = opts.lh ?? size * 1.4
+  const lines = pdfWrap(text || "", font, size, maxW)
+  for (const line of lines) {
+    pdfEnsure(c, lh)
+    c.page.drawText(line, { x, y: c.y - size, size, font, color })
+    c.y -= lh
+  }
+}
+
+function pdfDrawRect(c: PdfCursor, x: number, y: number, w: number, h: number, color: any) {
+  c.page.drawRectangle({ x, y, width: w, height: h, color })
+}
+function pdfDrawLine(c: PdfCursor, x1: number, y1: number, x2: number, y2: number, color: any, thickness = 0.5) {
+  c.page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness, color })
+}
+
+// Format a cell value for PDF display. Mirrors src/modules/ReportRunner.jsx
+// formatCellValue: booleans → Yes/No, dates → locale, numbers → toLocaleString,
+// UUIDs → truncated. Returns a plain string (no React).
+function pdfFormatCell(v: any, type?: string): string {
+  if (v == null) return ""
+  if (typeof v === "object") return "[obj]"
+  if (type === "boolean" || type === "bool") return v ? "Yes" : "No"
+  if (type === "timestamp with time zone" || type === "timestamptz" || type === "timestamp") {
+    try { return new Date(v).toLocaleString() } catch { return String(v) }
+  }
+  if (type === "date") {
+    try { return new Date(v).toLocaleDateString() } catch { return String(v) }
+  }
+  if (typeof v === "number") return v.toLocaleString()
+  if (typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) {
+    return v.slice(0, 8) + "…"
+  }
+  return String(v)
+}
+
+// Walk via_path on a row to resolve a column's value. Mirrors the
+// buildCsv / buildXlsx walk pattern. Picklist substitution is already
+// applied to row[col.name] by runReportSimple for direct fields; for
+// via_path fields the embedded record's columns are uncooked, but the
+// label resolution is not the dispatcher's concern in v10.
+function pdfResolveCell(row: any, col: any): any {
+  if (col.via_path?.length) {
+    let cur: any = row
+    for (const fk of col.via_path) {
+      if (cur == null) break
+      cur = cur[fk]
+    }
+    return cur ? cur[col.name] : null
+  }
+  return row[col.name]
+}
+
+// Estimate per-column widths in points based on header label width and
+// up to 60 sample row widths, then scale to fit PDF_CW. Each column gets
+// a minimum width so very narrow columns are still labeled. Mirrors the
+// xlsx builder's heuristic (sample up to 100; cap at 50 chars), tuned
+// for PDF pt instead of Excel character units.
+function pdfEstimateColWidths(rows: any[], columns: any[], font: any, fontBold: any, headerSize: number, bodySize: number, totalW: number): number[] {
+  const minW = 40
+  const maxW = 220
+  const padding = 12
+  const raws: number[] = []
+  for (let i = 0; i < columns.length; i++) {
+    const c = columns[i]
+    let max = fontBold.widthOfTextAtSize(c.label || c.name || "", headerSize)
+    const sample = Math.min(60, rows.length)
+    for (let r = 0; r < sample; r++) {
+      const v = pdfFormatCell(pdfResolveCell(rows[r], c), c._data_type || c.type)
+      const w = font.widthOfTextAtSize(String(v), bodySize)
+      if (w > max) max = w
+    }
+    raws.push(Math.max(minW, Math.min(maxW, max + padding)))
+  }
+  // Scale to fit (or shrink if over)
+  const sum = raws.reduce((a, b) => a + b, 0)
+  if (sum <= totalW) return raws
+  const scale = totalW / sum
+  return raws.map(w => Math.max(minW, w * scale))
+}
+
+// ─── Tabular renderer ─────────────────────────────────────────────────────
+
+function pdfRenderTabular(c: PdfCursor, result: RunResult) {
+  const { rows, columns } = result
+  if (columns.length === 0) {
+    pdfDrawText(c, "No fields selected. Edit the report to add fields.",
+      { color: pdfRgb(c, PDF_C.textMuted), size: 11 })
+    return
+  }
+  if (rows.length === 0) {
+    pdfDrawText(c, "No matching rows.", { color: pdfRgb(c, PDF_C.textMuted), size: 11 })
+    return
+  }
+
+  const headerSize = 9
+  const bodySize   = 9
+  const headerH    = 22
+  const rowH       = 18
+  const colWidths = pdfEstimateColWidths(rows, columns, c.font, c.fontBold, headerSize, bodySize, PDF_CW)
+
+  const drawHeader = () => {
+    pdfEnsure(c, headerH + rowH)
+    pdfDrawRect(c, PDF_MARGIN, c.y - headerH, PDF_CW, headerH, pdfRgb(c, PDF_C.card))
+    let x = PDF_MARGIN + 6
+    for (let i = 0; i < columns.length; i++) {
+      const label = pdfFit(columns[i].label || columns[i].name || "", c.fontBold, headerSize, colWidths[i] - 8)
+      c.page.drawText(label, {
+        x, y: c.y - headerH + 7, size: headerSize,
+        font: c.fontBold, color: pdfRgb(c, PDF_C.textSecondary),
+      })
+      x += colWidths[i]
+    }
+    c.y -= headerH
+    pdfDrawLine(c, PDF_MARGIN, c.y, PDF_PAGE_W - PDF_MARGIN, c.y, pdfRgb(c, PDF_C.borderDark), 0.6)
+  }
+
+  drawHeader()
+  for (let r = 0; r < rows.length; r++) {
+    if (c.y - rowH < PDF_BOT) { newPdfPage(c); drawHeader() }
+    const row = rows[r]
+    if (r % 2 === 1) {
+      pdfDrawRect(c, PDF_MARGIN, c.y - rowH, PDF_CW, rowH, pdfRgb(c, PDF_C.cardAlt))
+    }
+    let x = PDF_MARGIN + 6
+    for (let i = 0; i < columns.length; i++) {
+      const v = pdfFormatCell(pdfResolveCell(row, columns[i]), columns[i]._data_type || (columns[i] as any).type)
+      c.page.drawText(pdfFit(v, c.font, bodySize, colWidths[i] - 8), {
+        x, y: c.y - rowH + 5, size: bodySize,
+        font: c.font, color: pdfRgb(c, PDF_C.textPrimary),
+      })
+      x += colWidths[i]
+    }
+    c.y -= rowH
+    pdfDrawLine(c, PDF_MARGIN, c.y, PDF_PAGE_W - PDF_MARGIN, c.y, pdfRgb(c, PDF_C.border), 0.25)
+  }
+}
+
+// ─── Summary renderer ─────────────────────────────────────────────────────
+// Builds the group tree exactly like SummaryLayout in src/modules/ReportRunner.jsx:
+// recursive bucketing by each grouping field, sorted per grouping direction,
+// then walked to emit group headers, leaf rows under leaves, and subtotal
+// rows on the way back up.
+//
+// Summary-scope calculated fields are not evaluated here — same soft-degrade
+// as CSV/XLSX. validateReport already warned the operator if any are present.
+
+interface SummaryNode {
+  leafRows?: any[]
+  groupingLevel?: number
+  children?: { value: any, level: number, rows: any[], child: SummaryNode }[]
+}
+
+function pdfBuildSummaryTree(rows: any[], groupings: ReportGrouping[], level: number): SummaryNode {
+  if (level >= groupings.length) return { leafRows: rows }
+  const g = groupings[level]
+  const buckets = new Map<any, any[]>()
+  for (const row of rows) {
+    const fieldDef = { name: g.field_name, via_path: g.field_via_path }
+    const key = pdfResolveCell(row, fieldDef as any)
+    const k = key ?? "(blank)"
+    if (!buckets.has(k)) buckets.set(k, [])
+    buckets.get(k)!.push(row)
+  }
+  const dir = g.sort_direction === "desc" ? -1 : 1
+  const sorted = Array.from(buckets.entries()).sort((a, b) => {
+    if (a[0] === b[0]) return 0
+    return (a[0] < b[0] ? -1 : 1) * dir
+  })
+  return {
+    groupingLevel: level,
+    children: sorted.map(([key, rs]) => ({
+      value: key, level, rows: rs,
+      child: pdfBuildSummaryTree(rs, groupings, level + 1),
+    })),
+  }
+}
+
+function pdfRenderSummary(c: PdfCursor, result: RunResult) {
+  const { rows, columns, groupings } = result
+  if (groupings.length === 0) {
+    pdfDrawText(c, "Summary reports require at least one grouping. Edit the report to add groupings.",
+      { color: pdfRgb(c, PDF_C.textMuted), size: 11 })
+    return
+  }
+  if (rows.length === 0) {
+    pdfDrawText(c, "No matching rows.", { color: pdfRgb(c, PDF_C.textMuted), size: 11 })
+    return
+  }
+  if (columns.length === 0) {
+    pdfDrawText(c, "No fields selected. Edit the report to add fields.",
+      { color: pdfRgb(c, PDF_C.textMuted), size: 11 })
+    return
+  }
+
+  const headerSize = 9
+  const bodySize   = 9
+  const headerH    = 22
+  const rowH       = 18
+  const groupHdrH  = 22
+  const subtotalH  = 20
+  const indent     = 14
+  const colWidths = pdfEstimateColWidths(rows, columns, c.font, c.fontBold, headerSize, bodySize, PDF_CW)
+
+  const drawHeader = () => {
+    pdfEnsure(c, headerH + rowH)
+    pdfDrawRect(c, PDF_MARGIN, c.y - headerH, PDF_CW, headerH, pdfRgb(c, PDF_C.card))
+    let x = PDF_MARGIN + 6
+    for (let i = 0; i < columns.length; i++) {
+      const label = pdfFit(columns[i].label || columns[i].name || "", c.fontBold, headerSize, colWidths[i] - 8)
+      c.page.drawText(label, {
+        x, y: c.y - headerH + 7, size: headerSize,
+        font: c.fontBold, color: pdfRgb(c, PDF_C.textSecondary),
+      })
+      x += colWidths[i]
+    }
+    c.y -= headerH
+    pdfDrawLine(c, PDF_MARGIN, c.y, PDF_PAGE_W - PDF_MARGIN, c.y, pdfRgb(c, PDF_C.borderDark), 0.6)
+  }
+
+  drawHeader()
+
+  const walk = (node: SummaryNode, depth: number) => {
+    if (node.leafRows) {
+      for (let r = 0; r < node.leafRows.length; r++) {
+        if (c.y - rowH < PDF_BOT) { newPdfPage(c); drawHeader() }
+        const row = node.leafRows[r]
+        let xx = PDF_MARGIN + 6
+        for (let i = 0; i < columns.length; i++) {
+          const v = pdfFormatCell(pdfResolveCell(row, columns[i]), columns[i]._data_type || (columns[i] as any).type)
+          const indentX = (i === 0) ? depth * indent : 0
+          c.page.drawText(pdfFit(v, c.font, bodySize, colWidths[i] - 8 - indentX), {
+            x: xx + indentX, y: c.y - rowH + 5, size: bodySize,
+            font: c.font, color: pdfRgb(c, PDF_C.textPrimary),
+          })
+          xx += colWidths[i]
+        }
+        c.y -= rowH
+        pdfDrawLine(c, PDF_MARGIN, c.y, PDF_PAGE_W - PDF_MARGIN, c.y, pdfRgb(c, PDF_C.border), 0.25)
+      }
+      return
+    }
+    if (!node.children) return
+    for (const child of node.children) {
+      // Group header row
+      if (c.y - groupHdrH < PDF_BOT) { newPdfPage(c); drawHeader() }
+      pdfDrawRect(c, PDF_MARGIN, c.y - groupHdrH, PDF_CW, groupHdrH, pdfRgb(c, PDF_C.card))
+      pdfDrawLine(c, PDF_MARGIN, c.y, PDF_PAGE_W - PDF_MARGIN, c.y, pdfRgb(c, PDF_C.borderDark), 0.8)
+      const g = groupings[child.level]
+      const groupLabel = `${g.field_label}: ${String(child.value)}`
+      const countLabel = ` (${child.rows.length})`
+      const xText = PDF_MARGIN + 6 + child.level * indent
+      const groupMaxW = PDF_CW - (xText - PDF_MARGIN) - c.font.widthOfTextAtSize(countLabel, bodySize) - 8
+      c.page.drawText(pdfFit(groupLabel, c.fontBold, bodySize + 0.5, groupMaxW), {
+        x: xText, y: c.y - groupHdrH + 7, size: bodySize + 0.5,
+        font: c.fontBold, color: pdfRgb(c, PDF_C.textPrimary),
+      })
+      const groupLabelW = c.fontBold.widthOfTextAtSize(pdfFit(groupLabel, c.fontBold, bodySize + 0.5, groupMaxW), bodySize + 0.5)
+      c.page.drawText(countLabel, {
+        x: xText + groupLabelW, y: c.y - groupHdrH + 7, size: bodySize,
+        font: c.font, color: pdfRgb(c, PDF_C.textMuted),
+      })
+      c.y -= groupHdrH
+
+      walk(child.child, child.level + 1)
+
+      // Subtotal row
+      const g2 = groupings[child.level]
+      if (g2.show_subtotal !== false) {
+        if (c.y - subtotalH < PDF_BOT) { newPdfPage(c); drawHeader() }
+        pdfDrawRect(c, PDF_MARGIN, c.y - subtotalH, PDF_CW, subtotalH, pdfRgb(c, PDF_C.cardAlt))
+        const subLabel = `Subtotal — ${g2.field_label}: ${String(child.value)} (${child.rows.length} rows)`
+        c.page.drawText(pdfFit(subLabel, c.fontBold, bodySize, PDF_CW - 12), {
+          x: PDF_MARGIN + 6 + child.level * indent,
+          y: c.y - subtotalH + 6, size: bodySize,
+          font: c.fontBold, color: pdfRgb(c, PDF_C.textSecondary),
+        })
+        c.y -= subtotalH
+        pdfDrawLine(c, PDF_MARGIN, c.y, PDF_PAGE_W - PDF_MARGIN, c.y, pdfRgb(c, PDF_C.borderDark), 0.4)
+      }
+    }
+  }
+
+  const tree = pdfBuildSummaryTree(rows, groupings, 0)
+  walk(tree, 0)
+
+  // Grand total
+  const grandH = 24
+  if (c.y - grandH < PDF_BOT) { newPdfPage(c) }
+  pdfDrawRect(c, PDF_MARGIN, c.y - grandH, PDF_CW, grandH, pdfRgb(c, PDF_C.totalsBg))
+  c.page.drawText(`Grand Total — ${rows.length} rows`, {
+    x: PDF_MARGIN + 6, y: c.y - grandH + 8, size: bodySize + 1,
+    font: c.fontBold, color: pdfRgb(c, PDF_C.textPrimary),
+  })
+  c.y -= grandH
+}
+
+// ─── Matrix renderer ──────────────────────────────────────────────────────
+// Pivot output: row-axis groupings × column-axis groupings. Mirrors
+// MatrixLayout in src/modules/ReportRunner.jsx. Multi-level column
+// headers are drawn as a header band with cells spanning their leaf
+// descendants; row-axis labels fill the leftmost columns; data cells
+// hold the measure applied to (row-leaf, col-leaf) row intersections.
+//
+// If the combined column count overflows the page width, the right-most
+// data columns are truncated and a "+N more" indicator is rendered.
+
+interface AxisNode {
+  level?: number
+  leafRows?: any[]
+  children?: { key: any, level: number, child: AxisNode }[]
+}
+
+function pdfBuildAxisTree(
+  rows: any[],
+  groupings: { name: string, via_path?: string[]|null, sort?: string }[],
+  level: number,
+): AxisNode {
+  if (level >= groupings.length) return { leafRows: rows }
+  const g = groupings[level]
+  const buckets = new Map<any, any[]>()
+  for (const row of rows) {
+    const v = pdfResolveCell(row, { name: g.name, via_path: g.via_path } as any)
+    const k = v ?? "(blank)"
+    if (!buckets.has(k)) buckets.set(k, [])
+    buckets.get(k)!.push(row)
+  }
+  const dir = g.sort === "desc" ? -1 : 1
+  const sorted = Array.from(buckets.entries()).sort((a, b) => {
+    if (a[0] === b[0]) return 0
+    return (a[0] < b[0] ? -1 : 1) * dir
+  })
+  return {
+    level,
+    children: sorted.map(([key, rs]) => ({
+      key, level, child: pdfBuildAxisTree(rs, groupings, level + 1),
+    })),
+  }
+}
+
+function pdfFlattenAxisLeaves(node: AxisNode, prefix: any[] = []): { values: any[] }[] {
+  if (node.leafRows || !node.children) return [{ values: prefix }]
+  const out: { values: any[] }[] = []
+  for (const c of node.children) out.push(...pdfFlattenAxisLeaves(c.child, [...prefix, c.key]))
+  return out
+}
+
+function pdfCountLeaves(node: AxisNode): number {
+  if (node.leafRows || !node.children) return 1
+  return node.children.reduce((s, c) => s + pdfCountLeaves(c.child), 0)
+}
+
+function pdfApplyMeasure(cellRows: any[], measure: { type: string, field: string | null }): number | null {
+  if (cellRows.length === 0) return null
+  if (measure.type === "count") return cellRows.length
+  if (!measure.field) return null
+  const values: number[] = []
+  for (const r of cellRows) {
+    const v = pdfResolveCell(r, { name: measure.field } as any)
+    const n = typeof v === "number" ? v : parseFloat(v)
+    if (Number.isFinite(n)) values.push(n)
+  }
+  if (values.length === 0) return null
+  switch (measure.type) {
+    case "sum": return values.reduce((a, b) => a + b, 0)
+    case "avg": return values.reduce((a, b) => a + b, 0) / values.length
+    case "min": return Math.min(...values)
+    case "max": return Math.max(...values)
+  }
+  return null
+}
+
+function pdfRenderMatrix(c: PdfCursor, result: RunResult) {
+  const { rows, groupings, columnGroupings, measure } = result
+  if (groupings.length === 0) {
+    pdfDrawText(c, "Matrix reports need at least one row grouping.",
+      { color: pdfRgb(c, PDF_C.textMuted), size: 11 }); return
+  }
+  if (columnGroupings.length === 0) {
+    pdfDrawText(c, "Matrix reports need at least one column grouping.",
+      { color: pdfRgb(c, PDF_C.textMuted), size: 11 }); return
+  }
+  if (rows.length === 0) {
+    pdfDrawText(c, "No matching rows.",
+      { color: pdfRgb(c, PDF_C.textMuted), size: 11 }); return
+  }
+
+  const rowAxisDefs = groupings.map(g => ({ name: g.field_name, via_path: g.field_via_path, label: g.field_label, sort: g.sort_direction }))
+  const colAxisDefs = columnGroupings.map(c2 => ({ name: c2.name, via_path: c2.via_path ?? null, label: c2.label || c2.name, sort: c2.sort_direction }))
+
+  const rowAxis = pdfBuildAxisTree(rows, rowAxisDefs, 0)
+  const colAxis = pdfBuildAxisTree(rows, colAxisDefs, 0)
+  const rowLeaves = pdfFlattenAxisLeaves(rowAxis)
+  const colLeaves = pdfFlattenAxisLeaves(colAxis)
+
+  const bodySize = 9
+  const hdrSize  = 9
+  const rowH     = 18
+  const headerLevelH = 20
+
+  // Row-axis label column widths
+  const rowLabelWs = rowAxisDefs.map((d, i) => {
+    let max = c.fontBold.widthOfTextAtSize(d.label || d.name || "", hdrSize)
+    for (const rl of rowLeaves) {
+      const v = String(rl.values[i] ?? "")
+      const w = c.font.widthOfTextAtSize(v, bodySize)
+      if (w > max) max = w
+    }
+    return Math.max(60, Math.min(160, max + 12))
+  })
+  const totalRowLabelW = rowLabelWs.reduce((a, b) => a + b, 0)
+
+  // Data column widths — base on header text + measure value width sample.
+  // Compute cell measures up front into a Map for both layout sizing and rendering.
+  const cellMap = new Map<string, number | null>()
+  for (let ri = 0; ri < rowLeaves.length; ri++) {
+    for (let ci = 0; ci < colLeaves.length; ci++) {
+      const cellRows = rows.filter(row => {
+        for (let i = 0; i < rowLeaves[ri].values.length; i++) {
+          const v = pdfResolveCell(row, { name: rowAxisDefs[i].name, via_path: rowAxisDefs[i].via_path } as any)
+          if ((v ?? "(blank)") !== rowLeaves[ri].values[i]) return false
+        }
+        for (let i = 0; i < colLeaves[ci].values.length; i++) {
+          const v = pdfResolveCell(row, { name: colAxisDefs[i].name, via_path: colAxisDefs[i].via_path } as any)
+          if ((v ?? "(blank)") !== colLeaves[ci].values[i]) return false
+        }
+        return true
+      })
+      cellMap.set(ri + "###" + ci, pdfApplyMeasure(cellRows, measure))
+    }
+  }
+
+  const dataColMinW = 50
+  const dataColMaxW = 110
+  const allDataColWs: number[] = colLeaves.map((cl, ci) => {
+    const lastKey = String(cl.values[cl.values.length - 1] ?? "")
+    let max = c.fontBold.widthOfTextAtSize(lastKey, hdrSize)
+    for (let ri = 0; ri < rowLeaves.length; ri++) {
+      const v = cellMap.get(ri + "###" + ci)
+      const s = v == null ? "—" : pdfFormatCell(v, "number")
+      const w = c.font.widthOfTextAtSize(s, bodySize)
+      if (w > max) max = w
+    }
+    return Math.max(dataColMinW, Math.min(dataColMaxW, max + 14))
+  })
+
+  // Fit to page width: drop trailing columns until total fits, render "+N more"
+  let availW = PDF_CW - totalRowLabelW
+  let visibleColCount = colLeaves.length
+  let runningW = 0
+  for (let i = 0; i < allDataColWs.length; i++) {
+    runningW += allDataColWs[i]
+    if (runningW > availW) { visibleColCount = Math.max(1, i); break }
+  }
+  const truncatedCols = colLeaves.length - visibleColCount
+
+  // ── Multi-level column-axis header band ──────────────────────────────
+  const headerLevels = colAxisDefs.length
+  const headerBandH = headerLevels * headerLevelH
+  pdfEnsure(c, headerBandH + rowH * 2)
+
+  // Top-left corner block (row-axis labels) spans all header levels
+  pdfDrawRect(c, PDF_MARGIN, c.y - headerBandH, totalRowLabelW, headerBandH, pdfRgb(c, PDF_C.card))
+  {
+    let lx = PDF_MARGIN + 6
+    for (let i = 0; i < rowAxisDefs.length; i++) {
+      const lbl = pdfFit(rowAxisDefs[i].label || rowAxisDefs[i].name, c.fontBold, hdrSize, rowLabelWs[i] - 8)
+      c.page.drawText(lbl, {
+        x: lx, y: c.y - headerBandH + 6, size: hdrSize,
+        font: c.fontBold, color: pdfRgb(c, PDF_C.textSecondary),
+      })
+      lx += rowLabelWs[i]
+    }
+  }
+
+  // Emit each header level. For each level, walk the colAxis tree and
+  // draw cells centered above the columns they span. The bottom-most
+  // level has cells one-to-one with leaves; upper levels span groups.
+  const emitLevel = (lvl: number) => {
+    const yTop = c.y - lvl * headerLevelH
+    let leafIdx = 0
+    const visit = (node: AxisNode) => {
+      if (!node.children) {
+        leafIdx++
+        return
+      }
+      for (const child of node.children) {
+        const span = pdfCountLeaves(child.child)
+        if (child.level === lvl) {
+          // Determine the span in visible columns only
+          const visStart = leafIdx
+          const visEnd   = leafIdx + span
+          const visStartClamped = Math.max(0, visStart)
+          const visEndClamped   = Math.min(visibleColCount, visEnd)
+          const visSpan = visEndClamped - visStartClamped
+          if (visSpan > 0) {
+            // x position = data-cols start + sum of preceding visible col widths
+            let xStart = PDF_MARGIN + totalRowLabelW
+            for (let i = 0; i < visStartClamped; i++) xStart += allDataColWs[i]
+            let cellW = 0
+            for (let i = visStartClamped; i < visEndClamped; i++) cellW += allDataColWs[i]
+            pdfDrawRect(c, xStart, yTop - headerLevelH, cellW, headerLevelH, pdfRgb(c, PDF_C.card))
+            const txt = pdfFit(String(child.key), c.fontBold, hdrSize, cellW - 8)
+            const txtW = c.fontBold.widthOfTextAtSize(txt, hdrSize)
+            c.page.drawText(txt, {
+              x: xStart + (cellW - txtW) / 2, y: yTop - headerLevelH + 6,
+              size: hdrSize, font: c.fontBold, color: pdfRgb(c, PDF_C.textSecondary),
+            })
+            // Divider line at the right edge
+            pdfDrawLine(c, xStart, yTop - headerLevelH, xStart, yTop, pdfRgb(c, PDF_C.border), 0.4)
+          }
+          leafIdx += span
+        } else {
+          visit(child.child)
+        }
+      }
+    }
+    visit(colAxis)
+  }
+  for (let lvl = 0; lvl < headerLevels; lvl++) emitLevel(lvl)
+
+  c.y -= headerBandH
+  pdfDrawLine(c, PDF_MARGIN, c.y, PDF_PAGE_W - PDF_MARGIN, c.y, pdfRgb(c, PDF_C.borderDark), 0.6)
+
+  // ── Body rows ─────────────────────────────────────────────────────────
+  const drawBodyHeader = () => {
+    pdfEnsure(c, headerBandH + rowH)
+    // Redraw a condensed single-row header on continuation pages: just the
+    // bottom level (data columns) + the row-axis label corner.
+    pdfDrawRect(c, PDF_MARGIN, c.y - headerLevelH, totalRowLabelW, headerLevelH, pdfRgb(c, PDF_C.card))
+    let lx = PDF_MARGIN + 6
+    for (let i = 0; i < rowAxisDefs.length; i++) {
+      const lbl = pdfFit(rowAxisDefs[i].label || rowAxisDefs[i].name, c.fontBold, hdrSize, rowLabelWs[i] - 8)
+      c.page.drawText(lbl, {
+        x: lx, y: c.y - headerLevelH + 6, size: hdrSize,
+        font: c.fontBold, color: pdfRgb(c, PDF_C.textSecondary),
+      })
+      lx += rowLabelWs[i]
+    }
+    let dx = PDF_MARGIN + totalRowLabelW
+    for (let ci = 0; ci < visibleColCount; ci++) {
+      const w = allDataColWs[ci]
+      pdfDrawRect(c, dx, c.y - headerLevelH, w, headerLevelH, pdfRgb(c, PDF_C.card))
+      const leaf = colLeaves[ci]
+      const txt = pdfFit(String(leaf.values[leaf.values.length - 1] ?? ""), c.fontBold, hdrSize, w - 8)
+      const txtW = c.fontBold.widthOfTextAtSize(txt, hdrSize)
+      c.page.drawText(txt, {
+        x: dx + (w - txtW) / 2, y: c.y - headerLevelH + 6,
+        size: hdrSize, font: c.fontBold, color: pdfRgb(c, PDF_C.textSecondary),
+      })
+      pdfDrawLine(c, dx, c.y - headerLevelH, dx, c.y, pdfRgb(c, PDF_C.border), 0.4)
+      dx += w
+    }
+    c.y -= headerLevelH
+    pdfDrawLine(c, PDF_MARGIN, c.y, PDF_PAGE_W - PDF_MARGIN, c.y, pdfRgb(c, PDF_C.borderDark), 0.6)
+  }
+
+  for (let ri = 0; ri < rowLeaves.length; ri++) {
+    if (c.y - rowH < PDF_BOT) { newPdfPage(c); drawBodyHeader() }
+    if (ri % 2 === 1) pdfDrawRect(c, PDF_MARGIN, c.y - rowH, PDF_CW, rowH, pdfRgb(c, PDF_C.cardAlt))
+    // Row-axis label cells
+    let x = PDF_MARGIN + 6
+    for (let i = 0; i < rowAxisDefs.length; i++) {
+      const lbl = pdfFit(String(rowLeaves[ri].values[i] ?? ""), c.fontBold, bodySize, rowLabelWs[i] - 8)
+      c.page.drawText(lbl, {
+        x, y: c.y - rowH + 5, size: bodySize,
+        font: c.fontBold, color: pdfRgb(c, PDF_C.textPrimary),
+      })
+      x += rowLabelWs[i]
+    }
+    // Data cells
+    let dx = PDF_MARGIN + totalRowLabelW
+    for (let ci = 0; ci < visibleColCount; ci++) {
+      const w = allDataColWs[ci]
+      const v = cellMap.get(ri + "###" + ci)
+      const s = v == null ? "—" : pdfFormatCell(v, "number")
+      const color = v == null ? pdfRgb(c, PDF_C.textMuted) : pdfRgb(c, PDF_C.textPrimary)
+      const txt = pdfFit(s, c.font, bodySize, w - 8)
+      const txtW = c.font.widthOfTextAtSize(txt, bodySize)
+      c.page.drawText(txt, {
+        x: dx + w - txtW - 6, y: c.y - rowH + 5,
+        size: bodySize, font: c.font, color,
+      })
+      dx += w
+    }
+    c.y -= rowH
+    pdfDrawLine(c, PDF_MARGIN, c.y, PDF_PAGE_W - PDF_MARGIN, c.y, pdfRgb(c, PDF_C.border), 0.25)
+  }
+
+  if (truncatedCols > 0) {
+    pdfEnsure(c, rowH)
+    c.y -= 6
+    c.page.drawText(`+ ${truncatedCols} more column${truncatedCols === 1 ? "" : "s"} not shown — too wide for the page. Open this report in the app for the full pivot.`, {
+      x: PDF_MARGIN, y: c.y - bodySize, size: bodySize - 0.5,
+      font: c.font, color: pdfRgb(c, PDF_C.textMuted),
+    })
+    c.y -= rowH
+  }
+}
+
+// ─── Top-level PDF builder ────────────────────────────────────────────────
+
+async function buildPdf(result: RunResult, reportName: string): Promise<Uint8Array> {
+  // Dynamic import — keeps the dispatcher's cold-start cheap when CSV/XLSX
+  // are the requested format. pdf-lib is the same package used by
+  // generate-project-report (esm.sh resolves it once per region).
+  const { PDFDocument, StandardFonts, rgb } = await import("https://esm.sh/pdf-lib@1.17.1")
+
+  const pdf = await PDFDocument.create()
+  const font     = await pdf.embedFont(StandardFonts.Helvetica)
+  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold)
+
+  const cur: PdfCursor = {
+    pdf, font, fontBold, pages: [], page: null as any, y: 0, rgb,
+  }
+  newPdfPage(cur)
+
+  // Header band — report name + format + row count + run timestamp
+  pdfDrawText(cur, reportName || "Report", { size: 16, bold: true })
+  const meta = `${(result.rows || []).length.toLocaleString()} row${result.rows.length === 1 ? "" : "s"} · ${result.format} · ${result.primaryObject} · ${new Date().toLocaleString()}`
+  pdfDrawText(cur, meta, { size: 9, color: pdfRgb(cur, PDF_C.textMuted) })
+  cur.y -= 6
+  pdfDrawLine(cur, PDF_MARGIN, cur.y, PDF_PAGE_W - PDF_MARGIN, cur.y, pdfRgb(cur, PDF_C.borderDark), 0.6)
+  cur.y -= 10
+
+  // Dispatch on format
+  switch (result.format) {
+    case "summary": pdfRenderSummary(cur, result); break
+    case "matrix":  pdfRenderMatrix(cur,  result); break
+    default:        pdfRenderTabular(cur, result); break
+  }
+
+  // Page numbers — second pass after content layout. Stamp at bottom-center.
+  const total = cur.pages.length
+  for (let i = 0; i < total; i++) {
+    const p = cur.pages[i]
+    const label = `Page ${i + 1} of ${total}`
+    const w = font.widthOfTextAtSize(label, 8.5)
+    p.drawText(label, {
+      x: (PDF_PAGE_W - w) / 2, y: 22,
+      size: 8.5, font, color: rgb(143/255, 160/255, 184/255),
+    })
+  }
+
+  const bytes = await pdf.save()
+  return new Uint8Array(bytes)
 }
 
 // ─── Email sending via Resend ─────────────────────────────────────────────
