@@ -333,14 +333,14 @@ async function resolveRecipients(supabase: SupabaseClient, s: ScheduledReport): 
 //   • Multi-hop related-field filters (slow path: in-memory eval)
 //   • Custom filter logic expressions: '1 AND (2 OR 3)', NOT, parens
 //     (slow path: fetch then evaluate via shunting-yard RPN)
+//   • Cross-filters (rfilt_is_cross_filter) with 'with' / 'without'
+//     semantics and sub-filters on the cross object
 //   • Picklist label resolution for primary-object fields
 //   • FK label auto-embeds for primary-object FK columns
 //   • Sort by primary-object columns and one-hop related-object columns
 //   • Multi-hop sorts (slow path: client-side comparator)
 //
 // Hard-incompatible (run fails with report_error before any query work):
-//   • Cross-filters (rfilt_is_cross_filter) — without pre-querying the
-//     cross-object set, the dispatcher would produce strictly wrong rows
 //   • Calculated fields (report_calculated_fields) — without the formula
 //     evaluator, calc columns would be missing or wrong
 
@@ -371,13 +371,10 @@ async function validateReport(
   const errors: string[] = []
   const warnings: string[] = []
 
-  // Cross-filters — hard incompatible. Producing rows without the cross-
-  // filter applied would silently break "open work orders without a
-  // photo attached" style reports.
-  const crossFilters = filterRows.filter(f => f.rfilt_is_cross_filter)
-  if (crossFilters.length > 0) {
-    errors.push(`This report uses ${crossFilters.length} cross-filter${crossFilters.length === 1 ? '' : 's'} (with/without related records). The scheduled-report dispatcher's runner can't apply cross-filters yet. Either remove them, or run the report manually until the dispatcher supports them.`)
-  }
+  // Cross-filters were previously hard-incompatible. They're now
+  // supported via a pre-query that resolves each cross-filter to a
+  // set of primary-object IDs, then with/without filter applied after
+  // the main query returns. See resolveCrossFilters in runReportSimple.
 
   // Filter logic — complex expressions ('1 AND (2 OR 3)', NOT, etc.) are
   // now supported in the runner via applyFilterLogic (ported from the
@@ -571,6 +568,67 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
     }
   }
 
+  // ── Cross-filter resolution ────────────────────────────────────────
+  //
+  // Cross-filters constrain primary rows by their relationship to a
+  // *different* table. Shape on report_filters rows:
+  //   rfilt_is_cross_filter: true
+  //   rfilt_cross_object:    'work_orders'   (the related table)
+  //   rfilt_cross_match:     'with' | 'without'
+  //   rfilt_cross_subfilters: jsonb [{ field_name, operator, value }, ...]
+  //
+  // We resolve each cross-filter to a Set<uuid> of primary-object ids
+  // *before* pagination so we don't pay the cost of pulling rows we'll
+  // immediately drop. After pagination, primary rows survive only if
+  // their id is in the set (for 'with') or NOT in the set (for 'without').
+  //
+  // Discovery: the cross_object must have a FK column pointing at the
+  // primary object. We use describe_object_columns and pick the first
+  // FK whose references_table matches.
+  const crossFilterRows = (filterRows || []).filter((f: any) => f.rfilt_is_cross_filter)
+  const crossFilterSets: Array<{ match: string, ids: Set<string> }> = []
+  for (const cf of crossFilterRows) {
+    if (!cf.rfilt_cross_object) continue
+    try {
+      const { data: crossCols, error: cErr } = await supabase.rpc("describe_object_columns", { p_table: cf.rfilt_cross_object })
+      if (cErr) {
+        console.warn(`cross-filter: describe_object_columns(${cf.rfilt_cross_object}) failed:`, cErr.message)
+        continue
+      }
+      const linkCol = (crossCols || []).find((c: any) =>
+        c.is_foreign_key && c.references_table === r.rpt_primary_object
+      )
+      if (!linkCol) {
+        console.warn(`cross-filter: no FK from ${cf.rfilt_cross_object} to ${r.rpt_primary_object} \u2014 skipping`)
+        continue
+      }
+      let crossQ: any = supabase.from(cf.rfilt_cross_object).select(linkCol.column_name)
+      // Cross object's own soft-delete column (varies: prefixed vs 'is_deleted')
+      const { data: crossMeta } = await supabase.rpc("ees_table_metadata", { p_table: cf.rfilt_cross_object })
+      const crossSoftDel = (crossMeta as any)?.is_deleted_column
+      if (crossSoftDel) crossQ = crossQ.eq(crossSoftDel, false)
+      // Apply sub-filters with applyFilter (same operator set as the primary).
+      for (const sf of (cf.rfilt_cross_subfilters || [])) {
+        if (!sf.field_name || !sf.operator) continue
+        crossQ = applyFilter(crossQ, sf.field_name, sf.operator, sf.value)
+      }
+      const { data: crossData, error: crossErr } = await crossQ.limit(50000)
+      if (crossErr) {
+        console.warn(`cross-filter query on ${cf.rfilt_cross_object} failed:`, crossErr.message)
+        continue
+      }
+      const ids = new Set<string>(
+        (crossData || []).map((row: any) => row[linkCol.column_name]).filter(Boolean)
+      )
+      crossFilterSets.push({
+        match: cf.rfilt_cross_match || "with",
+        ids,
+      })
+    } catch (err) {
+      console.warn(`cross-filter resolution failed for ${cf.rfilt_cross_object}:`, (err as Error).message)
+    }
+  }
+
   // Paginate up to 50k rows
   const PAGE_SIZE = 1000, HARD_CEILING = 50000
   let pageStart = 0
@@ -585,6 +643,17 @@ async function runReportSimple(supabase: SupabaseClient, reportId: string): Prom
     if (data.length < requested) break
     pageStart += PAGE_SIZE
     if (rows.length >= HARD_CEILING) break
+  }
+
+  // Apply cross-filter sets. For 'with', keep rows whose id is in the
+  // set; for 'without', keep rows whose id is NOT in the set. Multiple
+  // cross-filters AND together (per Salesforce semantics).
+  for (const cs of crossFilterSets) {
+    if (cs.match === "without") {
+      rows = rows.filter((row: any) => !cs.ids.has(row.id))
+    } else {
+      rows = rows.filter((row: any) => cs.ids.has(row.id))
+    }
   }
 
   // Slow-path filter logic + related-field filter + sort — all in memory.
