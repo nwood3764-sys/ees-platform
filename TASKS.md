@@ -14,101 +14,77 @@ the next one starts.
 **Self-referential hashes:** A commit can't know its own hash in advance, so
 when a TASKS.md update lands in the same commit as the work it describes,
 the entry uses `(this commit)` as a placeholder. A follow-up chore commit
-runs `git log -1 --format=%H` and substitutes the real hash. Twice now this
-has become two commits per change — that's the cost, accept it. The
-alternative (separate chore commit *before* the work) leaves a dangling
-"in progress" entry, which is worse.
+runs `git log -1 --format=%H` and substitutes the real hash.
 
 ## Standing protocols
 
-- **Documentation discipline (added 2026-05-14):** every shipped feature that affects user behavior gets a help article in the same session — anchored to the relevant route, object, or concept so the in-app HelpIcon surfaces it in context. Don't go crazy; only document where users would intuitively reach for help. Required pieces per article: `ha_title`, `ha_summary` (search-friendly), `ha_body_markdown`, and at least one `help_article_anchors` row.
+- **Documentation discipline:** every shipped feature that affects user behavior gets a help article in the same session — anchored to the relevant route, object, or concept so the in-app HelpIcon surfaces it in context. Don't go crazy; only document where users would intuitively reach for help. Required pieces per article: `ha_title`, `ha_summary` (search-friendly), `ha_body_markdown`, and at least one `help_article_anchors` row.
+- **Migrations: production-only.** No Supabase dev branches. Always verify with a SELECT after `apply_migration`. Use `apply_migration` for DDL, `execute_sql` for reads.
+- **Communication:** one yes/no question at a time. Make a recommendation, ask for approval. No multiple choice.
 
-## Active backlog
+---
 
-### Reports module — dispatcher feature parity
-- [x] **PDF attachments in scheduled-report dispatcher** (this commit, dispatcher v11 sha `fe063d8...`) — implemented: pdf-lib via esm.sh, three layout renderers respecting `rpt_format` (tabular | summary | matrix), letter landscape, auto-pagination with header repeat on tabular, recursive group tree with indented headers + subtotals + grand total on summary, multi-level column-axis header band with cell-spanning width math + "+N more columns" truncation on matrix, page numbers stamped on every page. `runReportSimple` extended to return `format`, `groupings`, `columnGroupings`, `measure`, `primaryObject`. `buildAttachment` refactored to take the full `RunResult` instead of `(rows, columns, name, format)`. Soft-degraded: summary-scope calc fields still skipped (same as CSV/XLSX; validateReport already warns). **Deploy:** MCP `deploy_edge_function` accepted the payload after comment-stripping (97.7KB local → 73KB stripped; PRG's 86KB ceiling memory was wrong/conservative). Smoke-tested locally with 5 fixtures (multi-page tabular w/ header repeat, two-level summary w/ subtotals + grand total, matrix pivot, empty result, 25-column wide tabular) — all round-trip through pdf-lib cleanly, magic bytes valid, layouts visually verified via pdftoppm rasterization. **Repo push pending** — sandbox has no GitHub credentials; this commit exists locally only. Production already has the code.
-- [x] **Dispatcher runner up to feature parity with in-app runner** (commits `8034885` v6 multi-hop via_path, `9f69b48` v7 custom filter logic, `6857310` v8 related-field filters/sorts, `05f582f` v9 cross-filters, `8c47b67` v10 row-scope calc fields). Five sub-units, all delivered. The dispatcher's `runReportSimple` now handles everything the in-app runner does on its tabular output path: multi-hop FK embeds, simple + complex filter logic, related-field filters/sorts at one hop (fast path) or multi-hop (slow path), cross-filters with sub-filters, and row-scope calculated fields with a full Salesforce-flavored formula evaluator. Only summary-scope calc fields are soft-degraded (skipped with a warning, since the dispatcher only outputs flat tabular data; summary calc fields belong to summary/matrix layouts).
+## Up next (open backlog)
 
-### Permissions & RLS
-- [x] **Permission sweep — enforce role-based RLS on all business tables** (this commit, migrations `20260514204537_permission_sweep_seed_role_object_access_matrix` + `20260514204558_permission_sweep_drop_internal_staff_overrides`) — seeded `role_object_access` with 65 readable tables × 9 internal roles × 4 actions matrix (585 base rows + role-specific CRUD overrides per role); then dropped 51 `internal_staff_*` permissive override policies that were neutralizing the role-aware `app_user_can()`-backed policies. Net effect: every authenticated request now flows through `app_user_can(table, action)` which short-circuits to true for Admin and looks up the per-role matrix for everyone else. External roles (Property Owner, Property Manager, Subcontractor Partner) intentionally have no `role_object_access` rows — they're locked out until row-scoping policies ship with the portal. Verified end-to-end via matrix dump: Admin (Lucas, Nicholas, Nicholas) → full access; Lead Tech / Team Lead / Project Coordinator → read projects, update work_steps, no delete; Tech in Training → read projects, can NOT update work_steps (only time_sheets/photos/gps/comments); external roles → 0 readable tables. Two `cfp_*` tables (Cap Forecasting Pipeline, isolated feature) left with their existing `USING (true)` policies — noted for future cleanup. Config tables (page_layouts, picklist_values, etc.) keep open SELECT — they're read-only-for-all by design so the app can render; writes still gated through `app_user_can()`.
-- [x] **In-product help articles for permission sweep** (this commit, migration `20260514210100_help_articles_permission_sweep_documentation`) — three new admin-audience help articles authored and published with HelpIcon anchors: **HA-00006** "Permissions Are Now Enforced (May 2026)" — changelog explaining what changed, why, and what admins need to know; anchored to `/admin/permissions` route + `role-based-access-control` concept + `role_object_access` object. **HA-00007** "What Each Role Can Do by Default" — per-role reference of read/create/update/delete defaults for all 9 internal roles + note that external roles are locked out until portal ships; anchored to `/admin/permissions` route + `role-defaults` concept + `roles` object. **HA-00008** "Troubleshooting: A User Cannot See or Edit Something" — 6-step admin runbook covering user reports of access issues (confirm what they see → check role → check permissions → check permission sets → verify internal vs external → check audit log) + common gotchas (field-level UI not yet enforced, Admin always full access, soft-deletes, session refresh); anchored to `/admin/permissions` + `/admin/users` routes + `access-troubleshooting` concept. All three discoverable via HelpIcon on Permission Builder + User management pages.
-- [blocked] **Row-scoping policies for external portal users** — Property Owner, Property Manager, Subcontractor Partner roles currently have zero `role_object_access` rows so they're fully locked out at the object level. When the subcontractor portal subdomain is built, each will get scoped row-level policies (e.g. "Subcontractor sees only work_orders assigned to their account") via the resolver functions already in place.
-- [ ] **Field-level enforcement on the frontend** — `field_visible` and `field_editable` resolver functions exist in the DB but the frontend `RecordDetail.jsx` and widgets don't yet call them. Today field-level security is queryable but not enforced in the UI. Multi-session backlog item; pairs with the Permission Builder Field Permissions tab UI.
+### Foundation — start importing real data
+- [ ] **Data import: property hierarchy first** — start with Property Owners → Properties → Buildings → Units (via the `accounts` and property tables), then Accounts, Contacts, then Opportunities → Projects → Work Orders. Always import a parent before its children. Format of source export TBD — needs SF CSV/JSON from Nicholas. Production data verified safe to add: schema is stable; renames/type changes/backfills are mechanical (~5 min each); no work blocked by populated tables. Destructive column drops always require a `SELECT COUNT(*)` check-in first per the safety rule.
+
+### Permissions (continuation)
+- [ ] **Field-level enforcement on the frontend** — `field_visible` and `field_editable` resolver functions exist in the DB but `RecordDetail.jsx` and widgets don't call them. Today field-level security is queryable but not enforced in the UI. Multi-session backlog item; pairs with the Permission Builder Field Permissions tab UI.
+- [blocked] **Row-scoping policies for external portal users** — Property Owner, Property Manager, Subcontractor Partner roles have zero `role_object_access` rows so they're fully locked out at the object level. Activate when subcontractor portal subdomain is built — each gets scoped row-level policies via the resolver functions already in place.
 
 ### Help system & documentation
-- [x] **Help frontend — context-aware ? button + /help full center** (this commit) — added the user-facing entry points the help system was missing. New: `HelpTopbarButton` in the topbar right corner (always visible, every page), opens HelpPanel with anchors derived from current `activeModule` + `selectedRecord` via `useCurrentPageAnchors` hook. HelpPanel upgraded with a search box at top, footer "Browse all help articles" link, and search-mode swap when query non-empty (debounced via `searchHelpArticles`). New `HelpCenterPage` at `/help` and `/help/<slug>` — sidebar grouped by category, search box, dedicated reading pane, audience filter applied client-side. `urlNav.js` now recognizes `/help/*` as a non-module route that bypasses the module switch; `activeModule='help'` routes to `HelpCenterPage`. Authored HA-00013 "Finding Help — The Help Center and the Help Button" so users discover both entry points. Topbar button hidden on `/search` and `/help` pages (where it would be redundant).
 - [ ] **Help articles for remaining shipped features** — ongoing protocol per standing rule. Outstanding: Recycle Bin (restore + purge workflow), Page Layouts / Object Manager (admin editing), Reports module (build, schedule, filters, groupings, calc fields), Dashboards (widgets + folder shares), Audit Log (what's tracked, search), Field History (which fields, viewing), Document/Email Templates (merge fields, publish/lock, snapshots), E-Signature / Envelopes (send, sign, void, lifecycle). Authoring opportunistically as we touch each feature; not a single-session push.
 
-### Project Report Generator
-- [x] **In-product help articles for Project Reports** (this commit, migration `20260514220000_help_articles_project_reports_and_publish_workflow`) — four new articles in **Project Reports** category: **HA-00009** "Generating a Project Report" (all-audience, anchored to `projects` object + `project-report`/`generate-report` concepts) — walks through the Generate button, template selection, photo variant, where the PDF lands; **HA-00010** "Authoring a Project Report Template" (admin, anchored to `project_report_templates` + `project_report_template_sections` objects + `template-authoring` concept) — section types, configuration, merge field syntax; **HA-00011** "Publishing, Versioning, and Locking Templates" (admin, anchored to `project_report_templates` + `publish-workflow`/`template-versioning` concepts) — Draft → Active → Archived lifecycle, why publish locks the template, version increment on re-publish, snapshots, clone vs unpublish vs archive; **HA-00012** "Photo Variants — Watermarked vs Original" (all-audience, anchored to `projects` + `photo-variant`/`watermark` concepts) — when to use each and fallback behavior. All four published; HelpIcon on project pages and PRT admin pages now surfaces these.
-- [x] **PRG Phase 3 — documents FK columns** (commit `13d7560`, PRG v16 sha `8cffddc...`) — added `documents.project_report_template_id` (FK → `project_report_templates.id`, ON DELETE SET NULL) and `documents.project_report_template_snapshot_id` (FK → `project_report_template_snapshots.id`, ON DELETE SET NULL), both nullable. Two partial indexes (only on rows where the FK is set). One check constraint `documents_prtsn_implies_prt_chk` enforcing: snapshot FK set → template FK set (a snapshot belongs to a template; reverse fine — live-template generation only sets the template FK). Edge Function `generate-project-report` updated to populate both columns on the documents insert, and the previous category-suffix workaround (`(snapshot v...)` appended to `category`) dropped since the FK carries that signal cleanly. **Deploy:** MCP `deploy_edge_function` accepted the 60KB stripped payload (97.7KB original → 60KB stripped, 38% reduction). Smoke-tested in three modes: (1) bogus PRT id rejected by FK, (2) snapshot-without-template rejected by check constraint, (3) live-only and snapshot+template both insert + delete cleanly. The 86KB MCP ceiling was conservative/wrong — same lesson as dispatcher v11.
-- [x] **PRG merge field substitution for `custom_text` sections** — already implemented in `generate-project-report/index.ts` at `substituteMergeFields()`. `{{path.to.field}}` syntax resolved via `resolveMergeField` against the expanded RenderCtx. Unknown placeholders render inline as `[unknown: {{path}}]` for author visibility.
-
 ### Recycle Bin
-- [x] **Phase 1 — view + restore** (commit `293e435` + `4ff648a` for field-history)
-- [x] **Phase 2 — permanent purge with admin gate** (commit `718c37d`)
-- [x] **Cross-table search: 'All Tables' mode** — `fetchDeletedRecordsAcrossTables` fans out across the curated 29-table list in parallel (per-table cap 50), merges + sorts by deletedAt desc. UI gets a new "— All tables —" option in the dropdown that toggles a wider column set with the Object column, and surfaces a small object-name badge in the Quick Restore footer row. Per-row restore/purge dispatches to the row's own `_table`.
-- [ ] **Cascade rule per spec: parent restore restores children together** — investigated this session. Current schema has zero FK CASCADE on delete (everything is NO ACTION), and there's no batch-id tracking. Implementing properly needs either (a) walking parent-child topology in a SECURITY DEFINER function with depth limits, or (b) adding `deletion_batch_id` column on every soft-deletable table. Both are sizeable. Deferring until soft-delete cascade pain is real \u2014 today most soft-deletes are smoke-test artifacts; production usage may not need this.
+- [ ] **Cascade rule per spec: parent restore restores children together** — investigated previously. Current schema has zero FK CASCADE on delete (all NO ACTION), no batch-id tracking. Implementing properly needs either (a) walking parent-child topology in a SECURITY DEFINER function with depth limits, or (b) adding `deletion_batch_id` on every soft-deletable table. Both sizeable. Deferring until soft-delete cascade pain is real.
 
-### Audit + field history
-- [x] Audit triggers on Reports + Permission Builder tables (commit `f9fb5ab`)
-- [x] Audit triggers on permission/scope/portal tables (commit `b0f0f5d`)
-- [x] Audit triggers on PRT family (commit `5dc957c`)
-- [x] Audit triggers on envelope family (commit `05a903b`)
-- [x] Field-history registrations for permission/scope/portal columns (commit `4ff648a`)
-- [x] Field-history registrations for PRT + envelope columns (commit `0f6e53c`)
-- [x] **Audit triggers on folder + folder-share + help tables** (commit `c4da7be` — 9 tables: report_folders, dashboard_folders, four folder-share junctions, help_articles, help_article_anchors, object_chat_enabled). Final pass; every remaining unaudited table is skip-by-design (audit streams, snapshots, transient OAuth, unbuilt modules).
-- [x] AuditLogPane with object/record/action filters (commit `52b453d`)
-
-### Save As / Clone parity
-- [x] `clone_report` + ReportBuilder Save As button (prior session)
-- [x] `clone_dashboard` + DashboardEditor Save As button (commit `b2549fc`)
-- [x] `clone_scheduled_report` + ScheduleEditor Save As button (commit `41d3c0a`)
-- [x] `clone_permission_set` + PermissionSetEditor Clone button (commit `a64932b`)
-
-### Setup home
-- [x] Health-summary strip + clickable Most Visited cards (commit `fbb199f`)
-- [x] **`admin_health_summary` recycle-bin total undercounts** (commit `8af706f`) — RPC was summing across 20 tables but the bin dropdown shows 29; aligned the UNION ALL to all 29. Smoke-tested: total = 14.
-
-### Dispatcher (scheduled reports)
-- [x] CSV attachments (prior session)
-- [x] XLSX attachments via SheetJS (commit `4b9cb5b`)
-- [x] `validateReport()` fail-loud + soft-warning paths (prior session)
-- [x] PDF attachments (this commit, dispatcher v11 — see "Reports module — dispatcher feature parity" above)
-
-## Major unbuilt (each is a multi-session commitment)
-
+### Major unbuilt (each is a multi-session commitment)
 - [ ] **Templates Builder dedicated module** — today document/email templates are managed inside record-detail views; Salesforce parity wants a dedicated module
 - [ ] **Lifecycle Builder** — define per-object status transitions, automation triggers, ownership rules
 - [ ] **Automation Builder** — Salesforce Flow Builder equivalent (record-change triggers, scheduled actions, multi-step flows)
 - [ ] **EES AI assistant** — Claude-API-backed in-app assistant per `anura-ai-spec.md`
 - [ ] **E-signature workflow polish** — schema exists (envelopes/recipients/tabs), workflow needs front-end completion
 - [ ] **Portal subdomain deployments** — `owner.ees-ops.netlify.app`, `partner.ees-ops.netlify.app`, etc.
-- [ ] **Field Mobile PWA** — purpose-built mobile per `anura-field-mobile.md`
+- [ ] **Field Mobile PWA** — purpose-built mobile per `anura-field-mobile.md`; includes photo compression at upload + watermarking pipeline
 - [ ] **Azure AD / LEAP integration** — app pending Nicholas's manual setup at entra.microsoft.com
+
+### Long-term cleanup (not urgent)
+- [ ] **`cfp_*` tables permission policies** — two Cap Forecasting Pipeline tables still have `USING (true)` policies (isolated feature, not in main app flow). Replace with role-aware policies when CFP feature is touched again.
+
+---
+
+## Recently completed (this session — 2026-05-14)
+
+- [x] **Help frontend — context-aware ? button + /help full center** (`345cc34`) — added `HelpTopbarButton` in topbar right corner (every page), opens HelpPanel with anchors derived from current page via `useCurrentPageAnchors` hook. HelpPanel upgraded with top search box, footer "Browse all help articles" link, and search-mode swap. New `HelpCenterPage` at `/help` and `/help/<slug>` — sidebar by category, search, reading pane, audience filter. `urlNav.js` routes `/help/*` outside module switch.
+- [x] **HA-00013 "Finding Help — The Help Center and the Help Button"** — documents both entry points for users. Audience='all'. Anchored to module:home, help-system concepts, and /help route.
+- [x] **Help articles for Project Reports** (`df6ea44`) — HA-00009/00010/00011/00012 (Generate / Authoring / Publish Workflow / Photo Variants).
+- [x] **Help articles for permission sweep** (`fc625bd`) — HA-00006/00007/00008 (changelog / per-role defaults / troubleshooting runbook).
+- [x] **Permission sweep — role-based RLS enforced on all business tables** (`af31b82`, migrations `20260514204537` + `20260514204558`) — seeded `role_object_access` with 65 readable tables × 9 internal roles × 4 actions matrix; dropped 51 `internal_staff_*` permissive overrides. Net: every authenticated request flows through `app_user_can()`. Admin short-circuits true; external roles fully locked out until portal ships.
+- [x] **PRG Phase 3 — documents FK columns** (`13d7560`, PRG v16) — `documents.project_report_template_id` + `documents.project_report_template_snapshot_id` FK columns (both nullable, ON DELETE SET NULL), 2 partial indexes, check constraint `documents_prtsn_implies_prt_chk`. Edge fn populates both on insert. Verified live with PROJ-00001 against PRT-00001 v2.
 
 ## Completed (chronological, most recent first)
 
-- `8c47b67` dispatcher v10 — row-scope calculated field support (full port of `evaluateRowExpression` from `src/lib/reportFormulaEval.js`: tokenizer + recursive-descent parser + AST evaluator + Salesforce-flavored function library). Closes the entire "Dispatcher runner feature parity with in-app runner" backlog item.
+- `8c47b67` dispatcher v10 — row-scope calculated field support
 - `542bc82` chore: backfill TASKS.md commit hash for 05f582f
-- `05f582f` dispatcher v9 — cross-filter support (pre-query Set<uuid> via discover-link-FK + sub-filters; with/without filter on primary rows)
+- `05f582f` dispatcher v9 — cross-filter support
 - `11151ab` chore: backfill TASKS.md commit hash for 6857310
-- `6857310` dispatcher v8 — related-field filters/sorts support (one-hop via PostgREST `fk.field` syntax in fast path; multi-hop via slow-path fetch-then-filter + client-side comparator)
+- `6857310` dispatcher v8 — related-field filters/sorts support
 - `2afad5b` chore: backfill TASKS.md commit hash for 9f69b48
-- `9f69b48` dispatcher v7 — custom filter logic support (slow-path: fetch then evaluate in-memory via ported applyFilterLogic + evalFilterOnRow)
-- `8034885` dispatcher v6 — multi-hop via_path support (recursive embed tree, chain-walk in CSV/XLSX builders, validateReport no longer warns on multi-hop)
-- `8af706f` admin_health_summary recycle-bin total aligned with the 29-table dropdown
+- `9f69b48` dispatcher v7 — custom filter logic support
+- `8034885` dispatcher v6 — multi-hop via_path support
+- `8af706f` admin_health_summary recycle-bin total aligned with 29-table dropdown
 - `6b4d0d2` chore: backfill TASKS.md commit hash for ea766b0
-- `ea766b0` Recycle Bin cross-table 'All tables' mode + `fetchDeletedRecordsAcrossTables` helper
+- `ea766b0` Recycle Bin cross-table 'All tables' mode
 - `39632a3` chore: backfill TASKS.md commit hash for c4da7be
-- `c4da7be` audit triggers on folder + folder-share + help tables (9 tables) — closes the unaudited-tables scan; remaining gaps are skip-by-design
+- `c4da7be` audit triggers on folder + folder-share + help tables (9 tables)
 - `eb07ab6` add TASKS.md — live working task list
-- `0f6e53c` field-history tracking on PRT + envelope columns (27 columns / 6 tables)
+- `0f6e53c` field-history tracking on PRT + envelope columns
 - `05a903b` audit triggers on envelope family (3 tables)
 - `fbb199f` Setup Home health strip + clickable Most Visited cards
 - `5dc957c` audit triggers on PRT family (4 tables)
 - `718c37d` Recycle Bin Phase 2 — permanent purge with admin gate
-- `4ff648a` field-history tracking on permission/scope/portal columns (18 columns / 6 tables)
+- `4ff648a` field-history tracking on permission/scope/portal columns
 - `293e435` Recycle Bin Phase 1 — view + restore
 - `52b453d` AuditLogPane with object/record/action filters
 - `1339bbf` fetchAuditLog filter params + performer name resolution
