@@ -1850,32 +1850,35 @@ Deno.serve(async (req: Request) => {
     })
     if (upload.error) throw new Error(`PDF upload failed: ${upload.error.message}`)
 
-    // Document name carries snapshot version when applicable so users can
-    // distinguish "regenerated from a frozen old version" reports from
-    // current-template reports in the project's Documents widget.
+    // Document name carries snapshot version when applicable so users
+    // can distinguish "regenerated from a frozen old version" reports
+    // from current-template reports in the project's Documents widget.
     const docName = templateFromSnapshot
       ? `${project.project_name || "Project"} — Project Report (${datePart}, snapshot v${snapshotVersion})`
       : `${project.project_name || "Project"} — Project Report (${datePart})`
 
-    // Until documents.prtsn_id is added (deferred — wider schema change),
-    // we keep the snapshot version as a suffix on the category column so
-    // it's discoverable in the documents list.
-    const docCategory = templateFromSnapshot
-      ? `${prt.prt_record_number} (snapshot v${snapshotVersion})`
-      : prt.prt_record_number
-
+    // PRG Phase 3: the documents row now carries proper FKs back to
+    // the template (always) and snapshot (only when regenerated from
+    // a frozen snapshot, never when generated against the live
+    // template). Category stays as the prt_record_number only —
+    // snapshot version is no longer suffixed there since the FK
+    // carries that signal cleanly. The check constraint
+    // documents_prtsn_implies_prt_chk guarantees that if snapshot FK
+    // is set, template FK is too.
     const insertRow = {
       id: docId,
       storage_bucket: "property-documents",
       storage_path: path,
       name: docName,
       document_type: "project_report",
-      category: docCategory,
+      category: prt.prt_record_number,
       file_size_bytes: pdfBytes.byteLength,
       mime_type: "application/pdf",
       related_object: "projects",
       related_id: projectId,
       uploaded_by: userId,
+      project_report_template_id: prt.id,
+      project_report_template_snapshot_id: templateFromSnapshot ? snapshotId : null,
     }
     const ins = await client.from("documents").insert(insertRow).select().single()
     if (ins.error) {
