@@ -1,31 +1,42 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { C } from '../../data/constants'
 import { LoadingState, ErrorState } from '../UI'
-import { lookupHelpArticles } from '../../data/helpService'
+import { lookupHelpArticles, searchHelpArticles } from '../../data/helpService'
 import { useHelp } from './HelpProvider'
 import { renderMarkdown } from './markdown'
 
 // ---------------------------------------------------------------------------
 // HelpPanel — slide-out side panel rendered once near the app root.
 //
-// State:
-//   • Reads anchors + audience from HelpContext.
-//   • Fetches matching articles whenever the panel is opened or anchors change.
-//   • Displays articles inline. If multiple match, they stack with light
-//     separators and a per-article header. If none match, shows an empty
-//     state with a "Suggest a help article" stub the admin can act on.
+// Two modes inside the same panel:
+//   • Context mode (default): when opened, fetches articles anchored to the
+//     current page (per anchors passed in). Header reads "Help for: <page>".
+//   • Search mode: triggered when the user types in the search box. Replaces
+//     the context article list with full-library search results until the
+//     search box is cleared.
 //
-// Mounting:
-//   Place a single <HelpPanel /> at the top of App.jsx, alongside any other
-//   global overlays (toast, modals, etc.). HelpProvider must wrap it.
+// Footer link: "Browse all help articles →" routes to /help, the full
+// help center (sidebar nav by category, dedicated reading pane).
 // ---------------------------------------------------------------------------
 
 export default function HelpPanel() {
   const { isOpen, close, anchors, audience, title } = useHelp()
-  const [articles, setArticles] = useState([])
-  const [loading,  setLoading]  = useState(false)
-  const [error,    setError]    = useState(null)
 
+  // ── Context-mode articles (anchor lookup) ───────────────────────────────
+  const [articles, setArticles] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  // ── Search-mode state ───────────────────────────────────────────────────
+  const [query, setQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState(null)
+  const searchAbortRef = useRef(0)
+
+  const inSearchMode = query.trim().length > 0
+
+  // Refetch context articles whenever panel opens or anchors change.
   useEffect(() => {
     if (!isOpen) return
     let cancelled = false
@@ -41,6 +52,47 @@ export default function HelpPanel() {
     return () => { cancelled = true }
   }, [isOpen, anchors, audience])
 
+  // Reset search box every time the panel reopens — the panel is meant
+  // to be glanceable, not stateful across closes.
+  useEffect(() => {
+    if (isOpen) {
+      setQuery('')
+      setSearchResults([])
+      setSearchError(null)
+    }
+  }, [isOpen])
+
+  // Debounced search. Bumps a request id on every keystroke so a slow
+  // earlier request can't overwrite a faster later one.
+  useEffect(() => {
+    if (!isOpen) return
+    if (!inSearchMode) {
+      setSearchResults([])
+      setSearchError(null)
+      setSearching(false)
+      return
+    }
+    const myId = ++searchAbortRef.current
+    setSearching(true)
+    const t = setTimeout(() => {
+      searchHelpArticles(query.trim(), audience, 25)
+        .then(rows => {
+          if (myId !== searchAbortRef.current) return
+          setSearchResults(rows || [])
+          setSearchError(null)
+        })
+        .catch(e => {
+          if (myId !== searchAbortRef.current) return
+          setSearchError(e)
+          setSearchResults([])
+        })
+        .finally(() => {
+          if (myId === searchAbortRef.current) setSearching(false)
+        })
+    }, 220)
+    return () => clearTimeout(t)
+  }, [isOpen, query, inSearchMode, audience])
+
   // ESC closes the panel
   useEffect(() => {
     if (!isOpen) return
@@ -49,13 +101,19 @@ export default function HelpPanel() {
     return () => window.removeEventListener('keydown', onKey)
   }, [isOpen, close])
 
-  // Don't render anything when closed — keeps the DOM clean.
-  // We rely on a fresh open animation on each launch.
   if (!isOpen) return null
+
+  const subhead = inSearchMode
+    ? (searching
+        ? 'Searching…'
+        : `${searchResults.length} result${searchResults.length === 1 ? '' : 's'} for "${query.trim()}"`)
+    : (loading
+        ? 'Loading…'
+        : articles.length === 0 ? 'No articles for this page yet'
+        : `${articles.length} article${articles.length === 1 ? '' : 's'} for this page`)
 
   return (
     <>
-      {/* Backdrop — light, dismiss on click */}
       <div
         onClick={close}
         style={{
@@ -66,33 +124,25 @@ export default function HelpPanel() {
         }}
       />
 
-      {/* Panel */}
       <aside
         role="dialog"
         aria-label="Help"
         style={{
           position: 'fixed',
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: '100%',
-          maxWidth: 460,
+          top: 0, right: 0, bottom: 0,
+          width: '100%', maxWidth: 460,
           background: C.card,
           boxShadow: '-12px 0 32px rgba(13,26,46,0.18)',
-          display: 'flex',
-          flexDirection: 'column',
+          display: 'flex', flexDirection: 'column',
           zIndex: 1101,
           animation: 'helpSlideIn 220ms ease-out',
         }}
       >
-        {/* Header */}
         <div style={{
           padding: '14px 18px',
           borderBottom: `1px solid ${C.border}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
+          display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', gap: 12,
           flexShrink: 0,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -103,13 +153,11 @@ export default function HelpPanel() {
               <line x1="12" y1="17" x2="12.01" y2="17" />
             </svg>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {title || 'Help'}
               </div>
               <div style={{ fontSize: 11, color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {loading ? 'Loading…'
-                  : articles.length === 0 ? 'No articles yet'
-                  : `${articles.length} article${articles.length === 1 ? '' : 's'}`}
+                {subhead}
               </div>
             </div>
           </div>
@@ -133,22 +181,105 @@ export default function HelpPanel() {
           </button>
         </div>
 
+        {/* Search box */}
+        <div style={{
+          padding: '10px 14px',
+          borderBottom: `1px solid ${C.border}`,
+          flexShrink: 0,
+          background: C.cardSecondary || '#f7f9fc',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0 10px',
+            height: 32,
+            background: C.card,
+            border: `1px solid ${C.border}`,
+            borderRadius: 6,
+          }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+              stroke={C.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+            <input
+              type="text"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search all help articles…"
+              aria-label="Search help articles"
+              autoFocus
+              style={{
+                flex: 1,
+                border: 'none', outline: 'none', background: 'transparent',
+                fontSize: 13, color: C.textPrimary,
+                fontFamily: 'inherit',
+                minWidth: 0,
+              }}
+            />
+            {query && (
+              <button
+                onClick={() => setQuery('')}
+                aria-label="Clear search"
+                tabIndex={-1}
+                style={{
+                  flexShrink: 0,
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  padding: 2, color: C.textMuted, lineHeight: 0,
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6L6 18 M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Content */}
         <div style={{ flex: 1, overflow: 'auto', padding: 0, background: C.card }}>
-          {loading && <LoadingState />}
-          {error && !loading && <ErrorState error={error} />}
-          {!loading && !error && articles.length === 0 && <EmptyHelpState anchors={anchors} />}
-          {!loading && !error && articles.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {articles.map(a => (
-                <HelpArticleCard key={a.id} article={a} />
-              ))}
-            </div>
+          {inSearchMode ? (
+            <SearchResults loading={searching} error={searchError} results={searchResults} query={query} />
+          ) : (
+            <ContextResults loading={loading} error={error} articles={articles} anchors={anchors} />
           )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '10px 16px',
+          borderTop: `1px solid ${C.border}`,
+          flexShrink: 0,
+          background: C.cardSecondary || '#f7f9fc',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <a
+            href="/help"
+            onClick={e => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return
+              e.preventDefault()
+              window.history.pushState({}, '', '/help')
+              window.dispatchEvent(new PopStateEvent('popstate'))
+              close()
+            }}
+            style={{
+              fontSize: 12,
+              color: C.emerald,
+              textDecoration: 'none',
+              fontWeight: 500,
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            Browse all help articles
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12h14M13 5l7 7-7 7" />
+            </svg>
+          </a>
+          <span style={{ fontSize: 11, color: C.textMuted }}>Esc to close</span>
         </div>
       </aside>
 
-      {/* Inline keyframes — added once, scoped via CSS prefix */}
       <style>{`
         @keyframes helpFadeIn { from { opacity: 0 } to { opacity: 1 } }
         @keyframes helpSlideIn { from { transform: translateX(20px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
@@ -157,23 +288,59 @@ export default function HelpPanel() {
   )
 }
 
-function HelpArticleCard({ article }) {
+function ContextResults({ loading, error, articles, anchors }) {
+  if (loading) return <LoadingState />
+  if (error) return <ErrorState error={error} />
+  if (articles.length === 0) return <EmptyContextState anchors={anchors} />
   return (
-    <article style={{
-      padding: '16px 18px',
-      borderBottom: `1px solid ${C.border}`,
-      fontSize: 13,
-      color: C.textPrimary,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {articles.map(a => <HelpArticleCard key={a.id} article={a} />)}
+    </div>
+  )
+}
+
+function SearchResults({ loading, error, results, query }) {
+  if (loading) return <LoadingState />
+  if (error) return <ErrorState error={error} />
+  if (results.length === 0) {
+    return (
+      <div style={{ padding: 24, textAlign: 'center', color: C.textMuted, fontSize: 12.5 }}>
+        No articles found for &ldquo;{query.trim()}&rdquo;.
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {results.map(a => <SearchResultRow key={a.id} article={a} />)}
+    </div>
+  )
+}
+
+function SearchResultRow({ article }) {
+  const [expanded, setExpanded] = useState(false)
+  if (expanded) return <HelpArticleCard article={article} onCollapse={() => setExpanded(false)} />
+  return (
+    <button
+      type="button"
+      onClick={() => setExpanded(true)}
+      style={{
+        textAlign: 'left',
+        padding: '12px 16px',
+        borderBottom: `1px solid ${C.border}`,
+        background: C.card,
+        border: 'none',
+        borderBottomColor: C.border,
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = C.page }}
+      onMouseLeave={e => { e.currentTarget.style.background = C.card }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h2 style={{
-            margin: 0,
-            fontSize: 15,
-            fontWeight: 600,
-            color: C.textPrimary,
-            lineHeight: 1.35,
-          }}>{article.ha_title}</h2>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: C.textPrimary, lineHeight: 1.35 }}>
+            {article.ha_title}
+          </div>
           {article.ha_summary && (
             <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3, lineHeight: 1.4 }}>
               {article.ha_summary}
@@ -183,14 +350,43 @@ function HelpArticleCard({ article }) {
         {article.ha_category && (
           <span style={{
             flexShrink: 0,
-            padding: '2px 8px',
-            borderRadius: 999,
-            background: '#f0f9f5',
-            color: '#1a7a4e',
-            fontSize: 10.5,
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
+            padding: '2px 8px', borderRadius: 999,
+            background: '#f0f9f5', color: '#1a7a4e',
+            fontSize: 10.5, fontWeight: 600,
+            textTransform: 'uppercase', letterSpacing: '0.04em',
+          }}>{article.ha_category}</span>
+        )}
+      </div>
+    </button>
+  )
+}
+
+function HelpArticleCard({ article, onCollapse }) {
+  return (
+    <article style={{
+      padding: '16px 18px',
+      borderBottom: `1px solid ${C.border}`,
+      fontSize: 13,
+      color: C.textPrimary,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: C.textPrimary, lineHeight: 1.35 }}>
+            {article.ha_title}
+          </h2>
+          {article.ha_summary && (
+            <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3, lineHeight: 1.4 }}>
+              {article.ha_summary}
+            </div>
+          )}
+        </div>
+        {article.ha_category && (
+          <span style={{
+            flexShrink: 0,
+            padding: '2px 8px', borderRadius: 999,
+            background: '#f0f9f5', color: '#1a7a4e',
+            fontSize: 10.5, fontWeight: 600,
+            textTransform: 'uppercase', letterSpacing: '0.04em',
           }}>{article.ha_category}</span>
         )}
       </div>
@@ -198,11 +394,24 @@ function HelpArticleCard({ article }) {
         style={{ fontSize: 12.5, lineHeight: 1.55 }}
         dangerouslySetInnerHTML={{ __html: renderMarkdown(article.ha_body_markdown) }}
       />
+      {onCollapse && (
+        <button
+          type="button"
+          onClick={onCollapse}
+          style={{
+            marginTop: 8,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            padding: 0, color: C.textMuted, fontSize: 11, fontFamily: 'inherit',
+          }}
+        >
+          ← back to search results
+        </button>
+      )}
     </article>
   )
 }
 
-function EmptyHelpState({ anchors }) {
+function EmptyContextState({ anchors }) {
   return (
     <div style={{ padding: 24, textAlign: 'center' }}>
       <div style={{
@@ -220,15 +429,14 @@ function EmptyHelpState({ anchors }) {
         </svg>
       </div>
       <div style={{ fontSize: 13, fontWeight: 500, color: C.textPrimary, marginBottom: 4 }}>
-        No help article yet
+        No help article for this page yet
       </div>
       <div style={{ fontSize: 12, color: C.textMuted, maxWidth: 320, margin: '0 auto', lineHeight: 1.5 }}>
-        Nothing in the help library is anchored here yet. Admins can add an article in
-        Setup &rarr; Administration &rarr; Help Articles and tag it to this control.
+        Try searching above, or browse all articles using the link at the bottom of this panel.
       </div>
       {anchors && anchors.length > 0 && (
         <details style={{ marginTop: 14, fontSize: 11, color: C.textMuted, textAlign: 'left', maxWidth: 360, margin: '14px auto 0' }}>
-          <summary style={{ cursor: 'pointer', listStyle: 'none' }}>Show anchor info</summary>
+          <summary style={{ cursor: 'pointer', listStyle: 'none' }}>Show anchor info (admin)</summary>
           <pre style={{
             marginTop: 6,
             background: '#f0f3f8',

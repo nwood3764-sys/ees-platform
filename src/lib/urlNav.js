@@ -118,7 +118,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // all results" footer button or a shared link).
 const KNOWN_MODULES = new Set([
   'home', 'outreach', 'qualification', 'field', 'incentives',
-  'stock', 'fleet', 'admin', 'portal', 'search',
+  'stock', 'fleet', 'admin', 'portal', 'search', 'help',
 ])
 
 /**
@@ -147,10 +147,23 @@ export function parsePath(pathname, search = '') {
     section: null,
     searchQuery: null,
     searchType: null,
+    helpSlug: null,
   }
 
   // /
   if (parts.length === 0) return base
+
+  // /help                  → help center, no slug → show first article
+  // /help/<slug>           → help center, deep-link to specific article
+  // Bypasses the module switch so the help center is reachable from
+  // anywhere — including external portal subdomains in the future.
+  if (parts[0] === 'help') {
+    return {
+      ...base,
+      activeModule: 'help',
+      helpSlug: parts[1] || null,
+    }
+  }
 
   // /search?q=<term>&type=<object_type>
   // Reads the search string for q/type. type is optional. An empty/missing
@@ -169,7 +182,7 @@ export function parsePath(pathname, search = '') {
   // /m/<module>[/<section>]
   if (parts[0] === 'm') {
     const mod = parts[1]
-    if (KNOWN_MODULES.has(mod) && mod !== 'search') {
+    if (KNOWN_MODULES.has(mod) && mod !== 'search' && mod !== 'help') {
       return { ...base, activeModule: mod, section: parts[2] || null }
     }
     return base
@@ -199,10 +212,13 @@ export function parsePath(pathname, search = '') {
  * state. Inverse of parsePath. Returns the full path including any query
  * string the search route needs.
  */
-export function buildPath({ activeModule, selectedRecord, section, searchQuery, searchType }) {
+export function buildPath({ activeModule, selectedRecord, section, searchQuery, searchType, helpSlug }) {
   if (selectedRecord?.table) {
     if (selectedRecord.mode === 'create') return `/${selectedRecord.table}/new`
     if (selectedRecord.id) return `/${selectedRecord.table}/${selectedRecord.id}`
+  }
+  if (activeModule === 'help') {
+    return helpSlug ? `/help/${helpSlug}` : '/help'
   }
   if (activeModule === 'search') {
     const params = new URLSearchParams()
@@ -346,6 +362,7 @@ export function useUrlNavigation() {
     sectionFromUrl: state.section,
     searchQuery: state.searchQuery,
     searchType: state.searchType,
+    helpSlug: state.helpSlug,
     navigateToModule,
     navigateToSection,
     navigateToRecord,

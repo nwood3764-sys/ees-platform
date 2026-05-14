@@ -8,6 +8,7 @@ import OutlookCallback from './pages/OutlookCallback'
 import { GlobalSearchInline } from './components/GlobalSearch'
 import { HelpProvider } from './components/help/HelpProvider'
 import HelpPanel from './components/help/HelpPanel'
+import HelpTopbarButton from './components/help/HelpTopbarButton'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
@@ -34,6 +35,7 @@ const ReportsModule       = lazy(() => import('./modules/ReportsModule'))
 const AdminModule         = lazy(() => import('./modules/admin'))
 const PortalModule        = lazy(() => import('./modules/PortalModule'))
 const SearchResultsPage   = lazy(() => import('./modules/SearchResultsPage'))
+const HelpCenterPage      = lazy(() => import('./pages/HelpCenterPage'))
 
 // ─── Module loading fallback ─────────────────────────────────────────────────
 // Shown while a lazy chunk is in flight. Minimal + branded so the user sees
@@ -68,6 +70,7 @@ function AuthedApp({ session }) {
     sectionFromUrl,
     searchQuery,
     searchType,
+    helpSlug,
     navigateToModule,
     navigateToSection,
     navigateToRecord,
@@ -207,6 +210,7 @@ function AuthedApp({ session }) {
           onNavigateToSearch={navigateToSearch}
         />
       )
+      case 'help':          return <HelpCenterPage initialSlug={helpSlug} />
       default:              return <ComingSoon label={activeModule.charAt(0).toUpperCase() + activeModule.slice(1)} />
     }
   }
@@ -232,18 +236,37 @@ function AuthedApp({ session }) {
           moduleIcon={NAV_MODULES.find(m => m.id === activeModule)?.icon}
           onOpenSearch={() => setMobileSearchOpen(true)}
         />
-        {/* Inline universal search — real input on desktop (always visible),
-            slide-down below MobileHeader on mobile (gated by mobileSearchOpen).
-            Hidden on the search results page itself, which already has its
-            own dedicated input — two would just be confusing. */}
-        {activeModule !== 'search' && (
-          <GlobalSearchInline
-            inputRef={searchInputRef}
-            mobileOpen={mobileSearchOpen}
-            onCloseMobile={() => setMobileSearchOpen(false)}
-            onNavigate={navigateToRecord}
-            onViewAll={(q) => navigateToSearch(q)}
-          />
+        {/* Inline universal search + Help button. The search bar's own
+            container is a centered 44px-tall row with border-bottom; we
+            layer the HelpTopbarButton absolutely on top of it at right
+            so it appears in the same row without disrupting the search
+            input's centering. Hidden on the search results page itself,
+            which has its own dedicated input — two would just be
+            confusing — and on the Help Center page (since the panel
+            wouldn't add value while reading articles full-width).
+            */}
+        {activeModule !== 'search' && activeModule !== 'help' && (
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <GlobalSearchInline
+              inputRef={searchInputRef}
+              mobileOpen={mobileSearchOpen}
+              onCloseMobile={() => setMobileSearchOpen(false)}
+              onNavigate={navigateToRecord}
+              onViewAll={(q) => navigateToSearch(q)}
+            />
+            <div style={{
+              position: 'absolute',
+              top: 7,
+              right: 16,
+              zIndex: 10,
+              pointerEvents: 'auto',
+            }}>
+              <HelpTopbarButton
+                activeModule={activeModule}
+                selectedRecord={selectedRecord}
+              />
+            </div>
+          </div>
         )}
         <Suspense fallback={<ModuleLoader />}>
           {renderModule()}
