@@ -13,7 +13,7 @@
 // presents the resulting plan as a Gantt chart.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../UI'
 import { useToast } from '../Toast'
@@ -88,6 +88,15 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   const [ganttZoom, setGanttZoom] = useState(1)
   // Optional: blow the Gantt out to a fullscreen overlay for dispatcher review
   const [ganttFullscreen, setGanttFullscreen] = useState(false)
+  // Drag-to-reorder state. dragWoId is the WO being dragged; dragOverWoId
+  // is the target block under the pointer; dragOverPos is 'before' or
+  // 'after' based on which half of the target block the pointer is in.
+  // On pointer up we splice the dragged id into woOrder relative to the
+  // target and re-run the preview RPC. This lets dispatchers say "do unit
+  // B first" by dragging a unit-B block to the front of the Gantt.
+  const [dragWoId, setDragWoId] = useState(null)
+  const [dragOverWoId, setDragOverWoId] = useState(null)
+  const [dragOverPos, setDragOverPos] = useState('before')
 
   // ── Load initial data ────────────────────────────────────────────────────
   useEffect(() => {
@@ -220,18 +229,23 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     return null
   }
 
-  const runPreview = async () => {
-    setPreviewing(true); setPreviewError(null); setPreview(null)
+  const runPreview = async (overrideIds = null) => {
+    setPreviewing(true); setPreviewError(null)
+    // When called from a drag-drop reorder, overrideIds is non-null AND we
+    // want to keep the existing preview visible (just dim it) so the user
+    // doesn't see the Gantt flash to empty. On the initial run from Step
+    // 2, clear preview so the placeholder "Computing…" shows.
+    if (overrideIds === null) setPreview(null)
     try {
       const rows = await bulkScheduleWorkOrders({
         projectId,
-        workOrderIds: orderedSelectedIds,
+        workOrderIds: overrideIds || orderedSelectedIds,
         teamLeadContactId: teamLeadId,
         startDate, endDate,
         commit: false,
       })
       setPreview(rows)
-      setStep(3)
+      if (step !== 3) setStep(3)
     } catch (e) {
       setPreviewError(e.message || 'Preview failed')
     } finally {
@@ -264,6 +278,67 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
       setCommitting(false)
     }
   }
+
+  // ── Gantt drag-to-reorder ─────────────────────────────────────────────────
+  // Ref captures so the document-level pointer handlers see latest values
+  // without resubscribing on every state change.
+  const dragWoRef = useRef(null)
+  const dragOverRef = useRef({ id: null, pos: 'before' })
+  useEffect(() => { dragWoRef.current = dragWoId }, [dragWoId])
+  useEffect(() => { dragOverRef.current = { id: dragOverWoId, pos: dragOverPos } }, [dragOverWoId, dragOverPos])
+
+  const commitDragReorder = useCallback(() => {
+    const draggedId = dragWoRef.current
+    const { id: overId, pos } = dragOverRef.current
+    if (!draggedId || !overId || draggedId === overId) return
+    const newOrder = woOrder.filter(id => id !== draggedId)
+    let overIdx = newOrder.indexOf(overId)
+    if (overIdx < 0) return
+    if (pos === 'after') overIdx += 1
+    newOrder.splice(overIdx, 0, draggedId)
+    setWoOrder(newOrder)
+    // Re-run preview with the explicit new order so we don't depend on
+    // React having flushed woOrder before the call.
+    const newSelectedOrdered = newOrder.filter(id => selectedIds.has(id))
+    runPreview(newSelectedOrdered)
+  }, [woOrder, selectedIds]) // runPreview reads other state via closure
+
+  // Document-level pointer listeners are mounted only while a drag is in
+  // progress. Pointer events handle both mouse and touch automatically.
+  useEffect(() => {
+    if (!dragWoId) return
+    const onMove = (e) => {
+      // Find the WO block under the pointer (if any) and compute before/
+      // after based on which half of its bounding box the pointer is in.
+      const target = document.elementFromPoint(e.clientX, e.clientY)
+      const block = target && target.closest ? target.closest('[data-wo-id]') : null
+      if (!block) { setDragOverWoId(null); return }
+      const overId = block.dataset.woId
+      if (overId === dragWoId) { setDragOverWoId(null); return }
+      const rect = block.getBoundingClientRect()
+      const mid = rect.left + rect.width / 2
+      setDragOverWoId(overId)
+      setDragOverPos(e.clientX < mid ? 'before' : 'after')
+    }
+    const onUp = () => {
+      commitDragReorder()
+      setDragWoId(null)
+      setDragOverWoId(null)
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+    document.addEventListener('pointercancel', onUp)
+    return () => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
+    }
+  }, [dragWoId, commitDragReorder])
+
+  const onWoDragStart = useCallback((woId, e) => {
+    e.preventDefault()
+    setDragWoId(woId)
+  }, [])
 
   // ── Styles (match ProjectReportModal idiom) ──────────────────────────────
   const overlay = {
@@ -599,7 +674,12 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 marginBottom: 8, fontSize: 11.5, color: C.textMuted,
               }}>
-                <span>Hover any block for full details. Use zoom to see short measures clearly.</span>
+                <span>
+                  Drag a block to reorder. Drop before/after another WO to change its placement priority — the engine re-runs automatically.
+                  {previewing && (
+                    <span style={{ color: C.emerald, fontWeight: 600, marginLeft: 8 }}>Refreshing…</span>
+                  )}
+                </span>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span style={{ fontSize: 10.5, fontWeight: 600, color: C.textMuted,
                                  textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: 2 }}>
@@ -635,7 +715,9 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                 <GanttScroll trackWidth={trackWidth}>
                   <GanttAxis />
                   {placedByDay.map(group => (
-                    <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={ganttZoom} />
+                    <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={ganttZoom}
+                      dragWoId={dragWoId} dragOverWoId={dragOverWoId} dragOverPos={dragOverPos}
+                      onWoDragStart={onWoDragStart} />
                   ))}
                 </GanttScroll>
                 <GanttLegend rows={preview.filter(r => r.placed)} />
@@ -813,6 +895,10 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           previewSummary={previewSummary}
           previewByDay={previewByDay}
           allPlaced={preview.filter(r => r.placed)}
+          dragWoId={dragWoId}
+          dragOverWoId={dragOverWoId}
+          dragOverPos={dragOverPos}
+          onWoDragStart={onWoDragStart}
           onClose={() => setGanttFullscreen(false)}
         />
       )}
@@ -836,7 +922,10 @@ function SummaryCard({ label, value, color }) {
 // Fullscreen Gantt — viewport-filling overlay, separate zoom state, Esc to
 // close. Used when the dispatcher needs to read packed direct-install days
 // in detail. Same blocks, way more screen.
-function GanttFullscreenView({ previewSummary, previewByDay, allPlaced, onClose }) {
+function GanttFullscreenView({
+  previewSummary, previewByDay, allPlaced, onClose,
+  dragWoId, dragOverWoId, dragOverPos, onWoDragStart,
+}) {
   const [zoom, setZoom] = useState(2)
   useEffect(() => {
     const onKey = e => { if (e.key === 'Escape') onClose() }
@@ -898,7 +987,9 @@ function GanttFullscreenView({ previewSummary, previewByDay, allPlaced, onClose 
             <GanttScroll trackWidth={trackWidth}>
               <GanttAxis />
               {placedByDay.map(group => (
-                <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={zoom} />
+                <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={zoom}
+                  dragWoId={dragWoId} dragOverWoId={dragOverWoId} dragOverPos={dragOverPos}
+                  onWoDragStart={onWoDragStart} />
               ))}
             </GanttScroll>
             <GanttLegend rows={allPlaced} />
@@ -979,7 +1070,10 @@ function GanttAxis() {
   )
 }
 
-function GanttDay({ day, rows, zoom = 1 }) {
+function GanttDay({
+  day, rows, zoom = 1,
+  dragWoId = null, dragOverWoId = null, dragOverPos = 'before', onWoDragStart,
+}) {
   const d = new Date(day + 'T00:00:00')
   const weekday = d.toLocaleDateString(undefined, { weekday: 'short' })
   const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -1020,21 +1114,43 @@ function GanttDay({ day, rows, zoom = 1 }) {
           const leftPct  = startMin / DAY_RANGE_MIN * 100
           const widthPct = durMin / DAY_RANGE_MIN * 100
           const showLabel = durMin >= labelThresholdMin
+          const isBeingDragged = dragWoId === r.work_order_id
+          const isDropTarget = dragOverWoId === r.work_order_id
           return (
             <div key={r.work_order_id}
-              title={`${r.work_order_record_number} — ${r.work_type_name}\n${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}\n${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)} (${durMin} min)`}
+              data-wo-id={r.work_order_id}
+              onPointerDown={onWoDragStart ? (e) => onWoDragStart(r.work_order_id, e) : undefined}
+              title={`${r.work_order_record_number} — ${r.work_type_name}\n${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}\n${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)} (${durMin} min)\n\nDrag to reorder placement sequence.`}
               style={{
                 position: 'absolute', top: 5, bottom: 5,
                 left:  `${leftPct}%`,
                 width: `max(${minBlockPx}px, ${widthPct}%)`,
                 background: unitColor(r.unit_name),
-                border: '1px solid rgba(15, 23, 42, 0.25)',
+                border: isDropTarget
+                  ? '2px solid #15803d'
+                  : '1px solid rgba(15, 23, 42, 0.25)',
                 borderRadius: 3,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: '#1e293b', fontSize: 9.5, fontWeight: 600,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                cursor: 'help', padding: showLabel ? '0 4px' : 0,
+                cursor: onWoDragStart ? (isBeingDragged ? 'grabbing' : 'grab') : 'help',
+                padding: showLabel ? '0 4px' : 0,
+                opacity: isBeingDragged ? 0.35 : 1,
+                touchAction: 'none', userSelect: 'none',
+                boxShadow: isDropTarget ? '0 0 0 2px rgba(21, 128, 61, 0.25)' : 'none',
+                zIndex: isBeingDragged ? 3 : 1,
               }}>
+              {/* Insertion bar — left edge for 'before', right edge for 'after' */}
+              {isDropTarget && (
+                <div style={{
+                  position: 'absolute', top: -3, bottom: -3,
+                  width: 3, background: '#15803d',
+                  left: dragOverPos === 'before' ? -2 : undefined,
+                  right: dragOverPos === 'after' ? -2 : undefined,
+                  borderRadius: 2,
+                  pointerEvents: 'none',
+                }} />
+              )}
               {showLabel && r.work_order_record_number}
             </div>
           )
