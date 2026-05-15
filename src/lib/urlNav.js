@@ -47,6 +47,9 @@ const TABLE_MODULE_MAP = {
   // Field
   projects: 'field',
   work_orders: 'field',
+  service_appointments: 'field',
+  service_appointment_assignments: 'field',
+  resource_absences: 'field',
   envelopes: 'field',
   envelope_recipients: 'field',
   envelope_tabs: 'field',
@@ -103,6 +106,29 @@ const TABLE_MODULE_MAP = {
   dashboard_filters: 'reports',
   dashboard_folder_user_shares: 'reports',
   dashboard_folder_role_shares: 'reports',
+}
+
+// Some module sections drop or change the table name — e.g. the Field
+// module exposes work_orders under section id "workorders" (no underscore),
+// time_sheets under "timesheets", and resource_absences under "absences".
+// When wiring a related-list "View All" link to a list view we look up the
+// section here first, then fall back to the table name.
+const TABLE_LIST_SECTION_MAP = {
+  work_orders: 'workorders',
+  time_sheets: 'timesheets',
+  resource_absences: 'absences',
+}
+
+/**
+ * Compute the URL of a table's list view, if one is reachable.
+ * Returns null when the table isn't mapped to a module.
+ */
+export function getTableListUrl(table) {
+  if (!table) return null
+  const moduleId = TABLE_MODULE_MAP[table]
+  if (!moduleId) return null
+  const section = TABLE_LIST_SECTION_MAP[table] || table
+  return `/m/${moduleId}/${section}`
 }
 
 // Regex matching a UUID v4 — the only ID format we accept in record URLs.

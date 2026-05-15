@@ -209,7 +209,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         commit: true,
       })
       setCommitResult(rows)
-      setStep(4)
+      setStep(3)
       const placed = rows.filter(r => r.placed).length
       toast.success(`Scheduled ${placed} work order${placed === 1 ? '' : 's'}.`)
       onCommitted?.()
@@ -268,7 +268,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   // ── Step renderers ───────────────────────────────────────────────────────
 
   function StepIndicator() {
-    const steps = ['Select WOs', 'Crew & window', 'Preview', 'Done']
+    const steps = ['Select WOs', 'Crew & window', 'Done']
     return (
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         {steps.map((label, i) => {
@@ -668,8 +668,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         <div style={bodyStyle}>
           {step === 1 && renderStep1()}
           {step === 2 && renderStep2()}
-          {step === 3 && renderStep3()}
-          {step === 4 && renderStep4()}
+          {step === 3 && renderStep4()}
         </div>
 
         {/* Footer */}
@@ -685,32 +684,18 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           )}
           {step === 2 && (
             <>
-              {secondaryBtn('← Back', () => setStep(1))}
-              <div style={{ display: 'flex', gap: 8 }}>
-                {secondaryBtn('Cancel', onClose)}
-                {primaryBtn('Preview placement', runPreview, {
-                  disabled: !!step2Err || previewing, busy: previewing, busyLabel: 'Computing…',
-                })}
-              </div>
-            </>
-          )}
-          {step === 3 && (
-            <>
-              {secondaryBtn('← Back', () => setStep(2), { disabled: committing })}
+              {secondaryBtn('← Back', () => setStep(1), { disabled: committing })}
               <div style={{ display: 'flex', gap: 8 }}>
                 {secondaryBtn('Cancel', onClose, { disabled: committing })}
                 {primaryBtn(
-                  previewSummary && previewSummary.placed > 0
-                    ? `Confirm — schedule ${previewSummary.placed}`
-                    : 'Nothing to schedule',
+                  `Schedule ${selectedIds.size} work order${selectedIds.size === 1 ? '' : 's'}`,
                   runCommit,
-                  { disabled: !previewSummary || previewSummary.placed === 0 || committing,
-                    busy: committing, busyLabel: 'Scheduling…' }
+                  { disabled: !!step2Err || committing, busy: committing, busyLabel: 'Scheduling…' }
                 )}
               </div>
             </>
           )}
-          {step === 4 && (
+          {step === 3 && (
             <>
               <div></div>
               {primaryBtn('Close', onClose)}

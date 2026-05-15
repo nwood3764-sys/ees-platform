@@ -7,6 +7,7 @@ import ProjectSchedulerWizard from './scheduler/ProjectSchedulerWizard'
 import SendForSignatureModal from './SendForSignatureModal'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
+import { getTableListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import { ReportWidget } from './ReportWidget'
@@ -2360,7 +2361,7 @@ function ConfigFieldRow({ field, value, editing, onChange }) {
 //   • "View All (N)" footer link when more rows exist
 // ---------------------------------------------------------------------------
 
-const RELATED_LIST_MAX_ROWS = 10
+const RELATED_LIST_MAX_ROWS = 25
 
 // Render a single cell. Extracted so the editable and read-only paths can
 // share formatting without duplicating the picklist / date / number logic.
@@ -2868,28 +2869,48 @@ function RelatedListWidget({
               </div>
             )}
 
-            {hiddenCount > 0 && (
-              <div style={{
-                padding: '8px 14px',
-                borderTop: `1px solid ${C.border}`,
-                background: '#fafbfd',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                fontSize: 11.5,
-              }}>
-                <span style={{ color: C.textMuted }}>
-                  Showing {shownRows.length} of {allRows.length}
-                </span>
-                <span
-                  title="View All list view coming soon"
-                  style={{
-                    color: C.textMuted, fontStyle: 'italic',
-                    cursor: 'not-allowed',
-                  }}
-                >
-                  View All ({allRows.length}) →
-                </span>
-              </div>
-            )}
+            {hiddenCount > 0 && (() => {
+              // Wire View All to the table's list view when one is mapped.
+              // No project-filter yet — the link drops the user on the full
+              // list, which is still better than a not-allowed placeholder.
+              const listUrl = getTableListUrl(childTable)
+              return (
+                <div style={{
+                  padding: '8px 14px',
+                  borderTop: `1px solid ${C.border}`,
+                  background: '#fafbfd',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  fontSize: 11.5,
+                }}>
+                  <span style={{ color: C.textMuted }}>
+                    Showing {shownRows.length} of {allRows.length}
+                  </span>
+                  {listUrl ? (
+                    <a
+                      href={listUrl}
+                      style={{
+                        color: '#1a5a8a', fontWeight: 500,
+                        textDecoration: 'none', cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none' }}
+                    >
+                      View All ({allRows.length}) →
+                    </a>
+                  ) : (
+                    <span
+                      title="List view not available for this related table"
+                      style={{
+                        color: C.textMuted, fontStyle: 'italic',
+                        cursor: 'not-allowed',
+                      }}
+                    >
+                      View All ({allRows.length}) →
+                    </span>
+                  )}
+                </div>
+              )
+            })()}
           </>
         )}
       </div>
