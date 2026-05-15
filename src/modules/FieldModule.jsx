@@ -4,6 +4,7 @@ import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import HelpIcon from '../components/help/HelpIcon'
 import { fetchProjects, fetchWorkOrders, fetchSchedule, fetchUpcomingServiceAppointments } from '../data/fieldService'
 import { fetchPaymentRequests } from '../data/incentivesService'
 import { fetchTechnicians, fetchCertifications, fetchTimeSheets, fetchUpcomingAbsences } from '../data/peopleService'
@@ -560,8 +561,17 @@ function ServiceAppointmentsInbox({ onOpenRecord }) {
           marginBottom:16, flexWrap:'wrap', gap:12,
         }}>
           <div>
-            <h2 style={{ fontSize:20, fontWeight:600, marginBottom:4 }}>
+            <h2 style={{ fontSize:20, fontWeight:600, marginBottom:4, display:'flex', alignItems:'center', gap:6 }}>
               Upcoming Service Appointments — next {days} days
+              <HelpIcon
+                anchors={[
+                  { type: 'concept', concept: 'service-appointments-inbox' },
+                  { type: 'object',  object:  'service_appointments' },
+                  { type: 'concept', concept: 'customer-scheduling' },
+                  { type: 'concept', concept: 'manage-link' },
+                ]}
+                title="Service Appointments Inbox"
+              />
             </h2>
             <div style={{ fontSize:13, color:C.textSecondary }}>
               {rows.length === 0
