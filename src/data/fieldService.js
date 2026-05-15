@@ -341,11 +341,11 @@ export async function fetchSchedule(date = new Date()) {
 }
 
 // ---------------------------------------------------------------------------
-// Bookings inbox — customer-self-booked appointments in the upcoming window
+// Service Appointments inbox — customer-self-booked SAs in the upcoming window
 // ---------------------------------------------------------------------------
-// The /book/* customer flow inserts appointments via the book_appointment RPC.
-// Staff need a multi-day inbox view of incoming bookings so they can call the
-// customer to confirm and reschedule if needed.
+// The /book/* customer flow inserts service_appointments via the book_appointment
+// RPC. Staff need a multi-day inbox view of incoming Service Appointments so
+// they can call the customer to confirm and reschedule if needed.
 //
 // Returns: rows grouped by calendar day (Chicago), each row carrying customer
 // contact + service address + assigned auditor + work type. Sorted ascending
@@ -356,7 +356,7 @@ export async function fetchSchedule(date = new Date()) {
 // a Technician contact; we don't have an explicit "booking_source" column yet
 // (worth adding when we need to distinguish from internally-created SAs).
 
-export async function fetchUpcomingBookings(days = 14) {
+export async function fetchUpcomingServiceAppointments(days = 14) {
   // Direct picklist lookup — no helper for value-to-id in outreachService.
   const { data: statusRow } = await supabase
     .from('picklist_values')

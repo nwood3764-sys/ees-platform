@@ -4,20 +4,21 @@ import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
-import { fetchProjects, fetchWorkOrders, fetchSchedule, fetchUpcomingBookings } from '../data/fieldService'
+import { fetchProjects, fetchWorkOrders, fetchSchedule, fetchUpcomingServiceAppointments } from '../data/fieldService'
 import { fetchPaymentRequests } from '../data/incentivesService'
-import { fetchTechnicians, fetchCertifications, fetchTimeSheets } from '../data/peopleService'
+import { fetchTechnicians, fetchCertifications, fetchTimeSheets, fetchUpcomingAbsences } from '../data/peopleService'
 import { getCurrentUserProfile } from '../data/layoutService'
 
 const SECTIONS = [
-  { id:'home',        label:'Home'         },
-  { id:'bookings',    label:'Bookings'     },
-  { id:'projects',    label:'Projects'     },
-  { id:'workorders',  label:'Work Orders'  },
-  { id:'schedule',    label:'Schedule'     },
-  { id:'technicians', label:'Technicians'  },
-  { id:'credentials', label:'Credentials'  },
-  { id:'timesheets',  label:'Time Sheets'  },
+  { id:'home',                 label:'Home'                },
+  { id:'service_appointments', label:'Service Appointments'},
+  { id:'projects',             label:'Projects'            },
+  { id:'workorders',           label:'Work Orders'         },
+  { id:'schedule',             label:'Schedule'            },
+  { id:'absences',             label:'Out of Office'       },
+  { id:'technicians',          label:'Technicians'         },
+  { id:'credentials',          label:'Credentials'         },
+  { id:'timesheets',           label:'Time Sheets'         },
 ]
 
 const PROJ_COLS = [
@@ -109,6 +110,26 @@ const TS_VIEWS = [
   { id:'TSV-01', name:'All Time Sheets', filters:[], sortField:'weekStart', sortDir:'desc' },
   { id:'TSV-02', name:'Submitted',       filters:[{ field:'status', label:'Status', op:'equals', value:'Submitted' }], sortField:'weekStart', sortDir:'desc' },
   { id:'TSV-03', name:'Approved',        filters:[{ field:'status', label:'Status', op:'equals', value:'Approved' }], sortField:'weekStart', sortDir:'desc' },
+]
+
+// ─── Out-of-office (resource_absences) ───────────────────────────────────────
+// Compute-availability already filters slots that overlap any absence row,
+// so this list is the dispatcher's one-stop view of "who's out and when".
+// Adding/editing/deleting absences uses the standard RecordDetail flow.
+const ABSENCE_COLS = [
+  { field:'id',         label:'Record #',   type:'text', sortable:true,  filterable:false },
+  { field:'technician', label:'Technician', type:'text', sortable:true,  filterable:true  },
+  { field:'type',       label:'Type',       type:'select', sortable:true, filterable:true,
+    options:['PTO','Training','Sick','Other'] },
+  { field:'startDate',  label:'Starts',     type:'date', sortable:true,  filterable:true  },
+  { field:'endDate',    label:'Ends',       type:'date', sortable:true,  filterable:true  },
+  { field:'allDay',     label:'All Day',    type:'select', sortable:true, filterable:true, options:['Yes','No'] },
+  { field:'notes',      label:'Notes',      type:'text', sortable:false, filterable:true  },
+]
+const ABSENCE_VIEWS = [
+  { id:'AV-01', name:'Upcoming & Active', filters:[], sortField:'startDate', sortDir:'asc' },
+  { id:'AV-02', name:'PTO only',          filters:[{ field:'type', label:'Type', op:'equals', value:'PTO' }],      sortField:'startDate', sortDir:'asc' },
+  { id:'AV-03', name:'Training',          filters:[{ field:'type', label:'Type', op:'equals', value:'Training' }], sortField:'startDate', sortDir:'asc' },
 ]
 
 // Schedule constants
@@ -480,8 +501,8 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
   return <ListView data={data} {...rest} />
 }
 
-// ─── BookingsInbox ──────────────────────────────────────────────────────────
-// Dispatcher console for incoming customer-self-booked appointments.
+// ─── ServiceAppointmentsInbox ───────────────────────────────────────────────
+// Dispatcher console for incoming customer-self-booked Service Appointments.
 //
 // Reads service_appointments where sa_status='scheduled' AND start time is in
 // the upcoming `days` window (default 14). Groups by Chicago calendar day so
@@ -495,7 +516,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 // Refresh: manual button + auto-refetch on mount. Background polling could
 // be added later but a manual refresh keeps the UI predictable.
 
-function BookingsInbox({ onOpenRecord }) {
+function ServiceAppointmentsInbox({ onOpenRecord }) {
   const [rows,    setRows]    = useState([])
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
@@ -504,10 +525,10 @@ function BookingsInbox({ onOpenRecord }) {
   async function load() {
     setLoading(true); setError(null)
     try {
-      const data = await fetchUpcomingBookings(days)
+      const data = await fetchUpcomingServiceAppointments(days)
       setRows(data)
     } catch (e) {
-      setError(e.message || 'Could not load bookings')
+      setError(e.message || 'Could not load service appointments')
     } finally {
       setLoading(false)
     }
@@ -540,12 +561,12 @@ function BookingsInbox({ onOpenRecord }) {
         }}>
           <div>
             <h2 style={{ fontSize:20, fontWeight:600, marginBottom:4 }}>
-              Customer bookings — next {days} days
+              Upcoming Service Appointments — next {days} days
             </h2>
             <div style={{ fontSize:13, color:C.textSecondary }}>
               {rows.length === 0
-                ? 'No upcoming customer-self-booked appointments.'
-                : `${rows.length} appointment${rows.length === 1 ? '' : 's'} scheduled across ${byDay.length} day${byDay.length === 1 ? '' : 's'}.`}
+                ? 'No upcoming customer-self-booked service appointments.'
+                : `${rows.length} service appointment${rows.length === 1 ? '' : 's'} scheduled across ${byDay.length} day${byDay.length === 1 ? '' : 's'}.`}
             </div>
           </div>
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
@@ -571,7 +592,7 @@ function BookingsInbox({ onOpenRecord }) {
             background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
             padding:48, textAlign:'center', color:C.textMuted, fontSize:14,
           }}>
-            No bookings in this window. Customers can book at
+            No service appointments in this window. Customers can book at
             {' '}<a href="/book" target="_blank" rel="noreferrer" style={{ color:C.emerald, textDecoration:'none', fontWeight:500 }}>/book</a>.
           </div>
         ) : (
@@ -842,8 +863,8 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
-        {sec==='bookings'   && <BookingsInbox onOpenRecord={openRecord} />}
+        {sec==='home'                 && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
+        {sec==='service_appointments' && <ServiceAppointmentsInbox onOpenRecord={openRecord} />}
         {sec==='projects'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
         {sec==='workorders' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='schedule'   && <ScheduleView
