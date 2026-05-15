@@ -4610,6 +4610,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     Generate Report
                   </button>
                 )}
+                {tableName === 'projects' && (
+                  <button
+                    onClick={() => setShowSchedulerWizard(true)}
+                    title="Bulk-schedule unscheduled work orders on this project to a Team Lead"
+                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#ecfdf5' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" size={13} color={C.emerald} />
+                    Schedule
+                  </button>
+                )}
                 {hasActiveTemplate && (
                   <button
                     onClick={() => setShowSendSignatureModal(true)}
