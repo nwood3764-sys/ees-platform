@@ -2360,7 +2360,7 @@ function ConfigFieldRow({ field, value, editing, onChange }) {
 //   • "View All (N)" footer link when more rows exist
 // ---------------------------------------------------------------------------
 
-const RELATED_LIST_MAX_ROWS = 5
+const RELATED_LIST_MAX_ROWS = 10
 
 // Render a single cell. Extracted so the editable and read-only paths can
 // share formatting without duplicating the picklist / date / number logic.
@@ -4619,7 +4619,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
                   >
                     <Icon path="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" size={13} color={C.emerald} />
-                    Schedule
+                    Schedule Work Orders
                   </button>
                 )}
                 {hasActiveTemplate && (

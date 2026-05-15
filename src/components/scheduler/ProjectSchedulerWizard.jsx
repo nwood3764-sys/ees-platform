@@ -300,6 +300,34 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
   function renderStep1() {
     const step1Err = validateStep1()
+    // Empty state — every WO on the project is already scheduled (or there
+    // are none yet). Don't show the table + yellow warning; show a calm
+    // "nothing to do" panel.
+    if (workOrders.length === 0) {
+      return (
+        <>
+          <StepIndicator />
+          <div style={{
+            padding: 36, textAlign: 'center',
+            background: C.page, border: `1px solid ${C.border}`, borderRadius: 8,
+          }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: 999, background: '#15803d',
+              margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Icon path="M5 13l4 4L19 7" size={24} color="white" />
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, marginBottom: 6 }}>
+              Nothing to schedule
+            </div>
+            <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.55 }}>
+              This project has no work orders in status <strong>To Be Scheduled</strong>.
+              All work orders are either already scheduled or in another status.
+            </div>
+          </div>
+        </>
+      )
+    }
     return (
       <>
         <StepIndicator />
@@ -436,9 +464,10 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         </div>
 
         <div style={{ background: C.page, borderRadius: 6, padding: '10px 12px', fontSize: 12, color: C.textSecondary, lineHeight: 1.55 }}>
-          <strong style={{ color: C.textPrimary }}>Working hours:</strong> 7:00 AM – 3:30 PM, lunch 11:30 – 12:00,
-          15 min between work orders. Weekends are skipped. Existing appointments and absences for the
-          selected Team Lead are honored.
+          <strong style={{ color: C.textPrimary }}>Working hours:</strong> 7:00 AM – 3:30 PM,
+          lunch 11:30 – 12:00. Buffer between work orders is set per work type (default 5 min).
+          Work orders in the same unit pack back-to-back with no buffer. Weekends are skipped.
+          Existing appointments and absences for the selected Team Lead are honored.
         </div>
 
         {step2Err && (
