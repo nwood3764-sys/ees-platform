@@ -231,15 +231,15 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
   const runPreview = async (overrideIds = null) => {
     setPreviewing(true); setPreviewError(null)
-    // When called from a drag-drop reorder, overrideIds is non-null AND we
-    // want to keep the existing preview visible (just dim it) so the user
-    // doesn't see the Gantt flash to empty. On the initial run from Step
-    // 2, clear preview so the placeholder "Computing…" shows.
-    if (overrideIds === null) setPreview(null)
+    // Guard against accidental callers that pass a non-array (e.g. wiring
+    // runPreview directly to onClick lets React pass the MouseEvent). Only
+    // honor overrideIds when it's an actual array.
+    const safeOverride = Array.isArray(overrideIds) ? overrideIds : null
+    if (safeOverride === null) setPreview(null)
     try {
       const rows = await bulkScheduleWorkOrders({
         projectId,
-        workOrderIds: overrideIds || orderedSelectedIds,
+        workOrderIds: safeOverride || orderedSelectedIds,
         teamLeadContactId: teamLeadId,
         startDate, endDate,
         commit: false,
@@ -860,7 +860,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
               {secondaryBtn('← Back', () => setStep(1), { disabled: previewing })}
               <div style={{ display: 'flex', gap: 8 }}>
                 {secondaryBtn('Cancel', onClose, { disabled: previewing })}
-                {primaryBtn('Preview placement →', runPreview, {
+                {primaryBtn('Preview placement →', () => runPreview(), {
                   disabled: !!step2Err || previewing,
                   busy: previewing, busyLabel: 'Computing…',
                 })}
