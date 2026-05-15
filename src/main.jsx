@@ -3,22 +3,35 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import SigningPortalRoot from './pages/SigningPortal.jsx'
+import BookingRoot from './booking/BookingRoot.jsx'
 
 // ─── Path-based routing (no router library) ──────────────────────────────────
-// The signing portal is publicly accessible at /sign/{env_record_number}/{token}
-// without authentication. Recipients are not Energy Efficiency Services users; the token is the
-// auth. We can't render this through the normal App tree because that tree
-// gates everything behind <AuthGate>. Detecting the path here and dispatching
-// to a separate component avoids both the auth gate and the chrome (sidebar/
-// topbar) for these magic-link visits. Anything else goes to the normal App.
+// Two public, unauthenticated entry points bypass <AuthGate> and the staff
+// chrome (sidebar/topbar) by being dispatched here:
 //
-// Server-side routing for /sign/* paths is handled by Netlify's SPA fallback
-// (public/_redirects) so direct visits to those URLs still hit index.html.
+//   /sign/{env_record_number}/{token}  → SigningPortalRoot
+//     E-signature recipients are not Energy Efficiency Services users; the
+//     URL token is their auth.
+//
+//   /book/<slug> or /book/manage/<token>  → BookingRoot
+//     Customer-facing booking flow. Anyone in the service area can book a
+//     home energy assessment without an account; the bookAppointment edge
+//     function enforces input validation, territory containment, and the
+//     advisory-lock-based slot-conflict check.
+//
+// Anything else goes through the normal authenticated App tree.
+//
+// Netlify SPA fallback (netlify.toml: /* → /index.html, 200) means direct
+// hits to these paths still serve index.html so this dispatch runs.
 // ─────────────────────────────────────────────────────────────────────────────
-const isSigningRoute = window.location.pathname.startsWith('/sign/')
+const pathname       = window.location.pathname
+const isSigningRoute = pathname.startsWith('/sign/')
+const isBookingRoute = pathname === '/book' || pathname.startsWith('/book/')
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    {isSigningRoute ? <SigningPortalRoot /> : <App />}
+    {isSigningRoute ? <SigningPortalRoot />
+     : isBookingRoute ? <BookingRoot />
+     : <App />}
   </StrictMode>,
 )
