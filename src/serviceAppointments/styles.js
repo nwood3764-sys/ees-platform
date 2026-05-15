@@ -1,7 +1,7 @@
 // ─── styles.js ───────────────────────────────────────────────────────────────
-// Inline-style helpers for the customer-facing booking pages. Mirrors the
+// Inline-style helpers for the customer-facing /sa/* scheduling pages. Mirrors the
 // design tokens in src/data/constants.js (kept independent because the
-// booking module bypasses the rest of the app via main.jsx path routing).
+// /sa/* module bypasses the rest of the app via main.jsx path routing).
 
 export const C = {
   page:           '#f0f3f8',

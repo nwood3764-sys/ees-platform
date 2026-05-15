@@ -1,10 +1,10 @@
-// ─── BookingHeader.jsx ───────────────────────────────────────────────────────
-// Branded header for customer-facing booking pages. Deep-navy bar with the
+// ─── ServiceAppointmentHeader.jsx ───────────────────────────────────────────────────────
+// Branded header for customer-facing scheduling pages. Deep-navy bar with the
 // EES-WI / Anura Energy mark. No nav — customers are on a single-purpose flow.
 
 import { C } from './styles'
 
-export default function BookingHeader() {
+export default function ServiceAppointmentHeader() {
   return (
     <header style={{
       background:     C.navy,

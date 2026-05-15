@@ -1,6 +1,6 @@
 // ─── SlugIndex.jsx ───────────────────────────────────────────────────────────
-// Landing page at /book — lists the 4 customer-bookable assessment types and
-// links to each booking flow. Hardcoded to match WT-00072..00075. When the
+// Landing page at /sa — lists the 4 customer-bookable assessment types and
+// links to each scheduling flow. Hardcoded to match WT-00072..00075. When the
 // catalog grows, this should fetch from compute-availability's work_types
 // catalog or an /api/work-types endpoint.
 
@@ -47,7 +47,7 @@ export default function SlugIndex() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {SERVICES.map(s => (
           <a key={s.slug}
-             href={`/book/${s.slug}`}
+             href={`/sa/${s.slug}`}
              style={{
                ...card,
                textDecoration:  'none',

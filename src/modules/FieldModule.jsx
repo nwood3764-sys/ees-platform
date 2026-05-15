@@ -593,7 +593,7 @@ function ServiceAppointmentsInbox({ onOpenRecord }) {
             padding:48, textAlign:'center', color:C.textMuted, fontSize:14,
           }}>
             No service appointments in this window. Customers can book at
-            {' '}<a href="/book" target="_blank" rel="noreferrer" style={{ color:C.emerald, textDecoration:'none', fontWeight:500 }}>/book</a>.
+            {' '}<a href="/sa" target="_blank" rel="noreferrer" style={{ color:C.emerald, textDecoration:'none', fontWeight:500 }}>/sa</a>.
           </div>
         ) : (
           byDay.map(([dayLabel, dayRows]) => (
@@ -714,6 +714,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
   const [technicians, setTechnicians]   = useState([])
   const [credentials, setCredentials]   = useState([])
   const [timesheets,  setTimesheets]    = useState([])
+  const [absences,    setAbsences]      = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -736,6 +737,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
     technicians: 'contacts',
     credentials: 'contact_skills',
     timesheets:  'time_sheets',
+    absences:    'resource_absences',
   }
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, mode: 'view', name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
@@ -751,11 +753,12 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
       fetchTechnicians(),
       fetchCertifications(),
       fetchTimeSheets(),
+      fetchUpcomingAbsences(),
     ])
-      .then(([p, w, pr, tc, tech, cred, ts]) => {
+      .then(([p, w, pr, tc, tech, cred, ts, abs]) => {
         if (cancelled) return
         setProjects(p); setWorkOrders(w); setPaymentRequests(pr); setTodayCrews(tc)
-        setTechnicians(tech); setCredentials(cred); setTimesheets(ts)
+        setTechnicians(tech); setCredentials(cred); setTimesheets(ts); setAbsences(abs)
       })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -769,7 +772,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
   const loadAll = async () => {
     setError(null)
     try {
-      const [p, w, pr, tc, tech, cred, ts] = await Promise.all([
+      const [p, w, pr, tc, tech, cred, ts, abs] = await Promise.all([
         fetchProjects(),
         fetchWorkOrders(),
         fetchPaymentRequests(),
@@ -777,9 +780,10 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
         fetchTechnicians(),
         fetchCertifications(),
         fetchTimeSheets(),
+        fetchUpcomingAbsences(),
       ])
       setProjects(p); setWorkOrders(w); setPaymentRequests(pr); setTodayCrews(tc)
-      setTechnicians(tech); setCredentials(cred); setTimesheets(ts)
+      setTechnicians(tech); setCredentials(cred); setTimesheets(ts); setAbsences(abs)
     } catch (err) {
       setError(err)
     }
@@ -875,6 +879,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
           setSelectedDate={setScheduleDate}
           onOpenWorkOrder={(id, name) => setSelectedRecord({ table: 'work_orders', id, name })}
         />}
+        {sec==='absences'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={absences}    columns={ABSENCE_COLS} systemViews={ABSENCE_VIEWS} defaultViewId="AV-01"  newLabel="Out of Office" onNew={() => setSelectedRecord({ table: 'resource_absences', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='technicians' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={technicians} columns={TECH_COLS} systemViews={TECH_VIEWS} defaultViewId="TV-01"  newLabel="Technician" onNew={() => setSelectedRecord({ table: 'contacts',       id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='credentials' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={credentials} columns={CRED_COLS} systemViews={CRED_VIEWS} defaultViewId="CDV-01" newLabel="Credential" onNew={() => setSelectedRecord({ table: 'contact_skills', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='timesheets'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={timesheets}  columns={TS_COLS}   systemViews={TS_VIEWS}   defaultViewId="TSV-01" newLabel="Time Sheet" onNew={() => setSelectedRecord({ table: 'time_sheets',    id: null, mode: 'create' })} onOpenRecord={openRecord} />}

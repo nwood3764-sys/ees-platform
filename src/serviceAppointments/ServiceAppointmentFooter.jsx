@@ -1,9 +1,9 @@
-// ─── BookingFooter.jsx ───────────────────────────────────────────────────────
-// Small footer below the booking flow — company contact + jurisdiction note.
+// ─── ServiceAppointmentFooter.jsx ───────────────────────────────────────────────────────
+// Small footer below the scheduling flow — company contact + jurisdiction note.
 
 import { C } from './styles'
 
-export default function BookingFooter() {
+export default function ServiceAppointmentFooter() {
   return (
     <footer style={{
       borderTop:  `1px solid ${C.border}`,

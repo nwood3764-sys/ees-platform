@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import SigningPortalRoot from './pages/SigningPortal.jsx'
-import BookingRoot from './booking/BookingRoot.jsx'
+import ServiceAppointmentRoot from './serviceAppointments/ServiceAppointmentRoot.jsx'
 
 // ─── Path-based routing (no router library) ──────────────────────────────────
 // Two public, unauthenticated entry points bypass <AuthGate> and the staff
@@ -13,25 +13,38 @@ import BookingRoot from './booking/BookingRoot.jsx'
 //     E-signature recipients are not Energy Efficiency Services users; the
 //     URL token is their auth.
 //
-//   /book/<slug> or /book/manage/<token>  → BookingRoot
-//     Customer-facing booking flow. Anyone in the service area can book a
-//     home energy assessment without an account; the bookAppointment edge
-//     function enforces input validation, territory containment, and the
-//     advisory-lock-based slot-conflict check.
+//   /sa/<slug> or /sa/manage/<token>   → ServiceAppointmentRoot
+//     Customer-facing scheduling flow for a Service Appointment. Anyone in
+//     the service area can schedule a home energy assessment without an
+//     account; the book_appointment edge function enforces input validation,
+//     territory containment, and the advisory-lock-based conflict check.
 //
 // Anything else goes through the normal authenticated App tree.
+//
+// Backward compatibility: any /book or /book/<rest> URL already in the wild
+// (early test links shared before the rename) gets 301-equivalent
+// client-side rewritten to the matching /sa path before render. This keeps
+// confirmation emails, browser bookmarks, and copy-pasted links working.
 //
 // Netlify SPA fallback (netlify.toml: /* → /index.html, 200) means direct
 // hits to these paths still serve index.html so this dispatch runs.
 // ─────────────────────────────────────────────────────────────────────────────
-const pathname       = window.location.pathname
-const isSigningRoute = pathname.startsWith('/sign/')
-const isBookingRoute = pathname === '/book' || pathname.startsWith('/book/')
+{
+  const p = window.location.pathname
+  if (p === '/book' || p === '/book/' || p.startsWith('/book/')) {
+    const newPath = p.replace(/^\/book/, '/sa')
+    window.history.replaceState(null, '', newPath + window.location.search + window.location.hash)
+  }
+}
+
+const pathname               = window.location.pathname
+const isSigningRoute         = pathname.startsWith('/sign/')
+const isServiceAppointmentRoute = pathname === '/sa' || pathname.startsWith('/sa/')
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     {isSigningRoute ? <SigningPortalRoot />
-     : isBookingRoute ? <BookingRoot />
+     : isServiceAppointmentRoute ? <ServiceAppointmentRoot />
      : <App />}
   </StrictMode>,
 )

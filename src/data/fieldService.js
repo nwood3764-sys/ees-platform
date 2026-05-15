@@ -343,7 +343,7 @@ export async function fetchSchedule(date = new Date()) {
 // ---------------------------------------------------------------------------
 // Service Appointments inbox — customer-self-booked SAs in the upcoming window
 // ---------------------------------------------------------------------------
-// The /book/* customer flow inserts service_appointments via the book_appointment
+// The /sa/* customer flow inserts service_appointments via the book_appointment
 // RPC. Staff need a multi-day inbox view of incoming Service Appointments so
 // they can call the customer to confirm and reschedule if needed.
 //

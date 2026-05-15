@@ -1,5 +1,5 @@
-// ─── bookingService.js ───────────────────────────────────────────────────────
-// Public-facing API wrapper for the customer booking flow.
+// ─── serviceAppointmentService.js ───────────────────────────────────────────────────────
+// Public-facing API wrapper for the customer scheduling flow.
 //   - compute-availability + book-appointment: edge functions (fetch wrappers
 //     below) because they run server-side input validation + advisory locks
 //     and shape the response for the customer UI.
@@ -58,19 +58,19 @@ export function bookAppointment({
 // client using the publishable anon key. The RPCs verify the booking_token
 // themselves — no JWT auth required. The token IS the auth.
 
-export async function lookupBooking(token) {
+export async function lookupAppointment(token) {
   const { data, error } = await supabase.rpc('lookup_booking_by_token', { p_token: token })
   if (error) throw new Error(error.message || 'Lookup failed')
   return data
 }
 
-export async function cancelBooking(token) {
+export async function cancelAppointment(token) {
   const { data, error } = await supabase.rpc('cancel_appointment', { p_token: token })
   if (error) throw new Error(error.message || 'Cancel failed')
   return data
 }
 
-export async function rescheduleBooking({ token, start_iso, end_iso, resource_id }) {
+export async function rescheduleAppointment({ token, start_iso, end_iso, resource_id }) {
   const { data, error } = await supabase.rpc('reschedule_appointment', {
     p_token:           token,
     p_new_start_iso:   start_iso,

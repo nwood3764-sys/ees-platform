@@ -1,5 +1,5 @@
 // ─── ManagePage.jsx ──────────────────────────────────────────────────────────
-// Customer self-serve appointment management at /book/manage/<token>.
+// Customer self-serve appointment management at /sa/manage/<token>.
 //
 // Flow:
 //   1. On mount: call lookup_booking_by_token. Validate token + expiry +
@@ -18,9 +18,9 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import {
-  lookupBooking, cancelBooking, rescheduleBooking,
+  lookupAppointment, cancelAppointment, rescheduleAppointment,
   computeAvailability,
-} from './bookingService'
+} from './serviceAppointmentService'
 import {
   C, card, RADIUS, FONT_MONO,
   buttonPrimary, buttonSecondary, errorBanner, label,
@@ -34,18 +34,18 @@ export default function ManagePage({ token }) {
   const [view, setView] = useState('loading')
   // loading | error | view | confirm_cancel | canceling | canceled
   // | loading_slots | slots | confirm_reschedule | rescheduling
-  const [booking,     setBooking]      = useState(null)
+  const [appointment,     setAppointment]      = useState(null)
   const [error,       setError]        = useState(null)
   const [availability, setAvailability] = useState(null)
   const [selectedSlot, setSelectedSlot] = useState(null)
   const [slotsError,   setSlotsError]   = useState(null)
 
-  async function loadBooking() {
+  async function loadAppointment() {
     setView('loading'); setError(null)
     try {
-      const result = await lookupBooking(token)
+      const result = await lookupAppointment(token)
       if (result.status === 'ok') {
-        setBooking(result)
+        setAppointment(result)
         if (result.sa_status === 'canceled') {
           setView('canceled')
         } else {
@@ -61,12 +61,12 @@ export default function ManagePage({ token }) {
     }
   }
 
-  useEffect(() => { loadBooking() }, [token])
+  useEffect(() => { loadAppointment() }, [token])
 
   async function handleCancel() {
     setView('canceling')
     try {
-      const result = await cancelBooking(token)
+      const result = await cancelAppointment(token)
       if (result.status === 'ok') {
         setView('canceled')
         return
@@ -83,8 +83,8 @@ export default function ManagePage({ token }) {
     setView('loading_slots'); setSlotsError(null)
     try {
       const avail = await computeAvailability({
-        slug:    booking.work_type_slug,
-        address: booking.address,
+        slug:    appointment.work_type_slug,
+        address: appointment.address,
         days:    14,
       })
       if (avail.status !== 'ok' || !avail.slots || avail.slots.length === 0) {
@@ -107,7 +107,7 @@ export default function ManagePage({ token }) {
   async function handleReschedule() {
     setView('rescheduling')
     try {
-      const result = await rescheduleBooking({
+      const result = await rescheduleAppointment({
         token,
         start_iso:   selectedSlot.start_iso,
         end_iso:     selectedSlot.end_iso,
@@ -116,8 +116,8 @@ export default function ManagePage({ token }) {
       if (result.status === 'slot_taken') {
         try {
           const fresh = await computeAvailability({
-            slug:    booking.work_type_slug,
-            address: booking.address,
+            slug:    appointment.work_type_slug,
+            address: appointment.address,
             days:    14,
           })
           if (fresh.status === 'ok') setAvailability(fresh)
@@ -131,7 +131,7 @@ export default function ManagePage({ token }) {
         setView('slots')
         return
       }
-      await loadBooking()
+      await loadAppointment()
       setSlotsError(null)
       setSelectedSlot(null)
     } catch (e) {
@@ -160,17 +160,17 @@ export default function ManagePage({ token }) {
     )
   }
 
-  if (view === 'canceled')           return <CanceledView booking={booking} />
-  if (view === 'confirm_cancel')     return <ConfirmCancelView booking={booking} onConfirm={handleCancel} onBack={() => setView('view')} />
+  if (view === 'canceled')           return <CanceledView appointment={appointment} />
+  if (view === 'confirm_cancel')     return <ConfirmCancelView appointment={appointment} onConfirm={handleCancel} onBack={() => setView('view')} />
   if (view === 'slots')              return <SlotsView availability={availability} slotsError={slotsError}
                                                        onSelect={slot => { setSelectedSlot(slot); setView('confirm_reschedule') }}
                                                        onBack={() => { setView('view'); setSlotsError(null) }} />
-  if (view === 'confirm_reschedule') return <ConfirmRescheduleView booking={booking} slot={selectedSlot}
+  if (view === 'confirm_reschedule') return <ConfirmRescheduleView appointment={appointment} slot={selectedSlot}
                                                                    onConfirm={handleReschedule}
                                                                    onBack={() => setView('slots')} />
 
   return (
-    <BookingView booking={booking} slotsError={slotsError}
+    <AppointmentView appointment={appointment} slotsError={slotsError}
                  onReschedule={startReschedule}
                  onCancel={() => setView('confirm_cancel')} />
   )
@@ -185,7 +185,7 @@ function InvalidTokenPage() {
         Invalid management link
       </h1>
       <p style={{ color: C.textSecondary, fontSize: 15, lineHeight: 1.5 }}>
-        We couldn't recognize that booking token. Double-check the link from
+        We couldn't recognize that appointment token. Double-check the link from
         your confirmation, or email{' '}
         <a href="mailto:assessments.wi@ees-wi.org" style={{ color: C.emeraldMid, textDecoration: 'none' }}>
           assessments.wi@ees-wi.org
@@ -218,11 +218,11 @@ function CenteredLoading({ label: text }) {
   )
 }
 
-// ─── BookingView (default) ──────────────────────────────────────────────────
+// ─── AppointmentView (default) ──────────────────────────────────────────────────
 
-function BookingView({ booking, slotsError, onReschedule, onCancel }) {
-  const { date } = formatChicagoSlot(booking.sa_scheduled_start_iso)
-  const range = formatChicagoTimeRange(booking.sa_scheduled_start_iso, booking.sa_scheduled_end_iso)
+function AppointmentView({ appointment, slotsError, onReschedule, onCancel }) {
+  const { date } = formatChicagoSlot(appointment.sa_scheduled_start_iso)
+  const range = formatChicagoTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso)
 
   return (
     <div>
@@ -230,18 +230,18 @@ function BookingView({ booking, slotsError, onReschedule, onCancel }) {
         Your appointment
       </h1>
       <div style={{ color: C.textSecondary, fontSize: 14, marginBottom: 16 }}>
-        Reference: <span style={{ fontFamily: FONT_MONO, fontSize: 13 }}>{booking.sa_record_number}</span>
+        Reference: <span style={{ fontFamily: FONT_MONO, fontSize: 13 }}>{appointment.sa_record_number}</span>
       </div>
 
       {slotsError && <div style={errorBanner}>{slotsError}</div>}
 
       <div style={card}>
-        <DetailRow label="Service"  value={booking.work_type_name} />
+        <DetailRow label="Service"  value={appointment.work_type_name} />
         <DetailRow label="Date"     value={date} highlight />
         <DetailRow label="Time"     value={range} />
-        <DetailRow label="Auditor"  value={booking.auditor_name} />
-        <DetailRow label="Address"  value={`${booking.address.street}, ${booking.address.city}, ${booking.address.state} ${booking.address.zip}`} />
-        <DetailRow label="Customer" value={`${booking.customer.name} · ${booking.customer.phone} · ${booking.customer.email}`} />
+        <DetailRow label="Auditor"  value={appointment.auditor_name} />
+        <DetailRow label="Address"  value={`${appointment.address.street}, ${appointment.address.city}, ${appointment.address.state} ${appointment.address.zip}`} />
+        <DetailRow label="Customer" value={`${appointment.customer.name} · ${appointment.customer.phone} · ${appointment.customer.email}`} />
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginTop: 16, flexWrap: 'wrap' }}>
@@ -270,9 +270,9 @@ function BookingView({ booking, slotsError, onReschedule, onCancel }) {
 
 // ─── ConfirmCancelView ──────────────────────────────────────────────────────
 
-function ConfirmCancelView({ booking, onConfirm, onBack }) {
-  const { date } = formatChicagoSlot(booking.sa_scheduled_start_iso)
-  const range = formatChicagoTimeRange(booking.sa_scheduled_start_iso, booking.sa_scheduled_end_iso)
+function ConfirmCancelView({ appointment, onConfirm, onBack }) {
+  const { date } = formatChicagoSlot(appointment.sa_scheduled_start_iso)
+  const range = formatChicagoTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso)
 
   return (
     <div style={card}>
@@ -280,7 +280,7 @@ function ConfirmCancelView({ booking, onConfirm, onBack }) {
         Cancel this appointment?
       </h1>
       <p style={{ color: C.textSecondary, fontSize: 15, lineHeight: 1.5, marginBottom: 16 }}>
-        You're about to cancel your <strong style={{ color: C.textPrimary }}>{booking.work_type_name}</strong>{' '}
+        You're about to cancel your <strong style={{ color: C.textPrimary }}>{appointment.work_type_name}</strong>{' '}
         scheduled for <strong style={{ color: C.textPrimary }}>{date}</strong> at{' '}
         <strong style={{ color: C.textPrimary }}>{range}</strong>.
         This can't be undone — you'll need to book again if you change your mind.
@@ -303,7 +303,7 @@ function ConfirmCancelView({ booking, onConfirm, onBack }) {
 
 // ─── CanceledView ───────────────────────────────────────────────────────────
 
-function CanceledView({ booking }) {
+function CanceledView({ appointment }) {
   return (
     <div>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
@@ -320,14 +320,14 @@ function CanceledView({ booking }) {
           Appointment canceled
         </h1>
         <p style={{ color: C.textSecondary, fontSize: 15 }}>
-          Your <strong style={{ color: C.textPrimary }}>{booking.work_type_name}</strong>{' '}
+          Your <strong style={{ color: C.textPrimary }}>{appointment.work_type_name}</strong>{' '}
           has been canceled. Reference{' '}
-          <span style={{ fontFamily: FONT_MONO, fontSize: 13 }}>{booking.sa_record_number}</span>.
+          <span style={{ fontFamily: FONT_MONO, fontSize: 13 }}>{appointment.sa_record_number}</span>.
         </p>
       </div>
       <div style={{ textAlign: 'center' }}>
-        <a href="/book" style={{ ...buttonPrimary, display: 'inline-block', textDecoration: 'none', minWidth: 240 }}>
-          Book another appointment
+        <a href="/sa" style={{ ...buttonPrimary, display: 'inline-block', textDecoration: 'none', minWidth: 240 }}>
+          Schedule another appointment
         </a>
       </div>
     </div>
@@ -421,9 +421,9 @@ function SlotsView({ availability, slotsError, onSelect, onBack }) {
 
 // ─── ConfirmRescheduleView ──────────────────────────────────────────────────
 
-function ConfirmRescheduleView({ booking, slot, onConfirm, onBack }) {
-  const { date: oldDate } = formatChicagoSlot(booking.sa_scheduled_start_iso)
-  const oldRange = formatChicagoTimeRange(booking.sa_scheduled_start_iso, booking.sa_scheduled_end_iso)
+function ConfirmRescheduleView({ appointment, slot, onConfirm, onBack }) {
+  const { date: oldDate } = formatChicagoSlot(appointment.sa_scheduled_start_iso)
+  const oldRange = formatChicagoTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso)
   const { date: newDate } = formatChicagoSlot(slot.start_iso)
   const newRange = formatChicagoTimeRange(slot.start_iso, slot.end_iso)
 
@@ -434,11 +434,11 @@ function ConfirmRescheduleView({ booking, slot, onConfirm, onBack }) {
       </h1>
 
       <div style={card}>
-        <DetailRow label="Service" value={booking.work_type_name} />
+        <DetailRow label="Service" value={appointment.work_type_name} />
         <DetailRow label="From"    value={`${oldDate} · ${oldRange}`} />
         <DetailRow label="To"      value={`${newDate} · ${newRange}`} highlight />
         <DetailRow label="Auditor" value={slot.resource_first_name} />
-        <DetailRow label="Address" value={`${booking.address.street}, ${booking.address.city}, ${booking.address.state} ${booking.address.zip}`} />
+        <DetailRow label="Address" value={`${appointment.address.street}, ${appointment.address.city}, ${appointment.address.state} ${appointment.address.zip}`} />
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
@@ -480,7 +480,7 @@ function DetailRow({ label: labelText, value, highlight }) {
 function errorMessageForLookupStatus(status) {
   switch (status) {
     case 'invalid_token':
-      return "We couldn't find a booking with that link. Double-check the URL or contact us for help."
+      return "We couldn't find a appointment with that link. Double-check the URL or contact us for help."
     case 'expired_token':
       return "This management link has expired. Email us and we'll help you make changes."
     case 'appointment_not_found':

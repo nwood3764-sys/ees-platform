@@ -230,3 +230,61 @@ export async function fetchTimeSheets() {
     notes: r.ts_notes || '',
   }))
 }
+
+// ---------------------------------------------------------------------------
+// Resource absences — PTO, training, sick days, etc.
+// ---------------------------------------------------------------------------
+// The slot engine in compute-availability already consults resource_absences
+// — any row whose [ra_start_datetime, ra_end_datetime] overlaps a candidate
+// slot is filtered out of customer-facing availability. The UI's job is just
+// to let staff CRUD these rows.
+//
+// fetchUpcomingAbsences returns active + future absences across all Techs,
+// joining the Tech contact and the absence_type picklist label so the list
+// view can render names and types without further lookups.
+
+export async function fetchUpcomingAbsences({ days = 60 } = {}) {
+  const picklists = await loadPicklists()
+
+  // Window: from start of today (Chicago) to N days out. Capture currently-
+  // active absences (started in past, still ongoing) and any future ones.
+  const now = new Date()
+  const windowEnd = new Date(now.getTime() + days * 24 * 3600 * 1000)
+
+  const { data, error } = await supabase
+    .from('resource_absences')
+    .select(`
+      id,
+      ra_record_number,
+      ra_name,
+      ra_start_datetime,
+      ra_end_datetime,
+      ra_is_all_day,
+      ra_absence_type,
+      ra_notes,
+      contact_id,
+      contacts:contact_id (
+        id, contact_first_name, contact_last_name, contact_title
+      )
+    `)
+    .eq('ra_is_deleted', false)
+    .gte('ra_end_datetime', now.toISOString())
+    .lte('ra_start_datetime', windowEnd.toISOString())
+    .order('ra_start_datetime', { ascending: true })
+
+  if (error) throw error
+
+  return (data || []).map(r => ({
+    id:           r.ra_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id:          r.id,
+    technician:   `${r.contacts?.contact_first_name || ''} ${r.contacts?.contact_last_name || ''}`.trim() || '—',
+    technicianId: r.contact_id,
+    title:        r.contacts?.contact_title || '—',
+    type:         picklists.byId.get(r.ra_absence_type) || 'Other',
+    startDate:    r.ra_start_datetime,
+    endDate:      r.ra_end_datetime,
+    allDay:       r.ra_is_all_day === true,
+    notes:        r.ra_notes || '',
+    name:         r.ra_name || '—',
+  }))
+}

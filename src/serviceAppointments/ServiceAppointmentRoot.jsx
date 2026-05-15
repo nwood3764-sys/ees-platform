@@ -1,23 +1,23 @@
-// ─── BookingRoot.jsx ─────────────────────────────────────────────────────────
-// Top-level component for the customer-facing /book/* paths. Path-based
+// ─── ServiceAppointmentRoot.jsx ─────────────────────────────────────────────────────────
+// Top-level component for the customer-facing /sa/* paths. Path-based
 // routing (no router library — matches the rest of the app):
 //
-//   /book/<slug>             → BookingFlow (intake → slots → confirm → success)
-//   /book/manage/<token>     → ManagePage (view + future reschedule/cancel)
-//   /book or /book/          → SlugIndex (list of bookable services)
+//   /sa/<slug>             → ServiceAppointmentFlow (intake → slots → confirm → success)
+//   /sa/manage/<token>     → ManagePage (view + future reschedule/cancel)
+//   /sa or /sa/          → SlugIndex (list of bookable services)
 //
 // Renders its own page chrome (header + footer). Bypasses AuthGate and the
 // staff sidebar — customers are unauthenticated.
 
 import { useEffect } from 'react'
-import BookingFlow   from './BookingFlow'
+import ServiceAppointmentFlow   from './ServiceAppointmentFlow'
 import ManagePage    from './ManagePage'
 import SlugIndex     from './SlugIndex'
-import BookingHeader from './BookingHeader'
-import BookingFooter from './BookingFooter'
+import ServiceAppointmentHeader from './ServiceAppointmentHeader'
+import ServiceAppointmentFooter from './ServiceAppointmentFooter'
 import { C } from './styles'
 
-export default function BookingRoot() {
+export default function ServiceAppointmentRoot() {
   // Override the staff-app body styles. The staff app sets html/body to
   // overflow:hidden + height:100% (because it has its own scroll container).
   // For a customer-facing flow we want normal page scrolling.
@@ -38,7 +38,7 @@ export default function BookingRoot() {
     }
   }, [])
 
-  const path = typeof window !== 'undefined' ? window.location.pathname : '/book'
+  const path = typeof window !== 'undefined' ? window.location.pathname : '/sa'
   const parts = path.split('/').filter(Boolean) // ['book'], ['book','single-family-assessment'], ['book','manage','<token>']
 
   let content
@@ -47,7 +47,7 @@ export default function BookingRoot() {
   } else if (parts[1] === 'manage' && parts[2]) {
     content = <ManagePage token={parts[2]} />
   } else {
-    content = <BookingFlow slug={parts[1]} />
+    content = <ServiceAppointmentFlow slug={parts[1]} />
   }
 
   return (
@@ -58,7 +58,7 @@ export default function BookingRoot() {
       display:        'flex',
       flexDirection:  'column',
     }}>
-      <BookingHeader />
+      <ServiceAppointmentHeader />
       <main style={{
         flex:        1,
         width:       '100%',
@@ -69,7 +69,7 @@ export default function BookingRoot() {
       }}>
         {content}
       </main>
-      <BookingFooter />
+      <ServiceAppointmentFooter />
     </div>
   )
 }

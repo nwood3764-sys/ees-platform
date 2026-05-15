@@ -1,5 +1,5 @@
-// ─── BookingFlow.jsx ─────────────────────────────────────────────────────────
-// 4-step customer booking flow for a specific work_type slug.
+// ─── ServiceAppointmentFlow.jsx ─────────────────────────────────────────────────────────
+// 4-step customer scheduling flow for a specific work_type slug.
 //
 //   intake  →  slots  →  confirm  →  success
 //
@@ -11,7 +11,7 @@
 // zoom on focus), tap targets are ≥ 44px tall.
 
 import { useState, useMemo } from 'react'
-import { computeAvailability, bookAppointment } from './bookingService'
+import { computeAvailability, bookAppointment } from './serviceAppointmentService'
 import {
   C, card, label, input, inputFocus, buttonPrimary, buttonSecondary,
   errorBanner, RADIUS, formatChicagoSlot, formatChicagoTimeRange,
@@ -61,12 +61,12 @@ const SLUG_META = {
 
 const US_STATES = ['WI','NC','CO','MI','IN','IL','MN','IA']
 
-// ─── BookingFlow (main) ─────────────────────────────────────────────────────
+// ─── ServiceAppointmentFlow (main) ─────────────────────────────────────────────────────
 
-export default function BookingFlow({ slug }) {
+export default function ServiceAppointmentFlow({ slug }) {
   const meta = SLUG_META[slug]
 
-  const [step,           setStep]           = useState('intake') // intake|loading|slots|confirming|booking|success
+  const [step,           setStep]           = useState('intake') // intake|loading|slots|confirming|scheduling|success
   const [customerInfo,   setCustomerInfo]   = useState({
     firstName: '', lastName: '', phone: '', email: '',
     street: '', city: '', state: 'WI', zip: '',
@@ -74,7 +74,7 @@ export default function BookingFlow({ slug }) {
   })
   const [availability,   setAvailability]   = useState(null)
   const [selectedSlot,   setSelectedSlot]   = useState(null)
-  const [bookingResult,  setBookingResult]  = useState(null)
+  const [appointmentResult,  setAppointmentResult]  = useState(null)
   const [error,          setError]          = useState(null)
 
   if (!meta) {
@@ -84,10 +84,10 @@ export default function BookingFlow({ slug }) {
           Service not found
         </h1>
         <p style={{ color: C.textSecondary, marginBottom: 16 }}>
-          We couldn't find a booking page for "{slug}". You may have followed
+          We couldn't find a scheduling page for "{slug}". You may have followed
           a stale link — try our service menu.
         </p>
-        <a href="/book" style={{ color: C.emeraldMid, fontWeight: 600 }}>
+        <a href="/sa" style={{ color: C.emeraldMid, fontWeight: 600 }}>
           ← Back to all services
         </a>
       </div>
@@ -140,7 +140,7 @@ export default function BookingFlow({ slug }) {
 
   async function handleConfirm() {
     setError(null)
-    setStep('booking')
+    setStep('scheduling')
     try {
       const result = await bookAppointment({
         slug,
@@ -174,14 +174,14 @@ export default function BookingFlow({ slug }) {
         return
       }
       if (result.status !== 'ok') {
-        setError(result.message || 'Booking failed. Please try again.')
+        setError(result.message || 'Scheduling failed. Please try again.')
         setStep('confirming')
         return
       }
-      setBookingResult(result)
+      setAppointmentResult(result)
       setStep('success')
     } catch (err) {
-      setError(err.message || 'Booking failed. Please try again.')
+      setError(err.message || 'Scheduling failed. Please try again.')
       setStep('confirming')
     }
   }
@@ -194,7 +194,7 @@ export default function BookingFlow({ slug }) {
         meta={meta}
         slot={selectedSlot}
         customerInfo={customerInfo}
-        result={bookingResult}
+        result={appointmentResult}
       />
     )
   }
@@ -235,7 +235,7 @@ export default function BookingFlow({ slug }) {
           onBack={() => { setError(null); setStep('slots') }}
         />
       )}
-      {step === 'booking' && <LoadingStep label="Confirming your appointment…" />}
+      {step === 'scheduling' && <LoadingStep label="Confirming your appointment…" />}
     </div>
   )
 }
@@ -249,7 +249,7 @@ function Stepper({ step }) {
                   : step === 'loading' ? 0
                   : step === 'slots' ? 1
                   : step === 'confirming' ? 2
-                  : step === 'booking' ? 2 : 0
+                  : step === 'scheduling' ? 2 : 0
   return (
     <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
       {steps.map((s, i) => (
@@ -535,7 +535,7 @@ function ConfirmStep({ meta, slot, customerInfo, onConfirm, onBack }) {
           ← Back
         </button>
         <button type="button" onClick={onConfirm} style={{ ...buttonPrimary, flex: 2 }}>
-          Confirm booking
+          Confirm appointment
         </button>
       </div>
     </div>
@@ -567,7 +567,7 @@ function SummaryRow({ label: text, value, highlight }) {
 function SuccessStep({ meta, slot, customerInfo, result }) {
   const { date, time } = formatChicagoSlot(slot.start_iso)
   const range = formatChicagoTimeRange(slot.start_iso, slot.end_iso)
-  const manageUrl = result.manage_url || `/book/manage/${result.booking_token}`
+  const manageUrl = result.manage_url || `/sa/manage/${result.booking_token}`
 
   return (
     <div>
