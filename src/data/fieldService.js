@@ -229,6 +229,13 @@ export async function fetchSchedule(date = new Date()) {
       const title = a.contacts?.contact_title || ''
       return /Team Lead/i.test(title)
     })
+    // Fallback: customer-self-booked assessments are assigned to a single
+    // Technician (the auditor), with no Team Lead in the SAA. Treat that
+    // single Tech as the bucket key so these appointments group under the
+    // auditor's name instead of disappearing into "Unassigned". Multi-member
+    // SAAs with no Team Lead still fall through to Unassigned — those are
+    // a real data issue worth surfacing.
+    const soloAssn = !leadAssn && members.length === 1 ? members[0] : null
 
     let key, crewLabel, leadName, leadFirst, leadLast, crewMembers
     if (leadAssn) {
@@ -241,6 +248,14 @@ export async function fetchSchedule(date = new Date()) {
       crewMembers = members
         .map(a => `${a.contacts?.contact_first_name || ''} ${a.contacts?.contact_last_name || ''}`.trim())
         .filter(Boolean)
+    } else if (soloAssn) {
+      const t = soloAssn.contacts
+      leadFirst = t.contact_first_name
+      leadLast  = t.contact_last_name
+      leadName  = `${leadFirst} ${leadLast}`.trim()
+      crewLabel = leadName  // Auditor row, not "X Crew"
+      key = `tech:${t.id}`
+      crewMembers = [leadName]
     } else {
       key = UNASSIGNED
       crewLabel = 'Unassigned'
@@ -323,4 +338,124 @@ export async function fetchSchedule(date = new Date()) {
   })
 
   return crews
+}
+
+// ---------------------------------------------------------------------------
+// Bookings inbox — customer-self-booked appointments in the upcoming window
+// ---------------------------------------------------------------------------
+// The /book/* customer flow inserts appointments via the book_appointment RPC.
+// Staff need a multi-day inbox view of incoming bookings so they can call the
+// customer to confirm and reschedule if needed.
+//
+// Returns: rows grouped by calendar day (Chicago), each row carrying customer
+// contact + service address + assigned auditor + work type. Sorted ascending
+// by scheduled start.
+//
+// Filter: sa_status='scheduled' AND sa_scheduled_start_time IN [now, now+days].
+// Customer-self-booked is distinguished by having exactly one SAA pointing at
+// a Technician contact; we don't have an explicit "booking_source" column yet
+// (worth adding when we need to distinguish from internally-created SAs).
+
+export async function fetchUpcomingBookings(days = 14) {
+  // Direct picklist lookup — no helper for value-to-id in outreachService.
+  const { data: statusRow } = await supabase
+    .from('picklist_values')
+    .select('id')
+    .eq('picklist_object', 'service_appointments')
+    .eq('picklist_field',  'status')
+    .eq('picklist_value',  'scheduled')
+    .eq('picklist_is_active', true)
+    .maybeSingle()
+  const scheduledStatusId = statusRow?.id
+
+  const now = new Date()
+  const end = new Date(now.getTime() + days * 24 * 3600 * 1000)
+
+  let query = supabase
+    .from('service_appointments')
+    .select(`
+      id,
+      sa_record_number,
+      sa_name,
+      sa_status,
+      sa_scheduled_start_time,
+      sa_scheduled_end_time,
+      service_territory_id,
+      service_territories:service_territory_id ( service_territory_name ),
+      work_order_id,
+      work_orders:work_order_id (
+        id,
+        work_order_record_number,
+        work_type_id,
+        property_id,
+        opportunity_id,
+        work_types:work_type_id ( work_type_name, work_type_public_slug ),
+        properties:property_id (
+          property_name, property_street, property_city, property_state, property_zip
+        ),
+        opportunities:opportunity_id (
+          opportunity_account_id,
+          accounts:opportunity_account_id (
+            account_name, account_phone, account_email
+          )
+        )
+      )
+    `)
+    .gte('sa_scheduled_start_time', now.toISOString())
+    .lte('sa_scheduled_start_time', end.toISOString())
+    .eq('sa_is_deleted', false)
+    .order('sa_scheduled_start_time', { ascending: true })
+
+  if (scheduledStatusId) query = query.eq('sa_status', scheduledStatusId)
+
+  const { data: saRows, error } = await query
+  if (error) throw error
+
+  const saIds = (saRows || []).map(r => r.id)
+  if (saIds.length === 0) return []
+
+  const { data: aRows } = await supabase
+    .from('service_appointment_assignments')
+    .select(`
+      id,
+      service_appointment_id,
+      contact_id,
+      contacts:contact_id ( id, contact_first_name, contact_last_name )
+    `)
+    .in('service_appointment_id', saIds)
+    .eq('saa_is_deleted', false)
+
+  const assignmentsBySa = new Map()
+  for (const a of (aRows || [])) {
+    if (!assignmentsBySa.has(a.service_appointment_id)) assignmentsBySa.set(a.service_appointment_id, [])
+    assignmentsBySa.get(a.service_appointment_id).push(a)
+  }
+
+  return (saRows || []).map(sa => {
+    const assignees = assignmentsBySa.get(sa.id) || []
+    const auditor = assignees[0]?.contacts
+    const wo = sa.work_orders
+    const prop = wo?.properties
+    const acct = wo?.opportunities?.accounts
+    return {
+      id:                     sa.id,
+      saRecordNumber:         sa.sa_record_number,
+      scheduledStartIso:      sa.sa_scheduled_start_time,
+      scheduledEndIso:        sa.sa_scheduled_end_time,
+      workOrderRecordNumber:  wo?.work_order_record_number,
+      workTypeName:           wo?.work_types?.work_type_name || '—',
+      workTypeSlug:           wo?.work_types?.work_type_public_slug || null,
+      territoryName:          sa.service_territories?.service_territory_name || '—',
+      customerName:           acct?.account_name || '—',
+      customerPhone:          acct?.account_phone || '',
+      customerEmail:          acct?.account_email || '',
+      addressStreet:          prop?.property_street || '',
+      addressCity:            prop?.property_city || '',
+      addressState:           prop?.property_state || '',
+      addressZip:             prop?.property_zip || '',
+      auditorFirstName:       auditor?.contact_first_name || '',
+      auditorLastName:        auditor?.contact_last_name || '',
+      auditorName:            auditor ? `${auditor.contact_first_name} ${auditor.contact_last_name}`.trim() : '—',
+    }
+  })
 }

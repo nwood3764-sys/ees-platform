@@ -4,13 +4,14 @@ import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
-import { fetchProjects, fetchWorkOrders, fetchSchedule } from '../data/fieldService'
+import { fetchProjects, fetchWorkOrders, fetchSchedule, fetchUpcomingBookings } from '../data/fieldService'
 import { fetchPaymentRequests } from '../data/incentivesService'
 import { fetchTechnicians, fetchCertifications, fetchTimeSheets } from '../data/peopleService'
 import { getCurrentUserProfile } from '../data/layoutService'
 
 const SECTIONS = [
   { id:'home',        label:'Home'         },
+  { id:'bookings',    label:'Bookings'     },
   { id:'projects',    label:'Projects'     },
   { id:'workorders',  label:'Work Orders'  },
   { id:'schedule',    label:'Schedule'     },
@@ -479,6 +480,186 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
   return <ListView data={data} {...rest} />
 }
 
+// ─── BookingsInbox ──────────────────────────────────────────────────────────
+// Dispatcher console for incoming customer-self-booked appointments.
+//
+// Reads service_appointments where sa_status='scheduled' AND start time is in
+// the upcoming `days` window (default 14). Groups by Chicago calendar day so
+// the dispatcher can scan: "tomorrow Javier has 2, Kenji has 4, etc."
+//
+// Each row shows everything the dispatcher needs to either pick up the phone
+// (customer name + phone + email) or roll a truck (address, work type, time,
+// assigned auditor). Click the record number to open the SA record in
+// RecordDetail for full editing.
+//
+// Refresh: manual button + auto-refetch on mount. Background polling could
+// be added later but a manual refresh keeps the UI predictable.
+
+function BookingsInbox({ onOpenRecord }) {
+  const [rows,    setRows]    = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState(null)
+  const [days,    setDays]    = useState(14)
+
+  async function load() {
+    setLoading(true); setError(null)
+    try {
+      const data = await fetchUpcomingBookings(days)
+      setRows(data)
+    } catch (e) {
+      setError(e.message || 'Could not load bookings')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [days])
+
+  // Group by Chicago calendar date so each day gets its own header.
+  const byDay = useMemo(() => {
+    const map = new Map()
+    for (const r of rows) {
+      const key = new Date(r.scheduledStartIso).toLocaleDateString('en-US', {
+        weekday: 'long', month: 'long', day: 'numeric', timeZone: 'America/Chicago',
+      })
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(r)
+    }
+    return Array.from(map.entries())
+  }, [rows])
+
+  if (loading) return <LoadingState />
+  if (error)   return <ErrorState error={error} onRetry={load} />
+
+  return (
+    <div style={{ flex:1, overflow:'auto', padding:24, background:C.page }}>
+      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+        <div style={{
+          display:'flex', alignItems:'center', justifyContent:'space-between',
+          marginBottom:16, flexWrap:'wrap', gap:12,
+        }}>
+          <div>
+            <h2 style={{ fontSize:20, fontWeight:600, marginBottom:4 }}>
+              Customer bookings — next {days} days
+            </h2>
+            <div style={{ fontSize:13, color:C.textSecondary }}>
+              {rows.length === 0
+                ? 'No upcoming customer-self-booked appointments.'
+                : `${rows.length} appointment${rows.length === 1 ? '' : 's'} scheduled across ${byDay.length} day${byDay.length === 1 ? '' : 's'}.`}
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <select value={days} onChange={e => setDays(Number(e.target.value))} style={{
+              padding:'6px 10px', fontSize:13, border:`1px solid ${C.border}`,
+              borderRadius:6, background:C.card, color:C.textPrimary, cursor:'pointer',
+            }}>
+              <option value={7}>Next 7 days</option>
+              <option value={14}>Next 14 days</option>
+              <option value={30}>Next 30 days</option>
+              <option value={60}>Next 60 days</option>
+            </select>
+            <button onClick={load} style={{
+              padding:'6px 12px', fontSize:13, border:`1px solid ${C.border}`,
+              borderRadius:6, background:C.card, color:C.textSecondary, cursor:'pointer',
+              fontWeight:500,
+            }}>Refresh</button>
+          </div>
+        </div>
+
+        {byDay.length === 0 ? (
+          <div style={{
+            background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
+            padding:48, textAlign:'center', color:C.textMuted, fontSize:14,
+          }}>
+            No bookings in this window. Customers can book at
+            {' '}<a href="/book" target="_blank" rel="noreferrer" style={{ color:C.emerald, textDecoration:'none', fontWeight:500 }}>/book</a>.
+          </div>
+        ) : (
+          byDay.map(([dayLabel, dayRows]) => (
+            <div key={dayLabel} style={{ marginBottom:20 }}>
+              <div style={{
+                fontSize:13, fontWeight:600, color:C.textSecondary,
+                textTransform:'uppercase', letterSpacing:0.4,
+                marginBottom:8, padding:'0 4px',
+              }}>{dayLabel} · {dayRows.length}</div>
+              <div style={{
+                background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
+                overflow:'hidden',
+              }}>
+                {dayRows.map((r, i) => {
+                  const startTime = new Date(r.scheduledStartIso).toLocaleTimeString('en-US', {
+                    hour:'numeric', minute:'2-digit', timeZone:'America/Chicago',
+                  })
+                  const endTime = new Date(r.scheduledEndIso).toLocaleTimeString('en-US', {
+                    hour:'numeric', minute:'2-digit', timeZone:'America/Chicago',
+                  })
+                  return (
+                    <div key={r.id} style={{
+                      display:'grid',
+                      gridTemplateColumns:'90px 1fr 1fr 130px 110px',
+                      gap:16, padding:'14px 16px',
+                      borderTop: i === 0 ? 'none' : `1px solid ${C.border}`,
+                      alignItems:'center',
+                      cursor:'pointer',
+                      transition:'background 0.1s ease',
+                    }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#fafbfd'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      onClick={() => onOpenRecord && onOpenRecord({
+                        table: 'service_appointments', id: r.id, name: r.saRecordNumber,
+                      })}
+                    >
+                      <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>
+                        {startTime}
+                        <div style={{ fontSize:11, color:C.textMuted, fontWeight:400 }}>{endTime}</div>
+                      </div>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontSize:14, fontWeight:500, color:C.textPrimary, marginBottom:2,
+                                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                          {r.customerName}
+                        </div>
+                        <div style={{ fontSize:12, color:C.textSecondary,
+                                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                          {r.customerPhone && <span>{r.customerPhone}</span>}
+                          {r.customerPhone && r.customerEmail && <span> · </span>}
+                          {r.customerEmail && <span>{r.customerEmail}</span>}
+                        </div>
+                      </div>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontSize:13, color:C.textPrimary, marginBottom:2,
+                                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                          {r.addressStreet}
+                        </div>
+                        <div style={{ fontSize:12, color:C.textSecondary,
+                                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                          {r.addressCity}, {r.addressState} {r.addressZip}
+                        </div>
+                      </div>
+                      <div style={{ fontSize:12, color:C.textSecondary, lineHeight:1.4 }}>
+                        <div style={{ color:C.textPrimary, fontWeight:500, marginBottom:2,
+                                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                          {r.workTypeName}
+                        </div>
+                        <div style={{ fontSize:11 }}>{r.territoryName}</div>
+                      </div>
+                      <div style={{ fontSize:12, textAlign:'right' }}>
+                        <div style={{ color:C.textPrimary, fontWeight:500 }}>{r.auditorName}</div>
+                        <div style={{ color:C.textMuted, fontSize:11, fontFamily:'JetBrains Mono, monospace', marginTop:2 }}>
+                          {r.saRecordNumber}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function FieldModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord } = {}) {
   // Navigation is URL-driven when App passes nav props (the default in the
   // shipping app). The local-state fallback path remains so this module can
@@ -662,6 +843,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'       && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
+        {sec==='bookings'   && <BookingsInbox onOpenRecord={openRecord} />}
         {sec==='projects'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}   columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
         {sec==='workorders' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders} columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='schedule'   && <ScheduleView
