@@ -17,7 +17,7 @@
 //   - Day-fill preference (prefer resources who already have work that day)
 //
 // Authentication: public. The endpoint is called from the unauthenticated
-// customer booking page, so it uses the service role internally to query.
+// customer-facing scheduling page, so it uses the service role internally to query.
 // Returns only the data needed to present slots — no PII other than the
 // resolved territory name and (optional) auditor first name.
 //
@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
   // 1. Resolve work_type by slug.
   const workType = await fetchWorkType(supabase, body.slug)
   if (!workType) {
-    return json({ status: "invalid_work_type", message: `No customer-bookable work type with slug "${body.slug}"`,
+    return json({ status: "invalid_work_type", message: `No customer-schedulable work type with slug "${body.slug}"`,
                   work_type: null, territory: null, canonical_address: null, slots: [] }, 200)
   }
 
@@ -270,7 +270,7 @@ async function fetchWorkType(supabase: SupabaseClient, slug: string): Promise<Wo
       work_type_customer_facing_description, work_type_default_project_record_type
     `)
     .eq("work_type_public_slug", slug)
-    .eq("work_type_is_publicly_bookable", true)
+    .eq("work_type_is_publicly_schedulable", true)
     .eq("work_type_is_deleted", false)
     .eq("work_type_is_active", true)
     .maybeSingle()

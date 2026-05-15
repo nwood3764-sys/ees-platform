@@ -16,29 +16,17 @@ import ServiceAppointmentRoot from './serviceAppointments/ServiceAppointmentRoot
 //   /sa/<slug> or /sa/manage/<token>   → ServiceAppointmentRoot
 //     Customer-facing scheduling flow for a Service Appointment. Anyone in
 //     the service area can schedule a home energy assessment without an
-//     account; the book_appointment edge function enforces input validation,
+//     account; the create-service-appointment edge function enforces input validation,
 //     territory containment, and the advisory-lock-based conflict check.
 //
 // Anything else goes through the normal authenticated App tree.
 //
-// Backward compatibility: any /book or /book/<rest> URL already in the wild
-// (early test links shared before the rename) gets 301-equivalent
-// client-side rewritten to the matching /sa path before render. This keeps
-// confirmation emails, browser bookmarks, and copy-pasted links working.
-//
 // Netlify SPA fallback (netlify.toml: /* → /index.html, 200) means direct
 // hits to these paths still serve index.html so this dispatch runs.
 // ─────────────────────────────────────────────────────────────────────────────
-{
-  const p = window.location.pathname
-  if (p === '/book' || p === '/book/' || p.startsWith('/book/')) {
-    const newPath = p.replace(/^\/book/, '/sa')
-    window.history.replaceState(null, '', newPath + window.location.search + window.location.hash)
-  }
-}
 
-const pathname               = window.location.pathname
-const isSigningRoute         = pathname.startsWith('/sign/')
+const pathname                  = window.location.pathname
+const isSigningRoute            = pathname.startsWith('/sign/')
 const isServiceAppointmentRoute = pathname === '/sa' || pathname.startsWith('/sa/')
 
 createRoot(document.getElementById('root')).render(

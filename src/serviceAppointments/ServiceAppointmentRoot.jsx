@@ -4,7 +4,7 @@
 //
 //   /sa/<slug>             → ServiceAppointmentFlow (intake → slots → confirm → success)
 //   /sa/manage/<token>     → ManagePage (view + future reschedule/cancel)
-//   /sa or /sa/          → SlugIndex (list of bookable services)
+//   /sa or /sa/          → SlugIndex (list of schedulable services)
 //
 // Renders its own page chrome (header + footer). Bypasses AuthGate and the
 // staff sidebar — customers are unauthenticated.
@@ -39,7 +39,7 @@ export default function ServiceAppointmentRoot() {
   }, [])
 
   const path = typeof window !== 'undefined' ? window.location.pathname : '/sa'
-  const parts = path.split('/').filter(Boolean) // ['book'], ['book','single-family-assessment'], ['book','manage','<token>']
+  const parts = path.split('/').filter(Boolean) // ['sa'], ['sa','single-family-assessment'], ['sa','manage','<token>']
 
   let content
   if (parts.length === 1) {

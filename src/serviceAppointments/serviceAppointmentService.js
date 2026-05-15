@@ -1,12 +1,12 @@
-// ─── serviceAppointmentService.js ───────────────────────────────────────────────────────
+// ─── serviceAppointmentService.js ────────────────────────────────────────────
 // Public-facing API wrapper for the customer scheduling flow.
-//   - compute-availability + book-appointment: edge functions (fetch wrappers
-//     below) because they run server-side input validation + advisory locks
-//     and shape the response for the customer UI.
-//   - lookup_booking_by_token + cancel_appointment + reschedule_appointment:
-//     direct RPC calls. These RPCs are SECURITY DEFINER and granted to anon,
-//     so they don't need an edge function wrapper — the supabase JS client
-//     calls them directly using the publishable key.
+//   - compute-availability + create-service-appointment: edge functions
+//     (fetch wrappers below). Run server-side input validation + advisory
+//     locks and shape the response for the customer UI.
+//   - lookup_service_appointment_by_token + cancel_appointment +
+//     reschedule_appointment: direct RPC calls. These RPCs are SECURITY
+//     DEFINER and granted to anon, so the supabase JS client can call them
+//     using the publishable key. The customer's manage token IS the auth.
 
 import { supabase } from '../lib/supabase'
 
@@ -43,23 +43,23 @@ export function computeAvailability({ slug, address, intake, start_date, days })
   return call('compute-availability', { slug, address, intake, start_date, days })
 }
 
-export function bookAppointment({
+export function createServiceAppointment({
   slug, start_iso, end_iso, resource_id,
   customer_first_name, customer_last_name, phone, email, address, intake,
 }) {
-  return call('book-appointment', {
+  return call('create-service-appointment', {
     slug, start_iso, end_iso, resource_id,
     customer_first_name, customer_last_name, phone, email, address, intake,
   })
 }
 
 // ─── management RPCs ─────────────────────────────────────────────────────────
-// These three call SECURITY DEFINER RPCs directly through the Supabase JS
-// client using the publishable anon key. The RPCs verify the booking_token
+// All three call SECURITY DEFINER RPCs directly via supabase.rpc() using the
+// publishable anon key. The RPCs verify the service_appointment_token
 // themselves — no JWT auth required. The token IS the auth.
 
 export async function lookupAppointment(token) {
-  const { data, error } = await supabase.rpc('lookup_booking_by_token', { p_token: token })
+  const { data, error } = await supabase.rpc('lookup_service_appointment_by_token', { p_token: token })
   if (error) throw new Error(error.message || 'Lookup failed')
   return data
 }

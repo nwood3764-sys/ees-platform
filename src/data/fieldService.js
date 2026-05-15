@@ -229,7 +229,7 @@ export async function fetchSchedule(date = new Date()) {
       const title = a.contacts?.contact_title || ''
       return /Team Lead/i.test(title)
     })
-    // Fallback: customer-self-booked assessments are assigned to a single
+    // Fallback: customer-self-scheduled assessments are assigned to a single
     // Technician (the auditor), with no Team Lead in the SAA. Treat that
     // single Tech as the bucket key so these appointments group under the
     // auditor's name instead of disappearing into "Unassigned". Multi-member
@@ -341,9 +341,9 @@ export async function fetchSchedule(date = new Date()) {
 }
 
 // ---------------------------------------------------------------------------
-// Service Appointments inbox — customer-self-booked SAs in the upcoming window
+// Service Appointments inbox — customer-self-scheduled SAs in the upcoming window
 // ---------------------------------------------------------------------------
-// The /sa/* customer flow inserts service_appointments via the book_appointment
+// The /sa/* customer flow inserts service_appointments via the create_service_appointment
 // RPC. Staff need a multi-day inbox view of incoming Service Appointments so
 // they can call the customer to confirm and reschedule if needed.
 //
@@ -352,8 +352,8 @@ export async function fetchSchedule(date = new Date()) {
 // by scheduled start.
 //
 // Filter: sa_status='scheduled' AND sa_scheduled_start_time IN [now, now+days].
-// Customer-self-booked is distinguished by having exactly one SAA pointing at
-// a Technician contact; we don't have an explicit "booking_source" column yet
+// Customer-self-scheduled is distinguished by having exactly one SAA pointing at
+// a Technician contact; we don't have an explicit "creation_source" column yet
 // (worth adding when we need to distinguish from internally-created SAs).
 
 export async function fetchUpcomingServiceAppointments(days = 14) {

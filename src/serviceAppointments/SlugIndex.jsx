@@ -1,5 +1,5 @@
 // ─── SlugIndex.jsx ───────────────────────────────────────────────────────────
-// Landing page at /sa — lists the 4 customer-bookable assessment types and
+// Landing page at /sa — lists the 4 customer-schedulable assessment types and
 // links to each scheduling flow. Hardcoded to match WT-00072..00075. When the
 // catalog grows, this should fetch from compute-availability's work_types
 // catalog or an /api/work-types endpoint.

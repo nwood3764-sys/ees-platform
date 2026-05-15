@@ -11,7 +11,7 @@
 // zoom on focus), tap targets are ≥ 44px tall.
 
 import { useState, useMemo } from 'react'
-import { computeAvailability, bookAppointment } from './serviceAppointmentService'
+import { computeAvailability, createServiceAppointment } from './serviceAppointmentService'
 import {
   C, card, label, input, inputFocus, buttonPrimary, buttonSecondary,
   errorBanner, RADIUS, formatChicagoSlot, formatChicagoTimeRange,
@@ -142,7 +142,7 @@ export default function ServiceAppointmentFlow({ slug }) {
     setError(null)
     setStep('scheduling')
     try {
-      const result = await bookAppointment({
+      const result = await createServiceAppointment({
         slug,
         start_iso:           selectedSlot.start_iso,
         end_iso:             selectedSlot.end_iso,
@@ -158,8 +158,8 @@ export default function ServiceAppointmentFlow({ slug }) {
         intake: customerInfo.intake,
       })
       if (result.status === 'slot_taken') {
-        // The slot was just booked by someone else — go back to fresh slots.
-        setError("That time slot was just booked by another customer. Please pick another.")
+        // The slot was just taken by someone else — go back to fresh slots.
+        setError("That time slot was just taken by another customer. Please pick another.")
         // Re-fetch availability before sending the customer back.
         try {
           const fresh = await computeAvailability({
@@ -567,7 +567,7 @@ function SummaryRow({ label: text, value, highlight }) {
 function SuccessStep({ meta, slot, customerInfo, result }) {
   const { date, time } = formatChicagoSlot(slot.start_iso)
   const range = formatChicagoTimeRange(slot.start_iso, slot.end_iso)
-  const manageUrl = result.manage_url || `/sa/manage/${result.booking_token}`
+  const manageUrl = result.manage_url || `/sa/manage/${result.service_appointment_token}`
 
   return (
     <div>
@@ -583,7 +583,7 @@ function SuccessStep({ meta, slot, customerInfo, result }) {
           </svg>
         </div>
         <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 8 }}>
-          You're booked.
+          You're scheduled.
         </h1>
         <p style={{ color: C.textSecondary, fontSize: 15 }}>
           Your appointment is confirmed for <strong style={{ color: C.textPrimary }}>{date}</strong>.

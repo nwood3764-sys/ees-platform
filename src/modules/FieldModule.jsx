@@ -502,7 +502,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 }
 
 // ─── ServiceAppointmentsInbox ───────────────────────────────────────────────
-// Dispatcher console for incoming customer-self-booked Service Appointments.
+// Dispatcher console for incoming customer-self-scheduled Service Appointments.
 //
 // Reads service_appointments where sa_status='scheduled' AND start time is in
 // the upcoming `days` window (default 14). Groups by Chicago calendar day so
@@ -565,7 +565,7 @@ function ServiceAppointmentsInbox({ onOpenRecord }) {
             </h2>
             <div style={{ fontSize:13, color:C.textSecondary }}>
               {rows.length === 0
-                ? 'No upcoming customer-self-booked service appointments.'
+                ? 'No upcoming customer-self-scheduled service appointments.'
                 : `${rows.length} service appointment${rows.length === 1 ? '' : 's'} scheduled across ${byDay.length} day${byDay.length === 1 ? '' : 's'}.`}
             </div>
           </div>
@@ -592,7 +592,7 @@ function ServiceAppointmentsInbox({ onOpenRecord }) {
             background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
             padding:48, textAlign:'center', color:C.textMuted, fontSize:14,
           }}>
-            No service appointments in this window. Customers can book at
+            No service appointments in this window. Customers can schedule at
             {' '}<a href="/sa" target="_blank" rel="noreferrer" style={{ color:C.emerald, textDecoration:'none', fontWeight:500 }}>/sa</a>.
           </div>
         ) : (

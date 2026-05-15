@@ -2,7 +2,7 @@
 // Customer self-serve appointment management at /sa/manage/<token>.
 //
 // Flow:
-//   1. On mount: call lookup_booking_by_token. Validate token + expiry +
+//   1. On mount: call lookup_service_appointment_by_token. Validate token + expiry +
 //      consumed-state. If anything's off, show a clear error with an email
 //      fallback.
 //   2. View state: show appointment summary (date, time, address, auditor,
@@ -122,7 +122,7 @@ export default function ManagePage({ token }) {
           })
           if (fresh.status === 'ok') setAvailability(fresh)
         } catch { /* keep stale */ }
-        setSlotsError('That time slot was just booked by someone else. Please pick another.')
+        setSlotsError('That time slot was just taken by someone else. Please pick another.')
         setView('slots')
         return
       }
@@ -283,7 +283,7 @@ function ConfirmCancelView({ appointment, onConfirm, onBack }) {
         You're about to cancel your <strong style={{ color: C.textPrimary }}>{appointment.work_type_name}</strong>{' '}
         scheduled for <strong style={{ color: C.textPrimary }}>{date}</strong> at{' '}
         <strong style={{ color: C.textPrimary }}>{range}</strong>.
-        This can't be undone — you'll need to book again if you change your mind.
+        This can't be undone — you'll need to schedule again if you change your mind.
       </p>
       <div style={{ display: 'flex', gap: 12 }}>
         <button onClick={onBack} style={{ ...buttonSecondary, flex: 1 }}>
