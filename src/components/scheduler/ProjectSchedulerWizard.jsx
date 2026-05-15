@@ -83,6 +83,11 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   const [previewError, setPreviewError] = useState(null)
   const [committing, setCommitting] = useState(false)
   const [commitError, setCommitError] = useState(null)
+  // Gantt zoom multiplier. 1x = fits modal, 2x/4x/8x = horizontal scroll
+  // for dense direct-install days where 2-min blocks pile up.
+  const [ganttZoom, setGanttZoom] = useState(1)
+  // Optional: blow the Gantt out to a fullscreen overlay for dispatcher review
+  const [ganttFullscreen, setGanttFullscreen] = useState(false)
 
   // ── Load initial data ────────────────────────────────────────────────────
   useEffect(() => {
@@ -266,8 +271,12 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     zIndex: 1100, padding: 16,
   }
+  // On the preview step the Gantt benefits from a wider card. Other steps
+  // (selection table, form fields) read fine at 760.
   const card = {
-    width: '100%', maxWidth: 760, maxHeight: 'calc(100vh - 32px)',
+    width: '100%',
+    maxWidth: step === 3 ? 1200 : 760,
+    maxHeight: 'calc(100vh - 32px)',
     background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
     boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
     overflow: 'hidden', display: 'flex', flexDirection: 'column',
@@ -576,15 +585,64 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         )}
 
         {/* Gantt */}
-        {placedByDay.length > 0 && (
-          <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden', background: C.card, marginBottom: 12 }}>
-            <GanttAxis />
-            {placedByDay.map(group => (
-              <GanttDay key={group.day} day={group.day} rows={group.rows} />
-            ))}
-            <GanttLegend rows={preview.filter(r => r.placed)} />
-          </div>
-        )}
+        {placedByDay.length > 0 && (() => {
+          // Width math: at 1x the Gantt fills the modal body. The track
+          // (right of the day label column) is whatever fits. Zooming
+          // multiplies the track's CSS width and enables horizontal scroll;
+          // % positions inside each row continue to resolve against the
+          // wider track, so 2-min blocks become visibly fat at 4x/8x.
+          const trackWidth = `${100 * ganttZoom}%`
+          return (
+            <div style={{ marginBottom: 12 }}>
+              {/* Zoom toolbar */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: 8, fontSize: 11.5, color: C.textMuted,
+              }}>
+                <span>Hover any block for full details. Use zoom to see short measures clearly.</span>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 600, color: C.textMuted,
+                                 textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: 2 }}>
+                    Zoom
+                  </span>
+                  {[1, 2, 4, 8].map(z => (
+                    <button key={z} onClick={() => setGanttZoom(z)}
+                      style={{
+                        padding: '3px 8px', fontSize: 11.5, fontWeight: 600,
+                        border: `1px solid ${ganttZoom === z ? C.emerald : C.border}`,
+                        background: ganttZoom === z ? '#ecfdf5' : C.card,
+                        color: ganttZoom === z ? C.emerald : C.textSecondary,
+                        borderRadius: 4, cursor: 'pointer',
+                        fontFamily: 'JetBrains Mono, monospace',
+                      }}>{z}×</button>
+                  ))}
+                  <button onClick={() => setGanttFullscreen(true)}
+                    title="Expand to full screen"
+                    style={{
+                      marginLeft: 4, padding: '3px 8px', fontSize: 11.5, fontWeight: 600,
+                      border: `1px solid ${C.border}`, background: C.card,
+                      color: C.textSecondary, borderRadius: 4, cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                    }}>
+                    <Icon path="M4 4h6M4 4v6M20 4h-6M20 4v6M4 20h6M4 20v-6M20 20h-6M20 20v-6" size={11} color="currentColor" />
+                    Expand
+                  </button>
+                </div>
+              </div>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden', background: C.card }}>
+                {/* Horizontal scroll container — only the inner track scrolls,
+                    not the day-label column. */}
+                <GanttScroll trackWidth={trackWidth}>
+                  <GanttAxis />
+                  {placedByDay.map(group => (
+                    <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={ganttZoom} />
+                  ))}
+                </GanttScroll>
+                <GanttLegend rows={preview.filter(r => r.placed)} />
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Unplaced rows */}
         {unplaced && unplaced.rows.length > 0 && (
@@ -747,6 +805,17 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           )}
         </div>
       </div>
+
+      {/* Fullscreen Gantt overlay — same data, more screen real estate.
+          Renders on top of the wizard at a higher z-index. */}
+      {ganttFullscreen && preview && (
+        <GanttFullscreenView
+          previewSummary={previewSummary}
+          previewByDay={previewByDay}
+          allPlaced={preview.filter(r => r.placed)}
+          onClose={() => setGanttFullscreen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -760,6 +829,82 @@ function SummaryCard({ label, value, color }) {
         {label}
       </div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
+    </div>
+  )
+}
+
+// Fullscreen Gantt — viewport-filling overlay, separate zoom state, Esc to
+// close. Used when the dispatcher needs to read packed direct-install days
+// in detail. Same blocks, way more screen.
+function GanttFullscreenView({ previewSummary, previewByDay, allPlaced, onClose }) {
+  const [zoom, setZoom] = useState(2)
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const placedByDay = previewByDay.filter(g => g.day !== '(unplaced)')
+  const trackWidth = `${100 * zoom}%`
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)',
+      zIndex: 1200, display: 'flex', flexDirection: 'column', padding: 24,
+    }} onClick={onClose}>
+      <div style={{
+        flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{
+          padding: '14px 20px', borderBottom: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          flexShrink: 0, background: C.page,
+        }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>
+              Scheduled placement — fullscreen preview
+            </div>
+            <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
+              {previewSummary?.placed || 0} placed
+              {previewSummary?.unplaced > 0 ? `, ${previewSummary.unplaced} unplaced` : ''}
+              {' · '}Esc to close
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: C.textMuted,
+                           textTransform: 'uppercase', letterSpacing: '0.05em', marginRight: 4 }}>
+              Zoom
+            </span>
+            {[1, 2, 4, 8, 16].map(z => (
+              <button key={z} onClick={() => setZoom(z)}
+                style={{
+                  padding: '4px 10px', fontSize: 12, fontWeight: 600,
+                  border: `1px solid ${zoom === z ? C.emerald : C.border}`,
+                  background: zoom === z ? '#ecfdf5' : C.card,
+                  color: zoom === z ? C.emerald : C.textSecondary,
+                  borderRadius: 4, cursor: 'pointer',
+                  fontFamily: 'JetBrains Mono, monospace',
+                }}>{z}×</button>
+            ))}
+            <button onClick={onClose} aria-label="Close"
+              style={{ marginLeft: 8, background: 'transparent', border: 'none', padding: 6, borderRadius: 4,
+                       cursor: 'pointer', color: C.textMuted }}>
+              <Icon path="M18 6 6 18M6 6l12 12" size={18} color="currentColor" />
+            </button>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden', background: C.card }}>
+            <GanttScroll trackWidth={trackWidth}>
+              <GanttAxis />
+              {placedByDay.map(group => (
+                <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={zoom} />
+              ))}
+            </GanttScroll>
+            <GanttLegend rows={allPlaced} />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -792,13 +937,30 @@ function unitColor(unitName) {
 
 const GANTT_LABEL_WIDTH = 110
 
+// Horizontal scroll wrapper that lets the inner Gantt track grow wider
+// than the modal while keeping the day-label column fixed-width. The
+// trackWidth prop is a CSS value like '200%' to drive the zoom.
+function GanttScroll({ trackWidth, children }) {
+  return (
+    <div style={{ overflowX: 'auto', overflowY: 'hidden', position: 'relative' }}>
+      <div style={{
+        width: `calc(${GANTT_LABEL_WIDTH}px + (100% - ${GANTT_LABEL_WIDTH}px) * ${parseFloat(trackWidth) / 100})`,
+        minWidth: '100%',
+      }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 function GanttAxis() {
   const hours = [7, 8, 9, 10, 11, 12, 13, 14, 15]
   const fmt = h => (h > 12 ? `${h - 12}p` : h === 12 ? '12p' : `${h}a`)
   return (
     <div style={{ display: 'flex', fontSize: 10, color: C.textMuted, borderBottom: `1px solid ${C.border}`, background: C.page }}>
       <div style={{ width: GANTT_LABEL_WIDTH, flexShrink: 0, borderRight: `1px solid ${C.border}`,
-                    padding: '6px 10px', fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    padding: '6px 10px', fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em',
+                    position: 'sticky', left: 0, zIndex: 2, background: C.page }}>
         Day
       </div>
       <div style={{ flex: 1, position: 'relative', height: 24 }}>
@@ -817,14 +979,21 @@ function GanttAxis() {
   )
 }
 
-function GanttDay({ day, rows }) {
+function GanttDay({ day, rows, zoom = 1 }) {
   const d = new Date(day + 'T00:00:00')
   const weekday = d.toLocaleDateString(undefined, { weekday: 'short' })
   const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  // Higher zoom → labels appear on shorter blocks. At 1x a 2-min block is
+  // ~0.4% of the track and labels are pointless; at 4x same block is ~1.6%
+  // and at 8x ~3.2%, plenty of room for the record number.
+  const labelThresholdMin = zoom >= 4 ? 2 : zoom >= 2 ? 8 : 20
+  // Min absolute block width so 2-min direct-installs are at least clickable
+  // at low zoom levels.
+  const minBlockPx = zoom >= 4 ? 18 : zoom >= 2 ? 10 : 6
   return (
     <div style={{ display: 'flex', borderTop: `1px solid ${C.border}`, fontSize: 11 }}>
       <div style={{ width: GANTT_LABEL_WIDTH, padding: '10px 10px', borderRight: `1px solid ${C.border}`,
-                    background: C.page, flexShrink: 0 }}>
+                    background: C.page, flexShrink: 0, position: 'sticky', left: 0, zIndex: 2 }}>
         <div style={{ fontWeight: 600, color: C.textPrimary, fontSize: 12 }}>{weekday}</div>
         <div style={{ color: C.textMuted, fontSize: 10.5 }}>{date}</div>
       </div>
@@ -850,14 +1019,14 @@ function GanttDay({ day, rows }) {
           const durMin = Number(r.duration_minutes) || 0
           const leftPct  = startMin / DAY_RANGE_MIN * 100
           const widthPct = durMin / DAY_RANGE_MIN * 100
-          const showLabel = durMin >= 20
+          const showLabel = durMin >= labelThresholdMin
           return (
             <div key={r.work_order_id}
               title={`${r.work_order_record_number} — ${r.work_type_name}\n${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}\n${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)} (${durMin} min)`}
               style={{
                 position: 'absolute', top: 5, bottom: 5,
                 left:  `${leftPct}%`,
-                width: `max(3px, ${widthPct}%)`,
+                width: `max(${minBlockPx}px, ${widthPct}%)`,
                 background: unitColor(r.unit_name),
                 border: '1px solid rgba(15, 23, 42, 0.25)',
                 borderRadius: 3,
