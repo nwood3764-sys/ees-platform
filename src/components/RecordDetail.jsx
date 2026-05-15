@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
 import ProjectReportModal from './ProjectReportModal'
+import ProjectSchedulerWizard from './scheduler/ProjectSchedulerWizard'
 import SendForSignatureModal from './SendForSignatureModal'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
@@ -3465,6 +3466,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
+  // Project Scheduler wizard (only used when tableName === 'projects').
+  // Bulk-schedules unscheduled work orders for the project to a Team Lead.
+  // After a successful commit, the tick is bumped so the related-records area
+  // (Work Orders, Service Appointments widgets) re-fetches.
+  const [showSchedulerWizard, setShowSchedulerWizard] = useState(false)
   // Send-for-signature modal: shown on any record whose table has at least one
   // Active document template (document_templates.related_object = tableName).
   // The DocuSign / Conga model — gating is data-driven, not hardcoded. The
@@ -4376,6 +4382,21 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={18} color="currentColor" />
                   </button>
                 )}
+                {tableName === 'projects' && (
+                  <button
+                    onClick={() => setShowSchedulerWizard(true)}
+                    aria-label="Schedule Work Orders"
+                    title="Bulk-schedule unscheduled work orders on this project"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: 'pointer', color: C.emerald,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44,
+                    }}
+                  >
+                    <Icon path="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" size={18} color="currentColor" />
+                  </button>
+                )}
                 {hasActiveTemplate && (
                   <button
                     onClick={() => setShowSendSignatureModal(true)}
@@ -5105,6 +5126,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           project={record}
           onClose={() => setShowReportModal(false)}
           onComplete={() => { setReloadTick(t => t + 1) }}
+        />
+      )}
+
+      {/* Project Scheduler wizard (only on projects, opt-in via toolbar button) */}
+      {showSchedulerWizard && tableName === 'projects' && (
+        <ProjectSchedulerWizard
+          projectId={recordId}
+          project={record}
+          onClose={() => setShowSchedulerWizard(false)}
+          onCommitted={() => { setReloadTick(t => t + 1) }}
         />
       )}
 
