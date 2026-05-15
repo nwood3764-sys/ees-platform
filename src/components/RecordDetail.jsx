@@ -2361,7 +2361,7 @@ function ConfigFieldRow({ field, value, editing, onChange }) {
 //   • "View All (N)" footer link when more rows exist
 // ---------------------------------------------------------------------------
 
-const RELATED_LIST_MAX_ROWS = 25
+const RELATED_LIST_MAX_ROWS = 7
 
 // Render a single cell. Extracted so the editable and read-only paths can
 // share formatting without duplicating the picklist / date / number logic.

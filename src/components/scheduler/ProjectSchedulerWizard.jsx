@@ -1,16 +1,16 @@
 // ---------------------------------------------------------------------------
 // ProjectSchedulerWizard — bulk-schedule unscheduled work orders on a project.
 //
-// 4-step modal:
-//   1. Select WOs (default = all 'To Be Scheduled' WOs on the project)
-//   2. Pick Team Lead + date range + working-hours overrides (optional)
-//   3. Preview the placement plan (calls RPC with commit:false)
-//   4. Confirm — calls RPC with commit:true, displays the result
+// 3-step modal:
+//   1. Select WOs (with up/down arrows to set placement order)
+//   2. Pick Team Lead + date range
+//   3. Gantt preview → Confirm. On commit the wizard closes; a toast confirms
+//      the result. No separate "Done" screen.
 //
 // The engine is server-side (public.bulk_schedule_work_orders). This component
-// is a UI shell: it loads data, sends RPC calls, displays results. The
-// algorithm itself — greedy first-fit, working-hours model, conflict-carve —
-// lives in plpgsql so the same logic governs preview AND commit.
+// is a UI shell: it loads data, sends RPC calls, displays results. Per-WO
+// post-buffer + same-unit-zero-buffer is engine behavior; the wizard simply
+// presents the resulting plan as a Gantt chart.
 // ---------------------------------------------------------------------------
 
 import { useEffect, useMemo, useState } from 'react'
@@ -58,13 +58,16 @@ function prettyDay(iso) {
 export default function ProjectSchedulerWizard({ projectId, project, onClose, onCommitted }) {
   const toast = useToast()
 
-  const [step, setStep] = useState(1)            // 1=select, 2=window, 3=preview, 4=result
+  const [step, setStep] = useState(1)            // 1=select, 2=window, 3=preview/confirm
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   // Step 1 data
   const [workOrders, setWorkOrders] = useState([])
   const [selectedIds, setSelectedIds] = useState(new Set())
+  // User-controllable placement order. Holds ALL workOrder ids in display
+  // order; the RPC receives only the selected subset in this order.
+  const [woOrder, setWoOrder] = useState([])
 
   // Step 2 data
   const [teamLeads, setTeamLeads] = useState([])
@@ -74,14 +77,11 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   const [startDate, setStartDate] = useState(defaultStart)
   const [endDate,   setEndDate]   = useState(defaultEnd)
 
-  // Step 3 data (preview)
+  // Step 3 data (preview + commit)
   const [previewing, setPreviewing] = useState(false)
   const [preview, setPreview] = useState(null)         // array of rows from RPC
   const [previewError, setPreviewError] = useState(null)
-
-  // Step 4 data (commit result)
   const [committing, setCommitting] = useState(false)
-  const [commitResult, setCommitResult] = useState(null)
   const [commitError, setCommitError] = useState(null)
 
   // ── Load initial data ────────────────────────────────────────────────────
@@ -95,6 +95,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         ])
         if (cancelled) return
         setWorkOrders(wos)
+        setWoOrder(wos.map(w => w.id))
         setSelectedIds(new Set(wos.filter(w => w.duration_minutes != null && w.duration_minutes > 0).map(w => w.id)))
         setTeamLeads(leads)
         if (leads.length === 1) setTeamLeadId(leads[0].id)
@@ -109,9 +110,20 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   }, [projectId])
 
   // ── Derived ──────────────────────────────────────────────────────────────
+  // workOrders in the user-controlled placement order. The RPC is order-
+  // sensitive: it walks ids in array order, so this list drives placement.
+  const orderedWorkOrders = useMemo(() => {
+    const byId = new Map(workOrders.map(w => [w.id, w]))
+    return woOrder.map(id => byId.get(id)).filter(Boolean)
+  }, [workOrders, woOrder])
+
+  const orderedSelectedIds = useMemo(
+    () => woOrder.filter(id => selectedIds.has(id)),
+    [woOrder, selectedIds]
+  )
   const selectedWorkOrders = useMemo(
-    () => workOrders.filter(w => selectedIds.has(w.id)),
-    [workOrders, selectedIds]
+    () => orderedWorkOrders.filter(w => selectedIds.has(w.id)),
+    [orderedWorkOrders, selectedIds]
   )
   const summary = useMemo(
     () => summarizeWorkOrderDurations(selectedWorkOrders),
@@ -126,7 +138,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     return { total: preview.length, placed, unplaced, errorsByKind }
   }, [preview])
 
-  // Group placement rows by day for the preview render
+  // Group placement rows by day for the Gantt
   const previewByDay = useMemo(() => {
     if (!preview) return []
     const groups = new Map()
@@ -135,7 +147,6 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
       if (!groups.has(k)) groups.set(k, [])
       groups.get(k).push(r)
     }
-    // sort placed rows in each day by start time
     const out = []
     for (const [k, rows] of groups) {
       const sorted = k === '(unplaced)'
@@ -143,7 +154,6 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         : [...rows].sort((a, b) => (a.scheduled_start_iso || '').localeCompare(b.scheduled_start_iso || ''))
       out.push({ day: k, rows: sorted })
     }
-    // sort days chronologically, then put '(unplaced)' last
     out.sort((a, b) => {
       if (a.day === '(unplaced)') return 1
       if (b.day === '(unplaced)') return -1
@@ -158,13 +168,39 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     const next = new Set(selectedIds)
     if (next.has(id)) next.delete(id); else next.add(id)
     setSelectedIds(next)
+    setPreview(null)
   }
   const toggleAll = () => {
     if (selectedIds.size === workOrders.length) setSelectedIds(new Set())
     else setSelectedIds(new Set(workOrders.map(w => w.id)))
+    setPreview(null)
   }
   const selectOnlyValid = () => {
     setSelectedIds(new Set(workOrders.filter(w => w.duration_minutes != null && w.duration_minutes > 0).map(w => w.id)))
+    setPreview(null)
+  }
+  // Reorder: swap a WO with its neighbor. Operates on all workOrders (not
+  // just selected) so the user can position an unchecked WO between two
+  // selected ones if they want to.
+  const moveUp = id => {
+    setWoOrder(prev => {
+      const i = prev.indexOf(id)
+      if (i <= 0) return prev
+      const next = [...prev]
+      ;[next[i - 1], next[i]] = [next[i], next[i - 1]]
+      return next
+    })
+    setPreview(null)
+  }
+  const moveDown = id => {
+    setWoOrder(prev => {
+      const i = prev.indexOf(id)
+      if (i < 0 || i >= prev.length - 1) return prev
+      const next = [...prev]
+      ;[next[i], next[i + 1]] = [next[i + 1], next[i]]
+      return next
+    })
+    setPreview(null)
   }
 
   const validateStep1 = () => {
@@ -184,7 +220,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     try {
       const rows = await bulkScheduleWorkOrders({
         projectId,
-        workOrderIds: [...selectedIds],
+        workOrderIds: orderedSelectedIds,
         teamLeadContactId: teamLeadId,
         startDate, endDate,
         commit: false,
@@ -203,16 +239,20 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     try {
       const rows = await bulkScheduleWorkOrders({
         projectId,
-        workOrderIds: [...selectedIds],
+        workOrderIds: orderedSelectedIds,
         teamLeadContactId: teamLeadId,
         startDate, endDate,
         commit: true,
       })
-      setCommitResult(rows)
-      setStep(3)
       const placed = rows.filter(r => r.placed).length
-      toast.success(`Scheduled ${placed} work order${placed === 1 ? '' : 's'}.`)
+      const unplaced = rows.filter(r => !r.placed).length
       onCommitted?.()
+      if (unplaced > 0) {
+        toast.success(`Scheduled ${placed} work order${placed === 1 ? '' : 's'}. ${unplaced} did not fit — extend the window and run again to place the rest.`)
+      } else {
+        toast.success(`Scheduled ${placed} work order${placed === 1 ? '' : 's'}.`)
+      }
+      onClose()
     } catch (e) {
       setCommitError(e.message || 'Commit failed')
     } finally {
@@ -268,7 +308,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   // ── Step renderers ───────────────────────────────────────────────────────
 
   function StepIndicator() {
-    const steps = ['Select WOs', 'Crew & window', 'Done']
+    const steps = ['Select & order', 'Crew & window', 'Preview & schedule']
     return (
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         {steps.map((label, i) => {
@@ -336,9 +376,10 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
             Unscheduled work orders ({workOrders.length})
           </div>
           <div style={hintStyle}>
-            Pick which work orders to schedule. Default is all. Work orders without a duration
-            cannot be placed automatically — set a duration on the work type or the work order
-            itself before scheduling.
+            Pick which work orders to schedule and the sequence the crew will work them in.
+            Use the ▲▼ arrows to reorder. The engine walks the list in order, packing same-unit
+            work orders back-to-back. Default order matches what the property loader returns
+            (typically grouped by building/unit).
           </div>
         </div>
 
@@ -364,6 +405,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
             <thead>
               <tr style={{ background: C.page, color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 <th style={{ padding: '8px 10px', textAlign: 'left', width: 30 }}></th>
+                <th style={{ padding: '8px 6px', textAlign: 'center', width: 60 }} title="Reorder placement sequence">Order</th>
                 <th style={{ padding: '8px 10px', textAlign: 'left' }}>WO</th>
                 <th style={{ padding: '8px 10px', textAlign: 'left' }}>Work type</th>
                 <th style={{ padding: '8px 10px', textAlign: 'left' }}>Location</th>
@@ -371,19 +413,38 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
               </tr>
             </thead>
             <tbody>
-              {workOrders.length === 0 && (
-                <tr><td colSpan={5} style={{ padding: '14px 10px', color: C.textMuted, textAlign: 'center' }}>
+              {orderedWorkOrders.length === 0 && (
+                <tr><td colSpan={6} style={{ padding: '14px 10px', color: C.textMuted, textAlign: 'center' }}>
                   No work orders in 'To Be Scheduled' on this project.
                 </td></tr>
               )}
-              {workOrders.map(w => {
+              {orderedWorkOrders.map((w, idx) => {
                 const missing = w.duration_minutes == null || w.duration_minutes <= 0
                 const checked = selectedIds.has(w.id)
+                const isFirst = idx === 0
+                const isLast  = idx === orderedWorkOrders.length - 1
+                const arrowBtn = (label, onClick, disabled, title) => (
+                  <button onClick={onClick} disabled={disabled} title={title}
+                    style={{
+                      background: 'transparent', border: 'none', padding: '0 2px',
+                      cursor: disabled ? 'default' : 'pointer',
+                      color: disabled ? '#cbd5e1' : C.textSecondary,
+                      fontSize: 11, lineHeight: 1,
+                    }}>{label}</button>
+                )
                 return (
                   <tr key={w.id} style={{ borderTop: `1px solid ${C.border}`,
                                           background: missing ? '#fffbeb' : 'transparent' }}>
                     <td style={{ padding: '8px 10px' }}>
                       <input type="checkbox" checked={checked} onChange={() => toggleOne(w.id)} disabled={missing} />
+                    </td>
+                    <td style={{ padding: '6px 4px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                      {arrowBtn('▲', () => moveUp(w.id), isFirst, 'Move up')}
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace', color: C.textMuted,
+                                     fontSize: 11, margin: '0 4px', minWidth: 16, display: 'inline-block' }}>
+                        {idx + 1}
+                      </span>
+                      {arrowBtn('▼', () => moveDown(w.id), isLast, 'Move down')}
                     </td>
                     <td style={{ padding: '8px 10px', fontFamily: 'JetBrains Mono, monospace', color: C.textMuted }}>
                       {w.record_number}
@@ -487,13 +548,26 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   }
 
   function renderStep3() {
+    if (!preview) {
+      return (
+        <>
+          <StepIndicator />
+          <div style={{ padding: 40, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+            Computing placement…
+          </div>
+        </>
+      )
+    }
+    const placedByDay = previewByDay.filter(g => g.day !== '(unplaced)')
+    const unplaced = previewByDay.find(g => g.day === '(unplaced)')
+
     return (
       <>
         <StepIndicator />
         {/* Summary banner */}
         {previewSummary && (
           <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16,
+            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14,
           }}>
             <SummaryCard label="Total"    value={previewSummary.total} color={C.textPrimary} />
             <SummaryCard label="Placed"   value={previewSummary.placed} color="#15803d" />
@@ -501,60 +575,52 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           </div>
         )}
 
-        {/* Placement table grouped by day */}
-        <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden' }}>
-          {previewByDay.map(group => (
-            <div key={group.day}>
-              <div style={{
-                background: group.day === '(unplaced)' ? '#fef3c7' : C.page,
-                padding: '8px 12px', fontSize: 12, fontWeight: 600,
-                color: group.day === '(unplaced)' ? '#92400e' : C.textSecondary,
-                borderTop: `1px solid ${C.border}`,
-              }}>
-                {group.day === '(unplaced)' ? `Unplaced (${group.rows.length})` : prettyDay(group.day)}
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                <tbody>
-                  {group.rows.map((r, i) => (
-                    <tr key={r.work_order_id || i} style={{ borderTop: `1px solid ${C.border}` }}>
-                      <td style={{ padding: '7px 12px', fontFamily: 'JetBrains Mono, monospace',
-                                   fontSize: 11.5, color: C.textMuted, width: 90 }}>
-                        {r.work_order_record_number}
-                      </td>
-                      <td style={{ padding: '7px 12px', color: C.textPrimary }}>
-                        {r.work_type_name}
-                        <span style={{ color: C.textMuted, marginLeft: 6 }}>
-                          ({r.building_name}{r.unit_name ? ` / ${r.unit_name}` : ''})
-                        </span>
-                      </td>
-                      <td style={{ padding: '7px 12px', textAlign: 'right', color: C.textSecondary, width: 130 }}>
-                        {r.placed ? (
-                          <>
-                            <strong style={{ color: C.textPrimary }}>
-                              {timeKey(r.scheduled_start_iso)}
-                            </strong>
-                            <span style={{ color: C.textMuted }}> – {timeKey(r.scheduled_end_iso)}</span>
-                          </>
-                        ) : (
-                          <span style={{ color: '#b45309', fontSize: 12 }}>
-                            {describePlacementError(r.placement_error)}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* Gantt */}
+        {placedByDay.length > 0 && (
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden', background: C.card, marginBottom: 12 }}>
+            <GanttAxis />
+            {placedByDay.map(group => (
+              <GanttDay key={group.day} day={group.day} rows={group.rows} />
+            ))}
+            <GanttLegend rows={preview.filter(r => r.placed)} />
+          </div>
+        )}
+
+        {/* Unplaced rows */}
+        {unplaced && unplaced.rows.length > 0 && (
+          <div style={{ border: '1px solid #fcd34d', borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
+            <div style={{
+              background: '#fef3c7', padding: '8px 12px', fontSize: 12, fontWeight: 600, color: '#92400e',
+            }}>
+              Won't fit in this window ({unplaced.rows.length})
             </div>
-          ))}
-        </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, background: C.card }}>
+              <tbody>
+                {unplaced.rows.map(r => (
+                  <tr key={r.work_order_id} style={{ borderTop: `1px solid ${C.border}` }}>
+                    <td style={{ padding: '7px 12px', fontFamily: 'JetBrains Mono, monospace',
+                                 fontSize: 11.5, color: C.textMuted, width: 90 }}>{r.work_order_record_number}</td>
+                    <td style={{ padding: '7px 12px', color: C.textPrimary }}>
+                      {r.work_type_name}
+                      <span style={{ color: C.textMuted, marginLeft: 6 }}>
+                        ({r.building_name}{r.unit_name ? ` / ${r.unit_name}` : ''})
+                      </span>
+                    </td>
+                    <td style={{ padding: '7px 12px', textAlign: 'right', color: '#b45309', fontSize: 11.5 }}>
+                      {describePlacementError(r.placement_error)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {previewSummary?.unplaced > 0 && (
-          <div style={{ marginTop: 12, padding: '10px 12px', background: '#fef3c7',
+          <div style={{ padding: '10px 12px', background: '#fef3c7',
                         border: '1px solid #fcd34d', borderRadius: 6, fontSize: 12.5,
                         color: '#92400e', lineHeight: 1.5 }}>
-            {previewSummary.unplaced} work order(s) won't fit. You can either confirm to schedule the
-            placeable ones and leave the rest unscheduled, or go back and extend the date range.
+            Confirm to schedule the {previewSummary.placed} placeable work order{previewSummary.placed === 1 ? '' : 's'} and leave the rest unscheduled, or go back and extend the date range.
           </div>
         )}
 
@@ -564,39 +630,6 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
             {commitError}
           </div>
         )}
-      </>
-    )
-  }
-
-  function renderStep4() {
-    const placed = commitResult?.filter(r => r.placed).length || 0
-    const unplaced = (commitResult?.length || 0) - placed
-    return (
-      <>
-        <StepIndicator />
-        <div style={{
-          padding: 24, textAlign: 'center', background: '#ecfdf5', border: '1px solid #a7f3d0',
-          borderRadius: 8, marginBottom: 16,
-        }}>
-          <div style={{ width: 48, height: 48, borderRadius: 999, background: '#15803d',
-                        margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Icon path="M5 13l4 4L19 7" size={24} color="white" />
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#14532d', marginBottom: 4 }}>
-            Scheduled {placed} work order{placed === 1 ? '' : 's'}
-          </div>
-          {unplaced > 0 && (
-            <div style={{ fontSize: 12.5, color: '#92400e' }}>
-              {unplaced} work order(s) remain unscheduled — extend the window and run the scheduler again.
-            </div>
-          )}
-        </div>
-
-        <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.6 }}>
-          Service Appointments and assignments have been created for the placed work orders. Their
-          status is now <strong>Scheduled</strong>. Open the Service Appointments inbox in the Field
-          module to review or dispatch them.
-        </div>
       </>
     )
   }
@@ -668,7 +701,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         <div style={bodyStyle}>
           {step === 1 && renderStep1()}
           {step === 2 && renderStep2()}
-          {step === 3 && renderStep4()}
+          {step === 3 && renderStep3()}
         </div>
 
         {/* Footer */}
@@ -684,21 +717,32 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           )}
           {step === 2 && (
             <>
-              {secondaryBtn('← Back', () => setStep(1), { disabled: committing })}
+              {secondaryBtn('← Back', () => setStep(1), { disabled: previewing })}
               <div style={{ display: 'flex', gap: 8 }}>
-                {secondaryBtn('Cancel', onClose, { disabled: committing })}
-                {primaryBtn(
-                  `Schedule ${selectedIds.size} work order${selectedIds.size === 1 ? '' : 's'}`,
-                  runCommit,
-                  { disabled: !!step2Err || committing, busy: committing, busyLabel: 'Scheduling…' }
-                )}
+                {secondaryBtn('Cancel', onClose, { disabled: previewing })}
+                {primaryBtn('Preview placement →', runPreview, {
+                  disabled: !!step2Err || previewing,
+                  busy: previewing, busyLabel: 'Computing…',
+                })}
               </div>
             </>
           )}
           {step === 3 && (
             <>
-              <div></div>
-              {primaryBtn('Close', onClose)}
+              {secondaryBtn('← Back', () => setStep(2), { disabled: committing })}
+              <div style={{ display: 'flex', gap: 8 }}>
+                {secondaryBtn('Cancel', onClose, { disabled: committing })}
+                {primaryBtn(
+                  previewSummary && previewSummary.placed > 0
+                    ? `Confirm — schedule ${previewSummary.placed}`
+                    : 'Nothing to schedule',
+                  runCommit,
+                  {
+                    disabled: !previewSummary || previewSummary.placed === 0 || committing,
+                    busy: committing, busyLabel: 'Scheduling…',
+                  }
+                )}
+              </div>
             </>
           )}
         </div>
@@ -716,6 +760,153 @@ function SummaryCard({ label, value, color }) {
         {label}
       </div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
+    </div>
+  )
+}
+
+// ── Gantt ────────────────────────────────────────────────────────────────────
+// Workday: 7:00 AM – 3:30 PM. Lunch 11:30 – 12:00. The track width is
+// proportional to the workday minute-range (510 minutes). Each WO is an
+// absolute-positioned colored block; color is hashed by unit_name so the
+// same apartment's WOs visibly group together. Hover for full details.
+
+const DAY_START_MIN = 7 * 60          // 420
+const DAY_END_MIN   = 15 * 60 + 30    // 930
+const DAY_RANGE_MIN = DAY_END_MIN - DAY_START_MIN  // 510
+const LUNCH_START_MIN = 11 * 60 + 30  // 690
+const LUNCH_END_MIN   = 12 * 60       // 720
+
+function minutesFromIso(iso) {
+  if (!iso) return 0
+  const [h, m] = iso.slice(11, 16).split(':').map(Number)
+  return h * 60 + m
+}
+
+function unitColor(unitName) {
+  if (!unitName) return '#cbd5e1'
+  let hash = 0
+  for (let i = 0; i < unitName.length; i++) hash = (hash * 31 + unitName.charCodeAt(i)) | 0
+  const hue = Math.abs(hash) % 360
+  return `hsl(${hue}, 55%, 72%)`
+}
+
+const GANTT_LABEL_WIDTH = 110
+
+function GanttAxis() {
+  const hours = [7, 8, 9, 10, 11, 12, 13, 14, 15]
+  const fmt = h => (h > 12 ? `${h - 12}p` : h === 12 ? '12p' : `${h}a`)
+  return (
+    <div style={{ display: 'flex', fontSize: 10, color: C.textMuted, borderBottom: `1px solid ${C.border}`, background: C.page }}>
+      <div style={{ width: GANTT_LABEL_WIDTH, flexShrink: 0, borderRight: `1px solid ${C.border}`,
+                    padding: '6px 10px', fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Day
+      </div>
+      <div style={{ flex: 1, position: 'relative', height: 24 }}>
+        {hours.map(h => {
+          const pct = (h * 60 - DAY_START_MIN) / DAY_RANGE_MIN * 100
+          return (
+            <div key={h} style={{
+              position: 'absolute', top: 4, left: `${pct}%`,
+              transform: 'translateX(-50%)',
+              fontFamily: 'JetBrains Mono, monospace',
+            }}>{fmt(h)}</div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function GanttDay({ day, rows }) {
+  const d = new Date(day + 'T00:00:00')
+  const weekday = d.toLocaleDateString(undefined, { weekday: 'short' })
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return (
+    <div style={{ display: 'flex', borderTop: `1px solid ${C.border}`, fontSize: 11 }}>
+      <div style={{ width: GANTT_LABEL_WIDTH, padding: '10px 10px', borderRight: `1px solid ${C.border}`,
+                    background: C.page, flexShrink: 0 }}>
+        <div style={{ fontWeight: 600, color: C.textPrimary, fontSize: 12 }}>{weekday}</div>
+        <div style={{ color: C.textMuted, fontSize: 10.5 }}>{date}</div>
+      </div>
+      <div style={{ flex: 1, position: 'relative', height: 40, background: '#fafbfd' }}>
+        {/* Lunch block */}
+        <div style={{
+          position: 'absolute', top: 0, bottom: 0,
+          left:  `${(LUNCH_START_MIN - DAY_START_MIN) / DAY_RANGE_MIN * 100}%`,
+          width: `${(LUNCH_END_MIN - LUNCH_START_MIN) / DAY_RANGE_MIN * 100}%`,
+          background: 'repeating-linear-gradient(45deg, #e5e7eb 0, #e5e7eb 4px, #f3f4f6 4px, #f3f4f6 8px)',
+        }} title="Lunch 11:30 – 12:00" />
+        {/* Vertical hour gridlines */}
+        {[8, 9, 10, 11, 12, 13, 14, 15].map(h => (
+          <div key={h} style={{
+            position: 'absolute', top: 0, bottom: 0,
+            left: `${(h * 60 - DAY_START_MIN) / DAY_RANGE_MIN * 100}%`,
+            width: 1, background: '#e4e9f2',
+          }} />
+        ))}
+        {/* WO blocks */}
+        {rows.map(r => {
+          const startMin = minutesFromIso(r.scheduled_start_iso) - DAY_START_MIN
+          const durMin = Number(r.duration_minutes) || 0
+          const leftPct  = startMin / DAY_RANGE_MIN * 100
+          const widthPct = durMin / DAY_RANGE_MIN * 100
+          const showLabel = durMin >= 20
+          return (
+            <div key={r.work_order_id}
+              title={`${r.work_order_record_number} — ${r.work_type_name}\n${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}\n${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)} (${durMin} min)`}
+              style={{
+                position: 'absolute', top: 5, bottom: 5,
+                left:  `${leftPct}%`,
+                width: `max(3px, ${widthPct}%)`,
+                background: unitColor(r.unit_name),
+                border: '1px solid rgba(15, 23, 42, 0.25)',
+                borderRadius: 3,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#1e293b', fontSize: 9.5, fontWeight: 600,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                cursor: 'help', padding: showLabel ? '0 4px' : 0,
+              }}>
+              {showLabel && r.work_order_record_number}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function GanttLegend({ rows }) {
+  // One swatch per unique unit_name so Nicholas can quickly map a color
+  // back to an apartment. Limit to first 12 to avoid a wall of swatches
+  // on enormous projects.
+  const seen = new Set()
+  const units = []
+  for (const r of rows) {
+    const k = `${r.building_name}|${r.unit_name || ''}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    units.push({ key: k, building: r.building_name, unit: r.unit_name })
+    if (units.length >= 12) break
+  }
+  if (units.length === 0) return null
+  return (
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', gap: 6,
+      padding: '8px 12px', borderTop: `1px solid ${C.border}`, background: C.page,
+      fontSize: 10.5, color: C.textSecondary,
+    }}>
+      <span style={{ marginRight: 4, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Units:
+      </span>
+      {units.map(u => (
+        <span key={u.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: 2,
+            background: unitColor(u.unit), border: '1px solid rgba(15, 23, 42, 0.2)',
+          }} />
+          {u.building}{u.unit ? ` / ${u.unit}` : ''}
+        </span>
+      ))}
     </div>
   )
 }
