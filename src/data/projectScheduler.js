@@ -60,7 +60,17 @@ export async function fetchUnscheduledWorkOrdersForProject(projectId) {
         work_type_name,
         work_type_duration_minutes
       ),
-      buildings:building_id ( building_name ),
+      buildings:building_id (
+        building_name,
+        building_address,
+        properties:property_id (
+          property_name,
+          property_street,
+          property_city,
+          property_state,
+          property_zip
+        )
+      ),
       units:unit_id ( unit_name )
     `)
     .eq('project_id', projectId)
@@ -74,6 +84,14 @@ export async function fetchUnscheduledWorkOrdersForProject(projectId) {
       (r.work_order_duration_minutes != null ? Number(r.work_order_duration_minutes) : null) ??
       (r.work_types?.work_type_duration_minutes != null
         ? Number(r.work_types.work_type_duration_minutes) : null)
+    const prop = r.buildings?.properties
+    const addressParts = [
+      r.buildings?.building_address,
+      prop?.property_street,
+      prop?.property_city && prop?.property_state
+        ? `${prop.property_city}, ${prop.property_state}${prop.property_zip ? ' ' + prop.property_zip : ''}`
+        : null,
+    ].filter(Boolean)
     return {
       id: r.id,
       record_number: r.work_order_record_number,
@@ -84,6 +102,9 @@ export async function fetchUnscheduledWorkOrdersForProject(projectId) {
       building_name: r.buildings?.building_name || '',
       unit_id: r.unit_id,
       unit_name: r.units?.unit_name || '',
+      property_name: prop?.property_name || '',
+      // Pre-joined address string for the hover tooltip
+      address: addressParts.join('\n'),
       duration_minutes: effectiveDuration,
       duration_source: r.work_order_duration_minutes != null
         ? 'work_order_override'

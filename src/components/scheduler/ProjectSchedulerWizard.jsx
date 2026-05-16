@@ -112,6 +112,11 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   // dragDropOnEmpty captures the target day + ISO time when the user
   // releases over empty space. Stays null otherwise.
   const dragDropEmptyRef = useRef(null)
+  // When a drop would benefit from dispatcher confirmation (out-of-window
+  // or displacing existing blocks), we stash the pending pin here and
+  // surface a small modal. The dispatcher confirms or cancels.
+  // Shape: { woId, iso, displayTime, reason, force, displacing: [rows] }
+  const [pendingPin, setPendingPin] = useState(null)
 
   // ── Load initial data ────────────────────────────────────────────────────
   useEffect(() => {
@@ -193,6 +198,16 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
   const pinnedIdsSet = useMemo(() => new Set(Object.keys(pins)), [pins])
 
+  // Map of WO id → metadata for hover-tooltip enrichment. The preview RPC
+  // returns building/unit/work_type but not address; we keep the loader's
+  // full record set indexed by id so the Gantt can surface property name
+  // and full street address on hover.
+  const woMetaById = useMemo(() => {
+    const m = new Map()
+    for (const w of workOrders) m.set(w.id, w)
+    return m
+  }, [workOrders])
+
   // Convert the dispatcher's HH:MM inputs to minute offsets for the Gantt
   // axis & block math. Falls back to module-level defaults on bad input.
   const dayStartMin = useMemo(
@@ -269,9 +284,17 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   // anyway but we keep the payload clean.
   const pinsToArray = useCallback((pinsMap) => {
     const out = []
-    for (const [woId, startTs] of Object.entries(pinsMap || {})) {
-      if (!startTs) continue
-      out.push({ work_order_id: woId, start_ts: startTs })
+    for (const [woId, entry] of Object.entries(pinsMap || {})) {
+      if (!entry) continue
+      // Backward compat: older code stored entry as a raw ISO string;
+      // newer code stores { iso, force }.
+      if (typeof entry === 'string') {
+        out.push({ work_order_id: woId, start_ts: entry })
+      } else if (entry.iso) {
+        const row = { work_order_id: woId, start_ts: entry.iso }
+        if (entry.force) row.force = true
+        out.push(row)
+      }
     }
     return out
   }, [])
@@ -339,55 +362,111 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   useEffect(() => { dragWoRef.current = dragWoId }, [dragWoId])
   useEffect(() => { dragOverRef.current = { id: dragOverWoId, pos: dragOverPos } }, [dragOverWoId, dragOverPos])
 
+  // Build an ISO string for a (day, minuteOfDay) pin coordinate, in
+  // Chicago time. Snaps to 5-minute boundary. Used by both empty-space
+  // and drop-on-block paths.
+  const buildPinIso = useCallback((day, minuteOfDay) => {
+    const dt = new Date(`${day}T00:00:00`)
+    dt.setMinutes(dt.getMinutes() + minuteOfDay)
+    const rounded = Math.round(dt.getMinutes() / 5) * 5
+    dt.setMinutes(rounded, 0, 0)
+    const pad = n => String(n).padStart(2, '0')
+    const tzDate = new Date(`${day}T12:00:00Z`)
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Chicago', timeZoneName: 'short',
+    }).formatToParts(tzDate)
+    const tzAbbr = parts.find(p => p.type === 'timeZoneName')?.value || 'CDT'
+    const offset = tzAbbr === 'CST' ? '-06:00' : '-05:00'
+    const iso = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}` +
+                `T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00${offset}`
+    const displayTime = `${pad(dt.getHours())}:${pad(dt.getMinutes())}`
+    return { iso, displayTime, minute: dt.getHours() * 60 + dt.getMinutes() }
+  }, [])
+
+  // Apply a pin (with optional force flag) and re-run the preview. The
+  // pendingPin modal calls this on confirm; direct paths call this when
+  // no confirmation is needed.
+  const applyPin = useCallback((woId, iso, force = false) => {
+    const entry = force ? { iso, force: true } : { iso, force: false }
+    const nextPins = { ...pins, [woId]: entry }
+    setPins(nextPins)
+    runPreview(orderedSelectedIds, nextPins)
+  }, [pins, orderedSelectedIds])
+
   const commitDragDrop = useCallback(() => {
     const draggedId = dragWoRef.current
-    const { id: overId, pos } = dragOverRef.current
+    const { id: overId } = dragOverRef.current
     const dropOnEmpty = dragDropEmptyRef.current
+    if (!draggedId) return
 
-    // Drop on another block → reorder (unchanged behavior).
-    if (overId && draggedId && overId !== draggedId) {
-      const newOrder = woOrder.filter(id => id !== draggedId)
-      let overIdx = newOrder.indexOf(overId)
-      if (overIdx < 0) return
-      if (pos === 'after') overIdx += 1
-      newOrder.splice(overIdx, 0, draggedId)
-      setWoOrder(newOrder)
-      const newSelectedOrdered = newOrder.filter(id => selectedIds.has(id))
-      runPreview(newSelectedOrdered, pins)
+    // Drop on another block → pin to THAT block's start time. The engine
+    // reflows non-pinned siblings around the new pin. Surface a confirm
+    // dialog showing the displaced WOs so the dispatcher knows what'll
+    // happen.
+    if (overId && overId !== draggedId) {
+      const targetRow = preview && preview.find(r => r.work_order_id === overId)
+      if (!targetRow || !targetRow.placed) return
+      const day = dayKey(targetRow.scheduled_start_iso)
+      const minuteOfDay = minutesFromIso(targetRow.scheduled_start_iso)
+      const { iso, displayTime } = buildPinIso(day, minuteOfDay)
+      // Which WOs will be displaced? Anything in the same day that
+      // currently overlaps the new pin's [iso, iso+dur] window and is
+      // not the dragged WO itself.
+      const draggedMeta = woMetaById && woMetaById.get(draggedId)
+      const newDur = draggedMeta?.duration_minutes || 0
+      const newStartMin = minuteOfDay
+      const newEndMin = minuteOfDay + newDur
+      const displacing = (preview || []).filter(r =>
+        r.placed && r.work_order_id !== draggedId
+        && dayKey(r.scheduled_start_iso) === day
+        && minutesFromIso(r.scheduled_end_iso) > newStartMin
+        && minutesFromIso(r.scheduled_start_iso) < newEndMin
+      ).map(r => ({
+        record_number: r.work_order_record_number,
+        work_type: r.work_type_name,
+        location: `${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}`,
+        time: `${timeKey(r.scheduled_start_iso)}–${timeKey(r.scheduled_end_iso)}`,
+      }))
+      setPendingPin({
+        woId: draggedId, iso, displayTime,
+        reason: 'displaces',
+        force: false,
+        displacing,
+      })
       return
     }
 
-    // Drop on empty track space → pin to that time on that day.
-    if (dropOnEmpty && draggedId) {
+    // Drop on empty track space → pin to that time.
+    if (dropOnEmpty) {
       const { day, minuteOfDay } = dropOnEmpty
-      const dt = new Date(`${day}T00:00:00`)
-      dt.setMinutes(dt.getMinutes() + minuteOfDay)
-      // Round to nearest 5-minute boundary so dispatchers don't get
-      // unusable times like 10:37:23.
-      const rounded = Math.round(dt.getMinutes() / 5) * 5
-      dt.setMinutes(rounded, 0, 0)
-      // Build the ISO with an explicit Chicago offset. CRITICAL: without
-      // an offset, Postgres parses the string as session-tz (UTC on
-      // Supabase), so a 4:30 PM Chicago drop becomes 4:30 PM UTC =
-      // 11:30 AM Chicago after the engine's AT TIME ZONE conversion,
-      // which falls into the lunch window and gets rejected.
-      // CDT (March–November) = -05:00; CST (November–March) = -06:00.
-      // Detect via the JS Date Intl API for the specific day.
-      const pad = n => String(n).padStart(2, '0')
-      // Determine Chicago offset for this date by formatting and parsing
-      const tzDate = new Date(`${day}T12:00:00Z`)
-      const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/Chicago', timeZoneName: 'short',
-      }).formatToParts(tzDate)
-      const tzAbbr = parts.find(p => p.type === 'timeZoneName')?.value || 'CDT'
-      const offset = tzAbbr === 'CST' ? '-06:00' : '-05:00'
-      const iso = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}` +
-                  `T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00${offset}`
-      const nextPins = { ...pins, [draggedId]: iso }
-      setPins(nextPins)
-      runPreview(orderedSelectedIds, nextPins)
+      const { iso, displayTime, minute } = buildPinIso(day, minuteOfDay)
+      // Out-of-window check: outside daily start/end OR inside lunch.
+      const isOutsideWindow =
+        minute < dayStartMin
+        || minute >= dayEndMin
+        || (minute >= LUNCH_START_MIN && minute < LUNCH_END_MIN)
+      if (isOutsideWindow) {
+        // Ask the dispatcher whether to force the pin.
+        setPendingPin({
+          woId: draggedId, iso, displayTime,
+          reason: 'out_of_window',
+          force: true,
+          displacing: [],
+        })
+        return
+      }
+      // In-window drop → apply directly.
+      applyPin(draggedId, iso, false)
     }
-  }, [woOrder, selectedIds, pins, orderedSelectedIds])
+  }, [preview, woMetaById, dayStartMin, dayEndMin, buildPinIso, applyPin])
+
+  // Confirm a pending pin from the modal.
+  const confirmPendingPin = useCallback(() => {
+    if (!pendingPin) return
+    applyPin(pendingPin.woId, pendingPin.iso, pendingPin.force)
+    setPendingPin(null)
+  }, [pendingPin, applyPin])
+  const cancelPendingPin = useCallback(() => setPendingPin(null), [])
 
   const unpin = useCallback((woId) => {
     setPins(prev => {
@@ -423,10 +502,9 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         const rect = track.getBoundingClientRect()
         const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
         const minuteOfDay = dayStartMin + Math.round(pct * (dayEndMin - dayStartMin))
-        // Reject lunch-window drops and snap-to-nearest-5
-        if (minuteOfDay >= LUNCH_START_MIN && minuteOfDay <= LUNCH_END_MIN) {
-          setDragOverWoId(null); dragDropEmptyRef.current = null; return
-        }
+        // Capture the drop coordinate. commitDragDrop classifies the drop
+        // (in-window vs out-of-window vs lunch) and either applies the
+        // pin directly or opens a confirmation modal.
         dragDropEmptyRef.current = { day: track.dataset.ganttDay, minuteOfDay }
         setDragOverWoId(null)
         return
@@ -810,7 +888,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                 marginBottom: 8, fontSize: 11.5, color: C.textMuted,
               }}>
                 <span>
-                  Drag a block onto another to reorder, or drag to an empty time slot to pin to that time. Click the 📌 to unpin.
+                  Drag any block to pin it. Drop onto another block to pin at that block's time (existing work orders move). Drop on empty time to pin to that time. Click the 📌 to unpin.
                   {pinnedIdsSet.size > 0 && (
                     <span style={{ color: '#2563eb', fontWeight: 600, marginLeft: 8 }}>
                       {pinnedIdsSet.size} pinned
@@ -859,7 +937,8 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                       dayStartMin={dayStartMin} dayEndMin={dayEndMin}
                       dragWoId={dragWoId} dragOverWoId={dragOverWoId} dragOverPos={dragOverPos}
                       onWoDragStart={onWoDragStart}
-                      pinnedIds={pinnedIdsSet} onUnpin={unpin} />
+                      pinnedIds={pinnedIdsSet} onUnpin={unpin}
+                      woMetaById={woMetaById} />
                   ))}
                 </GanttScroll>
                 <GanttLegend rows={preview.filter(r => r.placed)} />
@@ -1045,7 +1124,20 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           onUnpin={unpin}
           dayStartMin={dayStartMin}
           dayEndMin={dayEndMin}
+          woMetaById={woMetaById}
           onClose={() => setGanttFullscreen(false)}
+        />
+      )}
+
+      {/* Pin confirmation modal — appears when a drop lands outside the
+          working window or displaces other scheduled blocks. Higher
+          z-index than the fullscreen overlay so it sits on top. */}
+      {pendingPin && (
+        <PinConfirmModal
+          pendingPin={pendingPin}
+          woMetaById={woMetaById}
+          onConfirm={confirmPendingPin}
+          onCancel={cancelPendingPin}
         />
       )}
     </div>
@@ -1065,6 +1157,118 @@ function SummaryCard({ label, value, color }) {
   )
 }
 
+// ── Pin confirmation modal ──────────────────────────────────────────────────
+// Surfaces when a drag-drop pin needs dispatcher confirmation. Two reasons:
+//   1. 'out_of_window' — drop time is before daily start, after daily end,
+//      or during lunch. The dispatcher can override (force=true on engine).
+//   2. 'displaces' — drop time on the Gantt overlaps one or more existing
+//      placed WOs. The engine will reflow them around the new pin; this
+//      modal shows which ones will move.
+function PinConfirmModal({ pendingPin, woMetaById, onConfirm, onCancel }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+  const meta = woMetaById && woMetaById.get(pendingPin.woId)
+  const woLabel = meta
+    ? `${meta.record_number} — ${meta.work_type_name} (${meta.building_name}${meta.unit_name ? ' / ' + meta.unit_name : ''})`
+    : pendingPin.woId
+  const headerTone = pendingPin.reason === 'out_of_window' ? '#1d4ed8' : C.textPrimary
+  const headerText = pendingPin.reason === 'out_of_window'
+    ? 'Pin outside working hours?'
+    : (pendingPin.displacing.length > 0
+        ? `Pin will displace ${pendingPin.displacing.length} work order${pendingPin.displacing.length === 1 ? '' : 's'}`
+        : 'Confirm pin')
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1300, padding: 16,
+    }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 480,
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        }}>
+        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: headerTone, marginBottom: 4 }}>
+            {headerText}
+          </div>
+          <div style={{ fontSize: 12, color: C.textMuted }}>
+            Pinning to <strong style={{ color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{pendingPin.displayTime}</strong>
+          </div>
+        </div>
+        <div style={{ padding: '14px 20px', fontSize: 12.5, color: C.textSecondary, lineHeight: 1.55 }}>
+          <div style={{ marginBottom: 12 }}>
+            <strong style={{ color: C.textPrimary }}>Work order:</strong> {woLabel}
+          </div>
+          {pendingPin.reason === 'out_of_window' && (
+            <div style={{
+              background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6,
+              padding: '10px 12px', color: '#1e3a8a',
+            }}>
+              This time falls outside the configured working hours or during the
+              lunch period. The dispatcher is overriding the schedule — pinning
+              will succeed but the engine will not auto-place other work orders
+              in this off-hours window.
+            </div>
+          )}
+          {pendingPin.reason === 'displaces' && pendingPin.displacing.length > 0 && (
+            <div>
+              <div style={{ marginBottom: 6, color: C.textPrimary, fontWeight: 600 }}>
+                Existing work orders that overlap this time:
+              </div>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden' }}>
+                {pendingPin.displacing.map((d, i) => (
+                  <div key={d.record_number} style={{
+                    padding: '8px 10px', fontSize: 12,
+                    borderTop: i === 0 ? 'none' : `1px solid ${C.border}`,
+                    display: 'flex', justifyContent: 'space-between', gap: 10,
+                  }}>
+                    <div>
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace', color: C.textMuted }}>
+                        {d.record_number}
+                      </span>
+                      <span style={{ color: C.textPrimary, marginLeft: 6 }}>{d.work_type}</span>
+                      <span style={{ color: C.textMuted, marginLeft: 6 }}>({d.location})</span>
+                    </div>
+                    <div style={{ color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace' }}>
+                      {d.time}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 10, color: C.textSecondary }}>
+                These will be moved to the next available time slots. If any do not
+                fit in the remaining window they will be returned as unplaced —
+                pin them manually or extend the date range.
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{
+          padding: '12px 20px', borderTop: `1px solid ${C.border}`, background: C.page,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+        }}>
+          <button onClick={onCancel}
+            style={{ background: C.card, color: C.textSecondary, border: `1px solid ${C.border}`,
+                     borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button onClick={onConfirm}
+            style={{ background: C.emerald, color: 'white', border: `1px solid ${C.emerald}`,
+                     borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+            {pendingPin.reason === 'out_of_window' ? 'Pin anyway' : 'Pin and displace'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Fullscreen Gantt — viewport-filling overlay, separate zoom state, Esc to
 // close. Used when the dispatcher needs to read packed direct-install days
 // in detail. Same blocks, way more screen.
@@ -1073,6 +1277,7 @@ function GanttFullscreenView({
   dragWoId, dragOverWoId, dragOverPos, onWoDragStart,
   pinnedIds, onUnpin,
   dayStartMin, dayEndMin,
+  woMetaById,
 }) {
   const [zoom, setZoom] = useState(2)
   useEffect(() => {
@@ -1139,7 +1344,8 @@ function GanttFullscreenView({
                   dayStartMin={dayStartMin} dayEndMin={dayEndMin}
                   dragWoId={dragWoId} dragOverWoId={dragOverWoId} dragOverPos={dragOverPos}
                   onWoDragStart={onWoDragStart}
-                  pinnedIds={pinnedIds} onUnpin={onUnpin} />
+                  pinnedIds={pinnedIds} onUnpin={onUnpin}
+                  woMetaById={woMetaById} />
               ))}
             </GanttScroll>
             <GanttLegend rows={allPlaced} />
@@ -1244,6 +1450,7 @@ function GanttDay({
   dragWoId = null, dragOverWoId = null, dragOverPos = 'before', onWoDragStart,
   pinnedIds = null, onUnpin,
   dayStartMin = DAY_START_MIN, dayEndMin = DAY_END_MIN,
+  woMetaById = null,
 }) {
   const dayRange = dayEndMin - dayStartMin
   const d = new Date(day + 'T00:00:00')
@@ -1292,6 +1499,20 @@ function GanttDay({
           const isBeingDragged = dragWoId === r.work_order_id
           const isDropTarget = dragOverWoId === r.work_order_id
           const isPinned = pinnedIds && pinnedIds.has(r.work_order_id)
+          // Build a multi-line tooltip with everything the dispatcher
+          // needs to identify a block at a glance: WO#, work type, full
+          // property name, street address, building/unit, time window.
+          const meta = woMetaById && woMetaById.get(r.work_order_id)
+          const tooltipLines = [
+            `${r.work_order_record_number} — ${r.work_type_name}`,
+            meta?.property_name || '',
+            meta?.address || '',
+            `${r.building_name}${r.unit_name ? ' / Unit ' + r.unit_name : ''}`,
+            `${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)}  (${durMin} min)`,
+            isPinned ? '📌 Pinned to this time — click pin badge to unpin' : '',
+            '',
+            'Drag to an empty time slot to pin. Drag onto another block to pin at its time.',
+          ].filter(Boolean)
           return (
             <div key={r.work_order_id}
               data-wo-id={r.work_order_id}
@@ -1299,7 +1520,7 @@ function GanttDay({
               onDragStart={(e) => e.preventDefault()}
               onMouseDown={(e) => e.preventDefault()}
               onPointerDown={onWoDragStart ? (e) => onWoDragStart(r.work_order_id, e) : undefined}
-              title={`${r.work_order_record_number} — ${r.work_type_name}\n${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}\n${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)} (${durMin} min)${isPinned ? '\n📌 Pinned to this time' : ''}\n\nDrag onto another block to reorder. Drag to empty time to pin.`}
+              title={tooltipLines.join('\n')}
               style={{
                 position: 'absolute', top: 5, bottom: 5,
                 left:  `${leftPct}%`,
