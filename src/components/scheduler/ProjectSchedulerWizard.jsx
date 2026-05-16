@@ -97,6 +97,15 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   const [dragWoId, setDragWoId] = useState(null)
   const [dragOverWoId, setDragOverWoId] = useState(null)
   const [dragOverPos, setDragOverPos] = useState('before')
+  // Pinned placements. Map of work_order_id -> ISO start_ts. The engine
+  // accepts these as p_pinned_placements jsonb and locks each WO to its
+  // exact time; non-pinned WOs flow around them. Used when the dispatcher
+  // drops a drag on empty Gantt space (vs. dropping on another block,
+  // which reorders). Click the anchor badge on a pinned block to unpin.
+  const [pins, setPins] = useState({})
+  // dragDropOnEmpty captures the target day + ISO time when the user
+  // releases over empty space. Stays null otherwise.
+  const dragDropEmptyRef = useRef(null)
 
   // ── Load initial data ────────────────────────────────────────────────────
   useEffect(() => {
@@ -176,6 +185,8 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     return out
   }, [preview])
 
+  const pinnedIdsSet = useMemo(() => new Set(Object.keys(pins)), [pins])
+
   // ── Actions ──────────────────────────────────────────────────────────────
 
   const toggleOne = id => {
@@ -229,19 +240,33 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     return null
   }
 
-  const runPreview = async (overrideIds = null) => {
+  // Build the pin-array shape the engine expects from the pins map.
+  // Drops invalid (no-such-WO) entries silently — engine would ignore them
+  // anyway but we keep the payload clean.
+  const pinsToArray = useCallback((pinsMap) => {
+    const out = []
+    for (const [woId, startTs] of Object.entries(pinsMap || {})) {
+      if (!startTs) continue
+      out.push({ work_order_id: woId, start_ts: startTs })
+    }
+    return out
+  }, [])
+
+  const runPreview = async (overrideIds = null, overridePins = null) => {
     setPreviewing(true); setPreviewError(null)
     // Guard against accidental callers that pass a non-array (e.g. wiring
     // runPreview directly to onClick lets React pass the MouseEvent). Only
     // honor overrideIds when it's an actual array.
     const safeOverride = Array.isArray(overrideIds) ? overrideIds : null
     if (safeOverride === null) setPreview(null)
+    const pinsForCall = overridePins != null ? overridePins : pins
     try {
       const rows = await bulkScheduleWorkOrders({
         projectId,
         workOrderIds: safeOverride || orderedSelectedIds,
         teamLeadContactId: teamLeadId,
         startDate, endDate,
+        pinnedPlacements: pinsToArray(pinsForCall),
         commit: false,
       })
       setPreview(rows)
@@ -261,6 +286,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         workOrderIds: orderedSelectedIds,
         teamLeadContactId: teamLeadId,
         startDate, endDate,
+        pinnedPlacements: pinsToArray(pins),
         commit: true,
       })
       const placed = rows.filter(r => r.placed).length
@@ -287,43 +313,100 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   useEffect(() => { dragWoRef.current = dragWoId }, [dragWoId])
   useEffect(() => { dragOverRef.current = { id: dragOverWoId, pos: dragOverPos } }, [dragOverWoId, dragOverPos])
 
-  const commitDragReorder = useCallback(() => {
+  const commitDragDrop = useCallback(() => {
     const draggedId = dragWoRef.current
     const { id: overId, pos } = dragOverRef.current
-    if (!draggedId || !overId || draggedId === overId) return
-    const newOrder = woOrder.filter(id => id !== draggedId)
-    let overIdx = newOrder.indexOf(overId)
-    if (overIdx < 0) return
-    if (pos === 'after') overIdx += 1
-    newOrder.splice(overIdx, 0, draggedId)
-    setWoOrder(newOrder)
-    // Re-run preview with the explicit new order so we don't depend on
-    // React having flushed woOrder before the call.
-    const newSelectedOrdered = newOrder.filter(id => selectedIds.has(id))
-    runPreview(newSelectedOrdered)
-  }, [woOrder, selectedIds]) // runPreview reads other state via closure
+    const dropOnEmpty = dragDropEmptyRef.current
+
+    // Drop on another block → reorder (unchanged behavior).
+    if (overId && draggedId && overId !== draggedId) {
+      const newOrder = woOrder.filter(id => id !== draggedId)
+      let overIdx = newOrder.indexOf(overId)
+      if (overIdx < 0) return
+      if (pos === 'after') overIdx += 1
+      newOrder.splice(overIdx, 0, draggedId)
+      setWoOrder(newOrder)
+      const newSelectedOrdered = newOrder.filter(id => selectedIds.has(id))
+      runPreview(newSelectedOrdered, pins)
+      return
+    }
+
+    // Drop on empty track space → pin to that time on that day.
+    if (dropOnEmpty && draggedId) {
+      const { day, minuteOfDay } = dropOnEmpty
+      // Build a local-time ISO and append the wizard's timezone offset
+      // implicitly via the engine's p_timezone (America/Chicago). The
+      // engine reads ISO as timestamptz; we send a local wall-clock with
+      // a -06:00 / -05:00 offset that matches Chicago for the date.
+      const dt = new Date(`${day}T00:00:00`)
+      dt.setMinutes(dt.getMinutes() + minuteOfDay)
+      // Round to nearest 5-minute boundary so dispatchers don't get
+      // unusable times like 10:37:23.
+      const rounded = Math.round(dt.getMinutes() / 5) * 5
+      dt.setMinutes(rounded, 0, 0)
+      // Build local-naive ISO (YYYY-MM-DDTHH:MM:SS) — the engine accepts
+      // it as timestamptz in session tz; the wizard always runs at
+      // America/Chicago so values stay consistent.
+      const pad = n => String(n).padStart(2, '0')
+      const iso = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}` +
+                  `T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`
+      const nextPins = { ...pins, [draggedId]: iso }
+      setPins(nextPins)
+      runPreview(orderedSelectedIds, nextPins)
+    }
+  }, [woOrder, selectedIds, pins, orderedSelectedIds])
+
+  const unpin = useCallback((woId) => {
+    setPins(prev => {
+      if (!(woId in prev)) return prev
+      const next = { ...prev }
+      delete next[woId]
+      runPreview(orderedSelectedIds, next)
+      return next
+    })
+  }, [orderedSelectedIds])
 
   // Document-level pointer listeners are mounted only while a drag is in
   // progress. Pointer events handle both mouse and touch automatically.
   useEffect(() => {
     if (!dragWoId) return
     const onMove = (e) => {
-      // Find the WO block under the pointer (if any) and compute before/
-      // after based on which half of its bounding box the pointer is in.
+      // First check if we're over another WO block — that means reorder.
       const target = document.elementFromPoint(e.clientX, e.clientY)
       const block = target && target.closest ? target.closest('[data-wo-id]') : null
-      if (!block) { setDragOverWoId(null); return }
-      const overId = block.dataset.woId
-      if (overId === dragWoId) { setDragOverWoId(null); return }
-      const rect = block.getBoundingClientRect()
-      const mid = rect.left + rect.width / 2
-      setDragOverWoId(overId)
-      setDragOverPos(e.clientX < mid ? 'before' : 'after')
+      if (block) {
+        const overId = block.dataset.woId
+        if (overId === dragWoId) { setDragOverWoId(null); dragDropEmptyRef.current = null; return }
+        const rect = block.getBoundingClientRect()
+        const mid = rect.left + rect.width / 2
+        setDragOverWoId(overId)
+        setDragOverPos(e.clientX < mid ? 'before' : 'after')
+        dragDropEmptyRef.current = null
+        return
+      }
+      // No block under pointer — see if we're over a day track.
+      const track = target && target.closest ? target.closest('[data-gantt-day]') : null
+      if (track) {
+        const rect = track.getBoundingClientRect()
+        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+        const minuteOfDay = DAY_START_MIN + Math.round(pct * DAY_RANGE_MIN)
+        // Reject lunch-window drops and snap-to-nearest-5
+        if (minuteOfDay >= LUNCH_START_MIN && minuteOfDay <= LUNCH_END_MIN) {
+          setDragOverWoId(null); dragDropEmptyRef.current = null; return
+        }
+        dragDropEmptyRef.current = { day: track.dataset.ganttDay, minuteOfDay }
+        setDragOverWoId(null)
+        return
+      }
+      // Pointer is outside the Gantt entirely.
+      setDragOverWoId(null)
+      dragDropEmptyRef.current = null
     }
     const onUp = () => {
-      commitDragReorder()
+      commitDragDrop()
       setDragWoId(null)
       setDragOverWoId(null)
+      dragDropEmptyRef.current = null
     }
     document.addEventListener('pointermove', onMove)
     document.addEventListener('pointerup', onUp)
@@ -333,7 +416,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
       document.removeEventListener('pointerup', onUp)
       document.removeEventListener('pointercancel', onUp)
     }
-  }, [dragWoId, commitDragReorder])
+  }, [dragWoId, commitDragDrop])
 
   const onWoDragStart = useCallback((woId, e) => {
     e.preventDefault()
@@ -675,7 +758,12 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                 marginBottom: 8, fontSize: 11.5, color: C.textMuted,
               }}>
                 <span>
-                  Drag a block to reorder. Drop before/after another WO to change its placement priority — the engine re-runs automatically.
+                  Drag a block onto another to reorder, or drag to an empty time slot to pin to that time. Click the 📌 to unpin.
+                  {pinnedIdsSet.size > 0 && (
+                    <span style={{ color: '#b45309', fontWeight: 600, marginLeft: 8 }}>
+                      {pinnedIdsSet.size} pinned
+                    </span>
+                  )}
                   {previewing && (
                     <span style={{ color: C.emerald, fontWeight: 600, marginLeft: 8 }}>Refreshing…</span>
                   )}
@@ -717,7 +805,8 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                   {placedByDay.map(group => (
                     <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={ganttZoom}
                       dragWoId={dragWoId} dragOverWoId={dragOverWoId} dragOverPos={dragOverPos}
-                      onWoDragStart={onWoDragStart} />
+                      onWoDragStart={onWoDragStart}
+                      pinnedIds={pinnedIdsSet} onUnpin={unpin} />
                   ))}
                 </GanttScroll>
                 <GanttLegend rows={preview.filter(r => r.placed)} />
@@ -899,6 +988,8 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           dragOverWoId={dragOverWoId}
           dragOverPos={dragOverPos}
           onWoDragStart={onWoDragStart}
+          pinnedIds={pinnedIdsSet}
+          onUnpin={unpin}
           onClose={() => setGanttFullscreen(false)}
         />
       )}
@@ -925,6 +1016,7 @@ function SummaryCard({ label, value, color }) {
 function GanttFullscreenView({
   previewSummary, previewByDay, allPlaced, onClose,
   dragWoId, dragOverWoId, dragOverPos, onWoDragStart,
+  pinnedIds, onUnpin,
 }) {
   const [zoom, setZoom] = useState(2)
   useEffect(() => {
@@ -989,7 +1081,8 @@ function GanttFullscreenView({
               {placedByDay.map(group => (
                 <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={zoom}
                   dragWoId={dragWoId} dragOverWoId={dragOverWoId} dragOverPos={dragOverPos}
-                  onWoDragStart={onWoDragStart} />
+                  onWoDragStart={onWoDragStart}
+                  pinnedIds={pinnedIds} onUnpin={onUnpin} />
               ))}
             </GanttScroll>
             <GanttLegend rows={allPlaced} />
@@ -1073,6 +1166,7 @@ function GanttAxis() {
 function GanttDay({
   day, rows, zoom = 1,
   dragWoId = null, dragOverWoId = null, dragOverPos = 'before', onWoDragStart,
+  pinnedIds = null, onUnpin,
 }) {
   const d = new Date(day + 'T00:00:00')
   const weekday = d.toLocaleDateString(undefined, { weekday: 'short' })
@@ -1091,20 +1185,22 @@ function GanttDay({
         <div style={{ fontWeight: 600, color: C.textPrimary, fontSize: 12 }}>{weekday}</div>
         <div style={{ color: C.textMuted, fontSize: 10.5 }}>{date}</div>
       </div>
-      <div style={{ flex: 1, position: 'relative', height: 40, background: '#fafbfd' }}>
+      <div data-gantt-day={day}
+           style={{ flex: 1, position: 'relative', height: 40, background: '#fafbfd' }}>
         {/* Lunch block */}
         <div style={{
           position: 'absolute', top: 0, bottom: 0,
           left:  `${(LUNCH_START_MIN - DAY_START_MIN) / DAY_RANGE_MIN * 100}%`,
           width: `${(LUNCH_END_MIN - LUNCH_START_MIN) / DAY_RANGE_MIN * 100}%`,
           background: 'repeating-linear-gradient(45deg, #e5e7eb 0, #e5e7eb 4px, #f3f4f6 4px, #f3f4f6 8px)',
+          pointerEvents: 'none',
         }} title="Lunch 11:30 – 12:00" />
         {/* Vertical hour gridlines */}
         {[8, 9, 10, 11, 12, 13, 14, 15].map(h => (
           <div key={h} style={{
             position: 'absolute', top: 0, bottom: 0,
             left: `${(h * 60 - DAY_START_MIN) / DAY_RANGE_MIN * 100}%`,
-            width: 1, background: '#e4e9f2',
+            width: 1, background: '#e4e9f2', pointerEvents: 'none',
           }} />
         ))}
         {/* WO blocks */}
@@ -1116,11 +1212,12 @@ function GanttDay({
           const showLabel = durMin >= labelThresholdMin
           const isBeingDragged = dragWoId === r.work_order_id
           const isDropTarget = dragOverWoId === r.work_order_id
+          const isPinned = pinnedIds && pinnedIds.has(r.work_order_id)
           return (
             <div key={r.work_order_id}
               data-wo-id={r.work_order_id}
               onPointerDown={onWoDragStart ? (e) => onWoDragStart(r.work_order_id, e) : undefined}
-              title={`${r.work_order_record_number} — ${r.work_type_name}\n${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}\n${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)} (${durMin} min)\n\nDrag to reorder placement sequence.`}
+              title={`${r.work_order_record_number} — ${r.work_type_name}\n${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}\n${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)} (${durMin} min)${isPinned ? '\n📌 Pinned to this time' : ''}\n\nDrag onto another block to reorder. Drag to empty time to pin.`}
               style={{
                 position: 'absolute', top: 5, bottom: 5,
                 left:  `${leftPct}%`,
@@ -1128,7 +1225,9 @@ function GanttDay({
                 background: unitColor(r.unit_name),
                 border: isDropTarget
                   ? '2px solid #15803d'
-                  : '1px solid rgba(15, 23, 42, 0.25)',
+                  : isPinned
+                    ? '2px solid #b45309'
+                    : '1px solid rgba(15, 23, 42, 0.25)',
                 borderRadius: 3,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: '#1e293b', fontSize: 9.5, fontWeight: 600,
@@ -1137,7 +1236,9 @@ function GanttDay({
                 padding: showLabel ? '0 4px' : 0,
                 opacity: isBeingDragged ? 0.35 : 1,
                 touchAction: 'none', userSelect: 'none',
-                boxShadow: isDropTarget ? '0 0 0 2px rgba(21, 128, 61, 0.25)' : 'none',
+                boxShadow: isDropTarget
+                  ? '0 0 0 2px rgba(21, 128, 61, 0.25)'
+                  : isPinned ? '0 0 0 1px rgba(180, 83, 9, 0.25)' : 'none',
                 zIndex: isBeingDragged ? 3 : 1,
               }}>
               {/* Insertion bar — left edge for 'before', right edge for 'after' */}
@@ -1150,6 +1251,22 @@ function GanttDay({
                   borderRadius: 2,
                   pointerEvents: 'none',
                 }} />
+              )}
+              {/* Pin indicator + unpin click target */}
+              {isPinned && (
+                <span
+                  onPointerDown={(e) => { e.stopPropagation() }}
+                  onClick={(e) => { e.stopPropagation(); onUnpin && onUnpin(r.work_order_id) }}
+                  title="Pinned — click to unpin"
+                  style={{
+                    position: 'absolute', top: -6, right: -6,
+                    width: 14, height: 14, borderRadius: 7,
+                    background: '#b45309', color: 'white',
+                    fontSize: 9, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', border: '1px solid white',
+                    zIndex: 4,
+                  }}>📌</span>
               )}
               {showLabel && r.work_order_record_number}
             </div>

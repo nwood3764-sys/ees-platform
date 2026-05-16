@@ -126,6 +126,7 @@ export async function bulkScheduleWorkOrders({
   interWoBufferMinutes,
   timezone,
   commit = false,
+  pinnedPlacements = [],  // [{ work_order_id, start_ts }, ...]
 }) {
   if (!projectId)            throw new Error('projectId is required')
   if (!Array.isArray(workOrderIds) || workOrderIds.length === 0)
@@ -148,6 +149,9 @@ export async function bulkScheduleWorkOrders({
   if (lunchEnd)                    params.p_lunch_end = lunchEnd
   if (interWoBufferMinutes != null) params.p_inter_wo_buffer_minutes = interWoBufferMinutes
   if (timezone)                    params.p_timezone = timezone
+  if (Array.isArray(pinnedPlacements) && pinnedPlacements.length > 0) {
+    params.p_pinned_placements = pinnedPlacements
+  }
 
   const { data, error } = await supabase.rpc('bulk_schedule_work_orders', params)
   if (error) throw error
@@ -182,6 +186,10 @@ export function describePlacementError(code) {
       return 'Not enough open time in this date range — extend the window or reduce the WO selection.'
     case 'duration_not_set':
       return 'No duration set on this work type or work order — set one before scheduling.'
+    case 'pin_outside_working_hours':
+      return 'Pinned start time is outside the working window (7:00–11:30, 12:00–3:30 weekdays) — unpin and try a valid time.'
+    case 'pin_overlaps_existing':
+      return 'Pinned time overlaps another pinned work order — unpin one of them.'
     default:
       return code || ''
   }
