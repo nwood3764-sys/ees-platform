@@ -82,6 +82,12 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   // 11:30–12:00 for lunch and skips weekends regardless.
   const [dailyStartTime, setDailyStartTime] = useState('07:00')
   const [dailyEndTime,   setDailyEndTime]   = useState('18:00')
+  // Travel buffer used between WOs that span two different properties.
+  // The engine first checks the property_distances matrix for a stored
+  // drive time; falls back to this value if the matrix has no row for
+  // (origin → destination). Same-property cross-unit transitions still
+  // use the work_type's post buffer.
+  const [interPropertyBufferMinutes, setInterPropertyBufferMinutes] = useState(15)
 
   // Step 3 data (preview + commit)
   const [previewing, setPreviewing] = useState(false)
@@ -123,16 +129,20 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     let cancelled = false
     async function load() {
       try {
-        const [wos, leads] = await Promise.all([
-          fetchUnscheduledWorkOrdersForProject(projectId),
-          fetchTeamLeads(),
-        ])
+        const wos = await fetchUnscheduledWorkOrdersForProject(projectId)
         if (cancelled) return
         setWorkOrders(wos)
         setWoOrder(wos.map(w => w.id))
-        setSelectedIds(new Set(wos.filter(w => w.duration_minutes != null && w.duration_minutes > 0).map(w => w.id)))
+        const defaultSelected = wos.filter(w => w.duration_minutes != null && w.duration_minutes > 0).map(w => w.id)
+        setSelectedIds(new Set(defaultSelected))
+        // Fetch leads with qualification for the default selection so the
+        // dropdown can disable unqualified leads from the start. Falls back
+        // to "all qualified" when the selection is empty.
+        const leads = await fetchTeamLeads({ workOrderIds: defaultSelected, startDate: startDate })
+        if (cancelled) return
         setTeamLeads(leads)
-        if (leads.length === 1) setTeamLeadId(leads[0].id)
+        const onlyQualified = leads.filter(l => l.qualified)
+        if (onlyQualified.length === 1) setTeamLeadId(onlyQualified[0].id)
       } catch (e) {
         if (!cancelled) setError(e.message || 'Failed to load')
       } finally {
@@ -142,6 +152,34 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     load()
     return () => { cancelled = true }
   }, [projectId])
+
+  // Re-query qualified leads when the WO selection or start date changes.
+  // Debounced via a short timer so rapid clicks don't thrash the RPC.
+  // Skips the first run (initial load already handled it).
+  const skipNextLeadFetchRef = useRef(true)
+  useEffect(() => {
+    if (skipNextLeadFetchRef.current) {
+      skipNextLeadFetchRef.current = false
+      return
+    }
+    const handle = setTimeout(async () => {
+      try {
+        const ids = Array.from(selectedIds)
+        const leads = await fetchTeamLeads({ workOrderIds: ids, startDate })
+        setTeamLeads(leads)
+        // If the currently-chosen lead lost qualification (e.g. user added
+        // a WO requiring a cert they lack), clear the selection.
+        if (teamLeadId) {
+          const stillOk = leads.find(l => l.id === teamLeadId)
+          if (stillOk && !stillOk.qualified) setTeamLeadId('')
+        }
+      } catch {
+        // Non-fatal — keep the old list; commit will surface any error.
+      }
+    }, 200)
+    return () => clearTimeout(handle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds, startDate])
 
   // ── Derived ──────────────────────────────────────────────────────────────
   // workOrders in the user-controlled placement order. The RPC is order-
@@ -314,6 +352,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         teamLeadContactId: teamLeadId,
         startDate, endDate,
         dailyStartTime, dailyEndTime,
+        interPropertyBufferMinutes,
         pinnedPlacements: pinsToArray(pinsForCall),
         commit: false,
       })
@@ -335,6 +374,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         teamLeadContactId: teamLeadId,
         startDate, endDate,
         dailyStartTime, dailyEndTime,
+        interPropertyBufferMinutes,
         pinnedPlacements: pinsToArray(pins),
         commit: true,
       })
@@ -780,6 +820,8 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
   function renderStep2() {
     const step2Err = validateStep2()
+    const qualifiedLeads = teamLeads.filter(l => l.qualified)
+    const unqualifiedLeads = teamLeads.filter(l => !l.qualified)
     return (
       <>
         <StepIndicator />
@@ -787,15 +829,29 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           <label style={labelStyle}>Team Lead</label>
           <select value={teamLeadId} onChange={e => setTeamLeadId(e.target.value)} style={inputStyle}>
             <option value="">— Pick a Team Lead —</option>
-            {teamLeads.map(l => (
-              <option key={l.id} value={l.id}>
-                {l.full_name}{l.crew_label ? ` — ${l.crew_label}` : ''}
-              </option>
-            ))}
+            {qualifiedLeads.length > 0 && (
+              <optgroup label="Qualified for selected work">
+                {qualifiedLeads.map(l => (
+                  <option key={l.id} value={l.id}>
+                    {l.full_name}{l.crew_label ? ` — ${l.crew_label}` : ''}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {unqualifiedLeads.length > 0 && (
+              <optgroup label="Missing required certifications">
+                {unqualifiedLeads.map(l => (
+                  <option key={l.id} value={l.id} disabled
+                    title={`Missing: ${l.missing_certs}`}>
+                    {l.full_name}{l.crew_label ? ` — ${l.crew_label}` : ''} — missing {l.missing_certs}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <div style={hintStyle}>
-            All selected work orders will be assigned to this Team Lead. Add additional crew members
-            on each Service Appointment after scheduling.
+            Leads are filtered by certification coverage for the work types in your selection.
+            Hover an unavailable lead to see what's missing — manage certs from the contact's record.
           </div>
         </div>
 
@@ -810,22 +866,31 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 18 }}>
           <div>
-            <label style={labelStyle}>Daily start time</label>
+            <label style={labelStyle}>Daily start</label>
             <input type="time" value={dailyStartTime} onChange={e => setDailyStartTime(e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={labelStyle}>Daily end time</label>
+            <label style={labelStyle}>Daily end</label>
             <input type="time" value={dailyEndTime} onChange={e => setDailyEndTime(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Travel buffer (min)</label>
+            <input type="number" min={0} max={120} step={5}
+                   value={interPropertyBufferMinutes}
+                   onChange={e => setInterPropertyBufferMinutes(Math.max(0, Number(e.target.value) || 0))}
+                   style={inputStyle} />
           </div>
         </div>
 
         <div style={{ background: C.page, borderRadius: 6, padding: '10px 12px', fontSize: 12, color: C.textSecondary, lineHeight: 1.55 }}>
           <strong style={{ color: C.textPrimary }}>Working hours:</strong> {dailyStartTime} – {dailyEndTime},
           lunch 11:30 – 12:00. Buffer between work orders is set per work type (default 5 min).
-          Work orders in the same unit pack back-to-back with no buffer. Weekends are skipped.
-          Existing appointments and absences for the selected Team Lead are honored.
+          Cross-property transitions add {interPropertyBufferMinutes} min unless a property-to-property
+          drive time is set in the distance matrix.
+          Work orders in the same unit pack back-to-back with no buffer.
+          Weekends are skipped. Existing appointments and absences for the selected Team Lead are honored.
         </div>
 
         {step2Err && (

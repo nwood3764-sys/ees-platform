@@ -113,25 +113,28 @@ export async function fetchUnscheduledWorkOrdersForProject(projectId) {
   })
 }
 
-export async function fetchTeamLeads() {
-  const { data, error } = await supabase
-    .from('contacts')
-    .select('id, contact_first_name, contact_last_name, contact_title')
-    .eq('contact_is_deleted', false)
-    .ilike('contact_title', '%team lead%')
-    .order('contact_first_name', { ascending: true })
-
-  if (error) throw error
-  return (data || []).map(c => {
-    const full = `${c.contact_first_name || ''} ${c.contact_last_name || ''}`.trim()
-    const m = (c.contact_title || '').match(/Team Lead\s*[—\-]\s*(.+)$/)
-    return {
-      id: c.id,
-      full_name: full,
-      title: c.contact_title || '',
-      crew_label: m ? m[1].trim() : null,
-    }
+// Returns Team Leads with qualification status for a given WO batch.
+// When called with no workOrderIds (initial load), returns all leads as
+// qualified=true. When called with a WO list, qualification reflects
+// which leads hold every cert required by any work_type in the batch.
+export async function fetchTeamLeads({ workOrderIds = null, startDate = null } = {}) {
+  // For the no-WO case, fall back to the simple listing — the RPC will
+  // happily return everyone with qualified=true since required is empty.
+  const wos = Array.isArray(workOrderIds) && workOrderIds.length > 0 ? workOrderIds : []
+  const start = startDate || new Date().toISOString().slice(0, 10)
+  const { data, error } = await supabase.rpc('team_leads_qualified_for_work_orders', {
+    p_work_order_ids: wos,
+    p_start_date: start,
   })
+  if (error) throw error
+  return (data || []).map(r => ({
+    id: r.contact_id,
+    full_name: r.full_name,
+    title: r.contact_title || '',
+    crew_label: r.crew_label,
+    qualified: !!r.qualified,
+    missing_certs: r.missing_certs || null,
+  }))
 }
 
 export async function bulkScheduleWorkOrders({
@@ -145,9 +148,10 @@ export async function bulkScheduleWorkOrders({
   lunchStart,
   lunchEnd,
   interWoBufferMinutes,
+  interPropertyBufferMinutes,
   timezone,
   commit = false,
-  pinnedPlacements = [],  // [{ work_order_id, start_ts }, ...]
+  pinnedPlacements = [],
 }) {
   if (!projectId)            throw new Error('projectId is required')
   if (!Array.isArray(workOrderIds) || workOrderIds.length === 0)
@@ -163,12 +167,12 @@ export async function bulkScheduleWorkOrders({
     p_end_date: endDate,
     p_commit: !!commit,
   }
-  // RPC has defaults for the rest; only pass when explicitly provided
   if (dailyStartTime)              params.p_daily_start_time = dailyStartTime
   if (dailyEndTime)                params.p_daily_end_time = dailyEndTime
   if (lunchStart)                  params.p_lunch_start = lunchStart
   if (lunchEnd)                    params.p_lunch_end = lunchEnd
   if (interWoBufferMinutes != null) params.p_inter_wo_buffer_minutes = interWoBufferMinutes
+  if (interPropertyBufferMinutes != null) params.p_inter_property_buffer_minutes = interPropertyBufferMinutes
   if (timezone)                    params.p_timezone = timezone
   if (Array.isArray(pinnedPlacements) && pinnedPlacements.length > 0) {
     params.p_pinned_placements = pinnedPlacements
