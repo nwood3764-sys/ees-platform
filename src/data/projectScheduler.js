@@ -187,7 +187,7 @@ export function describePlacementError(code) {
     case 'duration_not_set':
       return 'No duration set on this work type or work order — set one before scheduling.'
     case 'pin_outside_working_hours':
-      return 'Pinned start time is outside the working window (7:00–11:30, 12:00–3:30 weekdays) — unpin and try a valid time.'
+      return "Pinned start time is outside the scheduling window for the selected daily hours, or falls during lunch (11:30–12:00) or on a weekend — unpin and try a valid time."
     case 'pin_overlaps_existing':
       return 'Pinned time overlaps another pinned work order — unpin one of them.'
     default:

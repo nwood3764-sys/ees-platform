@@ -360,22 +360,29 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     // Drop on empty track space → pin to that time on that day.
     if (dropOnEmpty && draggedId) {
       const { day, minuteOfDay } = dropOnEmpty
-      // Build a local-time ISO and append the wizard's timezone offset
-      // implicitly via the engine's p_timezone (America/Chicago). The
-      // engine reads ISO as timestamptz; we send a local wall-clock with
-      // a -06:00 / -05:00 offset that matches Chicago for the date.
       const dt = new Date(`${day}T00:00:00`)
       dt.setMinutes(dt.getMinutes() + minuteOfDay)
       // Round to nearest 5-minute boundary so dispatchers don't get
       // unusable times like 10:37:23.
       const rounded = Math.round(dt.getMinutes() / 5) * 5
       dt.setMinutes(rounded, 0, 0)
-      // Build local-naive ISO (YYYY-MM-DDTHH:MM:SS) — the engine accepts
-      // it as timestamptz in session tz; the wizard always runs at
-      // America/Chicago so values stay consistent.
+      // Build the ISO with an explicit Chicago offset. CRITICAL: without
+      // an offset, Postgres parses the string as session-tz (UTC on
+      // Supabase), so a 4:30 PM Chicago drop becomes 4:30 PM UTC =
+      // 11:30 AM Chicago after the engine's AT TIME ZONE conversion,
+      // which falls into the lunch window and gets rejected.
+      // CDT (March–November) = -05:00; CST (November–March) = -06:00.
+      // Detect via the JS Date Intl API for the specific day.
       const pad = n => String(n).padStart(2, '0')
+      // Determine Chicago offset for this date by formatting and parsing
+      const tzDate = new Date(`${day}T12:00:00Z`)
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Chicago', timeZoneName: 'short',
+      }).formatToParts(tzDate)
+      const tzAbbr = parts.find(p => p.type === 'timeZoneName')?.value || 'CDT'
+      const offset = tzAbbr === 'CST' ? '-06:00' : '-05:00'
       const iso = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}` +
-                  `T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`
+                  `T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00${offset}`
       const nextPins = { ...pins, [draggedId]: iso }
       setPins(nextPins)
       runPreview(orderedSelectedIds, nextPins)
