@@ -118,7 +118,7 @@ Replaces the current Jobber-based scheduling flow. Customer self-serve schedulin
 
 ## Completed (chronological, most recent first)
 
-- `(this commit)` Single-WO Schedule modal + Dispatch Console v2 — filter rail, unscheduled palette, drag-to-assign/reassign
+- `9e77625` Single-WO Schedule modal + Dispatch Console v2 — filter rail, unscheduled palette, drag-to-assign/reassign
 - `8c47b67` dispatcher v10 — row-scope calculated field support
 - `542bc82` chore: backfill TASKS.md commit hash for 05f582f
 - `05f582f` dispatcher v9 — cross-filter support
