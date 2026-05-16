@@ -76,6 +76,12 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   const defaultEnd   = useMemo(() => isoDateOnly(addDays(nextMonday(), 4)), [])  // Mon–Fri
   const [startDate, setStartDate] = useState(defaultStart)
   const [endDate,   setEndDate]   = useState(defaultEnd)
+  // Working-hours window for this scheduling run. Defaults match the
+  // typical EES-WI multifamily field day: 7am start, 6pm hard stop.
+  // Dispatcher can shorten or extend per run. The engine still carves
+  // 11:30–12:00 for lunch and skips weekends regardless.
+  const [dailyStartTime, setDailyStartTime] = useState('07:00')
+  const [dailyEndTime,   setDailyEndTime]   = useState('18:00')
 
   // Step 3 data (preview + commit)
   const [previewing, setPreviewing] = useState(false)
@@ -187,6 +193,17 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
   const pinnedIdsSet = useMemo(() => new Set(Object.keys(pins)), [pins])
 
+  // Convert the dispatcher's HH:MM inputs to minute offsets for the Gantt
+  // axis & block math. Falls back to module-level defaults on bad input.
+  const dayStartMin = useMemo(
+    () => timeStrToMin(dailyStartTime) ?? DAY_START_MIN,
+    [dailyStartTime]
+  )
+  const dayEndMin = useMemo(
+    () => timeStrToMin(dailyEndTime) ?? DAY_END_MIN,
+    [dailyEndTime]
+  )
+
   // ── Actions ──────────────────────────────────────────────────────────────
 
   const toggleOne = id => {
@@ -237,6 +254,13 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     if (!teamLeadId) return 'Pick a Team Lead.'
     if (!startDate || !endDate) return 'Start and end dates are required.'
     if (startDate > endDate) return 'End date must be on or after start date.'
+    if (!dailyStartTime || !dailyEndTime) return 'Daily start and end times are required.'
+    const sMin = timeStrToMin(dailyStartTime)
+    const eMin = timeStrToMin(dailyEndTime)
+    if (sMin == null || eMin == null) return 'Daily start and end times must be valid times.'
+    if (sMin >= LUNCH_START_MIN) return 'Daily start must be before 11:30 AM lunch.'
+    if (eMin <= LUNCH_END_MIN) return 'Daily end must be after 12:00 PM lunch.'
+    if (sMin >= eMin) return 'Daily end must be after daily start.'
     return null
   }
 
@@ -266,6 +290,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         workOrderIds: safeOverride || orderedSelectedIds,
         teamLeadContactId: teamLeadId,
         startDate, endDate,
+        dailyStartTime, dailyEndTime,
         pinnedPlacements: pinsToArray(pinsForCall),
         commit: false,
       })
@@ -286,6 +311,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         workOrderIds: orderedSelectedIds,
         teamLeadContactId: teamLeadId,
         startDate, endDate,
+        dailyStartTime, dailyEndTime,
         pinnedPlacements: pinsToArray(pins),
         commit: true,
       })
@@ -389,7 +415,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
       if (track) {
         const rect = track.getBoundingClientRect()
         const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-        const minuteOfDay = DAY_START_MIN + Math.round(pct * DAY_RANGE_MIN)
+        const minuteOfDay = dayStartMin + Math.round(pct * (dayEndMin - dayStartMin))
         // Reject lunch-window drops and snap-to-nearest-5
         if (minuteOfDay >= LUNCH_START_MIN && minuteOfDay <= LUNCH_END_MIN) {
           setDragOverWoId(null); dragDropEmptyRef.current = null; return
@@ -416,7 +442,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
       document.removeEventListener('pointerup', onUp)
       document.removeEventListener('pointercancel', onUp)
     }
-  }, [dragWoId, commitDragDrop])
+  }, [dragWoId, commitDragDrop, dayStartMin, dayEndMin])
 
   const onWoDragStart = useCallback((woId, e) => {
     e.preventDefault()
@@ -687,7 +713,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
           <div>
             <label style={labelStyle}>Start date</label>
             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
@@ -698,8 +724,19 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           </div>
         </div>
 
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
+          <div>
+            <label style={labelStyle}>Daily start time</label>
+            <input type="time" value={dailyStartTime} onChange={e => setDailyStartTime(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Daily end time</label>
+            <input type="time" value={dailyEndTime} onChange={e => setDailyEndTime(e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+
         <div style={{ background: C.page, borderRadius: 6, padding: '10px 12px', fontSize: 12, color: C.textSecondary, lineHeight: 1.55 }}>
-          <strong style={{ color: C.textPrimary }}>Working hours:</strong> 7:00 AM – 3:30 PM,
+          <strong style={{ color: C.textPrimary }}>Working hours:</strong> {dailyStartTime} – {dailyEndTime},
           lunch 11:30 – 12:00. Buffer between work orders is set per work type (default 5 min).
           Work orders in the same unit pack back-to-back with no buffer. Weekends are skipped.
           Existing appointments and absences for the selected Team Lead are honored.
@@ -767,7 +804,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                 <span>
                   Drag a block onto another to reorder, or drag to an empty time slot to pin to that time. Click the 📌 to unpin.
                   {pinnedIdsSet.size > 0 && (
-                    <span style={{ color: '#b45309', fontWeight: 600, marginLeft: 8 }}>
+                    <span style={{ color: '#2563eb', fontWeight: 600, marginLeft: 8 }}>
                       {pinnedIdsSet.size} pinned
                     </span>
                   )}
@@ -808,9 +845,10 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                 {/* Horizontal scroll container — only the inner track scrolls,
                     not the day-label column. */}
                 <GanttScroll trackWidth={trackWidth}>
-                  <GanttAxis />
+                  <GanttAxis dayStartMin={dayStartMin} dayEndMin={dayEndMin} />
                   {placedByDay.map(group => (
                     <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={ganttZoom}
+                      dayStartMin={dayStartMin} dayEndMin={dayEndMin}
                       dragWoId={dragWoId} dragOverWoId={dragOverWoId} dragOverPos={dragOverPos}
                       onWoDragStart={onWoDragStart}
                       pinnedIds={pinnedIdsSet} onUnpin={unpin} />
@@ -997,6 +1035,8 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           onWoDragStart={onWoDragStart}
           pinnedIds={pinnedIdsSet}
           onUnpin={unpin}
+          dayStartMin={dayStartMin}
+          dayEndMin={dayEndMin}
           onClose={() => setGanttFullscreen(false)}
         />
       )}
@@ -1024,6 +1064,7 @@ function GanttFullscreenView({
   previewSummary, previewByDay, allPlaced, onClose,
   dragWoId, dragOverWoId, dragOverPos, onWoDragStart,
   pinnedIds, onUnpin,
+  dayStartMin, dayEndMin,
 }) {
   const [zoom, setZoom] = useState(2)
   useEffect(() => {
@@ -1084,9 +1125,10 @@ function GanttFullscreenView({
         <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
           <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden', background: C.card }}>
             <GanttScroll trackWidth={trackWidth}>
-              <GanttAxis />
+              <GanttAxis dayStartMin={dayStartMin} dayEndMin={dayEndMin} />
               {placedByDay.map(group => (
                 <GanttDay key={group.day} day={group.day} rows={group.rows} zoom={zoom}
+                  dayStartMin={dayStartMin} dayEndMin={dayEndMin}
                   dragWoId={dragWoId} dragOverWoId={dragOverWoId} dragOverPos={dragOverPos}
                   onWoDragStart={onWoDragStart}
                   pinnedIds={pinnedIds} onUnpin={onUnpin} />
@@ -1106,11 +1148,29 @@ function GanttFullscreenView({
 // absolute-positioned colored block; color is hashed by unit_name so the
 // same apartment's WOs visibly group together. Hover for full details.
 
+// Module-level fallback constants; the actual visible window is driven by
+// the wizard's dailyStartTime/dailyEndTime state and passed in as props.
 const DAY_START_MIN = 7 * 60          // 420
 const DAY_END_MIN   = 15 * 60 + 30    // 930
 const DAY_RANGE_MIN = DAY_END_MIN - DAY_START_MIN  // 510
 const LUNCH_START_MIN = 11 * 60 + 30  // 690
 const LUNCH_END_MIN   = 12 * 60       // 720
+
+function timeStrToMin(s) {
+  if (!s || typeof s !== 'string') return null
+  const [h, m] = s.split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null
+  return h * 60 + m
+}
+
+// Build hour-tick array for the axis between two minute offsets (inclusive).
+function hourTicks(startMin, endMin) {
+  const ticks = []
+  const startH = Math.ceil(startMin / 60)
+  const endH   = Math.floor(endMin / 60)
+  for (let h = startH; h <= endH; h++) ticks.push(h)
+  return ticks
+}
 
 function minutesFromIso(iso) {
   if (!iso) return 0
@@ -1144,8 +1204,9 @@ function GanttScroll({ trackWidth, children }) {
   )
 }
 
-function GanttAxis() {
-  const hours = [7, 8, 9, 10, 11, 12, 13, 14, 15]
+function GanttAxis({ dayStartMin = DAY_START_MIN, dayEndMin = DAY_END_MIN }) {
+  const range = dayEndMin - dayStartMin
+  const hours = hourTicks(dayStartMin, dayEndMin)
   const fmt = h => (h > 12 ? `${h - 12}p` : h === 12 ? '12p' : `${h}a`)
   return (
     <div style={{ display: 'flex', fontSize: 10, color: C.textMuted, borderBottom: `1px solid ${C.border}`, background: C.page }}>
@@ -1156,7 +1217,7 @@ function GanttAxis() {
       </div>
       <div style={{ flex: 1, position: 'relative', height: 24 }}>
         {hours.map(h => {
-          const pct = (h * 60 - DAY_START_MIN) / DAY_RANGE_MIN * 100
+          const pct = (h * 60 - dayStartMin) / range * 100
           return (
             <div key={h} style={{
               position: 'absolute', top: 4, left: `${pct}%`,
@@ -1174,7 +1235,9 @@ function GanttDay({
   day, rows, zoom = 1,
   dragWoId = null, dragOverWoId = null, dragOverPos = 'before', onWoDragStart,
   pinnedIds = null, onUnpin,
+  dayStartMin = DAY_START_MIN, dayEndMin = DAY_END_MIN,
 }) {
+  const dayRange = dayEndMin - dayStartMin
   const d = new Date(day + 'T00:00:00')
   const weekday = d.toLocaleDateString(undefined, { weekday: 'short' })
   const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -1185,6 +1248,7 @@ function GanttDay({
   // Min absolute block width so 2-min direct-installs are at least clickable
   // at low zoom levels.
   const minBlockPx = zoom >= 4 ? 18 : zoom >= 2 ? 10 : 6
+  const hourLines = hourTicks(dayStartMin, dayEndMin).filter(h => h * 60 > dayStartMin && h * 60 < dayEndMin)
   return (
     <div style={{ display: 'flex', borderTop: `1px solid ${C.border}`, fontSize: 11 }}>
       <div style={{ width: GANTT_LABEL_WIDTH, padding: '10px 10px', borderRight: `1px solid ${C.border}`,
@@ -1197,25 +1261,25 @@ function GanttDay({
         {/* Lunch block */}
         <div style={{
           position: 'absolute', top: 0, bottom: 0,
-          left:  `${(LUNCH_START_MIN - DAY_START_MIN) / DAY_RANGE_MIN * 100}%`,
-          width: `${(LUNCH_END_MIN - LUNCH_START_MIN) / DAY_RANGE_MIN * 100}%`,
+          left:  `${(LUNCH_START_MIN - dayStartMin) / dayRange * 100}%`,
+          width: `${(LUNCH_END_MIN - LUNCH_START_MIN) / dayRange * 100}%`,
           background: 'repeating-linear-gradient(45deg, #e5e7eb 0, #e5e7eb 4px, #f3f4f6 4px, #f3f4f6 8px)',
           pointerEvents: 'none',
         }} title="Lunch 11:30 – 12:00" />
         {/* Vertical hour gridlines */}
-        {[8, 9, 10, 11, 12, 13, 14, 15].map(h => (
+        {hourLines.map(h => (
           <div key={h} style={{
             position: 'absolute', top: 0, bottom: 0,
-            left: `${(h * 60 - DAY_START_MIN) / DAY_RANGE_MIN * 100}%`,
+            left: `${(h * 60 - dayStartMin) / dayRange * 100}%`,
             width: 1, background: '#e4e9f2', pointerEvents: 'none',
           }} />
         ))}
         {/* WO blocks */}
         {rows.map(r => {
-          const startMin = minutesFromIso(r.scheduled_start_iso) - DAY_START_MIN
+          const startMin = minutesFromIso(r.scheduled_start_iso) - dayStartMin
           const durMin = Number(r.duration_minutes) || 0
-          const leftPct  = startMin / DAY_RANGE_MIN * 100
-          const widthPct = durMin / DAY_RANGE_MIN * 100
+          const leftPct  = startMin / dayRange * 100
+          const widthPct = durMin / dayRange * 100
           const showLabel = durMin >= labelThresholdMin
           const isBeingDragged = dragWoId === r.work_order_id
           const isDropTarget = dragOverWoId === r.work_order_id
@@ -1235,7 +1299,7 @@ function GanttDay({
                 border: isDropTarget
                   ? '2px solid #15803d'
                   : isPinned
-                    ? '2px solid #b45309'
+                    ? '2px solid #2563eb'
                     : '1px solid rgba(15, 23, 42, 0.25)',
                 borderRadius: 3,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1247,7 +1311,7 @@ function GanttDay({
                 touchAction: 'none', userSelect: 'none',
                 boxShadow: isDropTarget
                   ? '0 0 0 2px rgba(21, 128, 61, 0.25)'
-                  : isPinned ? '0 0 0 1px rgba(180, 83, 9, 0.25)' : 'none',
+                  : isPinned ? '0 0 0 1px rgba(37, 99, 235, 0.25)' : 'none',
                 zIndex: isBeingDragged ? 3 : 1,
               }}>
               {/* Insertion bar — left edge for 'before', right edge for 'after' */}
@@ -1270,7 +1334,7 @@ function GanttDay({
                   style={{
                     position: 'absolute', top: -6, right: -6,
                     width: 14, height: 14, borderRadius: 7,
-                    background: '#b45309', color: 'white',
+                    background: '#2563eb', color: 'white',
                     fontSize: 9, fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: 'pointer', border: '1px solid white',
