@@ -446,12 +446,13 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
   const onWoDragStart = useCallback((woId, e) => {
     e.preventDefault()
-    // Capture the pointer to the source element so subsequent moves are
-    // delivered even when React re-renders the block mid-drag. Without
-    // this, the first state change can break the pointer event stream
-    // and the drag visually "disappears."
-    if (e.target && e.target.setPointerCapture) {
-      try { e.target.setPointerCapture(e.pointerId) } catch { /* noop */ }
+    e.stopPropagation()
+    // Capture the pointer to the block itself (currentTarget) — NOT the
+    // pointer's hit-test target which may be a child text/span node.
+    // Capturing on the block keeps the pointermove/up stream tied to it
+    // through React re-renders that follow setDragWoId.
+    if (e.currentTarget && e.currentTarget.setPointerCapture) {
+      try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* noop */ }
     }
     setDragWoId(woId)
   }, [])
@@ -1289,6 +1290,7 @@ function GanttDay({
               data-wo-id={r.work_order_id}
               draggable={false}
               onDragStart={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
               onPointerDown={onWoDragStart ? (e) => onWoDragStart(r.work_order_id, e) : undefined}
               title={`${r.work_order_record_number} — ${r.work_type_name}\n${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}\n${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)} (${durMin} min)${isPinned ? '\n📌 Pinned to this time' : ''}\n\nDrag onto another block to reorder. Drag to empty time to pin.`}
               style={{
@@ -1309,6 +1311,15 @@ function GanttDay({
                 padding: showLabel ? '0 4px' : 0,
                 opacity: isBeingDragged ? 0.35 : 1,
                 touchAction: 'none', userSelect: 'none',
+                // Chrome / Safari respect -webkit-user-drag separately from the
+                // HTML draggable attribute. Without 'none' here, the browser
+                // can still initiate a native drag operation on mousedown,
+                // which fires the 'no-drop' red X cursor and prevents our
+                // pointer event stream from firing. Setting it explicitly
+                // disables native drag-image generation at the CSS layer.
+                WebkitUserDrag: 'none',
+                KhtmlUserDrag: 'none',
+                MozUserSelect: 'none',
                 boxShadow: isDropTarget
                   ? '0 0 0 2px rgba(21, 128, 61, 0.25)'
                   : isPinned ? '0 0 0 1px rgba(37, 99, 235, 0.25)' : 'none',
@@ -1325,17 +1336,19 @@ function GanttDay({
                   pointerEvents: 'none',
                 }} />
               )}
-              {/* Pin indicator + unpin click target */}
+              {/* Pin indicator + unpin click target. Sits inside the
+                  block (positive top/right) so it doesn't intercept
+                  drags that start near the top-right corner. */}
               {isPinned && (
                 <span
                   onPointerDown={(e) => { e.stopPropagation() }}
                   onClick={(e) => { e.stopPropagation(); onUnpin && onUnpin(r.work_order_id) }}
                   title="Pinned — click to unpin"
                   style={{
-                    position: 'absolute', top: -6, right: -6,
-                    width: 14, height: 14, borderRadius: 7,
+                    position: 'absolute', top: 1, right: 1,
+                    width: 12, height: 12, borderRadius: 6,
                     background: '#2563eb', color: 'white',
-                    fontSize: 9, fontWeight: 700,
+                    fontSize: 8, fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: 'pointer', border: '1px solid white',
                     zIndex: 4,
