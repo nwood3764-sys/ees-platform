@@ -420,6 +420,13 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
   const onWoDragStart = useCallback((woId, e) => {
     e.preventDefault()
+    // Capture the pointer to the source element so subsequent moves are
+    // delivered even when React re-renders the block mid-drag. Without
+    // this, the first state change can break the pointer event stream
+    // and the drag visually "disappears."
+    if (e.target && e.target.setPointerCapture) {
+      try { e.target.setPointerCapture(e.pointerId) } catch { /* noop */ }
+    }
     setDragWoId(woId)
   }, [])
 
@@ -1216,6 +1223,8 @@ function GanttDay({
           return (
             <div key={r.work_order_id}
               data-wo-id={r.work_order_id}
+              draggable={false}
+              onDragStart={(e) => e.preventDefault()}
               onPointerDown={onWoDragStart ? (e) => onWoDragStart(r.work_order_id, e) : undefined}
               title={`${r.work_order_record_number} — ${r.work_type_name}\n${r.building_name}${r.unit_name ? ' / ' + r.unit_name : ''}\n${timeKey(r.scheduled_start_iso)} – ${timeKey(r.scheduled_end_iso)} (${durMin} min)${isPinned ? '\n📌 Pinned to this time' : ''}\n\nDrag onto another block to reorder. Drag to empty time to pin.`}
               style={{
