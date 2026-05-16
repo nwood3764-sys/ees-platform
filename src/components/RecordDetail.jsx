@@ -4,6 +4,7 @@ import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
 import ProjectReportModal from './ProjectReportModal'
 import ProjectSchedulerWizard from './scheduler/ProjectSchedulerWizard'
+import ServiceAppointmentRescheduleModal from './scheduler/ServiceAppointmentRescheduleModal'
 import SendForSignatureModal from './SendForSignatureModal'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
@@ -3492,6 +3493,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // After a successful commit, the tick is bumped so the related-records area
   // (Work Orders, Service Appointments widgets) re-fetches.
   const [showSchedulerWizard, setShowSchedulerWizard] = useState(false)
+  const [showRescheduleWizard, setShowRescheduleWizard] = useState(false)
+  const [showSaReschedule, setShowSaReschedule] = useState(false)
   // Send-for-signature modal: shown on any record whose table has at least one
   // Active document template (document_templates.related_object = tableName).
   // The DocuSign / Conga model — gating is data-driven, not hardcoded. The
@@ -4418,6 +4421,37 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" size={18} color="currentColor" />
                   </button>
                 )}
+                {tableName === 'projects' && (
+                  <button
+                    onClick={() => setShowRescheduleWizard(true)}
+                    aria-label="Reschedule Work Orders"
+                    title="Bulk-reschedule already-scheduled work orders on this project"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: 'pointer', color: '#2563eb',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44,
+                    }}
+                  >
+                    {/* lucide: calendar-clock — calendar with a small clock to read as 'change scheduled time' */}
+                    <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={18} color="currentColor" />
+                  </button>
+                )}
+                {tableName === 'service_appointments' && (
+                  <button
+                    onClick={() => setShowSaReschedule(true)}
+                    aria-label="Reschedule Appointment"
+                    title="Reschedule this appointment"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: 'pointer', color: '#2563eb',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44,
+                    }}
+                  >
+                    <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={18} color="currentColor" />
+                  </button>
+                )}
                 {hasActiveTemplate && (
                   <button
                     onClick={() => setShowSendSignatureModal(true)}
@@ -4641,6 +4675,30 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   >
                     <Icon path="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" size={13} color={C.emerald} />
                     Schedule Work Orders
+                  </button>
+                )}
+                {tableName === 'projects' && (
+                  <button
+                    onClick={() => setShowRescheduleWizard(true)}
+                    title="Bulk-reschedule already-scheduled work orders on this project"
+                    style={{ background: C.page, color: '#2563eb', border: `1px solid #bfdbfe`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#eff6ff' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={13} color="#2563eb" />
+                    Reschedule Work Orders
+                  </button>
+                )}
+                {tableName === 'service_appointments' && (
+                  <button
+                    onClick={() => setShowSaReschedule(true)}
+                    title="Reschedule this appointment"
+                    style={{ background: C.page, color: '#2563eb', border: `1px solid #bfdbfe`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#eff6ff' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={13} color="#2563eb" />
+                    Reschedule
                   </button>
                 )}
                 {hasActiveTemplate && (
@@ -5169,6 +5227,26 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           project={record}
           onClose={() => setShowSchedulerWizard(false)}
           onCommitted={() => { setReloadTick(t => t + 1) }}
+        />
+      )}
+
+      {/* Project Reschedule wizard — same component, reschedule mode */}
+      {showRescheduleWizard && tableName === 'projects' && (
+        <ProjectSchedulerWizard
+          mode="reschedule"
+          projectId={recordId}
+          project={record}
+          onClose={() => setShowRescheduleWizard(false)}
+          onCommitted={() => { setReloadTick(t => t + 1) }}
+        />
+      )}
+
+      {/* Single-SA reschedule modal — opt-in via toolbar button on SA records */}
+      {showSaReschedule && tableName === 'service_appointments' && (
+        <ServiceAppointmentRescheduleModal
+          serviceAppointmentId={recordId}
+          onClose={() => setShowSaReschedule(false)}
+          onRescheduled={() => { setReloadTick(t => t + 1) }}
         />
       )}
 

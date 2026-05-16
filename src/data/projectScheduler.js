@@ -152,6 +152,7 @@ export async function bulkScheduleWorkOrders({
   timezone,
   commit = false,
   pinnedPlacements = [],
+  mode = 'schedule',  // 'schedule' (default) or 'reschedule'
 }) {
   if (!projectId)            throw new Error('projectId is required')
   if (!Array.isArray(workOrderIds) || workOrderIds.length === 0)
@@ -178,9 +179,146 @@ export async function bulkScheduleWorkOrders({
     params.p_pinned_placements = pinnedPlacements
   }
 
-  const { data, error } = await supabase.rpc('bulk_schedule_work_orders', params)
+  const rpcName = mode === 'reschedule' ? 'bulk_reschedule_work_orders' : 'bulk_schedule_work_orders'
+  const { data, error } = await supabase.rpc(rpcName, params)
   if (error) throw error
   return data || []
+}
+
+// Returns the work orders for a project that are already in an active
+// 'scheduled' Service Appointment. Used by the wizard in reschedule mode
+// to pre-populate the WO list, Team Lead picker, and start date from the
+// existing schedule.
+//
+// Shape mirrors fetchUnscheduledWorkOrdersForProject so the wizard can
+// treat both modes the same way after a small merge step.
+export async function fetchScheduledWorkOrdersForProject(projectId) {
+  if (!projectId) throw new Error('projectId is required')
+
+  // 1) Get the WO ids currently scheduled, plus their SA + lead context
+  const { data: rpcRows, error: rpcErr } = await supabase
+    .rpc('project_scheduled_work_orders', { p_project_id: projectId })
+  if (rpcErr) throw rpcErr
+  const woIds = (rpcRows || []).map(r => r.work_order_id)
+  if (woIds.length === 0) return { workOrders: [], leadHint: null, startDateHint: null }
+
+  // 2) Pull the same display fields the schedule-mode loader uses
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select(`
+      id,
+      work_order_record_number,
+      work_order_name,
+      work_order_duration_minutes,
+      work_type_id,
+      building_id,
+      unit_id,
+      work_types:work_type_id (
+        work_type_name,
+        work_type_duration_minutes
+      ),
+      buildings:building_id (
+        building_name,
+        building_address,
+        properties:property_id (
+          property_name,
+          property_street,
+          property_city,
+          property_state,
+          property_zip
+        )
+      ),
+      units:unit_id ( unit_name )
+    `)
+    .in('id', woIds)
+    .eq('work_order_is_deleted', false)
+  if (error) throw error
+
+  const byId = new Map((data || []).map(r => [r.id, r]))
+  const workOrders = (rpcRows || []).map(row => {
+    const r = byId.get(row.work_order_id)
+    if (!r) return null
+    const effectiveDuration =
+      (r.work_order_duration_minutes != null ? Number(r.work_order_duration_minutes) : null) ??
+      (r.work_types?.work_type_duration_minutes != null
+        ? Number(r.work_types.work_type_duration_minutes) : null)
+    const prop = r.buildings?.properties
+    const addressParts = [
+      r.buildings?.building_address,
+      prop?.property_street,
+      prop?.property_city && prop?.property_state
+        ? `${prop.property_city}, ${prop.property_state}${prop.property_zip ? ' ' + prop.property_zip : ''}`
+        : null,
+    ].filter(Boolean)
+    return {
+      id: r.id,
+      record_number: r.work_order_record_number,
+      name: r.work_order_name,
+      work_type_id: r.work_type_id,
+      work_type_name: r.work_types?.work_type_name || '(unknown work type)',
+      building_id: r.building_id,
+      building_name: r.buildings?.building_name || '',
+      unit_id: r.unit_id,
+      unit_name: r.units?.unit_name || '',
+      property_name: prop?.property_name || '',
+      address: addressParts.join('\n'),
+      duration_minutes: effectiveDuration,
+      duration_source: r.work_order_duration_minutes != null
+        ? 'work_order_override'
+        : (r.work_types?.work_type_duration_minutes != null ? 'work_type_default' : null),
+      // Reschedule-specific extras — current SA snapshot
+      current_sa_id: row.service_appointment_id,
+      current_start_iso: row.sa_scheduled_start_time,
+      current_end_iso:   row.sa_scheduled_end_time,
+      current_lead_id:   row.team_lead_contact_id,
+    }
+  }).filter(Boolean)
+
+  // Pick the most common lead + earliest start date as the wizard hints
+  const leadCounts = new Map()
+  let earliestDate = null
+  for (const w of workOrders) {
+    if (w.current_lead_id) {
+      leadCounts.set(w.current_lead_id, (leadCounts.get(w.current_lead_id) || 0) + 1)
+    }
+    if (w.current_start_iso) {
+      const d = new Date(w.current_start_iso)
+      if (!earliestDate || d < earliestDate) earliestDate = d
+    }
+  }
+  let leadHint = null
+  let topCount = 0
+  for (const [id, n] of leadCounts.entries()) {
+    if (n > topCount) { topCount = n; leadHint = id }
+  }
+  const startDateHint = earliestDate
+    ? earliestDate.toLocaleDateString('en-CA') // YYYY-MM-DD in local tz
+    : null
+
+  return { workOrders, leadHint, startDateHint }
+}
+
+// Single-SA reschedule — used by the toolbar button on a Service Appointment
+// record. Internally calls the dispatch_reschedule_service_appointment RPC.
+// Returns {status, ...} jsonb from the RPC.
+export async function dispatchRescheduleServiceAppointment({
+  serviceAppointmentId,
+  newStartIso,
+  newEndIso,
+  newTeamLeadContactId,
+}) {
+  if (!serviceAppointmentId) throw new Error('serviceAppointmentId is required')
+  if (!newStartIso || !newEndIso) throw new Error('newStartIso and newEndIso are required')
+  if (!newTeamLeadContactId) throw new Error('newTeamLeadContactId is required')
+
+  const { data, error } = await supabase.rpc('dispatch_reschedule_service_appointment', {
+    p_sa_id: serviceAppointmentId,
+    p_new_start_iso: newStartIso,
+    p_new_end_iso: newEndIso,
+    p_new_team_lead_contact_id: newTeamLeadContactId,
+  })
+  if (error) throw error
+  return data || { status: 'unknown' }
 }
 
 // ── Helpers exported for the wizard UI ──────────────────────────────────────

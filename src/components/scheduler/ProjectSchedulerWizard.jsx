@@ -19,6 +19,7 @@ import { Icon } from '../UI'
 import { useToast } from '../Toast'
 import {
   fetchUnscheduledWorkOrdersForProject,
+  fetchScheduledWorkOrdersForProject,
   fetchTeamLeads,
   bulkScheduleWorkOrders,
   summarizeWorkOrderDurations,
@@ -55,8 +56,9 @@ function prettyDay(iso) {
 
 // ── Main wizard ─────────────────────────────────────────────────────────────
 
-export default function ProjectSchedulerWizard({ projectId, project, onClose, onCommitted }) {
+export default function ProjectSchedulerWizard({ projectId, project, onClose, onCommitted, mode = 'schedule' }) {
   const toast = useToast()
+  const isReschedule = mode === 'reschedule'
 
   const [step, setStep] = useState(1)            // 1=select, 2=window, 3=preview/confirm
   const [loading, setLoading] = useState(true)
@@ -129,20 +131,43 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     let cancelled = false
     async function load() {
       try {
-        const wos = await fetchUnscheduledWorkOrdersForProject(projectId)
+        let wos
+        let leadHint = null
+        let startDateHint = null
+        if (isReschedule) {
+          const res = await fetchScheduledWorkOrdersForProject(projectId)
+          wos = res.workOrders
+          leadHint = res.leadHint
+          startDateHint = res.startDateHint
+        } else {
+          wos = await fetchUnscheduledWorkOrdersForProject(projectId)
+        }
         if (cancelled) return
         setWorkOrders(wos)
         setWoOrder(wos.map(w => w.id))
         const defaultSelected = wos.filter(w => w.duration_minutes != null && w.duration_minutes > 0).map(w => w.id)
         setSelectedIds(new Set(defaultSelected))
+        // In reschedule mode, seed the picker from the existing schedule
+        let effectiveStart = startDate
+        if (isReschedule && startDateHint) {
+          setStartDate(startDateHint)
+          // Default end = start + 4 days (Mon-Fri shape) if not previously edited
+          const start = new Date(startDateHint + 'T00:00:00')
+          setEndDate(isoDateOnly(addDays(start, 4)))
+          effectiveStart = startDateHint
+        }
         // Fetch leads with qualification for the default selection so the
         // dropdown can disable unqualified leads from the start. Falls back
         // to "all qualified" when the selection is empty.
-        const leads = await fetchTeamLeads({ workOrderIds: defaultSelected, startDate: startDate })
+        const leads = await fetchTeamLeads({ workOrderIds: defaultSelected, startDate: effectiveStart })
         if (cancelled) return
         setTeamLeads(leads)
-        const onlyQualified = leads.filter(l => l.qualified)
-        if (onlyQualified.length === 1) setTeamLeadId(onlyQualified[0].id)
+        if (isReschedule && leadHint && leads.find(l => l.id === leadHint && l.qualified)) {
+          setTeamLeadId(leadHint)
+        } else {
+          const onlyQualified = leads.filter(l => l.qualified)
+          if (onlyQualified.length === 1) setTeamLeadId(onlyQualified[0].id)
+        }
       } catch (e) {
         if (!cancelled) setError(e.message || 'Failed to load')
       } finally {
@@ -151,7 +176,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     }
     load()
     return () => { cancelled = true }
-  }, [projectId])
+  }, [projectId, isReschedule])
 
   // Re-query qualified leads when the WO selection or start date changes.
   // Debounced via a short timer so rapid clicks don't thrash the RPC.
@@ -355,6 +380,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         interPropertyBufferMinutes,
         pinnedPlacements: pinsToArray(pinsForCall),
         commit: false,
+        mode,
       })
       setPreview(rows)
       if (step !== 3) setStep(3)
@@ -377,14 +403,16 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         interPropertyBufferMinutes,
         pinnedPlacements: pinsToArray(pins),
         commit: true,
+        mode,
       })
       const placed = rows.filter(r => r.placed).length
       const unplaced = rows.filter(r => !r.placed).length
       onCommitted?.()
+      const verb = isReschedule ? 'Rescheduled' : 'Scheduled'
       if (unplaced > 0) {
-        toast.success(`Scheduled ${placed} work order${placed === 1 ? '' : 's'}. ${unplaced} did not fit — extend the window and run again to place the rest.`)
+        toast.success(`${verb} ${placed} work order${placed === 1 ? '' : 's'}. ${unplaced} did not fit — extend the window and run again to place the rest.`)
       } else {
-        toast.success(`Scheduled ${placed} work order${placed === 1 ? '' : 's'}.`)
+        toast.success(`${verb} ${placed} work order${placed === 1 ? '' : 's'}.`)
       }
       onClose()
     } catch (e) {
@@ -684,11 +712,14 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
               <Icon path="M5 13l4 4L19 7" size={24} color="white" />
             </div>
             <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, marginBottom: 6 }}>
-              Nothing to schedule
+              {isReschedule ? 'Nothing to reschedule' : 'Nothing to schedule'}
             </div>
             <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.55 }}>
-              This project has no work orders in status <strong>To Be Scheduled</strong>.
-              All work orders are either already scheduled or in another status.
+              {isReschedule
+                ? <>This project has no work orders in an active <strong>Scheduled</strong> appointment.
+                  Use the <strong>Schedule Work Orders</strong> button to plan unscheduled work first.</>
+                : <>This project has no work orders in status <strong>To Be Scheduled</strong>.
+                  All work orders are either already scheduled or in another status.</>}
             </div>
           </div>
         </>
@@ -699,13 +730,19 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         <StepIndicator />
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: C.textPrimary, marginBottom: 4 }}>
-            Unscheduled work orders ({workOrders.length})
+            {isReschedule
+              ? `Currently scheduled work orders (${workOrders.length})`
+              : `Unscheduled work orders (${workOrders.length})`}
           </div>
           <div style={hintStyle}>
-            Pick which work orders to schedule and the sequence the crew will work them in.
-            Use the ▲▼ arrows to reorder. The engine walks the list in order, packing same-unit
-            work orders back-to-back. Default order matches what the property loader returns
-            (typically grouped by building/unit).
+            {isReschedule
+              ? <>These work orders already have a scheduled appointment. Pick which to reschedule
+                — committing will cancel the existing appointments and re-place them with the new
+                Team Lead, dates, and order you choose below. Crew assignments are reset.</>
+              : <>Pick which work orders to schedule and the sequence the crew will work them in.
+                Use the ▲▼ arrows to reorder. The engine walks the list in order, packing same-unit
+                work orders back-to-back. Default order matches what the property loader returns
+                (typically grouped by building/unit).</>}
           </div>
         </div>
 
@@ -1108,7 +1145,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
             </div>
             <div>
               <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>
-                Schedule Work Orders
+                {isReschedule ? 'Reschedule Work Orders' : 'Schedule Work Orders'}
               </div>
               <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 1 }}>
                 {project?.project_record_number} • {project?.project_name || 'Untitled Project'}
@@ -1160,12 +1197,14 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                 {secondaryBtn('Cancel', onClose, { disabled: committing })}
                 {primaryBtn(
                   previewSummary && previewSummary.placed > 0
-                    ? `Confirm — schedule ${previewSummary.placed}`
-                    : 'Nothing to schedule',
+                    ? (isReschedule
+                        ? `Confirm — reschedule ${previewSummary.placed}`
+                        : `Confirm — schedule ${previewSummary.placed}`)
+                    : (isReschedule ? 'Nothing to reschedule' : 'Nothing to schedule'),
                   runCommit,
                   {
                     disabled: !previewSummary || previewSummary.placed === 0 || committing,
-                    busy: committing, busyLabel: 'Scheduling…',
+                    busy: committing, busyLabel: isReschedule ? 'Rescheduling…' : 'Scheduling…',
                   }
                 )}
               </div>
