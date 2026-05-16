@@ -139,21 +139,38 @@ export async function fetchResourceAbsencesInRange({ startDate, endDate }) {
 }
 
 // Active Team Leads (the lanes of the board). Same definition as the
-// scheduler wizard uses — title ILIKE '%team lead%'.
+// scheduler wizard uses — title ILIKE '%team lead%'. Returns the
+// service_territory_id and the array of held (unexpired) certification_ids
+// so the filter rail can filter the lane list client-side.
 export async function fetchActiveTeamLeads() {
   const { data, error } = await supabase
     .from('contacts')
-    .select('id, contact_first_name, contact_last_name, contact_title')
+    .select(`
+      id, contact_first_name, contact_last_name, contact_title,
+      contact_service_territory_id,
+      contact_certifications!contact_certifications_contact_id_fkey (
+        certification_id, cc_expires_date, cc_is_deleted
+      )
+    `)
     .eq('contact_is_deleted', false)
     .ilike('contact_title', '%team lead%')
     .order('contact_last_name', { ascending: true })
   if (error) throw error
-  return (data || []).map(c => ({
-    id: c.id,
-    full_name: `${c.contact_first_name || ''} ${c.contact_last_name || ''}`.trim(),
-    title: c.contact_title || '',
-    crew_label: parseCrewLabel(c.contact_title || ''),
-  }))
+  const todayYMD = new Date().toLocaleDateString('en-CA')
+  return (data || []).map(c => {
+    const certs = (Array.isArray(c.contact_certifications) ? c.contact_certifications : [])
+      .filter(cc => !cc.cc_is_deleted)
+      .filter(cc => !cc.cc_expires_date || cc.cc_expires_date >= todayYMD)
+      .map(cc => cc.certification_id)
+    return {
+      id: c.id,
+      full_name: `${c.contact_first_name || ''} ${c.contact_last_name || ''}`.trim(),
+      title: c.contact_title || '',
+      crew_label: parseCrewLabel(c.contact_title || ''),
+      service_territory_id: c.contact_service_territory_id || null,
+      certification_ids: certs,
+    }
+  })
 }
 
 function parseCrewLabel(title) {
@@ -162,4 +179,148 @@ function parseCrewLabel(title) {
   const hy = title.match(/Team Lead\s*-\s*(.+)$/)
   if (hy) return hy[1].trim()
   return null
+}
+
+// ─── Phase 3: dispatch console additions ───────────────────────────────
+//
+// The console adds three filter dimensions (service territory, certifications,
+// crew) and an unscheduled-WO palette that the dispatcher drags onto lanes.
+//
+// fetchServiceTerritories — flat list for the filter rail multi-select.
+// fetchActiveCertifications — flat list for the filter rail multi-select.
+// fetchUnscheduledWorkOrdersForDispatch — every WO in 'To Be Scheduled'
+//   across all projects, joined to building → property → territory, work_type,
+//   and work_type_required_certifications so the palette can filter by
+//   territory + required cert client-side.
+// dispatchAssignWorkOrder — drop-from-palette commit. Wraps
+//   bulk_schedule_work_orders with a one-element WO array and a pinned
+//   placement so the engine path is identical to the bulk wizard.
+//   (dispatchRescheduleServiceAppointment lives in projectScheduler.js
+//   and handles the drag-between-lanes / drag-within-lane cases.)
+
+export async function fetchServiceTerritories() {
+  const { data, error } = await supabase
+    .from('service_territories')
+    .select('id, service_territory_name')
+    .eq('service_territory_is_deleted', false)
+    .eq('service_territory_is_active', true)
+    .order('service_territory_name', { ascending: true })
+  if (error) throw error
+  return (data || []).map(t => ({ id: t.id, name: t.service_territory_name }))
+}
+
+export async function fetchActiveCertifications() {
+  const { data, error } = await supabase
+    .from('certifications')
+    .select('id, certification_name')
+    .eq('certification_is_active', true)
+    .eq('certification_is_deleted', false)
+    .order('certification_name', { ascending: true })
+  if (error) throw error
+  return (data || []).map(c => ({ id: c.id, name: c.certification_name }))
+}
+
+// Returns To-Be-Scheduled WOs with everything the palette needs to render
+// and the filter rail needs to filter:
+//   {
+//     id, record_number, name, duration_minutes,
+//     work_type: { id, name, required_certification_ids: [uuid] },
+//     building: { id, name, property_id, property_name },
+//     unit:     { id, name },
+//     project:  { id, record_number, name },
+//     service_territory_id,  -- from WO, falling back to building's
+//   }
+export async function fetchUnscheduledWorkOrdersForDispatch() {
+  // First resolve the 'To Be Scheduled' picklist id
+  const { data: pv, error: pvErr } = await supabase
+    .from('picklist_values')
+    .select('id')
+    .eq('picklist_object', 'work_orders')
+    .eq('picklist_field', 'work_order_status')
+    .eq('picklist_value', 'To Be Scheduled')
+    .eq('picklist_is_active', true)
+    .maybeSingle()
+  if (pvErr) throw pvErr
+  if (!pv) throw new Error("picklist value 'work_orders.work_order_status'=To Be Scheduled not found")
+
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select(`
+      id, work_order_record_number, work_order_name,
+      work_order_duration_minutes, service_territory_id,
+      work_type_id, building_id, unit_id, project_id,
+      work_types ( id, work_type_name, work_type_duration_minutes,
+        work_type_required_certifications!work_type_required_certifications_work_type_id_fkey (
+          certification_id, wtrc_is_deleted
+        )
+      ),
+      buildings ( id, building_name, service_territory_id,
+        properties ( id, property_name )
+      ),
+      units ( id, unit_name ),
+      projects ( id, project_record_number, project_name )
+    `)
+    .eq('work_order_status', pv.id)
+    .eq('work_order_is_deleted', false)
+    .order('work_order_record_number', { ascending: true })
+  if (error) throw error
+
+  return (data || []).map(r => {
+    const wt = r.work_types || null
+    const requiredCertIds = (Array.isArray(wt?.work_type_required_certifications)
+      ? wt.work_type_required_certifications
+      : [])
+      .filter(rc => !rc.wtrc_is_deleted)
+      .map(rc => rc.certification_id)
+    const effectiveDuration =
+      (r.work_order_duration_minutes != null ? Number(r.work_order_duration_minutes) : null) ??
+      (wt?.work_type_duration_minutes != null ? Number(wt.work_type_duration_minutes) : null)
+    const territoryId =
+      r.service_territory_id || r.buildings?.service_territory_id || null
+    return {
+      id: r.id,
+      record_number: r.work_order_record_number,
+      name: r.work_order_name,
+      duration_minutes: effectiveDuration,
+      work_type: wt ? { id: wt.id, name: wt.work_type_name, required_certification_ids: requiredCertIds } : null,
+      building: r.buildings ? {
+        id: r.buildings.id,
+        name: r.buildings.building_name,
+        property_id: r.buildings.properties?.id || null,
+        property_name: r.buildings.properties?.property_name || null,
+      } : null,
+      unit: r.units ? { id: r.units.id, name: r.units.unit_name } : null,
+      project: r.projects ? { id: r.projects.id, record_number: r.projects.project_record_number, name: r.projects.project_name } : null,
+      service_territory_id: territoryId,
+      project_id: r.project_id,
+    }
+  })
+}
+
+// Drop a palette WO onto a (lane × day) cell at a specific local start time.
+// Reuses bulk_schedule_work_orders via a one-element array + pinned placement —
+// same engine as the wizard and the single-WO modal. Returns the result row
+// from the RPC: {placed, placement_error, service_appointment_id, ...}.
+export async function dispatchAssignWorkOrder({
+  workOrderId,
+  projectId,
+  teamLeadContactId,
+  startISO,           // RFC3339 with explicit offset, e.g. '2026-05-18T09:00:00-05:00'
+  dateYMD,            // 'YYYY-MM-DD' for the start_date/end_date single-day window
+  force = false,
+}) {
+  if (!workOrderId || !projectId || !teamLeadContactId || !startISO || !dateYMD) {
+    throw new Error('workOrderId, projectId, teamLeadContactId, startISO, dateYMD are required')
+  }
+  const { data, error } = await supabase.rpc('bulk_schedule_work_orders', {
+    p_project_id: projectId,
+    p_work_order_ids: [workOrderId],
+    p_team_lead_contact_id: teamLeadContactId,
+    p_start_date: dateYMD,
+    p_end_date: dateYMD,
+    p_commit: true,
+    p_pinned_placements: [{ work_order_id: workOrderId, start_ts: startISO, force }],
+  })
+  if (error) throw error
+  return Array.isArray(data) && data.length > 0 ? data[0] : null
 }

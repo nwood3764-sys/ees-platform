@@ -5,6 +5,7 @@ import { Badge, Icon } from './UI'
 import ProjectReportModal from './ProjectReportModal'
 import ProjectSchedulerWizard from './scheduler/ProjectSchedulerWizard'
 import ServiceAppointmentRescheduleModal from './scheduler/ServiceAppointmentRescheduleModal'
+import WorkOrderScheduleModal from './scheduler/WorkOrderScheduleModal'
 import SendForSignatureModal from './SendForSignatureModal'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
@@ -3495,6 +3496,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showSchedulerWizard, setShowSchedulerWizard] = useState(false)
   const [showRescheduleWizard, setShowRescheduleWizard] = useState(false)
   const [showSaReschedule, setShowSaReschedule] = useState(false)
+  // Single-WO scheduler — opt-in via toolbar button on a Work Order whose
+  // status is 'To Be Scheduled'. Reuses the bulk_schedule_work_orders RPC
+  // with a one-element WO array plus a pinned placement at the chosen
+  // start time, so the engine path is identical to the bulk wizard.
+  const [showWoSchedule, setShowWoSchedule] = useState(false)
   // Send-for-signature modal: shown on any record whose table has at least one
   // Active document template (document_templates.related_object = tableName).
   // The DocuSign / Conga model — gating is data-driven, not hardcoded. The
@@ -4437,6 +4443,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={18} color="currentColor" />
                   </button>
                 )}
+                {tableName === 'work_orders' && statusLabel === 'To Be Scheduled' && (
+                  <button
+                    onClick={() => setShowWoSchedule(true)}
+                    aria-label="Schedule Work Order"
+                    title="Schedule this work order to a Team Lead at a specific start time"
+                    style={{
+                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
+                      cursor: 'pointer', color: C.emerald,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 44, minHeight: 44,
+                    }}
+                  >
+                    {/* lucide: calendar-plus */}
+                    <Icon path="M8 2v4 M16 2v4 M3 10h18 M19 16v6 M22 19h-6 M21 12.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" size={18} color="currentColor" />
+                  </button>
+                )}
                 {tableName === 'service_appointments' && (
                   <button
                     onClick={() => setShowSaReschedule(true)}
@@ -4687,6 +4709,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   >
                     <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={13} color="#2563eb" />
                     Reschedule Work Orders
+                  </button>
+                )}
+                {tableName === 'work_orders' && statusLabel === 'To Be Scheduled' && (
+                  <button
+                    onClick={() => setShowWoSchedule(true)}
+                    title="Schedule this work order to a Team Lead at a specific start time"
+                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#ecfdf5' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
+                  >
+                    <Icon path="M8 2v4 M16 2v4 M3 10h18 M19 16v6 M22 19h-6 M21 12.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" size={13} color={C.emerald} />
+                    Schedule
                   </button>
                 )}
                 {tableName === 'service_appointments' && (
@@ -5247,6 +5281,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           serviceAppointmentId={recordId}
           onClose={() => setShowSaReschedule(false)}
           onRescheduled={() => { setReloadTick(t => t + 1) }}
+        />
+      )}
+
+      {/* Single-WO schedule modal — opt-in via toolbar button on a Work Order
+          whose status is 'To Be Scheduled'. Reuses bulk_schedule_work_orders
+          with a one-element WO array and a pinned placement, so the engine
+          path is identical to the bulk wizard. On success the SA exists and
+          the WO flips to 'Scheduled'; the related-records area refreshes via
+          reloadTick. */}
+      {showWoSchedule && tableName === 'work_orders' && (
+        <WorkOrderScheduleModal
+          workOrderId={recordId}
+          onClose={() => setShowWoSchedule(false)}
+          onScheduled={() => { setReloadTick(t => t + 1) }}
         />
       )}
 
