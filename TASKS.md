@@ -75,7 +75,21 @@ Replaces the current Jobber-based scheduling flow. Customer self-serve schedulin
 
 ## Recently completed (this session — 2026-05-16)
 
-- [x] **Scheduling Platform Phase 4b — `send-notification-email` + `send-notification-sms` edge fns** (this commit, 1 migration) — Paired notification dispatch skeletons. Both deployed, mock-mode end-to-end verified through `notification_logs`.
+- [x] **Scheduling Platform Phase 4c — conversations + messages threading** (this commit, 4 migrations) — Two-table conversation architecture modeled after Twilio Conversations / Salesforce MessagingSession + ConversationEntry. `conversations` is the thread (one row per channel + our_address + customer_address pair, partial unique index enforces one open thread per pair). `messages` is the children — direction-aware, channel-aware, same table for inbound and outbound so the threaded view is a single `ORDER BY` query. Full audit columns, RLS via `app_user_can`, role_object_access seeded for 5 internal roles.
+
+  **Rollup trigger**: `trg_messages_rollup_to_conversation` fires AFTER INSERT on `messages` and updates the thread's `conv_last_message_at`, `_direction`, `_preview` (first 200 chars), `_inbound_unread_count` (incremented on inbound). Related list always shows the latest activity without joining to messages.
+
+  **Helper RPCs**: `normalize_phone_e164` (any format → E.164, default US +1 for 10 digits), `resolve_contact_from_phone` (best-effort lookup against `contact_mobile_phone` and `contact_phone`; returns `{contact_id, account_id, project_id, service_appointment_id}`), `find_or_create_conversation` (idempotent, backfills null FKs on existing threads), `mark_conversation_read` (clears unread counter).
+
+  **`twilio-inbound` webhook** (new): receives customer SMS replies. URL `https://flyjigrijjjtcsvpgzvk.supabase.co/functions/v1/twilio-inbound`. Signature validation via X-Twilio-Signature header when `TWILIO_AUTH_TOKEN` set (HMAC-SHA1 over sorted-param payload). MessageSid idempotency check prevents Twilio retries from double-inserting. Resolves contact context → finds/creates thread → inserts inbound message → rollup trigger updates thread. Returns empty TwiML. Smoke-tested: simulated webhook payload → CONV-00003 created, MSG-00004 inserted, inbound_unread_count=1; duplicate MessageSid → no double-insert.
+
+  **`send-notification-sms` v2**: now dual-writes to both `notification_logs` (legacy low-level provider audit) AND `messages` (canonical thread). New optional fields in the request body: `account_id`, `project_id`. Outbound message gets `msg_status='queued'` → `'sent'` on Twilio 200 or `'failed'` on error. Mock mode still writes both tables with `mock-<uuid>` IDs. Smoke-tested end-to-end: outbound notification + inbound reply landed in same conversation (CONV-00004), ordered chronologically — outbound MSG-00005 with mock id + audit link, inbound MSG-00006 with Twilio SID.
+
+  **Related list surface** (22 page layouts seeded): "Conversations" section + related_list widget added to every page layout on contacts (6), accounts (8), projects (7), service_appointments (1). Widget config filters by the appropriate FK column, sorts by `conv_last_message_at DESC`, displays thread number, channel, customer address, last-message timestamp/direction/preview, unread count, status. Section is collapsible, collapsed by default.
+
+  **Help: HA-00026** `conversations-threading` documents the full schema, trigger logic, helper RPCs, edge fn integration, and what's not yet built (conversation detail page UI, dispatcher inbox aggregating unread, email-side dual-write port). Migrations: `conversations_and_messages_threading`, `messaging_helper_rpcs`, `conversations_related_list_widgets`, `help_conversations_threading`.
+
+- [x] **Scheduling Platform Phase 4b — `send-notification-email` + `send-notification-sms` edge fns** (`fd2242b`, 1 migration) — Paired notification dispatch skeletons. Both deployed, mock-mode end-to-end verified through `notification_logs`.
 
   **`send-notification-email`**: Customer-facing email sender. Distinct from existing `send-email-via-graph` (which is delegated-OAuth, sends as the logged-in user's mailbox). This new fn uses Microsoft Graph **application-permission** Mail.Send to `/users/{mailbox}/sendMail` from a configured shared mailbox (default `assessments.wi@EES-WI.org`; sender resolves via `sender_mailbox` override → `DEFAULT_SENDER_BY_STATE[sender_state]` → `FALLBACK_SENDER`). Token via `client_credentials` flow against `OUTLOOK_CLIENT_ID/SECRET/TENANT_ID` (already set in Edge secrets for the OAuth fn — same Azure AD app, different permission type). Real send activates when those env vars present AND the Azure AD app has Mail.Send granted as application permission with `Add-ApplicationAccessPolicy` scoping it to specific mailboxes. Pre-launch: mock mode returns `mode:"mock"` and `provider_message_id:"mock-<uuid>"` while still writing the `notification_logs` row in `sent` state so the pipeline can be exercised end-to-end. On Graph 202 → real-mode synthetic ID `graph-<notification_log_id>` (Graph sendMail returns no message ID). Endpoint: `POST /functions/v1/send-notification-email`.
 
@@ -142,6 +156,10 @@ Replaces the current Jobber-based scheduling flow. Customer self-serve schedulin
 
 ## Completed (chronological, most recent first)
 
+- `(this commit)` Conversations + messages threading — twilio-inbound webhook + send-notification-sms v2 + related lists on contact/account/project/SA
+- `fd2242b` Scheduling Phase 4b — send-notification-email + send-notification-sms
+- `0e82866` Scheduling Phase 4a — validate-address + compute-route-matrix edge fns
+- `560403c` chore: backfill TASKS.md commit hash for 9e77625
 - `9e77625` Single-WO Schedule modal + Dispatch Console v2 — filter rail, unscheduled palette, drag-to-assign/reassign
 - `8c47b67` dispatcher v10 — row-scope calculated field support
 - `542bc82` chore: backfill TASKS.md commit hash for 05f582f
