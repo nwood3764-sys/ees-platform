@@ -76,7 +76,7 @@ Replaces the current Jobber-based scheduling flow. Customer self-serve schedulin
 
 ## Recently completed (this session — 2026-05-17)
 
-- [x] **Conversation panel widget — Service Cloud Messaging-style split-pane** (this commit, 2 migrations) — Closes the "conversation detail page UI" backlog item from the LEAP Communications spec. Replaces the read-only related-list table on the existing 22 page layouts (contacts/accounts/projects/service_appointments) with an inline chat surface that keeps thread context bound to the parent record — no navigation hop, matches Salesforce Service Cloud Messaging.
+- [x] **Conversation panel widget — Service Cloud Messaging-style split-pane** (`fdfed14`, 2 migrations) — Closes the "conversation detail page UI" backlog item from the LEAP Communications spec. Replaces the read-only related-list table on the existing 22 page layouts (contacts/accounts/projects/service_appointments) with an inline chat surface that keeps thread context bound to the parent record — no navigation hop, matches Salesforce Service Cloud Messaging.
 
   **New widget type `conversation_panel`** registered in `AddWidgetModal` and rendered out of `RecordDetail.jsx` on the Related tab alongside file galleries, PRTSN history, and report widgets. Self-contained: loads its own conversations + messages on mount, owns its own state, never goes through `layoutService.fetchRelatedRecords`. Widget config keeps just `{ table: 'conversations', fk, channel_filter }` — fixed columns and sort, no per-layout customisation surface (yet — see backlog).
 
