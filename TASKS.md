@@ -70,11 +70,12 @@ Replaces the current Jobber-based scheduling flow. Customer self-serve schedulin
 
 ### Long-term cleanup (not urgent)
 - [ ] **`cfp_*` tables permission policies** — two Cap Forecasting Pipeline tables still have `USING (true)` policies (isolated feature, not in main app flow). Replace with role-aware policies when CFP feature is touched again.
-- [ ] **LayoutEditor support for `conversation_panel` widget config** — `AddWidgetModal` now offers Conversation Panel as a widget type, but `LayoutEditor` falls through to `UnknownWidgetTypeModal` on edit because the widget has no dedicated contents editor. The FK column (one of `contact_id` / `account_id` / `project_id` / `service_appointment_id`) and the optional `channel_filter` must be set via SQL or page-layout JSON for now. Build a 2-field editor (FK picker + channel filter dropdown) when admins start adding the panel to additional layouts.
 
 ---
 
 ## Recently completed (this session — 2026-05-17)
+
+- [x] **`LayoutEditor` support for `conversation_panel` widget config** (`4a1fc6d`) — Replaced the `UnknownWidgetTypeModal` placeholder that fired when admins clicked edit on a `conversation_panel` widget. New `src/modules/admin/widgets/WidgetEditorConversationPanel.jsx` mirrors `WidgetEditorRelatedList`: required title input, FK column radio selector (discovered via `describe_object_incoming_fks` filtered to FKs on `conversations` matching the four supported columns — `contact_id`, `account_id`, `project_id`, `service_appointment_id` — and auto-selects the only option when there's exactly one match), and a channel-filter dropdown (All / SMS only / Email only) that writes `widget_config.channel_filter` and removes the key entirely when "All" is selected. Empty-state error when the host object has zero matching FKs. `ConversationPanel` widget reads `widget_config.channel_filter`, normalizes anything other than `'sms'`/`'email'` to null (typos can't silently hide all threads), threads it through `fetchConversationsForParent` whose new optional third arg adds `.eq('conv_channel', channelFilter)` to the database query — narrowing happens server-side, not client-side. Help: HA-00030 `conversation-panel-widget-editor` (8 anchors).
 
 - [x] **Communications Module v1 — schema + visibility model** (`0ea66ec`, 7 migrations) — First phase of the LEAP Communications Module per `leap-communications-module-1.md`. Database foundation only; no edge functions or UI in this phase. The conversation panel widget shipped earlier this session (`fdfed14`) keeps working — Nicholas's Admin session short-circuits `is_admin()` true so all threads remain visible.
 
