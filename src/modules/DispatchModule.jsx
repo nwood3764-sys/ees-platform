@@ -38,6 +38,7 @@ import {
 import { dispatchRescheduleServiceAppointment } from '../data/projectScheduler'
 import DispatchFilterRail, { laneInScope } from '../components/dispatch/DispatchFilterRail'
 import DispatchUnscheduledPalette from '../components/dispatch/DispatchUnscheduledPalette'
+import ResourceMatrix from '../components/dispatch/ResourceMatrix'
 
 // Working-hours window the board renders. Matches the scheduler default;
 // any SA whose times bleed outside this gets clipped at the edge with a
@@ -109,6 +110,12 @@ function pxFromTime(date) {
 
 export default function DispatchModule({ onNavigateToRecord }) {
   const toast = useToast()
+
+  // View toggle — 'console' is the swimlane scheduler (default); 'resources'
+  // is the field-staff skills/certifications matrix. Shares the same module
+  // shell + toolbar to keep navigation tight.
+  const [activeView, setActiveView] = useState('console')
+
   // Date range. Default: this week Mon-Fri (5 days).
   const [startDate, setStartDate] = useState(() => toYMD(startOfWeekMonday(new Date())))
   const [endDate,   setEndDate]   = useState(() => toYMD(addDays(startOfWeekMonday(new Date()), 4)))
@@ -412,82 +419,129 @@ export default function DispatchModule({ onNavigateToRecord }) {
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ fontSize: 18, fontWeight: 600, color: C.textPrimary }}>Dispatch Console</div>
           <div style={{ fontSize: 12, color: C.textSecondary }}>
-            {appointments.length} appointment{appointments.length === 1 ? '' : 's'}
-            {' • '}{filteredLanes.filter(l => !l.isUnassigned).length} of {leads.length} Team Lead{leads.length === 1 ? '' : 's'}
-            {' • '}{unscheduledWOs.length} unscheduled WO{unscheduledWOs.length === 1 ? '' : 's'}
+            {activeView === 'console' ? (
+              <>
+                {appointments.length} appointment{appointments.length === 1 ? '' : 's'}
+                {' • '}{filteredLanes.filter(l => !l.isUnassigned).length} of {leads.length} Team Lead{leads.length === 1 ? '' : 's'}
+                {' • '}{unscheduledWOs.length} unscheduled WO{unscheduledWOs.length === 1 ? '' : 's'}
+              </>
+            ) : (
+              <>Skills &amp; certifications matrix for field staff</>
+            )}
           </div>
+        </div>
+
+        {/* View toggle — sits left of the flex spacer so it's anchored near
+            the title. Switches between the swimlane Console and the
+            Resources matrix surface. */}
+        <div role="tablist" aria-label="Dispatch view"
+             style={{
+               display: 'inline-flex', background: '#f0f3f8',
+               borderRadius: 6, padding: 2, border: `1px solid ${C.border}`,
+               marginLeft: 16,
+             }}>
+          {[
+            { value: 'console',   label: 'Console' },
+            { value: 'resources', label: 'Resources' },
+          ].map(opt => {
+            const active = activeView === opt.value
+            return (
+              <button
+                key={opt.value}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveView(opt.value)}
+                style={{
+                  padding: '5px 14px',
+                  fontSize: 13, fontWeight: active ? 600 : 500,
+                  color: active ? C.textPrimary : C.textSecondary,
+                  background: active ? C.surface : 'transparent',
+                  border: 'none', borderRadius: 5, cursor: 'pointer',
+                  boxShadow: active ? '0 1px 2px rgba(13,26,46,0.08)' : 'none',
+                }}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
         </div>
 
         <div style={{ flex: 1 }} />
 
-        <button onClick={goPrevWeek} style={btnSecondary} title="Previous week">
-          <Icon path="M15 19l-7-7 7-7" size={14} /> Prev
-        </button>
-        <button onClick={goThisWeek} style={btnSecondary} title="Jump to current week">
-          This week
-        </button>
-        <button onClick={goNextWeek} style={btnSecondary} title="Next week">
-          Next <Icon path="M9 5l7 7-7 7" size={14} />
-        </button>
+        {/* Week navigation + date range — only meaningful in Console view */}
+        {activeView === 'console' && (
+          <>
+            <button onClick={goPrevWeek} style={btnSecondary} title="Previous week">
+              <Icon path="M15 19l-7-7 7-7" size={14} /> Prev
+            </button>
+            <button onClick={goThisWeek} style={btnSecondary} title="Jump to current week">
+              This week
+            </button>
+            <button onClick={goNextWeek} style={btnSecondary} title="Next week">
+              Next <Icon path="M9 5l7 7-7 7" size={14} />
+            </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
-          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                 style={dateInput} />
-          <span style={{ color: C.textSecondary }}>→</span>
-          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-                 style={dateInput} />
-        </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                     style={dateInput} />
+              <span style={{ color: C.textSecondary }}>→</span>
+              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                     style={dateInput} />
+            </div>
 
-        <button onClick={() => setRefreshNonce(n => n + 1)} style={btnSecondary} title="Refresh">
-          <Icon path="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" size={14} />
-        </button>
+            <button onClick={() => setRefreshNonce(n => n + 1)} style={btnSecondary} title="Refresh">
+              <Icon path="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" size={14} />
+            </button>
+          </>
+        )}
       </div>
 
-      {/* ── Console body: rail + board + palette ───────────────────── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
-        <DispatchFilterRail
-          search={filterSearch}              onSearchChange={setFilterSearch}
-          selectedCrews={filterCrews}        onCrewsChange={setFilterCrews}
-          selectedTerritoryIds={filterTerritoryIds} onTerritoryIdsChange={setFilterTerritoryIds}
-          selectedCertIds={filterCertIds}    onCertIdsChange={setFilterCertIds}
-          availableOnly={filterAvailableOnly} onAvailableOnlyChange={setFilterAvailableOnly}
-          crewOptions={crewOptions}
-          territoryOptions={territories}
-          certificationOptions={certifications}
-          visibleLaneCount={filteredLanes.filter(l => !l.isUnassigned).length}
-          totalLaneCount={leads.length}
-          collapsed={filterRailCollapsed}
-          onToggleCollapsed={() => setFilterRailCollapsed(c => !c)}
-        />
+      {/* ── Body: Console (rail + board + palette) OR Resources matrix ── */}
+      {activeView === 'console' ? (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
+          <DispatchFilterRail
+            search={filterSearch}              onSearchChange={setFilterSearch}
+            selectedCrews={filterCrews}        onCrewsChange={setFilterCrews}
+            selectedTerritoryIds={filterTerritoryIds} onTerritoryIdsChange={setFilterTerritoryIds}
+            selectedCertIds={filterCertIds}    onCertIdsChange={setFilterCertIds}
+            availableOnly={filterAvailableOnly} onAvailableOnlyChange={setFilterAvailableOnly}
+            crewOptions={crewOptions}
+            territoryOptions={territories}
+            certificationOptions={certifications}
+            visibleLaneCount={filteredLanes.filter(l => !l.isUnassigned).length}
+            totalLaneCount={leads.length}
+            collapsed={filterRailCollapsed}
+            onToggleCollapsed={() => setFilterRailCollapsed(c => !c)}
+          />
 
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          {error && <div style={{ padding: 18 }}><ErrorState message={error} /></div>}
-          {loading && <div style={{ padding: 18 }}><LoadingState message="Loading dispatch console…" /></div>}
-          {!loading && !error && (
-            <BoardGrid
-              days={days}
-              lanes={filteredLanes}
-              appointmentsByLaneDay={appointmentsByLaneDay}
-              absencesByLaneDay={absencesByLaneDay}
-              onSAClick={openSA}
-              dragPayload={dragPayload}
-              dragHoverKey={dragHoverKey}
-              onDragOverCell={(key) => setDragHoverKey(key)}
-              onDragLeaveCell={() => setDragHoverKey(null)}
-              onDrop={handleDrop}
-              onDragStartSA={(sa) => setDragPayload({
-                type: 'sa', sa_id: sa.id, duration_minutes: durationMinutesOf(sa),
-              })}
-              onDragEndSA={() => { setDragPayload(null); setDragHoverKey(null) }}
-            />
-          )}
-        </div>
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            {error && <div style={{ padding: 18 }}><ErrorState message={error} /></div>}
+            {loading && <div style={{ padding: 18 }}><LoadingState message="Loading dispatch console…" /></div>}
+            {!loading && !error && (
+              <BoardGrid
+                days={days}
+                lanes={filteredLanes}
+                appointmentsByLaneDay={appointmentsByLaneDay}
+                absencesByLaneDay={absencesByLaneDay}
+                onSAClick={openSA}
+                dragPayload={dragPayload}
+                dragHoverKey={dragHoverKey}
+                onDragOverCell={(key) => setDragHoverKey(key)}
+                onDragLeaveCell={() => setDragHoverKey(null)}
+                onDrop={handleDrop}
+                onDragStartSA={(sa) => setDragPayload({
+                  type: 'sa', sa_id: sa.id, duration_minutes: durationMinutesOf(sa),
+                })}
+                onDragEndSA={() => { setDragPayload(null); setDragHoverKey(null) }}
+              />
+            )}
+          </div>
 
-        <DispatchUnscheduledPalette
-          workOrders={unscheduledWOs}
-          territoryNamesById={territoryNamesById}
-          loading={paletteLoading}
-          onDragStartWO={(wo) => setDragPayload({
+          <DispatchUnscheduledPalette
+            workOrders={unscheduledWOs}
+            territoryNamesById={territoryNamesById}
+            loading={paletteLoading}
+            onDragStartWO={(wo) => setDragPayload({
             type: 'unscheduled_wo', wo_id: wo.id,
             project_id: wo.project_id, duration_minutes: wo.duration_minutes,
           })}
@@ -497,6 +551,20 @@ export default function DispatchModule({ onNavigateToRecord }) {
           onToggleCollapsed={() => setPaletteCollapsed(c => !c)}
         />
       </div>
+      ) : (
+        /* Resources view — field-staff skills & certifications matrix.
+           Shares the toolbar but has its own sub-toolbar (tab toggle +
+           search + title pills). RecordDetail navigation reuses the
+           parent's onNavigateToRecord callback for click-throughs. */
+        <ResourceMatrix onNavigateToRecord={(target) => {
+          // ResourceMatrix passes { table, id }; the parent's nav helper
+          // expects positional args. Adapt here so the component stays
+          // self-contained.
+          if (target?.table && target?.id) {
+            onNavigateToRecord?.(target.table, target.id)
+          }
+        }} />
+      )}
     </div>
   )
 }
