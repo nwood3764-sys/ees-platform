@@ -70,19 +70,26 @@ const SUPPORTED_FK = new Set([
 
 /**
  * Threads for the parent record, newest activity first.
- * @param {string} fk            FK column on conversations (one of the four)
- * @param {string} parentId      UUID of the parent record
+ * @param {string} fk             FK column on conversations (one of the four)
+ * @param {string} parentId       UUID of the parent record
+ * @param {string|null} channelFilter   Optional 'sms' | 'email' to narrow the
+ *                                      list to one channel. Null/undefined
+ *                                      returns all channels.
  */
-export async function fetchConversationsForParent(fk, parentId) {
+export async function fetchConversationsForParent(fk, parentId, channelFilter = null) {
   if (!fk || !parentId) return []
   if (!SUPPORTED_FK.has(fk)) {
     throw new Error(`ConversationPanel: unsupported FK '${fk}'. Expected one of ${[...SUPPORTED_FK].join(', ')}.`)
   }
-  const { data, error } = await supabase
+  let q = supabase
     .from('conversations')
     .select(CONV_COLUMNS)
     .eq(fk, parentId)
     .eq('conv_is_deleted', false)
+  if (channelFilter) {
+    q = q.eq('conv_channel', channelFilter)
+  }
+  const { data, error } = await q
     .order('conv_last_message_at', { ascending: false, nullsFirst: false })
     .limit(50)
   if (error) throw error

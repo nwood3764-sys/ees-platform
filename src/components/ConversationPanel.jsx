@@ -72,6 +72,13 @@ export default function ConversationPanelWidget({
 }) {
   const config = widget.widget_config || {}
   const fk = config.fk
+  // Optional 'sms' | 'email' filter from widget_config. Null means all channels.
+  // Anything other than the two known values is normalised to null so a typo
+  // in config doesn't silently hide every thread.
+  const channelFilter =
+    config.channel_filter === 'sms' || config.channel_filter === 'email'
+      ? config.channel_filter
+      : null
   const isMobile = useIsMobile()
   const toast = useToast()
 
@@ -101,7 +108,7 @@ export default function ConversationPanelWidget({
     if (!opts.background) setThreadsLoading(true)
     setThreadsError(null)
     try {
-      const rows = await fetchConversationsForParent(fk, parentRecordId)
+      const rows = await fetchConversationsForParent(fk, parentRecordId, channelFilter)
       setThreads(rows)
       // Keep the current selection if it's still in the list; otherwise
       // clear it so the right pane returns to the empty state.
@@ -111,7 +118,7 @@ export default function ConversationPanelWidget({
     } finally {
       if (!opts.background) setThreadsLoading(false)
     }
-  }, [fk, parentRecordId])
+  }, [fk, parentRecordId, channelFilter])
 
   useEffect(() => { refreshThreads() }, [refreshThreads])
 

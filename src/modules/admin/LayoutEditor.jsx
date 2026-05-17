@@ -24,6 +24,7 @@ import {
 import AddWidgetModal from './widgets/AddWidgetModal'
 import WidgetEditorFieldGroup from './widgets/WidgetEditorFieldGroup'
 import WidgetEditorRelatedList from './widgets/WidgetEditorRelatedList'
+import WidgetEditorConversationPanel from './widgets/WidgetEditorConversationPanel'
 
 // ---------------------------------------------------------------------------
 // LayoutEditor — the replacement for LayoutStructureViewer. Fully editable:
@@ -805,7 +806,15 @@ function WidgetsList({ sectionId, sectionLabel, objectName, widgets, onChanged, 
           onSaved={handleWidgetSaved}
         />
       )}
-      {editingWidget && !['field_group', 'related_list'].includes(editingWidget.widget_type) && (
+      {editingWidget && editingWidget.widget_type === 'conversation_panel' && (
+        <WidgetEditorConversationPanel
+          widget={editingWidget}
+          objectName={objectName}
+          onClose={() => setEditingWidget(null)}
+          onSaved={handleWidgetSaved}
+        />
+      )}
+      {editingWidget && !['field_group', 'related_list', 'conversation_panel'].includes(editingWidget.widget_type) && (
         // Unknown widget type — fall back to a placeholder so the user sees
         // something instead of a silent no-op. Clicking Cancel closes it.
         <UnknownWidgetTypeModal
