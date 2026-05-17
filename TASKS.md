@@ -76,7 +76,7 @@ Replaces the current Jobber-based scheduling flow. Customer self-serve schedulin
 
 ## Recently completed (this session — 2026-05-17)
 
-- [x] **Communications Module v1 — schema + visibility model** (this commit, 7 migrations) — First phase of the LEAP Communications Module per `leap-communications-module-1.md`. Database foundation only; no edge functions or UI in this phase. The conversation panel widget shipped earlier this session (`fdfed14`) keeps working — Nicholas's Admin session short-circuits `is_admin()` true so all threads remain visible.
+- [x] **Communications Module v1 — schema + visibility model** (`0ea66ec`, 7 migrations) — First phase of the LEAP Communications Module per `leap-communications-module-1.md`. Database foundation only; no edge functions or UI in this phase. The conversation panel widget shipped earlier this session (`fdfed14`) keeps working — Nicholas's Admin session short-circuits `is_admin()` true so all threads remain visible.
 
   **New tables (5)**: `outbound_mailboxes` (OBM-####, shared mailbox config keyed on program + state), `message_attachments` (file metadata + virus-scan status + delivery method `inline`|`signed_link`), `message_ai_transcripts` (MAT-####, per-iteration AI compose audit with stricter RLS than the parent message), `communications_view_all_grants` (role/permission-set grants for cross-thread visibility, seeded with Admin + Program Manager), `unmatched_inbox` (UI-####, inbound triage queue for emails that couldn't auto-thread; unique on `(ui_provider, ui_provider_message_id)` for webhook-retry idempotency).
 
