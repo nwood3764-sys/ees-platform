@@ -12,6 +12,7 @@ import { useIsMobile } from '../lib/useMediaQuery'
 import { getTableListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
+import ConversationPanelWidget from './ConversationPanel'
 import { ReportWidget } from './ReportWidget'
 import { supabase } from '../lib/supabase'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
@@ -201,6 +202,13 @@ const TABLE_META = {
   object_chat_enabled:                               { module: 'Admin', label: 'Object Chat Settings',               nameColumn: 'oce_object_name', recordNumberColumn: null,               statusColumn: null,        parents: [],                                          parentTables: [] },
   chat_threads:                                      { module: 'Field', label: 'Chat Threads',                       nameColumn: 'chat_subject', recordNumberColumn: 'chat_record_number',  statusColumn: 'chat_status', parents: [],                                         parentTables: [] },
   chat_messages:                                     { module: 'Field', label: 'Chat Messages',                      nameColumn: null,          recordNumberColumn: 'cm_record_number',     statusColumn: null,        parents: ['cm_thread_id'],                            parentTables: ['chat_threads'] },
+  // Conversations + messages — the canonical customer-correspondence thread
+  // surface. Day-to-day access is via the ConversationPanel widget on the
+  // parent record (contact / account / project / SA); these registry entries
+  // exist so direct-URL navigation (or a future global search hit) still
+  // renders a reasonable breadcrumb and header.
+  conversations:                                     { module: 'Field', label: 'Conversations',                      nameColumn: 'conv_subject', recordNumberColumn: 'conv_record_number',  statusColumn: 'conv_status', parents: ['contact_id', 'account_id', 'project_id', 'service_appointment_id'], parentTables: ['contacts', 'accounts', 'projects', 'service_appointments'] },
+  messages:                                          { module: 'Field', label: 'Messages',                            nameColumn: null,           recordNumberColumn: 'msg_record_number',   statusColumn: 'msg_status', parents: ['conversation_id'],                       parentTables: ['conversations'] },
   user_account_scopes:                               { module: 'Admin', label: 'User Account Scopes',                nameColumn: null,          recordNumberColumn: null,                   statusColumn: null,        parents: ['uas_user_id', 'uas_account_id', 'uas_property_id'], parentTables: ['users', 'accounts', 'properties'] },
   user_program_scopes:                               { module: 'Admin', label: 'User Program Scopes',                nameColumn: null,          recordNumberColumn: null,                   statusColumn: null,        parents: ['ups_user_id', 'ups_program_id'],           parentTables: ['users', 'programs'] },
   // Reports & Dashboards family
@@ -404,7 +412,7 @@ function buildOrderedTabs(sections, { includeActivity = true } = {}) {
   let hasRelated = false
   for (const sec of sections || []) {
     names.add(sec.section_tab || 'Details')
-    if ((sec.widgets || []).some(w => w.widget_type === 'related_list' || w.widget_type === 'file_gallery' || w.widget_type === 'prtsn_history' || w.widget_type === 'report')) {
+    if ((sec.widgets || []).some(w => w.widget_type === 'related_list' || w.widget_type === 'file_gallery' || w.widget_type === 'prtsn_history' || w.widget_type === 'report' || w.widget_type === 'conversation_panel')) {
       hasRelated = true
     }
   }
@@ -5101,6 +5109,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               key={w.id}
               widget={w}
               parentTable={tableName}
+              parentRecordId={recordId}
+            />
+          ))}
+
+        {/* Conversation panel — Service Cloud Messaging-style split-pane
+            (thread list left, active thread + composer right). Self-contained:
+            loads its own conversations + messages, marks threads read on
+            open, and invokes send-notification-sms v2 for replies. */}
+        {!isInsertMode && activeTab === 'Related' && sections
+          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'conversation_panel'))
+          .map(w => (
+            <ConversationPanelWidget
+              key={w.id}
+              widget={w}
               parentRecordId={recordId}
             />
           ))}

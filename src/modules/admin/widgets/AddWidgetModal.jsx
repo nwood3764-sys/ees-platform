@@ -59,6 +59,19 @@ const WIDGET_TYPES = [
     hint: 'File list for PDFs, spreadsheets, signed forms, and other attachments.',
     placeholder: 'e.g. Documents',
   },
+  {
+    value: 'conversation_panel',
+    widgetType: 'conversation_panel',
+    // FK left blank — must be set in the widget config after creation. The
+    // panel currently supports contact_id, account_id, project_id, and
+    // service_appointment_id (the four FK columns on the conversations table).
+    config: { table: 'conversations', fk: null, channel_filter: null },
+    label: 'Conversation Panel',
+    hint: 'Service Cloud Messaging-style split-pane (thread list + active thread + composer). ' +
+          'Only valid on Contacts, Accounts, Projects, and Service Appointments — the FK column ' +
+          'must be set in widget config after creation.',
+    placeholder: 'e.g. Conversations',
+  },
 ]
 
 export default function AddWidgetModal({

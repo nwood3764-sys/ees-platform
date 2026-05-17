@@ -70,10 +70,39 @@ Replaces the current Jobber-based scheduling flow. Customer self-serve schedulin
 
 ### Long-term cleanup (not urgent)
 - [ ] **`cfp_*` tables permission policies** — two Cap Forecasting Pipeline tables still have `USING (true)` policies (isolated feature, not in main app flow). Replace with role-aware policies when CFP feature is touched again.
+- [ ] **LayoutEditor support for `conversation_panel` widget config** — `AddWidgetModal` now offers Conversation Panel as a widget type, but `LayoutEditor` falls through to `UnknownWidgetTypeModal` on edit because the widget has no dedicated contents editor. The FK column (one of `contact_id` / `account_id` / `project_id` / `service_appointment_id`) and the optional `channel_filter` must be set via SQL or page-layout JSON for now. Build a 2-field editor (FK picker + channel filter dropdown) when admins start adding the panel to additional layouts.
 
 ---
 
-## Recently completed (this session — 2026-05-16)
+## Recently completed (this session — 2026-05-17)
+
+- [x] **Conversation panel widget — Service Cloud Messaging-style split-pane** (this commit, 2 migrations) — Closes the "conversation detail page UI" backlog item from the LEAP Communications spec. Replaces the read-only related-list table on the existing 22 page layouts (contacts/accounts/projects/service_appointments) with an inline chat surface that keeps thread context bound to the parent record — no navigation hop, matches Salesforce Service Cloud Messaging.
+
+  **New widget type `conversation_panel`** registered in `AddWidgetModal` and rendered out of `RecordDetail.jsx` on the Related tab alongside file galleries, PRTSN history, and report widgets. Self-contained: loads its own conversations + messages on mount, owns its own state, never goes through `layoutService.fetchRelatedRecords`. Widget config keeps just `{ table: 'conversations', fk, channel_filter }` — fixed columns and sort, no per-layout customisation surface (yet — see backlog).
+
+  **Migration `conversation_panel_widget_type`** swaps all 22 existing `related_list` widgets whose `widget_config.table='conversations'` to `widget_type='conversation_panel'`, preserving the FK column (one of `contact_id`/`account_id`/`project_id`/`service_appointment_id`) and dropping the dead `columns`/`sort_field`/`sort_dir`/`is_deleted_col` since the panel renders fixed columns + always-current sort. Verified post-migration: 8 accounts, 6 contacts, 7 projects, 1 service_appointment layout now carry the panel.
+
+  **`ConversationPanelWidget` component** (`src/components/ConversationPanel.jsx`, ~520 lines) — split-pane with collapsible card chrome matching `RelatedListWidget`. Left pane (280px on desktop, full-width on mobile): scrollable thread list sorted by `conv_last_message_at DESC`, each row showing thread number, channel icon (SMS green, Email blue), customer address, relative timestamp ("2m ago" / "Yesterday" / "Mar 14"), 2-line preview, and a red unread badge. Right pane: `ThreadHeader` with record number + channel + status + customer/our addresses, scrollable `MessageBubble` timeline (outbound right-aligned emerald, inbound left-aligned sky, failed bubbles in red wash with hover-title error text), then `Composer` at the bottom. Aggregate unread badge in the card header sums `conv_inbound_unread_count` across all threads. Total card height: 520px desktop / 560px mobile.
+
+  **Composer** is SMS-only in v1: 1600-char counter with live-red overflow indication, Cmd/Ctrl+Enter submit shortcut shown inline on desktop, Send button disabled while empty or sending. On non-SMS threads renders a friendly "email composer ships with the Communications Module" notice instead of a broken UI — matches the spec's deferral of TipTap rich-text + locked regions to the next phase.
+
+  **Send path** routes through `sendReplyToConversation()` in the new `src/data/conversationsService.js`, which invokes the existing `send-notification-sms` v2 edge function with `trigger_event='dispatcher_reply'`, customer phone as `recipient_phone`, our phone as `from_number`, and all four FKs (`contact_id`/`account_id`/`project_id`/`service_appointment_id`) lifted off the conversation row. The edge fn's `find_or_create_conversation` idempotency means the new outbound message threads onto the existing conversation, never spawning a duplicate. Toast distinguishes mock-mode ("Reply queued (mock mode — Twilio not configured)") from real send. On send success both panes refresh in parallel — message list re-fetches (so the new bubble appears with status `sent` and provider id), thread list re-fetches (so the rollup trigger's new `conv_last_message_preview` and `conv_last_message_at` are reflected).
+
+  **`mark_conversation_read` wiring**: on every thread-select the panel calls the existing RPC in parallel with the messages fetch. Optimistic local update zeroes the unread badge immediately; the rolled-up count from the next refetch reconciles. Failure is non-fatal — RPC error is console-warned, the user proceeds.
+
+  **`conversations` + `messages` added to `TABLE_META`** in `RecordDetail.jsx` so direct URL navigation (or future global search hit) renders a sensible breadcrumb + header instead of the "Record" fallback. The panel remains the canonical surface; these registry entries are defensive.
+
+  **`AddWidgetModal`** gains a Conversation Panel option (FK left null at creation — admin must wire it post-creation since the widget editor doesn't have a contents editor yet; backlog item logged for the LayoutEditor follow-up). Hint text states the four supported FK columns.
+
+  **Build verified**: clean, `RecordDetail` bundle 347.03 → 363.87 kB / 81.64 → 85.82 kB gzip (~4 kB gzip for the new widget + service layer). 19.80s vite build.
+
+  **Help: HA-00027** `conversation-panel` covers the layout, the open-thread/reply flow, the mock-vs-real Twilio behavior, the FK-to-surface mapping, and the email-deferred-to-Communications-Module behavior. Anchored to objects=contacts/accounts/projects/service_appointments/conversations/messages and concepts=conversation-panel/conversations/sms/reply/threading/notifications (12 anchors).
+
+  **Open follow-ups from this work**: LayoutEditor contents editor for `conversation_panel` (backlog above); real-time `messages` subscription so inbound replies appear without a manual refresh (deferred — refresh-on-send + refresh-on-thread-switch is enough for v1); email composer (deferred to Communications Module per the spec).
+
+---
+
+## Recently completed (prior session — 2026-05-16)
 
 - [x] **Scheduling Platform Phase 4c — conversations + messages threading** (this commit, 4 migrations) — Two-table conversation architecture modeled after Twilio Conversations / Salesforce MessagingSession + ConversationEntry. `conversations` is the thread (one row per channel + our_address + customer_address pair, partial unique index enforces one open thread per pair). `messages` is the children — direction-aware, channel-aware, same table for inbound and outbound so the threaded view is a single `ORDER BY` query. Full audit columns, RLS via `app_user_can`, role_object_access seeded for 5 internal roles.
 
