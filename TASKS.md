@@ -156,7 +156,7 @@ Replaces the current Jobber-based scheduling flow. Customer self-serve schedulin
 
 ## Completed (chronological, most recent first)
 
-- `(this commit)` Conversations + messages threading — twilio-inbound webhook + send-notification-sms v2 + related lists on contact/account/project/SA
+- `bd646ba` Conversations + messages threading — twilio-inbound webhook + send-notification-sms v2 + related lists on contact/account/project/SA
 - `fd2242b` Scheduling Phase 4b — send-notification-email + send-notification-sms
 - `0e82866` Scheduling Phase 4a — validate-address + compute-route-matrix edge fns
 - `560403c` chore: backfill TASKS.md commit hash for 9e77625
