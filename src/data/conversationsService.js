@@ -406,3 +406,195 @@ export function describeDirection(direction) {
     meta: '#1a5a8a',
   }
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Unmatched Inbox triage — Communications Module v1 Slice 4
+//
+// Inbound emails that fail all three resolution rules in the inbound-email-
+// webhook (plus-address, In-Reply-To/References, sender→contact→thread) land
+// in `unmatched_inbox` with ui_status='awaiting_triage'. The triage UI lets a
+// coordinator either link the row to an existing conversation or dismiss it.
+//
+// Three writes are wrapped here so the UI doesn't have to know the column
+// names or the linkage rules:
+//   • fetchUnmatchedInbox      — list, filterable by status, newest first
+//   • linkUnmatchedToConversation — attach to an existing thread (creates the
+//                                    messages row and stamps ui_status='linked')
+//   • dismissUnmatchedRow      — stamp ui_status='dismissed' with a reason
+// ───────────────────────────────────────────────────────────────────────────
+
+const UNMATCHED_COLUMNS = [
+  'id',
+  'ui_record_number',
+  'ui_channel',
+  'ui_received_at',
+  'ui_from_address',
+  'ui_to_address',
+  'ui_subject',
+  'ui_body_preview',
+  'ui_provider',
+  'ui_provider_message_id',
+  'ui_in_reply_to_header',
+  'ui_references_header',
+  'ui_status',
+  'ui_linked_conversation_id',
+  'ui_linked_at',
+  'ui_linked_by',
+  'ui_dismissed_reason',
+  'ui_created_at',
+].join(', ')
+
+/**
+ * Fetch unmatched_inbox rows. Defaults to status='awaiting_triage' (the queue
+ * a coordinator works through). Pass status=null to see everything.
+ */
+export async function fetchUnmatchedInbox({ status = 'awaiting_triage', limit = 100 } = {}) {
+  let q = supabase
+    .from('unmatched_inbox')
+    .select(UNMATCHED_COLUMNS)
+    .eq('ui_is_deleted', false)
+  if (status) q = q.eq('ui_status', status)
+  q = q.order('ui_received_at', { ascending: false, nullsFirst: false }).limit(limit)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+/**
+ * Recent email conversations for the link-picker. Returns the threads on
+ * (and immediately around) the same mailbox so coordinators can pick the
+ * right target without scrolling 1000 rows.
+ */
+export async function fetchRecentEmailConversations({ ourAddress = null, limit = 50 } = {}) {
+  let q = supabase
+    .from('conversations')
+    .select('id, conv_record_number, conv_subject, conv_customer_address, conv_our_address, conv_last_message_at')
+    .eq('conv_channel', 'email')
+    .eq('conv_is_deleted', false)
+  if (ourAddress) {
+    // strip plus-addressing — the unmatched row's to_address may carry +c_xxx
+    const at = ourAddress.indexOf('@')
+    let baseOurs = ourAddress
+    if (at > 0) {
+      const local = ourAddress.slice(0, at)
+      const domain = ourAddress.slice(at)
+      const plus = local.indexOf('+')
+      if (plus >= 0) baseOurs = `${local.slice(0, plus)}${domain}`
+    }
+    q = q.eq('conv_our_address', baseOurs)
+  }
+  q = q.order('conv_last_message_at', { ascending: false, nullsFirst: false }).limit(limit)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+/**
+ * Link an unmatched_inbox row to an existing conversation. Inserts the
+ * inbound message onto the target thread (carrying the original Message-ID,
+ * subject, body, from/to) and stamps the unmatched row with ui_status='linked'.
+ *
+ * The two writes happen sequentially rather than in a single RPC for now —
+ * an RPC wrapper is a follow-up cleanup; v1 keeps the SQL surface small.
+ */
+export async function linkUnmatchedToConversation({ unmatchedId, conversationId }) {
+  if (!unmatchedId) throw new Error('unmatchedId required')
+  if (!conversationId) throw new Error('conversationId required')
+
+  // Fetch the unmatched row in full
+  const { data: ui, error: uiErr } = await supabase
+    .from('unmatched_inbox')
+    .select(UNMATCHED_COLUMNS + ', ui_raw_payload')
+    .eq('id', unmatchedId)
+    .maybeSingle()
+  if (uiErr) throw uiErr
+  if (!ui) throw new Error('Unmatched row not found')
+  if (ui.ui_status === 'linked') throw new Error('This row has already been linked')
+
+  // Resolve caller's public.users.id for the audit cols
+  const { data: { user: authUser } } = await supabase.auth.getUser()
+  let callerUserId = null
+  if (authUser?.id) {
+    const { data: u } = await supabase
+      .from('users').select('id').eq('auth_user_id', authUser.id).maybeSingle()
+    callerUserId = u?.id || null
+  }
+
+  // Idempotency: if the same provider_message_id already exists in messages,
+  // don't double-insert — just stamp the unmatched row and return.
+  if (ui.ui_provider_message_id) {
+    const { data: existing } = await supabase
+      .from('messages')
+      .select('id')
+      .eq('msg_provider_message_id', ui.ui_provider_message_id)
+      .eq('msg_is_deleted', false)
+      .maybeSingle()
+    if (existing) {
+      await supabase.from('unmatched_inbox').update({
+        ui_status: 'linked',
+        ui_linked_conversation_id: conversationId,
+        ui_linked_at: new Date().toISOString(),
+        ui_linked_by: callerUserId,
+        ui_updated_by: callerUserId,
+      }).eq('id', unmatchedId)
+      return { messageId: existing.id, alreadyExisted: true }
+    }
+  }
+
+  // Insert the message onto the target thread
+  const { data: msg, error: msgErr } = await supabase.from('messages').insert({
+    msg_record_number:       '',
+    conversation_id:         conversationId,
+    msg_direction:           'inbound',
+    msg_channel:             ui.ui_channel || 'email',
+    msg_from_address:        ui.ui_from_address,
+    msg_to_address:          ui.ui_to_address,
+    msg_subject:             ui.ui_subject,
+    msg_body:                ui.ui_body_preview || '(linked from unmatched inbox — body preview only)',
+    msg_provider:            ui.ui_provider || 'microsoft_graph',
+    msg_provider_message_id: ui.ui_provider_message_id,
+    msg_status:              'received',
+    msg_status_updated_at:   new Date().toISOString(),
+    msg_external_message_id: ui.ui_provider_message_id,
+    msg_created_by:          callerUserId,
+    msg_updated_by:          callerUserId,
+  }).select('id').single()
+  if (msgErr) throw msgErr
+
+  // Stamp the unmatched row as linked
+  const { error: stampErr } = await supabase.from('unmatched_inbox').update({
+    ui_status: 'linked',
+    ui_linked_conversation_id: conversationId,
+    ui_linked_at: new Date().toISOString(),
+    ui_linked_by: callerUserId,
+    ui_updated_by: callerUserId,
+  }).eq('id', unmatchedId)
+  if (stampErr) throw stampErr
+
+  return { messageId: msg.id, alreadyExisted: false }
+}
+
+/**
+ * Dismiss an unmatched_inbox row without linking — for spam, irrelevant
+ * forwards, etc. Reason is required so the audit trail captures why.
+ */
+export async function dismissUnmatchedRow({ unmatchedId, reason }) {
+  if (!unmatchedId) throw new Error('unmatchedId required')
+  const trimmed = (reason || '').trim()
+  if (!trimmed) throw new Error('Dismissal reason required')
+
+  const { data: { user: authUser } } = await supabase.auth.getUser()
+  let callerUserId = null
+  if (authUser?.id) {
+    const { data: u } = await supabase
+      .from('users').select('id').eq('auth_user_id', authUser.id).maybeSingle()
+    callerUserId = u?.id || null
+  }
+
+  const { error } = await supabase.from('unmatched_inbox').update({
+    ui_status: 'dismissed',
+    ui_dismissed_reason: trimmed,
+    ui_updated_by: callerUserId,
+  }).eq('id', unmatchedId)
+  if (error) throw error
+}

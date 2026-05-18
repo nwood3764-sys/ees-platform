@@ -51,6 +51,8 @@ export const SETUP_TREE = [
       { id: 'email_templates',    label: 'Email Templates' },
       { id: 'document_templates', label: 'Document Templates' },
       { id: 'envelopes',          label: 'Envelopes' },
+      { id: 'outbound_mailboxes', label: 'Outbound Mailboxes' },
+      { id: 'unmatched_inbox',    label: 'Unmatched Inbox' },
     ],
   },
   {

@@ -1233,6 +1233,40 @@ export async function fetchObjectChatEnabled() {
   }))
 }
 
+// ─── Outbound mailboxes (Communications Module v1) ──────────────────────────
+//
+// The shared M365 mailboxes that send-email-v1 routes outbound through. State
+// separation is in the domain (assessments@ees-wi.org for WI, etc.); per-
+// program mailboxes can be layered on top later with the same lookup logic.
+//
+// Listed under Setup → Communication Templates → Outbound Mailboxes. Clicking
+// a row opens the standard record-detail surface so the address, display name,
+// active flag, and program assignment can be edited inline.
+
+export async function fetchOutboundMailboxesForListView() {
+  const { data, error } = await supabase
+    .from('outbound_mailboxes')
+    .select(`
+      id, obm_record_number, obm_address, obm_display_name, obm_state,
+      obm_is_active,
+      program:obm_program_id ( name )
+    `)
+    .eq('obm_is_deleted', false)
+    .order('obm_state', { ascending: true })
+
+  if (error) throw error
+
+  return (data || []).map(r => ({
+    id:           r.obm_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id:          r.id,
+    address:      r.obm_address,
+    displayName:  r.obm_display_name || '—',
+    state:        r.obm_state || '—',
+    program:      r.program?.name || '— state-only —',
+    active:       r.obm_is_active ? 'Active' : 'Inactive',
+  }))
+}
+
 // ─── Recycle Bin (Phase 1) ────────────────────────────────────────────────
 //
 // fetchDeletedRecords: pulls soft-deleted rows from a single table via the

@@ -27,7 +27,9 @@ import {
   fetchPortals,
   fetchPortalRoleAssignments,
   fetchObjectChatEnabled,
+  fetchOutboundMailboxesForListView,
 } from '../../data/adminService'
+import UnmatchedInboxPane from './UnmatchedInboxPane'
 
 // ---------------------------------------------------------------------------
 // Setup Home — Salesforce-style left tree nav + right content pane.
@@ -443,6 +445,8 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'email_templates':   return <NodePage title="Email Templates"         table="email_templates"   fetcher={fetchEmailTemplates}    columns={ET_COLS}             newLabel="Email Template"   onOpenRecord={onOpenRecord} />
     case 'document_templates':return <NodePage title="Document Templates"      table="document_templates" fetcher={fetchDocumentTemplates} columns={DT_COLS}            newLabel="Document Template" onOpenRecord={onOpenRecord} />
     case 'envelopes':         return <NodePage title="Envelopes"               table="envelopes"         fetcher={fetchEnvelopes}         columns={ENV_COLS}            newLabel={null}             onOpenRecord={onOpenRecord} />
+    case 'outbound_mailboxes':return <NodePage title="Outbound Mailboxes"      table="outbound_mailboxes" fetcher={fetchOutboundMailboxesForListView} columns={OBM_COLS} newLabel="Outbound Mailbox" onOpenRecord={onOpenRecord} />
+    case 'unmatched_inbox':   return <UnmatchedInboxPane />
     case 'programs':          return <NodePage title="Programs"                table="programs"          fetcher={fetchPrograms}          columns={PROG_COLS}           newLabel="Program"          onOpenRecord={onOpenRecord} />
     case 'work_types':        return <NodePage title="Work Types"              table="work_types"        fetcher={fetchWorkTypes}         columns={WT_COLS}             newLabel="Work Type"        onOpenRecord={onOpenRecord} />
     case 'work_plan_templates': return <WorkPlanTemplatesPane onOpenRecord={onOpenRecord} />
@@ -1270,6 +1274,15 @@ const ENV_COLS = [
   { field: 'sentAt',             label: 'Sent',         type: 'text', sortable: true, filterable: false },
   { field: 'completedAt',        label: 'Completed',    type: 'text', sortable: true, filterable: false },
   { field: 'status',             label: 'Status',       type: 'select', sortable: true, filterable: true, options: ['Draft','Sent — Awaiting Signature','Delivered to First Signer','Completed — All Signed','Declined','Voided','Failed to Send','—'] },
+]
+
+const OBM_COLS = [
+  { field: 'id',          label: 'Record #',     type: 'text',   sortable: true,  filterable: false },
+  { field: 'address',     label: 'Address',      type: 'text',   sortable: true,  filterable: true  },
+  { field: 'displayName', label: 'Display Name', type: 'text',   sortable: true,  filterable: true  },
+  { field: 'state',       label: 'State',        type: 'select', sortable: true,  filterable: true, options: ['WI','MI','NC','CO','IN'] },
+  { field: 'program',     label: 'Program',      type: 'text',   sortable: true,  filterable: true  },
+  { field: 'active',      label: 'Active',       type: 'select', sortable: true,  filterable: true, options: ['Active','Inactive'] },
 ]
 
 const AR_COLS = [
