@@ -73,6 +73,9 @@ const TABLE_MODULE_MAP = {
   // Field — people-related (Field module exposes Technicians/Credentials/Time Sheets)
   contact_skills: 'field',
   time_sheets: 'field',
+  // Field — dispatcher follow-up queue (captured leads from public scheduling
+  // pages when auto-scheduling hit a dead-end — out_of_territory etc.)
+  dispatcher_followup_requests: 'field',
   // Admin
   programs: 'admin',
   work_types: 'admin',
