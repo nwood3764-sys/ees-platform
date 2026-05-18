@@ -11,7 +11,7 @@
 // zoom on focus), tap targets are ≥ 44px tall.
 
 import { useState, useMemo } from 'react'
-import { computeAvailability, createServiceAppointment } from './serviceAppointmentService'
+import { computeAvailability, createServiceAppointment, requestDispatcherFollowup } from './serviceAppointmentService'
 import {
   C, card, label, input, inputFocus, buttonPrimary, buttonSecondary,
   errorBanner, RADIUS, formatChicagoSlot, formatChicagoTimeRange,
@@ -94,6 +94,36 @@ export default function ServiceAppointmentFlow({ slug }) {
     )
   }
 
+  // Fire-and-await capture for the three customer-dead-end branches. We
+  // await it (rather than fire-and-forget) so the user message can reflect
+  // success/failure of the lead capture — but on capture failure we still
+  // show the "we'll reach out" banner because the customer can't act on
+  // the error and a dispatcher will see the gap from the missing log
+  // entry on their side. Most importantly, never block the UI on a
+  // capture error: the customer's day shouldn't be ruined by our backend.
+  async function captureDispatcherFollowup(info, slugVal, reason) {
+    try {
+      await requestDispatcherFollowup({
+        customer_first_name: info.firstName,
+        customer_last_name:  info.lastName,
+        phone: info.phone,
+        email: info.email,
+        address: {
+          street: info.street,
+          city:   info.city,
+          state:  info.state,
+          zip:    info.zip,
+        },
+        work_type_slug: slugVal,
+        reason,
+      })
+    } catch (e) {
+      // Swallow — the banner is shown either way. Log to console for
+      // post-mortem debugging.
+      console.error('requestDispatcherFollowup failed', e)
+    }
+  }
+
   async function handleIntakeSubmit(info) {
     setCustomerInfo(info)
     setError(null)
@@ -106,17 +136,20 @@ export default function ServiceAppointmentFlow({ slug }) {
         days:    14,
       })
       if (result.status === 'out_of_territory') {
-        setError("This address is outside our current service area. Send us a note at assessments.wi@ees-wi.org and we'll follow up.")
+        await captureDispatcherFollowup(info, slug, 'out_of_territory')
+        setError("This address is outside our current service area, but we've captured your details. A dispatcher will reach out within 1 business day to discuss options.")
         setStep('intake')
         return
       }
       if (result.status === 'no_qualifying_resources') {
-        setError("No certified auditors are available in your area for this service. Send us a note at assessments.wi@ees-wi.org.")
+        await captureDispatcherFollowup(info, slug, 'no_qualifying_resources')
+        setError("No certified auditors are currently available in your area for this service. We've captured your request — a dispatcher will reach out within 1 business day with next steps.")
         setStep('intake')
         return
       }
       if (result.status === 'no_availability' || !result.slots || result.slots.length === 0) {
-        setError("No availability in the next 14 days. Try again next week, or send us a note at assessments.wi@ees-wi.org.")
+        await captureDispatcherFollowup(info, slug, 'no_availability')
+        setError("No availability in the next 14 days. We've captured your request — a dispatcher will reach out within 1 business day to find a time that works.")
         setStep('intake')
         return
       }

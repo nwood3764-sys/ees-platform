@@ -81,6 +81,30 @@ export function createServiceAppointment({
   })
 }
 
+// request-dispatcher-followup — fired when the customer scheduling flow
+// reaches a dead-end (address outside service area, no qualifying auditor
+// with capacity, all slots blocked). Captures the lead as a
+// dispatcher_followup_requests row (DFR-####) and emails the dispatcher
+// inbox with the customer's info + the reason. Dispatcher follows up
+// manually within 1 business day.
+//
+// `reason` must be one of:
+//   'out_of_territory' | 'no_qualifying_resources' | 'no_availability' | 'general_inquiry'
+//
+// Returns { status: 'ok', dfr_id, dfr_record_number, dispatcher_notified }
+// or throws on validation / network error. dispatcher_notified can be
+// false even on a successful DFR write — the row is still captured and
+// will surface in the dispatcher's Open queue.
+export function requestDispatcherFollowup({
+  customer_first_name, customer_last_name, phone, email, address,
+  work_type_slug, reason, extra_notes, preferred_start_at,
+}) {
+  return call('request-dispatcher-followup', {
+    customer_first_name, customer_last_name, phone, email, address,
+    work_type_slug, reason, extra_notes, preferred_start_at,
+  })
+}
+
 // ─── management RPCs ─────────────────────────────────────────────────────────
 // All three call SECURITY DEFINER RPCs directly via supabase.rpc() using the
 // publishable anon key. The RPCs verify the service_appointment_token
