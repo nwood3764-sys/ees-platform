@@ -132,60 +132,222 @@ export async function markConversationRead(conversationId) {
 
 /**
  * Send an outbound reply on an existing thread. Routes through the
- * send-notification-sms v2 edge function, which is responsible for:
- *   • inserting the notification_logs audit row
- *   • inserting the messages row (carrying conversation_id via
- *     find_or_create_conversation idempotency on the customer+our pair)
- *   • flipping msg_status from queued → sent / failed
+ * channel-appropriate edge function:
+ *   • SMS  → send-notification-sms v2 (writes notification_logs + messages)
+ *   • Email → send-email-v1 (writes messages + conversations only, free-form)
+ *
+ * Both paths flip msg_status from queued → sent / failed via the edge function.
  *
  * Returns the edge function's JSON payload so the caller can inspect
  * mock-vs-real mode + provider_message_id.
  */
-export async function sendReplyToConversation(conversation, bodyText) {
+export async function sendReplyToConversation(conversation, bodyText, opts = {}) {
   if (!conversation?.id) throw new Error('conversation required')
   const trimmed = (bodyText || '').trim()
   if (!trimmed) throw new Error('Message body is empty')
 
   const channel = conversation.conv_channel
-  if (channel !== 'sms') {
-    throw new Error(`Replies on '${channel}' threads are not yet supported. SMS only for now.`)
+
+  // ── SMS path ────────────────────────────────────────────────────────
+  if (channel === 'sms') {
+    const customerPhone = conversation.conv_customer_address
+    const ourPhone = conversation.conv_our_address
+    if (!customerPhone || !/^\+[1-9]\d{6,14}$/.test(customerPhone)) {
+      throw new Error('Customer phone on this thread is not a valid E.164 number.')
+    }
+
+    const payload = {
+      trigger_event: 'dispatcher_reply',
+      recipient_phone: customerPhone,
+      body_text: trimmed,
+      from_number: ourPhone || undefined,
+      contact_id: conversation.contact_id || undefined,
+      account_id: conversation.account_id || undefined,
+      project_id: conversation.project_id || undefined,
+      service_appointment_id: conversation.service_appointment_id || undefined,
+    }
+    const { data, error } = await supabase.functions.invoke('send-notification-sms', {
+      body: payload,
+    })
+    if (error) throw new Error(error.message || 'Send failed at the network layer')
+    if (data?.status === 'failed') {
+      const reason = data.failure_reason || 'Send failed'
+      const err = new Error(reason)
+      err.code = data.failure_code || null
+      err.payload = data
+      throw err
+    }
+    return data
   }
 
-  const customerPhone = conversation.conv_customer_address
-  const ourPhone = conversation.conv_our_address
-  if (!customerPhone || !/^\+[1-9]\d{6,14}$/.test(customerPhone)) {
-    throw new Error('Customer phone on this thread is not a valid E.164 number.')
+  // ── Email path ──────────────────────────────────────────────────────
+  if (channel === 'email') {
+    const customerEmail = conversation.conv_customer_address
+    if (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+      throw new Error('Customer email on this thread is not a valid email address.')
+    }
+    // Anchor — the caller must supply this for email; conversations carry the
+    // four canonical FKs but the spec says every email is anchored to a record
+    // and send-email-v1 enforces it. Resolve from the conversation's own FKs
+    // in priority order: service_appointment > project > account > contact.
+    let anchorObject = null
+    let anchorRecordId = null
+    if (opts.anchorObject && opts.anchorRecordId) {
+      anchorObject = opts.anchorObject
+      anchorRecordId = opts.anchorRecordId
+    } else if (conversation.service_appointment_id) {
+      anchorObject = 'service_appointments'
+      anchorRecordId = conversation.service_appointment_id
+    } else if (conversation.project_id) {
+      anchorObject = 'projects'
+      anchorRecordId = conversation.project_id
+    } else if (conversation.account_id) {
+      anchorObject = 'accounts'
+      anchorRecordId = conversation.account_id
+    } else if (conversation.contact_id) {
+      anchorObject = 'contacts'
+      anchorRecordId = conversation.contact_id
+    } else {
+      throw new Error('Email reply requires an anchor record but the thread has no project/account/contact/service_appointment.')
+    }
+
+    // Reply subject default: "Re: <original subject>" if not already prefixed.
+    const baseSubject = (conversation.conv_subject || '').trim() || '(no subject)'
+    const subject = /^re:/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`
+
+    // Find the outbound mailbox by matching the thread's our_address.
+    let outboundMailboxId = opts.outboundMailboxId || null
+    if (!outboundMailboxId && conversation.conv_our_address) {
+      // Strip plus-addressing before matching (assessments+c_abc@... → assessments@...)
+      const baseOurs = stripPlusAddress(conversation.conv_our_address)
+      const { data: mailbox } = await supabase
+        .from('outbound_mailboxes')
+        .select('id')
+        .eq('obm_address', baseOurs)
+        .eq('obm_is_active', true)
+        .eq('obm_is_deleted', false)
+        .maybeSingle()
+      outboundMailboxId = mailbox?.id || null
+    }
+
+    const payload = {
+      anchor_object: anchorObject,
+      anchor_record_id: anchorRecordId,
+      to: { email: customerEmail, name: opts.recipientName || customerEmail },
+      subject,
+      body_html: textToMinimalHtml(trimmed),
+      outbound_mailbox_id: outboundMailboxId || undefined,
+      contact_id: conversation.contact_id || undefined,
+    }
+    const { data, error } = await supabase.functions.invoke('send-email-v1', {
+      body: payload,
+    })
+    if (error) throw new Error(error.message || 'Send failed at the network layer')
+    if (data?.status === 'failed') {
+      const reason = data.failure_reason || 'Send failed'
+      const err = new Error(reason)
+      err.payload = data
+      throw err
+    }
+    return data
   }
+
+  throw new Error(`Replies on '${channel}' threads are not supported.`)
+}
+
+/**
+ * Active outbound mailboxes for the Compose Email mailbox picker.
+ * Soft-deleted and inactive rows are excluded.
+ */
+export async function fetchOutboundMailboxes() {
+  const { data, error } = await supabase
+    .from('outbound_mailboxes')
+    .select('id, obm_record_number, obm_address, obm_display_name, obm_state, obm_program_id')
+    .eq('obm_is_active', true)
+    .eq('obm_is_deleted', false)
+    .order('obm_state', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+/**
+ * Send a brand-new email (no existing thread) anchored to a parent record.
+ * Routes through send-email-v1 in free-form mode (subject + body_html).
+ *
+ * The edge function:
+ *   • resolves the outbound mailbox (explicit id wins, then state lookup)
+ *   • calls find_or_create_conversation to thread on customer + our address
+ *   • inserts the messages row in 'queued'
+ *   • flips to 'sent' (mock mode → mock-<uuid>, real mode → graph-<uuid>)
+ *   • updates conversation rollup via the AFTER INSERT trigger
+ *
+ * Returns the edge function's JSON payload — caller surfaces mode (mock/real),
+ * conversation_id (to navigate to the new thread), and provider_message_id.
+ */
+export async function sendNewEmail({
+  anchorObject,
+  anchorRecordId,
+  to,            // { email, name? }
+  subject,
+  bodyText,      // plain text — auto-wrapped to minimal HTML
+  outboundMailboxId,
+  contactId,
+}) {
+  if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
+  if (!to?.email) throw new Error('Recipient email required')
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.email)) throw new Error('Recipient email is not a valid address')
+  const trimmedSubject = (subject || '').trim()
+  if (!trimmedSubject) throw new Error('Subject required')
+  const trimmedBody = (bodyText || '').trim()
+  if (!trimmedBody) throw new Error('Message body required')
+  if (!outboundMailboxId) throw new Error('Outbound mailbox required')
 
   const payload = {
-    trigger_event: 'dispatcher_reply',
-    recipient_phone: customerPhone,
-    body_text: trimmed,
-    from_number: ourPhone || undefined,
-    contact_id: conversation.contact_id || undefined,
-    account_id: conversation.account_id || undefined,
-    project_id: conversation.project_id || undefined,
-    service_appointment_id: conversation.service_appointment_id || undefined,
+    anchor_object: anchorObject,
+    anchor_record_id: anchorRecordId,
+    to: { email: to.email, name: to.name || to.email },
+    subject: trimmedSubject,
+    body_html: textToMinimalHtml(trimmedBody),
+    outbound_mailbox_id: outboundMailboxId,
+    contact_id: contactId || undefined,
   }
-
-  const { data, error } = await supabase.functions.invoke('send-notification-sms', {
+  const { data, error } = await supabase.functions.invoke('send-email-v1', {
     body: payload,
   })
-  if (error) {
-    // Edge function returns 2xx with status:'failed' on Twilio errors, so a
-    // non-2xx response here means a transport-level problem (CORS, network,
-    // or the function 500'd before writing audit). Surface the supabase-js
-    // error message directly.
-    throw new Error(error.message || 'Send failed at the network layer')
-  }
+  if (error) throw new Error(error.message || 'Send failed at the network layer')
   if (data?.status === 'failed') {
     const reason = data.failure_reason || 'Send failed'
     const err = new Error(reason)
-    err.code = data.failure_code || null
     err.payload = data
     throw err
   }
   return data
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────
+
+// Strip plus-addressing (assessments+c_8f3a2b1d@ees-wi.org → assessments@ees-wi.org)
+// so we can match the conversation's our_address back to its underlying mailbox.
+function stripPlusAddress(address) {
+  if (!address) return ''
+  const at = address.indexOf('@')
+  if (at < 0) return address
+  const local = address.slice(0, at)
+  const domain = address.slice(at)
+  const plus = local.indexOf('+')
+  if (plus < 0) return address
+  return `${local.slice(0, plus)}${domain}`
+}
+
+// Plain text → minimal HTML for Graph's HTML body requirement.
+// Preserves line breaks via white-space:pre-wrap and entity-escapes &<>.
+function textToMinimalHtml(text) {
+  if (!text) return ''
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  return `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#111;white-space:pre-wrap;">${escaped}</div>`
 }
 
 /**

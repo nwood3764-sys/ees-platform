@@ -11,6 +11,17 @@ import {
   describeChannel,
   describeDirection,
 } from '../data/conversationsService'
+import ComposeEmailModal from './ComposeEmailModal'
+
+// FK column on conversations → anchor object name expected by send-email-v1.
+// The widget knows its parent only through widget_config.fk, so the modal
+// can't infer the anchor table itself — we map it explicitly here.
+const FK_TO_ANCHOR_OBJECT = {
+  contact_id: 'contacts',
+  account_id: 'accounts',
+  project_id: 'projects',
+  service_appointment_id: 'service_appointments',
+}
 
 // ---------------------------------------------------------------------------
 // ConversationPanel — Salesforce Service Cloud Messaging-style split-pane
@@ -94,6 +105,8 @@ export default function ConversationPanelWidget({
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  // New-email composer modal — opens via the header "New Email" button.
+  const [showCompose, setShowCompose] = useState(false)
 
   const messagesScrollRef = useRef(null)
   const composerRef = useRef(null)
@@ -169,7 +182,10 @@ export default function ConversationPanelWidget({
     if (!selectedThread) return
     const body = draft.trim()
     if (!body) return
-    if (body.length > 1600) {
+    const channel = selectedThread.conv_channel
+    // SMS hard cap at 1600 chars (Twilio segmented limit); email is effectively
+    // unlimited at the messages-table level.
+    if (channel === 'sms' && body.length > 1600) {
       toast.error('Message exceeds 1600-character SMS limit. Shorten and try again.')
       return
     }
@@ -177,7 +193,9 @@ export default function ConversationPanelWidget({
     try {
       const result = await sendReplyToConversation(selectedThread, body)
       const isMock = result?.mode === 'mock'
-      toast.success(isMock ? 'Reply queued (mock mode — Twilio not configured)' : 'Reply sent')
+      const channelName = channel === 'email' ? 'Email reply' : 'Reply'
+      const provider = channel === 'email' ? 'Graph not yet configured' : 'Twilio not configured'
+      toast.success(isMock ? `${channelName} queued (mock mode — ${provider})` : `${channelName} sent`)
       setDraft('')
       // Refetch both panes so the new outbound message and the rolled-up
       // last-message preview/timestamp are reflected immediately.
@@ -194,6 +212,15 @@ export default function ConversationPanelWidget({
       setSending(false)
     }
   }, [draft, refreshThreads, selectedThread, toast])
+
+  // ── Compose-modal callback ──────────────────────────────────────────
+  // The modal calls onSent with the newly-created conversation_id and
+  // message_id. We refresh the thread list in the background and select
+  // the new thread so the user sees their just-sent email immediately.
+  const handleComposeSent = useCallback(async ({ conversationId }) => {
+    await refreshThreads({ background: true })
+    if (conversationId) setSelectedThreadId(conversationId)
+  }, [refreshThreads])
 
   // Composer submit on Cmd/Ctrl + Enter; plain Enter inserts a newline.
   const handleKeyDown = (e) => {
@@ -216,7 +243,8 @@ export default function ConversationPanelWidget({
   const showMobileThread = isMobile && selectedThreadId
 
   return (
-    <div style={{
+    <>
+      <div style={{
       background: C.card,
       border: `1px solid ${C.border}`,
       borderRadius: 8,
@@ -276,6 +304,27 @@ export default function ConversationPanelWidget({
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {FK_TO_ANCHOR_OBJECT[fk] && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowCompose(true) }}
+              title="Compose a new email anchored to this record"
+              style={{
+                background: C.emerald || '#3ecf8e',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 5,
+                padding: isMobile ? '8px 10px' : '4px 10px',
+                fontSize: isMobile ? 13 : 11.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                minHeight: isMobile ? 36 : undefined,
+              }}
+            >
+              <Icon path="M12 5v14 M5 12h14" size={isMobile ? 13 : 11} color="currentColor" />
+              {isMobile ? '' : 'New Email'}
+            </button>
+          )}
           <button
             onClick={(e) => { e.stopPropagation(); refreshThreads() }}
             title="Refresh"
@@ -349,7 +398,7 @@ export default function ConversationPanelWidget({
                     <div style={{ marginBottom: 6, fontWeight: 600, color: C.textSecondary }}>
                       No conversations yet
                     </div>
-                    Threads appear here when an SMS or email is sent to — or received from — this record's contact.
+                    Threads appear here when an SMS or email is sent to — or received from — this record's contact. Click <strong>New Email</strong> above to start one.
                   </div>
                 )}
                 {threads.map(thread => (
@@ -443,7 +492,18 @@ export default function ConversationPanelWidget({
           )}
         </div>
       )}
-    </div>
+      </div>
+
+      {/* Compose new email modal — opened by the header "New Email" button */}
+      <ComposeEmailModal
+        open={showCompose}
+        onClose={() => setShowCompose(false)}
+        onSent={handleComposeSent}
+        anchorObject={FK_TO_ANCHOR_OBJECT[fk] || null}
+        anchorRecordId={parentRecordId}
+        defaultContactId={fk === 'contact_id' ? parentRecordId : null}
+      />
+    </>
   )
 }
 
