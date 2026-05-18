@@ -13,6 +13,7 @@ import {
   fetchEmailTemplates, fetchDocumentTemplates, fetchEnvelopes,
   fetchAutomationRules, fetchValidationRules,
   fetchPicklistValues, fetchAuditLog,
+  fetchSavedListViews,
   fetchDeletedRecords, fetchDeletedRecordsAcrossTables, restoreRecord, purgeRecord,
   fetchAdminHealthSummary,
   fetchAllPageLayouts,
@@ -435,7 +436,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'automation_rules':  return <NodePage title="Flows (Automation Rules)" table="automation_rules" fetcher={fetchAutomationRules}   columns={AR_COLS}             newLabel="Automation Rule"  onOpenRecord={onOpenRecord} />
     case 'validation_rules':  return <NodePage title="Validation Rules"        table="validation_rules"  fetcher={fetchValidationRules}   columns={VR_COLS}             newLabel="Validation Rule"  onOpenRecord={onOpenRecord} />
     case 'page_layouts':      return <NodePage title="Page Layouts"            table="page_layouts"      fetcher={fetchAllPageLayouts}    columns={PAGELAYOUT_COLS}     newLabel="Page Layout"      onOpenRecord={onOpenRecord} />
-    case 'saved_list_views':  return <ComingSoonPane label="Saved List Views" />
+    case 'saved_list_views':  return <NodePage title="Saved List Views"        table="saved_list_views"  fetcher={fetchSavedListViews}    columns={LV_COLS}             newLabel="List View"        onOpenRecord={onOpenRecord} />
     case 'email_templates':   return <NodePage title="Email Templates"         table="email_templates"   fetcher={fetchEmailTemplates}    columns={ET_COLS}             newLabel="Email Template"   onOpenRecord={onOpenRecord} />
     case 'document_templates':return <NodePage title="Document Templates"      table="document_templates" fetcher={fetchDocumentTemplates} columns={DT_COLS}            newLabel="Document Template" onOpenRecord={onOpenRecord} />
     case 'envelopes':         return <NodePage title="Envelopes"               table="envelopes"         fetcher={fetchEnvelopes}         columns={ENV_COLS}            newLabel={null}             onOpenRecord={onOpenRecord} />
@@ -1297,6 +1298,20 @@ const PL_COLS = [
   { field: 'label',     label: 'Label',    type: 'text', sortable: true, filterable: true },
   { field: 'sortOrder', label: 'Order',    type: 'text', sortable: true, filterable: false },
   { field: 'status',    label: 'Status',   type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
+]
+
+const LV_COLS = [
+  { field: 'id',            label: 'Record #',   type: 'text',   sortable: true, filterable: false },
+  { field: 'name',          label: 'Name',       type: 'text',   sortable: true, filterable: true },
+  { field: 'object',        label: 'Object',     type: 'text',   sortable: true, filterable: true },
+  { field: 'module',        label: 'Module',     type: 'text',   sortable: true, filterable: true },
+  { field: 'scope',         label: 'Scope',      type: 'text',   sortable: true, filterable: true },
+  { field: 'isDefault',     label: 'Default',    type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'] },
+  { field: 'sort',          label: 'Sort',       type: 'text',   sortable: false, filterable: false },
+  { field: 'columnsCount',  label: 'Columns',    type: 'text',   sortable: true, filterable: false },
+  { field: 'filtersCount',  label: 'Filters',    type: 'text',   sortable: true, filterable: false },
+  { field: 'owner',         label: 'Owner',      type: 'text',   sortable: true, filterable: true },
+  { field: 'updatedAt',     label: 'Updated',    type: 'text',   sortable: true, filterable: false },
 ]
 
 const PAGELAYOUT_COLS = [

@@ -272,6 +272,91 @@ export async function fetchPicklistValues() {
 }
 
 // ---------------------------------------------------------------------------
+// Saved list views — per-module record listings (filters / sort / columns)
+// ---------------------------------------------------------------------------
+
+export async function fetchSavedListViews() {
+  // Two-query shape so we can resolve the owner uuid → user_name for display
+  // without making the NodePage's row data carry both raw uuid and join.
+  const { data, error } = await supabase
+    .from('saved_list_views')
+    .select(`
+      id, list_view_record_number, list_view_name,
+      list_view_object, list_view_module,
+      list_view_user_id, list_view_role_id,
+      list_view_owner,
+      list_view_is_default, list_view_is_shared,
+      list_view_sort_field, list_view_sort_direction,
+      list_view_visible_columns, list_view_filters,
+      updated_at
+    `)
+    .eq('is_deleted', false)
+    .order('list_view_object', { ascending: true })
+    .order('list_view_name', { ascending: true })
+    .limit(500)
+
+  if (error) throw error
+  const rows = data || []
+
+  // Bulk-resolve owner names (NodePage row shows the owner). Skip if none.
+  const ownerIds = [...new Set(rows.map(r => r.list_view_owner).filter(Boolean))]
+  let ownerNames = {}
+  if (ownerIds.length > 0) {
+    const { data: users } = await supabase
+      .from('users').select('id, user_name').in('id', ownerIds)
+    ownerNames = Object.fromEntries((users || []).map(u => [u.id, u.user_name]))
+  }
+
+  // Bulk-resolve role names too (a list view can be scoped to a role
+  // rather than a single user — list_view_role_id).
+  const roleIds = [...new Set(rows.map(r => r.list_view_role_id).filter(Boolean))]
+  let roleNames = {}
+  if (roleIds.length > 0) {
+    const { data: roles } = await supabase
+      .from('roles').select('id, role_name').in('id', roleIds)
+    roleNames = Object.fromEntries((roles || []).map(r => [r.id, r.role_name]))
+  }
+
+  return rows.map(r => {
+    // Scope label: shared (everyone), role-scoped, user-scoped, or "owner only"
+    let scope = 'Personal'
+    if (r.list_view_is_shared) scope = 'Shared'
+    else if (r.list_view_role_id) scope = `Role: ${roleNames[r.list_view_role_id] || r.list_view_role_id.slice(0, 8)}`
+    else if (r.list_view_user_id) scope = `User: ${ownerNames[r.list_view_user_id] || r.list_view_user_id.slice(0, 8)}`
+
+    const columnsCount = Array.isArray(r.list_view_visible_columns)
+      ? r.list_view_visible_columns.length
+      : (r.list_view_visible_columns && typeof r.list_view_visible_columns === 'object')
+        ? Object.keys(r.list_view_visible_columns).length
+        : 0
+    const filtersCount = Array.isArray(r.list_view_filters)
+      ? r.list_view_filters.length
+      : (r.list_view_filters && typeof r.list_view_filters === 'object')
+        ? Object.keys(r.list_view_filters).length
+        : 0
+
+    return {
+      id: r.list_view_record_number || r.id.slice(0, 8).toUpperCase(),
+      _id: r.id,
+      name: r.list_view_name || '(untitled)',
+      object: r.list_view_object || '',
+      module: r.list_view_module || '',
+      scope,
+      isDefault: r.list_view_is_default ? 'Yes' : 'No',
+      sort: r.list_view_sort_field
+        ? `${r.list_view_sort_field} ${r.list_view_sort_direction === 'asc' ? '↑' : '↓'}`
+        : '—',
+      columnsCount,
+      filtersCount,
+      owner: ownerNames[r.list_view_owner] || '',
+      updatedAt: r.updated_at ? new Date(r.updated_at).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric',
+      }) : '',
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Object Manager fetchers — schema introspection via RPC and related queries
 // ---------------------------------------------------------------------------
 
