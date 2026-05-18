@@ -357,6 +357,95 @@ export async function fetchSavedListViews() {
 }
 
 // ---------------------------------------------------------------------------
+// Service Territories — geographic regions field staff are assigned to.
+// Hierarchical: parent_territory_id + top_level_territory_id self-refs.
+// Each territory owns a set of zip codes via the service_territory_zips junction.
+// ---------------------------------------------------------------------------
+
+export async function fetchServiceTerritories() {
+  const { data, error } = await supabase
+    .from('service_territories')
+    .select(`
+      id, service_territory_record_number, service_territory_name,
+      service_territory_is_active,
+      service_territory_state, service_territory_country,
+      service_territory_travel_time_buffer_minutes,
+      parent_territory_id, top_level_territory_id,
+      service_territory_owner,
+      service_territory_updated_at
+    `)
+    .eq('service_territory_is_deleted', false)
+    .order('service_territory_name', { ascending: true })
+    .limit(500)
+
+  if (error) throw error
+  const rows = data || []
+
+  // Bulk-resolve owner names so the row shape carries display text rather
+  // than a raw uuid.
+  const ownerIds = [...new Set(rows.map(r => r.service_territory_owner).filter(Boolean))]
+  let ownerNames = {}
+  if (ownerIds.length > 0) {
+    const { data: users } = await supabase
+      .from('users').select('id, user_name').in('id', ownerIds)
+    ownerNames = Object.fromEntries((users || []).map(u => [u.id, u.user_name]))
+  }
+
+  // Bulk-resolve parent territory names. The parent_territory_id self-ref
+  // means a territory can both be a parent and have a parent — we resolve
+  // every distinct id mentioned in either slot against the same rowset
+  // when possible, falling back to a small follow-up query for ids that
+  // aren't in the loaded page.
+  const knownNames = Object.fromEntries(rows.map(r => [r.id, r.service_territory_name]))
+  const referencedIds = [...new Set([
+    ...rows.map(r => r.parent_territory_id),
+    ...rows.map(r => r.top_level_territory_id),
+  ].filter(Boolean))]
+  const missingIds = referencedIds.filter(id => !knownNames[id])
+  if (missingIds.length > 0) {
+    const { data: extras } = await supabase
+      .from('service_territories')
+      .select('id, service_territory_name')
+      .in('id', missingIds)
+    for (const e of (extras || [])) knownNames[e.id] = e.service_territory_name
+  }
+
+  // Bulk zip-count per territory. service_territory_zips has 0 rows in the
+  // current install (zips haven't been imported yet), so this typically
+  // returns nothing — but the query shape is correct for when it does.
+  const territoryIds = rows.map(r => r.id)
+  let zipCounts = {}
+  if (territoryIds.length > 0) {
+    const { data: zipRows } = await supabase
+      .from('service_territory_zips')
+      .select('service_territory_id')
+      .in('service_territory_id', territoryIds)
+      .eq('stz_is_deleted', false)
+    if (zipRows) {
+      for (const z of zipRows) {
+        zipCounts[z.service_territory_id] = (zipCounts[z.service_territory_id] || 0) + 1
+      }
+    }
+  }
+
+  return rows.map(r => ({
+    id: r.service_territory_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id: r.id,
+    name: r.service_territory_name || '(unnamed)',
+    active: r.service_territory_is_active === false ? 'Inactive' : 'Active',
+    parent: r.parent_territory_id ? (knownNames[r.parent_territory_id] || '—') : '—',
+    state: r.service_territory_state || '',
+    country: r.service_territory_country || '',
+    zipCount: zipCounts[r.id] || 0,
+    travelBufferMin: r.service_territory_travel_time_buffer_minutes ?? '',
+    owner: ownerNames[r.service_territory_owner] || '',
+    updatedAt: r.service_territory_updated_at ? new Date(r.service_territory_updated_at).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric',
+    }) : '',
+  }))
+}
+
+// ---------------------------------------------------------------------------
 // Object Manager fetchers — schema introspection via RPC and related queries
 // ---------------------------------------------------------------------------
 

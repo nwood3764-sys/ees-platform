@@ -14,6 +14,7 @@ import {
   fetchAutomationRules, fetchValidationRules,
   fetchPicklistValues, fetchAuditLog,
   fetchSavedListViews,
+  fetchServiceTerritories,
   fetchDeletedRecords, fetchDeletedRecordsAcrossTables, restoreRecord, purgeRecord,
   fetchAdminHealthSummary,
   fetchAllPageLayouts,
@@ -445,7 +446,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'work_plan_templates': return <WorkPlanTemplatesPane onOpenRecord={onOpenRecord} />
     case 'work_step_templates': return <NodePage title="Work Step Templates"   table="work_step_templates" fetcher={fetchWorkStepTemplates} columns={WST_COLS}            newLabel="Work Step Template" onOpenRecord={onOpenRecord} />
     case 'project_report_templates': return <NodePage title="Project Report Templates" table="project_report_templates" fetcher={fetchProjectReportTemplates} columns={PRT_COLS} newLabel="Project Report Template" onOpenRecord={onOpenRecord} />
-    case 'service_territories': return <ComingSoonPane label="Service Territories" />
+    case 'service_territories': return <NodePage title="Service Territories"   table="service_territories" fetcher={fetchServiceTerritories} columns={ST_COLS}             newLabel="Service Territory" onOpenRecord={onOpenRecord} />
     case 'skills':              return <NodePage title="Skills"                  table="skills"                       fetcher={fetchSkills}                       columns={SKILL_COLS} newLabel="Skill"                       onOpenRecord={onOpenRecord} />
     case 'work_type_skill_requirements': return <NodePage title="Work Type Skill Requirements" table="work_type_skill_requirements" fetcher={fetchWorkTypeSkillRequirements} columns={WTSR_COLS}  newLabel="Skill Requirement"           onOpenRecord={onOpenRecord} />
     case 'audit_log':         return <AuditLogPane />
@@ -1312,6 +1313,19 @@ const LV_COLS = [
   { field: 'filtersCount',  label: 'Filters',    type: 'text',   sortable: true, filterable: false },
   { field: 'owner',         label: 'Owner',      type: 'text',   sortable: true, filterable: true },
   { field: 'updatedAt',     label: 'Updated',    type: 'text',   sortable: true, filterable: false },
+]
+
+const ST_COLS = [
+  { field: 'id',              label: 'Record #',     type: 'text',   sortable: true, filterable: false },
+  { field: 'name',            label: 'Name',         type: 'text',   sortable: true, filterable: true },
+  { field: 'active',          label: 'Status',       type: 'select', sortable: true, filterable: true, options: ['Active', 'Inactive'] },
+  { field: 'parent',          label: 'Parent',       type: 'text',   sortable: true, filterable: true },
+  { field: 'state',           label: 'State',        type: 'text',   sortable: true, filterable: true },
+  { field: 'country',         label: 'Country',      type: 'text',   sortable: true, filterable: true },
+  { field: 'zipCount',        label: 'Zips',         type: 'text',   sortable: true, filterable: false },
+  { field: 'travelBufferMin', label: 'Travel Buffer (min)', type: 'text', sortable: true, filterable: false },
+  { field: 'owner',           label: 'Owner',        type: 'text',   sortable: true, filterable: true },
+  { field: 'updatedAt',       label: 'Updated',      type: 'text',   sortable: true, filterable: false },
 ]
 
 const PAGELAYOUT_COLS = [
