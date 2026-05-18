@@ -595,7 +595,9 @@ function VoidEnvelopeModal({ envelopeRecordNumber, onConfirm, onCancel, busy }) 
 
 function DocumentTemplatePreviewModal({
   templateName, relatedObject, options, loadingOptions,
-  selected, onSelectedChange, rendering, onCancel, onGenerate,
+  selected, onSelectedChange,
+  overlay, onOverlayChange,
+  rendering, onCancel, onGenerate,
 }) {
   const canSubmit = !!selected && !rendering && !loadingOptions
   return (
@@ -669,6 +671,51 @@ function DocumentTemplatePreviewModal({
           </div>
         )}
 
+        {/* Anchor overlay toggle — when on, the edge function draws colored
+            translucent rectangles over every signature anchor so the author
+            can visually verify placement. Color legend appears when the
+            toggle is on so the rectangles in the rendered PDF make sense. */}
+        <div style={{
+          marginTop: 14, padding: '10px 12px',
+          background: overlay ? '#f0f9ff' : C.cardSecondary,
+          border: `1px solid ${overlay ? '#bae6fd' : C.border}`,
+          borderRadius: 6,
+        }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: rendering ? 'wait' : 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={!!overlay}
+              disabled={rendering}
+              onChange={(e) => onOverlayChange(e.target.checked)}
+              style={{ margin: 0, cursor: rendering ? 'wait' : 'pointer' }}
+            />
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>
+              Show signature anchor positions
+            </span>
+          </label>
+          <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 4, marginLeft: 22, lineHeight: 1.5 }}>
+            Draws labeled rectangles over each <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\sig1\</code>, <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\date1\</code>, <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\init1\</code>, and <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: `1px solid ${C.border}`, fontSize: 11 }}>\text1\</code> token at its resolved bounding box.
+          </div>
+          {overlay && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, marginLeft: 22 }}>
+              {[
+                { label: 'sig',  fill: 'rgba(62,207,142,0.30)',  border: '#2aab72' },
+                { label: 'init', fill: 'rgba(126,179,232,0.30)', border: '#3a82c6' },
+                { label: 'date', fill: 'rgba(232,169,73,0.30)',  border: '#bf7f1f' },
+                { label: 'text', fill: 'rgba(143,160,184,0.30)', border: '#61738d' },
+              ].map(c => (
+                <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: C.textSecondary }}>
+                  <span style={{
+                    display: 'inline-block', width: 22, height: 12,
+                    background: c.fill, border: `1px solid ${c.border}`, borderRadius: 2,
+                  }} />
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace', color: c.border, fontWeight: 600 }}>{c.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
           <button
             onClick={() => canSubmit && onGenerate()}
@@ -682,7 +729,7 @@ function DocumentTemplatePreviewModal({
               opacity: canSubmit ? 1 : 0.8,
             }}
           >
-            {rendering ? 'Rendering…' : 'Generate Preview'}
+            {rendering ? 'Rendering…' : overlay ? 'Generate Preview with Anchors' : 'Generate Preview'}
           </button>
           <button
             onClick={onCancel}
@@ -3675,6 +3722,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [docPreviewParentOptions, setDocPreviewParentOptions] = useState([])
   const [docPreviewParentRecord, setDocPreviewParentRecord] = useState('')
   const [docPreviewRendering, setDocPreviewRendering]       = useState(false)
+  // When true, the edge function draws translucent labeled rectangles over
+  // every signature anchor in the rendered preview PDF. Only used by the
+  // preview flow — signed envelopes never carry the overlay.
+  const [docPreviewOverlay, setDocPreviewOverlay]           = useState(false)
   // Email Template Preview state — same shape as document template preview
   // but the result is rendered inline in a modal with an iframe (no PDF
   // tab) since email templates are HTML-only.
@@ -4133,6 +4184,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     setDocPreviewOpen(false)
     setDocPreviewParentRecord('')
     setDocPreviewParentOptions([])
+    setDocPreviewOverlay(false)
   }, [docPreviewRendering])
 
   const generateDocPreview = useCallback(async () => {
@@ -4159,10 +4211,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           'Content-Type':  'application/json',
         },
         body: JSON.stringify({
-          document_template_id: recordId,
-          parent_object:        relatedObject,
-          parent_record_id:     docPreviewParentRecord,
-          preview:              true,
+          document_template_id:   recordId,
+          parent_object:          relatedObject,
+          parent_record_id:       docPreviewParentRecord,
+          preview:                true,
+          include_anchor_overlay: docPreviewOverlay,
         }),
       })
 
@@ -4199,12 +4252,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       setDocPreviewOpen(false)
       setDocPreviewParentRecord('')
       setDocPreviewParentOptions([])
+      setDocPreviewOverlay(false)
     } catch (err) {
       toast.error(`Preview failed — ${err.message || String(err)}`)
     } finally {
       setDocPreviewRendering(false)
     }
-  }, [docPreviewRendering, docPreviewParentRecord, recordId, data, toast])
+  }, [docPreviewRendering, docPreviewParentRecord, docPreviewOverlay, recordId, data, toast])
 
   // ─── Email Template Preview ───────────────────────────────────────────────
   // Same parent-record-picker UX as document templates. On Generate we hit
@@ -5381,6 +5435,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           loadingOptions={docPreviewLoadingOpts}
           selected={docPreviewParentRecord}
           onSelectedChange={setDocPreviewParentRecord}
+          overlay={docPreviewOverlay}
+          onOverlayChange={setDocPreviewOverlay}
           rendering={docPreviewRendering}
           onCancel={closeDocPreview}
           onGenerate={generateDocPreview}

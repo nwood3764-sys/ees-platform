@@ -539,9 +539,59 @@ function drawTable(ctx: LayoutCtx, rows: Run[][][]): void {
   ctx.cursor.y -= 6
 }
 
+// ─── Anchor overlay ─────────────────────────────────────────────────────
+// When renderHtmlToPdf is called with { overlayAnchors: true }, every
+// AnchorMatch in ctx.anchors gets a colored translucent rectangle drawn
+// at its bounding box position with a short label inside. Used only by
+// preview flows (signed envelopes never carry the overlay) so authors
+// can visually verify anchor placement before publishing a template.
+
+const OVERLAY_STYLE: Record<string, { fill: ReturnType<typeof rgb>, border: ReturnType<typeof rgb>, label: string }> = {
+  signature: { fill: rgb(0.243, 0.812, 0.557), border: rgb(0.165, 0.667, 0.447), label: "sig"  },
+  initial:   { fill: rgb(0.494, 0.702, 0.910), border: rgb(0.227, 0.510, 0.776), label: "init" },
+  date:      { fill: rgb(0.910, 0.663, 0.286), border: rgb(0.749, 0.498, 0.122), label: "date" },
+  text:      { fill: rgb(0.561, 0.627, 0.722), border: rgb(0.380, 0.451, 0.553), label: "text" },
+}
+
+function drawAnchorOverlay(ctx: LayoutCtx): void {
+  for (const a of ctx.anchors) {
+    const style = OVERLAY_STYLE[a.tab_type] || OVERLAY_STYLE.text
+    const page  = ctx.pages[a.page - 1]
+    if (!page) continue
+
+    page.drawRectangle({
+      x:           a.x,
+      y:           a.y,
+      width:       a.width,
+      height:      a.height,
+      color:       style.fill,
+      opacity:     0.30,
+      borderColor: style.border,
+      borderWidth: 1,
+      borderOpacity: 0.85,
+    })
+
+    const labelText = `${style.label} ${a.ordinal}`
+    const labelSize = 8
+    const labelWidth = ctx.fontBold.widthOfTextAtSize(labelText, labelSize)
+    const labelX = a.x + Math.max(2, (a.width - labelWidth) / 2)
+    const labelY = a.y + Math.max(2, (a.height - labelSize) / 2)
+    page.drawText(labelText, {
+      x: labelX, y: labelY,
+      size: labelSize, font: ctx.fontBold,
+      color: style.border,
+      opacity: 0.95,
+    })
+  }
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────
 
-export async function renderHtmlToPdf(html: string): Promise<RenderResult> {
+export interface RenderOptions {
+  overlayAnchors?: boolean
+}
+
+export async function renderHtmlToPdf(html: string, opts: RenderOptions = {}): Promise<RenderResult> {
   const doc = await PDFDocument.create()
   const fontRegular    = await doc.embedFont(StandardFonts.Helvetica)
   const fontBold       = await doc.embedFont(StandardFonts.HelveticaBold)
@@ -573,6 +623,8 @@ export async function renderHtmlToPdf(html: string): Promise<RenderResult> {
       case "table":     drawTable(ctx, b.rows); break
     }
   }
+
+  if (opts.overlayAnchors) drawAnchorOverlay(ctx)
 
   const pdfBytes = await doc.save()
   return { pdfBytes, anchors: ctx.anchors, pageCount: ctx.pages.length }

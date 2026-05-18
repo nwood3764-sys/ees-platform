@@ -46,6 +46,11 @@ interface ReqBody {
   parent_object:                  string
   parent_record_id:               string
   preview?:                       boolean
+  // When preview is true, render translucent labeled rectangles over each
+  // signature anchor so authors can visually verify placement before
+  // publishing. Ignored when preview is false — signed envelopes must never
+  // carry visible overlays.
+  include_anchor_overlay?:        boolean
 }
 
 Deno.serve(async (req) => {
@@ -170,7 +175,9 @@ Deno.serve(async (req) => {
   // ── Render HTML to PDF, scanning for anchor strings ─────────────────
   let result
   try {
-    result = await renderHtmlToPdf(html)
+    result = await renderHtmlToPdf(html, {
+      overlayAnchors: body.preview === true && body.include_anchor_overlay === true,
+    })
   } catch (e) {
     return json({ error: `PDF render failed: ${(e as Error).message}` }, 500)
   }
