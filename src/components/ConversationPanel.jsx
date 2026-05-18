@@ -10,6 +10,9 @@ import {
   sendReplyToConversation,
   describeChannel,
   describeDirection,
+  fetchAttachmentsForMessages,
+  createAttachmentSignedUrl,
+  formatBytes,
 } from '../data/conversationsService'
 import ComposeEmailModal from './ComposeEmailModal'
 
@@ -102,6 +105,9 @@ export default function ConversationPanelWidget({
   const [messages, setMessages] = useState([])
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [messagesError, setMessagesError] = useState(null)
+  // Attachments keyed by message id. Fetched once when the thread loads,
+  // re-fetched when the messages list refreshes (after a send).
+  const [attachmentsByMessage, setAttachmentsByMessage] = useState({})
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -141,6 +147,7 @@ export default function ConversationPanelWidget({
     if (!selectedThreadId) {
       setMessages([])
       setMessagesError(null)
+      setAttachmentsByMessage({})
       return
     }
     let alive = true
@@ -150,9 +157,24 @@ export default function ConversationPanelWidget({
       fetchMessagesForConversation(selectedThreadId),
       markConversationRead(selectedThreadId),
     ])
-      .then(([rows]) => {
+      .then(async ([rows]) => {
         if (!alive) return
         setMessages(rows)
+        // Pull attachments for every message in one batched query
+        if (rows.length > 0) {
+          try {
+            const byMsg = await fetchAttachmentsForMessages(rows.map(r => r.id))
+            if (alive) setAttachmentsByMessage(byMsg)
+          } catch (e) {
+            // Non-fatal — the bubble renders without paperclips if the
+            // attachments query failed.
+            // eslint-disable-next-line no-console
+            console.warn('fetchAttachmentsForMessages failed', e)
+            if (alive) setAttachmentsByMessage({})
+          }
+        } else {
+          setAttachmentsByMessage({})
+        }
         // Optimistically clear the thread's unread badge in local state so
         // the left pane updates immediately. The next refreshThreads call
         // will reconcile against the server-rolled-up value.
@@ -204,6 +226,15 @@ export default function ConversationPanelWidget({
         refreshThreads({ background: true }),
       ])
       setMessages(refreshedMsgs)
+      if (refreshedMsgs.length > 0) {
+        try {
+          const byMsg = await fetchAttachmentsForMessages(refreshedMsgs.map(r => r.id))
+          setAttachmentsByMessage(byMsg)
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('fetchAttachmentsForMessages on refresh failed', e)
+        }
+      }
       // Keep focus on composer for rapid-fire replies.
       composerRef.current?.focus()
     } catch (err) {
@@ -470,7 +501,11 @@ export default function ConversationPanelWidget({
                       </div>
                     )}
                     {messages.map(msg => (
-                      <MessageBubble key={msg.id} message={msg} />
+                      <MessageBubble
+                        key={msg.id}
+                        message={msg}
+                        attachments={attachmentsByMessage[msg.id] || []}
+                      />
                     ))}
                   </div>
 
@@ -666,10 +701,25 @@ function ThreadHeader({ thread, isMobile, onBack }) {
 // ---------------------------------------------------------------------------
 // MessageBubble — one row in the message timeline
 // ---------------------------------------------------------------------------
-function MessageBubble({ message }) {
+function MessageBubble({ message, attachments = [] }) {
   const dir = describeDirection(message.msg_direction)
   const isFailed = message.msg_status === 'failed'
   const isQueued = message.msg_status === 'queued'
+
+  // Open one attachment — mints a 5-min signed URL on click. Errors surface
+  // via window.alert here because MessageBubble doesn't have access to the
+  // toast context (it's rendered inside the message-list scroll container).
+  const handleAttachmentClick = async (att, evt) => {
+    if (evt) evt.preventDefault()
+    try {
+      const url = await createAttachmentSignedUrl(att)
+      if (!url) throw new Error('No signed URL returned')
+      window.open(url, '_blank', 'noopener')
+    } catch (e) {
+      // eslint-disable-next-line no-alert
+      window.alert(`Could not open attachment: ${e.message || e}`)
+    }
+  }
 
   return (
     <div style={{
@@ -689,6 +739,86 @@ function MessageBubble({ message }) {
       }}>
         {message.msg_body || '—'}
       </div>
+
+      {/* Attachments — paperclip chips below the body, same max-width and
+          alignment as the bubble so they read as part of the same message. */}
+      {attachments.length > 0 && (
+        <div style={{
+          maxWidth: '78%', marginTop: 6,
+          display: 'flex', flexDirection: 'column', gap: 4,
+          alignItems: 'stretch',
+        }}>
+          {attachments.map(att => {
+            const isPending  = att.ma_virus_scan_status === 'pending'
+            const isInfected = att.ma_virus_scan_status === 'infected'
+            const blocked    = isInfected
+            return (
+              <button
+                key={att.id}
+                onClick={blocked ? undefined : (e) => handleAttachmentClick(att, e)}
+                disabled={blocked}
+                title={blocked ? 'Attachment failed virus scan — download blocked.' : `Open ${att.ma_file_name}`}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 10px',
+                  background: isFailed ? '#fce8e8' : (blocked ? '#fce8e8' : '#ffffff'),
+                  border: `1px solid ${isFailed ? '#f3b4b4' : (blocked ? '#f3b4b4' : dir.border)}`,
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: blocked ? '#8a1a1a' : dir.color,
+                  cursor: blocked ? 'not-allowed' : 'pointer',
+                  textAlign: 'left', width: '100%',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <Icon
+                  path="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
+                  size={13}
+                  color="currentColor"
+                />
+                <div style={{
+                  flex: 1, minWidth: 0,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  fontWeight: 600,
+                }}>
+                  {att.ma_file_name}
+                </div>
+                <div style={{ fontSize: 10.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
+                  {formatBytes(att.ma_file_size_bytes)}
+                </div>
+                {isPending && (
+                  <span style={{
+                    background: '#fff4e0', color: '#8a5a1a',
+                    fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+                    padding: '1px 6px', borderRadius: 8, textTransform: 'uppercase',
+                  }} title="Virus scan pending — ClamAV hook ships in a follow-up slice">
+                    Scan pending
+                  </span>
+                )}
+                {isInfected && (
+                  <span style={{
+                    background: '#fce8e8', color: '#8a1a1a',
+                    fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+                    padding: '1px 6px', borderRadius: 8, textTransform: 'uppercase',
+                  }}>
+                    Blocked
+                  </span>
+                )}
+                {att.ma_delivery_method === 'signed_link' && (
+                  <span style={{
+                    background: '#e8f3fb', color: '#1a5a8a',
+                    fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+                    padding: '1px 6px', borderRadius: 8, textTransform: 'uppercase',
+                  }} title="Large file — ships as signed download link instead of inline attachment">
+                    Link
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       <div style={{
         marginTop: 3,
         fontSize: 10.5, color: dir.meta,

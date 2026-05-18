@@ -598,3 +598,209 @@ export async function dismissUnmatchedRow({ unmatchedId, reason }) {
   }).eq('id', unmatchedId)
   if (error) throw error
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Attachments — Communications Module v1 Slice 5
+//
+// Storage layout: bucket `communications-attachments`, key
+//   {conversation_id}/{message_id}/{uuid}-{filename}
+// Each row is linked from public.message_attachments. Bucket is non-public —
+// downloads go through signed URLs minted at view time.
+//
+// Allowed types (extension + MIME) and 25 MB inline / signed-link threshold
+// match the leap-communications-module-1.md spec. ma_virus_scan_status
+// defaults to 'pending' — the ClamAV edge function that flips it to 'clean'
+// or 'infected' is a follow-up slice. For v1, attachments display in the
+// timeline immediately with a pending-scan badge.
+// ───────────────────────────────────────────────────────────────────────────
+
+const ATTACHMENT_MAX_INLINE_BYTES = 25 * 1024 * 1024
+
+const ATTACHMENT_BUCKET = 'communications-attachments'
+
+// Conservative allow-list — common business document and image formats.
+// Mirrors the spec. Anything outside this set is refused at upload with a
+// clear toast.
+const ATTACHMENT_ALLOWED_EXTENSIONS = new Set([
+  'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt',
+  'png', 'jpg', 'jpeg', 'heic', 'heif', 'gif', 'webp',
+  'csv', 'tsv', 'txt', 'md',
+  'zip',
+])
+
+// Block executables / scripts outright — even if disguised by extension.
+const ATTACHMENT_BLOCKED_EXTENSIONS = new Set([
+  'exe', 'bat', 'sh', 'ps1', 'vbs', 'js', 'jar', 'dll', 'msi',
+  'app', 'scr', 'cmd', 'com', 'cpl', 'reg', 'wsf', 'wsh',
+])
+
+function extensionOf(filename) {
+  if (!filename) return ''
+  const dot = filename.lastIndexOf('.')
+  if (dot < 0 || dot === filename.length - 1) return ''
+  return filename.slice(dot + 1).toLowerCase()
+}
+
+/**
+ * Pre-flight validation a caller can run before staging an attachment in the
+ * compose modal. Throws a descriptive Error if the file is refused. Used by
+ * the modal's file-input change handler.
+ */
+export function validateAttachmentFile(file) {
+  if (!file) throw new Error('No file selected')
+  const ext = extensionOf(file.name)
+  if (ATTACHMENT_BLOCKED_EXTENSIONS.has(ext)) {
+    throw new Error(`Refused: .${ext} files are blocked for security.`)
+  }
+  if (ext && !ATTACHMENT_ALLOWED_EXTENSIONS.has(ext)) {
+    throw new Error(`Refused: .${ext} is not in the allowed file types (PDF, Office, images, CSV, TXT, ZIP).`)
+  }
+  // 100 MB hard ceiling regardless of inline vs signed-link — the signed-link
+  // path is the way around the 25 MB Graph cap but we still cap total size.
+  const HARD_MAX = 100 * 1024 * 1024
+  if (file.size > HARD_MAX) {
+    throw new Error(`File too large: ${(file.size / 1024 / 1024).toFixed(1)} MB exceeds the 100 MB limit.`)
+  }
+  return true
+}
+
+/**
+ * Upload a single attachment to Supabase Storage and create the
+ * message_attachments row linking it to the message. Returns the
+ * attachment row.
+ *
+ * Delivery method is picked automatically:
+ *   • <= 25 MB → 'inline'      (in real-mode Graph send: attached on the
+ *                                 outgoing email's `attachments` array)
+ *   • >  25 MB → 'signed_link' (in real-mode Graph send: body gets a
+ *                                 30-day signed URL appended)
+ *
+ * In mock-mode the file is uploaded and the row written exactly as in real
+ * mode; only the Graph send call is skipped (the same way send-email-v1
+ * works today).
+ */
+export async function uploadAttachmentForMessage({ messageId, conversationId, file }) {
+  if (!messageId)       throw new Error('messageId required')
+  if (!conversationId)  throw new Error('conversationId required')
+  validateAttachmentFile(file)
+
+  // Resolve caller for audit cols
+  const { data: { user: authUser } } = await supabase.auth.getUser()
+  let callerUserId = null
+  if (authUser?.id) {
+    const { data: u } = await supabase
+      .from('users').select('id').eq('auth_user_id', authUser.id).maybeSingle()
+    callerUserId = u?.id || null
+  }
+
+  // Build storage key — conversation_id / message_id / <uuid>-filename
+  const uniquePrefix = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  // Sanitize the filename for the storage key — keep the original on the row
+  const safeName = file.name.replace(/[^\w.\-]+/g, '_')
+  const storagePath = `${conversationId}/${messageId}/${uniquePrefix}-${safeName}`
+
+  // Upload
+  const { error: upErr } = await supabase.storage
+    .from(ATTACHMENT_BUCKET)
+    .upload(storagePath, file, {
+      contentType: file.type || 'application/octet-stream',
+      upsert: false,
+    })
+  if (upErr) throw new Error(`Upload failed: ${upErr.message}`)
+
+  // Decide delivery method
+  const deliveryMethod = file.size > ATTACHMENT_MAX_INLINE_BYTES ? 'signed_link' : 'inline'
+  // Signed-link path stamps an expiry 30 days out; inline leaves it null.
+  const signedLinkExpiresAt = deliveryMethod === 'signed_link'
+    ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+    : null
+
+  const { data: row, error: rowErr } = await supabase.from('message_attachments').insert({
+    ma_message_id:            messageId,
+    ma_storage_path:          storagePath,
+    ma_file_name:             file.name,
+    ma_file_size_bytes:       file.size,
+    ma_mime_type:             file.type || null,
+    ma_delivery_method:       deliveryMethod,
+    ma_virus_scan_status:     'pending',
+    ma_signed_link_expires_at: signedLinkExpiresAt,
+    ma_created_by:            callerUserId,
+    ma_updated_by:            callerUserId,
+  }).select('*').single()
+  if (rowErr) {
+    // Try to clean up the orphaned storage object so we don't leak
+    await supabase.storage.from(ATTACHMENT_BUCKET).remove([storagePath]).catch(() => {})
+    throw new Error(`Attachment row insert failed: ${rowErr.message}`)
+  }
+  return row
+}
+
+/**
+ * List attachments for one or many messages. Used by the timeline renderer
+ * to show paperclip + filename + size below the body bubble. Returns
+ * { [messageId]: [attachmentRow, ...] } for efficient batch fetching.
+ */
+export async function fetchAttachmentsForMessages(messageIds) {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) return {}
+  const { data, error } = await supabase
+    .from('message_attachments')
+    .select('id, ma_message_id, ma_storage_path, ma_file_name, ma_file_size_bytes, ma_mime_type, ma_delivery_method, ma_virus_scan_status, ma_signed_link_expires_at, ma_created_at')
+    .in('ma_message_id', messageIds)
+    .eq('ma_is_deleted', false)
+    .order('ma_created_at', { ascending: true })
+  if (error) throw error
+  const out = {}
+  for (const row of (data || [])) {
+    if (!out[row.ma_message_id]) out[row.ma_message_id] = []
+    out[row.ma_message_id].push(row)
+  }
+  return out
+}
+
+/**
+ * Mint a short-lived signed URL for downloading one attachment. The bucket
+ * is non-public — every view goes through this. 5-minute TTL is plenty for
+ * a click → open flow and won't survive being shared in a chat.
+ */
+export async function createAttachmentSignedUrl(attachmentRow) {
+  if (!attachmentRow?.ma_storage_path) throw new Error('attachment row missing storage path')
+  const { data, error } = await supabase.storage
+    .from(ATTACHMENT_BUCKET)
+    .createSignedUrl(attachmentRow.ma_storage_path, 5 * 60)
+  if (error) throw new Error(`Signed URL failed: ${error.message}`)
+  return data?.signedUrl || null
+}
+
+/**
+ * Soft-delete an attachment. Storage object is left in place — recovery and
+ * audit-trail completeness wins over storage-cost optimization until cleanup
+ * is its own dedicated chore.
+ */
+export async function softDeleteAttachment({ attachmentId, reason }) {
+  if (!attachmentId) throw new Error('attachmentId required')
+  const { data: { user: authUser } } = await supabase.auth.getUser()
+  let callerUserId = null
+  if (authUser?.id) {
+    const { data: u } = await supabase
+      .from('users').select('id').eq('auth_user_id', authUser.id).maybeSingle()
+    callerUserId = u?.id || null
+  }
+  const { error } = await supabase.from('message_attachments').update({
+    ma_is_deleted:      true,
+    ma_deleted_at:      new Date().toISOString(),
+    ma_deleted_by:      callerUserId,
+    ma_deletion_reason: (reason || '').trim() || null,
+    ma_updated_by:      callerUserId,
+  }).eq('id', attachmentId)
+  if (error) throw error
+}
+
+// Tiny formatter for display
+export function formatBytes(n) {
+  if (!n && n !== 0) return '—'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}

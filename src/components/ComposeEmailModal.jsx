@@ -24,13 +24,16 @@
 // thread.
 // =============================================================================
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
 import {
   fetchOutboundMailboxes,
   sendNewEmail,
+  uploadAttachmentForMessage,
+  validateAttachmentFile,
+  formatBytes,
 } from '../data/conversationsService'
 
 const OVERLAY_STYLE = {
@@ -148,6 +151,12 @@ export default function ComposeEmailModal({
   const [submitting, setSubmitting] = useState(false)
   const [lastResult, setLastResult] = useState(null)  // payload from edge fn on success
 
+  // Staged attachments — File objects held client-side until Send. Each file
+  // gets a stable client-id so list operations don't have to depend on
+  // identity.
+  const [stagedFiles, setStagedFiles] = useState([])  // [{ clientId, file, error? }]
+  const fileInputRef = useRef(null)
+
   // ── Reset state when the modal opens ────────────────────────────────
   useEffect(() => {
     if (!open) return
@@ -159,6 +168,7 @@ export default function ComposeEmailModal({
     setMailboxes(null)
     setMailboxError(null)
     setMailboxId('')
+    setStagedFiles([])
   }, [open, defaultRecipientEmail, defaultRecipientName])
 
   // ── Load mailboxes once per open ────────────────────────────────────
@@ -216,9 +226,37 @@ export default function ComposeEmailModal({
       })
       setLastResult(result)
       const isMock = result?.mode === 'mock'
-      toast.success(isMock
-        ? 'Email queued in mock mode — Graph credentials not yet configured. Row written to messages.'
-        : `Email sent (${result?.msg_record_number || 'queued'}).`)
+
+      // Upload staged attachments now that we know the message id. Sequential
+      // rather than parallel — mock-mode storage uploads are fast enough and
+      // it keeps the error path cleanly attributable to one file.
+      const attachmentResults = []
+      const successfulFiles = []
+      for (const sf of stagedFiles) {
+        try {
+          const row = await uploadAttachmentForMessage({
+            messageId:      result.message_id,
+            conversationId: result.conversation_id,
+            file:           sf.file,
+          })
+          attachmentResults.push({ ok: true, name: sf.file.name, row })
+          successfulFiles.push(sf.file.name)
+        } catch (e) {
+          attachmentResults.push({ ok: false, name: sf.file.name, error: e.message || String(e) })
+        }
+      }
+      const failedAttachments = attachmentResults.filter(r => !r.ok)
+      if (failedAttachments.length > 0) {
+        // Don't roll back the email — it sent. Just warn about the partial
+        // failure and leave the toast visible long enough to read.
+        toast.error(`Email sent but ${failedAttachments.length} of ${stagedFiles.length} attachment${stagedFiles.length === 1 ? '' : 's'} failed to upload: ${failedAttachments[0].error}`)
+      } else if (successfulFiles.length > 0) {
+        toast.success(`${isMock ? 'Email queued (mock mode)' : 'Email sent'} with ${successfulFiles.length} attachment${successfulFiles.length === 1 ? '' : 's'}.`)
+      } else {
+        toast.success(isMock
+          ? 'Email queued in mock mode — Graph credentials not yet configured. Row written to messages.'
+          : `Email sent (${result?.msg_record_number || 'queued'}).`)
+      }
       // Hand the new conversation id back to the panel so it can refresh +
       // optionally select the new thread.
       if (onSent && result?.conversation_id) {
@@ -239,8 +277,33 @@ export default function ComposeEmailModal({
     }
   }, [
     anchorObject, anchorRecordId, bodyText, defaultContactId,
-    mailboxId, onClose, onSent, subject, submitting, toEmail, toName, toast,
+    mailboxId, onClose, onSent, stagedFiles, subject, submitting, toEmail, toName, toast,
   ])
+
+  // ── File staging ────────────────────────────────────────────────────
+  const handleFilesPicked = useCallback((e) => {
+    const files = Array.from(e.target?.files || [])
+    if (files.length === 0) return
+    const additions = []
+    for (const file of files) {
+      try {
+        validateAttachmentFile(file)
+        additions.push({
+          clientId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          file,
+        })
+      } catch (err) {
+        toast.error(err.message || `Refused: ${file.name}`)
+      }
+    }
+    if (additions.length > 0) setStagedFiles(prev => [...prev, ...additions])
+    // Reset input value so the same file can be re-picked after removal
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [toast])
+
+  const removeStagedFile = useCallback((clientId) => {
+    setStagedFiles(prev => prev.filter(sf => sf.clientId !== clientId))
+  }, [])
 
   if (!open) return null
 
@@ -388,6 +451,77 @@ export default function ComposeEmailModal({
             <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
               Plain text for now. Rich-text editor + locked-region templates land in a follow-up slice.
             </div>
+          </div>
+
+          {/* Attachments */}
+          <div>
+            <label style={FIELD_LABEL}>Attachments</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFilesPicked}
+              disabled={submitting}
+              style={{ display: 'none' }}
+              accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.png,.jpg,.jpeg,.heic,.heif,.gif,.webp,.csv,.tsv,.txt,.md,.zip"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={submitting}
+              style={{
+                background: C.card, color: C.textSecondary,
+                border: `1px dashed ${C.border}`, borderRadius: 5,
+                padding: '8px 14px', fontSize: 12.5, cursor: submitting ? 'wait' : 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                opacity: submitting ? 0.4 : 1,
+              }}
+            >
+              <Icon path="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" size={13} color="currentColor" />
+              Attach file{stagedFiles.length > 0 ? 's' : ''}…
+            </button>
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+              Files ≤25 MB ride along as normal email attachments. Files &gt;25 MB ship as a 30-day signed download link. Virus scan is pending — `ma_virus_scan_status` flips to clean/infected once the ClamAV hook lands.
+            </div>
+            {stagedFiles.length > 0 && (
+              <div style={{
+                marginTop: 8, border: `1px solid ${C.border}`, borderRadius: 5,
+                background: '#fafbfd',
+              }}>
+                {stagedFiles.map(sf => (
+                  <div
+                    key={sf.clientId}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 10px',
+                      borderBottom: `1px solid ${C.border}`,
+                    }}
+                  >
+                    <Icon path="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8" size={14} color={C.textSecondary} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {sf.file.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.textMuted }}>
+                        {formatBytes(sf.file.size)} · {sf.file.size > 25 * 1024 * 1024 ? 'will ship as signed link' : 'inline attachment'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeStagedFile(sf.clientId)}
+                      disabled={submitting}
+                      title="Remove"
+                      style={{
+                        background: 'transparent', border: 'none',
+                        cursor: submitting ? 'not-allowed' : 'pointer',
+                        color: C.textMuted, padding: 4,
+                      }}
+                    >
+                      <Icon path="M6 6l12 12 M6 18l12-12" size={13} color="currentColor" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Result preview after success */}
