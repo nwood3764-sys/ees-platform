@@ -14,6 +14,7 @@ import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import ConversationPanelWidget from './ConversationPanel'
 import { ReportWidget } from './ReportWidget'
+import StatusTransitionsBar from './StatusTransitionsBar'
 import { supabase } from '../lib/supabase'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
@@ -5136,6 +5137,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             )}
           </div>
         )}
+
+        {/* Status transitions bar — surfaces outgoing transitions for the
+            record's current status as one-click action buttons. Calls the
+            change_record_status RPC, which validates the move server-side
+            against status_transitions. Self-suppresses when the table has
+            no lifecycle configured, when the record is in edit mode, or
+            when the current status is terminal (no outgoing transitions). */}
+        <StatusTransitionsBar
+          tableName={tableName}
+          recordId={recordId}
+          record={record}
+          editing={editing}
+          onStatusChanged={() => setReloadTick(t => t + 1)}
+        />
 
         {/* Tab bar — only shown when there's more than one tab. Styled to
             match SectionTabs in UI.jsx: bottom border, 2px emerald underline
