@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { getCurrentUserId } from './layoutService'
 
 // ---------------------------------------------------------------------------
 // Roles (used by Permission Builder)
@@ -1391,4 +1392,223 @@ export async function fetchAdminHealthSummary() {
     dispatchErrors24h: data.dispatch_errors_24h ?? 0,
     generatedAt:       data.generated_at ? new Date(data.generated_at) : new Date(),
   }
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle Builder — status_transitions
+// ---------------------------------------------------------------------------
+// Two-tier interface:
+//   1. fetchStatusLifecycleSummary() — the "which objects have lifecycles"
+//      pane. Aggregates picklist_values rows whose picklist_field looks like
+//      a status field, joining transition counts from status_transitions.
+//   2. fetchStatusTransitionsFor(object, field) — drill-in: returns the
+//      ordered list of statuses on this picklist plus every active
+//      transition between them.
+//
+// Both queries return raw uuid identifiers in addition to display strings,
+// so the pane can pass them straight back into create/update calls without
+// re-resolving.
+// ---------------------------------------------------------------------------
+
+// Status fields are conventionally named '<prefix>status', e.g.
+// 'work_order_status', 'ia_status', 'prt_status', or plain 'status' on the
+// admin-config tables (document_templates, email_templates, accounts).
+// This matcher catches all of them while excluding compound state fields
+// like 'unit_occupancy_status' or 'recipient_status' that are not master
+// lifecycles — those still appear, but with no transitions until an admin
+// authors them. Approval-status fields ('work_order_approval_status',
+// 'work_step_pc_approval_status') are intentionally included so they can
+// have their own transition graphs.
+function _looksLikeStatusField(field) {
+  if (!field) return false
+  if (field === 'status') return true
+  if (field === 'stage') return true
+  return /(_status|_state|_stage)$/.test(field)
+}
+
+export async function fetchStatusLifecycleSummary() {
+  // Pull all picklist values on status-shaped fields, then group client-side.
+  // 500 active picklist values across all objects is well within one query.
+  const { data: pls, error: plsErr } = await supabase
+    .from('picklist_values')
+    .select('id, picklist_object, picklist_field, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
+    .order('picklist_object', { ascending: true })
+    .order('picklist_field',  { ascending: true })
+    .order('picklist_sort_order', { ascending: true })
+  if (plsErr) throw plsErr
+
+  // Pull active transitions; group by (st_object, st_status_field).
+  const { data: txns, error: txnsErr } = await supabase
+    .from('status_transitions')
+    .select('id, st_object, st_status_field, st_is_active')
+    .eq('st_is_deleted', false)
+  if (txnsErr) throw txnsErr
+
+  // Index transitions by (object, field).
+  const txnIdx = new Map()
+  for (const t of (txns || [])) {
+    const key = `${t.st_object}::${t.st_status_field}`
+    const slot = txnIdx.get(key) || { total: 0, active: 0 }
+    slot.total++
+    if (t.st_is_active) slot.active++
+    txnIdx.set(key, slot)
+  }
+
+  // Group picklists by (object, field), filtering to status-shaped fields.
+  const groups = new Map()
+  for (const pv of (pls || [])) {
+    if (!_looksLikeStatusField(pv.picklist_field)) continue
+    const key = `${pv.picklist_object}::${pv.picklist_field}`
+    if (!groups.has(key)) {
+      groups.set(key, {
+        object:      pv.picklist_object,
+        statusField: pv.picklist_field,
+        statusCount: 0,
+        activeStatusCount: 0,
+      })
+    }
+    const g = groups.get(key)
+    g.statusCount++
+    if (pv.picklist_is_active) g.activeStatusCount++
+  }
+
+  // Materialize into the shape the ListView expects. Stable sort by object
+  // then status_field so related lifecycles cluster (work_orders shows its
+  // work_order_status alongside work_order_approval_status).
+  return Array.from(groups.values())
+    .map(g => {
+      const t = txnIdx.get(`${g.object}::${g.statusField}`) || { total: 0, active: 0 }
+      return {
+        id:           `${g.object}::${g.statusField}`,
+        _object:      g.object,
+        _statusField: g.statusField,
+        object:       g.object,
+        statusField:  g.statusField,
+        statusCount:  g.activeStatusCount,
+        statusCountTotal: g.statusCount,
+        transitionCount: t.active,
+        transitionCountTotal: t.total,
+      }
+    })
+    .sort((a, b) => {
+      if (a.object !== b.object) return a.object.localeCompare(b.object)
+      return a.statusField.localeCompare(b.statusField)
+    })
+}
+
+export async function fetchStatusTransitionsFor(object, statusField) {
+  if (!object || !statusField) throw new Error('object and statusField required')
+
+  // Statuses for this (object, field) — ordered, including inactive so the
+  // graph view can show greyed-out picklist values that still have
+  // historical transitions attached.
+  const { data: statuses, error: stErr } = await supabase
+    .from('picklist_values')
+    .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
+    .eq('picklist_object', object)
+    .eq('picklist_field',  statusField)
+    .order('picklist_sort_order', { ascending: true })
+    .order('picklist_label',      { ascending: true })
+  if (stErr) throw stErr
+
+  const { data: txns, error: txnErr } = await supabase
+    .from('status_transitions')
+    .select(`
+      id, st_record_number, st_from_status_id, st_to_status_id,
+      st_transition_label, st_description, st_sort_order, st_is_active,
+      st_created_at, st_updated_at
+    `)
+    .eq('st_object',       object)
+    .eq('st_status_field', statusField)
+    .eq('st_is_deleted',   false)
+    .order('st_sort_order', { ascending: true })
+    .order('st_created_at', { ascending: true })
+  if (txnErr) throw txnErr
+
+  return {
+    statuses: (statuses || []).map(s => ({
+      id:        s.id,
+      value:     s.picklist_value,
+      label:     s.picklist_label || s.picklist_value,
+      sortOrder: s.picklist_sort_order || 0,
+      isActive:  s.picklist_is_active !== false,
+    })),
+    transitions: (txns || []).map(t => ({
+      id:          t.id,
+      recordNumber: t.st_record_number,
+      fromStatusId: t.st_from_status_id,
+      toStatusId:   t.st_to_status_id,
+      label:        t.st_transition_label,
+      description:  t.st_description,
+      sortOrder:    t.st_sort_order || 0,
+      isActive:     t.st_is_active,
+      createdAt:    t.st_created_at,
+      updatedAt:    t.st_updated_at,
+    })),
+  }
+}
+
+export async function createStatusTransition({
+  object, statusField, fromStatusId, toStatusId, label, description, sortOrder, isActive,
+}) {
+  const ownerId = await getCurrentUserId()
+  if (!ownerId) throw new Error('Not authenticated — cannot author a transition without a user_id.')
+
+  const payload = {
+    st_record_number:    '',
+    st_object:           object,
+    st_status_field:     statusField,
+    st_from_status_id:   fromStatusId || null,
+    st_to_status_id:     toStatusId,
+    st_transition_label: label,
+    st_description:      description || null,
+    st_sort_order:       sortOrder ?? 0,
+    st_is_active:        isActive !== false,
+    st_owner:            ownerId,
+    st_created_by:       ownerId,
+  }
+  const { data, error } = await supabase
+    .from('status_transitions')
+    .insert(payload)
+    .select('id, st_record_number')
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateStatusTransition(transitionId, patch) {
+  const userId = await getCurrentUserId()
+  if (!userId) throw new Error('Not authenticated.')
+
+  const mapped = {}
+  if ('label'        in patch) mapped.st_transition_label = patch.label
+  if ('description'  in patch) mapped.st_description      = patch.description
+  if ('sortOrder'    in patch) mapped.st_sort_order       = patch.sortOrder
+  if ('isActive'     in patch) mapped.st_is_active        = patch.isActive
+  if ('fromStatusId' in patch) mapped.st_from_status_id   = patch.fromStatusId || null
+  if ('toStatusId'   in patch) mapped.st_to_status_id     = patch.toStatusId
+  mapped.st_updated_by = userId
+  mapped.st_updated_at = new Date().toISOString()
+
+  const { error } = await supabase
+    .from('status_transitions')
+    .update(mapped)
+    .eq('id', transitionId)
+  if (error) throw error
+}
+
+export async function softDeleteStatusTransition(transitionId, reason) {
+  const userId = await getCurrentUserId()
+  if (!userId) throw new Error('Not authenticated.')
+
+  const { error } = await supabase
+    .from('status_transitions')
+    .update({
+      st_is_deleted:      true,
+      st_deletion_reason: reason || 'Removed via Lifecycle Builder',
+      st_deleted_at:      new Date().toISOString(),
+      st_deleted_by:      userId,
+    })
+    .eq('id', transitionId)
+  if (error) throw error
 }

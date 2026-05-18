@@ -29,6 +29,7 @@ export const SETUP_TREE = [
     label: 'Process Automation',
     icon: 'M13 10V3L4 14h7v7l9-11h-7z',
     children: [
+      { id: 'lifecycle_builder', label: 'Lifecycle Builder' },
       { id: 'automation_rules', label: 'Flows (Automation Rules)' },
       { id: 'validation_rules', label: 'Validation Rules' },
     ],
