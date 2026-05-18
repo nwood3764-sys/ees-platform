@@ -25,6 +25,7 @@ import { getCurrentUserId } from '../../data/layoutService'
 import {
   fetchDfrPicklists,
   fetchOpenDispatcherFollowups,
+  fetchDfrWeeklyStats,
   updateDfrStatus,
   formatDfrAddressOneLine,
   formatDfrAge,
@@ -39,6 +40,7 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
   const [error, setError]        = useState(null)
   const [rows, setRows]          = useState([])
   const [reasonOptions, setReasonOptions] = useState([])
+  const [stats, setStats]        = useState(null)  // last-7-days KPI banner data
 
   // ── Filter state ───────────────────────────────────────────────────
   const [search, setSearch]      = useState('')
@@ -51,9 +53,10 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
     setLoading(true)
     setError(null)
     try {
-      const [pl, queue] = await Promise.all([
+      const [pl, queue, weeklyStats] = await Promise.all([
         fetchDfrPicklists(),
         fetchOpenDispatcherFollowups(),
+        fetchDfrWeeklyStats(),
       ])
       setReasonOptions(
         Object.entries(pl.reasonByValueLabel)
@@ -61,6 +64,7 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
           .sort((a, b) => a.label.localeCompare(b.label))
       )
       setRows(queue)
+      setStats(weeklyStats)
     } catch (e) {
       setError(e.message || String(e))
     } finally {
@@ -88,6 +92,17 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
     })
   }, [rows, search, reasonFilter])
 
+  // Background refresh of the KPI banner after a stats-affecting mutation.
+  // Errors are swallowed silently — the existing stats stay on screen.
+  const refreshStats = useCallback(async () => {
+    try {
+      const s = await fetchDfrWeeklyStats()
+      setStats(s)
+    } catch {
+      // Stats are non-critical; keep the prior snapshot on screen.
+    }
+  }, [])
+
   // ── Inline status flip ─────────────────────────────────────────────
   const handleFlip = useCallback(async (dfrId, nextStatus) => {
     setBusyDfrId(dfrId)
@@ -103,10 +118,15 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
       // so the dispatcher can see the claim took.
       if (nextStatus === 'Closed' || nextStatus === 'Resolved') {
         setRows(prev => prev.filter(r => r.id !== dfrId))
+        // Resolved/Closed transitions affect the KPI banner (resolved +=1,
+        // still_open -=1). Refresh in background — don't block the UI.
+        refreshStats()
       } else {
         setRows(prev => prev.map(r =>
           r.id === dfrId ? { ...r, _status_value: nextStatus, _status_label: nextStatus } : r
         ))
+        // Open ↔ In Progress flips stay inside the still_open bucket;
+        // no stats refresh needed.
       }
     } catch (e) {
       // Surface the error in the row error banner area
@@ -114,7 +134,7 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
     } finally {
       setBusyDfrId(null)
     }
-  }, [])
+  }, [refreshStats])
 
   // ── Conversion flow (DFR → SA) ─────────────────────────────────────
   // Called by the ConvertDfrToSaModal on success. The modal has already
@@ -123,7 +143,9 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
   // optionally surface a click-through to the newly-created SA.
   const handleConverted = useCallback(({ dfr_id }) => {
     setRows(prev => prev.filter(r => r.id !== dfr_id))
-  }, [])
+    // Conversion bumps both resolved and converted — definitely refresh.
+    refreshStats()
+  }, [refreshStats])
 
   // ── Render ─────────────────────────────────────────────────────────
   if (loading) return <div style={{ padding: 24 }}><LoadingState message="Loading dispatcher follow-ups…" /></div>
@@ -131,6 +153,13 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* KPI banner — last-7-days conversion stats. Hidden when there's
+          been zero captured DFRs in the window (e.g. fresh install,
+          first deployment) so the surface isn't dominated by empty zeros. */}
+      {stats && stats.captured > 0 && (
+        <KpiStrip stats={stats} />
+      )}
+
       {/* Sub-toolbar: search + reason filter + count badge */}
       <div style={subToolbar}>
         <input
@@ -328,6 +357,50 @@ function MobileCards({ rows, busyDfrId, onFlip, onSchedule, onNavigateToRecord }
 }
 
 // ─── Bits & pieces ───────────────────────────────────────────────────────
+
+// KpiStrip — last-7-days conversion banner shown above the sub-toolbar
+// when there's been at least one captured DFR in the window. Three
+// tiles: Captured / Converted / Conversion rate. Compact, single row
+// on desktop; stays horizontal on mobile (numbers shrink, labels wrap).
+function KpiStrip({ stats }) {
+  const rate = stats.resolved > 0 ? `${stats.conversion_rate}%` : '—'
+  // Color the rate by health: green ≥ 50%, amber 25–49%, red < 25%, gray when no resolutions yet
+  const rateTone = stats.resolved === 0 ? KPI_TONE.neutral
+    : stats.conversion_rate >= 50 ? KPI_TONE.good
+    : stats.conversion_rate >= 25 ? KPI_TONE.warn
+    : KPI_TONE.bad
+  return (
+    <div style={kpiStripWrap}>
+      <div style={kpiHeader}>Last 7 days</div>
+      <div style={kpiTilesRow}>
+        <KpiTile label="Captured"    value={stats.captured}    tone={KPI_TONE.neutral} />
+        <KpiTile label="Converted"   value={stats.converted}   tone={KPI_TONE.good}
+          sub={`of ${stats.resolved} resolved`} />
+        <KpiTile label="Conversion"  value={rate}              tone={rateTone}
+          sub={stats.resolved === 0 ? 'no resolutions yet' : null} />
+        <KpiTile label="Still open"  value={stats.still_open}  tone={KPI_TONE.neutral} />
+      </div>
+    </div>
+  )
+}
+
+function KpiTile({ label, value, sub, tone }) {
+  return (
+    <div style={{ ...kpiTile, borderLeftColor: tone.accent }}>
+      <div style={{ ...kpiTileValue, color: tone.fg }}>{value}</div>
+      <div style={kpiTileLabel}>{label}</div>
+      {sub && <div style={kpiTileSub}>{sub}</div>}
+    </div>
+  )
+}
+
+const KPI_TONE = {
+  neutral: { fg: '#0d1a2e', accent: '#cbd5e1' },
+  good:    { fg: '#1e7d4f', accent: '#3ecf8e' },
+  warn:    { fg: '#8a5a04', accent: '#e8a949' },
+  bad:     { fg: '#a01616', accent: '#e85c5c' },
+}
+
 function RowActions({ row, busy, onFlip, onSchedule, stretched = false }) {
   const status = row._status_value
   const btnStyle = stretched
@@ -402,6 +475,47 @@ const STATUS_TONE = {
 }
 
 // ─── styles ──────────────────────────────────────────────────────────────
+const kpiStripWrap = {
+  display: 'flex', flexDirection: 'column', gap: 6,
+  padding: '12px 16px 10px',
+  borderBottom: `1px solid ${C.border}`,
+  background: '#f8f9fb',
+}
+
+const kpiHeader = {
+  fontSize: 10.5, fontWeight: 700,
+  textTransform: 'uppercase', letterSpacing: 0.6,
+  color: C.textMuted,
+}
+
+const kpiTilesRow = {
+  display: 'flex', gap: 10, flexWrap: 'wrap',
+}
+
+const kpiTile = {
+  flex: '1 1 130px', minWidth: 110,
+  padding: '8px 12px',
+  background: '#fff',
+  border: `1px solid ${C.border}`,
+  borderLeftWidth: 3,
+  borderRadius: 6,
+}
+
+const kpiTileValue = {
+  fontSize: 22, fontWeight: 700, lineHeight: 1.1,
+  fontVariantNumeric: 'tabular-nums',
+}
+
+const kpiTileLabel = {
+  fontSize: 11, fontWeight: 600,
+  textTransform: 'uppercase', letterSpacing: 0.4,
+  color: C.textSecondary, marginTop: 4,
+}
+
+const kpiTileSub = {
+  fontSize: 11, color: C.textMuted, marginTop: 1,
+}
+
 const subToolbar = {
   display: 'flex', alignItems: 'center', gap: 12,
   padding: '10px 16px',

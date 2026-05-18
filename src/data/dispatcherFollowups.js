@@ -193,6 +193,59 @@ export async function markDfrResolvedToSa({ dfr_id, sa_id }) {
   return data
 }
 
+/**
+ * Last-7-days conversion stats for the queue's KPI banner.
+ *
+ * Returns:
+ *   { captured: int,          DFRs created in last 7 days
+ *     resolved: int,          captured DFRs whose status is Resolved or Closed
+ *     converted: int,         resolved DFRs that link to a real SA (dfr_resolved_sa_id NOT NULL)
+ *     still_open: int,        captured DFRs still in Open or In Progress
+ *     conversion_rate: number 0-100 — converted / resolved, NaN-safe (0 when resolved=0) }
+ *
+ * One query: pulls just dfr_status + dfr_resolved_sa_id for non-deleted
+ * DFRs created in the window. We bucket client-side rather than firing
+ * three count queries because the dispatcher viewport rarely exceeds a
+ * few dozen DFRs/week — server-side aggregation isn't worth the round
+ * trip cost.
+ */
+export async function fetchDfrWeeklyStats() {
+  const pl = await fetchDfrPicklists()
+  const resolvedIds = new Set(
+    ['Resolved', 'Closed'].map(v => pl.statusByValue[v]).filter(Boolean)
+  )
+  const openIds = new Set(
+    DFR_ACTIVE_STATUSES.map(v => pl.statusByValue[v]).filter(Boolean)
+  )
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await supabase
+    .from('dispatcher_followup_requests')
+    .select('dfr_status, dfr_resolved_sa_id')
+    .eq('dfr_is_deleted', false)
+    .gte('dfr_created_at', sevenDaysAgo)
+
+  if (error) throw new Error(`fetchDfrWeeklyStats: ${error.message}`)
+
+  let captured = 0, resolved = 0, converted = 0, still_open = 0
+  for (const row of data || []) {
+    captured += 1
+    if (resolvedIds.has(row.dfr_status)) {
+      resolved += 1
+      if (row.dfr_resolved_sa_id) converted += 1
+    } else if (openIds.has(row.dfr_status)) {
+      still_open += 1
+    }
+  }
+
+  const conversion_rate = resolved > 0
+    ? Math.round((converted / resolved) * 100)
+    : 0
+
+  return { captured, resolved, converted, still_open, conversion_rate }
+}
+
 // Helper: pretty-print a row's address as one line for the queue display.
 export function formatDfrAddressOneLine(row) {
   const street = row.dfr_address_street || ''
