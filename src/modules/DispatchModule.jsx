@@ -39,6 +39,7 @@ import { dispatchRescheduleServiceAppointment } from '../data/projectScheduler'
 import DispatchFilterRail, { laneInScope } from '../components/dispatch/DispatchFilterRail'
 import DispatchUnscheduledPalette from '../components/dispatch/DispatchUnscheduledPalette'
 import ResourceMatrix from '../components/dispatch/ResourceMatrix'
+import FollowupsQueue from '../components/dispatch/FollowupsQueue'
 
 // Working-hours window the board renders. Matches the scheduler default;
 // any SA whose times bleed outside this gets clipped at the edge with a
@@ -443,6 +444,7 @@ export default function DispatchModule({ onNavigateToRecord }) {
           {[
             { value: 'console',   label: 'Console' },
             { value: 'resources', label: 'Resources' },
+            { value: 'followups', label: 'Follow-ups' },
           ].map(opt => {
             const active = activeView === opt.value
             return (
@@ -551,7 +553,7 @@ export default function DispatchModule({ onNavigateToRecord }) {
           onToggleCollapsed={() => setPaletteCollapsed(c => !c)}
         />
       </div>
-      ) : (
+      ) : activeView === 'resources' ? (
         /* Resources view — field-staff skills & certifications matrix.
            Shares the toolbar but has its own sub-toolbar (tab toggle +
            search + title pills). RecordDetail navigation reuses the
@@ -560,6 +562,16 @@ export default function DispatchModule({ onNavigateToRecord }) {
           // ResourceMatrix passes { table, id }; the parent's nav helper
           // expects positional args. Adapt here so the component stays
           // self-contained.
+          if (target?.table && target?.id) {
+            onNavigateToRecord?.(target.table, target.id)
+          }
+        }} />
+      ) : (
+        /* Follow-ups view — dispatcher_followup_requests queue. Open +
+           In Progress DFRs oldest-first; inline Claim / Close actions
+           and click-through to the record-detail page for the full
+           notes/resolution flow. */
+        <FollowupsQueue onNavigateToRecord={(target) => {
           if (target?.table && target?.id) {
             onNavigateToRecord?.(target.table, target.id)
           }
