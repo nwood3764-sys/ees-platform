@@ -1435,17 +1435,25 @@ function MergeFieldPickerBody({ mode, onPick }) {
 function MergeFieldTextarea({ value, onChange }) {
   const taRef = useRef(null)
   const [open, setOpen] = useState(false)
+  const [tabPickerOpen, setTabPickerOpen] = useState(false)
+  // Last ordinal used in this session — defaulted to 1 (primary signer)
+  // since most templates have exactly one recipient.
+  const [tabOrdinal, setTabOrdinal] = useState(1)
   const caretRef = useRef({ start: 0, end: 0 })
   const text = value == null ? '' : String(value)
 
   useEffect(() => {
-    if (!open) return
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    if (!open && !tabPickerOpen) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') { setOpen(false); setTabPickerOpen(false) }
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [open, tabPickerOpen])
 
-  const openPicker = () => {
+  // Capture caret position immediately so it's available when either picker
+  // opens. We track it once for both flows since both insert at the same spot.
+  const captureCaret = () => {
     const ta = taRef.current
     if (ta) {
       caretRef.current = {
@@ -1455,14 +1463,17 @@ function MergeFieldTextarea({ value, onChange }) {
     } else {
       caretRef.current = { start: text.length, end: text.length }
     }
-    setOpen(true)
   }
+
+  const openPicker = () => { captureCaret(); setOpen(true) }
+  const openTabPicker = () => { captureCaret(); setTabPickerOpen(true) }
 
   const insertToken = (token) => {
     const { start, end } = caretRef.current
     const next = text.slice(0, start) + token + text.slice(end)
     onChange(next)
     setOpen(false)
+    setTabPickerOpen(false)
     requestAnimationFrame(() => {
       const ta = taRef.current
       if (!ta) return
@@ -1470,6 +1481,16 @@ function MergeFieldTextarea({ value, onChange }) {
       ta.focus()
       ta.setSelectionRange(pos, pos)
     })
+  }
+
+  // Insert a signature anchor in the exact format the htmlToPdf renderer
+  // expects (regex: /\\(sig|initial|date|text)(\d+)\\/g). Padded with one
+  // space on each side so the anchor sits inline like a placeholder run
+  // — flush-against-text anchors get measured against adjacent word
+  // boundaries which can produce off-by-a-character geometry.
+  const insertSignatureTab = (tabType, ordinal) => {
+    const token = ` \\${tabType}${ordinal}\\ `
+    insertToken(token)
   }
 
   const overlay = {
@@ -1484,6 +1505,13 @@ function MergeFieldTextarea({ value, onChange }) {
     overflow: 'hidden',
     display: 'flex', flexDirection: 'column',
     maxHeight: 'min(620px, 92vh)',
+  }
+  const tabCard = {
+    width: '100%', maxWidth: 440, background: C.card,
+    border: `1px solid ${C.border}`, borderRadius: 10,
+    boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+    overflow: 'hidden',
+    display: 'flex', flexDirection: 'column',
   }
   const headerStyle = {
     padding: '14px 18px', borderBottom: `1px solid ${C.border}`,
@@ -1523,9 +1551,23 @@ function MergeFieldTextarea({ value, onChange }) {
           <Icon path="M12 4v16m8-8H4" size={13} color={C.textPrimary} />
           Insert Merge Field
         </button>
+        <button
+          type="button"
+          onClick={openTabPicker}
+          style={{
+            padding: '5px 12px', fontSize: 12, fontWeight: 500,
+            background: C.card, border: `1px solid ${C.borderDark}`,
+            borderRadius: 4, cursor: 'pointer', color: C.textPrimary,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            whiteSpace: 'nowrap', flexShrink: 0,
+          }}
+        >
+          <Icon path="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" size={13} color={C.textPrimary} />
+          Insert Signature Tab
+        </button>
         <span style={{ fontSize: 11, color: C.textMuted }}>
-          Tokens use <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{`{{path}}`}</code> syntax.
-          Unknown tokens render as <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>[unknown: …]</code>.
+          Merge tokens use <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{`{{path}}`}</code> syntax.
+          Signature tabs use <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{`\\sig1\\`}</code> anchors.
         </span>
       </div>
       {open && createPortal(
@@ -1566,6 +1608,105 @@ function MergeFieldTextarea({ value, onChange }) {
             <MergeFieldPickerBody mode="insert" onPick={insertToken} />
             <div style={footerStyle}>
               Click a field to insert at the cursor. Press Esc to close.
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+      {tabPickerOpen && createPortal(
+        <div style={overlay} onClick={() => setTabPickerOpen(false)}>
+          <div style={tabCard} onClick={e => e.stopPropagation()}>
+            <div style={headerStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: 6,
+                  background: '#eff6ff', border: '1px solid #bfdbfe',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Icon path="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" size={15} color="#1f7ae0" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>Insert Signature Tab</div>
+                  <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 1 }}>
+                    Pick the recipient and tab type — anchor inserts at the cursor.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTabPickerOpen(false)}
+                aria-label="Close"
+                style={{
+                  width: 28, height: 28, borderRadius: 6,
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: C.textMuted,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.page }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <Icon path="M6 18L18 6M6 6l12 12" size={16} color={C.textSecondary} />
+              </button>
+            </div>
+            <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: C.textSecondary, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                  Recipient Order
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={tabOrdinal}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10)
+                      if (!Number.isFinite(n) || n < 1) { setTabOrdinal(1); return }
+                      setTabOrdinal(Math.min(20, n))
+                    }}
+                    style={{ ...inputBase, width: 80, fontSize: 13 }}
+                  />
+                  <span style={{ fontSize: 12, color: C.textMuted }}>
+                    {tabOrdinal === 1 ? 'Primary signer' : `Recipient #${tabOrdinal} in the signing order`}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: C.textSecondary, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                  Tab Type
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {[
+                    { type: 'sig',     label: 'Signature',    hint: '180 × 36 pt' },
+                    { type: 'initial', label: 'Initials',     hint: '60 × 30 pt'  },
+                    { type: 'date',    label: 'Date Signed',  hint: '90 × 18 pt'  },
+                    { type: 'text',    label: 'Text Input',   hint: '140 × 18 pt' },
+                  ].map(t => (
+                    <button
+                      key={t.type}
+                      type="button"
+                      onClick={() => insertSignatureTab(t.type, tabOrdinal)}
+                      style={{
+                        padding: '10px 12px', fontSize: 13, fontWeight: 500,
+                        background: C.card, border: `1px solid ${C.borderDark}`,
+                        borderRadius: 6, cursor: 'pointer', color: C.textPrimary,
+                        textAlign: 'left',
+                        display: 'flex', flexDirection: 'column', gap: 3,
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = C.page }}
+                      onMouseLeave={e => { e.currentTarget.style.background = C.card }}
+                    >
+                      <span>{t.label}</span>
+                      <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted }}>
+                        \{t.type}{tabOrdinal}\ — {t.hint}
+                      </code>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={footerStyle}>
+              Anchors are scanned at render time and replaced with sized boxes. Press Esc to close.
             </div>
           </div>
         </div>,
