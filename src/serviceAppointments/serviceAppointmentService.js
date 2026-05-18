@@ -81,6 +81,39 @@ export function createServiceAppointment({
   })
 }
 
+// dispatcherCreateServiceAppointment — dispatcher-mode counterpart to the
+// public createServiceAppointment helper above. Calls the same
+// create_service_appointment RPC, but does so directly via supabase.rpc()
+// so the dispatcher's session JWT is in context — which lets the RPC's
+// new bypass_territory_check flag activate (server-side gated on
+// current_app_user_id() IS NOT NULL).
+//
+// Use this from authenticated internal-staff surfaces — currently the
+// DFR conversion modal. The customer-facing scheduling flow continues
+// to use createServiceAppointment() above (anon-keyed via edge function).
+//
+// Returns the same shape as the edge function:
+//   { status: 'ok', service_appointment_id, sa_record_number,
+//     service_appointment_token, territory_bypassed }
+//   { status: 'slot_taken', message }
+//   { status: 'error',      message }
+// Throws on network / RPC infrastructure error.
+export async function dispatcherCreateServiceAppointment({
+  slug, start_iso, end_iso, resource_id,
+  customer_first_name, customer_last_name, phone, email, address, intake,
+  bypass_territory_check = true,
+}) {
+  const payload = {
+    slug, start_iso, end_iso, resource_id,
+    customer_first_name, customer_last_name, phone, email, address,
+    intake: intake || {},
+    bypass_territory_check,
+  }
+  const { data, error } = await supabase.rpc('create_service_appointment', { payload })
+  if (error) throw new Error(error.message || 'RPC error')
+  return data
+}
+
 // request-dispatcher-followup — fired when the customer scheduling flow
 // reaches a dead-end (address outside service area, no qualifying auditor
 // with capacity, all slots blocked). Captures the lead as a

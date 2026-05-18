@@ -1,25 +1,26 @@
 // ConvertDfrToSaModal — converts a dispatcher_followup_requests row into
-// a real Service Appointment by calling the existing public
-// create-service-appointment edge function with the captured customer
-// data + a dispatcher-chosen slot and resource.
+// a real Service Appointment by calling the create_service_appointment
+// RPC directly via supabase.rpc() (so the dispatcher's session JWT is
+// in context). Passes bypass_territory_check=true; the RPC honors this
+// flag only when current_app_user_id() IS NOT NULL (gated server-side).
 //
 // On success: writes dfr_resolved_sa_id + flips dfr_status to Resolved
 // in one UPDATE (the trg_dfr_stamp_resolution trigger fires and stamps
 // dfr_resolved_at/_by). The caller — FollowupsQueue — drops the row out
 // of the queue locally and toasts success.
 //
-// Known v1 limitation: out_of_territory DFRs fail at the territory
-// check inside create_service_appointment RPC. The modal surfaces the
-// error inline with guidance to use Close + manual scheduling. v1.1
-// will introduce a dispatcher-mode RPC variant that bypasses the
-// territory check for authenticated internal staff.
+// Out-of-territory: handled. When the captured ZIP doesn't match any
+// active service_territory_zips row, the RPC creates the SA with
+// service_territory_id = NULL (column is already nullable) and returns
+// territory_bypassed=true. The toast surfaces a small "(out-of-territory
+// bypass applied)" note so the dispatcher knows the bypass triggered.
 
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { C } from '../../data/constants'
 import { Icon } from '../UI'
 import { useToast } from '../Toast'
-import { createServiceAppointment } from '../../serviceAppointments/serviceAppointmentService'
+import { dispatcherCreateServiceAppointment } from '../../serviceAppointments/serviceAppointmentService'
 import { fetchAllFieldStaff } from '../../data/resourceManagement'
 import { markDfrResolvedToSa, formatDfrAddressOneLine } from '../../data/dispatcherFollowups'
 
@@ -193,11 +194,15 @@ export default function ConvertDfrToSaModal({ dfr, onClose, onConverted }) {
       const end_iso   = localInputToISO(endLocal)
       if (!start_iso || !end_iso) throw new Error('Invalid start or end datetime.')
 
-      // Step 1 — create the SA via the existing public edge function. The
-      // dispatcher is authenticated but the edge function is verify_jwt
-      // false (public surface), so we can just call it with anon-key auth
-      // via the existing helper.
-      const result = await createServiceAppointment({
+      // Step 1 — create the SA via the create_service_appointment RPC.
+      // dispatcherCreateServiceAppointment calls the RPC directly via
+      // supabase.rpc() so the dispatcher's session JWT is in context,
+      // which activates the bypass_territory_check flag inside the RPC
+      // (gated server-side on current_app_user_id() IS NOT NULL).
+      // The result includes territory_bypassed=true when the bypass
+      // actually triggered (out-of-territory ZIP); we use that to
+      // toast a slightly different success message.
+      const result = await dispatcherCreateServiceAppointment({
         slug:                 selectedWorkType.slug,
         start_iso,
         end_iso,
@@ -212,28 +217,18 @@ export default function ConvertDfrToSaModal({ dfr, onClose, onConverted }) {
           state:  dfr.dfr_address_state,
           zip:    dfr.dfr_address_zip,
         },
+        bypass_territory_check: true,
       })
 
-      // Edge function returns 200 even for slot_taken / error — surface
-      // those as inline errors rather than throwing.
+      // RPC returns the same shape as the edge function — surface
+      // non-ok statuses as inline errors.
       if (result?.status === 'slot_taken') {
         setSubmitError(result.message || 'That time slot was just taken. Pick another.')
         setSubmitting(false)
         return
       }
       if (result?.status !== 'ok') {
-        const msg = result?.message || 'Could not create the appointment.'
-        // Friendly guidance for the known out-of-territory case so the
-        // dispatcher knows what to do next.
-        if (/outside our service territory/i.test(msg)) {
-          setSubmitError(
-            `${msg} This DFR was captured for an out-of-territory address. ` +
-            `Conversion via this flow is not supported in v1 — close the DFR ` +
-            `and schedule manually, or wait for the v1.1 dispatcher-bypass flow.`
-          )
-        } else {
-          setSubmitError(msg)
-        }
+        setSubmitError(result?.message || 'Could not create the appointment.')
         setSubmitting(false)
         return
       }
@@ -245,7 +240,10 @@ export default function ConvertDfrToSaModal({ dfr, onClose, onConverted }) {
         sa_id:  result.service_appointment_id,
       })
 
-      toast?.success?.(`Scheduled — ${result.sa_record_number} created from ${dfr.dfr_record_number}`)
+      const bypassNote = result.territory_bypassed
+        ? ' (out-of-territory bypass applied)'
+        : ''
+      toast?.success?.(`Scheduled — ${result.sa_record_number} created from ${dfr.dfr_record_number}${bypassNote}`)
       onConverted?.({
         dfr_id: dfr.id,
         sa_id: result.service_appointment_id,
