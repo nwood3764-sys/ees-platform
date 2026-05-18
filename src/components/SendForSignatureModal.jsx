@@ -26,6 +26,35 @@ import { useToast } from './Toast'
 
 const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 
+// ─── Anchor scanner ─────────────────────────────────────────────────────
+// Mirrors the regex in supabase/functions/_shared/htmlToPdf.ts so the
+// pre-send mismatch warning sees exactly the same tokens the renderer
+// will pick up. Only meaningful for html-authored templates — docx-mode
+// templates would require downloading and parsing the .docx asset, which
+// is the renderer's job, not the modal's.
+const ANCHOR_RE = /\\(sig|initial|date|text)(\d+)\\/g
+
+function scanAnchors(bodyHtml) {
+  if (typeof bodyHtml !== 'string' || !bodyHtml) {
+    return { total: 0, maxOrdinal: 0, byOrdinal: new Map() }
+  }
+  const byOrdinal = new Map()  // ordinal -> Set of tab types
+  let maxOrdinal = 0
+  let total = 0
+  ANCHOR_RE.lastIndex = 0
+  let m
+  while ((m = ANCHOR_RE.exec(bodyHtml)) !== null) {
+    total++
+    const ord = parseInt(m[2], 10)
+    if (!Number.isFinite(ord)) continue
+    if (ord > maxOrdinal) maxOrdinal = ord
+    const tabType = m[1] === 'sig' ? 'signature' : m[1]
+    if (!byOrdinal.has(ord)) byOrdinal.set(ord, new Set())
+    byOrdinal.get(ord).add(tabType)
+  }
+  return { total, maxOrdinal, byOrdinal }
+}
+
 export default function SendForSignatureModal({ open, parentObject, parentRecordId, parentRecordLabel, onClose }) {
   const toast = useToast()
 
@@ -66,6 +95,7 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
           .from('document_templates')
           .select(`
             id, name, description, dt_record_number, related_object,
+            body_html,
             authoring:dt_authoring_mode ( picklist_value ),
             status:status ( picklist_value )
           `)
@@ -151,6 +181,44 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
   const canProceedFromPick = !!chosenTemplateId
   const canProceedFromRecipients = recipients.every(r => r.name?.trim() && r.email?.trim())
 
+  // ── Anchor / recipient mismatch detection ──────────────────────────
+  // Scan the chosen template's body_html for anchor tokens. Compare the
+  // highest ordinal found against the recipient count. The warning is a
+  // soft pre-flight check — submit is still allowed — because some
+  // legitimate flows leave anchors orphan on purpose (e.g. an internal
+  // counter-sign block authored but not assigned this round).
+  const chosenTemplate = templates?.find(t => t.id === chosenTemplateId) || null
+  const isHtmlMode = chosenTemplate?.authoring?.picklist_value === 'html'
+  const isDocxMode = chosenTemplate?.authoring?.picklist_value === 'docx'
+  const anchorScan = isHtmlMode ? scanAnchors(chosenTemplate?.body_html) : null
+  const mismatch = (() => {
+    if (!chosenTemplate) return null
+    if (isDocxMode) {
+      return { kind: 'docx_unverified' }
+    }
+    if (!anchorScan) return null
+    if (anchorScan.total === 0) {
+      return { kind: 'no_anchors' }
+    }
+    if (anchorScan.maxOrdinal > recipients.length) {
+      const orphans = []
+      for (let ord = recipients.length + 1; ord <= anchorScan.maxOrdinal; ord++) {
+        if (anchorScan.byOrdinal.has(ord)) {
+          orphans.push({ ordinal: ord, types: Array.from(anchorScan.byOrdinal.get(ord)) })
+        }
+      }
+      return { kind: 'orphan_anchors', maxOrdinal: anchorScan.maxOrdinal, orphans }
+    }
+    if (anchorScan.maxOrdinal < recipients.length) {
+      return {
+        kind: 'unused_recipients',
+        firstUnused: anchorScan.maxOrdinal + 1,
+        unusedCount: recipients.length - anchorScan.maxOrdinal,
+      }
+    }
+    return null
+  })()
+
   if (!open) return null
   return (
     <div onClick={onClose} style={modalBackdropStyle}>
@@ -192,6 +260,8 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
               message={message}
               onSubject={setSubject}
               onMessage={setMessage}
+              mismatch={mismatch}
+              onBackToRecipients={() => setStep('recipients')}
             />
           )}
           {step === 'sending' && (
@@ -354,13 +424,16 @@ function RecipientsStep({ recipients, onAdd, onRemove, onChange }) {
   )
 }
 
-function ReviewStep({ template, recipients, subject, message, onSubject, onMessage }) {
+function ReviewStep({ template, recipients, subject, message, onSubject, onMessage, mismatch, onBackToRecipients }) {
   return (
     <>
       <div style={{ marginBottom: 14, padding: 12, background: '#f1f5f9', borderRadius: 6, fontSize: 12.5, color: C.textPrimary }}>
         <div><b>Template:</b> {template?.name} ({template?.dt_record_number})</div>
         <div style={{ marginTop: 4 }}><b>Recipients:</b> {recipients.map(r => `${r.order}. ${r.name}`).join(' → ')}</div>
       </div>
+
+      {mismatch && <AnchorMismatchBanner mismatch={mismatch} recipientCount={recipients.length} onBackToRecipients={onBackToRecipients} />}
+
       <label style={labelStyle}>Subject</label>
       <input type="text" value={subject} onChange={e => onSubject(e.target.value)} style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }} />
       <label style={{ ...labelStyle, marginTop: 12 }}>Message (optional)</label>
@@ -371,6 +444,130 @@ function ReviewStep({ template, recipients, subject, message, onSubject, onMessa
       />
     </>
   )
+}
+
+function AnchorMismatchBanner({ mismatch, recipientCount, onBackToRecipients }) {
+  if (!mismatch) return null
+
+  // Common card chrome — amber for soft warnings (recipient count off,
+  // docx unverified, missing anchors). Submit is never gated; this is a
+  // pre-flight check, not a validation rule.
+  const card = {
+    padding: 12,
+    background: '#fef3c7',
+    border: '1px solid #fde68a',
+    borderRadius: 6,
+    marginBottom: 14,
+    fontSize: 12.5,
+    color: '#78350f',
+    lineHeight: 1.55,
+  }
+  const icon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#b45309" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+      <line x1="12" y1="9"  x2="12" y2="13"/>
+      <line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+  )
+
+  if (mismatch.kind === 'orphan_anchors') {
+    return (
+      <div style={card}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          {icon}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+              Template references {mismatch.maxOrdinal} recipient{mismatch.maxOrdinal === 1 ? '' : 's'}, but only {recipientCount} {recipientCount === 1 ? 'is' : 'are'} listed.
+            </div>
+            <div style={{ marginBottom: 6 }}>
+              The following anchor{mismatch.orphans.length === 1 ? ' has no recipient' : 's have no recipient'} bound to {mismatch.orphans.length === 1 ? 'its' : 'their'} ordinal — {mismatch.orphans.length === 1 ? 'it' : 'they'} will be dropped at render time and never signed:
+            </div>
+            <ul style={{ margin: '0 0 8px 18px', padding: 0 }}>
+              {mismatch.orphans.map(o => (
+                <li key={o.ordinal} style={{ marginBottom: 2 }}>
+                  Recipient #{o.ordinal} — {o.types.map(t => (
+                    <code key={t} style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #fde68a', fontSize: 11, marginRight: 4 }}>
+                      {`\\${t === 'signature' ? 'sig' : t}${o.ordinal}\\`}
+                    </code>
+                  ))}
+                </li>
+              ))}
+            </ul>
+            <button onClick={onBackToRecipients} style={{
+              marginTop: 4, background: '#fff', color: '#92400e',
+              border: '1px solid #fde68a', borderRadius: 5,
+              padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}>
+              ← Add recipient{mismatch.maxOrdinal - recipientCount === 1 ? '' : 's'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (mismatch.kind === 'unused_recipients') {
+    return (
+      <div style={card}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          {icon}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+              {mismatch.unusedCount === 1
+                ? `Recipient #${mismatch.firstUnused} has no signing tabs assigned`
+                : `Recipients #${mismatch.firstUnused}–${recipientCount} have no signing tabs assigned`}
+            </div>
+            <div>
+              The template's highest anchor ordinal is <b>{mismatch.firstUnused - 1}</b>. {mismatch.unusedCount === 1 ? 'This recipient' : 'These recipients'} will get the signing email but will have nothing to sign. Either remove the extra recipient{mismatch.unusedCount === 1 ? '' : 's'} or add anchors (<code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #fde68a', fontSize: 11 }}>{`\\sig${mismatch.firstUnused}\\`}</code>, etc.) to the template.
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (mismatch.kind === 'no_anchors') {
+    return (
+      <div style={card}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          {icon}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>No signing anchors found in this template.</div>
+            <div>
+              The recipient{recipientCount === 1 ? '' : 's'} will receive the PDF but will have no signature, initial, date, or text fields to fill in. Add anchors like <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #fde68a', fontSize: 11 }}>{`\\sig1\\`}</code> to the template body, or use the <b>Insert Signature Tab</b> picker on the document template record.
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (mismatch.kind === 'docx_unverified') {
+    // Lighter neutral card — docx anchors are scanned at render time by
+    // mammoth+regex; we can't pre-flight that from the client. This is
+    // informational, not a problem.
+    return (
+      <div style={{
+        padding: 10, background: '#eff6ff', border: '1px solid #bfdbfe',
+        borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#1e3a8a', lineHeight: 1.55,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" strokeWidth="2"
+               strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <div>
+            This is a docx-mode template — anchors are scanned at render time and can't be pre-verified here. If you're unsure about anchor placement, preview the template first with the <b>Show signature anchor positions</b> overlay from the document template record.
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return null
 }
 
 function SentStep({ result }) {
