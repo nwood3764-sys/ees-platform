@@ -171,10 +171,27 @@ Deno.serve(async (req) => {
           notification_template_id: tpl.id,
         }),
       })
-      dispatcherNotified = res.ok
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => "")
-        console.error("send-notification-email failed", res.status, errBody.slice(0, 500))
+
+      // send-notification-email returns HTTP 200 even on Graph failures
+      // (it owns the audit row and reports failure_reason in the body),
+      // so we have to inspect the body to know if the email actually went
+      // out. The contract: body.status === 'ok' iff Graph accepted or
+      // mock mode wrote the synthetic message id. Anything else
+      // (status: 'failed' / 'error') means the dispatcher did NOT
+      // receive the email.
+      let parsed: any = null
+      const raw = await res.text().catch(() => "")
+      if (raw) {
+        try { parsed = JSON.parse(raw) } catch { /* non-JSON body */ }
+      }
+      dispatcherNotified = res.ok && parsed && parsed.status === "ok"
+      if (!dispatcherNotified) {
+        console.error(
+          "send-notification-email did not deliver",
+          res.status,
+          parsed?.status || "<no body status>",
+          (parsed?.failure_reason || raw || "").slice(0, 500),
+        )
       }
     } catch (e) {
       console.error("Dispatcher notification dispatch error", (e as Error).message)
