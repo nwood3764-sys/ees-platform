@@ -122,7 +122,7 @@ export default function StatusTransitionsBar({
   }, [tableName, statusField, currentStatusId])
 
   // ── Submit a transition via the RPC ─────────────────────────────────
-  const applyTransition = useCallback(async (txn) => {
+  const applyTransition = useCallback(async (txn, note) => {
     setBusy(true)
     try {
       const { data, error } = await supabase.rpc('change_record_status', {
@@ -130,6 +130,7 @@ export default function StatusTransitionsBar({
         p_status_field:  statusField,
         p_record_id:     recordId,
         p_to_status_id:  txn.st_to_status_id,
+        p_note:          note?.trim() || null,
       })
       if (error) throw error
       if (!data?.ok) throw new Error('Status change did not complete')
@@ -140,6 +141,7 @@ export default function StatusTransitionsBar({
           transitionId: data.transition_id,
           fromStatusId: data.from_status_id,
           toStatusId:   data.to_status_id,
+          eventId:      data.event_id,
         })
       }
     } catch (e) {
@@ -212,7 +214,7 @@ export default function StatusTransitionsBar({
           transition={pendingTxn}
           currentLabel={currentLabel}
           toLabel={statusLabels.get(pendingTxn.st_to_status_id) || '—'}
-          onConfirm={() => applyTransition(pendingTxn)}
+          onConfirm={(note) => applyTransition(pendingTxn, note)}
           onCancel={() => setPendingTxn(null)}
           busy={busy}
         />
@@ -222,13 +224,14 @@ export default function StatusTransitionsBar({
 }
 
 function ConfirmTransitionModal({ transition, currentLabel, toLabel, onConfirm, onCancel, busy }) {
+  const [note, setNote] = useState('')
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 600,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{
-        background: C.card, borderRadius: 10, width: 440,
+        background: C.card, borderRadius: 10, width: 480,
         boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
       }}>
         <header style={{ padding: '16px 22px 8px' }}>
@@ -244,6 +247,33 @@ function ConfirmTransitionModal({ transition, currentLabel, toLabel, onConfirm, 
               {transition.st_description}
             </div>
           )}
+
+          {/* Optional note — stored on status_change_events.sce_note. The
+              field is empty by default; the RPC trims empty input to NULL
+              so no event row ends up with whitespace-only notes. */}
+          <div style={{ marginTop: 14 }}>
+            <label style={{
+              display: 'block', fontSize: 11, fontWeight: 600,
+              color: C.textSecondary, marginBottom: 5,
+              textTransform: 'uppercase', letterSpacing: '0.04em',
+            }}>
+              Note (optional)
+            </label>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Context for this status change. Visible in the status change history."
+              disabled={busy}
+              rows={3}
+              style={{
+                width: '100%', padding: '8px 10px', fontSize: 13,
+                fontFamily: 'inherit', color: C.textPrimary, background: C.card,
+                border: `1px solid ${C.border}`, borderRadius: 6, outline: 'none',
+                boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.45,
+              }}
+              maxLength={500}
+            />
+          </div>
         </div>
         <footer style={{
           padding: '10px 22px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8,
@@ -259,7 +289,7 @@ function ConfirmTransitionModal({ transition, currentLabel, toLabel, onConfirm, 
             }}
           >Cancel</button>
           <button
-            onClick={onConfirm}
+            onClick={() => onConfirm(note)}
             disabled={busy}
             style={{
               background: C.emerald, border: 'none', color: '#fff',
