@@ -29,6 +29,7 @@ import {
   formatDfrAddressOneLine,
   formatDfrAge,
 } from '../../data/dispatcherFollowups'
+import ConvertDfrToSaModal from './ConvertDfrToSaModal'
 
 export default function FollowupsQueue({ onNavigateToRecord }) {
   const isMobile = useIsMobile()
@@ -43,6 +44,7 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
   const [search, setSearch]      = useState('')
   const [reasonFilter, setReasonFilter] = useState([])  // value[] — empty = all
   const [busyDfrId, setBusyDfrId] = useState(null)      // disables row buttons while a flip is in flight
+  const [convertingDfr, setConvertingDfr] = useState(null)  // dfr row currently in the Schedule modal
 
   // ── Initial load ───────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -114,6 +116,15 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
     }
   }, [])
 
+  // ── Conversion flow (DFR → SA) ─────────────────────────────────────
+  // Called by the ConvertDfrToSaModal on success. The modal has already
+  // written the dfr_resolved_sa_id + flipped status to Resolved; we just
+  // drop the row from the queue locally (mirrors the Close flow) and
+  // optionally surface a click-through to the newly-created SA.
+  const handleConverted = useCallback(({ dfr_id }) => {
+    setRows(prev => prev.filter(r => r.id !== dfr_id))
+  }, [])
+
   // ── Render ─────────────────────────────────────────────────────────
   if (loading) return <div style={{ padding: 24 }}><LoadingState message="Loading dispatcher follow-ups…" /></div>
   if (error)   return <div style={{ padding: 24 }}><ErrorState message={error} /></div>
@@ -168,6 +179,7 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
             rows={filteredRows}
             busyDfrId={busyDfrId}
             onFlip={handleFlip}
+            onSchedule={(row) => setConvertingDfr(row)}
             onNavigateToRecord={onNavigateToRecord}
           />
         ) : (
@@ -175,16 +187,31 @@ export default function FollowupsQueue({ onNavigateToRecord }) {
             rows={filteredRows}
             busyDfrId={busyDfrId}
             onFlip={handleFlip}
+            onSchedule={(row) => setConvertingDfr(row)}
             onNavigateToRecord={onNavigateToRecord}
           />
         )}
       </div>
+
+      {/* Conversion modal — mounted at queue level so dispatcher can scroll
+          the underlying table while editing. Drops the row out of the queue
+          on success via handleConverted. */}
+      {convertingDfr && (
+        <ConvertDfrToSaModal
+          dfr={convertingDfr}
+          onClose={() => setConvertingDfr(null)}
+          onConverted={(payload) => {
+            handleConverted(payload)
+            setConvertingDfr(null)
+          }}
+        />
+      )}
     </div>
   )
 }
 
 // ─── Desktop table ───────────────────────────────────────────────────────
-function DesktopTable({ rows, busyDfrId, onFlip, onNavigateToRecord }) {
+function DesktopTable({ rows, busyDfrId, onFlip, onSchedule, onNavigateToRecord }) {
   return (
     <div style={tableShell}>
       <div style={tableHeader}>
@@ -195,7 +222,7 @@ function DesktopTable({ rows, busyDfrId, onFlip, onNavigateToRecord }) {
         <div style={{ ...headerCell, flex: '0 0 140px' }}>Reason</div>
         <div style={{ ...headerCell, flex: '0 0 110px' }}>Status</div>
         <div style={{ ...headerCell, flex: '0 0 100px' }}>Age</div>
-        <div style={{ ...headerCell, flex: '0 0 180px' }}>Actions</div>
+        <div style={{ ...headerCell, flex: '0 0 240px' }}>Actions</div>
       </div>
       {rows.map(row => (
         <div key={row.id} style={tableRow}>
@@ -235,11 +262,12 @@ function DesktopTable({ rows, busyDfrId, onFlip, onNavigateToRecord }) {
           <div style={{ ...rowCell, flex: '0 0 100px', color: C.textSecondary, fontSize: 13 }}>
             {formatDfrAge(row.dfr_created_at)}
           </div>
-          <div style={{ ...rowCell, flex: '0 0 180px' }}>
+          <div style={{ ...rowCell, flex: '0 0 240px' }}>
             <RowActions
               row={row}
               busy={busyDfrId === row.id}
               onFlip={onFlip}
+              onSchedule={onSchedule}
             />
           </div>
         </div>
@@ -249,7 +277,7 @@ function DesktopTable({ rows, busyDfrId, onFlip, onNavigateToRecord }) {
 }
 
 // ─── Mobile cards ────────────────────────────────────────────────────────
-function MobileCards({ rows, busyDfrId, onFlip, onNavigateToRecord }) {
+function MobileCards({ rows, busyDfrId, onFlip, onSchedule, onNavigateToRecord }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {rows.map(row => (
@@ -292,7 +320,7 @@ function MobileCards({ rows, busyDfrId, onFlip, onNavigateToRecord }) {
               {formatDfrAge(row.dfr_created_at)}
             </span>
           </div>
-          <RowActions row={row} busy={busyDfrId === row.id} onFlip={onFlip} stretched />
+          <RowActions row={row} busy={busyDfrId === row.id} onFlip={onFlip} onSchedule={onSchedule} stretched />
         </div>
       ))}
     </div>
@@ -300,7 +328,7 @@ function MobileCards({ rows, busyDfrId, onFlip, onNavigateToRecord }) {
 }
 
 // ─── Bits & pieces ───────────────────────────────────────────────────────
-function RowActions({ row, busy, onFlip, stretched = false }) {
+function RowActions({ row, busy, onFlip, onSchedule, stretched = false }) {
   const status = row._status_value
   const btnStyle = stretched
     ? { ...actionButton, flex: 1 }
@@ -317,6 +345,15 @@ function RowActions({ row, busy, onFlip, stretched = false }) {
           {busy ? '…' : 'Claim'}
         </button>
       )}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onSchedule?.(row)}
+        style={btnStyle}
+        title="Convert to a real Service Appointment"
+      >
+        Schedule
+      </button>
       <button
         type="button"
         disabled={busy}

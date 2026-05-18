@@ -155,6 +155,44 @@ export async function updateDfrStatus({ dfr_id, new_status_value, current_user_i
   return data
 }
 
+/**
+ * Mark a DFR resolved by linking it to a freshly-created Service Appointment.
+ * Called by the conversion flow after create-service-appointment returns
+ * successfully. Atomic-as-possible from the client side: one UPDATE that
+ * sets dfr_status=Resolved + dfr_resolved_sa_id in the same write.
+ *
+ * The trg_dfr_stamp_resolution trigger will fire on the status transition
+ * and stamp dfr_resolved_at / dfr_resolved_by automatically — we don't
+ * pass them explicitly so the trigger uses now() + current_app_user_id().
+ *
+ * Returns the updated row including the resolution-stamping fields the
+ * trigger populated.
+ */
+export async function markDfrResolvedToSa({ dfr_id, sa_id }) {
+  if (!dfr_id) throw new Error('markDfrResolvedToSa: dfr_id required')
+  if (!sa_id)  throw new Error('markDfrResolvedToSa: sa_id required')
+
+  const pl = await fetchDfrPicklists()
+  const resolvedStatusId = pl.statusByValue['Resolved']
+  if (!resolvedStatusId) throw new Error('markDfrResolvedToSa: Resolved status not found in picklist')
+
+  const { data, error } = await supabase
+    .from('dispatcher_followup_requests')
+    .update({
+      dfr_status:          resolvedStatusId,
+      dfr_resolved_sa_id:  sa_id,
+      dfr_updated_at:      new Date().toISOString(),
+      // dfr_resolved_at / dfr_resolved_by come from the trg_dfr_stamp_resolution
+      // trigger — passing them here would be redundant.
+    })
+    .eq('id', dfr_id)
+    .select('id, dfr_status, dfr_resolved_sa_id, dfr_resolved_at, dfr_resolved_by')
+    .single()
+
+  if (error) throw new Error(`markDfrResolvedToSa: ${error.message}`)
+  return data
+}
+
 // Helper: pretty-print a row's address as one line for the queue display.
 export function formatDfrAddressOneLine(row) {
   const street = row.dfr_address_street || ''
