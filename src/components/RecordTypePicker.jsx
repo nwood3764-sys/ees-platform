@@ -43,14 +43,20 @@ export default function RecordTypePicker({ tableName, objectLabel, onPick, onCan
       .catch(err => { if (!cancelled) setError(err.message || String(err)) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [tableName, onPick])
+    // Deliberately omit onPick from deps — it's an inline arrow on the parent
+    // and a new reference every render, which would otherwise cause an
+    // infinite fetch loop. We only want to refetch when the tableName
+    // actually changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableName])
 
   // Cancel on Escape
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onCancel?.() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Hide entirely when the effect already auto-picked (one or zero RTs)
   if (!loading && recordTypes.length <= 1 && !error) return null

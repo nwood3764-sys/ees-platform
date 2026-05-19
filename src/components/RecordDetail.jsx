@@ -3787,14 +3787,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // the prefill already carries a record_type, skip the picker. Otherwise,
   // fetch the object's active record types; 0 or 1 -> skip picker; 2+ ->
   // show picker (gate the load effect until the user picks).
+  // Extract the prefill RT value here so the effect depends on the stable
+  // primitive — not on the prefill object identity (which could be a new
+  // reference every parent render and cause refetch loops).
+  const prefillRecordTypeValue = getRecordTypeValue(prefill)
   useEffect(() => {
     if (!isCreate) { setPickerEvaluated(true); return }
     let cancelled = false
     setPickerEvaluated(false)
     setPickedRecordType(null)
 
-    const prefillRT = getRecordTypeValue(prefill)
-    if (prefillRT) {
+    if (prefillRecordTypeValue) {
       setPickedRecordType(false)   // prefill already has it — no picker needed
       setPickerEvaluated(true)
       return
@@ -3818,7 +3821,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         setPickerEvaluated(true)
       })
     return () => { cancelled = true }
-  }, [isCreate, tableName, prefill])
+  }, [isCreate, tableName, prefillRecordTypeValue])
 
   useEffect(() => {
     let cancelled = false
