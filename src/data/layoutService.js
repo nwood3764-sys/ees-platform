@@ -336,37 +336,43 @@ export async function fetchPageLayout(objectName, recordTypeValue = null, option
 
   return {
     layout,
-    sections: applyRollupReadOnly(sectionList),
+    sections: applyConventionalReadOnly(objectName, sectionList),
   }
 }
 
 /**
- * Annotate every field whose name follows the roll-up naming convention with
- * `_editable: false` so the EditField renderer renders them as read-only
- * display values rather than free-text inputs. Counts and aggregates are
- * computed by triggers or by frontend rollup helpers — never typed in.
+ * Annotate read-only fields based on table+name conventions. Two kinds:
  *
- * Patterns covered (and only when the value is an integer-flavored column,
- * which is true everywhere in Energy Efficiency Services for these names):
- *   - <prefix>_total_number_of_<thing>   (account_total_number_of_properties)
- *   - <prefix>_number_of_<thing>         (account_number_of_opportunities)
- *   - <prefix>_amount_of_<thing>         (account_amount_of_open_opportunities)
- *   - <prefix>_count_of_<thing>
- *   - any field name ending in _rollup
+ * 1. Roll-up summary fields — naming patterns that always indicate computed
+ *    aggregates: <prefix>_total_number_of_<thing>, <prefix>_number_of_<thing>,
+ *    <prefix>_amount_of_<thing>, <prefix>_count_of_<thing>, *_rollup.
+ *    These are maintained by triggers (or to-be-built triggers); the user
+ *    should never type into them.
  *
- * Operates on the sectionList in-place (returning the same reference is
- * intentional — callers want to keep the cached object identity stable).
+ * 2. Derived-name fields — Salesforce-style auto-computed display names.
+ *    Currently:
+ *      - properties.property_name  =  property_street + ' - ' + property_city
+ *      - (others may follow as the model fleshes out)
+ *    The handleFieldChange in RecordDetail keeps the draft in sync when the
+ *    source fields change. Marking them read-only here prevents the user
+ *    from typing into them directly.
+ *
+ * Mutates the section list in place; the same reference is returned so the
+ * caching identity stays stable.
  */
-function applyRollupReadOnly(sectionList) {
+function applyConventionalReadOnly(objectName, sectionList) {
   const ROLLUP_RE = /(_total_number_of_|_number_of_|_amount_of_|_count_of_|_rollup$)/
+  const DERIVED_NAME_FIELDS = {
+    properties: new Set(['property_name']),
+  }
+  const derivedSet = DERIVED_NAME_FIELDS[objectName] || new Set()
   for (const sec of sectionList) {
     for (const w of sec.widgets || []) {
       if (w.widget_type !== 'field_group' || !Array.isArray(w.widget_config?.fields)) continue
       const fields = w.widget_config.fields.map(f => {
         if (!f?.name) return f
-        // Don't override an explicit `_editable: false` already set by perms.
         if (f._editable === false) return f
-        if (ROLLUP_RE.test(f.name)) return { ...f, _editable: false }
+        if (ROLLUP_RE.test(f.name) || derivedSet.has(f.name)) return { ...f, _editable: false }
         return f
       })
       w.widget_config = { ...w.widget_config, fields }
@@ -730,33 +736,41 @@ export async function insertRecord(tableName, fields) {
  * modal's inline-create flow so both paths produce identical inserts.
  */
 export function applyInsertDefaults(tableName, fields, userId) {
-  const prefixes = [
-    'contact', 'property', 'opportunity', 'work_order', 'project', 'building',
-    'unit', 'assessment', 'vehicle', 'product', 'equipment', 'account', 'skill',
-  ]
-  for (const p of prefixes) {
-    // Match the table name exactly to its singular or pluralized form.
-    // Using startsWith() here would collide with longer table names that
-    // share a prefix — e.g. `project_report_template_sections` would match
-    // the `project` branch and apply project_* defaults to a prts_* table.
-    // Affected long-prefix tables: project_report_templates,
-    // project_report_template_sections, project_report_template_record_type_assignments,
-    // project_report_template_snapshots, project_payment_requests, account_contact_relations,
-    // contact_skills. Each of these has its own explicit branch below.
-    if (tableName === p || tableName === p + 's' || tableName === p + 'ies') {
-      if (!fields[`${p}_record_number`]) fields[`${p}_record_number`] = 'NEW'
-      if (!fields[`${p}_owner`])         fields[`${p}_owner`]         = userId
-      if (!fields[`${p}_created_by`])    fields[`${p}_created_by`]    = userId
-      // Auto-derive contact_name when only first/last were typed
-      if (p === 'contact' && !fields.contact_name && fields.contact_first_name) {
-        fields.contact_name = `${fields.contact_first_name} ${fields.contact_last_name || ''}`.trim()
-      }
-      // Auto-derive account_name from organization_name when present
-      if (p === 'account' && !fields.account_name && fields.account_organization_name) {
-        fields.account_name = fields.account_organization_name
-      }
-      return fields
+  // Explicit table -> column-prefix map. Replaces a previous pluralization-
+  // guessing loop that broke for y->ies words (properties, opportunities,
+  // assessments-was-fine-but-companies/categories etc would have failed
+  // too). Map covers every standard-prefix Energy Efficiency Services
+  // business table. Short-prefix tables (incentive_applications -> ia_, etc.)
+  // are handled by the explicit branches below.
+  const TABLE_PREFIX = {
+    accounts:       'account',
+    assessments:    'assessment',
+    buildings:      'building',
+    contacts:       'contact',
+    equipment:      'equipment',   // already singular
+    opportunities:  'opportunity',
+    products:       'product',
+    projects:       'project',
+    properties:     'property',
+    skills:         'skill',
+    units:          'unit',
+    vehicles:       'vehicle',
+    work_orders:    'work_order',
+  }
+  const p = TABLE_PREFIX[tableName]
+  if (p) {
+    if (!fields[`${p}_record_number`]) fields[`${p}_record_number`] = 'NEW'
+    if (!fields[`${p}_owner`])         fields[`${p}_owner`]         = userId
+    if (!fields[`${p}_created_by`])    fields[`${p}_created_by`]    = userId
+    // Auto-derive contact_name when only first/last were typed
+    if (p === 'contact' && !fields.contact_name && fields.contact_first_name) {
+      fields.contact_name = `${fields.contact_first_name} ${fields.contact_last_name || ''}`.trim()
     }
+    // Auto-derive account_name from organization_name when present
+    if (p === 'account' && !fields.account_name && fields.account_organization_name) {
+      fields.account_name = fields.account_organization_name
+    }
+    return fields
   }
   // Short-prefix special cases
   if (tableName === 'incentive_applications') {

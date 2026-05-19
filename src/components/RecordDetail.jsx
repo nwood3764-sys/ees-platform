@@ -2187,18 +2187,36 @@ const tdStyle = { padding: '10px 14px', color: C.textPrimary, verticalAlign: 'mi
 // FieldGroup widget — view mode OR edit mode
 // ---------------------------------------------------------------------------
 
-function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons, onNavigateToRecord }) {
+function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons, onNavigateToRecord, requiredFields }) {
   const fields = widget.widget_config?.fields || []
   if (fields.length === 0) return null
+
+  // System fields are auto-populated at insert time by applyInsertDefaults
+  // (record_number, owner, created_by) — they appear in the layout for
+  // display purposes on saved records but shouldn't be shown as inputs on
+  // the create form. Hide them when the record doesn't exist yet.
+  const isCreate = !record?.id
+  const isSystemField = (name) =>
+    /(_record_number|_created_by|_updated_by|_created_at|_updated_at|_owner)$/.test(name || '')
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0' }}>
       {fields.map(f => {
+        // Hide system-set fields on the create form — they're auto-populated
+        // at insert time by applyInsertDefaults and rendering them as inputs
+        // just confuses the user (and produced an incorrect 'Required fields
+        // missing' error before the prefix-map fix landed).
+        if (isCreate && isSystemField(f.name)) return null
         const raw = editing ? draft[f.name] : record[f.name]
         const display = formatFieldValue(raw, f, picklists, lookups)
         const isLookupLike = f.type === 'lookup' || f.type === 'polymorphic_lookup'
         const isLink = f.type === 'email' || isLookupLike
         const hasLookupOpts = f.type === 'lookup' && allLookupOpts?.[f.name]?.length > 0
+        // The widget config may already mark a field as required (admin-set);
+        // the DB-derived requiredFields set is authoritative for NOT NULL
+        // columns. Render the red asterisk if EITHER is true and we're
+        // currently in edit mode (asterisks would be visual noise in view).
+        const isRequiredField = (f.required === true) || requiredFields?.has?.(f.name)
         // polymorphic_lookup is read-only in edit mode for now — there's no
         // UI for picking both the parent table and the parent record from a
         // single field, and these fields are typically system-set anyway
@@ -2272,6 +2290,9 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
           }}>
             <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
               {f.label}
+              {editing && isRequiredField && (
+                <span style={{ color: '#c0392b', marginLeft: 3 }}>*</span>
+              )}
             </span>
             {isEditable ? (
               <EditField field={f} value={draft[f.name]} onChange={onChange}
@@ -3610,7 +3631,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 // Section
 // ---------------------------------------------------------------------------
 
-function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes, onNavigateToRecord }) {
+function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes, onNavigateToRecord, requiredFields }) {
   const isMobile = useIsMobile()
   const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
   // Render any widgets that live inside a section card. Today: field_group,
@@ -3641,7 +3662,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
           return <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
             editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts}
             onRefreshRecord={onRefreshRecord} recordId={recordId} fieldDisabledReasons={fieldDisabledReasons}
-            onNavigateToRecord={onNavigateToRecord} />
+            onNavigateToRecord={onNavigateToRecord} requiredFields={requiredFields} />
         }
         if (w.widget_type === 'section_config_editor') {
           return <SectionConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
@@ -3695,6 +3716,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // object{id,value,label} = the user's picked record type
   const [pickedRecordType, setPickedRecordType] = useState(null)
   const [pickerEvaluated,  setPickerEvaluated]  = useState(false)
+  // Required-field set for this table — used to render the red asterisk in
+  // the field-group renderer. Populated once at mount via fetchTableMetadata
+  // (which is cached so subsequent calls in handleSave are free).
+  const [requiredFields, setRequiredFields] = useState(new Set())
   // Project report generator (only used when tableName === 'projects'). The
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
@@ -3823,6 +3848,21 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     return () => { cancelled = true }
   }, [isCreate, tableName, prefillRecordTypeValue])
 
+  // ── Load required-field set ────────────────────────────────────────────
+  // Fetch the table's NOT NULL columns once per mount; render the red
+  // asterisk on those fields. fetchTableMetadata is cached per session so
+  // this is essentially free on repeat opens.
+  useEffect(() => {
+    let cancelled = false
+    fetchTableMetadata(tableName)
+      .then(meta => {
+        if (cancelled) return
+        setRequiredFields(new Set(meta.required_fields || []))
+      })
+      .catch(() => { if (!cancelled) setRequiredFields(new Set()) })
+    return () => { cancelled = true }
+  }, [tableName])
+
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
@@ -3931,7 +3971,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     if (cloneSource) { setCloneSource(null); setEditing(false); setDraft({}); return }
     setEditing(false); setDraft({})
   }
-  const handleFieldChange = (name, value) => setDraft(prev => ({ ...prev, [name]: value }))
+  const handleFieldChange = (name, value) => setDraft(prev => {
+    const next = { ...prev, [name]: value }
+    // Per-table auto-derive rules. Salesforce parity: certain "name" fields
+    // are computed from other fields rather than free-text.
+    if (tableName === 'properties' && (name === 'property_street' || name === 'property_city')) {
+      const street = (name === 'property_street' ? value : next.property_street) || ''
+      const city   = (name === 'property_city'   ? value : next.property_city)   || ''
+      const derived = [street, city].filter(s => String(s || '').trim()).join(' - ')
+      next.property_name = derived || ''
+    }
+    return next
+  })
 
   // Clone: strip system fields, append " (Copy)" to visible name fields,
   // enter insert-mode so Save inserts a brand-new record in the same table.
@@ -5361,7 +5412,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName}
                 onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
                 fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes}
-                onNavigateToRecord={onNavigateToRecord} />
+                onNavigateToRecord={onNavigateToRecord}
+                requiredFields={requiredFields} />
             )
           })}
 
