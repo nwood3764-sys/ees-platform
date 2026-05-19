@@ -4558,6 +4558,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     </div>
   )
 
+  // Defensive: if loading flipped to false but data is still null (e.g. the
+  // load effect was gated mid-flight, or fetchPageLayout returned null without
+  // setting error), surface a clean message instead of letting the destructure
+  // below throw and white-screen the whole app.
+  if (!data) return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, padding: 24 }}>
+      <div style={{ color: '#b03a2e', fontSize: 14, fontWeight: 600 }}>Record could not be loaded</div>
+      <div style={{ color: C.textMuted, fontSize: 12, maxWidth: 560, textAlign: 'center' }}>
+        The layout for this object didn't load. Try refreshing the page, or contact an admin if the problem persists.
+      </div>
+      <button onClick={onBack} style={{ marginTop: 8, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 16px', fontSize: 12, color: C.textSecondary, cursor: 'pointer' }}>Back</button>
+    </div>
+  )
+
   const { record, layout, sections, picklists, lookups } = data
 
   // Build the ordered tab list from the loaded sections. Details first,
