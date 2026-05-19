@@ -336,8 +336,43 @@ export async function fetchPageLayout(objectName, recordTypeValue = null, option
 
   return {
     layout,
-    sections: sectionList,
+    sections: applyRollupReadOnly(sectionList),
   }
+}
+
+/**
+ * Annotate every field whose name follows the roll-up naming convention with
+ * `_editable: false` so the EditField renderer renders them as read-only
+ * display values rather than free-text inputs. Counts and aggregates are
+ * computed by triggers or by frontend rollup helpers — never typed in.
+ *
+ * Patterns covered (and only when the value is an integer-flavored column,
+ * which is true everywhere in Energy Efficiency Services for these names):
+ *   - <prefix>_total_number_of_<thing>   (account_total_number_of_properties)
+ *   - <prefix>_number_of_<thing>         (account_number_of_opportunities)
+ *   - <prefix>_amount_of_<thing>         (account_amount_of_open_opportunities)
+ *   - <prefix>_count_of_<thing>
+ *   - any field name ending in _rollup
+ *
+ * Operates on the sectionList in-place (returning the same reference is
+ * intentional — callers want to keep the cached object identity stable).
+ */
+function applyRollupReadOnly(sectionList) {
+  const ROLLUP_RE = /(_total_number_of_|_number_of_|_amount_of_|_count_of_|_rollup$)/
+  for (const sec of sectionList) {
+    for (const w of sec.widgets || []) {
+      if (w.widget_type !== 'field_group' || !Array.isArray(w.widget_config?.fields)) continue
+      const fields = w.widget_config.fields.map(f => {
+        if (!f?.name) return f
+        // Don't override an explicit `_editable: false` already set by perms.
+        if (f._editable === false) return f
+        if (ROLLUP_RE.test(f.name)) return { ...f, _editable: false }
+        return f
+      })
+      w.widget_config = { ...w.widget_config, fields }
+    }
+  }
+  return sectionList
 }
 
 /**
@@ -608,16 +643,57 @@ export async function saveRecord(tableName, recordId, changes) {
  * Used to populate <select> dropdowns in edit mode.
  */
 export async function fetchPicklistOptions(objectName, fieldName) {
-  const { data, error } = await supabase
-    .from('picklist_values')
-    .select('id, picklist_value, picklist_label')
-    .eq('picklist_object', objectName)
-    .eq('picklist_field', fieldName)
-    .eq('picklist_is_active', true)
-    .order('picklist_sort_order', { ascending: true })
+  // Picklist values use the *short* field name (e.g. 'record_type', 'status',
+  // 'type'), while page-layout widgets pass the actual column name on the
+  // table (e.g. 'account_record_type', 'property_subsidy_type'). Try the
+  // direct lookup first; if it returns nothing AND the column name has the
+  // table's prefix in front of a known short field, retry with the short
+  // form. This keeps the loader resilient to both naming styles.
+  const tryFetch = async (field) => {
+    const { data, error } = await supabase
+      .from('picklist_values')
+      .select('id, picklist_value, picklist_label')
+      .eq('picklist_object', objectName)
+      .eq('picklist_field', field)
+      .eq('picklist_is_active', true)
+      .order('picklist_sort_order', { ascending: true })
+    if (error) throw error
+    return data || []
+  }
 
-  if (error) throw error
-  return (data || []).map(r => ({
+  let rows = await tryFetch(fieldName)
+
+  if (rows.length === 0) {
+    // Strip the object prefix and retry. accounts -> account_, properties ->
+    // property_, opportunities -> opportunity_, etc. Also handle the short-
+    // prefix tables (incentive_applications -> ia_, work_plan_templates ->
+    // wpt_) via the same explicit map used elsewhere.
+    const SHORT_PREFIX = {
+      incentive_applications: 'ia_',
+      work_plan_templates:    'wpt_',
+      work_step_templates:    'wst_',
+      project_payment_requests: 'ppr_',
+      project_reservations:   'pr_',
+      service_appointments:   'sa_',
+      service_appointment_assignments: 'saa_',
+      diagnostic_tests:       'dt_',
+      efr_reports:            'efr_',
+      equipment_activities:   'ea_',
+      project_report_templates: 'prt_',
+    }
+    let prefix = SHORT_PREFIX[objectName]
+    if (!prefix) {
+      // Standard singular prefix: 'accounts' -> 'account_'
+      const singular = objectName.endsWith('s') ? objectName.slice(0, -1) : objectName
+      prefix = `${singular}_`
+    }
+    if (fieldName.startsWith(prefix)) {
+      const shortField = fieldName.slice(prefix.length)
+      rows = await tryFetch(shortField)
+    }
+  }
+
+  return rows.map(r => ({
     id: r.id,
     value: r.id,        // the UUID stored in the record
     label: r.picklist_label || r.picklist_value,
