@@ -57,6 +57,61 @@ export async function getCurrentUserProfile() {
 }
 
 /**
+ * Identify the table's record-type column. For business tables (accounts,
+ * properties, opportunities, etc.) this is `{prefix}_record_type` where the
+ * prefix is the singular form of the table name with the long-prefix tables
+ * (incentive_applications -> ia, work_plan_templates -> wpt) handled by the
+ * applyInsertDefaults explicit-case map elsewhere. For Create-mode form
+ * prefill we accept either the canonical column name OR the generic
+ * `record_type` key, which propagates through to the right column at save.
+ */
+export function getRecordTypeColumn(tableName) {
+  // Manually map the short-prefix tables that don't follow `singular_record_type`
+  const SHORT_PREFIX = {
+    incentive_applications:  'ia_record_type',
+    work_plan_templates:     'wpt_record_type',
+    work_step_templates:     'wst_record_type',
+    project_payment_requests: 'ppr_record_type',
+    project_reservations:    'pr_record_type',
+    service_appointments:    'sa_record_type',
+    service_appointment_assignments: 'saa_record_type',
+    work_orders:             'work_order_record_type',
+    work_steps:              'work_step_record_type',
+    work_plans:              'work_plan_record_type',
+    diagnostic_tests:        'dt_record_type',
+    efr_reports:             'efr_record_type',
+    equipment_activities:    'ea_record_type',
+    project_report_templates: 'prt_record_type',
+  }
+  if (SHORT_PREFIX[tableName]) return SHORT_PREFIX[tableName]
+  // Strip trailing 's' for the standard singular form
+  const singular = tableName.endsWith('s') ? tableName.slice(0, -1) : tableName
+  return `${singular}_record_type`
+}
+
+/**
+ * Returns the active record-type picklist values for an object as
+ * [{ id, value, label }]. Empty array means the object has no record-type
+ * differentiation and the Create flow should skip the record-type picker.
+ */
+export async function fetchAvailableRecordTypes(objectName) {
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('id, picklist_value, picklist_label, picklist_sort_order')
+    .eq('picklist_object', objectName)
+    .eq('picklist_field', 'record_type')
+    .eq('picklist_is_active', true)
+    .order('picklist_sort_order', { ascending: true })
+    .order('picklist_label', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({
+    id:    r.id,
+    value: r.picklist_value,
+    label: r.picklist_label || r.picklist_value,
+  }))
+}
+
+/**
  * Extract the record-type value from a record (or prefill draft) regardless of
  * column-naming convention. Energy Efficiency Services business tables use a {prefix}_record_type
  * column (e.g. property_record_type, account_record_type, ia_record_type) that

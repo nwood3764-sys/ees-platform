@@ -42,7 +42,10 @@ import {
   removeJunctionRow,
   applyInsertDefaults,
   getRecordTypeValue,
+  getRecordTypeColumn,
+  fetchAvailableRecordTypes,
 } from '../data/layoutService'
+import RecordTypePicker from './RecordTypePicker'
 
 // ---------------------------------------------------------------------------
 // Template lifecycle registry
@@ -3682,6 +3685,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // draft pre-populated from the source.
   const [cloneSource, setCloneSource] = useState(null)
   const isInsertMode = isCreate || cloneSource !== null
+  // Record-type picker state. In create mode, if the user hasn't supplied a
+  // prefill record_type and the object has multiple active record types, we
+  // show RecordTypePicker before loading the form layout. `pickedRecordType`
+  // holds the user's choice once made.
+  // null  = still showing picker (or evaluating whether to show it)
+  // false = picker has determined no record-type pick is needed (0 or 1 RTs,
+  //         or the prefill already supplied one)
+  // object{id,value,label} = the user's picked record type
+  const [pickedRecordType, setPickedRecordType] = useState(null)
+  const [pickerEvaluated,  setPickerEvaluated]  = useState(false)
   // Project report generator (only used when tableName === 'projects'). The
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
@@ -3769,15 +3782,67 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     return () => { cancelled = true }
   }, [tableName])
 
+  // ── Record-type picker evaluation ───────────────────────────────────────
+  // On entering create mode, decide whether the picker needs to show. If
+  // the prefill already carries a record_type, skip the picker. Otherwise,
+  // fetch the object's active record types; 0 or 1 -> skip picker; 2+ ->
+  // show picker (gate the load effect until the user picks).
+  useEffect(() => {
+    if (!isCreate) { setPickerEvaluated(true); return }
+    let cancelled = false
+    setPickerEvaluated(false)
+    setPickedRecordType(null)
+
+    const prefillRT = getRecordTypeValue(prefill)
+    if (prefillRT) {
+      setPickedRecordType(false)   // prefill already has it — no picker needed
+      setPickerEvaluated(true)
+      return
+    }
+
+    fetchAvailableRecordTypes(tableName)
+      .then(rts => {
+        if (cancelled) return
+        if (rts.length === 0) {
+          setPickedRecordType(false)
+        } else if (rts.length === 1) {
+          setPickedRecordType(rts[0])
+        }
+        // else: leave null so picker renders
+        setPickerEvaluated(true)
+      })
+      .catch(err => {
+        if (cancelled) return
+        console.warn('fetchAvailableRecordTypes failed', err)
+        setPickedRecordType(false)
+        setPickerEvaluated(true)
+      })
+    return () => { cancelled = true }
+  }, [isCreate, tableName, prefill])
+
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
 
     if (isCreate) {
+      // Gate on picker evaluation. Until we know whether the picker is
+      // needed (and the user has picked, if shown), don't fetch the layout.
+      if (!pickerEvaluated) { setLoading(false); return }
+      if (pickedRecordType === null) { setLoading(false); return }   // picker is up
+
+      // Resolve which record type the form will use:
+      //   pickedRecordType === false  -> object has no RTs OR prefill supplied one
+      //   pickedRecordType === object -> the user (or auto-pick) chose one
+      const rtId    = pickedRecordType && pickedRecordType.id    ? pickedRecordType.id    : null
+      const rtCol   = getRecordTypeColumn(tableName)
+      // Seed value for the form's record-type column when we have a pick
+      const seededRT = rtId ? { [rtCol]: rtId } : {}
+
       // Create mode: fetch layout + picklists only, no record.
-      // If a record_type was pre-populated (via prefill or URL), use it to
-      // select the record-type-specific layout. Otherwise falls back to master.
-      Promise.all([fetchPageLayout(tableName, getRecordTypeValue(prefill)), loadAllPicklists()])
+      // Layout selection uses the picked RT (if any) so the right
+      // record-type-specific layout loads.
+      const layoutKey = rtId || getRecordTypeValue(prefill)
+      Promise.all([fetchPageLayout(tableName, layoutKey), loadAllPicklists()])
         .then(([layoutData, picklists]) => {
           if (cancelled) return
           setData({
@@ -3787,7 +3852,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             picklists,
             lookups: new Map(),
           })
-          setDraft(prefill ? { ...prefill } : {})
+          setDraft(prefill ? { ...seededRT, ...prefill } : { ...seededRT })
           setEditing(true)
           // Pre-load picklist + lookup options
           if (layoutData?.sections) {
@@ -3805,7 +3870,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         .finally(() => { if (!cancelled) setLoading(false) })
     }
     return () => { cancelled = true }
-  }, [tableName, recordId, isCreate, reloadTick])
+  }, [tableName, recordId, isCreate, reloadTick, pickerEvaluated, pickedRecordType])
 
   // When data first loads (or when the loaded record changes tables),
   // pick the first tab as active. Only initializes — does not override
@@ -4462,6 +4527,23 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       toast.error(`Delete failed — ${err.message || String(err)}`)
       setDeleting(false)
     }
+  }
+
+  // Show the record-type picker before loading the layout. Gates create mode.
+  if (isCreate && pickerEvaluated && pickedRecordType === null) {
+    const objectLabel = TABLE_META[tableName]?.label || tableName
+    return (
+      <RecordTypePicker
+        tableName={tableName}
+        objectLabel={objectLabel}
+        onPick={(rt) => {
+          // rt can be null when the picker auto-determined no RTs exist;
+          // false marks 'no picker needed' so the load effect can proceed.
+          setPickedRecordType(rt || false)
+        }}
+        onCancel={() => onBack()}
+      />
+    )
   }
 
   if (loading) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading record…</div>
