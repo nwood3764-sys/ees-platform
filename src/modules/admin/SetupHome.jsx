@@ -31,6 +31,7 @@ import {
 } from '../../data/adminService'
 import UnmatchedInboxPane from './UnmatchedInboxPane'
 import SeedDataPurgePane from './SeedDataPurgePane'
+import BulkPropertyImportPane from './BulkPropertyImportPane'
 
 // ---------------------------------------------------------------------------
 // Setup Home — Salesforce-style left tree nav + right content pane.
@@ -459,6 +460,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'audit_log':         return <AuditLogPane />
     case 'recycle_bin':       return <RecycleBinPane onOpenRecord={onOpenRecord} />
     case 'seed_data_purge':   return <SeedDataPurgePane />
+    case 'bulk_property_import': return <BulkPropertyImportPane />
     case 'portals':                  return <NodePage title="Portals"                  table="portals"                  fetcher={fetchPortals}                 columns={PORTAL_COLS}     newLabel="Portal"                  onOpenRecord={onOpenRecord} />
     case 'portal_role_assignments':  return <NodePage title="Portal Role Assignments"  table="portal_role_assignments"  fetcher={fetchPortalRoleAssignments}   columns={PRA_COLS}        newLabel="Role Assignment"         onOpenRecord={onOpenRecord} />
     case 'object_chat_enabled':      return <NodePage title="Object Chat Settings"     table="object_chat_enabled"      fetcher={fetchObjectChatEnabled}       columns={OCE_COLS}        newLabel="Object Chat Setting"     onOpenRecord={onOpenRecord} />
