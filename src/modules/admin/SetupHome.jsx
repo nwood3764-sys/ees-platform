@@ -30,6 +30,7 @@ import {
   fetchOutboundMailboxesForListView,
 } from '../../data/adminService'
 import UnmatchedInboxPane from './UnmatchedInboxPane'
+import SeedDataPurgePane from './SeedDataPurgePane'
 
 // ---------------------------------------------------------------------------
 // Setup Home — Salesforce-style left tree nav + right content pane.
@@ -457,6 +458,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'work_type_skill_requirements': return <NodePage title="Work Type Skill Requirements" table="work_type_skill_requirements" fetcher={fetchWorkTypeSkillRequirements} columns={WTSR_COLS}  newLabel="Skill Requirement"           onOpenRecord={onOpenRecord} />
     case 'audit_log':         return <AuditLogPane />
     case 'recycle_bin':       return <RecycleBinPane onOpenRecord={onOpenRecord} />
+    case 'seed_data_purge':   return <SeedDataPurgePane />
     case 'portals':                  return <NodePage title="Portals"                  table="portals"                  fetcher={fetchPortals}                 columns={PORTAL_COLS}     newLabel="Portal"                  onOpenRecord={onOpenRecord} />
     case 'portal_role_assignments':  return <NodePage title="Portal Role Assignments"  table="portal_role_assignments"  fetcher={fetchPortalRoleAssignments}   columns={PRA_COLS}        newLabel="Role Assignment"         onOpenRecord={onOpenRecord} />
     case 'object_chat_enabled':      return <NodePage title="Object Chat Settings"     table="object_chat_enabled"      fetcher={fetchObjectChatEnabled}       columns={OCE_COLS}        newLabel="Object Chat Setting"     onOpenRecord={onOpenRecord} />
