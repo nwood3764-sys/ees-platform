@@ -11,6 +11,7 @@ import HelpPanel from './components/help/HelpPanel'
 import HelpTopbarButton from './components/help/HelpTopbarButton'
 import TopbarSetupGear from './components/TopbarSetupGear'
 import TopbarUserMenu from './components/TopbarUserMenu'
+import NotificationBell from './components/NotificationBell'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
@@ -289,6 +290,7 @@ function AuthedApp({ session }) {
                   activeModule={activeModule}
                   selectedRecord={selectedRecord}
                 />
+                <NotificationBell onNavigateToRecord={navigateToRecord} />
                 <TopbarSetupGear
                   selectedRecord={selectedRecord}
                   onOpenSetup={navigateToSetup}
