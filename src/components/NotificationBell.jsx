@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
+import { supabase } from '../lib/supabase'
 import {
   loadUnreadCount,
   loadRecent,
@@ -19,8 +20,13 @@ import {
  * (tasks_create_notification_iu) and by the automation executor as it fires.
  * The client never inserts to the notifications table.
  *
- * Polling: refetches unread count every 60s while open, and once on mount.
- * Cheap RPC (count(*) over the caller's recipient_id), small impact.
+ * Live delivery: subscribes to the supabase_realtime publication on the
+ * notifications table. The RLS policy notifications_select_own restricts
+ * realtime payloads to rows where recipient_id matches the caller's
+ * public.users.id, so the subscription only fires for the current user's
+ * notifications — no client-side filtering required and no other user's
+ * data is ever transmitted. Slow 5-minute poll kept as a fallback in case
+ * the websocket drops; the realtime channel handles the common case.
  */
 export default function NotificationBell({ onNavigateToRecord }) {
   const [open, setOpen] = useState(false)
@@ -32,16 +38,60 @@ export default function NotificationBell({ onNavigateToRecord }) {
   const [busyAll, setBusyAll] = useState(false)
   const wrapRef = useRef(null)
   const pollRef = useRef(null)
+  const channelRef = useRef(null)
+  const openRef = useRef(false)
+  useEffect(() => { openRef.current = open }, [open])
 
-  // Initial fetch + 60s polling for the badge count.
+  // Refresh badge count from the server.
   const refreshUnread = useCallback(async () => {
     try { setUnread(await loadUnreadCount()) } catch { /* ignore polling errors */ }
   }, [])
+
+  // Initial fetch + slow-poll fallback (every 5 min) in case realtime drops.
   useEffect(() => {
     refreshUnread()
-    pollRef.current = setInterval(refreshUnread, 60000)
+    pollRef.current = setInterval(refreshUnread, 5 * 60 * 1000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [refreshUnread])
+
+  // Realtime subscription: pop new notifications instantly when they land.
+  // We only listen for INSERTs — UPDATE/DELETE on notifications happens via
+  // RPC and we always know about those locally.
+  //
+  // RLS scopes the broadcast to the caller's own rows server-side, so the
+  // event will only fire for notifications addressed to this user.
+  //
+  // Subscription is bound once on mount and torn down on unmount; we read
+  // the current `open` state from openRef instead of including it in deps,
+  // which would otherwise re-bind the channel on every toggle.
+  useEffect(() => {
+    const channel = supabase
+      .channel('notification-bell')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+      }, (payload) => {
+        const row = payload?.new
+        if (!row) return
+        setUnread(u => u + 1)
+        // If the popover is open, prepend the new row so the user sees it
+        // immediately. If it's closed, we let loadRecent() refetch on next
+        // open — keeping the items array tight to what's been viewed avoids
+        // memory bloat on long sessions.
+        if (openRef.current) {
+          setItems(arr => [row, ...arr].slice(0, 30))
+        }
+      })
+      .subscribe()
+    channelRef.current = channel
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+    }
+  }, [])
 
   // Click-outside to close.
   useEffect(() => {
