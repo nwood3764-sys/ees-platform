@@ -914,6 +914,73 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
 }
 
 /**
+ * Fetch lookup options for a dependent dropdown — options narrowed by the
+ * current record's other field values. Each `kind` is a named query pattern
+ * implemented as a Postgres RPC; the field config supplies `kind` plus the
+ * names of the host-record fields whose values feed the filter.
+ *
+ * Spec on a field_group field:
+ *
+ *   {
+ *     "name": "property_primary_contact_id",
+ *     "type": "lookup",
+ *     "lookup_table": "contacts",     // fallback for the unscoped path
+ *     "lookup_field": "contact_name", // fallback for the unscoped path
+ *     "lookup_dependency": {
+ *       "kind": "contacts_for_accounts",
+ *       "depends_on": ["property_account_id", "property_managing_account_id"]
+ *     }
+ *   }
+ *
+ * On entering edit mode the caller passes the current draft (or the loaded
+ * record on first read). On dependency-field change the caller re-invokes
+ * with the updated draft to refresh the options.
+ *
+ * Returns the same `{value, label}[]` shape as fetchLookupOptions. If the
+ * dependency yields no input values (e.g. neither parent field is filled
+ * yet on a new record) we return an empty list — the UI surfaces a hint
+ * telling the user to fill the parent field first.
+ *
+ * Extending: add a new `kind` here when adding a new dependent-lookup RPC.
+ * Keep the contract: pure read, returns rows of `{id, <displayField>}`,
+ * SECURITY INVOKER so RLS still applies to the caller.
+ */
+export async function fetchDependentLookupOptions(field, record) {
+  const dep = field.lookup_dependency
+  if (!dep || !dep.kind) {
+    throw new Error('fetchDependentLookupOptions called without lookup_dependency')
+  }
+  const dependsOn = Array.isArray(dep.depends_on) ? dep.depends_on : []
+  const dependencyValues = dependsOn
+    .map(fieldName => record?.[fieldName])
+    .filter(v => v !== null && v !== undefined && v !== '')
+
+  // The current FK value on the field itself — passed to the RPC as a
+  // backward-compat escape hatch so saved values that don't match the
+  // filter still render in the dropdown rather than appearing blank.
+  const currentValue = record?.[field.name] ?? null
+
+  switch (dep.kind) {
+    case 'contacts_for_accounts': {
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_contacts_for_accounts', {
+        p_account_ids: dependencyValues,
+        p_include_contact_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.contact_name || r.id.slice(0, 8),
+      }))
+    }
+    default:
+      throw new Error(`Unknown lookup_dependency kind: ${dep.kind}`)
+  }
+}
+
+/**
  * Fetch table metadata (required fields, soft-delete column, is-active column)
  * via the ees_table_metadata(text) Postgres RPC. Results are cached in-memory
  * for the life of the page load since the schema doesn't change at runtime.

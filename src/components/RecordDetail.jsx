@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
@@ -32,6 +32,7 @@ import {
   fetchTableMetadata,
   fetchPicklistOptions,
   fetchLookupOptions,
+  fetchDependentLookupOptions,
   fetchPageLayout,
   loadPicklists as loadAllPicklists,
   getCurrentUserId,
@@ -1028,12 +1029,28 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts }) {
 
     case 'lookup': {
       const opts = lookupOpts || []
+      const dep = field.lookup_dependency
       if (opts.length > 0) {
         return (
           <select style={{ ...inputBase, cursor: 'pointer' }}
             value={v || ''} onChange={e => onChange(field.name, e.target.value || null)}>
             <option value="">— Select —</option>
             {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )
+      }
+      // Dependent lookup with empty options means the parent fields aren't
+      // filled in yet (or no related records exist). Render an inert select
+      // showing what's needed so the field doesn't appear silently broken.
+      if (dep && dep.kind) {
+        const dependsOn = Array.isArray(dep.depends_on) ? dep.depends_on : []
+        const hint = dependsOn.length > 0
+          ? `— Fill ${dependsOn.map(n => n.replace(/_id$/, '').replace(/_/g, ' ')).join(' or ')} first —`
+          : '— No matching records —'
+        return (
+          <select style={{ ...inputBase, cursor: 'not-allowed', color: C.textMuted, background: '#f7f9fc' }}
+            value="" disabled>
+            <option value="">{hint}</option>
           </select>
         )
       }
@@ -2249,7 +2266,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         const isEditable = editing
           && (f.type !== 'datetime')
           && (f.type !== 'polymorphic_lookup')
-          && (f.type !== 'lookup' || hasLookupOpts)
+          && (f.type !== 'lookup' || hasLookupOpts || !!f.lookup_dependency)
           && (f._editable !== false)
 
         // Lookup hyperlinking — turn populated lookup fields into clickable
@@ -3722,6 +3739,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [saving, setSaving] = useState(false)
   const [allPicklistOpts, setAllPicklistOpts] = useState({})
   const [allLookupOpts, setAllLookupOpts] = useState({})
+  // Dependent lookup fields registered for this layout's edit session. Each
+  // entry is { name, field }; the effect below re-fetches its options
+  // whenever any of field.lookup_dependency.depends_on values change in
+  // the draft, so the dropdown stays in sync with parent-field edits.
+  const [dependentLookupFields, setDependentLookupFields] = useState([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
   // Which tab is active on the record detail page. Null until data loads,
@@ -3922,9 +3944,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           })
           setDraft(prefill ? { ...seededRT, ...prefill } : { ...seededRT })
           setEditing(true)
-          // Pre-load picklist + lookup options
+          // Pre-load picklist + lookup options. Pass the seeded draft so
+          // any dependent-lookup fields can resolve their dependencies on
+          // the very first render rather than waiting for a draft change.
           if (layoutData?.sections) {
-            loadAllEditOpts(layoutData.sections)
+            const initialDraft = prefill ? { ...seededRT, ...prefill } : { ...seededRT }
+            loadAllEditOpts(layoutData.sections, initialDraft)
           }
         })
         .catch(err => { if (!cancelled) setError(err) })
@@ -3956,15 +3981,24 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     setActiveTab(null)
   }, [tableName, recordId])
 
-  const loadAllEditOpts = useCallback(async (sections) => {
+  const loadAllEditOpts = useCallback(async (sections, currentRecord = null) => {
     const pickFields = []
     const lookupFields = []
+    const dependentLookupFields = []
     for (const s of sections) for (const w of s.widgets)
       if (w.widget_type === 'field_group' && w.widget_config?.fields)
         for (const f of w.widget_config.fields) {
           if (f.type === 'picklist') pickFields.push(f.name)
-          if (f.type === 'lookup' && f.lookup_table && f.lookup_field)
-            lookupFields.push({ name: f.name, table: f.lookup_table, field: f.lookup_field })
+          if (f.type === 'lookup' && f.lookup_table && f.lookup_field) {
+            if (f.lookup_dependency && f.lookup_dependency.kind) {
+              dependentLookupFields.push({
+                name: f.name,
+                field: f,
+              })
+            } else {
+              lookupFields.push({ name: f.name, table: f.lookup_table, field: f.lookup_field })
+            }
+          }
         }
 
     // Fetch picklist options
@@ -3976,20 +4010,36 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       setAllPicklistOpts(opts)
     }
 
-    // Fetch lookup options
+    // Fetch unscoped lookup options (the unfiltered path)
     if (lookupFields.length) {
       const opts = {}
       await Promise.all(lookupFields.map(async lf => {
         try { opts[lf.name] = await fetchLookupOptions(lf.table, lf.field) } catch { opts[lf.name] = [] }
       }))
-      setAllLookupOpts(opts)
+      setAllLookupOpts(prev => ({ ...prev, ...opts }))
+    }
+
+    // Fetch dependent lookup options — scoped by other fields on the record.
+    // Caller passes `currentRecord` so the RPC has the right input values on
+    // the initial load. Subsequent re-fetches on dependency change happen
+    // via the effect below.
+    if (dependentLookupFields.length) {
+      const opts = {}
+      await Promise.all(dependentLookupFields.map(async dlf => {
+        try { opts[dlf.name] = await fetchDependentLookupOptions(dlf.field, currentRecord || {}) }
+        catch (e) { console.warn('fetchDependentLookupOptions failed for', dlf.name, e); opts[dlf.name] = [] }
+      }))
+      setAllLookupOpts(prev => ({ ...prev, ...opts }))
+      setDependentLookupFields(dependentLookupFields)
+    } else {
+      setDependentLookupFields([])
     }
   }, [tableName])
 
   const startEditing = () => {
     if (!data?.record) return
     setDraft({ ...data.record }); setEditing(true)
-    if (data.sections) loadAllEditOpts(data.sections)
+    if (data.sections) loadAllEditOpts(data.sections, data.record)
   }
   const cancelEditing = () => {
     if (isCreate) { onBack(); return }
@@ -4008,6 +4058,42 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
     return next
   })
+
+  // Dependent-lookup re-fetch: when any field listed in a dependent
+  // lookup's depends_on array changes value in the draft, re-query the
+  // options for that dependent field. The effect derives a comma-joined
+  // signature of every dependency value so React's dependency-array
+  // comparison fires precisely when a dependency value flips.
+  // Runs only in edit mode and only when dependentLookupFields is non-empty.
+  const dependencySignature = useMemo(() => {
+    if (!editing || dependentLookupFields.length === 0) return ''
+    const parts = []
+    for (const dlf of dependentLookupFields) {
+      const fields = dlf.field?.lookup_dependency?.depends_on || []
+      for (const fn of fields) {
+        parts.push(`${dlf.name}@${fn}=${draft?.[fn] ?? ''}`)
+      }
+    }
+    return parts.join('|')
+  }, [editing, dependentLookupFields, draft])
+
+  useEffect(() => {
+    if (!editing || dependentLookupFields.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      const opts = {}
+      await Promise.all(dependentLookupFields.map(async dlf => {
+        try { opts[dlf.name] = await fetchDependentLookupOptions(dlf.field, draft) }
+        catch (e) { console.warn('dependent lookup re-fetch failed for', dlf.name, e); opts[dlf.name] = [] }
+      }))
+      if (cancelled) return
+      setAllLookupOpts(prev => ({ ...prev, ...opts }))
+    })()
+    return () => { cancelled = true }
+    // dependencySignature captures every relevant value; including draft
+    // directly would re-fire on every keystroke in unrelated fields.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dependencySignature])
 
   // Clone: strip system fields, append " (Copy)" to visible name fields,
   // enter insert-mode so Save inserts a brand-new record in the same table.
@@ -4037,7 +4123,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       || data.record?.work_order_name || data.record?.project_name
       || data.record?.name || 'record' })
     setDraft(seed)
-    if (data.sections) loadAllEditOpts(data.sections)
+    if (data.sections) loadAllEditOpts(data.sections, seed)
     setEditing(true)
   }, [data, recordId, loadAllEditOpts])
 
