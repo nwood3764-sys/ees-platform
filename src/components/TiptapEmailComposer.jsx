@@ -42,7 +42,8 @@ import {
   useRef,
   useState,
 } from 'react'
-import { useEditor, EditorContent, ReactRenderer, Node, mergeAttributes } from '@tiptap/react'
+import { useEditor, EditorContent, ReactRenderer } from '@tiptap/react'
+import { Node, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Underline from '@tiptap/extension-underline'
