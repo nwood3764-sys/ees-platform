@@ -74,9 +74,6 @@ export default function ObjectManager({ onOpenObject }) {
           </div>
         </div>
         <div style={{ position: 'relative', width: 320 }}>
-          <Icon path="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            size={14} color={C.textMuted}
-          />
           <input
             type="text"
             placeholder="Quick Find"

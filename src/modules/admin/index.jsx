@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
 import { useIsMobile } from '../../lib/useMediaQuery'
@@ -6,6 +6,7 @@ import RecordDetail from '../../components/RecordDetail'
 import SetupHome from './SetupHome'
 import ObjectManager from './ObjectManager'
 import ObjectDetail from './ObjectDetail'
+import { OBJECT_CATALOG } from './objectCatalog'
 
 // ---------------------------------------------------------------------------
 // AdminModule — Salesforce-style Setup shell.
@@ -17,7 +18,7 @@ import ObjectDetail from './ObjectDetail'
 // Both tabs can open individual record detail pages (contacts, templates, etc.)
 // ---------------------------------------------------------------------------
 
-export default function AdminModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+export default function AdminModule({ selectedRecord: navSelectedRecord, sectionFromUrl, subsectionFromUrl, adminTabFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onSubsectionChange, onReplaceRecord, onOpenSetup } = {}) {
   // Admin uses 'setup' / 'objects' rather than the section-name pattern of
   // the other modules, so we map the URL section to the local tab. Only
   // 'objects' is exposed via URL today; everything else stays on 'setup'.
@@ -28,7 +29,23 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
     if (urlDriven && onSectionChange) onSectionChange(t === 'objects' ? 'objects' : '')
     setTabLocal(t)
   }
-  const [selectedObject, setSelectedObject] = useState(null)   // catalog entry from ObjectManager
+
+  // selectedObject is now URL-driven via the subsection segment so the browser
+  // back button takes you up one level (Object Manager list) instead of all
+  // the way home. Local-state fallback keeps the module mountable in isolation.
+  const [selectedObjectLocal, setSelectedObjectLocal] = useState(null)
+  const selectedObjectTable = urlDriven ? subsectionFromUrl : (selectedObjectLocal?.table || null)
+  const selectedObject = useMemo(() => {
+    if (!selectedObjectTable) return null
+    return OBJECT_CATALOG.find(o => o.table === selectedObjectTable) || null
+  }, [selectedObjectTable])
+  const setSelectedObject = (obj) => {
+    if (urlDriven) {
+      if (onSubsectionChange) onSubsectionChange(obj?.table || null)
+    } else {
+      setSelectedObjectLocal(obj)
+    }
+  }
 
   const [selectedRecordLocal, setSelectedRecordLocal] = useState(null)
   const selectedRecord = urlDriven ? navSelectedRecord : selectedRecordLocal
@@ -72,8 +89,16 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
 
   const closeRecord = () => setSelectedRecord(null)
 
-  // Breadcrumb trail — depends on current view
-  const crumbs = buildCrumbs(tab, selectedObject, selectedRecord)
+  // Breadcrumb trail — depends on current view. Each crumb is clickable when
+  // there's a meaningful "go up" target. Admin and Object Manager always
+  // navigate back to their respective tabs; the object-name crumb pops
+  // back to the manager list. Salesforce-style.
+  const crumbs = buildCrumbs(tab, selectedObject, selectedRecord, {
+    onAdminClick:         () => { setSelectedRecord(null); setSelectedObject(null); setTab('setup') },
+    onSetupHomeClick:     () => { setSelectedRecord(null); setSelectedObject(null); setTab('setup') },
+    onObjectManagerClick: () => { setSelectedRecord(null); setSelectedObject(null); setTab('objects') },
+    onObjectClick:        () => { setSelectedRecord(null) /* keep object */ },
+  })
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -140,11 +165,11 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
               <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {i > 0 && <span style={{ color: C.textMuted }}>/</span>}
                 <span
-                  onClick={crumb.onClick}
+                  onClick={isLast ? undefined : crumb.onClick}
                   style={{
                     color: isLast ? C.textPrimary : C.textMuted,
                     fontWeight: isLast ? 500 : 400,
-                    cursor: crumb.onClick ? 'pointer' : 'default',
+                    cursor: (crumb.onClick && !isLast) ? 'pointer' : 'default',
                   }}
                   onMouseEnter={e => { if (crumb.onClick && !isLast) e.currentTarget.style.color = C.emerald }}
                   onMouseLeave={e => { if (crumb.onClick && !isLast) e.currentTarget.style.color = C.textMuted }}
@@ -193,12 +218,15 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
             onRecordCreated={r => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
             prefill={selectedRecord.prefill}
             onNavigateToRecord={r => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })}
-            onOpenSetup={onOpenSetup}
           />
         ) : tab === 'setup' ? (
           <SetupHome onOpenObjectManager={openObjectManager} onOpenRecord={openRecord} initialNodeId={sectionFromUrl} />
         ) : selectedObject ? (
-          <ObjectDetail obj={selectedObject} onBack={() => setSelectedObject(null)} />
+          <ObjectDetail
+            obj={selectedObject}
+            onBack={() => setSelectedObject(null)}
+            initialSubTab={adminTabFromUrl || 'details'}
+          />
         ) : (
           <ObjectManager onOpenObject={obj => setSelectedObject(obj)} />
         )}
@@ -227,14 +255,20 @@ function TabButton({ label, active, onClick }) {
 }
 
 // ─── Breadcrumb builder ────────────────────────────────────────────────
-
-function buildCrumbs(tab, selectedObject, selectedRecord) {
-  const crumbs = [{ label: 'Admin', onClick: null }]
+//
+// Crumbs are clickable when there's a meaningful "go up" target. We pass
+// handlers in via the second arg so the builder doesn't need to know about
+// component state — it just composes the label + onClick pair per row.
+// `isLast` styling in the renderer makes the active crumb visually distinct
+// even though the onClick is still present (clicking your current location
+// is a no-op rather than a crash).
+function buildCrumbs(tab, selectedObject, selectedRecord, handlers = {}) {
+  const crumbs = [{ label: 'Admin', onClick: handlers.onAdminClick || null }]
   if (tab === 'setup') {
-    crumbs.push({ label: 'Setup Home', onClick: null })
+    crumbs.push({ label: 'Setup Home', onClick: handlers.onSetupHomeClick || null })
   } else {
-    crumbs.push({ label: 'Object Manager', onClick: null })
-    if (selectedObject) crumbs.push({ label: selectedObject.pluralLabel, onClick: null })
+    crumbs.push({ label: 'Object Manager', onClick: handlers.onObjectManagerClick || null })
+    if (selectedObject) crumbs.push({ label: selectedObject.pluralLabel, onClick: handlers.onObjectClick || null })
   }
   if (selectedRecord) {
     crumbs.push({ label: selectedRecord.name || selectedRecord.table, onClick: null })

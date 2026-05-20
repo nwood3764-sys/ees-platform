@@ -366,7 +366,6 @@ export default function ReportsModule({
               onRecordCreated={(r) => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
               prefill={selectedRecord.prefill}
               onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })}
-              onOpenSetup={onOpenSetup}
             />
           )
         ) : (<>

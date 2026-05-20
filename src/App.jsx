@@ -9,6 +9,8 @@ import { GlobalSearchInline } from './components/GlobalSearch'
 import { HelpProvider } from './components/help/HelpProvider'
 import HelpPanel from './components/help/HelpPanel'
 import HelpTopbarButton from './components/help/HelpTopbarButton'
+import TopbarSetupGear from './components/TopbarSetupGear'
+import TopbarUserMenu from './components/TopbarUserMenu'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
@@ -69,11 +71,14 @@ function AuthedApp({ session }) {
     activeModule,
     selectedRecord,
     sectionFromUrl,
+    subsectionFromUrl,
+    adminTabFromUrl,
     searchQuery,
     searchType,
     helpSlug,
     navigateToModule,
     navigateToSection,
+    navigateToSubsection,
     navigateToSetup,
     navigateToRecord,
     navigateToSearch,
@@ -188,9 +193,12 @@ function AuthedApp({ session }) {
     const navProps = {
       selectedRecord,
       sectionFromUrl,
+      subsectionFromUrl,
+      adminTabFromUrl,
       onNavigateToRecord: navigateToRecord,
       onCloseRecord: closeRecord,
       onSectionChange: navigateToSection,
+      onSubsectionChange: navigateToSubsection,
       onReplaceRecord: replaceRecord,
       onOpenSetup: navigateToSetup,
     }
@@ -258,18 +266,38 @@ function AuthedApp({ session }) {
               onNavigate={navigateToRecord}
               onViewAll={(q) => navigateToSearch(q)}
             />
-            <div style={{
-              position: 'absolute',
-              top: 7,
-              right: 16,
-              zIndex: 10,
-              pointerEvents: 'auto',
-            }}>
-              <HelpTopbarButton
-                activeModule={activeModule}
-                selectedRecord={selectedRecord}
-              />
-            </div>
+            {/* Right-cluster: Help / Setup gear / User avatar — Salesforce
+                top-right pattern. Absolute-positioned so we layer over the
+                centered search bar without disrupting its layout. Hidden on
+                mobile (the MobileHeader has its own profile/menu path). */}
+            {!isMobile && (
+              <div style={{
+                position: 'absolute',
+                top: 7,
+                right: 16,
+                zIndex: 10,
+                pointerEvents: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}>
+                <HelpTopbarButton
+                  activeModule={activeModule}
+                  selectedRecord={selectedRecord}
+                />
+                <TopbarSetupGear
+                  selectedRecord={selectedRecord}
+                  onOpenSetup={navigateToSetup}
+                  onNavigateToRecord={navigateToRecord}
+                />
+                <TopbarUserMenu
+                  userEmail={session?.user?.email}
+                  onSignOut={handleSignOut}
+                  onChangePassword={() => setPasswordModalOpen(true)}
+                  onOpenIntegrations={() => setIntegrationsOpen(true)}
+                />
+              </div>
+            )}
           </div>
         )}
         <Suspense fallback={<ModuleLoader />}>

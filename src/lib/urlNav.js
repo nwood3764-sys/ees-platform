@@ -175,6 +175,8 @@ export function parsePath(pathname, search = '') {
     activeModule: 'home',
     selectedRecord: null,
     section: null,
+    subsection: null,
+    adminTab: null,
     searchQuery: null,
     searchType: null,
     helpSlug: null,
@@ -209,11 +211,27 @@ export function parsePath(pathname, search = '') {
     }
   }
 
-  // /m/<module>[/<section>]
+  // /m/<module>[/<section>[/<subsection>]]
+  // Examples:
+  //   /m/field/projects              → { section: 'projects' }
+  //   /m/admin/objects/properties    → { section: 'objects', subsection: 'properties' }
+  // Subsection is consumed by modules that need a finer routing tier — today
+  // only Admin's Object Manager (which needs the specific table the user is
+  // viewing) so that browser-back lands on the manager list rather than home.
   if (parts[0] === 'm') {
     const mod = parts[1]
     if (KNOWN_MODULES.has(mod) && mod !== 'search' && mod !== 'help') {
-      return { ...base, activeModule: mod, section: parts[2] || null }
+      // ?tab=<id> carries an admin-module sub-tab hint (used by ObjectDetail's
+      // initialSubTab). Only honored on /m/admin/objects/<table> today but
+      // safe to surface for any module.
+      const params = new URLSearchParams(search || '')
+      return {
+        ...base,
+        activeModule: mod,
+        section: parts[2] || null,
+        subsection: parts[3] || null,
+        adminTab: params.get('tab') || null,
+      }
     }
     return base
   }
@@ -242,7 +260,7 @@ export function parsePath(pathname, search = '') {
  * state. Inverse of parsePath. Returns the full path including any query
  * string the search route needs.
  */
-export function buildPath({ activeModule, selectedRecord, section, searchQuery, searchType, helpSlug }) {
+export function buildPath({ activeModule, selectedRecord, section, subsection, adminTab, searchQuery, searchType, helpSlug }) {
   if (selectedRecord?.table) {
     if (selectedRecord.mode === 'create') return `/${selectedRecord.table}/new`
     if (selectedRecord.id) return `/${selectedRecord.table}/${selectedRecord.id}`
@@ -257,9 +275,13 @@ export function buildPath({ activeModule, selectedRecord, section, searchQuery, 
     const qs = params.toString()
     return qs ? `/search?${qs}` : '/search'
   }
-  if (section) return `/m/${activeModule}/${section}`
-  if (activeModule && activeModule !== 'home') return `/m/${activeModule}`
-  return '/'
+  let base
+  if (section && subsection) base = `/m/${activeModule}/${section}/${subsection}`
+  else if (section)          base = `/m/${activeModule}/${section}`
+  else if (activeModule && activeModule !== 'home') base = `/m/${activeModule}`
+  else return '/'
+  if (adminTab) return `${base}?tab=${encodeURIComponent(adminTab)}`
+  return base
 }
 
 /**
@@ -321,28 +343,51 @@ export function useUrlNavigation() {
   }, [])
 
   const navigateToModule = useCallback((moduleId) => {
-    push({ activeModule: moduleId, selectedRecord: null, section: null, searchQuery: null, searchType: null })
+    push({ activeModule: moduleId, selectedRecord: null, section: null, subsection: null, searchQuery: null, searchType: null })
   }, [push])
 
   const navigateToSection = useCallback((sectionId) => {
     setState((prev) => {
-      const next = { ...prev, section: sectionId, selectedRecord: null, searchQuery: null, searchType: null }
+      const next = { ...prev, section: sectionId, subsection: null, selectedRecord: null, searchQuery: null, searchType: null }
       const path = buildPath(next)
       if (path !== currentFullPath()) window.history.pushState(null, '', path)
       return next
     })
   }, [])
 
-  // navigateToSetup is for the "open in Setup" quick-link menu on every
-  // record detail page (gear icon next to Edit/Clone/Delete). Unlike
-  // navigateToSection it forces activeModule='admin' regardless of where
-  // the user currently is — clicking 'Edit Page Layout' from a Property
-  // in the Outreach module should land in Admin, not Outreach/page_layouts.
-  const navigateToSetup = useCallback((nodeId) => {
+  // Push the third URL tier — e.g. /m/admin/objects/<table-name>. Lets the
+  // Admin Object Manager record which object you're drilled into so the
+  // browser back button takes you up one level (objects list) rather than
+  // all the way home. Pass null to clear the subsection (return to section
+  // list view).
+  const navigateToSubsection = useCallback((subsectionId) => {
+    setState((prev) => {
+      const next = { ...prev, subsection: subsectionId || null, selectedRecord: null, searchQuery: null, searchType: null }
+      const path = buildPath(next)
+      if (path !== currentFullPath()) window.history.pushState(null, '', path)
+      return next
+    })
+  }, [])
+
+  // navigateToSetup is for the global Setup gear-icon menu in the topbar.
+  // Forces activeModule='admin' regardless of where the user currently is.
+  //
+  // Args:
+  //   nodeId       — the SetupHome node or section to land on (e.g. 'objects',
+  //                  'page_layouts', 'record_types'). Pass null for /m/admin
+  //                  (Setup Home with no node selected).
+  //   subsectionId — third URL tier. For Object Manager, this is the table
+  //                  name so the user lands on /m/admin/objects/<table>.
+  //   options.initialSubTab — appended to the URL as ?tab=<id>. Consumed
+  //                  by ObjectDetail to pre-select a sub-tab (e.g.
+  //                  'recordtypes' for the Edit Record Types deep-link).
+  const navigateToSetup = useCallback((nodeId, subsectionId = null, options = {}) => {
     const next = {
       activeModule: 'admin',
       selectedRecord: null,
       section: nodeId || null,
+      subsection: subsectionId || null,
+      adminTab: options.initialSubTab || null,
       searchQuery: null,
       searchType: null,
     }
@@ -356,7 +401,7 @@ export function useUrlNavigation() {
     if (!rec?.table) return
     setState((prev) => {
       const mod = TABLE_MODULE_MAP[rec.table] || prev.activeModule
-      const next = { activeModule: mod, selectedRecord: { ...rec }, section: null, searchQuery: null, searchType: null }
+      const next = { activeModule: mod, selectedRecord: { ...rec }, section: null, subsection: null, searchQuery: null, searchType: null }
       const path = buildPath(next)
       if (path !== currentFullPath()) window.history.pushState(null, '', path)
       return next
@@ -365,15 +410,12 @@ export function useUrlNavigation() {
 
   // Open the universal search results page. Called from the search
   // modal's "View all results" footer button and any deep-link sources.
-  // typeFilter is optional — pass null/undefined to show all object types.
-  // useReplace=true rewrites the current URL instead of pushing a new
-  // history entry; the search page uses this for in-page query refinement
-  // so the back button doesn't accumulate one entry per keystroke.
   const navigateToSearch = useCallback((query, typeFilter = null, { useReplace = false } = {}) => {
     const next = {
       activeModule: 'search',
       selectedRecord: null,
       section: null,
+      subsection: null,
       searchQuery: query || '',
       searchType: typeFilter || null,
     }
@@ -387,7 +429,7 @@ export function useUrlNavigation() {
 
   const closeRecord = useCallback(() => {
     setState((prev) => {
-      const next = { activeModule: prev.activeModule, selectedRecord: null, section: prev.section, searchQuery: null, searchType: null }
+      const next = { activeModule: prev.activeModule, selectedRecord: null, section: prev.section, subsection: prev.subsection, searchQuery: null, searchType: null }
       const path = buildPath(next)
       if (path !== currentFullPath()) window.history.pushState(null, '', path)
       return next
@@ -397,7 +439,7 @@ export function useUrlNavigation() {
   const replaceRecord = useCallback((rec) => {
     setState((prev) => {
       const mod = TABLE_MODULE_MAP[rec?.table] || prev.activeModule
-      const next = { activeModule: mod, selectedRecord: rec ? { ...rec } : null, section: null, searchQuery: null, searchType: null }
+      const next = { activeModule: mod, selectedRecord: rec ? { ...rec } : null, section: null, subsection: null, searchQuery: null, searchType: null }
       const path = buildPath(next)
       if (path !== currentFullPath()) window.history.replaceState(null, '', path)
       return next
@@ -408,11 +450,14 @@ export function useUrlNavigation() {
     activeModule: state.activeModule,
     selectedRecord: state.selectedRecord,
     sectionFromUrl: state.section,
+    subsectionFromUrl: state.subsection,
+    adminTabFromUrl: state.adminTab,
     searchQuery: state.searchQuery,
     searchType: state.searchType,
     helpSlug: state.helpSlug,
     navigateToModule,
     navigateToSection,
+    navigateToSubsection,
     navigateToSetup,
     navigateToRecord,
     navigateToSearch,

@@ -27,8 +27,8 @@ const SUB_TABS = [
   { id: 'related',     label: 'Related Lookups' },
 ]
 
-export default function ObjectDetail({ obj, onBack }) {
-  const [sub, setSub] = useState('details')
+export default function ObjectDetail({ obj, onBack, initialSubTab = 'details' }) {
+  const [sub, setSub] = useState(initialSubTab)
   const [columns, setColumns] = useState([])
   const [incomingFKs, setIncomingFKs] = useState([])
   const [recordCount, setRecordCount] = useState(null)
@@ -49,7 +49,7 @@ export default function ObjectDetail({ obj, onBack }) {
     let cancelled = false
     setLoading(true)
     setError(null)
-    setSub('details')
+    setSub(initialSubTab || 'details')
     setSelectedLayoutId(null)
     setRecordTypesCount(null)
     setLayoutsCount(null)

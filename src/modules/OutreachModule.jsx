@@ -484,7 +484,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {selectedRecord ? (
-          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord} onOpenSetup={onOpenSetup}
+          <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
             onRecordCreated={(r) => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
             prefill={selectedRecord.prefill}
