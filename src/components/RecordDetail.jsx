@@ -13,6 +13,7 @@ import { getTableListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import ConversationPanelWidget from './ConversationPanel'
+import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
 import StatusTransitionsBar from './StatusTransitionsBar'
 import { supabase } from '../lib/supabase'
@@ -5400,6 +5401,26 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             )}
           </div>
         )}
+
+        {/* Status Path — Salesforce-style horizontal chevron strip showing
+            the record's position in its lifecycle. Widget is registered as
+            'status_path' and configured per page layout with widget_config.
+            status_field naming which status column to render. Self-suppresses
+            when the object has no lifecycle configured. Multiple status_path
+            widgets per layout are supported (e.g. work_orders has both
+            work_order_status and work_order_approval_status). */}
+        {!isInsertMode && !editing && sections
+          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'status_path'))
+          .map(w => (
+            <StatusPathWidget
+              key={w.id}
+              widget={w}
+              parentRecordId={recordId}
+              tableName={tableName}
+              record={record}
+              onStatusChanged={() => setReloadTick(t => t + 1)}
+            />
+          ))}
 
         {/* Status transitions bar — surfaces outgoing transitions for the
             record's current status as one-click action buttons. Calls the
