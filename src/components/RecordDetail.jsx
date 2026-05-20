@@ -8,7 +8,7 @@ import ServiceAppointmentRescheduleModal from './scheduler/ServiceAppointmentRes
 import WorkOrderScheduleModal from './scheduler/WorkOrderScheduleModal'
 import SendForSignatureModal from './SendForSignatureModal'
 import { useToast } from './Toast'
-import { useIsMobile } from '../lib/useMediaQuery'
+import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
@@ -3708,6 +3708,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const isCreate = mode === 'create'
   const toast = useToast()
   const isMobile = useIsMobile()
+  // isNarrow controls right-rail layout. The right rail renders alongside the
+  // main content on wide screens (>1024px). Below that, it stacks underneath
+  // — keeps the main field groups readable when there's not enough width for
+  // two columns. Salesforce's Lightning utility rail collapses at a similar
+  // breakpoint.
+  const isNarrow = useMediaQuery('(max-width: 1024px)')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -5323,6 +5329,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           onStatusChanged={() => setReloadTick(t => t + 1)}
         />
 
+        {/* Two-column body: main content (tab bar + tab content) on the left,
+            right rail on the right. Right rail holds sections whose
+            section_placement='right' — Salesforce Lightning utility-rail
+            pattern. On narrow viewports (≤1024px) we collapse to a single
+            column so the main field groups stay readable; right-rail
+            sections appear underneath. */}
+        <div style={{
+          display: 'flex',
+          flexDirection: isNarrow ? 'column' : 'row',
+          alignItems: 'flex-start',
+          gap: isNarrow ? 16 : 20,
+        }}>
+          <div style={{ flex: 1, minWidth: 0, width: isNarrow ? '100%' : 'auto' }}>
+
         {/* Tab bar — only shown when there's more than one tab. Styled to
             match SectionTabs in UI.jsx: bottom border, 2px emerald underline
             on the active tab. On mobile, horizontally scrolls with snap. */}
@@ -5397,8 +5417,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         {/* Sections — field groups only. Filter by active tab. For
             document_templates we also skip the Document Content section
             when authoring mode is "docx" (the body_html field is
-            irrelevant in that mode — the .docx asset replaces it). */}
+            irrelevant in that mode — the .docx asset replaces it).
+            Right-rail sections (section_placement='right') are excluded
+            here — they render in the always-visible right column below. */}
         {sections
+          .filter(sec => (sec.section_placement || 'main') === 'main')
           .filter(sec => (sec.section_tab || 'Details') === activeTab)
           .filter(sec => {
             if (tableName !== 'document_templates') return true
@@ -5439,8 +5462,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           })}
 
         {/* Related lists — standalone Salesforce-style cards, shown only on
-            the Related tab regardless of which section they came from. */}
+            the Related tab regardless of which section they came from.
+            Right-placement widgets are excluded — they render in the right
+            sidebar below. */}
         {!isInsertMode && activeTab === 'Related' && sections
+          .filter(sec => (sec.section_placement || 'main') === 'main')
           .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'related_list'))
           .map(w => {
             // Lock child related_lists when the parent template is Active or
@@ -5485,6 +5511,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             and refreshes after mutations without going back through the
             page-layout loader. */}
         {!isInsertMode && activeTab === 'Related' && sections
+          .filter(sec => (sec.section_placement || 'main') === 'main')
           .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'file_gallery'))
           .map(w => (
             <FileGalleryWidget
@@ -5500,6 +5527,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             loads its own conversations + messages, marks threads read on
             open, and invokes send-notification-sms v2 for replies. */}
         {!isInsertMode && activeTab === 'Related' && sections
+          .filter(sec => (sec.section_placement || 'main') === 'main')
           .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'conversation_panel'))
           .map(w => (
             <ConversationPanelWidget
@@ -5513,6 +5541,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             Self-contained widget that fetches snapshots for the current PRT
             and offers a Preview-from-snapshot action per version. */}
         {!isInsertMode && activeTab === 'Related' && sections
+          .filter(sec => (sec.section_placement || 'main') === 'main')
           .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'prtsn_history'))
           .map(w => (
             <PrtsnHistoryWidget
@@ -5527,6 +5556,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             the current record (so a generic 'All Tasks' report becomes
             'Tasks for THIS record' when embedded). */}
         {!isInsertMode && activeTab === 'Related' && sections
+          .filter(sec => (sec.section_placement || 'main') === 'main')
           .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'report'))
           .map(w => (
             <ReportWidget
@@ -5544,6 +5574,102 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         {!isInsertMode && activeTab === 'Activity' && (
           <ActivityTimeline tableName={tableName} recordId={recordId} />
         )}
+          </div>
+
+          {/* Right rail — always-visible utility column. Holds sections with
+              section_placement='right' regardless of active tab. Width is
+              fixed on desktop (320px) and full-width on narrow viewports
+              where the column has collapsed to a stacked layout. Sections
+              here support the same widget types as the main flow
+              (field_group, related_list, conversation_panel, file_gallery,
+              report, prtsn_history) — admins place whatever they want via
+              the page layout editor. Hidden on insert mode since the right
+              rail's widgets typically don't make sense for a record that
+              doesn't exist yet. */}
+          {!isInsertMode && sections.some(sec => (sec.section_placement || 'main') === 'right') && (
+            <div style={{
+              width: isNarrow ? '100%' : 320,
+              flexShrink: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}>
+              {sections
+                .filter(sec => (sec.section_placement || 'main') === 'right')
+                .map(sec => {
+                  // Field groups inside right-rail sections render via the
+                  // same Section component as the main flow — works fine in
+                  // a narrow column, fields stack vertically because
+                  // section_columns is honored by Section but field rows
+                  // collapse below the column width.
+                  const hasFieldGroup = (sec.widgets || []).some(w => w.widget_type === 'field_group')
+                  return (
+                    <div key={sec.id}>
+                      {hasFieldGroup && (
+                        <Section
+                          section={sec}
+                          record={record}
+                          picklists={picklists}
+                          lookups={lookups}
+                          editing={editing}
+                          draft={draft}
+                          onChange={handleFieldChange}
+                          allPicklistOpts={allPicklistOpts}
+                          allLookupOpts={allLookupOpts}
+                          tableName={tableName}
+                          onRefreshRecord={() => setReloadTick(t => t + 1)}
+                          recordId={recordId}
+                          onNavigateToRecord={onNavigateToRecord}
+                          requiredFields={requiredFields}
+                        />
+                      )}
+                      {(sec.widgets || [])
+                        .filter(w => w.widget_type === 'related_list')
+                        .map(w => (
+                          <RelatedListWidget
+                            key={w.id}
+                            widget={w}
+                            picklists={picklists}
+                            onNavigateToRecord={onNavigateToRecord}
+                            parentRecordId={recordId}
+                          />
+                        ))}
+                      {(sec.widgets || [])
+                        .filter(w => w.widget_type === 'conversation_panel')
+                        .map(w => (
+                          <ConversationPanelWidget
+                            key={w.id}
+                            widget={w}
+                            parentRecordId={recordId}
+                          />
+                        ))}
+                      {(sec.widgets || [])
+                        .filter(w => w.widget_type === 'file_gallery')
+                        .map(w => (
+                          <FileGalleryWidget
+                            key={w.id}
+                            widget={w}
+                            parentTable={tableName}
+                            parentRecordId={recordId}
+                          />
+                        ))}
+                      {(sec.widgets || [])
+                        .filter(w => w.widget_type === 'report')
+                        .map(w => (
+                          <ReportWidget
+                            key={w.id}
+                            widget={w}
+                            parentTable={tableName}
+                            parentRecordId={recordId}
+                            onOpenRecord={onNavigateToRecord}
+                          />
+                        ))}
+                    </div>
+                  )
+                })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Sticky bottom action bar — mobile edit mode only. Always visible,
