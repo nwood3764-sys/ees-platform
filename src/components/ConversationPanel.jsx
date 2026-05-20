@@ -832,11 +832,30 @@ function MessageBubble({ message, attachments = [] }) {
           <span style={{ color: C.textMuted, fontStyle: 'italic' }}>• queued</span>
         )}
         {isFailed && (
-          <span style={{ color: '#8a1a1a', fontWeight: 600 }} title={message.msg_provider_error_message || ''}>
-            • failed
+          <span style={{ color: '#8a1a1a', fontWeight: 600 }}>
+            • failed{message.msg_provider_error_code ? ` (${message.msg_provider_error_code})` : ''}
           </span>
         )}
       </div>
+
+      {/* Failure reason — surfaced inline so the operational error is visible
+          on mobile (where tooltips don't fire) and on desktop without hover.
+          Wraps long Graph error bodies. */}
+      {isFailed && message.msg_provider_error_message && (
+        <div style={{
+          maxWidth: '78%', marginTop: 4,
+          padding: '6px 9px',
+          background: '#fff5f5',
+          border: '1px solid #f3b4b4',
+          borderRadius: 6,
+          fontSize: 11, lineHeight: 1.4,
+          color: '#8a1a1a',
+          fontFamily: 'JetBrains Mono, monospace',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>
+          {message.msg_provider_error_message}
+        </div>
+      )}
     </div>
   )
 }
