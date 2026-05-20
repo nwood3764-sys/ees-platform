@@ -203,6 +203,7 @@ export async function createSection(layoutId, {
   isCollapsible = false,
   isCollapsedByDefault = false,
   tab = 'Details',
+  placement = 'main',
 } = {}) {
   if (!layoutId) throw new Error('createSection: layoutId is required')
 
@@ -218,6 +219,7 @@ export async function createSection(layoutId, {
       section_is_collapsible: isCollapsible,
       section_is_collapsed_by_default: isCollapsedByDefault,
       section_tab: tab,
+      section_placement: placement,
     })
     .select()
     .single()
@@ -234,6 +236,7 @@ export async function updateSection(sectionId, patch) {
   if (patch.isCollapsible        !== undefined) update.section_is_collapsible          = patch.isCollapsible
   if (patch.isCollapsedByDefault !== undefined) update.section_is_collapsed_by_default = patch.isCollapsedByDefault
   if (patch.tab                  !== undefined) update.section_tab                     = patch.tab
+  if (patch.placement            !== undefined) update.section_placement               = patch.placement
   update.updated_at = new Date().toISOString()
 
   const { data, error } = await supabase
@@ -637,6 +640,7 @@ export async function fetchLayoutForEdit(layoutId) {
       isCollapsible: s.section_is_collapsible,
       isCollapsedByDefault: s.section_is_collapsed_by_default,
       tab: s.section_tab,
+      placement: s.section_placement || 'main',
       widgets: widgetsBySection[s.id] || [],
     })),
   }

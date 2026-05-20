@@ -343,10 +343,13 @@ function SectionsList({ sections, layoutId, objectName, onChanged, disabled }) {
     }
   }
 
-  async function handleAddSection(label) {
+  async function handleAddSection(label, opts = {}) {
     if (!label.trim()) return
     try {
-      await createSection(layoutId, { label: label.trim() })
+      await createSection(layoutId, {
+        label: label.trim(),
+        placement: opts.placement === 'right' ? 'right' : 'main',
+      })
       toast.success('Section added')
       setAddingSection(false)
       await onChanged()
@@ -422,13 +425,14 @@ function SectionsList({ sections, layoutId, objectName, onChanged, disabled }) {
 
 function AddSectionInline({ onSave, onCancel }) {
   const [label, setLabel] = useState('')
+  const [placement, setPlacement] = useState('main')
   const [busy, setBusy] = useState(false)
   const inputRef = useRef(null)
   useEffect(() => { inputRef.current?.focus() }, [])
 
   async function save() {
     setBusy(true)
-    await onSave(label)
+    await onSave(label, { placement })
     setBusy(false)
   }
 
@@ -450,6 +454,16 @@ function AddSectionInline({ onSave, onCancel }) {
         disabled={busy}
         style={{ ...inputStyle, flex: 1, minWidth: 200 }}
       />
+      <select
+        value={placement}
+        onChange={e => setPlacement(e.target.value)}
+        disabled={busy}
+        title="Placement"
+        style={{ ...inputStyle, cursor: 'pointer', width: 150 }}
+      >
+        <option value="main">Main content</option>
+        <option value="right">Right sidebar</option>
+      </select>
       <button style={buttonSmSecondaryStyle} onClick={onCancel} disabled={busy}>Cancel</button>
       <button style={buttonSmPrimaryStyle} onClick={save} disabled={busy || !label.trim()}>
         {busy ? 'Adding…' : 'Add Section'}
@@ -475,6 +489,7 @@ function SectionCard({
   const [collapsible, setCollapsible] = useState(section.isCollapsible)
   const [collapsedByDefault, setCollapsedByDefault] = useState(section.isCollapsedByDefault)
   const [tab, setTab] = useState(section.tab || 'Details')
+  const [placement, setPlacement] = useState(section.placement || 'main')
 
   useEffect(() => {
     if (!editing) {
@@ -483,6 +498,7 @@ function SectionCard({
       setCollapsible(section.isCollapsible)
       setCollapsedByDefault(section.isCollapsedByDefault)
       setTab(section.tab || 'Details')
+      setPlacement(section.placement || 'main')
     }
   }, [editing, section])
 
@@ -499,6 +515,7 @@ function SectionCard({
         isCollapsible: collapsible,
         isCollapsedByDefault: collapsedByDefault,
         tab: tab.trim() || 'Details',
+        placement: placement === 'right' ? 'right' : 'main',
       })
       toast.success('Section updated')
       setEditing(false)
@@ -600,7 +617,13 @@ function SectionCard({
               </select>
             </FormField>
             <FormField label="Tab" hint="Which record detail tab this section appears on.">
-              <input value={tab} onChange={e => setTab(e.target.value)} disabled={saving} style={inputStyle} />
+              <input value={tab} onChange={e => setTab(e.target.value)} disabled={saving || placement === 'right'} style={inputStyle} />
+            </FormField>
+            <FormField label="Placement" hint="Main = inside the active tab. Right = persistent right sidebar (always visible regardless of tab).">
+              <select value={placement} onChange={e => setPlacement(e.target.value)} disabled={saving} style={{ ...inputStyle, cursor: 'pointer' }}>
+                <option value="main">Main content</option>
+                <option value="right">Right sidebar</option>
+              </select>
             </FormField>
             <FormField label="Collapsible">
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: C.textPrimary, cursor: 'pointer' }}>
@@ -619,8 +642,12 @@ function SectionCard({
           </div>
         ) : (
           <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 10 }}>
-            Tab: <strong style={{ color: C.textSecondary }}>{section.tab}</strong> ·
-            {' '}Columns: <strong style={{ color: C.textSecondary }}>{section.columns}</strong>
+            {(section.placement || 'main') === 'right' ? (
+              <>Placement: <strong style={{ color: C.emerald }}>Right sidebar</strong> · </>
+            ) : (
+              <>Tab: <strong style={{ color: C.textSecondary }}>{section.tab}</strong> · </>
+            )}
+            Columns: <strong style={{ color: C.textSecondary }}>{section.columns}</strong>
             {section.isCollapsible && <> · <span style={{ color: C.textSecondary }}>Collapsible{section.isCollapsedByDefault ? ' (collapsed)' : ''}</span></>}
             {' '}· {section.widgets.length} widget{section.widgets.length === 1 ? '' : 's'}
           </div>
