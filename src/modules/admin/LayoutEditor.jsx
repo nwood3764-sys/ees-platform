@@ -301,42 +301,102 @@ function SectionsList({ sections, layoutId, objectName, onChanged, disabled }) {
   const [addingSection, setAddingSection] = useState(false)
   // Reordering state — follows the HTML5 DnD pattern used in RecordDetail.
   const [localSections, setLocalSections] = useState(sections)
-  const [dragIndex, setDragIndex] = useState(null)
-  const [dragOverIndex, setDragOverIndex] = useState(null)
+  const [dragId, setDragId] = useState(null)
+  const [dragOverId, setDragOverId] = useState(null)
+  // dropColumnHint = 'main' | 'right' | null. Tracks which column the user
+  // is hovering when they're over the empty area of a column (no specific
+  // target section). Used by the cross-column drag path to know what
+  // placement to assign when the drop hits the column footer.
+  const [dropColumnHint, setDropColumnHint] = useState(null)
   const [savingOrder, setSavingOrder] = useState(false)
 
   // Keep localSections in sync when the parent refetches
   useEffect(() => { setLocalSections(sections) }, [sections])
 
-  function handleDragStart(e, idx) {
-    setDragIndex(idx)
+  // Split sections into the two columns. Within each column they render in
+  // the global section_order — that's the same field used for both columns,
+  // since RecordDetail filters by placement before rendering.
+  const mainSections = localSections.filter(s => (s.placement || 'main') === 'main')
+  const rightSections = localSections.filter(s => s.placement === 'right')
+
+  function handleDragStart(e, id) {
+    setDragId(id)
     e.dataTransfer.effectAllowed = 'move'
-    try { e.dataTransfer.setData('text/plain', String(idx)) } catch { /* Safari */ }
+    try { e.dataTransfer.setData('text/plain', String(id)) } catch { /* Safari */ }
   }
-  function handleDragOver(e, idx) {
+  function handleDragOverSection(e, id) {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    if (dragOverIndex !== idx) setDragOverIndex(idx)
+    if (dragOverId !== id) setDragOverId(id)
   }
-  function handleDragEnd() { setDragIndex(null); setDragOverIndex(null) }
-
-  async function handleDrop(e, dropIdx) {
+  function handleDragOverColumn(e, col) {
     e.preventDefault()
-    const srcIdx = dragIndex
-    setDragIndex(null); setDragOverIndex(null)
-    if (srcIdx === null || srcIdx === dropIdx) return
+    e.dataTransfer.dropEffect = 'move'
+    if (dropColumnHint !== col) setDropColumnHint(col)
+  }
+  function handleDragEnd() {
+    setDragId(null)
+    setDragOverId(null)
+    setDropColumnHint(null)
+  }
+
+  /**
+   * Perform a drop: either reorder within a column or move across columns.
+   * targetColumn = 'main' | 'right'. targetId = section id we dropped on,
+   * or null if dropping in the column footer (append to end).
+   */
+  async function performDrop(targetColumn, targetId) {
+    const srcId = dragId
+    setDragId(null); setDragOverId(null); setDropColumnHint(null)
+    if (!srcId) return
+
+    const src = localSections.find(s => s.id === srcId)
+    if (!src) return
+
+    // Build the new ordering: pull src out, insert it at the target position
+    // in the target column. Other column stays untouched.
+    const srcPlacement = src.placement || 'main'
+    const otherColumn = targetColumn === 'main' ? rightSections : mainSections
+    let intoColumn = (targetColumn === 'main' ? mainSections : rightSections)
+      .filter(s => s.id !== srcId)
+    let insertAt
+    if (!targetId) {
+      insertAt = intoColumn.length // append
+    } else {
+      const idx = intoColumn.findIndex(s => s.id === targetId)
+      insertAt = idx >= 0 ? idx : intoColumn.length
+    }
+    intoColumn = [
+      ...intoColumn.slice(0, insertAt),
+      { ...src, placement: targetColumn },
+      ...intoColumn.slice(insertAt),
+    ]
+
+    // Final full ordering: main column first, then right column. Both arrays
+    // already have any moved section inserted; the placement field on the
+    // moved row reflects its new home.
+    const newMain = targetColumn === 'main' ? intoColumn : otherColumn
+    const newRight = targetColumn === 'right' ? intoColumn : otherColumn
+    const next = [...newMain, ...newRight]
+
+    // No-op guard: if src is already in the target column and at the same
+    // position, don't save.
+    const wasSamePos = srcPlacement === targetColumn
+      && (targetColumn === 'main' ? mainSections : rightSections)
+        .findIndex(s => s.id === srcId) === insertAt
+    if (wasSamePos) return
 
     const before = localSections
-    const next = [...localSections]
-    const [moved] = next.splice(srcIdx, 1)
-    next.splice(dropIdx, 0, moved)
     setLocalSections(next)
     setSavingOrder(true)
     try {
+      if (srcPlacement !== targetColumn) {
+        await updateSection(srcId, { placement: targetColumn })
+      }
       await reorderSections(layoutId, next.map(s => s.id))
       await onChanged()
     } catch (err) {
-      toast.error(`Reorder failed: ${err.message || err}`)
+      toast.error(`Move failed: ${err.message || err}`)
       setLocalSections(before)
     } finally {
       setSavingOrder(false)
@@ -358,6 +418,67 @@ function SectionsList({ sections, layoutId, objectName, onChanged, disabled }) {
     }
   }
 
+  function renderColumn(col, cards, headerLabel, helperText) {
+    const isActiveDropZone = dropColumnHint === col && dragId
+    return (
+      <div
+        key={col}
+        onDragOver={e => handleDragOverColumn(e, col)}
+        onDrop={e => { e.preventDefault(); performDrop(col, null) }}
+        style={{
+          background: isActiveDropZone ? '#f0fdf4' : 'transparent',
+          border: isActiveDropZone ? `1px dashed ${C.emerald}` : '1px dashed transparent',
+          borderRadius: 8,
+          padding: 8,
+          marginBottom: 8,
+          transition: 'background 0.12s, border-color 0.12s',
+        }}
+      >
+        <div style={{
+          fontSize: 11.5, fontWeight: 600, color: C.textMuted,
+          textTransform: 'uppercase', letterSpacing: 0.4,
+          padding: '4px 4px 8px',
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          <Icon
+            path={col === 'right'
+              ? 'M9 4v16M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1z'
+              : 'M15 4v16M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1z'}
+            size={12}
+            color="currentColor"
+          />
+          {headerLabel} · {cards.length}
+        </div>
+        {cards.length === 0 ? (
+          <div style={{
+            padding: '24px 16px', textAlign: 'center',
+            background: C.card, border: `1px dashed ${C.borderDark || C.border}`, borderRadius: 8,
+            color: C.textMuted, fontSize: 12, fontStyle: 'italic',
+          }}>
+            {helperText}
+          </div>
+        ) : (
+          cards.map(section => (
+            <SectionCard
+              key={section.id}
+              section={section}
+              idx={localSections.findIndex(s => s.id === section.id)}
+              objectName={objectName}
+              isDragging={dragId === section.id}
+              isDropTarget={dragOverId === section.id && dragId && dragId !== section.id}
+              onDragStart={e => handleDragStart(e, section.id)}
+              onDragOver={e => handleDragOverSection(e, section.id)}
+              onDragEnd={handleDragEnd}
+              onDrop={e => { e.preventDefault(); performDrop(col, section.id) }}
+              onChanged={onChanged}
+              disabled={disabled || savingOrder}
+            />
+          ))
+        )}
+      </div>
+    )
+  }
+
   return (
     <div style={{ marginTop: 18 }}>
       <div style={{
@@ -366,6 +487,9 @@ function SectionsList({ sections, layoutId, objectName, onChanged, disabled }) {
       }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>
           Sections · {localSections.length}
+          <span style={{ fontSize: 11, fontWeight: 400, color: C.textMuted, marginLeft: 8 }}>
+            Drag between Main and Right Sidebar to change placement
+          </span>
         </div>
         {savingOrder && (
           <div style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>Saving order…</div>
@@ -382,22 +506,8 @@ function SectionsList({ sections, layoutId, objectName, onChanged, disabled }) {
         </div>
       )}
 
-      {localSections.map((section, idx) => (
-        <SectionCard
-          key={section.id}
-          section={section}
-          idx={idx}
-          objectName={objectName}
-          isDragging={dragIndex === idx}
-          isDropTarget={dragOverIndex === idx && dragIndex !== null && dragIndex !== idx}
-          onDragStart={e => handleDragStart(e, idx)}
-          onDragOver={e => handleDragOver(e, idx)}
-          onDragEnd={handleDragEnd}
-          onDrop={e => handleDrop(e, idx)}
-          onChanged={onChanged}
-          disabled={disabled || savingOrder}
-        />
-      ))}
+      {renderColumn('main', mainSections, 'Main content', 'Drag a section here to put it on the main page tabs.')}
+      {renderColumn('right', rightSections, 'Right sidebar', 'Drag a section here to put it in the always-visible right rail.')}
 
       {addingSection ? (
         <AddSectionInline onSave={handleAddSection} onCancel={() => setAddingSection(false)} />
