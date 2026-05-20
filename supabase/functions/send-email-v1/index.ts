@@ -405,53 +405,59 @@ async function resolveOutboundMailbox(
   admin: SupabaseClient,
   body: ReqBody,
 ): Promise<{ mailbox: any | null; trace: string }> {
-  // Priority order:
-  //   1. body.outbound_mailbox_id explicit
-  //   2. template.template_default_outbound_mailbox_id (if template provided)
-  //   3. program_id × state match
-  //   4. state-only match (NULL program_id)
+  // Mailbox selection is PROGRAMMATIC and NOT overridable. The single
+  // source of truth is the resolve_outbound_mailbox_for_anchor SQL
+  // function, which walks the anchor record's parent chain to a state
+  // and then to the active outbound_mailbox for that state.
+  //
+  // Any outbound_mailbox_id passed in the request body is verified
+  // against the resolver. If they disagree, the request is rejected.
+  // This blocks any client (browser, API caller, future automation)
+  // from sending from a mailbox other than the one the resolver picks.
 
-  // (1) explicit
-  if (body.outbound_mailbox_id) {
-    const { data } = await admin.from("outbound_mailboxes")
-      .select("*").eq("id", body.outbound_mailbox_id).eq("obm_is_active", true).eq("obm_is_deleted", false).maybeSingle()
-    if (data) return { mailbox: data, trace: "explicit outbound_mailbox_id" }
-    return { mailbox: null, trace: "explicit outbound_mailbox_id not found or inactive" }
+  const { data: rows, error } = await admin.rpc(
+    "resolve_outbound_mailbox_for_anchor",
+    {
+      p_anchor_object:    body.anchor_object,
+      p_anchor_record_id: body.anchor_record_id,
+    },
+  )
+  if (error) {
+    return { mailbox: null, trace: `resolver RPC failed: ${error.message}` }
   }
-
-  // (2) template default
-  if (body.email_template_id) {
-    const { data: tpl } = await admin.from("email_templates")
-      .select("template_default_outbound_mailbox_id").eq("id", body.email_template_id).maybeSingle()
-    if (tpl?.template_default_outbound_mailbox_id) {
-      const { data } = await admin.from("outbound_mailboxes")
-        .select("*").eq("id", tpl.template_default_outbound_mailbox_id)
-        .eq("obm_is_active", true).eq("obm_is_deleted", false).maybeSingle()
-      if (data) return { mailbox: data, trace: "template default mailbox" }
+  const resolved = Array.isArray(rows) && rows.length > 0 ? rows[0] : null
+  if (!resolved) {
+    return {
+      mailbox: null,
+      trace: `no mailbox could be resolved for anchor (${body.anchor_object} ${body.anchor_record_id}) — ` +
+             `the record's state may be missing, or no active outbound_mailbox is configured for that state`,
     }
   }
 
-  // (3) program × state
-  if (body.program_id && body.state) {
-    const { data } = await admin.from("outbound_mailboxes")
-      .select("*")
-      .eq("obm_program_id", body.program_id)
-      .eq("obm_state", body.state.toUpperCase())
-      .eq("obm_is_active", true).eq("obm_is_deleted", false).limit(1).maybeSingle()
-    if (data) return { mailbox: data, trace: `program × state match (program=${body.program_id}, state=${body.state})` }
+  // Hydrate the full mailbox row so downstream sender code has all columns
+  const { data: full, error: fullErr } = await admin
+    .from("outbound_mailboxes")
+    .select("*")
+    .eq("id", resolved.outbound_mailbox_id)
+    .eq("obm_is_active", true)
+    .eq("obm_is_deleted", false)
+    .maybeSingle()
+  if (fullErr || !full) {
+    return { mailbox: null, trace: `resolved mailbox ${resolved.outbound_mailbox_id} could not be hydrated (inactive or deleted)` }
   }
 
-  // (4) state-only (NULL program_id)
-  if (body.state) {
-    const { data } = await admin.from("outbound_mailboxes")
-      .select("*")
-      .is("obm_program_id", null)
-      .eq("obm_state", body.state.toUpperCase())
-      .eq("obm_is_active", true).eq("obm_is_deleted", false).limit(1).maybeSingle()
-    if (data) return { mailbox: data, trace: `state-only match (state=${body.state})` }
+  // Defense in depth: if caller supplied outbound_mailbox_id and it
+  // disagrees with the resolver, reject. Caller can omit the field;
+  // if they pass it, it must match.
+  if (body.outbound_mailbox_id && body.outbound_mailbox_id !== resolved.outbound_mailbox_id) {
+    return {
+      mailbox: null,
+      trace: `client supplied outbound_mailbox_id=${body.outbound_mailbox_id} but resolver picked ${resolved.outbound_mailbox_id}; ` +
+             `mailbox is programmatic and not overridable`,
+    }
   }
 
-  return { mailbox: null, trace: "no rule matched (no explicit id, no template default, no program × state, no state-only)" }
+  return { mailbox: full, trace: `resolver: ${resolved.resolution_path}` }
 }
 
 function singularize(plural: string): string {

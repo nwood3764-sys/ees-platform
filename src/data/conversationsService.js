@@ -798,7 +798,29 @@ export async function softDeleteAttachment({ attachmentId, reason }) {
 }
 
 // =============================================================================
-// Email template loaders for the rich-text composer
+// Programmatic mailbox resolver
+// =============================================================================
+//
+// Mailbox selection is NEVER user-choice. The mailbox is fully determined by
+// the anchor record's parent chain → state → outbound_mailboxes row. Users
+// see which mailbox will send (read-only display) but cannot change it.
+// The same resolver runs server-side in send-email-v1 as defense in depth.
+
+export async function resolveOutboundMailboxForAnchor({ anchorObject, anchorRecordId }) {
+  if (!anchorObject || !anchorRecordId) {
+    throw new Error('anchorObject and anchorRecordId required')
+  }
+  const { data, error } = await supabase.rpc('resolve_outbound_mailbox_for_anchor', {
+    p_anchor_object:    anchorObject,
+    p_anchor_record_id: anchorRecordId,
+  })
+  if (error) throw error
+  // The RPC returns SETOF rows; an empty set means no mailbox is configured
+  // for the resolved state (or the state itself could not be determined).
+  const row = Array.isArray(data) && data.length > 0 ? data[0] : null
+  return row
+}
+
 // =============================================================================
 //
 // fetchActiveEmailTemplates returns Active (publishable) templates available

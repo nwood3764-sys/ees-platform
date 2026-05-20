@@ -30,7 +30,7 @@ import { Icon } from './UI'
 import { useToast } from './Toast'
 import TiptapEmailComposer from './TiptapEmailComposer'
 import {
-  fetchOutboundMailboxes,
+  resolveOutboundMailboxForAnchor,
   sendNewEmail,
   sendNewEmailHtml,
   sendTemplateEmail,
@@ -144,9 +144,15 @@ export default function ComposeEmailModal({
 }) {
   const toast = useToast()
 
-  const [mailboxes, setMailboxes] = useState(null)   // null = loading, [] = none, [...] = ready
-  const [mailboxError, setMailboxError] = useState(null)
-  const [mailboxId, setMailboxId] = useState('')
+  // Resolved-mailbox state. Mailbox is NOT user-selectable — it is
+  // resolved from the anchor record's parent chain to a state and then
+  // to the single active outbound_mailbox for that state. The UI shows
+  // it as a read-only display. send-email-v1 also runs the same
+  // resolver server-side and rejects payloads that disagree.
+  const [resolvedMailbox, setResolvedMailbox] = useState(null)   // null while loading
+  const [resolvedMailboxError, setResolvedMailboxError] = useState(null)
+  // Convenience alias for downstream code that still references mailboxId
+  const mailboxId = resolvedMailbox?.outbound_mailbox_id || ''
 
   const [toEmail, setToEmail] = useState('')
   const [toName, setToName]   = useState('')
@@ -197,9 +203,8 @@ export default function ComposeEmailModal({
     setBodyText('')
     setBodyHtml('')
     setLastResult(null)
-    setMailboxes(null)
-    setMailboxError(null)
-    setMailboxId('')
+    setResolvedMailbox(null)
+    setResolvedMailboxError(null)
     setStagedFiles([])
     setTemplates(null)
     setTemplatesError(null)
@@ -208,23 +213,36 @@ export default function ComposeEmailModal({
     setEditableRegionsByTemplate({})
   }, [open, defaultRecipientEmail, defaultRecipientName])
 
-  // ── Load mailboxes once per open ────────────────────────────────────
+  // ── Resolve outbound mailbox once per open ──────────────────────────
+  // Programmatic, not user-selectable. Walks the anchor's parent chain
+  // (project → property → state) → active outbound_mailbox for that
+  // state. If the resolver returns nothing (no state on the property,
+  // or no active mailbox configured for that state), surface a hard
+  // error in the UI and disable Send. Defense in depth: send-email-v1
+  // runs the same resolver server-side.
   useEffect(() => {
     if (!open) return
     let alive = true
-    fetchOutboundMailboxes()
-      .then(rows => {
+    setResolvedMailbox(null)
+    setResolvedMailboxError(null)
+    resolveOutboundMailboxForAnchor({ anchorObject, anchorRecordId })
+      .then(row => {
         if (!alive) return
-        setMailboxes(rows)
-        // Default selection: first active mailbox (no state heuristic yet —
-        // user can change via dropdown if it's not the right one)
-        if (rows.length > 0) setMailboxId(rows[0].id)
+        if (!row) {
+          setResolvedMailboxError(
+            `No outbound mailbox could be resolved for this record. ` +
+            `The property's state may be missing, or no active mailbox is ` +
+            `configured for that state. Contact your administrator.`
+          )
+          return
+        }
+        setResolvedMailbox(row)
       })
       .catch(err => {
-        if (alive) setMailboxError(err.message || String(err))
+        if (alive) setResolvedMailboxError(err.message || String(err))
       })
     return () => { alive = false }
-  }, [open])
+  }, [open, anchorObject, anchorRecordId])
 
   // ── Load active email templates once per open ───────────────────────
   useEffect(() => {
@@ -255,10 +273,10 @@ export default function ComposeEmailModal({
         if (row?.subject && !subject) {
           setSubject(row.subject)
         }
-        // Seed mailbox from template default if set
-        if (row?.template_default_outbound_mailbox_id) {
-          setMailboxId(row.template_default_outbound_mailbox_id)
-        }
+        // NOTE: template.template_default_outbound_mailbox_id is intentionally
+        // ignored. Mailbox selection is resolver-driven (anchor → state →
+        // mailbox) and not overridable by template, user, or any other source.
+        // The column may be retired in a later schema slice.
       })
       .catch(err => {
         if (alive) toast.error(`Failed to load template: ${err.message || err}`)
@@ -460,47 +478,50 @@ export default function ComposeEmailModal({
         {/* Body */}
         <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-          {/* Mailbox picker */}
+          {/* From — programmatic, NOT user-selectable. Resolver picks the
+              single active outbound mailbox for this anchor's state. */}
           <div>
             <label style={FIELD_LABEL}>From</label>
-            {mailboxError && (
+            {resolvedMailboxError && (
               <div style={{
                 padding: 8, fontSize: 12, color: '#8a1a1a',
                 background: '#fce8e8', border: `1px solid #f3c8c8`,
                 borderRadius: 5,
               }}>
-                Failed to load mailboxes: {mailboxError}
+                {resolvedMailboxError}
               </div>
             )}
-            {!mailboxError && mailboxes === null && (
+            {!resolvedMailboxError && !resolvedMailbox && (
               <div style={{ fontSize: 12, color: C.textMuted, padding: '8px 0' }}>
-                Loading mailboxes…
+                Resolving mailbox from record…
               </div>
             )}
-            {!mailboxError && Array.isArray(mailboxes) && mailboxes.length === 0 && (
+            {!resolvedMailboxError && resolvedMailbox && (
               <div style={{
-                padding: 8, fontSize: 12, color: '#8a5a1a',
-                background: '#fff4e0', border: `1px solid #f0d7a0`,
-                borderRadius: 5,
-              }}>
-                No active outbound mailboxes are configured. Seed at least one
-                row in <code>outbound_mailboxes</code> before sending.
+                ...INPUT_STYLE,
+                background: C.cardSecondary || '#f7f9fc',
+                cursor: 'not-allowed',
+                color: C.textPrimary,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+              title={`Resolved via: ${resolvedMailbox.resolution_path}`}
+              >
+                <span style={{ flex: 1 }}>
+                  {resolvedMailbox.obm_display_name} — {resolvedMailbox.obm_address} ({resolvedMailbox.obm_state})
+                </span>
+                <span style={{
+                  fontSize: 10, color: C.textMuted, fontWeight: 600,
+                  letterSpacing: 0.4, textTransform: 'uppercase',
+                }}>
+                  Auto
+                </span>
               </div>
             )}
-            {!mailboxError && Array.isArray(mailboxes) && mailboxes.length > 0 && (
-              <select
-                value={mailboxId}
-                onChange={e => setMailboxId(e.target.value)}
-                disabled={submitting}
-                style={{ ...INPUT_STYLE, fontFamily: 'inherit' }}
-              >
-                {mailboxes.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.obm_display_name || m.obm_address} — {m.obm_address} ({m.obm_state})
-                  </option>
-                ))}
-              </select>
-            )}
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+              Mailbox is determined by the record's program and state. Not user-selectable.
+            </div>
           </div>
 
           {/* To */}
@@ -730,11 +751,11 @@ export default function ComposeEmailModal({
             </button>
             <button
               onClick={handleSend}
-              disabled={submitting || !mailboxId || mailboxes === null}
+              disabled={submitting || !mailboxId || !resolvedMailbox}
               style={{
                 ...BUTTON_PRIMARY,
-                opacity: (submitting || !mailboxId || mailboxes === null) ? 0.6 : 1,
-                cursor: (submitting || !mailboxId || mailboxes === null) ? 'wait' : 'pointer',
+                opacity: (submitting || !mailboxId || !resolvedMailbox) ? 0.6 : 1,
+                cursor: (submitting || !mailboxId || !resolvedMailbox) ? 'wait' : 'pointer',
               }}
             >
               <Icon path="M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z" size={13} color="currentColor" />
