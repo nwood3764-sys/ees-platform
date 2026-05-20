@@ -31,6 +31,7 @@ export const SETUP_TREE = [
     children: [
       { id: 'lifecycle_builder', label: 'Lifecycle Builder' },
       { id: 'automation_rules', label: 'Flows (Automation Rules)' },
+      { id: 'automation_run_log', label: 'Automation Run Log' },
       { id: 'validation_rules', label: 'Validation Rules' },
     ],
   },

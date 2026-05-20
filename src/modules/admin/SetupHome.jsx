@@ -9,6 +9,7 @@ import RolesPane from './permissions/RolesPane'
 import PermissionSetsPane from './permissions/PermissionSetsPane'
 import HelpArticlesPane from './help/HelpArticlesPane'
 import LifecycleBuilderPane from './LifecycleBuilderPane'
+import AutomationRunLogPane from './AutomationRunLogPane'
 import {
   fetchPrograms, fetchWorkTypes,
   fetchEmailTemplates, fetchDocumentTemplates, fetchEnvelopes,
@@ -452,6 +453,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'picklist_values':   return <NodePage title="Picklist Value Sets"     table="picklist_values"   fetcher={fetchPicklistValues}    columns={PL_COLS}             newLabel="Picklist Value"   onOpenRecord={onOpenRecord} />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'automation_rules':  return <NodePage title="Flows (Automation Rules)" table="automation_rules" fetcher={fetchAutomationRules}   columns={AR_COLS}             newLabel="Automation Rule"  onOpenRecord={onOpenRecord} />
+    case 'automation_run_log': return <AutomationRunLogPane />
     case 'lifecycle_builder': return <LifecycleBuilderPane />
     case 'validation_rules':  return <NodePage title="Validation Rules"        table="validation_rules"  fetcher={fetchValidationRules}   columns={VR_COLS}             newLabel="Validation Rule"  onOpenRecord={onOpenRecord} />
     case 'page_layouts':      return <NodePage title="Page Layouts"            table="page_layouts"      fetcher={fetchAllPageLayouts}    columns={PAGELAYOUT_COLS}     newLabel="Page Layout"      onOpenRecord={onOpenRecord} />

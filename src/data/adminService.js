@@ -220,6 +220,42 @@ export async function fetchAutomationRules() {
 }
 
 // ---------------------------------------------------------------------------
+// Automation run log — observability for fired rules
+// ---------------------------------------------------------------------------
+
+export async function fetchAutomationRunLog() {
+  // Most recent 500 firings. The full log is unbounded so we cap; deeper
+  // history can be reached via record-scoped filtering on the source record
+  // detail page if we wire that in later.
+  const { data, error } = await supabase
+    .from('automation_run_log')
+    .select(`
+      id, arl_record_number, arl_rule_id, arl_rule_name,
+      arl_trigger_object, arl_trigger_record_id, arl_trigger_event,
+      arl_trigger_status, arl_action_type, arl_outcome, arl_outcome_message,
+      arl_created_target_id, arl_fired_at, arl_fired_by
+    `)
+    .eq('arl_is_deleted', false)
+    .order('arl_fired_at', { ascending: false })
+    .limit(500)
+  if (error) throw error
+  return (data || []).map(r => ({
+    id: r.arl_record_number || r.id.slice(0, 8).toUpperCase(),
+    _id: r.id,
+    ruleName: r.arl_rule_name || '—',
+    triggerObject: r.arl_trigger_object,
+    triggerEvent: r.arl_trigger_event,
+    triggerStatus: r.arl_trigger_status || '—',
+    actionType: r.arl_action_type,
+    outcome: r.arl_outcome,
+    outcomeMessage: r.arl_outcome_message || '',
+    firedAt: r.arl_fired_at,
+    triggerRecordId: r.arl_trigger_record_id,
+    ruleId: r.arl_rule_id,
+  }))
+}
+
+// ---------------------------------------------------------------------------
 // Validation rules
 // ---------------------------------------------------------------------------
 
