@@ -147,6 +147,25 @@ const monoInput = { ...inputBase, fontFamily: 'JetBrains Mono, monospace' }
 // Breadcrumb — Salesforce-style hierarchy path
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+
+// Proper English singularization for object labels. Used by both the create-
+// header ("New Property" from "Properties") and the record-type picker. The
+// previous naïve `.replace(/s$/, '')` produced "Propertie" from "Properties"
+// and "Opportunitie" from "Opportunities" — the y->ies pluralization case.
+function singularizeLabel(word) {
+  if (!word) return word
+  // Words that don't pluralize at all even though they end in s.
+  if (/(equipment|news|series|species)$/i.test(word)) return word
+  // -ies -> -y  (properties -> property, opportunities -> opportunity)
+  if (/ies$/i.test(word)) return word.slice(0, -3) + 'y'
+  // -ches, -shes, -xes, -zes, -sses -> drop -es
+  if (/(ches|shes|xes|zes|sses)$/i.test(word)) return word.slice(0, -2)
+  // -s -> drop the s
+  if (/s$/i.test(word)) return word.slice(0, -1)
+  return word
+}
+
 // Per-table display metadata. `nameColumn` and `recordNumberColumn` drive the
 // detail-page header (replacing the long hard-coded `record.foo || record.bar
 // || ...` fallback chains that used to live inline). `parents` lists FK columns
@@ -4589,7 +4608,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     return (
       <RecordTypePicker
         tableName={tableName}
-        objectLabel={objectLabel}
+        objectLabel={singularizeLabel(objectLabel)}
         onPick={(rt) => {
           // rt can be null when the picker auto-determined no RTs exist;
           // false marks 'no picker needed' so the load effect can proceed.
@@ -4635,8 +4654,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // one row of metadata. Previously these were 9-fallback `||` chains that
   // grew with every new table — the envelope page rendered "Record" + a
   // partial UUID because env_name / env_record_number weren't on the chain.
+  // Uses the module-level singularizeLabel helper so "Properties" -> "Property"
+  // and "Opportunities" -> "Opportunity" instead of the naïve "Propertie".
   const displayName = isCreate
-    ? `New ${objectLabel.replace(/s$/, '')}`
+    ? `New ${singularizeLabel(objectLabel)}`
     : getRecordDisplayName(tableName, record)
 
   const recordNumber = !isCreate ? getRecordNumber(tableName, record) : ''

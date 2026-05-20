@@ -65,28 +65,69 @@ export async function getCurrentUserProfile() {
  * prefill we accept either the canonical column name OR the generic
  * `record_type` key, which propagates through to the right column at save.
  */
+// Central table->column-prefix map. Same prefixes the database columns use
+// (e.g. accounts.account_*, properties.property_*). Driven by hand because
+// English pluralization rules don't always match how column prefixes were
+// chosen — and getting it wrong silently produces invalid column names
+// like 'propertie_record_type' or 'opportunitie_record_type'. Every table
+// that has prefixed columns must appear here. Tables that don't follow
+// the convention at all (mapping tables, certain telemetry) are absent.
+const TABLE_COLUMN_PREFIX = {
+  accounts:                          'account',
+  account_contact_relations:         'acr',
+  assessments:                       'assessment',
+  buildings:                         'building',
+  bulk_import_runs:                  'bir',
+  contacts:                          'contact',
+  contact_skills:                    'cs',
+  conversations:                     'conv',
+  diagnostic_tests:                  'dt',
+  efr_reports:                       'efr',
+  equipment:                         'equipment',
+  equipment_activities:              'ea',
+  incentive_applications:            'ia',
+  messages:                          'msg',
+  opportunities:                     'opportunity',
+  outbound_mailboxes:                'outbound_mailbox',
+  products:                          'product',
+  projects:                          'project',
+  project_payment_requests:          'ppr',
+  project_report_templates:          'prt',
+  project_report_template_sections:  'prts',
+  project_report_template_snapshots: 'prtsn',
+  project_reservations:              'pr',
+  properties:                        'property',
+  service_appointments:              'sa',
+  service_appointment_assignments:   'saa',
+  skills:                            'skill',
+  units:                             'unit',
+  vehicles:                          'vehicle',
+  work_orders:                       'work_order',
+  work_plans:                        'work_plan',
+  work_plan_templates:               'wpt',
+  work_steps:                        'work_step',
+  work_step_templates:               'wst',
+  work_type_skill_requirements:      'wtsr',
+}
+
+/**
+ * Get the column prefix for a table. Returns null if the table isn't in
+ * the canonical map, which means callers must handle that case explicitly
+ * rather than silently producing a wrong column name like 'propertie_*'.
+ */
+export function getTableColumnPrefix(tableName) {
+  return TABLE_COLUMN_PREFIX[tableName] || null
+}
+
 export function getRecordTypeColumn(tableName) {
-  // Manually map the short-prefix tables that don't follow `singular_record_type`
-  const SHORT_PREFIX = {
-    incentive_applications:  'ia_record_type',
-    work_plan_templates:     'wpt_record_type',
-    work_step_templates:     'wst_record_type',
-    project_payment_requests: 'ppr_record_type',
-    project_reservations:    'pr_record_type',
-    service_appointments:    'sa_record_type',
-    service_appointment_assignments: 'saa_record_type',
-    work_orders:             'work_order_record_type',
-    work_steps:              'work_step_record_type',
-    work_plans:              'work_plan_record_type',
-    diagnostic_tests:        'dt_record_type',
-    efr_reports:             'efr_record_type',
-    equipment_activities:    'ea_record_type',
-    project_report_templates: 'prt_record_type',
+  const prefix = TABLE_COLUMN_PREFIX[tableName]
+  if (!prefix) {
+    // No mapping — fall back to the literal column name 'record_type'.
+    // Tables outside the map shouldn't be using record types, but if one
+    // does, prefer the unprefixed name over a guess that might be wrong.
+    return 'record_type'
   }
-  if (SHORT_PREFIX[tableName]) return SHORT_PREFIX[tableName]
-  // Strip trailing 's' for the standard singular form
-  const singular = tableName.endsWith('s') ? tableName.slice(0, -1) : tableName
-  return `${singular}_record_type`
+  return `${prefix}_record_type`
 }
 
 /**
@@ -670,31 +711,13 @@ export async function fetchPicklistOptions(objectName, fieldName) {
   let rows = await tryFetch(fieldName)
 
   if (rows.length === 0) {
-    // Strip the object prefix and retry. accounts -> account_, properties ->
-    // property_, opportunities -> opportunity_, etc. Also handle the short-
-    // prefix tables (incentive_applications -> ia_, work_plan_templates ->
-    // wpt_) via the same explicit map used elsewhere.
-    const SHORT_PREFIX = {
-      incentive_applications: 'ia_',
-      work_plan_templates:    'wpt_',
-      work_step_templates:    'wst_',
-      project_payment_requests: 'ppr_',
-      project_reservations:   'pr_',
-      service_appointments:   'sa_',
-      service_appointment_assignments: 'saa_',
-      diagnostic_tests:       'dt_',
-      efr_reports:            'efr_',
-      equipment_activities:   'ea_',
-      project_report_templates: 'prt_',
-    }
-    let prefix = SHORT_PREFIX[objectName]
-    if (!prefix) {
-      // Standard singular prefix: 'accounts' -> 'account_'
-      const singular = objectName.endsWith('s') ? objectName.slice(0, -1) : objectName
-      prefix = `${singular}_`
-    }
-    if (fieldName.startsWith(prefix)) {
-      const shortField = fieldName.slice(prefix.length)
+    // Strip the table's column prefix and retry. Uses the canonical
+    // TABLE_COLUMN_PREFIX map so this handles every table correctly
+    // including y->ies words (properties, opportunities) that naive
+    // pluralization breaks.
+    const prefix = getTableColumnPrefix(objectName)
+    if (prefix && fieldName.startsWith(`${prefix}_`)) {
+      const shortField = fieldName.slice(prefix.length + 1)
       rows = await tryFetch(shortField)
     }
   }
