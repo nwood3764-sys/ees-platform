@@ -201,7 +201,11 @@ export default function HomeModule({ onNavigate }) {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button style={{ background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 14px', fontSize: 12.5, color: C.textSecondary, cursor: 'pointer', fontWeight: 500 }}>Refresh</button>
-          <button style={{ background: C.emerald, border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12.5, color: '#fff', cursor: 'pointer', fontWeight: 500 }}>+ Add Widget</button>
+          {/* Widget composition (add/remove/rearrange) belongs in the Dashboard
+              Builder admin surface, not on the consumer dashboard. The prior
+              "+ Add Widget" affordance here had no onClick handler and was
+              misleading — implied dashboards were end-user editable when in
+              fact they're configured centrally per role. Removed 2026-05-19. */}
         </div>
       </div>
 
