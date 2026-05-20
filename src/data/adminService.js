@@ -220,6 +220,171 @@ export async function fetchAutomationRules() {
 }
 
 // ---------------------------------------------------------------------------
+// Automation Rule Builder — CRUD helpers driving the structured editor
+// at Setup → Process Automation → Flows. The generic NodePage editor
+// can't shape action_config per action_type, so the Builder owns the
+// full create/read/update surface.
+// ---------------------------------------------------------------------------
+
+/**
+ * Load one rule with every column populated, for the edit modal. Returns
+ * the raw row shape — the Builder owns the rendering of action_config.
+ */
+export async function fetchAutomationRuleFull(ruleId) {
+  const { data, error } = await supabase
+    .from('automation_rules')
+    .select(`
+      id, name, description, is_active, execution_order,
+      trigger_object, trigger_event, trigger_status, trigger_field, trigger_field_value,
+      action_type, action_config, target_object, target_role_id,
+      email_template_id, document_template_id, owner_id,
+      created_by, created_at, updated_by, updated_at
+    `)
+    .eq('id', ruleId)
+    .single()
+  if (error) throw error
+  return data
+}
+
+/**
+ * Create a new rule. The Builder enforces required-fields client-side;
+ * this helper makes no assumptions beyond what Postgres will enforce.
+ * Returns the new row's id.
+ */
+export async function createAutomationRule(payload) {
+  const { data, error } = await supabase
+    .from('automation_rules')
+    .insert(payload)
+    .select('id')
+    .single()
+  if (error) throw error
+  return data.id
+}
+
+/**
+ * Update an existing rule. Builder passes only the columns it knows about
+ * so the DB-level updated_at trigger does the rest.
+ */
+export async function updateAutomationRule(ruleId, payload) {
+  const { error } = await supabase
+    .from('automation_rules')
+    .update(payload)
+    .eq('id', ruleId)
+  if (error) throw error
+}
+
+/**
+ * Flip is_active on a rule. Separate helper because the list view exposes
+ * this as a one-click toggle without opening the edit modal.
+ */
+export async function setAutomationRuleActive(ruleId, isActive) {
+  const { error } = await supabase
+    .from('automation_rules')
+    .update({ is_active: !!isActive })
+    .eq('id', ruleId)
+  if (error) throw error
+}
+
+/**
+ * Soft delete: automation_rules has no is_deleted column (the table predates
+ * the universal soft-delete convention). Set is_active=false instead — the
+ * executor ignores inactive rules and they drop out of the default list.
+ * Hard delete is reserved for admin via direct SQL if a rule truly needs to
+ * disappear.
+ */
+export async function disableAutomationRule(ruleId) {
+  return setAutomationRuleActive(ruleId, false)
+}
+
+/**
+ * Lightweight pickers powering the Builder's structured form. Each returns
+ * {value, label}[] for a <select> dropdown. Failure is non-fatal; the
+ * Builder falls back to a free-text input if a picker is empty.
+ */
+export async function fetchAutomationTriggerObjects() {
+  // Objects that have at least one active status_transitions row — these are
+  // the targets where 'status_change' can fire today. Other trigger_events
+  // can still be saved against any object, but this gives the picker a
+  // sensible default scope when event='status_change'.
+  const { data, error } = await supabase
+    .from('status_transitions')
+    .select('st_object')
+    .eq('st_is_active', true)
+    .eq('st_is_deleted', false)
+  if (error) throw error
+  const uniq = Array.from(new Set((data || []).map(r => r.st_object))).sort()
+  return uniq.map(o => ({ value: o, label: o }))
+}
+
+export async function fetchAutomationStatusValues(triggerObject) {
+  // Distinct status labels reachable as destinations on this object's
+  // lifecycle. Joined through picklist_values because the transition table
+  // stores status FKs, not labels. The picker offers only statuses
+  // currently part of the lifecycle, matching what the executor will see.
+  if (!triggerObject) return []
+  const { data, error } = await supabase
+    .from('status_transitions')
+    .select('st_to_status_id, picklist_values:st_to_status_id ( picklist_label, picklist_value )')
+    .eq('st_object', triggerObject)
+    .eq('st_is_active', true)
+    .eq('st_is_deleted', false)
+  if (error) throw error
+  const labels = (data || [])
+    .map(r => r.picklist_values?.picklist_label || r.picklist_values?.picklist_value)
+    .filter(Boolean)
+  const uniq = Array.from(new Set(labels)).sort()
+  return uniq.map(s => ({ value: s, label: s }))
+}
+
+export async function fetchAutomationRoles() {
+  // The roles table uses role_is_active (no role_is_deleted). Inactive
+  // roles drop out of the picker; existing rules referencing an inactive
+  // role still save round-trippably because action_config stores the
+  // role NAME, not the role id.
+  const { data, error } = await supabase
+    .from('roles')
+    .select('id, role_name, role_is_active')
+    .eq('role_is_active', true)
+    .order('role_name', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({ value: r.role_name, label: r.role_name, _id: r.id }))
+}
+
+export async function fetchAutomationEmailTemplates() {
+  // email_templates uses unprefixed canonical columns. status is a uuid FK
+  // to picklist_values (not a text column), so we join through picklist
+  // and filter on the resolved label. Active and Draft templates surface
+  // in the picker; Archived templates drop out.
+  const { data, error } = await supabase
+    .from('email_templates')
+    .select('id, name, status:picklist_values!status ( picklist_label )')
+    .eq('is_deleted', false)
+    .order('name', { ascending: true })
+  if (error) throw error
+  return (data || [])
+    .filter(r => r.status?.picklist_label !== 'Archived')
+    .map(r => {
+      const statusLabel = r.status?.picklist_label || 'Draft'
+      return {
+        value: r.name,
+        label: statusLabel === 'Active' ? r.name : `${r.name} (${statusLabel})`,
+        _id: r.id,
+      }
+    })
+}
+
+export async function fetchAutomationWorkTypes() {
+  const { data, error } = await supabase
+    .from('work_types')
+    .select('id, work_type_name')
+    .eq('work_type_is_deleted', false)
+    .eq('work_type_is_active', true)
+    .order('work_type_name', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({ value: r.work_type_name, label: r.work_type_name, _id: r.id }))
+}
+
+// ---------------------------------------------------------------------------
 // Automation run log — observability for fired rules
 // ---------------------------------------------------------------------------
 

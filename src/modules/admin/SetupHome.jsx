@@ -9,6 +9,7 @@ import RolesPane from './permissions/RolesPane'
 import PermissionSetsPane from './permissions/PermissionSetsPane'
 import HelpArticlesPane from './help/HelpArticlesPane'
 import LifecycleBuilderPane from './LifecycleBuilderPane'
+import AutomationRulesPane from './AutomationRulesPane'
 import AutomationRunLogPane from './AutomationRunLogPane'
 import {
   fetchPrograms, fetchWorkTypes,
@@ -452,7 +453,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'help_articles':     return <HelpArticlesPane />
     case 'picklist_values':   return <NodePage title="Picklist Value Sets"     table="picklist_values"   fetcher={fetchPicklistValues}    columns={PL_COLS}             newLabel="Picklist Value"   onOpenRecord={onOpenRecord} />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
-    case 'automation_rules':  return <NodePage title="Flows (Automation Rules)" table="automation_rules" fetcher={fetchAutomationRules}   columns={AR_COLS}             newLabel="Automation Rule"  onOpenRecord={onOpenRecord} />
+    case 'automation_rules':  return <AutomationRulesPane />
     case 'automation_run_log': return <AutomationRunLogPane />
     case 'lifecycle_builder': return <LifecycleBuilderPane />
     case 'validation_rules':  return <NodePage title="Validation Rules"        table="validation_rules"  fetcher={fetchValidationRules}   columns={VR_COLS}             newLabel="Validation Rule"  onOpenRecord={onOpenRecord} />
