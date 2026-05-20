@@ -44,8 +44,10 @@ import {
   getRecordTypeValue,
   getRecordTypeColumn,
   fetchAvailableRecordTypes,
+  getCurrentUserProfile,
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
+import RecordSetupMenu from './RecordSetupMenu'
 
 // ---------------------------------------------------------------------------
 // Template lifecycle registry
@@ -3704,7 +3706,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
 // RecordDetail — main component
 // ---------------------------------------------------------------------------
 
-export default function RecordDetail({ tableName, recordId, onBack, mode = 'view', onRecordCreated, onNavigateToRecord, prefill }) {
+export default function RecordDetail({ tableName, recordId, onBack, mode = 'view', onRecordCreated, onNavigateToRecord, prefill, onOpenSetup }) {
   const isCreate = mode === 'create'
   const toast = useToast()
   const isMobile = useIsMobile()
@@ -3718,6 +3720,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [allLookupOpts, setAllLookupOpts] = useState({})
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // Whether the current viewer has the Admin role. Drives visibility of the
+  // Setup quick-link gear menu in the toolbar. Fetched once on mount.
+  // Non-admins simply don't see the button — no UI flicker, no extra hit
+  // to the network per record because we cache the result for the lifetime
+  // of the component.
+  const [isAdmin, setIsAdmin] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    getCurrentUserProfile().then(({ roleName }) => {
+      if (!cancelled) setIsAdmin(roleName === 'Admin')
+    }).catch(() => { /* non-admin or error — leave isAdmin false */ })
+    return () => { cancelled = true }
+  }, [])
   // Which tab is active on the record detail page. Null until data loads,
   // then initialized to the first tab (Details) by the useEffect below.
   const [activeTab, setActiveTab] = useState(null)
@@ -5259,6 +5274,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={13} color={C.textSecondary} />
                   Clone
                 </button>
+                {/* Admin-only Setup quick-link gear menu. Renders nothing for
+                    non-admin users so the toolbar collapses naturally. The
+                    record_type column varies per table — getRecordTypeColumn
+                    returns the right one (account_record_type, property_record_type,
+                    etc.) so we can pass the correct uuid into the menu's
+                    page-layout resolver. */}
+                <RecordSetupMenu
+                  tableName={tableName}
+                  recordTypeId={record?.[getRecordTypeColumn(tableName)] || null}
+                  isAdmin={isAdmin}
+                  onOpenSetup={onOpenSetup}
+                  onNavigateToRecord={onNavigateToRecord}
+                />
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
                   title="Move to recycle bin"

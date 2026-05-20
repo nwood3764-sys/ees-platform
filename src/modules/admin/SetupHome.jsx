@@ -39,12 +39,24 @@ import BulkPropertyImportPane from './BulkPropertyImportPane'
 // carry a `nodeId` that maps to a renderer in NODE_RENDERERS below.
 // ---------------------------------------------------------------------------
 
-export default function SetupHome({ onOpenObjectManager, onOpenRecord }) {
-  const [selectedId, setSelectedId] = useState(null)    // e.g. 'users', 'automation_rules'
+export default function SetupHome({ onOpenObjectManager, onOpenRecord, initialNodeId }) {
+  const [selectedId, setSelectedId] = useState(initialNodeId || null)    // e.g. 'users', 'automation_rules'
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(() =>
     Object.fromEntries(SETUP_TREE.map(g => [g.id, true]))
   )
+
+  // When the URL section changes (e.g. user clicked Edit Page Layout from a
+  // record detail page and we deep-link to /m/admin/page_layouts), update
+  // the local selection so the right pane renders. We do not clear selectedId
+  // when initialNodeId becomes null — keeps the user's manual selection
+  // sticky if they then navigate around.
+  useEffect(() => {
+    if (initialNodeId && initialNodeId !== selectedId) {
+      setSelectedId(initialNodeId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialNodeId])
   // On mobile we treat the two panes as a drill-in navigation stack rather
   // than a side-by-side layout. Desktop keeps the classic Salesforce-style
   // left tree + right detail.

@@ -74,6 +74,7 @@ function AuthedApp({ session }) {
     helpSlug,
     navigateToModule,
     navigateToSection,
+    navigateToSetup,
     navigateToRecord,
     navigateToSearch,
     closeRecord,
@@ -191,6 +192,7 @@ function AuthedApp({ session }) {
       onCloseRecord: closeRecord,
       onSectionChange: navigateToSection,
       onReplaceRecord: replaceRecord,
+      onOpenSetup: navigateToSetup,
     }
     switch (activeModule) {
       case 'home':          return <HomeModule onNavigate={navigateToModule} />

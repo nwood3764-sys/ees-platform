@@ -87,6 +87,7 @@ const TABLE_MODULE_MAP = {
   validation_rules: 'admin',
   roles: 'admin',
   picklist_values: 'admin',
+  page_layouts: 'admin',
   skills: 'admin',
   users: 'admin',
   project_report_templates: 'admin',
@@ -332,6 +333,24 @@ export function useUrlNavigation() {
     })
   }, [])
 
+  // navigateToSetup is for the "open in Setup" quick-link menu on every
+  // record detail page (gear icon next to Edit/Clone/Delete). Unlike
+  // navigateToSection it forces activeModule='admin' regardless of where
+  // the user currently is — clicking 'Edit Page Layout' from a Property
+  // in the Outreach module should land in Admin, not Outreach/page_layouts.
+  const navigateToSetup = useCallback((nodeId) => {
+    const next = {
+      activeModule: 'admin',
+      selectedRecord: null,
+      section: nodeId || null,
+      searchQuery: null,
+      searchType: null,
+    }
+    const path = buildPath(next)
+    if (path !== currentFullPath()) window.history.pushState(null, '', path)
+    setState(next)
+  }, [])
+
   const navigateToRecord = useCallback((rec) => {
     // rec: { table, id, mode, prefill? }
     if (!rec?.table) return
@@ -394,6 +413,7 @@ export function useUrlNavigation() {
     helpSlug: state.helpSlug,
     navigateToModule,
     navigateToSection,
+    navigateToSetup,
     navigateToRecord,
     navigateToSearch,
     closeRecord,

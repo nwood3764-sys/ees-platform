@@ -17,7 +17,7 @@ import ObjectDetail from './ObjectDetail'
 // Both tabs can open individual record detail pages (contacts, templates, etc.)
 // ---------------------------------------------------------------------------
 
-export default function AdminModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord } = {}) {
+export default function AdminModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
   // Admin uses 'setup' / 'objects' rather than the section-name pattern of
   // the other modules, so we map the URL section to the local tab. Only
   // 'objects' is exposed via URL today; everything else stays on 'setup'.
@@ -193,9 +193,10 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
             onRecordCreated={r => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
             prefill={selectedRecord.prefill}
             onNavigateToRecord={r => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })}
+            onOpenSetup={onOpenSetup}
           />
         ) : tab === 'setup' ? (
-          <SetupHome onOpenObjectManager={openObjectManager} onOpenRecord={openRecord} />
+          <SetupHome onOpenObjectManager={openObjectManager} onOpenRecord={openRecord} initialNodeId={sectionFromUrl} />
         ) : selectedObject ? (
           <ObjectDetail obj={selectedObject} onBack={() => setSelectedObject(null)} />
         ) : (
