@@ -27,6 +27,7 @@ import { useUrlNavigation } from './lib/urlNav'
 // for users who never open it.
 // ─────────────────────────────────────────────────────────────────────────────
 const HomeModule          = lazy(() => import('./modules/HomeModule'))
+const TasksModule         = lazy(() => import('./modules/TasksModule'))
 const OutreachModule      = lazy(() => import('./modules/OutreachModule'))
 const QualificationModule = lazy(() => import('./modules/QualificationModule'))
 const FieldModule         = lazy(() => import('./modules/FieldModule'))
@@ -206,6 +207,7 @@ function AuthedApp({ session }) {
     }
     switch (activeModule) {
       case 'home':          return <HomeModule onNavigate={navigateToModule} />
+      case 'tasks':         return <TasksModule {...navProps} />
       case 'outreach':      return <OutreachModule {...navProps} />
       case 'qualification': return <QualificationModule {...navProps} />
       case 'field':         return <FieldModule {...navProps} />

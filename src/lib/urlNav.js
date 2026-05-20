@@ -76,6 +76,8 @@ const TABLE_MODULE_MAP = {
   // Field — dispatcher follow-up queue (captured leads from public scheduling
   // pages when auto-scheduling hit a dead-end — out_of_territory etc.)
   dispatcher_followup_requests: 'field',
+  // Tasks (global to-do queue)
+  tasks: 'tasks',
   // Admin
   programs: 'admin',
   work_types: 'admin',
@@ -147,8 +149,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // user lands on /search?q=... (typically from the search modal's "View
 // all results" footer button or a shared link).
 const KNOWN_MODULES = new Set([
-  'home', 'outreach', 'qualification', 'field', 'incentives',
-  'stock', 'fleet', 'admin', 'portal', 'search', 'help',
+  'home', 'tasks', 'outreach', 'qualification', 'field', 'dispatch', 'incentives',
+  'stock', 'fleet', 'reports', 'admin', 'portal', 'search', 'help',
 ])
 
 /**
