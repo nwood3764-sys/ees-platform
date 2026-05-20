@@ -18,7 +18,7 @@ import { OBJECT_CATALOG } from './objectCatalog'
 // Both tabs can open individual record detail pages (contacts, templates, etc.)
 // ---------------------------------------------------------------------------
 
-export default function AdminModule({ selectedRecord: navSelectedRecord, sectionFromUrl, subsectionFromUrl, adminTabFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onSubsectionChange, onReplaceRecord, onOpenSetup } = {}) {
+export default function AdminModule({ selectedRecord: navSelectedRecord, sectionFromUrl, subsectionFromUrl, adminTabFromUrl, adminLayoutIdFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onSubsectionChange, onReplaceRecord, onOpenSetup } = {}) {
   // Admin uses 'setup' / 'objects' rather than the section-name pattern of
   // the other modules, so we map the URL section to the local tab. Only
   // 'objects' is exposed via URL today; everything else stays on 'setup'.
@@ -226,6 +226,7 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
             obj={selectedObject}
             onBack={() => setSelectedObject(null)}
             initialSubTab={adminTabFromUrl || 'details'}
+            initialLayoutId={adminLayoutIdFromUrl || null}
           />
         ) : (
           <ObjectManager onOpenObject={obj => setSelectedObject(obj)} />

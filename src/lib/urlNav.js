@@ -177,6 +177,7 @@ export function parsePath(pathname, search = '') {
     section: null,
     subsection: null,
     adminTab: null,
+    adminLayoutId: null,
     searchQuery: null,
     searchType: null,
     helpSlug: null,
@@ -222,8 +223,8 @@ export function parsePath(pathname, search = '') {
     const mod = parts[1]
     if (KNOWN_MODULES.has(mod) && mod !== 'search' && mod !== 'help') {
       // ?tab=<id> carries an admin-module sub-tab hint (used by ObjectDetail's
-      // initialSubTab). Only honored on /m/admin/objects/<table> today but
-      // safe to surface for any module.
+      // initialSubTab). ?layout=<uuid> carries a layout-id hint so the
+      // Page Layouts sub-tab can open the specific layout's editor directly.
       const params = new URLSearchParams(search || '')
       return {
         ...base,
@@ -231,6 +232,7 @@ export function parsePath(pathname, search = '') {
         section: parts[2] || null,
         subsection: parts[3] || null,
         adminTab: params.get('tab') || null,
+        adminLayoutId: params.get('layout') || null,
       }
     }
     return base
@@ -260,7 +262,7 @@ export function parsePath(pathname, search = '') {
  * state. Inverse of parsePath. Returns the full path including any query
  * string the search route needs.
  */
-export function buildPath({ activeModule, selectedRecord, section, subsection, adminTab, searchQuery, searchType, helpSlug }) {
+export function buildPath({ activeModule, selectedRecord, section, subsection, adminTab, adminLayoutId, searchQuery, searchType, helpSlug }) {
   if (selectedRecord?.table) {
     if (selectedRecord.mode === 'create') return `/${selectedRecord.table}/new`
     if (selectedRecord.id) return `/${selectedRecord.table}/${selectedRecord.id}`
@@ -280,8 +282,11 @@ export function buildPath({ activeModule, selectedRecord, section, subsection, a
   else if (section)          base = `/m/${activeModule}/${section}`
   else if (activeModule && activeModule !== 'home') base = `/m/${activeModule}`
   else return '/'
-  if (adminTab) return `${base}?tab=${encodeURIComponent(adminTab)}`
-  return base
+  const params = new URLSearchParams()
+  if (adminTab) params.set('tab', adminTab)
+  if (adminLayoutId) params.set('layout', adminLayoutId)
+  const qs = params.toString()
+  return qs ? `${base}?${qs}` : base
 }
 
 /**
@@ -388,6 +393,7 @@ export function useUrlNavigation() {
       section: nodeId || null,
       subsection: subsectionId || null,
       adminTab: options.initialSubTab || null,
+      adminLayoutId: options.initialLayoutId || null,
       searchQuery: null,
       searchType: null,
     }
@@ -452,6 +458,7 @@ export function useUrlNavigation() {
     sectionFromUrl: state.section,
     subsectionFromUrl: state.subsection,
     adminTabFromUrl: state.adminTab,
+    adminLayoutIdFromUrl: state.adminLayoutId,
     searchQuery: state.searchQuery,
     searchType: state.searchType,
     helpSlug: state.helpSlug,

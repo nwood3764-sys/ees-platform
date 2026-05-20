@@ -73,6 +73,7 @@ function AuthedApp({ session }) {
     sectionFromUrl,
     subsectionFromUrl,
     adminTabFromUrl,
+    adminLayoutIdFromUrl,
     searchQuery,
     searchType,
     helpSlug,
@@ -195,6 +196,7 @@ function AuthedApp({ session }) {
       sectionFromUrl,
       subsectionFromUrl,
       adminTabFromUrl,
+      adminLayoutIdFromUrl,
       onNavigateToRecord: navigateToRecord,
       onCloseRecord: closeRecord,
       onSectionChange: navigateToSection,
@@ -288,7 +290,6 @@ function AuthedApp({ session }) {
                 <TopbarSetupGear
                   selectedRecord={selectedRecord}
                   onOpenSetup={navigateToSetup}
-                  onNavigateToRecord={navigateToRecord}
                 />
                 <TopbarUserMenu
                   userEmail={session?.user?.email}

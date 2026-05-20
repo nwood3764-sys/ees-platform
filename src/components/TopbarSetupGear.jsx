@@ -25,7 +25,6 @@ import { getRecordTypeColumn, getCurrentUserProfile } from '../data/layoutServic
 export default function TopbarSetupGear({
   selectedRecord,
   onOpenSetup,
-  onNavigateToRecord,
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -115,15 +114,25 @@ export default function TopbarSetupGear({
           .maybeSingle()
         layoutId = data?.id || null
       }
-      if (layoutId && onNavigateToRecord) {
-        onNavigateToRecord({ table: 'page_layouts', id: layoutId, mode: 'view' })
-      } else if (onOpenSetup) {
-        onOpenSetup('page_layouts')
+      // Deep-link into Object Manager's Page Layouts sub-tab with the
+      // specific layout pre-selected. ObjectDetail reads initialLayoutId
+      // from the ?layout= URL param and renders LayoutEditor directly.
+      // Previously this opened RecordDetail on the page_layouts row itself,
+      // which just shows the metadata row, not the real editor with
+      // sections/fields/drag-and-drop.
+      if (onOpenSetup) {
+        if (layoutId) {
+          onOpenSetup('objects', tableName, { initialSubTab: 'layouts', initialLayoutId: layoutId })
+        } else {
+          // No matching layout — fall back to the Page Layouts list for
+          // this object so the admin can pick one or create one.
+          onOpenSetup('objects', tableName, { initialSubTab: 'layouts' })
+        }
       }
     } finally {
       setBusy(false)
     }
-  }, [selectedRecord, resolvedRecordTypeId, onNavigateToRecord, onOpenSetup, busy])
+  }, [selectedRecord, resolvedRecordTypeId, onOpenSetup, busy])
 
   const handleEditObject = useCallback(() => {
     setOpen(false)

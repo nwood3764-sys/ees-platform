@@ -27,7 +27,7 @@ const SUB_TABS = [
   { id: 'related',     label: 'Related Lookups' },
 ]
 
-export default function ObjectDetail({ obj, onBack, initialSubTab = 'details' }) {
+export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', initialLayoutId = null }) {
   const [sub, setSub] = useState(initialSubTab)
   const [columns, setColumns] = useState([])
   const [incomingFKs, setIncomingFKs] = useState([])
@@ -38,7 +38,7 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details' })
   const [picklists,   setPicklists]   = useState([])
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
-  const [selectedLayoutId, setSelectedLayoutId] = useState(null)
+  const [selectedLayoutId, setSelectedLayoutId] = useState(initialLayoutId)
   // Live counts — updated by the relevant pane when it creates/deletes items,
   // so the tab badge stays in sync without a full parent refetch. Null until
   // the pane reports.
@@ -49,8 +49,13 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details' })
     let cancelled = false
     setLoading(true)
     setError(null)
-    setSub(initialSubTab || 'details')
-    setSelectedLayoutId(null)
+    // When the object itself changes (or when the deep-link's initialSubTab /
+    // initialLayoutId change because the user clicked Edit Page Layout from
+    // a different record), reset to the deep-link's target. If initialLayoutId
+    // is set we also force sub='layouts' since opening a specific layout
+    // outside the layouts tab makes no sense.
+    setSub(initialLayoutId ? 'layouts' : (initialSubTab || 'details'))
+    setSelectedLayoutId(initialLayoutId || null)
     setRecordTypesCount(null)
     setLayoutsCount(null)
 
@@ -76,7 +81,7 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details' })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [obj.table])
+  }, [obj.table, initialSubTab, initialLayoutId])
 
   // Count badges for tabs — mirrors Salesforce's counts in object setup.
   // recordtypes prefers the live count reported by RecordTypesPane; falls
