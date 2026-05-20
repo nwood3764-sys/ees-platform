@@ -797,6 +797,162 @@ export async function softDeleteAttachment({ attachmentId, reason }) {
   if (error) throw error
 }
 
+// =============================================================================
+// Email template loaders for the rich-text composer
+// =============================================================================
+//
+// fetchActiveEmailTemplates returns Active (publishable) templates available
+// for compose. We do not (yet) filter by anchor object — the template
+// configuration captures intent loosely and the merge field resolver gates
+// what actually renders. A future slice will narrow by record type when
+// templates routinely carry that scope; for now Active is the right filter.
+
+export async function fetchActiveEmailTemplates({ anchorObject } = {}) {
+  // email_templates.status is a uuid FK to picklist_values — must filter
+  // by the resolved label, not the raw value.
+  const { data, error } = await supabase
+    .from('email_templates')
+    .select(`
+      id,
+      et_record_number,
+      name,
+      description,
+      related_object,
+      template_default_outbound_mailbox_id,
+      template_ai_assist_allowed,
+      template_locked_regions,
+      status:picklist_values!status ( picklist_label )
+    `)
+    .eq('is_deleted', false)
+    .order('name', { ascending: true })
+  if (error) throw error
+  // Active rows only, and (if an anchorObject is supplied) filter to
+  // templates whose related_object matches — send-email-v1 enforces the
+  // same match server-side and rejects with 400 if they disagree, so
+  // hiding mismatched templates at the picker keeps the UX clean.
+  return (data || []).filter(r => {
+    if ((r.status?.picklist_label || '').toLowerCase() !== 'active') return false
+    if (anchorObject && r.related_object && r.related_object !== anchorObject) return false
+    return true
+  })
+}
+
+// fetchEmailTemplate returns one template by id, including the locked-region
+// jsonb. Used by the composer when the user picks a template from the
+// dropdown.
+
+export async function fetchEmailTemplate(templateId) {
+  if (!templateId) throw new Error('templateId required')
+  const { data, error } = await supabase
+    .from('email_templates')
+    .select(`
+      id,
+      et_record_number,
+      name,
+      description,
+      subject,
+      body_html,
+      template_default_outbound_mailbox_id,
+      template_ai_assist_allowed,
+      template_locked_regions
+    `)
+    .eq('id', templateId)
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+/**
+ * Template-driven send. Hands an email_template_id plus a map of editable
+ * region content to send-email-v1, which assembles the final body
+ * server-side from the template's locked regions + the provided editable
+ * regions and validates that locked content appears verbatim.
+ *
+ * The map shape is { [region_id]: html_string }. Region ids must match
+ * the editable regions declared in template_locked_regions.
+ */
+export async function sendTemplateEmail({
+  anchorObject,
+  anchorRecordId,
+  to,                  // { email, name? }
+  emailTemplateId,
+  editableRegions,     // { [region_id]: html_string }
+  outboundMailboxId,   // optional — template's default wins if omitted
+  contactId,
+  subjectOverride,     // optional — user-edited subject line
+}) {
+  if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
+  if (!emailTemplateId)                  throw new Error('emailTemplateId required')
+  if (!to?.email)                        throw new Error('Recipient email required')
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.email))
+    throw new Error('Recipient email is not a valid address')
+
+  const payload = {
+    anchor_object:    anchorObject,
+    anchor_record_id: anchorRecordId,
+    to: { email: to.email, name: to.name || to.email },
+    email_template_id: emailTemplateId,
+    editable_regions:  editableRegions || {},
+    subject:           subjectOverride || undefined,
+    outbound_mailbox_id: outboundMailboxId || undefined,
+    contact_id:          contactId || undefined,
+  }
+  const { data, error } = await supabase.functions.invoke('send-email-v1', { body: payload })
+  if (error) throw new Error(error.message || 'Send failed at the network layer')
+  if (data?.status === 'failed') {
+    const reason = data.failure_reason || 'Send failed'
+    const err = new Error(reason)
+    err.payload = data
+    throw err
+  }
+  return data
+}
+
+/**
+ * Free-form send variant that accepts pre-rendered HTML directly (vs the
+ * legacy plain-text path which auto-wraps). Used by the TipTap composer
+ * in free-form mode.
+ */
+export async function sendNewEmailHtml({
+  anchorObject,
+  anchorRecordId,
+  to,
+  subject,
+  bodyHtml,
+  outboundMailboxId,
+  contactId,
+}) {
+  if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
+  if (!to?.email) throw new Error('Recipient email required')
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.email))
+    throw new Error('Recipient email is not a valid address')
+  const trimmedSubject = (subject || '').trim()
+  if (!trimmedSubject) throw new Error('Subject required')
+  if (!bodyHtml || !bodyHtml.replace(/<[^>]*>/g, '').trim()) {
+    throw new Error('Message body required')
+  }
+  if (!outboundMailboxId) throw new Error('Outbound mailbox required')
+
+  const payload = {
+    anchor_object:       anchorObject,
+    anchor_record_id:    anchorRecordId,
+    to: { email: to.email, name: to.name || to.email },
+    subject:             trimmedSubject,
+    body_html:           bodyHtml,
+    outbound_mailbox_id: outboundMailboxId,
+    contact_id:          contactId || undefined,
+  }
+  const { data, error } = await supabase.functions.invoke('send-email-v1', { body: payload })
+  if (error) throw new Error(error.message || 'Send failed at the network layer')
+  if (data?.status === 'failed') {
+    const reason = data.failure_reason || 'Send failed'
+    const err = new Error(reason)
+    err.payload = data
+    throw err
+  }
+  return data
+}
+
 // Tiny formatter for display
 export function formatBytes(n) {
   if (!n && n !== 0) return '—'

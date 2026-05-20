@@ -24,13 +24,18 @@
 // thread.
 // =============================================================================
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
+import TiptapEmailComposer from './TiptapEmailComposer'
 import {
   fetchOutboundMailboxes,
   sendNewEmail,
+  sendNewEmailHtml,
+  sendTemplateEmail,
+  fetchActiveEmailTemplates,
+  fetchEmailTemplate,
   uploadAttachmentForMessage,
   validateAttachmentFile,
   formatBytes,
@@ -53,7 +58,7 @@ const MODAL_STYLE = {
   background: C.card,
   borderRadius: 10,
   width: '100%',
-  maxWidth: 640,
+  maxWidth: 760,
   boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
   border: `1px solid ${C.borderDark || C.border}`,
   overflow: 'hidden',
@@ -146,7 +151,24 @@ export default function ComposeEmailModal({
   const [toEmail, setToEmail] = useState('')
   const [toName, setToName]   = useState('')
   const [subject, setSubject] = useState('')
-  const [bodyText, setBodyText] = useState('')
+  const [bodyText, setBodyText] = useState('')   // legacy state — preserved
+                                                  // for the plain-text send
+                                                  // path until a final cutover
+
+  // Rich-text editor — the source of truth for the message body.
+  const editorRef = useRef(null)
+  const [bodyHtml, setBodyHtml] = useState('')   // live HTML mirror of editor
+
+  // Template picker. null = none selected (free-form mode). Otherwise the
+  // hydrated row including locked_regions, default_outbound_mailbox,
+  // default_subject, ai_assist_allowed.
+  const [templates, setTemplates] = useState(null)   // null=loading, []=none, [...]=ready
+  const [templatesError, setTemplatesError] = useState(null)
+  const [selectedTemplateId, setSelectedTemplateId] = useState('')
+  const [activeTemplate, setActiveTemplate] = useState(null)
+  const [editableRegionsByTemplate, setEditableRegionsByTemplate] = useState({})
+  //                ^ keyed by templateId → { region_id: html } so flipping
+  //                  between templates preserves what the user typed
 
   const [submitting, setSubmitting] = useState(false)
   const [lastResult, setLastResult] = useState(null)  // payload from edge fn on success
@@ -157,6 +179,15 @@ export default function ComposeEmailModal({
   const [stagedFiles, setStagedFiles] = useState([])  // [{ clientId, file, error? }]
   const fileInputRef = useRef(null)
 
+  // ── Derived: which mode are we in? ──────────────────────────────────
+  // Template mode requires the selected template to have a non-empty
+  // locked_regions structure. Otherwise the template just prefills the
+  // body and the send path stays free-form (the edge function ignores
+  // editable_regions when locked_regions is empty).
+  const hasLockedRegions = Array.isArray(activeTemplate?.template_locked_regions)
+    && activeTemplate.template_locked_regions.length > 0
+  const mode = hasLockedRegions ? 'template' : 'free-form'
+
   // ── Reset state when the modal opens ────────────────────────────────
   useEffect(() => {
     if (!open) return
@@ -164,11 +195,17 @@ export default function ComposeEmailModal({
     setToName(defaultRecipientName || '')
     setSubject('')
     setBodyText('')
+    setBodyHtml('')
     setLastResult(null)
     setMailboxes(null)
     setMailboxError(null)
     setMailboxId('')
     setStagedFiles([])
+    setTemplates(null)
+    setTemplatesError(null)
+    setSelectedTemplateId('')
+    setActiveTemplate(null)
+    setEditableRegionsByTemplate({})
   }, [open, defaultRecipientEmail, defaultRecipientName])
 
   // ── Load mailboxes once per open ────────────────────────────────────
@@ -189,6 +226,47 @@ export default function ComposeEmailModal({
     return () => { alive = false }
   }, [open])
 
+  // ── Load active email templates once per open ───────────────────────
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    fetchActiveEmailTemplates({ anchorObject })
+      .then(rows => {
+        if (alive) setTemplates(rows || [])
+      })
+      .catch(err => {
+        if (alive) setTemplatesError(err.message || String(err))
+      })
+    return () => { alive = false }
+  }, [open, anchorObject])
+
+  // ── Template selection → hydrate the active template row ────────────
+  useEffect(() => {
+    if (!selectedTemplateId) {
+      setActiveTemplate(null)
+      return
+    }
+    let alive = true
+    fetchEmailTemplate(selectedTemplateId)
+      .then(row => {
+        if (!alive) return
+        setActiveTemplate(row)
+        // Seed subject from template default if user hasn't typed one
+        if (row?.subject && !subject) {
+          setSubject(row.subject)
+        }
+        // Seed mailbox from template default if set
+        if (row?.template_default_outbound_mailbox_id) {
+          setMailboxId(row.template_default_outbound_mailbox_id)
+        }
+      })
+      .catch(err => {
+        if (alive) toast.error(`Failed to load template: ${err.message || err}`)
+      })
+    return () => { alive = false }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplateId])
+
   // ── Submit ──────────────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
     if (submitting) return
@@ -204,26 +282,55 @@ export default function ComposeEmailModal({
       toast.error('Subject is required.')
       return
     }
-    if (!bodyText.trim()) {
-      toast.error('Message body is empty.')
-      return
-    }
     if (!mailboxId) {
       toast.error('Pick an outbound mailbox before sending.')
       return
     }
 
+    // Body-content validation differs between modes. Template mode requires
+    // at least one editable region to have content; free-form requires the
+    // editor body to be non-empty.
+    const editorEmpty = editorRef.current?.isEmpty?.() ?? true
+    const regions = editorRef.current?.getEditableRegions?.() || {}
+    if (mode === 'free-form' && editorEmpty) {
+      toast.error('Message body is empty.')
+      return
+    }
+    if (mode === 'template') {
+      const anyFilled = Object.values(regions).some(html =>
+        (html || '').replace(/<[^>]*>/g, '').trim().length > 0
+      )
+      if (!anyFilled) {
+        toast.error('Fill in at least one editable section before sending.')
+        return
+      }
+    }
+
     setSubmitting(true)
     try {
-      const result = await sendNewEmail({
-        anchorObject,
-        anchorRecordId,
-        to: { email: toEmail.trim(), name: toName.trim() || undefined },
-        subject: subject.trim(),
-        bodyText: bodyText.trim(),
-        outboundMailboxId: mailboxId,
-        contactId: defaultContactId || undefined,
-      })
+      let result
+      if (mode === 'template') {
+        result = await sendTemplateEmail({
+          anchorObject,
+          anchorRecordId,
+          to: { email: toEmail.trim(), name: toName.trim() || undefined },
+          emailTemplateId:  activeTemplate.id,
+          editableRegions:  regions,
+          outboundMailboxId: mailboxId,
+          contactId:         defaultContactId || undefined,
+          subjectOverride:   subject.trim(),
+        })
+      } else {
+        result = await sendNewEmailHtml({
+          anchorObject,
+          anchorRecordId,
+          to: { email: toEmail.trim(), name: toName.trim() || undefined },
+          subject: subject.trim(),
+          bodyHtml: editorRef.current?.getHtml?.() || '',
+          outboundMailboxId: mailboxId,
+          contactId: defaultContactId || undefined,
+        })
+      }
       setLastResult(result)
       const isMock = result?.mode === 'mock'
 
@@ -276,7 +383,7 @@ export default function ComposeEmailModal({
       setSubmitting(false)
     }
   }, [
-    anchorObject, anchorRecordId, bodyText, defaultContactId,
+    anchorObject, anchorRecordId, activeTemplate, defaultContactId, mode,
     mailboxId, onClose, onSent, stagedFiles, subject, submitting, toEmail, toName, toast,
   ])
 
@@ -423,6 +530,56 @@ export default function ComposeEmailModal({
             </div>
           </div>
 
+          {/* Template picker */}
+          <div>
+            <label style={FIELD_LABEL}>Template</label>
+            {templatesError && (
+              <div style={{
+                padding: 8, fontSize: 12, color: '#8a1a1a',
+                background: '#fce8e8', border: `1px solid #f3c8c8`,
+                borderRadius: 5,
+              }}>
+                Failed to load templates: {templatesError}
+              </div>
+            )}
+            {!templatesError && (
+              <select
+                value={selectedTemplateId}
+                onChange={e => setSelectedTemplateId(e.target.value)}
+                disabled={submitting || templates === null}
+                style={{ ...INPUT_STYLE, fontFamily: 'inherit' }}
+              >
+                <option value="">
+                  {templates === null
+                    ? 'Loading templates…'
+                    : `(no template — free-form${(templates?.length || 0) > 0 ? `, ${templates.length} available` : ''})`}
+                </option>
+                {Array.isArray(templates) && templates.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.et_record_number ? `${t.et_record_number} · ` : ''}{t.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {activeTemplate && (
+              <div style={{
+                marginTop: 6, fontSize: 11, color: C.textMuted,
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <span>Locked sections render verbatim from the template; editable sections accept your content.</span>
+                {activeTemplate.template_ai_assist_allowed === false && (
+                  <span style={{
+                    padding: '1px 6px', borderRadius: 3,
+                    background: '#fff4e0', color: '#8a5a1a',
+                    fontWeight: 600, fontSize: 10, letterSpacing: 0.3,
+                  }}>
+                    AI assist disabled
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Subject */}
           <div>
             <label style={FIELD_LABEL}>Subject</label>
@@ -437,19 +594,33 @@ export default function ComposeEmailModal({
             />
           </div>
 
-          {/* Body */}
+          {/* Body — TipTap rich-text editor */}
           <div>
             <label style={FIELD_LABEL}>Message</label>
-            <textarea
-              value={bodyText}
-              onChange={e => setBodyText(e.target.value)}
+            <TiptapEmailComposer
+              ref={editorRef}
+              mode={mode}
+              initialHtml={
+                mode === 'free-form' && activeTemplate?.body_html
+                  ? activeTemplate.body_html
+                  : ''
+              }
+              templateLockedRegions={hasLockedRegions ? activeTemplate.template_locked_regions : null}
+              placeholder={
+                mode === 'template'
+                  ? 'Fill in the editable sections below…'
+                  : 'Type your message. Use {{ to insert a merge field, or click Merge field above.'
+              }
+              onChange={(html) => setBodyHtml(html)}
               disabled={submitting}
-              placeholder="Write your message…"
-              rows={9}
-              style={{ ...INPUT_STYLE, resize: 'vertical', fontFamily: 'inherit', minHeight: 160 }}
             />
             <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-              Plain text for now. Rich-text editor + locked-region templates land in a follow-up slice.
+              {mode === 'template'
+                ? <>Locked sections render verbatim and cannot be edited. Type <code>{'{{'}</code> in any editable section to insert a merge field.</>
+                : activeTemplate
+                  ? <>Template body prefilled. You can edit freely; <code>{'{{'}</code> tokens render with live record values at send time.</>
+                  : <>Type <code>{'{{'}</code> to insert a merge field inline.</>
+              }
             </div>
           </div>
 
