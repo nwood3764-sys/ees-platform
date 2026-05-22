@@ -13,7 +13,15 @@ import {
   reorderSections,
   softDeleteWidget,
   reorderWidgets,
+  fetchActionsForLayout,
+  upsertActionOverride,
+  clearActionOverride,
 } from '../../data/pageLayoutBuilderService'
+import {
+  ALL_OBJECTS,
+  buildLayoutActionConfig,
+  actionColors,
+} from '../../data/recordActions'
 import {
   FormField,
   inputStyle, textareaStyle,
@@ -171,6 +179,13 @@ export default function LayoutEditor({
         layoutId={layoutId}
         objectName={layout.object}
         onChanged={async () => { await refresh(); if (onLayoutsChanged) await onLayoutsChanged() }}
+        disabled={busy}
+      />
+
+      {/* Actions — per-layout topbar action tier overrides */}
+      <ActionsSection
+        layoutId={layoutId}
+        objectName={layout.object}
         disabled={busy}
       />
 
@@ -1247,4 +1262,310 @@ const cardHeaderStyle = {
 
 const cardBodyStyle = {
   padding: '10px 14px 12px',
+}
+
+// ─── Actions Section ──────────────────────────────────────────────────────
+//
+// Per-layout configuration of the RecordDetail topbar's action tier
+// assignment. Lists every action from the registry that's applicable to
+// this layout's object. For each action:
+//   - Tier dropdown (Primary / Menu / Hidden)
+//   - Sort order numeric input
+//   - Reset-to-default button (clears the override row)
+//
+// Overrides persist in page_layout_actions. Absence of an override row
+// means the action takes its registry default. "Hidden" is recorded as
+// an absent row plus a UI-only convention: applicability is determined
+// by registry + runtime predicate, so the only way to "hide" an
+// applicable action today is to delete it from the registry. The Hidden
+// option exists in the dropdown for forward-compat — when we add a
+// `pla_display_tier='hidden'` option to the CHECK constraint, the UI
+// will support it without change. Until then, picking Hidden falls back
+// to Menu with a toast.
+// ──────────────────────────────────────────────────────────────────────────
+
+function ActionsSection({ layoutId, objectName, disabled }) {
+  const toast = useToast()
+  const [overrides, setOverrides] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const rows = await fetchActionsForLayout(layoutId)
+      setOverrides(rows || [])
+    } catch (e) {
+      setError(e)
+    } finally {
+      setLoading(false)
+    }
+  }, [layoutId])
+
+  useEffect(() => { refresh() }, [refresh])
+
+  const rows = buildLayoutActionConfig({ objectName, overrides })
+
+  // ── Per-row mutations ──
+  async function setTier(actionKey, nextTier, currentRow) {
+    if (busy || disabled) return
+    setBusy(true)
+    try {
+      await upsertActionOverride({
+        layoutId,
+        actionKey,
+        displayTier: nextTier,
+        sortOrder:    currentRow.effectiveSortOrder,
+        labelOverride: currentRow.override?.pla_label_override ?? null,
+      })
+      await refresh()
+    } catch (e) {
+      toast.error(`Update failed: ${e.message || String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function setSortOrder(actionKey, nextOrder, currentRow) {
+    if (busy || disabled) return
+    if (!Number.isFinite(nextOrder)) return
+    setBusy(true)
+    try {
+      await upsertActionOverride({
+        layoutId,
+        actionKey,
+        displayTier:  currentRow.effectiveTier,
+        sortOrder:     nextOrder,
+        labelOverride: currentRow.override?.pla_label_override ?? null,
+      })
+      await refresh()
+    } catch (e) {
+      toast.error(`Update failed: ${e.message || String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function resetRow(actionKey) {
+    if (busy || disabled) return
+    setBusy(true)
+    try {
+      await clearActionOverride({ layoutId, actionKey, reason: 'Reset to default via Layout Editor' })
+      toast.success('Reset to default')
+      await refresh()
+    } catch (e) {
+      toast.error(`Reset failed: ${e.message || String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div
+        onClick={() => setCollapsed(c => !c)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 0', cursor: 'pointer', userSelect: 'none',
+          borderBottom: `1px solid ${C.border}`,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Icon
+            path={collapsed ? 'M9 5l7 7-7 7' : 'M5 9l7 7 7-7'}
+            size={12}
+            color={C.textSecondary}
+          />
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>
+            Actions · {rows.length}
+            <span style={{ fontSize: 11, fontWeight: 400, color: C.textMuted, marginLeft: 8 }}>
+              Promote or demote which buttons appear in the topbar of this layout
+            </span>
+          </div>
+        </div>
+        {(loading || busy) && (
+          <div style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>
+            {loading ? 'Loading…' : 'Saving…'}
+          </div>
+        )}
+      </div>
+
+      {!collapsed && (
+        <div style={{ marginTop: 10 }}>
+          {error && (
+            <div style={{ ...dangerBoxStyle, marginBottom: 10 }}>
+              Could not load action config: {String(error.message || error)}
+            </div>
+          )}
+          {rows.length === 0 ? (
+            <div style={{
+              padding: '32px 16px', textAlign: 'center',
+              background: C.card, border: `1px dashed ${C.borderDark || C.border}`,
+              borderRadius: 8, color: C.textMuted, fontSize: 12,
+            }}>
+              No actions are applicable to this object.
+            </div>
+          ) : (
+            <div style={{
+              background: C.card,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+              overflow: 'hidden',
+            }}>
+              {/* Header row */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '32px 1fr 130px 90px 90px',
+                gap: 12, padding: '8px 12px',
+                background: '#fafbfd',
+                borderBottom: `1px solid ${C.border}`,
+                fontSize: 11, fontWeight: 600,
+                textTransform: 'uppercase', letterSpacing: 0.4,
+                color: C.textMuted,
+              }}>
+                <div></div>
+                <div>Action</div>
+                <div>Tier</div>
+                <div style={{ textAlign: 'center' }}>Order</div>
+                <div style={{ textAlign: 'right' }}>Reset</div>
+              </div>
+              {rows.map(r => <ActionRow
+                key={r.definition.key}
+                row={r}
+                onSetTier={(t)   => setTier(r.definition.key, t, r)}
+                onSetSort={(n)   => setSortOrder(r.definition.key, n, r)}
+                onReset={()      => resetRow(r.definition.key)}
+                disabled={busy || disabled}
+              />)}
+            </div>
+          )}
+          <div style={{ marginTop: 8, fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
+            <strong>Primary</strong> actions render as buttons in the topbar.{' '}
+            <strong>Menu</strong> actions collapse into the "Actions" overflow menu.{' '}
+            Defaults come from the registry — only changed rows persist.
+            Runtime gating (e.g. Schedule appears only when a work order is "To Be Scheduled")
+            is enforced by the registry's availability predicate and is not overridable here.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ActionRow({ row, onSetTier, onSetSort, onReset, disabled }) {
+  const { definition, override, effectiveTier, effectiveSortOrder } = row
+  const palette = actionColors(C, definition.color)
+  const isOverridden = !!override
+  const [localSort, setLocalSort] = useState(String(effectiveSortOrder))
+  useEffect(() => { setLocalSort(String(effectiveSortOrder)) }, [effectiveSortOrder])
+
+  const tierStyle = {
+    width: '100%',
+    padding: '5px 8px',
+    fontSize: 12, fontFamily: 'inherit',
+    border: `1px solid ${C.border}`, borderRadius: 4,
+    background: C.card, color: C.textPrimary,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+  }
+  const numStyle = {
+    width: 64,
+    padding: '5px 6px',
+    fontSize: 12, fontFamily: 'JetBrains Mono, monospace',
+    border: `1px solid ${C.border}`, borderRadius: 4,
+    background: C.card, color: C.textPrimary,
+    textAlign: 'center',
+    cursor: disabled ? 'not-allowed' : 'text',
+  }
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '32px 1fr 130px 90px 90px',
+      gap: 12, padding: '8px 12px',
+      borderBottom: `1px solid ${C.border}`,
+      alignItems: 'center',
+      background: isOverridden ? '#fffbeb' : 'transparent',
+    }}>
+      {/* icon */}
+      <div style={{
+        width: 28, height: 28, borderRadius: 5,
+        background: palette.hoverBg,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Icon path={definition.icon} size={14} color={palette.fg} />
+      </div>
+
+      {/* label + key + applicability + override badge */}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: C.textPrimary, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {definition.label}
+          {isOverridden && (
+            <span style={{
+              fontSize: 9, fontWeight: 700,
+              padding: '1px 5px', borderRadius: 3,
+              background: '#fef3c7', color: '#92400e',
+              letterSpacing: 0.4, textTransform: 'uppercase',
+            }}>
+              Override
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 10.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
+          {definition.key}
+          {definition.applicableObjects === ALL_OBJECTS
+            ? ' · all objects'
+            : ` · ${(definition.applicableObjects || []).join(', ')}`}
+        </div>
+      </div>
+
+      {/* tier */}
+      <div>
+        <select
+          value={effectiveTier}
+          onChange={e => onSetTier(e.target.value)}
+          disabled={disabled}
+          style={tierStyle}
+        >
+          <option value="primary">Primary</option>
+          <option value="menu">Menu</option>
+        </select>
+      </div>
+
+      {/* sort order */}
+      <div style={{ textAlign: 'center' }}>
+        <input
+          type="number"
+          value={localSort}
+          onChange={e => setLocalSort(e.target.value)}
+          onBlur={() => {
+            const n = parseInt(localSort, 10)
+            if (Number.isFinite(n) && n !== effectiveSortOrder) onSetSort(n)
+            else setLocalSort(String(effectiveSortOrder))
+          }}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+          disabled={disabled}
+          style={numStyle}
+        />
+      </div>
+
+      {/* reset */}
+      <div style={{ textAlign: 'right' }}>
+        <button
+          onClick={onReset}
+          disabled={disabled || !isOverridden}
+          title={isOverridden ? 'Clear the override and revert to registry default' : 'No override to reset'}
+          style={{
+            ...buttonSmSecondaryStyle,
+            opacity: (disabled || !isOverridden) ? 0.4 : 1,
+            cursor: (disabled || !isOverridden) ? 'not-allowed' : 'pointer',
+          }}
+        >
+          Reset
+        </button>
+      </div>
+    </div>
+  )
 }

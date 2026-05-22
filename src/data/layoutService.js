@@ -375,9 +375,25 @@ export async function fetchPageLayout(objectName, recordTypeValue = null, option
     }
   }
 
+  // Step 4 — fetch per-layout action overrides. Drives the topbar's
+  // primary/menu tier assignment for actions; absence of a row means "use
+  // the recordActions.js registry default." Read is RLS-open so this works
+  // for every authenticated user.
+  let actionOverrides = []
+  {
+    const { data, error } = await supabase
+      .from('page_layout_actions')
+      .select('pla_action_key, pla_display_tier, pla_sort_order, pla_label_override, pla_visibility_role_id, pla_is_deleted')
+      .eq('pla_page_layout_id', layout.id)
+      .eq('pla_is_deleted', false)
+    if (error) throw error
+    actionOverrides = data || []
+  }
+
   return {
     layout,
     sections: applyConventionalReadOnly(objectName, sectionList),
+    actionOverrides,
   }
 }
 
@@ -609,7 +625,7 @@ export async function loadRecordDetailData(tableName, recordId) {
   const layoutData = await fetchPageLayout(tableName, getRecordTypeValue(record))
 
   if (!layoutData) {
-    return { record, layout: null, sections: [], picklists, lookups: new Map() }
+    return { record, layout: null, sections: [], picklists, lookups: new Map(), actionOverrides: [] }
   }
 
   // Collect lookup requests from all field_group widgets.
@@ -666,6 +682,7 @@ export async function loadRecordDetailData(tableName, recordId) {
     sections: layoutData.sections,
     picklists,
     lookups,
+    actionOverrides: layoutData.actionOverrides || [],
   }
 }
 

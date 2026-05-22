@@ -16,6 +16,8 @@ import ConversationPanelWidget from './ConversationPanel'
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
 import StatusTransitionsBar from './StatusTransitionsBar'
+import TopbarActions from './TopbarActions'
+import { ACTION_KEYS } from '../data/recordActions'
 import { supabase } from '../lib/supabase'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
@@ -3942,6 +3944,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             sections: layoutData?.sections || [],
             picklists,
             lookups: new Map(),
+            actionOverrides: layoutData?.actionOverrides || [],
           })
           setDraft(prefill ? { ...seededRT, ...prefill } : { ...seededRT })
           setEditing(true)
@@ -4800,6 +4803,63 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Tracks whether the main edit action bar is "busy" — used to gate taps on mobile sticky bar.
   const editActionsDisabled = saving || deleting
 
+  // ── Topbar action context — shared between mobile and desktop renders ──
+  // The registry in recordActions.js evaluates `isAvailable(ctx)` against
+  // this shape to decide which actions are eligible for the current record
+  // state. Anything that's not in the registry stays as bespoke UI further
+  // down (Save / Cancel during edit mode).
+  const topbarActionCtx = {
+    tableName,
+    record:               data?.record || {},
+    editing,
+    statusLabel,
+    lifecycle,
+    lifecycleStatusValue,
+    lifecycleIsLocked,
+    hasActiveTemplate,
+    envelopeIsResendable,
+    envelopeIsVoidable,
+    hasRelatedObject:     !!data?.record?.related_object,
+  }
+
+  const topbarActionHandlers = {
+    [ACTION_KEYS.EDIT]:                   startEditing,
+    [ACTION_KEYS.CLONE]:                  handleClone,
+    [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
+    [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
+    [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
+    [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
+    [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
+    [ACTION_KEYS.RESCHEDULE_APPOINTMENT]: () => setShowSaReschedule(true),
+    [ACTION_KEYS.SEND_FOR_SIGNATURE]:     () => setShowSendSignatureModal(true),
+    [ACTION_KEYS.RESEND_SIGNING_EMAIL]:   handleResendEnvelope,
+    [ACTION_KEYS.VOID_ENVELOPE]:          handleVoidEnvelope,
+    [ACTION_KEYS.PREVIEW_PDF]:            handlePreviewPdf,
+    [ACTION_KEYS.PREVIEW_DOCUMENT]:       openDocPreview,
+    [ACTION_KEYS.PREVIEW_EMAIL]:          openEmailPreview,
+    [ACTION_KEYS.CLONE_TEMPLATE]:         handleCloneTemplate,
+    [ACTION_KEYS.PUBLISH]:                handlePublish,
+    [ACTION_KEYS.UNPUBLISH]:              handleUnpublish,
+    [ACTION_KEYS.ARCHIVE]:                handleArchive,
+    [ACTION_KEYS.RESTORE]:                handleRestore,
+  }
+
+  // Per-action pending flag — drives the disabled+wait-cursor+ellipsis label
+  // on the TopbarActions buttons. Mirrors the prior inline `disabled={…}`
+  // gates so the runtime feel matches.
+  const topbarPendingByKey = {
+    [ACTION_KEYS.RESEND_SIGNING_EMAIL]: envelopeBusy,
+    [ACTION_KEYS.VOID_ENVELOPE]:        envelopeBusy,
+    [ACTION_KEYS.PREVIEW_PDF]:          previewingPdf,
+    [ACTION_KEYS.PREVIEW_DOCUMENT]:     docPreviewOpen || docPreviewRendering,
+    [ACTION_KEYS.PREVIEW_EMAIL]:        emailPreviewOpen || emailPreviewRendering,
+    [ACTION_KEYS.CLONE_TEMPLATE]:       cloningTemplate,
+    [ACTION_KEYS.PUBLISH]:              statusChanging,
+    [ACTION_KEYS.UNPUBLISH]:            statusChanging,
+    [ACTION_KEYS.ARCHIVE]:              statusChanging,
+    [ACTION_KEYS.RESTORE]:              statusChanging,
+  }
+
   return (
     <div style={{
       flex: 1,
@@ -4864,256 +4924,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 </svg>
               </button>
             ) : (
-              <>
-                {tableName === 'projects' && (
-                  <button
-                    onClick={() => setShowReportModal(true)}
-                    aria-label="Generate Report"
-                    title="Generate Project Report"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: 'pointer', color: C.emerald,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44,
-                    }}
-                  >
-                    <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={18} color="currentColor" />
-                  </button>
-                )}
-                {tableName === 'projects' && (
-                  <button
-                    onClick={() => setShowSchedulerWizard(true)}
-                    aria-label="Schedule Work Orders"
-                    title="Bulk-schedule unscheduled work orders on this project"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: 'pointer', color: C.emerald,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44,
-                    }}
-                  >
-                    <Icon path="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" size={18} color="currentColor" />
-                  </button>
-                )}
-                {tableName === 'projects' && (
-                  <button
-                    onClick={() => setShowRescheduleWizard(true)}
-                    aria-label="Reschedule Work Orders"
-                    title="Bulk-reschedule already-scheduled work orders on this project"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: 'pointer', color: '#2563eb',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44,
-                    }}
-                  >
-                    {/* lucide: calendar-clock — calendar with a small clock to read as 'change scheduled time' */}
-                    <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={18} color="currentColor" />
-                  </button>
-                )}
-                {tableName === 'work_orders' && statusLabel === 'To Be Scheduled' && (
-                  <button
-                    onClick={() => setShowWoSchedule(true)}
-                    aria-label="Schedule Work Order"
-                    title="Schedule this work order to a Team Lead at a specific start time"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: 'pointer', color: C.emerald,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44,
-                    }}
-                  >
-                    {/* lucide: calendar-plus */}
-                    <Icon path="M8 2v4 M16 2v4 M3 10h18 M19 16v6 M22 19h-6 M21 12.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" size={18} color="currentColor" />
-                  </button>
-                )}
-                {tableName === 'service_appointments' && (
-                  <button
-                    onClick={() => setShowSaReschedule(true)}
-                    aria-label="Reschedule Appointment"
-                    title="Reschedule this appointment"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: 'pointer', color: '#2563eb',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44,
-                    }}
-                  >
-                    <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={18} color="currentColor" />
-                  </button>
-                )}
-                {hasActiveTemplate && (
-                  <button
-                    onClick={() => setShowSendSignatureModal(true)}
-                    aria-label="Send for Signature"
-                    title="Send a document for e-signature against this record"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: 'pointer', color: C.emerald,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44,
-                    }}
-                  >
-                    {/* lucide: feather — a quill, instantly read as 'sign here' and visually distinct from the Edit pencil */}
-                    <Icon path="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z M16 8L2 22 M17.5 15H9" size={18} color="currentColor" />
-                  </button>
-                )}
-                {tableName === 'envelopes' && envelopeIsResendable && (
-                  <button
-                    onClick={handleResendEnvelope}
-                    disabled={envelopeBusy}
-                    aria-label="Resend Signing Email"
-                    title="Resend the signing-request email to the current pending signer"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: envelopeBusy ? 'wait' : 'pointer', color: '#0369a1',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44, opacity: envelopeBusy ? 0.6 : 1,
-                    }}
-                  >
-                    {/* lucide: send-horizontal */}
-                    <Icon path="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a1 1 0 0 0-1.4 1.05L3.5 11l13.5 1L3.5 13l-1.5 6.35a1 1 0 0 0 1.4 1.05z" size={18} color="currentColor" />
-                  </button>
-                )}
-                {tableName === 'envelopes' && envelopeIsVoidable && (
-                  <button
-                    onClick={handleVoidEnvelope}
-                    disabled={envelopeBusy}
-                    aria-label="Void Envelope"
-                    title="Void this envelope — invalidates outstanding signing links"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: envelopeBusy ? 'wait' : 'pointer', color: '#b45309',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44, opacity: envelopeBusy ? 0.6 : 1,
-                    }}
-                  >
-                    {/* lucide: ban — circle with diagonal slash */}
-                    <Icon path="M18.36 5.64a9 9 0 1 1-12.72 0M5.64 5.64l12.72 12.72" size={18} color="currentColor" />
-                  </button>
-                )}
-                {tableName === 'project_report_templates' && (
-                  <button
-                    onClick={handlePreviewPdf}
-                    disabled={previewingPdf}
-                    aria-label="Preview PDF"
-                    title="Preview PDF (sample data)"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: previewingPdf ? 'wait' : 'pointer', color: '#0369a1',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44, opacity: previewingPdf ? 0.6 : 1,
-                    }}
-                  >
-                    <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" size={18} color="currentColor" />
-                  </button>
-                )}
-                {lifecycle && (
-                  <button
-                    onClick={handleCloneTemplate}
-                    disabled={cloningTemplate}
-                    aria-label="Clone Template"
-                    title={lifecycle.childrenTable ? `Clone Template (with ${lifecycle.childrenLabel})` : 'Clone Template'}
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: cloningTemplate ? 'wait' : 'pointer', color: C.emerald,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44, opacity: cloningTemplate ? 0.6 : 1,
-                    }}
-                  >
-                    <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={18} color="currentColor" />
-                  </button>
-                )}
-                {lifecycle && lifecycleStatusValue === 'Draft' && (
-                  <button
-                    onClick={handlePublish}
-                    disabled={statusChanging}
-                    aria-label="Publish"
-                    title="Publish to Active"
-                    style={{
-                      background: statusChanging ? '#a7f3d0' : C.emerald, border: 'none', padding: 10, borderRadius: 6,
-                      cursor: statusChanging ? 'wait' : 'pointer', color: '#fff',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44,
-                    }}
-                  >
-                    <Icon path="M5 13l4 4L19 7" size={18} color="#fff" />
-                  </button>
-                )}
-                {lifecycle && lifecycleStatusValue === 'Active' && (
-                  <button
-                    onClick={handleUnpublish}
-                    disabled={statusChanging}
-                    aria-label="Unpublish"
-                    title="Unpublish to Draft"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: statusChanging ? 'wait' : 'pointer', color: '#b45309',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44, opacity: statusChanging ? 0.6 : 1,
-                    }}
-                  >
-                    <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={18} color="currentColor" />
-                  </button>
-                )}
-                {lifecycle && lifecycleStatusValue === 'Archived' && (
-                  <button
-                    onClick={handleRestore}
-                    disabled={statusChanging}
-                    aria-label="Restore"
-                    title="Restore to Draft"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: statusChanging ? 'wait' : 'pointer', color: C.emerald,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44, opacity: statusChanging ? 0.6 : 1,
-                    }}
-                  >
-                    <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={18} color="currentColor" />
-                  </button>
-                )}
-                {!lifecycleIsLocked && (
-                  <button
-                    onClick={startEditing}
-                    aria-label="Edit"
-                    title="Edit"
-                    style={{
-                      background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                      cursor: 'pointer', color: C.emerald,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      minWidth: 44, minHeight: 44,
-                    }}
-                  >
-                    <Icon path="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" size={18} color="currentColor" />
-                  </button>
-                )}
-                <button
-                  onClick={handleClone}
-                  aria-label="Clone"
-                  title="Clone"
-                  style={{
-                    background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                    cursor: 'pointer', color: C.textSecondary,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    minWidth: 44, minHeight: 44,
-                  }}
-                >
-                  <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={18} color="currentColor" />
-                </button>
-                <button
-                  onClick={() => setShowDeleteConfirm(true)}
-                  aria-label="Delete"
-                  title="Delete"
-                  style={{
-                    background: 'transparent', border: 'none', padding: 10, borderRadius: 6,
-                    cursor: 'pointer', color: '#b03a2e',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    minWidth: 44, minHeight: 44,
-                  }}
-                >
-                  <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" size={18} color="currentColor" />
-                </button>
-              </>
+              <TopbarActions
+                variant="mobile"
+                tableName={tableName}
+                record={data?.record}
+                ctx={topbarActionCtx}
+                actionOverrides={data?.actionOverrides || []}
+                handlers={topbarActionHandlers}
+                pendingByKey={topbarPendingByKey}
+              />
             )}
           </div>
         </div>
@@ -5142,232 +4961,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   <Icon path="M5 13l4 4L19 7" size={13} color="#fff" />{saving ? 'Saving…' : 'Save'}
                 </button>
                 <button onClick={cancelEditing} disabled={saving} style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
-              </>) : (<>
-                {tableName === 'projects' && (
-                  <button
-                    onClick={() => setShowReportModal(true)}
-                    title="Generate a PDF project report saved to this project's Documents"
-                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#ecfdf5' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" size={13} color={C.emerald} />
-                    Generate Report
-                  </button>
-                )}
-                {tableName === 'projects' && (
-                  <button
-                    onClick={() => setShowSchedulerWizard(true)}
-                    title="Bulk-schedule unscheduled work orders on this project to a Team Lead"
-                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#ecfdf5' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" size={13} color={C.emerald} />
-                    Schedule Work Orders
-                  </button>
-                )}
-                {tableName === 'projects' && (
-                  <button
-                    onClick={() => setShowRescheduleWizard(true)}
-                    title="Bulk-reschedule already-scheduled work orders on this project"
-                    style={{ background: C.page, color: '#2563eb', border: `1px solid #bfdbfe`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#eff6ff' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={13} color="#2563eb" />
-                    Reschedule Work Orders
-                  </button>
-                )}
-                {tableName === 'work_orders' && statusLabel === 'To Be Scheduled' && (
-                  <button
-                    onClick={() => setShowWoSchedule(true)}
-                    title="Schedule this work order to a Team Lead at a specific start time"
-                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#ecfdf5' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M8 2v4 M16 2v4 M3 10h18 M19 16v6 M22 19h-6 M21 12.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" size={13} color={C.emerald} />
-                    Schedule
-                  </button>
-                )}
-                {tableName === 'service_appointments' && (
-                  <button
-                    onClick={() => setShowSaReschedule(true)}
-                    title="Reschedule this appointment"
-                    style={{ background: C.page, color: '#2563eb', border: `1px solid #bfdbfe`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#eff6ff' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6 M16 2v4 M8 2v4 M3 10h18 M16 14v2.5l1.5 1.5 M16 21a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" size={13} color="#2563eb" />
-                    Reschedule
-                  </button>
-                )}
-                {hasActiveTemplate && (
-                  <button
-                    onClick={() => setShowSendSignatureModal(true)}
-                    title="Send a document for e-signature against this record"
-                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#ecfdf5' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z M16 8L2 22 M17.5 15H9" size={13} color={C.emerald} />
-                    Send for Signature
-                  </button>
-                )}
-                {tableName === 'envelopes' && envelopeIsResendable && (
-                  <button
-                    onClick={handleResendEnvelope}
-                    disabled={envelopeBusy}
-                    title="Resend the signing-request email to the current pending signer"
-                    style={{ background: envelopeBusy ? '#e0f2fe' : C.page, color: '#0369a1', border: `1px solid #bae6fd`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: envelopeBusy ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: envelopeBusy ? 0.85 : 1 }}
-                    onMouseEnter={(e) => { if (!envelopeBusy) e.currentTarget.style.background = '#f0f9ff' }}
-                    onMouseLeave={(e) => { if (!envelopeBusy) e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a1 1 0 0 0-1.4 1.05L3.5 11l13.5 1L3.5 13l-1.5 6.35a1 1 0 0 0 1.4 1.05z" size={13} color="#0369a1" />
-                    {envelopeBusy ? 'Resending…' : 'Resend Email'}
-                  </button>
-                )}
-                {tableName === 'envelopes' && envelopeIsVoidable && (
-                  <button
-                    onClick={handleVoidEnvelope}
-                    disabled={envelopeBusy}
-                    title="Void this envelope — invalidates outstanding signing links"
-                    style={{ background: C.page, color: '#b45309', border: '1px solid #fcd34d', borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: envelopeBusy ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: envelopeBusy ? 0.7 : 1 }}
-                    onMouseEnter={(e) => { if (!envelopeBusy) e.currentTarget.style.background = '#fffbeb' }}
-                    onMouseLeave={(e) => { if (!envelopeBusy) e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M18.36 5.64a9 9 0 1 1-12.72 0M5.64 5.64l12.72 12.72" size={13} color="#b45309" />
-                    Void
-                  </button>
-                )}
-                {tableName === 'project_report_templates' && (
-                  <button
-                    onClick={handlePreviewPdf}
-                    disabled={previewingPdf}
-                    title="Render this template against sample data and open the PDF in a new tab — works in any status, doesn't save anything"
-                    style={{ background: previewingPdf ? '#e0f2fe' : C.page, color: '#0369a1', border: `1px solid #bae6fd`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: previewingPdf ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: previewingPdf ? 0.85 : 1 }}
-                    onMouseEnter={(e) => { if (!previewingPdf) e.currentTarget.style.background = '#f0f9ff' }}
-                    onMouseLeave={(e) => { if (!previewingPdf) e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" size={13} color="#0369a1" />
-                    {previewingPdf ? 'Rendering…' : 'Preview PDF'}
-                  </button>
-                )}
-                {tableName === 'document_templates' && data?.record?.related_object && (
-                  <button
-                    onClick={openDocPreview}
-                    disabled={docPreviewOpen || docPreviewRendering}
-                    title="Render this template against a real record and open the PDF in a new tab — works in any status, doesn't save anything"
-                    style={{ background: (docPreviewOpen || docPreviewRendering) ? '#e0f2fe' : C.page, color: '#0369a1', border: `1px solid #bae6fd`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: (docPreviewOpen || docPreviewRendering) ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                    onMouseEnter={(e) => { if (!docPreviewOpen && !docPreviewRendering) e.currentTarget.style.background = '#f0f9ff' }}
-                    onMouseLeave={(e) => { if (!docPreviewOpen && !docPreviewRendering) e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" size={13} color="#0369a1" />
-                    Preview PDF
-                  </button>
-                )}
-                {tableName === 'email_templates' && data?.record?.related_object && (
-                  <button
-                    onClick={openEmailPreview}
-                    disabled={emailPreviewOpen || emailPreviewRendering}
-                    title="Render this email against a real record and view the merged result inline — works in any status, doesn't send anything"
-                    style={{ background: (emailPreviewOpen || emailPreviewRendering) ? '#e0f2fe' : C.page, color: '#0369a1', border: `1px solid #bae6fd`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: (emailPreviewOpen || emailPreviewRendering) ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                    onMouseEnter={(e) => { if (!emailPreviewOpen && !emailPreviewRendering) e.currentTarget.style.background = '#f0f9ff' }}
-                    onMouseLeave={(e) => { if (!emailPreviewOpen && !emailPreviewRendering) e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" size={13} color="#0369a1" />
-                    Preview Email
-                  </button>
-                )}
-                {lifecycle && (
-                  <button
-                    onClick={handleCloneTemplate}
-                    disabled={cloningTemplate}
-                    title={lifecycle.childrenTable
-                      ? `Duplicate this template AND all its ${lifecycle.childrenLabel}, reset to Draft / version 1`
-                      : 'Duplicate this template, reset to Draft / version 1'}
-                    style={{ background: cloningTemplate ? '#86efac' : C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: cloningTemplate ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: cloningTemplate ? 0.85 : 1 }}
-                    onMouseEnter={(e) => { if (!cloningTemplate) e.currentTarget.style.background = '#ecfdf5' }}
-                    onMouseLeave={(e) => { if (!cloningTemplate) e.currentTarget.style.background = C.page }}
-                  >
-                    <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={13} color={C.emerald} />
-                    {cloningTemplate ? 'Cloning…' : 'Clone Template'}
-                  </button>
-                )}
-                {lifecycle && lifecycleStatusValue === 'Draft' && (
-                  <button
-                    onClick={handlePublish}
-                    disabled={statusChanging}
-                    title="Publish this template — locks editing and makes it generatable"
-                    style={{ background: statusChanging ? '#a7f3d0' : C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: statusChanging ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                  >
-                    <Icon path="M5 13l4 4L19 7" size={13} color="#fff" />
-                    {statusChanging ? 'Publishing…' : 'Publish'}
-                  </button>
-                )}
-                {lifecycle && lifecycleStatusValue === 'Active' && (
-                  <>
-                    <button
-                      onClick={handleUnpublish}
-                      disabled={statusChanging}
-                      title="Unpublish back to Draft so the template can be edited"
-                      style={{ background: C.page, color: '#b45309', border: '1px solid #fcd34d', borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: statusChanging ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: statusChanging ? 0.7 : 1 }}
-                    >
-                      <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={13} color="#b45309" />
-                      {statusChanging ? '…' : 'Unpublish'}
-                    </button>
-                    <button
-                      onClick={handleArchive}
-                      disabled={statusChanging}
-                      title="Archive this template — retired but kept for history"
-                      style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, cursor: statusChanging ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: statusChanging ? 0.7 : 1 }}
-                    >
-                      <Icon path="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" size={13} color={C.textSecondary} />
-                      Archive
-                    </button>
-                  </>
-                )}
-                {lifecycle && lifecycleStatusValue === 'Archived' && (
-                  <button
-                    onClick={handleRestore}
-                    disabled={statusChanging}
-                    title="Restore this template to Draft so it can be edited"
-                    style={{ background: C.page, color: C.emerald, border: `1px solid #a7f3d0`, borderRadius: 6, padding: '7px 14px', fontSize: 12.5, fontWeight: 500, cursor: statusChanging ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, opacity: statusChanging ? 0.7 : 1 }}
-                  >
-                    <Icon path="M3 10h11a4 4 0 014 4v0a4 4 0 01-4 4h-3M3 10l5 5m-5-5l5-5" size={13} color={C.emerald} />
-                    {statusChanging ? '…' : 'Restore to Draft'}
-                  </button>
-                )}
-                {!lifecycleIsLocked && (
-                  <button onClick={startEditing} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Edit</button>
-                )}
-                <button
-                  onClick={handleClone}
-                  title="Create a new record seeded from this one"
-                  style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2f7' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = C.page }}
-                >
-                  <Icon path="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" size={13} color={C.textSecondary} />
-                  Clone
-                </button>
-                <button
-                  onClick={() => setShowDeleteConfirm(true)}
-                  title="Move to recycle bin"
-                  style={{
-                    background: C.page, color: '#b03a2e',
-                    border: `1px solid ${C.border}`, borderRadius: 6,
-                    padding: '7px 12px', fontSize: 12.5, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 5,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.borderColor = '#fca5a5' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = C.page; e.currentTarget.style.borderColor = C.border }}
-                >
-                  <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" size={13} color="#b03a2e" />
-                  Delete
-                </button>
-              </>)}
+              </>) : (
+                <TopbarActions
+                  variant="desktop"
+                  tableName={tableName}
+                  record={data?.record}
+                  ctx={topbarActionCtx}
+                  actionOverrides={data?.actionOverrides || []}
+                  handlers={topbarActionHandlers}
+                  pendingByKey={topbarPendingByKey}
+                />
+              )}
             </div>
           </div>
         ) : (

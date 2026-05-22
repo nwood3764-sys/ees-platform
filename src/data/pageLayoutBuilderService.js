@@ -734,3 +734,143 @@ function _objectPluralLabel(objectName) {
     .map(w => (w ? w.charAt(0).toUpperCase() + w.slice(1) : ''))
     .join(' ')
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Page Layout Actions — per-layout override config
+//
+// The action registry (src/data/recordActions.js) declares every action that
+// can appear on a record detail page along with a sensible default tier and
+// sort order. These functions read and write the page_layout_actions table
+// which records OVERRIDES on top of those defaults. Absence of a row for
+// a given (layout, action_key) means "use the registry default."
+//
+// Writes are gated by RLS to Admin (via role_object_access). Reads are open
+// to all authenticated users (the topbar renderer needs them on every record
+// open regardless of role).
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Return every active override row for a given page layout. Sorted by
+ * sort_order then action_key for stable ordering. Returns [] when no
+ * overrides are configured (the topbar then falls back to registry defaults).
+ */
+export async function fetchActionsForLayout(layoutId) {
+  if (!layoutId) return []
+  const { data, error } = await supabase
+    .from('page_layout_actions')
+    .select('*')
+    .eq('pla_page_layout_id', layoutId)
+    .eq('pla_is_deleted', false)
+    .order('pla_sort_order', { ascending: true })
+    .order('pla_action_key',  { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+/**
+ * Insert or update an override row for (layoutId, actionKey). Matches by
+ * the (pla_page_layout_id, pla_action_key) unique constraint via upsert.
+ *
+ * Required:
+ *   layoutId, actionKey
+ * Optional:
+ *   displayTier         — 'primary' | 'menu' (defaults to 'menu')
+ *   sortOrder           — integer (defaults to 100)
+ *   labelOverride       — string (null clears any prior override)
+ *   visibilityRoleId    — uuid (null = visible to all roles)
+ *
+ * Returns the upserted row.
+ */
+export async function upsertActionOverride({
+  layoutId,
+  actionKey,
+  displayTier = 'menu',
+  sortOrder = 100,
+  labelOverride = null,
+  visibilityRoleId = null,
+}) {
+  if (!layoutId)  throw new Error('layoutId is required')
+  if (!actionKey) throw new Error('actionKey is required')
+  if (!['primary', 'menu'].includes(displayTier)) {
+    throw new Error(`displayTier must be 'primary' or 'menu', got ${displayTier}`)
+  }
+
+  const userId = await getCurrentUserId()
+  if (!userId) throw new Error('Not signed in')
+
+  // Look up existing row so we know whether to insert or update. We could
+  // use .upsert() with onConflict but Supabase's upsert doesn't play well
+  // with non-overlapping required columns (pla_owner / pla_created_by must
+  // not be overwritten on update).
+  const { data: existing, error: lookupErr } = await supabase
+    .from('page_layout_actions')
+    .select('id, pla_owner')
+    .eq('pla_page_layout_id', layoutId)
+    .eq('pla_action_key', actionKey)
+    .maybeSingle()
+  if (lookupErr && lookupErr.code !== 'PGRST116') throw lookupErr
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('page_layout_actions')
+      .update({
+        pla_display_tier:       displayTier,
+        pla_sort_order:         sortOrder,
+        pla_label_override:     labelOverride,
+        pla_visibility_role_id: visibilityRoleId,
+        pla_updated_by:         userId,
+        pla_is_deleted:         false,        // un-delete on re-author
+        pla_deleted_at:         null,
+        pla_deleted_by:         null,
+      })
+      .eq('id', existing.id)
+      .select()
+      .single()
+    if (error) throw error
+    return data
+  } else {
+    const { data, error } = await supabase
+      .from('page_layout_actions')
+      .insert({
+        pla_record_number:      '',           // BEFORE INSERT trigger fills
+        pla_page_layout_id:     layoutId,
+        pla_action_key:         actionKey,
+        pla_display_tier:       displayTier,
+        pla_sort_order:         sortOrder,
+        pla_label_override:     labelOverride,
+        pla_visibility_role_id: visibilityRoleId,
+        pla_owner:              userId,
+        pla_created_by:         userId,
+        pla_updated_by:         userId,
+      })
+      .select()
+      .single()
+    if (error) throw error
+    return data
+  }
+}
+
+/**
+ * Soft-delete an override row. After this the action falls back to its
+ * registry default tier / sort order. Pass a deletion reason for the
+ * audit trail.
+ */
+export async function clearActionOverride({ layoutId, actionKey, reason = 'cleared via Layout Editor' }) {
+  if (!layoutId)  throw new Error('layoutId is required')
+  if (!actionKey) throw new Error('actionKey is required')
+  const userId = await getCurrentUserId()
+  if (!userId) throw new Error('Not signed in')
+  const { error } = await supabase
+    .from('page_layout_actions')
+    .update({
+      pla_is_deleted:     true,
+      pla_deleted_at:     new Date().toISOString(),
+      pla_deleted_by:     userId,
+      pla_deletion_reason: reason,
+      pla_updated_by:     userId,
+    })
+    .eq('pla_page_layout_id', layoutId)
+    .eq('pla_action_key',     actionKey)
+    .eq('pla_is_deleted',     false)
+  if (error) throw error
+}
