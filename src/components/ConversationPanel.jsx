@@ -24,6 +24,12 @@ const FK_TO_ANCHOR_OBJECT = {
   account_id: 'accounts',
   project_id: 'projects',
   service_appointment_id: 'service_appointments',
+  work_order_id: 'work_orders',
+  incentive_application_id: 'incentive_applications',
+  opportunity_id: 'opportunities',
+  assessment_id: 'assessments',
+  building_id: 'buildings',
+  property_id: 'properties',
 }
 
 // ---------------------------------------------------------------------------

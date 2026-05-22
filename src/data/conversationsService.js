@@ -35,6 +35,12 @@ const CONV_COLUMNS = [
   'account_id',
   'project_id',
   'service_appointment_id',
+  'work_order_id',
+  'incentive_application_id',
+  'opportunity_id',
+  'assessment_id',
+  'building_id',
+  'property_id',
 ].join(', ')
 
 const MSG_COLUMNS = [
@@ -66,6 +72,12 @@ const SUPPORTED_FK = new Set([
   'account_id',
   'project_id',
   'service_appointment_id',
+  'work_order_id',
+  'incentive_application_id',
+  'opportunity_id',
+  'assessment_id',
+  'building_id',
+  'property_id',
 ])
 
 /**
@@ -187,9 +199,11 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
       throw new Error('Customer email on this thread is not a valid email address.')
     }
     // Anchor — the caller must supply this for email; conversations carry the
-    // four canonical FKs but the spec says every email is anchored to a record
-    // and send-email-v1 enforces it. Resolve from the conversation's own FKs
-    // in priority order: service_appointment > project > account > contact.
+    // four canonical FKs plus six extended anchors and send-email-v1 enforces
+    // one anchor. Resolve from the conversation's own FKs in priority order
+    // (most-specific leaf → most-canonical root): service_appointment >
+    // work_order > assessment > incentive_application > project > opportunity
+    // > building > property > account > contact.
     let anchorObject = null
     let anchorRecordId = null
     if (opts.anchorObject && opts.anchorRecordId) {
@@ -198,9 +212,27 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
     } else if (conversation.service_appointment_id) {
       anchorObject = 'service_appointments'
       anchorRecordId = conversation.service_appointment_id
+    } else if (conversation.work_order_id) {
+      anchorObject = 'work_orders'
+      anchorRecordId = conversation.work_order_id
+    } else if (conversation.assessment_id) {
+      anchorObject = 'assessments'
+      anchorRecordId = conversation.assessment_id
+    } else if (conversation.incentive_application_id) {
+      anchorObject = 'incentive_applications'
+      anchorRecordId = conversation.incentive_application_id
     } else if (conversation.project_id) {
       anchorObject = 'projects'
       anchorRecordId = conversation.project_id
+    } else if (conversation.opportunity_id) {
+      anchorObject = 'opportunities'
+      anchorRecordId = conversation.opportunity_id
+    } else if (conversation.building_id) {
+      anchorObject = 'buildings'
+      anchorRecordId = conversation.building_id
+    } else if (conversation.property_id) {
+      anchorObject = 'properties'
+      anchorRecordId = conversation.property_id
     } else if (conversation.account_id) {
       anchorObject = 'accounts'
       anchorRecordId = conversation.account_id
@@ -208,7 +240,7 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
       anchorObject = 'contacts'
       anchorRecordId = conversation.contact_id
     } else {
-      throw new Error('Email reply requires an anchor record but the thread has no project/account/contact/service_appointment.')
+      throw new Error('Email reply requires an anchor record but the thread has no resolvable parent.')
     }
 
     // Reply subject default: "Re: <original subject>" if not already prefixed.
