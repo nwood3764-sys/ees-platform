@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase'
+import { supabase, fetchAllPaged } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
 
 // ---------------------------------------------------------------------------
@@ -1662,15 +1662,20 @@ function _looksLikeStatusField(field) {
 }
 
 export async function fetchStatusLifecycleSummary() {
-  // Pull all picklist values on status-shaped fields, then group client-side.
-  // 500 active picklist values across all objects is well within one query.
-  const { data: pls, error: plsErr } = await supabase
-    .from('picklist_values')
-    .select('id, picklist_object, picklist_field, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
-    .order('picklist_object', { ascending: true })
-    .order('picklist_field',  { ascending: true })
-    .order('picklist_sort_order', { ascending: true })
-  if (plsErr) throw plsErr
+  // Paginated: picklist_values is past 900 rows and growing. Without
+  // pagination this fetch silently truncates and the Status Lifecycle
+  // Builder shows partial / wrong lifecycle data for the objects whose
+  // picklist rows happen to fall past the 1000-row PostgREST cutoff.
+  const pls = await fetchAllPaged((from, to) =>
+    supabase
+      .from('picklist_values')
+      .select('id, picklist_object, picklist_field, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
+      .order('picklist_object',     { ascending: true })
+      .order('picklist_field',      { ascending: true })
+      .order('picklist_sort_order', { ascending: true })
+      .order('id',                  { ascending: true })
+      .range(from, to)
+  )
 
   // Pull active transitions; group by (st_object, st_status_field).
   const { data: txns, error: txnsErr } = await supabase
