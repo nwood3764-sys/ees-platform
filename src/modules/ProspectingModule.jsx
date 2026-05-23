@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { ProspectingMap } from '../components/ProspectingMap'
+import ProspectingFilterPanel, {
+  EMPTY_FILTERS,
+  applyFilters,
+} from '../components/ProspectingFilterPanel'
 import {
   fetchProspectingProperties,
   fetchProspectingCounts,
@@ -176,11 +180,235 @@ function PropertiesListSection({ loading, error, properties, onRefresh, onRetry,
 }
 
 function MapSection({ loading, error, properties, onRetry, onOpenProperty }) {
+  // Filter state lives at the MapSection level so it can drive the
+  // filter panel, the map markers, and the viewport list in lockstep.
+  const [filters, setFilters] = useState(() => ({ ...EMPTY_FILTERS, states: new Set() }))
+  const updateFilter = (key, value) => setFilters(f => ({ ...f, [key]: value }))
+  const resetFilters = () => setFilters({ ...EMPTY_FILTERS, states: new Set() })
+
+  // Bounds of the current map viewport. Null until the first
+  // moveend fires (or the map auto-fits on first render).
+  const [bounds, setBounds] = useState(null)
+
+  // Filter rail visibility — on desktop the rail is always shown,
+  // on tablet/mobile (≤900px) it's hidden by default and toggled
+  // via the floating Filters button.
+  const isNarrow = useIsTabletOrSmaller()
+  const [railOpen, setRailOpen] = useState(false)
+  const railVisible = !isNarrow || railOpen
+
+  // Pipeline:
+  //   allProperties  → applyFilters → filteredByCriteria
+  //                                  → restrict to map bounds → viewport list
+  // The map gets `filteredByCriteria` so panning doesn't lose pins
+  // that just slid off-screen; the list gets the bounds-restricted
+  // subset so it shows only what the user is actually looking at.
+  const filteredByCriteria = useMemo(
+    () => applyFilters(properties || [], filters),
+    [properties, filters]
+  )
+
+  const visibleInViewport = useMemo(() => {
+    if (!bounds) return filteredByCriteria
+    return filteredByCriteria.filter(p => {
+      if (typeof p.latitude !== 'number' || typeof p.longitude !== 'number') return false
+      return p.latitude  >= bounds.south && p.latitude  <= bounds.north
+          && p.longitude >= bounds.west  && p.longitude <= bounds.east
+    })
+  }, [filteredByCriteria, bounds])
+
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} onRetry={onRetry} />
+
+  const activeCount = countActiveFiltersLocal(filters)
+
   return (
-    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-      <ProspectingMap properties={properties} onOpenProperty={onOpenProperty} />
+    <div style={{ flex:1, display:'flex', flexDirection:'row', overflow:'hidden', position:'relative' }}>
+      {/* Filter rail */}
+      {railVisible && (
+        <div style={{
+          width: isNarrow ? '100%' : 280,
+          maxWidth: isNarrow ? 320 : 280,
+          minWidth: isNarrow ? undefined : 280,
+          height: '100%', overflow:'hidden',
+          display:'flex', flexDirection:'column',
+          background: C.card, borderRight:`1px solid ${C.border}`,
+          position: isNarrow ? 'absolute' : 'relative',
+          left: 0, top: 0, bottom: 0, zIndex: isNarrow ? 100 : 1,
+          boxShadow: isNarrow ? '0 6px 24px rgba(7,17,31,0.18)' : 'none',
+        }}>
+          {isNarrow && (
+            <div style={{
+              padding:'10px 14px', borderBottom:`1px solid ${C.border}`,
+              display:'flex', alignItems:'center', justifyContent:'space-between',
+              background: C.cardSecondary || '#f7f9fc',
+            }}>
+              <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Filters</div>
+              <button onClick={() => setRailOpen(false)}
+                style={{ background:'transparent', border:'none', cursor:'pointer', padding:4 }}>
+                <Icon path="M18 6L6 18M6 6l12 12" size={15} color={C.textSecondary} />
+              </button>
+            </div>
+          )}
+          <ProspectingFilterPanel
+            allProperties={properties || []}
+            filters={filters}
+            updateFilter={updateFilter}
+            resetFilters={resetFilters}
+            visibleCount={filteredByCriteria.length}
+            totalCount={(properties || []).length}
+          />
+        </div>
+      )}
+
+      {/* Backdrop for mobile rail */}
+      {isNarrow && railOpen && (
+        <div onClick={() => setRailOpen(false)}
+          style={{ position:'absolute', inset:0, background:'rgba(7,17,31,0.4)', zIndex:90 }} />
+      )}
+
+      {/* Map + viewport-list right pane */}
+      <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', overflow:'hidden', position:'relative' }}>
+        {isNarrow && (
+          <button onClick={() => setRailOpen(true)}
+            style={{
+              position:'absolute', top:10, left:10, zIndex:80,
+              display:'flex', alignItems:'center', gap:6,
+              padding:'7px 12px', fontSize:12, fontWeight:600,
+              background:C.card, color:C.textPrimary,
+              border:`1px solid ${C.border}`, borderRadius:6,
+              boxShadow:'0 2px 6px rgba(7,17,31,0.12)', cursor:'pointer',
+            }}>
+            <Icon path="M3 4h18M6 12h12M10 20h4" size={13} color={C.textPrimary} />
+            Filters
+            {activeCount > 0 && (
+              <span style={{ background:'#3ecf8e', color:'#fff', borderRadius:10, padding:'1px 7px', fontSize:10, fontWeight:700 }}>{activeCount}</span>
+            )}
+          </button>
+        )}
+        <div style={{ flex:'1 1 60%', minHeight:240, display:'flex', flexDirection:'column' }}>
+          <ProspectingMap
+            properties={filteredByCriteria}
+            onOpenProperty={onOpenProperty}
+            onBoundsChange={setBounds}
+          />
+        </div>
+
+        {/* Viewport list — bottom 40% of the right pane */}
+        <div style={{
+          flex:'1 1 40%', minHeight:160,
+          borderTop:`1px solid ${C.border}`,
+          background:C.card,
+          display:'flex', flexDirection:'column',
+        }}>
+          <div style={{
+            padding:'8px 14px',
+            borderBottom:`1px solid ${C.border}`,
+            display:'flex', alignItems:'center', justifyContent:'space-between',
+            background:C.cardSecondary || '#f7f9fc',
+          }}>
+            <div style={{ fontSize:12, color:C.textSecondary }}>
+              <span style={{ fontWeight:700, color:C.textPrimary }}>
+                {visibleInViewport.length.toLocaleString()}
+              </span>
+              {' in current view'}
+              {bounds && filteredByCriteria.length !== visibleInViewport.length && (
+                <span style={{ color:C.textMuted, marginLeft:8 }}>
+                  ({filteredByCriteria.length.toLocaleString()} match filters total)
+                </span>
+              )}
+            </div>
+          </div>
+          <ViewportPropertyList
+            rows={visibleInViewport}
+            onOpenProperty={onOpenProperty}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Local helper: tablet+phone breakpoint reuse from useMediaQuery.
+function useIsTabletOrSmaller() {
+  const [match, setMatch] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(max-width: 900px)').matches
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 900px)')
+    const handler = (e) => setMatch(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return match
+}
+
+// Avoid pulling countActiveFilters as a circular import via the panel;
+// recompute it here for the toggle-button badge. (Same logic — kept
+// in sync manually since both copies are short.)
+function countActiveFiltersLocal(f) {
+  let n = 0
+  if (f.search && f.search.trim()) n++
+  if (f.states?.size > 0) n++
+  if (f.county !== 'all') n++
+  if (f.account !== 'all') n++
+  if (f.subsidyType !== 'all') n++
+  if (f.unitsMin != null) n++
+  if (f.unitsMax != null) n++
+  if (f.hasDisaster !== 'all') n++
+  if (f.contractExpiringWithin !== 'all') n++
+  if (f.energyBurdenMin != null) n++
+  if (f.showEngaged) n++
+  return n
+}
+
+function ViewportPropertyList({ rows, onOpenProperty }) {
+  if (rows.length === 0) {
+    return (
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:C.textMuted, fontSize:12.5 }}>
+        No properties in the current view. Pan or zoom out to see more.
+      </div>
+    )
+  }
+  // Cap rendering at 500 rows for performance — at zoom levels that
+  // would show more than 500 markers, the user shouldn't be reading
+  // a flat list anyway.
+  const shown = rows.slice(0, 500)
+  return (
+    <div style={{ flex:1, overflowY:'auto' }}>
+      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+        <thead style={{ position:'sticky', top:0, background:C.card, zIndex:1 }}>
+          <tr style={{ borderBottom:`1px solid ${C.border}`, color:C.textMuted, fontSize:10.5, textTransform:'uppercase', letterSpacing:0.5 }}>
+            <th style={{ textAlign:'left', padding:'8px 14px', fontWeight:600 }}>Property</th>
+            <th style={{ textAlign:'left', padding:'8px 8px',  fontWeight:600 }}>City</th>
+            <th style={{ textAlign:'left', padding:'8px 8px',  fontWeight:600 }}>State</th>
+            <th style={{ textAlign:'right',padding:'8px 8px',  fontWeight:600 }}>Units</th>
+            <th style={{ textAlign:'left', padding:'8px 14px', fontWeight:600 }}>Account</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map(r => (
+            <tr key={r._id}
+                onClick={() => onOpenProperty?.(r._id)}
+                style={{ cursor:'pointer', borderBottom:`1px solid ${C.border}`, transition:'background 80ms' }}
+                onMouseEnter={(e) => e.currentTarget.style.background = C.cardSecondary || '#f7f9fc'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+              <td style={{ padding:'7px 14px', color:C.textPrimary, fontWeight:500 }}>{r.name || '—'}</td>
+              <td style={{ padding:'7px 8px',  color:C.textSecondary }}>{(r.address || '').split(',')[1]?.trim() || (r.address || '').split(',')[0] || '—'}</td>
+              <td style={{ padding:'7px 8px',  color:C.textSecondary }}>{r.state || '—'}</td>
+              <td style={{ padding:'7px 8px',  color:C.textSecondary, textAlign:'right', fontFamily:'JetBrains Mono, monospace' }}>{r.units ?? '—'}</td>
+              <td style={{ padding:'7px 14px', color:C.textSecondary, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:240 }}>{r.account || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > 500 && (
+        <div style={{ padding:'8px 14px', fontSize:11, color:C.textMuted, fontStyle:'italic', borderTop:`1px solid ${C.border}` }}>
+          Showing the first 500 of {rows.length.toLocaleString()}. Zoom in or refine filters to narrow.
+        </div>
+      )}
     </div>
   )
 }
