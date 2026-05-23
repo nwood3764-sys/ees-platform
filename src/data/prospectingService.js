@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase'
+import { supabase, fetchAllPaged } from '../lib/supabase'
 import { loadPicklists } from './outreachService'
 
 /**
@@ -22,9 +22,11 @@ import { loadPicklists } from './outreachService'
 export async function fetchProspectingProperties({ includeEngaged = false } = {}) {
   const picklists = await loadPicklists()
 
-  let query = supabase
-    .from('prospecting_properties_v')
-    .select(`
+  // Paginated full-table read: prospecting today is ~6,800 rows; will
+  // grow into the tens of thousands as the remaining program states
+  // ingest. PostgREST caps every single response at 1000 rows, so the
+  // only correct path is .range(from,to) in a loop via fetchAllPaged.
+  const SELECT_COLS = `
       id,
       property_record_number,
       property_name,
@@ -59,17 +61,20 @@ export async function fetchProspectingProperties({ includeEngaged = false } = {}
       pde_fema_hurricane_declaration_count,
       pde_fema_most_recent_declaration_date,
       has_active_opportunity
-    `)
-    .order('property_name', { ascending: true })
+    `
 
-  if (!includeEngaged) {
-    query = query.eq('has_active_opportunity', false)
-  }
+  const data = await fetchAllPaged((from, to) => {
+    let q = supabase
+      .from('prospecting_properties_v')
+      .select(SELECT_COLS)
+      .order('property_name', { ascending: true })
+      .order('id',            { ascending: true })   // tie-breaker for stable pagination
+      .range(from, to)
+    if (!includeEngaged) q = q.eq('has_active_opportunity', false)
+    return q
+  })
 
-  const { data, error } = await query
-  if (error) throw error
-
-  return (data || []).map(r => ({
+  return data.map(r => ({
     // ListView keys
     id:                r.property_record_number || r.id,
     _id:               r.id,
@@ -201,9 +206,11 @@ export function exportProspectingPropertiesCsv(rows, filename = 'prospecting-pro
  * Most-recent first.
  */
 export async function fetchImportBatches() {
-  const { data, error } = await supabase
-    .from('property_import_batches')
-    .select(`
+  // Paginated full-table read. Import batches accumulate at ~1 row per
+  // ingest pass; for any single program-state seed (200 chunks × 4
+  // datasets = ~800 batches) this is well under the 1000-row PostgREST
+  // cap, but using fetchAllPaged here is cheap insurance.
+  const SELECT_COLS = `
       id,
       pib_record_number,
       pib_source_dataset,
@@ -219,14 +226,22 @@ export async function fetchImportBatches() {
       pib_completed_at,
       pib_error_report_path,
       pib_owner,
-      pib_created_at
-    `)
-    .eq('pib_is_deleted', false)
-    .order('pib_started_at', { ascending: false, nullsFirst: false })
-    .order('pib_created_at', { ascending: false })
-    .limit(500)
-  if (error) throw error
-  return (data || []).map(r => ({
+      pib_created_at,
+      pib_is_deleted
+    `
+  // NOTE: we filter is_deleted=false in JS rather than .eq(... false) so
+  // rows where pib_is_deleted is NULL (older inserts before the column
+  // had a default propagated) still show. Server-side .eq('col', false)
+  // does NOT match NULL.
+  const data = await fetchAllPaged((from, to) =>
+    supabase
+      .from('property_import_batches')
+      .select(SELECT_COLS)
+      .order('pib_started_at', { ascending: false, nullsFirst: false })
+      .order('pib_created_at', { ascending: false })
+      .range(from, to)
+  )
+  return data.filter(r => r.pib_is_deleted !== true).map(r => ({
     id:             r.pib_record_number || r.id,
     _id:            r.id,
     name:           r.pib_record_number || '',
