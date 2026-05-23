@@ -1,10 +1,18 @@
 // =============================================================================
 // StatusPathWidget — Salesforce-style Path component
 //
-// Renders a horizontal chevron strip showing the FULL status lifecycle for
-// a record. Every active picklist value for (object, status_field) appears
-// as a chevron in picklist_sort_order. The strip is a visual representation
-// of the entire lifecycle, not a curated subset.
+// Renders a horizontal chevron strip showing the status lifecycle for a
+// record. Every active picklist value for (object, status_field) that
+// applies to the record's record_type appears as a chevron in
+// picklist_sort_order. The strip is a visual representation of the lifecycle
+// that's actually relevant to this record, not a curated subset.
+//
+// Record-type scoping: the widget calls the picklist_values_for_record_type
+// RPC, which returns only values either (a) explicitly assigned to the
+// record's record_type via picklist_value_record_type_assignments or
+// (b) universal (zero assignment rows for that value — applies everywhere).
+// Until an admin authors any scoped assignments, every value falls through
+// to (b) and renders on every layout, preserving the pre-scoping behavior.
 //
 // Stage states:
 //   complete — index < current's index (filled emerald)
@@ -33,6 +41,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
 import { useToast } from './Toast'
+import { getRecordTypeValue } from '../data/layoutService'
 
 function ChevronSegment({
   label, state /* 'complete' | 'current' | 'future' */,
@@ -97,16 +106,23 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
   const [transitions, setTransitions]       = useState(null)
   const [submitting, setSubmitting]         = useState(false)
 
+  // Record type for the current record. Used to filter the chevron strip via
+  // the picklist_values_for_record_type RPC, which applies the universal-
+  // fallback rule: a picklist value with zero rows in
+  // picklist_value_record_type_assignments renders on every record type
+  // (so the migration is non-destructive — every status value continues to
+  // appear on every layout until someone explicitly scopes it).
+  const recordTypeId = useMemo(() => getRecordTypeValue(record), [record])
+
   useEffect(() => {
     if (!tableName || !statusField) return
     let alive = true
     Promise.all([
-      supabase.from('picklist_values')
-        .select('id, picklist_label, picklist_sort_order')
-        .eq('picklist_object', tableName)
-        .eq('picklist_field', statusField)
-        .eq('picklist_is_active', true)
-        .order('picklist_sort_order', { ascending: true }),
+      supabase.rpc('picklist_values_for_record_type', {
+        p_object:      tableName,
+        p_field:       statusField,
+        p_record_type: recordTypeId || null,
+      }),
       supabase.from('status_transitions')
         .select('st_from_status_id, st_to_status_id, st_description')
         .eq('st_object', tableName)
@@ -123,7 +139,7 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
         if (alive) { setPicklistValues([]); setTransitions([]) }
       })
     return () => { alive = false }
-  }, [tableName, statusField])
+  }, [tableName, statusField, recordTypeId])
 
   const currentStatusId = statusField ? record?.[statusField] : null
   const currentIdx = useMemo(
