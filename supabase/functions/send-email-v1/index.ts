@@ -555,8 +555,8 @@ function assembleFromLockedRegions(
 }
 
 function plusAddress(address: string, token: string): string {
-  // Inject +token before @ — e.g. assessments@ees-wi.org becomes
-  // assessments+c_8f3a2b1d@ees-wi.org. The plus-address subaddressing convention
+  // Inject +token before @ — e.g. assessments@EES-WI.org becomes
+  // assessments+c_8f3a2b1d@EES-WI.org. The plus-address subaddressing convention
   // is preserved by Microsoft 365 routing, so inbound to the plus-addressed
   // alias still lands in the base mailbox.
   const at = address.indexOf("@")

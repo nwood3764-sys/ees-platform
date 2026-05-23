@@ -9,7 +9,7 @@
 //   {
 //     "changeType":         "created",
 //     "notificationUrl":    "https://flyjigrijjjtcsvpgzvk.supabase.co/functions/v1/inbound-email-webhook",
-//     "resource":           "users/assessments@ees-wi.org/mailFolders('Inbox')/messages",
+//     "resource":           "users/assessments@EES-WI.org/mailFolders('Inbox')/messages",
 //     "expirationDateTime": "<ISO-8601 ~3 days from now>",
 //     "clientState":        "<env GRAPH_WEBHOOK_CLIENT_STATE>"
 //   }
@@ -41,7 +41,7 @@
 //      (real mode) OR uses inline `_mock_message` payload (mock mode).
 //   3. Resolves the thread via a three-step fallback:
 //        a. Plus-addressed conversation token in toRecipients
-//           (assessments+c_8f3a2b1d@ees-wi.org → conversations.id LIKE '8f3a2b1d%')
+//           (assessments+c_8f3a2b1d@EES-WI.org → conversations.id LIKE '8f3a2b1d%')
 //        b. In-Reply-To / References header → messages.msg_external_message_id
 //        c. Sender email → contacts.contact_email → most recent open thread
 //   4. If matched: insert messages row in 'received', rollup trigger
@@ -60,9 +60,9 @@
 //                  "bodyPreview":"…",
 //                  "body":{"contentType":"html","content":"<p>…</p>"},
 //                  "from":{"emailAddress":{"address":"customer@example.com","name":"Customer"}},
-//                  "toRecipients":[{"emailAddress":{"address":"assessments+c_8f3a2b1d@ees-wi.org"}}],
+//                  "toRecipients":[{"emailAddress":{"address":"assessments+c_8f3a2b1d@EES-WI.org"}}],
 //                  "internetMessageHeaders":[
-//                    {"name":"In-Reply-To","value":"<leap-…@ees-wi.org>"}
+//                    {"name":"In-Reply-To","value":"<leap-…@EES-WI.org>"}
 //                  ]
 //                }
 //              }]
@@ -401,7 +401,7 @@ function extractMailboxFromResource(resource: string): string | null {
 }
 
 // Pull the conversation token from any toRecipient that's plus-addressed:
-//   assessments+c_8f3a2b1d@ees-wi.org → '8f3a2b1d'  (8-hex token after 'c_')
+//   assessments+c_8f3a2b1d@EES-WI.org → '8f3a2b1d'  (8-hex token after 'c_')
 function findConversationTokenInRecipients(recipients: GraphRecipient[]): string | null {
   for (const r of recipients) {
     const addr = r.emailAddress?.address || ""

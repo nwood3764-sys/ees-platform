@@ -26,9 +26,9 @@ export default function ServiceAppointmentFooter() {
         </div>
         <div>
           Questions? <a
-            href="mailto:assessments.wi@ees-wi.org"
+            href="mailto:assessments.wi@EES-WI.org"
             style={{ color: C.emeraldMid, textDecoration: 'none' }}
-          >assessments.wi@ees-wi.org</a>
+          >assessments.wi@EES-WI.org</a>
         </div>
       </div>
     </footer>

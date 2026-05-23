@@ -224,7 +224,7 @@ export default function InviteUserModal({
               value={email}
               onChange={e => setEmail(e.target.value)}
               disabled={busy || isRelink}
-              placeholder="user@ees-wi.org"
+              placeholder="user@EES-WI.org"
               style={{
                 ...inputStyle,
                 background: isRelink ? C.page : C.card,

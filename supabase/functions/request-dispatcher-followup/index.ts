@@ -43,7 +43,7 @@ const VALID_REASONS = new Set([
 const RENDER_TIMEZONE = "America/Chicago"
 const RENDER_LOCALE   = "en-US"
 
-const DISPATCHER_EMAIL = Deno.env.get("DISPATCHER_FOLLOWUP_EMAIL") || "assessments.wi@ees-wi.org"
+const DISPATCHER_EMAIL = Deno.env.get("DISPATCHER_FOLLOWUP_EMAIL") || "assessments.wi@EES-WI.org"
 
 interface ReqBody {
   customer_first_name: string
@@ -294,7 +294,7 @@ function buildDfrContext(args: {
     company: {
       name: "EES-WI",
       phone: Deno.env.get("COMPANY_PHONE") || "",
-      email: Deno.env.get("COMPANY_EMAIL") || "hello@ees-wi.org",
+      email: Deno.env.get("COMPANY_EMAIL") || "hello@EES-WI.org",
     },
   }
 }

@@ -358,7 +358,7 @@ export async function sendNewEmail({
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-// Strip plus-addressing (assessments+c_8f3a2b1d@ees-wi.org → assessments@ees-wi.org)
+// Strip plus-addressing (assessments+c_8f3a2b1d@EES-WI.org → assessments@EES-WI.org)
 // so we can match the conversation's our_address back to its underlying mailbox.
 function stripPlusAddress(address) {
   if (!address) return ''

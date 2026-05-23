@@ -152,7 +152,7 @@ export default function ManagePage({ token }) {
           We couldn't load your appointment
         </h1>
         <p style={{ color: C.textSecondary, marginBottom: 16, lineHeight: 1.5 }}>{error}</p>
-        <a href="mailto:assessments.wi@ees-wi.org?subject=Help with my appointment"
+        <a href="mailto:assessments.wi@EES-WI.org?subject=Help with my appointment"
            style={{ ...buttonPrimary, display: 'inline-block', textAlign: 'center', textDecoration: 'none' }}>
           Email Energy Efficiency Services
         </a>
@@ -187,8 +187,8 @@ function InvalidTokenPage() {
       <p style={{ color: C.textSecondary, fontSize: 15, lineHeight: 1.5 }}>
         We couldn't recognize that appointment token. Double-check the link from
         your confirmation, or email{' '}
-        <a href="mailto:assessments.wi@ees-wi.org" style={{ color: C.emeraldMid, textDecoration: 'none' }}>
-          assessments.wi@ees-wi.org
+        <a href="mailto:assessments.wi@EES-WI.org" style={{ color: C.emeraldMid, textDecoration: 'none' }}>
+          assessments.wi@EES-WI.org
         </a>{' '}
         and we'll find your appointment.
       </p>
@@ -259,7 +259,7 @@ function AppointmentView({ appointment, slotsError, onReschedule, onCancel }) {
       </div>
 
       <div style={{ textAlign: 'center', marginTop: 20 }}>
-        <a href="mailto:assessments.wi@ees-wi.org?subject=Help with my appointment"
+        <a href="mailto:assessments.wi@EES-WI.org?subject=Help with my appointment"
            style={{ color: C.textMuted, fontSize: 13, textDecoration: 'none' }}>
           Need help? Email us →
         </a>

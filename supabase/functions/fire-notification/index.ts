@@ -303,7 +303,7 @@ async function buildAppointmentContext(
     company: {
       name:  "EES-WI",
       phone: Deno.env.get("COMPANY_PHONE") || "",
-      email: Deno.env.get("COMPANY_EMAIL") || "hello@ees-wi.org",
+      email: Deno.env.get("COMPANY_EMAIL") || "hello@EES-WI.org",
     },
   }
 }

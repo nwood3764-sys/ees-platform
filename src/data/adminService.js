@@ -1437,7 +1437,7 @@ export async function fetchObjectChatEnabled() {
 // ─── Outbound mailboxes (Communications Module v1) ──────────────────────────
 //
 // The shared M365 mailboxes that send-email-v1 routes outbound through. State
-// separation is in the domain (assessments@ees-wi.org for WI, etc.); per-
+// separation is in the domain (assessments@EES-WI.org for WI, etc.); per-
 // program mailboxes can be layered on top later with the same lookup logic.
 //
 // Listed under Setup → Communication Templates → Outbound Mailboxes. Clicking

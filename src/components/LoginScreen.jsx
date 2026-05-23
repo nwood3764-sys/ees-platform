@@ -124,7 +124,7 @@ export default function LoginScreen() {
             autoFocus
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@ees-wi.org"
+            placeholder="you@EES-WI.org"
             style={{
               width: '100%',
               padding: '10px 12px',

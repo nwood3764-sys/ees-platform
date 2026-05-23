@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
   const supabaseUrl     = Deno.env.get("SUPABASE_URL")
   const serviceRoleKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
   const resendApiKey    = Deno.env.get("RESEND_API_KEY")
-  const fromAddress     = Deno.env.get("RESEND_FROM_ADDRESS") || "EES Reports <reports@ees-wi.org>"
+  const fromAddress     = Deno.env.get("RESEND_FROM_ADDRESS") || "EES Reports <reports@EES-WI.org>"
   const baseUrl         = Deno.env.get("APP_BASE_URL") || "https://ees-ops.netlify.app"
 
   if (!supabaseUrl || !serviceRoleKey) {
