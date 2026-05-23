@@ -2714,6 +2714,17 @@ function RelatedListWidget({
   const shownRows = editable ? localRows : localRows.slice(0, RELATED_LIST_MAX_ROWS)
   const hiddenCount = editable ? 0 : Math.max(0, localRows.length - shownRows.length)
 
+  // hide_when_empty: opt-in widget_config flag for related lists that
+  // should disappear entirely when no rows exist (rather than rendering
+  // the standard zero-state card). Used by the Disaster Exposure list on
+  // the Property page layout so non-NC properties don't show a placeholder
+  // section. Suppresses both the read-only and editable variants — the
+  // page layout configuration is the single signal that a property does
+  // or doesn't have ingested data of this type.
+  if (config.hide_when_empty === true && localRows.length === 0) {
+    return null
+  }
+
   const handleRowClick = (row) => {
     if (!canNavigate || !row?.id) return
     onNavigateToRecord({ table: childTable, id: row.id, mode: 'view' })

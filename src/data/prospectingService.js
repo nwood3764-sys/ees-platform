@@ -195,3 +195,71 @@ export function exportProspectingPropertiesCsv(rows, filename = 'prospecting-pro
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
 }
+
+/**
+ * Fetches the list of import batches for the Imports section list view.
+ * Most-recent first.
+ */
+export async function fetchImportBatches() {
+  const { data, error } = await supabase
+    .from('property_import_batches')
+    .select(`
+      id,
+      pib_record_number,
+      pib_source_dataset,
+      pib_status,
+      pib_records_total,
+      pib_records_created,
+      pib_records_updated,
+      pib_records_skipped,
+      pib_records_errored,
+      pib_accounts_created,
+      pib_accounts_matched,
+      pib_started_at,
+      pib_completed_at,
+      pib_error_report_path,
+      pib_owner,
+      pib_created_at
+    `)
+    .eq('pib_is_deleted', false)
+    .order('pib_started_at', { ascending: false, nullsFirst: false })
+    .order('pib_created_at', { ascending: false })
+    .limit(500)
+  if (error) throw error
+  return (data || []).map(r => ({
+    id:             r.pib_record_number || r.id,
+    _id:            r.id,
+    name:           r.pib_record_number || '',
+    sourceDataset:  r.pib_source_dataset || '',
+    status:         r.pib_status || '',
+    total:          r.pib_records_total ?? 0,
+    created:        r.pib_records_created ?? 0,
+    updated:        r.pib_records_updated ?? 0,
+    skipped:        r.pib_records_skipped ?? 0,
+    errored:        r.pib_records_errored ?? 0,
+    accountsCreated:r.pib_accounts_created ?? 0,
+    accountsMatched:r.pib_accounts_matched ?? 0,
+    startedAt:      r.pib_started_at || null,
+    completedAt:    r.pib_completed_at || null,
+  }))
+}
+
+/**
+ * Submits a batch of records to the import-prospecting-properties edge
+ * function. Returns the function's response payload.
+ *
+ * @param {string} sourceDataset  e.g. 'HUD_ACTIVE_PORTFOLIO', 'HUD_LIHTC',
+ *                                'HUD_MULTIFAMILY_CONTRACTS', 'DOE_LEAD',
+ *                                'MANUAL'
+ * @param {Array<Object>} records Array of records (see RPC docstring)
+ */
+export async function submitPropertyImport(sourceDataset, records) {
+  const { data, error } = await supabase.functions.invoke('import-prospecting-properties', {
+    body: { source_dataset: sourceDataset, records },
+  })
+  if (error) throw error
+  if (data && data.ok === false) {
+    throw new Error(data.error || 'Import failed')
+  }
+  return data
+}
