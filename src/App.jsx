@@ -30,6 +30,7 @@ import { useUrlNavigation } from './lib/urlNav'
 const HomeModule          = lazy(() => import('./modules/HomeModule'))
 const TasksModule         = lazy(() => import('./modules/TasksModule'))
 const OutreachModule      = lazy(() => import('./modules/OutreachModule'))
+const ProspectingModule   = lazy(() => import('./modules/ProspectingModule'))
 const QualificationModule = lazy(() => import('./modules/QualificationModule'))
 const FieldModule         = lazy(() => import('./modules/FieldModule'))
 const DispatchModule      = lazy(() => import('./modules/DispatchModule'))
@@ -210,6 +211,7 @@ function AuthedApp({ session }) {
       case 'home':          return <HomeModule onNavigate={navigateToModule} />
       case 'tasks':         return <TasksModule {...navProps} />
       case 'outreach':      return <OutreachModule {...navProps} />
+      case 'prospecting':   return <ProspectingModule {...navProps} />
       case 'qualification': return <QualificationModule {...navProps} />
       case 'field':         return <FieldModule {...navProps} />
       case 'dispatch':      return <DispatchModule {...navProps} />
