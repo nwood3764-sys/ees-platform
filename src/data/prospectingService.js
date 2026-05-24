@@ -94,6 +94,10 @@ export async function fetchProspectingProperties({ includeEngaged = false } = {}
     lihtcProjectId:    r.property_lihtc_project_id || '',
     // Account
     account:           r.property_account_name || '—',
+    // Underlying FK id for the Account column — surfaces to the
+    // EditableListView so the Account lookup picker can write the
+    // chosen account back to property_account_id.
+    property_account_id: r.property_account_id || null,
     accountHudParticipantNumber: r.account_hud_participant_number || '',
     managingAccount:   r.property_managing_account_name || '',
     // Source data

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
+import { EditableListView } from '../components/EditableListView'
 import RecordDetail from '../components/RecordDetail'
 import { ProspectingMap } from '../components/ProspectingMap'
 import ProspectingFilterPanel, {
@@ -34,23 +35,29 @@ const SECTIONS = [
   { id: 'imports',    label: 'Imports'    },
 ]
 
+// Display columns for the Prospecting Properties list.
+// `columnName` indicates the DB column on the `properties` table that
+// the EditableListView should write to when the cell is edited. Cells
+// where `columnName` is omitted (or points to a column on a joined
+// table like property_source_data) are read-only — the editor service
+// only writes to columns on `tableName`, which is `properties` here.
 const PROP_COLS = [
-  { field:'id',                          label:'Record #',          type:'text',   sortable:true,  filterable:false },
-  { field:'name',                        label:'Property',          type:'text',   sortable:true,  filterable:true  },
-  { field:'hudPropertyId',               label:'HUD Property ID',   type:'text',   sortable:true,  filterable:true  },
-  { field:'lihtcProjectId',              label:'LIHTC Project ID',  type:'text',   sortable:true,  filterable:true  },
-  { field:'account',                     label:'Account',           type:'text',   sortable:true,  filterable:true  },
-  { field:'accountHudParticipantNumber', label:'HUD Participant #', type:'text',   sortable:true,  filterable:true  },
-  { field:'state',                       label:'State',             type:'select', sortable:true,  filterable:true,
+  { field:'id',                          label:'Record #',            type:'text',   sortable:true,  filterable:false, editable:false },
+  { field:'name',                        label:'Property',            type:'text',   sortable:true,  filterable:true,  columnName:'property_name'         },
+  { field:'hudPropertyId',               label:'HUD Property ID',     type:'text',   sortable:true,  filterable:true,  columnName:'property_hud_property_id' },
+  { field:'lihtcProjectId',              label:'LIHTC Project ID',    type:'text',   sortable:true,  filterable:true,  columnName:'property_lihtc_project_id' },
+  { field:'account',                     label:'Account',             type:'text',   sortable:true,  filterable:true,  columnName:'property_account_id'   },
+  { field:'accountHudParticipantNumber', label:'HUD Participant #',   type:'text',   sortable:true,  filterable:true,  editable:false },  // lives on accounts, not properties
+  { field:'state',                       label:'State',               type:'select', sortable:true,  filterable:true,  columnName:'property_state',
     options:['WI','NC','CO','MI','IN','TX','GA'] },
-  { field:'units',                       label:'Units',             type:'number', sortable:true,  filterable:true  },
-  { field:'buildings',                   label:'Buildings',         type:'number', sortable:true,  filterable:true  },
-  { field:'yearBuilt',                   label:'Year Built',        type:'number', sortable:true,  filterable:true  },
-  { field:'subsidyType',                 label:'Subsidy Type',      type:'text',   sortable:true,  filterable:true  },
-  { field:'hudContractNumber',           label:'HUD Contract #',    type:'text',   sortable:true,  filterable:true  },
-  { field:'contractExpiration',          label:'Contract Expiration', type:'date', sortable:true,  filterable:true  },
-  { field:'energyBurden',                label:'Energy Burden',     type:'number', sortable:true,  filterable:true  },
-  { field:'hasDisasterExposure',         label:'Disaster Exposure', type:'select', sortable:true,  filterable:true,
+  { field:'units',                       label:'Units',               type:'number', sortable:true,  filterable:true,  columnName:'property_total_units' },
+  { field:'buildings',                   label:'Buildings',           type:'number', sortable:true,  filterable:true,  columnName:'property_total_buildings' },
+  { field:'yearBuilt',                   label:'Year Built',          type:'number', sortable:true,  filterable:true,  columnName:'property_year_built'  },
+  { field:'subsidyType',                 label:'Subsidy Type',        type:'text',   sortable:true,  filterable:true,  editable:false },  // on property_source_data
+  { field:'hudContractNumber',           label:'HUD Contract #',      type:'text',   sortable:true,  filterable:true,  editable:false },
+  { field:'contractExpiration',          label:'Contract Expiration', type:'date',   sortable:true,  filterable:true,  editable:false },
+  { field:'energyBurden',                label:'Energy Burden',       type:'number', sortable:true,  filterable:true,  editable:false },
+  { field:'hasDisasterExposure',         label:'Disaster Exposure',   type:'select', sortable:true,  filterable:true,  editable:false,
     options:['Yes','No'] },
 ]
 
@@ -136,6 +143,13 @@ function ProspectingHome({ counts, loading }) {
 }
 
 function PropertiesListSection({ loading, error, properties, onRefresh, onRetry, onOpenRecord }) {
+  // 'view' = the standard rich ListView (system views, filter dropdowns,
+  //          column filters). Read-only.
+  // 'edit' = the Salesforce-style EditableListView (row checkboxes,
+  //          inline cell editing, bulk-edit toolbar). No system views,
+  //          but the user can still sort by clicking a column header.
+  const [mode, setMode] = useState('view')
+
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} onRetry={onRetry} />
 
@@ -146,7 +160,21 @@ function PropertiesListSection({ loading, error, properties, onRefresh, onRetry,
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', padding:'10px 20px 0', gap:8 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 20px 0', gap:8 }}>
+        {/* Mode toggle */}
+        <div style={{ display:'flex', background:C.card, border:`1px solid ${C.border}`, borderRadius:6, overflow:'hidden' }}>
+          <button onClick={() => setMode('view')}
+            style={modeToggleStyle(mode === 'view')}>
+            <Icon path="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 100 6 3 3 0 000-6z" size={12} color={mode === 'view' ? '#fff' : C.textSecondary} />
+            View
+          </button>
+          <button onClick={() => setMode('edit')}
+            style={modeToggleStyle(mode === 'edit')}>
+            <Icon path="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" size={12} color={mode === 'edit' ? '#fff' : C.textSecondary} />
+            Edit
+          </button>
+        </div>
+
         <button
           onClick={handleExport}
           disabled={!properties.length}
@@ -164,19 +192,39 @@ function PropertiesListSection({ loading, error, properties, onRefresh, onRetry,
         </button>
       </div>
       <div style={{ flex:1, overflow:'hidden' }}>
-        <ListView
-          data={properties}
-          columns={PROP_COLS}
-          systemViews={PROP_VIEWS}
-          defaultViewId="PV-01"
-          newLabel={null}
-          onNew={null}
-          onOpenRecord={onOpenRecord}
-          onRefresh={onRefresh}
-        />
+        {mode === 'view' ? (
+          <ListView
+            data={properties}
+            columns={PROP_COLS}
+            systemViews={PROP_VIEWS}
+            defaultViewId="PV-01"
+            newLabel={null}
+            onNew={null}
+            onOpenRecord={onOpenRecord}
+            onRefresh={onRefresh}
+          />
+        ) : (
+          <EditableListView
+            tableName="properties"
+            data={properties}
+            columns={PROP_COLS}
+            onOpenRecord={onOpenRecord}
+            onRecordsUpdated={onRefresh}
+          />
+        )}
       </div>
     </div>
   )
+}
+
+function modeToggleStyle(active) {
+  return {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '5px 12px', fontSize: 12, fontWeight: 600,
+    border: 'none', cursor: 'pointer',
+    background: active ? '#3ecf8e' : 'transparent',
+    color:      active ? '#fff'    : C.textSecondary,
+  }
 }
 
 function MapSection({ loading, error, properties, onRetry, onOpenProperty }) {
