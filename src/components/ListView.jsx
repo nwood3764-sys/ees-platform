@@ -4,6 +4,12 @@ import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
 import { usePullToRefresh } from '../lib/usePullToRefresh';
 import { Badge, Icon, TableRow, ProgramTag } from './UI';
+import {
+  getEditableFieldsForTable,
+  getPicklistOptions,
+  searchLookupOptions,
+  bulkUpdateRecords,
+} from '../data/fieldMetadataService';
 
 // ── Filter Dropdown ──────────────────────────────────────────────────────────
 function FilterDropdown({ col, activeFilters, onApply, onClose }) {
@@ -632,7 +638,21 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClos
 }
 
 // ── Main ListView ────────────────────────────────────────────────────────────
-export function ListView({ data, columns, systemViews, defaultViewId, newLabel, renderCell, renderDetail, onNew, onOpenRecord, onRefresh }) {
+// Opt-in edit features (Salesforce-style):
+//   tableName        — when provided, enables row checkboxes, inline cell
+//                      edit via double-click, and the bulk-edit toolbar.
+//                      The string is the LEAP table to write back to via
+//                      the bulk_update_records RPC. When omitted, the
+//                      ListView renders exactly as it did before — pure
+//                      read-only, all existing call sites unchanged.
+//   onRecordsUpdated — fires after any successful inline or bulk edit
+//                      with the RPC summary. Parent should reload its
+//                      data on this callback so the table reflects the
+//                      new server state.
+export function ListView({ data, columns, systemViews, defaultViewId, newLabel,
+                           renderCell, renderDetail, onNew, onOpenRecord, onRefresh,
+                           tableName, onRecordsUpdated }) {
+  const editMode = Boolean(tableName);
   const firstView = systemViews.find(v => v.id === defaultViewId) || systemViews[0];
   const isMobile = useIsMobile();
 
@@ -661,6 +681,41 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
   // Mobile-only: whether the filter bottom sheet is open.
   const [showFilterSheet, setShowFilterSheet] = useState(false);
 
+  // ── Edit mode state (active only when tableName is provided) ────────────
+  // fieldMeta: Map<columnName, meta> built from describe_object_columns
+  // Selected row uuids (keyed by row._id; falls back to row.id for legacy
+  // call sites that don't surface an _id).
+  // editingCell: { rowId, columnName } | null
+  // savingCell:  { rowId, columnName } | null  (cell is mid-RPC)
+  // editError:   { rowId, columnName, message } | null
+  // overlay:     Map<`${rowId}::${columnName}`, value>  optimistic-write
+  //              cache. Cleared whenever the parent reloads `data`.
+  const [fieldMeta, setFieldMeta]       = useState(null);
+  const [fieldMetaErr, setFieldMetaErr] = useState(null);
+  const [selected, setSelected]         = useState(() => new Set());
+  const [editingCell, setEditingCell]   = useState(null);
+  const [savingCell, setSavingCell]     = useState(null);
+  const [editError, setEditError]       = useState(null);
+  const [overlay, setOverlay]           = useState(new Map());
+  const [bulkPanelOpen, setBulkPanelOpen] = useState(false);
+
+  // Load field metadata once per tableName. Stays null in non-edit mode.
+  useEffect(() => {
+    if (!editMode) return;
+    let cancelled = false;
+    setFieldMeta(null); setFieldMetaErr(null);
+    getEditableFieldsForTable(tableName)
+      .then(rows => {
+        if (cancelled) return;
+        setFieldMeta(new Map(rows.map(r => [r.columnName, r])));
+      })
+      .catch(e => { if (!cancelled) setFieldMetaErr(e); });
+    return () => { cancelled = true; };
+  }, [tableName, editMode]);
+
+  // Drop stale overlay entries when parent reloads data.
+  useEffect(() => { if (editMode) setOverlay(new Map()); }, [data, editMode]);
+
   const applyView = v => {
     setActiveViewId(v.id);
     setActiveFilters(v.filters || []);
@@ -683,6 +738,63 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
     setActiveViewId(v.id);
     setIsDirty(false);
     setShowSave(false);
+  };
+
+  // ── Selection helpers (edit mode only) ──────────────────────────────────
+  // We key on row._id (the underlying uuid) and fall back to row.id since
+  // some legacy data shapes only have id. The bulk_update_records RPC
+  // requires a real uuid — rows without _id can't be selected at all.
+  const rowKey = (r) => r._id || (typeof r.id === 'string' && r.id.length === 36 ? r.id : null);
+  const toggleRow = (r) => {
+    const k = rowKey(r); if (!k) return;
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  };
+  const toggleAllVisible = (visibleRows) => {
+    const keys = visibleRows.map(rowKey).filter(Boolean);
+    setSelected(prev => {
+      const allSelected = keys.length > 0 && keys.every(k => prev.has(k));
+      const next = new Set(prev);
+      if (allSelected) { for (const k of keys) next.delete(k); }
+      else             { for (const k of keys) next.add(k); }
+      return next;
+    });
+  };
+
+  // ── Inline cell save (edit mode only) ───────────────────────────────────
+  const saveSingleCell = async (rowId, columnName, newValue) => {
+    setSavingCell({ rowId, columnName });
+    setEditError(null);
+    try {
+      const result = await bulkUpdateRecords(tableName, [rowId], { [columnName]: newValue });
+      if (result.records_errored > 0) {
+        const msg = (result.errors?.[0]?.error) || 'Update failed';
+        setEditError({ rowId, columnName, message: msg });
+        return;
+      }
+      setOverlay(prev => {
+        const next = new Map(prev);
+        next.set(`${rowId}::${columnName}`, newValue);
+        return next;
+      });
+      setEditingCell(null);
+      if (onRecordsUpdated) onRecordsUpdated(result);
+    } catch (e) {
+      setEditError({ rowId, columnName, message: e.message || String(e) });
+    } finally {
+      setSavingCell(null);
+    }
+  };
+
+  // Returns the value to display for (row, col) — honoring optimistic
+  // overlay first. Used both for the cell's read state and as the seed
+  // value when the user starts editing.
+  const overlayValue = (rowId, columnName) => {
+    const k = `${rowId}::${columnName}`;
+    return overlay.has(k) ? overlay.get(k) : undefined;
   };
 
   const filtered = useMemo(() => {
@@ -1125,6 +1237,36 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
         </div>
       </div>
 
+      {/* Bulk-edit toolbar (edit mode only, shown when 1+ rows selected) */}
+      {editMode && selected.size > 0 && (
+        <div style={{
+          padding: '8px 24px', display: 'flex', alignItems: 'center', gap: 12,
+          background: '#e8f8f2', borderBottom: '1px solid #2aab72',
+        }}>
+          <div style={{ fontSize: 12.5, color: '#1a7a4e', fontWeight: 600 }}>
+            {selected.size.toLocaleString()} selected
+          </div>
+          <button onClick={() => setBulkPanelOpen(true)}
+            style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 600,
+                     background: '#3ecf8e', border: '1px solid #2aab72', borderRadius: 6,
+                     color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon path="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" size={13} color="#fff" />
+            Edit selected
+          </button>
+          <button onClick={() => setSelected(new Set())}
+            style={{ padding: '6px 12px', fontSize: 12.5, fontWeight: 500,
+                     background: 'transparent', border: '1px solid #2aab72', borderRadius: 6,
+                     color: '#1a7a4e', cursor: 'pointer' }}>
+            Clear selection
+          </button>
+          {fieldMetaErr && (
+            <div style={{ fontSize: 11.5, color: '#a32626', marginLeft: 'auto' }}>
+              Field metadata failed to load: {fieldMetaErr.message}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Table + detail panel */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         <div style={{ flex: 1, overflow: 'auto', padding: '14px 24px 24px' }}>
@@ -1132,6 +1274,22 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr>
+                  {editMode && (
+                    <th style={{
+                      width: 36, padding: '9px 0 9px 14px',
+                      borderBottom: `1px solid ${C.border}`,
+                      background: C.card, position: 'sticky', top: 0, zIndex: 4,
+                    }}>
+                      <ListCheckbox
+                        checked={filtered.length > 0 && filtered.every(r => selected.has(rowKey(r)))}
+                        indeterminate={
+                          filtered.some(r => selected.has(rowKey(r))) &&
+                          !filtered.every(r => selected.has(rowKey(r)))
+                        }
+                        onChange={() => toggleAllVisible(filtered)}
+                      />
+                    </th>
+                  )}
                   {columns.map(col => (
                     <SortableHeader key={col.field} col={col} sortField={sortField} sortDir={sortDir} onSort={handleSort}
                       activeFilters={activeFilters} onFilterApply={handleFilterApply} openFilterCol={openFilterCol} setOpenFilterCol={setOpenFilterCol} />
@@ -1140,23 +1298,70 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
-                  <tr><td colSpan={columns.length} style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+                  <tr><td colSpan={columns.length + (editMode ? 1 : 0)} style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
                     {data.length === 0
                       ? <>No {newLabel ? newLabel.toLowerCase() + 's' : 'records'} yet. <span onClick={onNew} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Create one</span></>
                       : <>No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span></>
                     }
                   </td></tr>
-                ) : filtered.map(r => (
-                  <TableRow key={r.id} onClick={() => setSelectedRow(selectedRow?.id === r.id ? null : r)} onDoubleClick={() => onOpenRecord && onOpenRecord(r)} selected={selectedRow?.id === r.id}>
-                    {columns.map(col => {
-                      if (renderCell) {
-                        const custom = renderCell(col, r);
-                        if (custom !== null && custom !== undefined) return custom;
-                      }
-                      return defaultCell(col, r);
-                    })}
-                  </TableRow>
-                ))}
+                ) : filtered.map(r => {
+                  const key = rowKey(r);
+                  const isSelected = key && selected.has(key);
+                  return (
+                    <TableRow key={r.id}
+                              onClick={() => setSelectedRow(selectedRow?.id === r.id ? null : r)}
+                              onDoubleClick={() => !editMode && onOpenRecord && onOpenRecord(r)}
+                              selected={selectedRow?.id === r.id || isSelected}>
+                      {editMode && (
+                        <td style={{
+                          width: 36, padding: '11px 0 11px 14px',
+                          borderBottom: `1px solid ${C.border}`,
+                          background: isSelected ? '#f0faf6' : undefined,
+                        }} onClick={(e) => { e.stopPropagation(); toggleRow(r); }}>
+                          <ListCheckbox checked={isSelected} onChange={() => toggleRow(r)} />
+                        </td>
+                      )}
+                      {columns.map(col => {
+                        // Edit-mode wrapping: when this column is editable on
+                        // the underlying table, replace the cell with an
+                        // EditableCell that intercepts double-click.
+                        if (editMode && key) {
+                          const columnName = col.columnName;
+                          const meta       = columnName ? fieldMeta?.get(columnName) : null;
+                          const cellEditable = col.editable !== false && columnName && meta?.isEditable === true;
+                          const isEditing = editingCell?.rowId === key && editingCell?.columnName === columnName;
+                          const isSaving  = savingCell?.rowId  === key && savingCell?.columnName  === columnName;
+                          const errorHere = editError?.rowId   === key && editError?.columnName   === columnName
+                                              ? editError.message : null;
+                          if (cellEditable || isSaving || errorHere) {
+                            const ov = overlayValue(key, columnName);
+                            // Render the underlying-display cell with a wrapper
+                            // <td> that handles double-click + error display.
+                            const baseCell = (renderCell ? renderCell(col, r) : null) || defaultCell(col, r);
+                            return (
+                              <EditableCellTd
+                                key={col.field}
+                                col={col} row={r} columnName={columnName} meta={meta}
+                                baseCell={baseCell}
+                                isEditing={isEditing} isSaving={isSaving} errorHere={errorHere}
+                                overlayVal={ov}
+                                onStartEdit={() => { setEditingCell({ rowId: key, columnName }); setEditError(null); }}
+                                onCancel={() => { setEditingCell(null); setEditError(null); }}
+                                onSave={(newValue) => saveSingleCell(key, columnName, newValue)}
+                              />
+                            );
+                          }
+                          // Non-editable in edit mode → fall through to default
+                        }
+                        if (renderCell) {
+                          const custom = renderCell(col, r);
+                          if (custom !== null && custom !== undefined) return custom;
+                        }
+                        return defaultCell(col, r);
+                      })}
+                    </TableRow>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1200,6 +1405,433 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel, 
       </div>
 
       {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => setShowSave(false)} />}
+      {editMode && bulkPanelOpen && (
+        <BulkEditModal
+          tableName={tableName}
+          fieldMeta={fieldMeta}
+          columns={columns}
+          recordIds={[...selected]}
+          onClose={() => setBulkPanelOpen(false)}
+          onApplied={(summary) => {
+            setBulkPanelOpen(false);
+            setSelected(new Set());
+            if (onRecordsUpdated) onRecordsUpdated(summary);
+          }}
+        />
+      )}
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit-mode helpers (active only when ListView gets a `tableName` prop)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ListCheckbox({ checked, indeterminate, onChange }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = Boolean(indeterminate);
+  }, [indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={!!checked}
+      onChange={(e) => { e.stopPropagation(); onChange?.(); }}
+      onClick={(e) => e.stopPropagation()}
+      style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#3ecf8e' }}
+    />
+  );
+}
+
+// EditableCellTd wraps a single <td> for an edit-mode-eligible column.
+// In view state it renders the existing `baseCell` (the result of the
+// caller's renderCell or the ListView's defaultCell). On double-click it
+// flips into edit state, replacing the cell contents with the right
+// editor for the field's data type.
+function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSaving, errorHere, overlayVal, onStartEdit, onCancel, onSave }) {
+  // If we have an overlay value (just-saved) and the baseCell hasn't
+  // caught up yet (parent hasn't reloaded), render a small chip over the
+  // baseCell instead so the user sees the new value immediately.
+  if (isEditing) {
+    return (
+      <td style={{
+        padding: 0,
+        borderBottom: `1px solid ${C.border}`,
+        background: '#f0faf6',
+        position: 'relative',
+      }}>
+        <div style={{ padding: '4px 6px' }}>
+          <CellEditor
+            meta={meta}
+            initialValue={overlayVal !== undefined ? overlayVal : row[col.field]}
+            onCancel={onCancel}
+            onSave={onSave}
+          />
+        </div>
+      </td>
+    );
+  }
+
+  return (
+    <td style={{
+      padding: 0,
+      borderBottom: `1px solid ${C.border}`,
+      cursor: 'cell',
+      position: 'relative',
+      background: errorHere ? '#fde8e8' : (overlayVal !== undefined ? '#f0faf6' : undefined),
+    }}
+        onDoubleClick={(e) => { e.stopPropagation(); if (!isSaving) onStartEdit(); }}
+        title="Double-click to edit">
+      {isSaving ? (
+        <div style={{ padding: '11px 12px', color: C.textMuted, fontStyle: 'italic', fontSize: 12 }}>Saving…</div>
+      ) : (
+        // Render the baseCell contents inline. baseCell is already a <td>
+        // produced by defaultCell/renderCell — we strip its outer td by
+        // rendering its `children` inside this td instead. React lets us
+        // grab .props.children directly on the element.
+        <div style={{ padding: '11px 12px', fontSize: 12, color: C.textPrimary }}>
+          {(baseCell?.props?.children !== undefined) ? baseCell.props.children : baseCell}
+        </div>
+      )}
+      {errorHere && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, zIndex: 10,
+          background: '#a32626', color: '#fff', fontSize: 11,
+          padding: '4px 8px', borderRadius: '0 0 4px 4px', maxWidth: 280,
+        }}>{errorHere}</div>
+      )}
+    </td>
+  );
+}
+
+// CellEditor: the in-place input for whatever type the field is.
+function CellEditor({ meta, initialValue, onSave, onCancel }) {
+  const [value, setValue] = useState(initialValue ?? '');
+  const editorType = meta?.editorType || 'text';
+
+  const commit = () => {
+    let toSend = value;
+    if (editorType === 'number' && value !== '' && value !== null) {
+      const n = Number(value);
+      if (Number.isNaN(n)) { onCancel(); return; }
+      toSend = n;
+    }
+    if (value === '' || value === null) toSend = null;
+    onSave(toSend);
+  };
+  const onKey = (e) => {
+    if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+  };
+
+  if (editorType === 'boolean') {
+    return (
+      <select autoFocus value={String(value ?? '')} onBlur={commit} onKeyDown={onKey}
+        onChange={(e) => setValue(e.target.value === 'true')}
+        style={inlineEditorStyle}>
+        <option value="">—</option><option value="true">Yes</option><option value="false">No</option>
+      </select>
+    );
+  }
+  if (editorType === 'picklist' && meta?.picklistObject && meta?.picklistField) {
+    return <PicklistInlineEditor meta={meta} value={value} setValue={setValue} commit={commit} onCancel={onCancel} />;
+  }
+  if (editorType === 'lookup' && meta?.referencesTable) {
+    return <LookupInlineEditor meta={meta} value={value} setValue={setValue} commit={commit} onCancel={onCancel} />;
+  }
+  if (editorType === 'date') {
+    return <input autoFocus type="date" value={value || ''} onChange={(e) => setValue(e.target.value)}
+                  onBlur={commit} onKeyDown={onKey} style={inlineEditorStyle} />;
+  }
+  if (editorType === 'datetime') {
+    return <input autoFocus type="datetime-local" value={(value || '').slice(0,16)}
+                  onChange={(e) => setValue(e.target.value)} onBlur={commit} onKeyDown={onKey} style={inlineEditorStyle} />;
+  }
+  if (editorType === 'number') {
+    return <input autoFocus type="number" value={value ?? ''} onChange={(e) => setValue(e.target.value)}
+                  onBlur={commit} onKeyDown={onKey} style={inlineEditorStyle} />;
+  }
+  return <input autoFocus type="text" value={value ?? ''} onChange={(e) => setValue(e.target.value)}
+                onBlur={commit} onKeyDown={onKey} style={inlineEditorStyle} />;
+}
+
+function PicklistInlineEditor({ meta, value, setValue, commit, onCancel }) {
+  const [options, setOptions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    getPicklistOptions(meta.picklistObject, meta.picklistField)
+      .then(o => { if (!cancelled) { setOptions(o); setLoading(false); } })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [meta.picklistObject, meta.picklistField]);
+  return (
+    <select autoFocus value={value || ''} onBlur={commit}
+      onChange={(e) => setValue(e.target.value || null)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+      }}
+      style={inlineEditorStyle}>
+      <option value="">—</option>
+      {loading && <option disabled>Loading…</option>}
+      {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+    </select>
+  );
+}
+
+function LookupInlineEditor({ meta, value, setValue, commit, onCancel }) {
+  const [query, setQuery]     = useState('');
+  const [options, setOptions] = useState([]);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      searchLookupOptions(meta.referencesTable, query, { limit: 20 })
+        .then(setOptions).catch(() => setOptions([]));
+    }, 180);
+    return () => clearTimeout(t);
+  }, [query, meta.referencesTable]);
+  return (
+    <div style={{ position: 'relative', width: '100%' }}>
+      <input autoFocus type="text" value={query}
+        placeholder={`Search ${meta.referencesTable}…`}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+          if (e.key === 'Enter' && options[0]) {
+            e.preventDefault();
+            setValue(options[0].id);
+            setTimeout(() => commit(), 0);
+          }
+        }}
+        style={inlineEditorStyle}
+      />
+      {options.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20,
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
+          maxHeight: 200, overflowY: 'auto', boxShadow: '0 6px 18px rgba(7,17,31,0.2)',
+        }}>
+          {options.map(o => (
+            <div key={o.id}
+                 onMouseDown={(e) => { e.preventDefault(); setValue(o.id); setTimeout(() => commit(), 0); }}
+                 style={{ padding: '7px 10px', fontSize: 12, cursor: 'pointer', borderBottom: `1px solid ${C.border}` }}>
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BulkEditModal({ tableName, fieldMeta, columns, recordIds, onClose, onApplied }) {
+  const editableFields = useMemo(() => {
+    if (!fieldMeta) return [];
+    const out = [];
+    for (const [columnName, meta] of fieldMeta.entries()) {
+      if (!meta.isEditable) continue;
+      const colDescriptor = columns.find(c => c.columnName === columnName);
+      out.push({ columnName, label: colDescriptor?.label || prettifyColumnName(columnName), meta });
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }, [fieldMeta, columns]);
+
+  const [field, setField] = useState('');
+  const [value, setValue] = useState('');
+  const [working, setWorking] = useState(false);
+  const [result, setResult]   = useState(null);
+  const [error, setError]     = useState(null);
+  const selectedMeta = field ? fieldMeta.get(field) : null;
+
+  const apply = async () => {
+    if (!field) return;
+    setWorking(true); setError(null); setResult(null);
+    try {
+      const sendValue = value === '' || value === null ? null
+                       : selectedMeta?.editorType === 'number'  ? Number(value)
+                       : selectedMeta?.editorType === 'boolean' ? (value === 'true')
+                       : value;
+      const summary = await bulkUpdateRecords(tableName, recordIds, { [field]: sendValue });
+      setResult(summary);
+      if (summary.records_errored === 0 && onApplied) onApplied(summary);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally { setWorking(false); }
+  };
+
+  return (
+    <div onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.55)', zIndex: 9000,
+               display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ background: C.card, borderRadius: 10, width: 'min(560px, 100%)', maxHeight: '90vh',
+                 display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                 boxShadow: '0 12px 40px rgba(7,17,31,0.4)' }}>
+        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${C.border}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>
+            Edit field across {recordIds.length.toLocaleString()} record{recordIds.length === 1 ? '' : 's'}
+          </div>
+          <button onClick={onClose}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: C.textMuted, fontSize: 18, lineHeight: 1 }}>✕</button>
+        </div>
+        <div style={{ padding: '14px 18px', overflowY: 'auto', flex: 1 }}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={bulkLabel}>Field</label>
+            <select value={field} onChange={(e) => { setField(e.target.value); setValue(''); }} style={bulkInput}>
+              <option value="">— Select a field —</option>
+              {editableFields.map(f => (
+                <option key={f.columnName} value={f.columnName}>{f.label} ({f.meta.editorType})</option>
+              ))}
+            </select>
+          </div>
+          {field && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={bulkLabel}>New value</label>
+              <BulkValueEditor meta={selectedMeta} value={value} setValue={setValue} />
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                Leave blank to clear the field on all selected records.
+              </div>
+            </div>
+          )}
+          {error && (
+            <div style={{ padding: '10px 12px', background: '#fde8e8', color: '#a32626', fontSize: 12, borderRadius: 6, marginBottom: 12 }}>
+              {error}
+            </div>
+          )}
+          {result && (
+            <div style={{ padding: '12px 14px',
+                          background: result.records_errored > 0 ? '#fef3e7' : '#e8f8f2',
+                          color:      result.records_errored > 0 ? '#a35a18' : '#1a7a4e',
+                          fontSize: 12.5, borderRadius: 6, marginBottom: 12 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                {result.records_updated} updated, {result.records_errored} errored, of {result.records_total} total
+              </div>
+              {Array.isArray(result.errors) && result.errors.length > 0 && (
+                <details>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                    {result.errors.length} error{result.errors.length === 1 ? '' : 's'}
+                  </summary>
+                  <pre style={{ fontSize: 10.5, fontFamily: 'JetBrains Mono, monospace', marginTop: 6, whiteSpace: 'pre-wrap', maxHeight: 140, overflow: 'auto' }}>
+                    {JSON.stringify(result.errors, null, 2)}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+        <div style={{ padding: '12px 18px', borderTop: `1px solid ${C.border}`,
+                      display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={bulkSecondaryBtn}>Close</button>
+          <button onClick={apply} disabled={!field || working}
+            style={{ ...bulkPrimaryBtn,
+                     background: (!field || working) ? C.border : '#3ecf8e',
+                     cursor: (!field || working) ? 'not-allowed' : 'pointer' }}>
+            {working ? 'Applying…' : 'Apply'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BulkValueEditor({ meta, value, setValue }) {
+  if (!meta) return null;
+  if (meta.editorType === 'boolean') {
+    return (
+      <select value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput}>
+        <option value="">—</option><option value="true">Yes</option><option value="false">No</option>
+      </select>
+    );
+  }
+  if (meta.editorType === 'picklist') return <BulkPicklist meta={meta} value={value} setValue={setValue} />;
+  if (meta.editorType === 'lookup')   return <BulkLookup meta={meta} value={value} setValue={setValue} />;
+  if (meta.editorType === 'date')     return <input type="date" value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput} />;
+  if (meta.editorType === 'datetime') return <input type="datetime-local" value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput} />;
+  if (meta.editorType === 'number')   return <input type="number" value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput} />;
+  return <input type="text" value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput} />;
+}
+
+function BulkPicklist({ meta, value, setValue }) {
+  const [options, setOptions] = useState([]);
+  useEffect(() => {
+    getPicklistOptions(meta.picklistObject, meta.picklistField).then(setOptions).catch(() => setOptions([]));
+  }, [meta.picklistObject, meta.picklistField]);
+  return (
+    <select value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput}>
+      <option value="">—</option>
+      {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+    </select>
+  );
+}
+
+function BulkLookup({ meta, value, setValue }) {
+  const [query, setQuery] = useState('');
+  const [opts, setOpts]   = useState([]);
+  const [picked, setPicked] = useState(null);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      searchLookupOptions(meta.referencesTable, query, { limit: 20 })
+        .then(setOpts).catch(() => setOpts([]));
+    }, 180);
+    return () => clearTimeout(t);
+  }, [query, meta.referencesTable]);
+  if (picked) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, padding: '8px 10px', background: '#e8f8f2', border: '1px solid #2aab72', borderRadius: 6, fontSize: 12, color: '#1a7a4e' }}>
+          {picked.label}
+        </div>
+        <button onClick={() => { setPicked(null); setValue(''); }}
+          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: C.textMuted, fontSize: 14, padding: 4 }}>✕</button>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <input type="text" value={query} placeholder={`Search ${meta.referencesTable}…`}
+        onChange={(e) => setQuery(e.target.value)} style={bulkInput} />
+      {opts.length > 0 && (
+        <div style={{ marginTop: 4, maxHeight: 180, overflowY: 'auto',
+                      border: `1px solid ${C.border}`, borderRadius: 6, background: C.page }}>
+          {opts.map(o => (
+            <div key={o.id} onClick={() => { setPicked(o); setValue(o.id); setQuery(''); }}
+              style={{ padding: '7px 10px', fontSize: 12, cursor: 'pointer', borderBottom: `1px solid ${C.border}` }}>
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function prettifyColumnName(s) {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+const inlineEditorStyle = {
+  width: '100%', padding: '5px 8px', fontSize: 12,
+  border: '1.5px solid #2aab72', borderRadius: 4,
+  background: '#fff', color: C.textPrimary, outline: 'none',
+};
+const bulkLabel = {
+  fontSize: 11, color: C.textMuted, fontWeight: 500, display: 'block', marginBottom: 4,
+  textTransform: 'uppercase', letterSpacing: 0.3,
+};
+const bulkInput = {
+  width: '100%', padding: '8px 10px', fontSize: 13,
+  border: `1px solid ${C.border}`, borderRadius: 6,
+  background: C.card, color: C.textPrimary,
+};
+const bulkPrimaryBtn = {
+  padding: '8px 16px', fontSize: 12.5, fontWeight: 600,
+  color: '#fff', border: 'none', borderRadius: 6,
+};
+const bulkSecondaryBtn = {
+  padding: '8px 14px', fontSize: 12.5, fontWeight: 500,
+  background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
+  color: C.textSecondary, cursor: 'pointer',
+};
