@@ -3,6 +3,7 @@ import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import HelpIcon from '../components/help/HelpIcon'
 import { ProspectingMap } from '../components/ProspectingMap'
 import ProspectingFilterPanel, {
   EMPTY_FILTERS,
@@ -639,6 +640,17 @@ export default function ProspectingModule({
         <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
           <span style={{ color:C.textMuted }}>Prospecting</span><span style={{ color:C.textMuted }}>/</span>
           <span style={{ color:C.textPrimary, fontWeight:500 }}>{SECTIONS.find(s => s.id===sec)?.label}</span>
+          {/* Per-section help: anchored to the route the current section
+             lives at. Falls back to the module overview when the user is
+             on home. */}
+          <HelpIcon
+            anchors={[
+              { type:'route', route:`/m/prospecting/${sec}` },
+              { type:'route', route:'/m/prospecting' },
+              { type:'concept', concept:'prospecting' },
+            ]}
+            title={`Prospecting — ${SECTIONS.find(s => s.id===sec)?.label || ''}`}
+          />
         </div>
       </div>
 

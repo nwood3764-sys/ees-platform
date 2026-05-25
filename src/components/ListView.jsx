@@ -765,6 +765,19 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel,
   };
 
   // ── Inline cell save (edit mode only) ───────────────────────────────────
+  //
+  // Single-cell saves are intentionally LOCAL-ONLY for performance. When
+  // a single cell saves successfully the new value lives in the
+  // `overlay` map indefinitely for the lifetime of this list mount — we
+  // do NOT call onRecordsUpdated, which would force the parent to
+  // re-fetch the entire dataset (6,781 properties + counts + batches
+  // takes seconds). The next time the user navigates away and back, or
+  // pulls to refresh, the parent reloads naturally and the overlay
+  // gets discarded.
+  //
+  // Bulk edits DO trigger onRecordsUpdated because they touch enough
+  // rows that the parent's source-of-truth view (counts, related
+  // derivations, etc.) is worth refreshing.
   const saveSingleCell = async (rowId, columnName, newValue) => {
     setSavingCell({ rowId, columnName });
     setEditError(null);
@@ -775,13 +788,16 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel,
         setEditError({ rowId, columnName, message: msg });
         return;
       }
+      // Persist the new value in the local overlay. This is the
+      // authoritative display until the parent reloads on its own.
       setOverlay(prev => {
         const next = new Map(prev);
         next.set(`${rowId}::${columnName}`, newValue);
         return next;
       });
       setEditingCell(null);
-      if (onRecordsUpdated) onRecordsUpdated(result);
+      // NOTE: deliberately do NOT call onRecordsUpdated here. See block
+      // comment above. Bulk edits (BulkEditModal) still fire it.
     } catch (e) {
       setEditError({ rowId, columnName, message: e.message || String(e) });
     } finally {
@@ -821,6 +837,14 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel,
     }
     return d;
   }, [activeFilters, sortField, sortDir, globalSearch, data]);
+
+  // Render-time row cap. Filtering + sorting still run across the full
+  // dataset above, but only the first `renderLimit` rows actually mount.
+  // 200 is a comfortable scroll buffer for screens. The toolbar shows
+  // "Showing X of Y; load more" when the cap is hit.
+  const [renderLimit, setRenderLimit] = useState(200);
+  useEffect(() => { setRenderLimit(200); }, [activeFilters, sortField, sortDir, globalSearch, activeViewId]);
+  const visibleRows = useMemo(() => filtered.slice(0, renderLimit), [filtered, renderLimit]);
 
   const activeViewName = [...systemViews, ...personalViews].find(v => v.id === activeViewId)?.name || systemViews[0]?.name;
 
@@ -1088,7 +1112,7 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel,
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {filtered.map(r => {
+              {visibleRows.map(r => {
                 const statusVal = r.status || r.stage;
                 return (
                   <div
@@ -1304,7 +1328,7 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel,
                       : <>No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span></>
                     }
                   </td></tr>
-                ) : filtered.map(r => {
+                ) : visibleRows.map(r => {
                   const key = rowKey(r);
                   const isSelected = key && selected.has(key);
                   return (
@@ -1364,6 +1388,34 @@ export function ListView({ data, columns, systemViews, defaultViewId, newLabel,
                 })}
               </tbody>
             </table>
+            {filtered.length > visibleRows.length && (
+              <div style={{
+                padding: '12px 14px',
+                borderTop: `1px solid ${C.border}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+                fontSize: 12, color: C.textSecondary, background: C.card,
+              }}>
+                <span>
+                  Showing <b>{visibleRows.length.toLocaleString()}</b> of {filtered.length.toLocaleString()} records
+                </span>
+                <button onClick={() => setRenderLimit(n => n + 500)}
+                  style={{
+                    padding: '5px 12px', fontSize: 12, fontWeight: 600,
+                    background: C.page, border: `1px solid ${C.border}`, borderRadius: 5,
+                    color: C.textPrimary, cursor: 'pointer',
+                  }}>
+                  Load 500 more
+                </button>
+                <button onClick={() => setRenderLimit(filtered.length)}
+                  style={{
+                    padding: '5px 12px', fontSize: 12, fontWeight: 600,
+                    background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 5,
+                    color: C.textSecondary, cursor: 'pointer',
+                  }}>
+                  Show all {filtered.length.toLocaleString()}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
