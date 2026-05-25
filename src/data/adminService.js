@@ -1852,3 +1852,96 @@ export async function softDeleteStatusTransition(transitionId, reason) {
     .eq('id', transitionId)
   if (error) throw error
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Scheduling resources (= service_territory_members)
+//
+// In Salesforce Field Service this is the "Service Resource" object.
+// In LEAP it's a junction row pairing a Contact with a Service
+// Territory, plus an effective-date window and a primary-territory flag.
+// A Contact can sit on multiple territories (one as primary), which is
+// the field-team-on-call rotation across territories.
+// ───────────────────────────────────────────────────────────────────────────
+export async function fetchServiceTerritoryMembers() {
+  const data = await fetchAllPaged((from, to) =>
+    supabase
+      .from('service_territory_members')
+      .select(`
+        id, stm_record_number,
+        service_territory_id,
+        contact_id,
+        stm_is_primary,
+        stm_effective_start_date,
+        stm_effective_end_date,
+        stm_owner,
+        stm_updated_at,
+        service_territories:service_territory_id ( service_territory_name, service_territory_state ),
+        contacts:contact_id ( contact_name, contact_role )
+      `)
+      .eq('stm_is_deleted', false)
+      .order('stm_updated_at', { ascending: false })
+      .order('id',             { ascending: true })
+      .range(from, to)
+  )
+
+  return data.map(r => ({
+    id:        r.stm_record_number || r.id,
+    _id:       r.id,
+    name:      r.contacts?.contact_name || '—',
+    contact:   r.contacts?.contact_name || '—',
+    contactRole: r.contacts?.contact_role || '',
+    territory: r.service_territories?.service_territory_name || '—',
+    state:     r.service_territories?.service_territory_state || '',
+    primary:   r.stm_is_primary ? 'Yes' : 'No',
+    effectiveStart: r.stm_effective_start_date || '',
+    effectiveEnd:   r.stm_effective_end_date   || '',
+    // Underlying FK ids for the editable list view
+    contact_id:          r.contact_id,
+    service_territory_id:r.service_territory_id,
+    stm_is_primary:      r.stm_is_primary,
+    stm_effective_start_date: r.stm_effective_start_date,
+    stm_effective_end_date:   r.stm_effective_end_date,
+  }))
+}
+
+// Resource Absences — calendared time off / unavailability for a
+// scheduling resource. Drives dispatch board availability shading.
+export async function fetchResourceAbsences() {
+  const data = await fetchAllPaged((from, to) =>
+    supabase
+      .from('resource_absences')
+      .select(`
+        id, ra_record_number, ra_name,
+        contact_id,
+        ra_absence_type,
+        ra_start_datetime, ra_end_datetime,
+        ra_is_all_day, ra_notes,
+        ra_owner, ra_updated_at,
+        contacts:contact_id ( contact_name )
+      `)
+      .eq('ra_is_deleted', false)
+      .order('ra_start_datetime', { ascending: false, nullsFirst: false })
+      .order('id',                { ascending: true })
+      .range(from, to)
+  )
+
+  return data.map(r => ({
+    id:        r.ra_record_number || r.id,
+    _id:       r.id,
+    name:      r.ra_name || r.contacts?.contact_name || '—',
+    contact:   r.contacts?.contact_name || '—',
+    absenceType: r.ra_absence_type || '',
+    startDate: r.ra_start_datetime ? r.ra_start_datetime.slice(0,10) : '',
+    endDate:   r.ra_end_datetime   ? r.ra_end_datetime.slice(0,10)   : '',
+    allDay:    r.ra_is_all_day ? 'Yes' : 'No',
+    notes:     r.ra_notes || '',
+    // Underlying FK ids
+    contact_id: r.contact_id,
+    ra_name: r.ra_name,
+    ra_absence_type: r.ra_absence_type,
+    ra_start_datetime: r.ra_start_datetime,
+    ra_end_datetime: r.ra_end_datetime,
+    ra_is_all_day: r.ra_is_all_day,
+    ra_notes: r.ra_notes,
+  }))
+}

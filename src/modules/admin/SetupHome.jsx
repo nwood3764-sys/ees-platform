@@ -18,6 +18,8 @@ import {
   fetchPicklistValues, fetchAuditLog,
   fetchSavedListViews,
   fetchServiceTerritories,
+  fetchServiceTerritoryMembers,
+  fetchResourceAbsences,
   fetchDeletedRecords, fetchDeletedRecordsAcrossTables, restoreRecord, purgeRecord,
   fetchAdminHealthSummary,
   fetchAllPageLayouts,
@@ -470,6 +472,8 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'work_step_templates': return <NodePage title="Work Step Templates"   table="work_step_templates" fetcher={fetchWorkStepTemplates} columns={WST_COLS}            newLabel="Work Step Template" onOpenRecord={onOpenRecord} />
     case 'project_report_templates': return <NodePage title="Project Report Templates" table="project_report_templates" fetcher={fetchProjectReportTemplates} columns={PRT_COLS} newLabel="Project Report Template" onOpenRecord={onOpenRecord} />
     case 'service_territories': return <NodePage title="Service Territories"   table="service_territories" fetcher={fetchServiceTerritories} columns={ST_COLS}             newLabel="Service Territory" onOpenRecord={onOpenRecord} />
+    case 'service_territory_members': return <NodePage title="Scheduling Resources" table="service_territory_members" fetcher={fetchServiceTerritoryMembers} columns={STM_COLS} newLabel="Scheduling Resource" onOpenRecord={onOpenRecord} />
+    case 'resource_absences':   return <NodePage title="Resource Absences"     table="resource_absences"   fetcher={fetchResourceAbsences}   columns={RA_COLS}             newLabel="Resource Absence"  onOpenRecord={onOpenRecord} />
     case 'skills':              return <NodePage title="Skills"                  table="skills"                       fetcher={fetchSkills}                       columns={SKILL_COLS} newLabel="Skill"                       onOpenRecord={onOpenRecord} />
     case 'work_type_skill_requirements': return <NodePage title="Work Type Skill Requirements" table="work_type_skill_requirements" fetcher={fetchWorkTypeSkillRequirements} columns={WTSR_COLS}  newLabel="Skill Requirement"           onOpenRecord={onOpenRecord} />
     case 'audit_log':         return <AuditLogPane />
@@ -1360,6 +1364,36 @@ const ST_COLS = [
   { field: 'travelBufferMin', label: 'Travel Buffer (min)', type: 'text', sortable: true, filterable: false },
   { field: 'owner',           label: 'Owner',        type: 'text',   sortable: true, filterable: true },
   { field: 'updatedAt',       label: 'Updated',      type: 'text',   sortable: true, filterable: false },
+]
+
+// Scheduling Resources (= service_territory_members) — pairs a Contact
+// with a Service Territory plus an effective-date window and a
+// primary-territory flag. Salesforce Field Service equivalent: Service
+// Resource.
+const STM_COLS = [
+  { field: 'id',             label: 'Record #', type: 'text', sortable: true, filterable: false, editable: false },
+  { field: 'name',           label: 'Resource',  type: 'text',  sortable: true, filterable: true,  editable: false },  // display copy of contact name
+  { field: 'territory',      label: 'Territory', type: 'text',  sortable: true, filterable: true,  columnName: 'service_territory_id' },
+  { field: 'contact',        label: 'Contact',   type: 'text',  sortable: true, filterable: true,  columnName: 'contact_id' },
+  { field: 'contactRole',    label: 'Role',      type: 'text',  sortable: true, filterable: true,  editable: false },  // lives on contacts
+  { field: 'state',          label: 'State',     type: 'text',  sortable: true, filterable: true,  editable: false },  // lives on service_territories
+  { field: 'primary',        label: 'Primary',   type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'], columnName: 'stm_is_primary' },
+  { field: 'effectiveStart', label: 'Effective Start', type: 'date', sortable: true, filterable: true, columnName: 'stm_effective_start_date' },
+  { field: 'effectiveEnd',   label: 'Effective End',   type: 'date', sortable: true, filterable: true, columnName: 'stm_effective_end_date' },
+]
+
+// Resource Absences — calendared time off / unavailability. Drives
+// dispatch board availability shading and prevents auto-scheduling
+// against absent resources.
+const RA_COLS = [
+  { field: 'id',          label: 'Record #',    type: 'text',   sortable: true, filterable: false, editable: false },
+  { field: 'name',        label: 'Absence',     type: 'text',   sortable: true, filterable: true,  columnName: 'ra_name' },
+  { field: 'contact',     label: 'Resource',    type: 'text',   sortable: true, filterable: true,  columnName: 'contact_id' },
+  { field: 'absenceType', label: 'Type',        type: 'text',   sortable: true, filterable: true,  columnName: 'ra_absence_type' },
+  { field: 'startDate',   label: 'Start',       type: 'date',   sortable: true, filterable: true,  columnName: 'ra_start_datetime' },
+  { field: 'endDate',     label: 'End',         type: 'date',   sortable: true, filterable: true,  columnName: 'ra_end_datetime' },
+  { field: 'allDay',      label: 'All Day',     type: 'select', sortable: true, filterable: true,  options: ['Yes','No'], columnName: 'ra_is_all_day' },
+  { field: 'notes',       label: 'Notes',       type: 'text',   sortable: false, filterable: true, columnName: 'ra_notes' },
 ]
 
 const PAGELAYOUT_COLS = [

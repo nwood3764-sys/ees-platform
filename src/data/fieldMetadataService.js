@@ -205,6 +205,8 @@ function guessPrefix(tableName) {
     work_orders: 'work_order',
     service_appointments: 'sa',
     service_appointment_assignments: 'saa',
+    service_territory_members: 'stm',
+    resource_absences: 'ra',
     projects: 'project',
     project_payment_requests: 'ppr',
     incentive_applications: 'ia',
@@ -220,6 +222,8 @@ function guessPrefix(tableName) {
     property_source_data: 'psd',
     property_disaster_exposure: 'pde',
     property_import_batches: 'pib',
+    service_territory_members: 'stm',
+    resource_absences: 'ra',
   }
   return map[tableName] || null
 }
