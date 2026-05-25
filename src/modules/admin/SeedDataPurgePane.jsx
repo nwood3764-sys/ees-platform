@@ -1,49 +1,45 @@
 // =============================================================================
-// SeedDataPurgePane — Setup → Data → Seed Data Purge
+// SeedDataPurgePane — Setup → Data → Purge Training Data
 //
-// Wipes every row currently flagged is_seed_data=true across every tenant-data
-// table. Backed by the seed_purge_tenant_data(text) RPC; that function is
-// SECURITY DEFINER, role-gated to Admin, and takes a confirm token so a
-// misclick can't trigger a purge.
+// Wipes every row that was inserted as part of the initial training/seed data
+// set, tracked in the seed_data_records audit table. Backed by:
+//   - count_seed_data() — per-table counts (read-only)
+//   - purge_seed_data() — hard-deletes via block_hard_delete bypass flag
 //
-// Two-phase UX:
-//   1) Dry-run: shows per-table row counts so the user can sanity-check the
-//      blast radius before pulling the trigger.
-//   2) Confirm: requires typing the literal phrase PURGE ALL SEED DATA, then
-//      clicking Confirm to issue the RPC with the validated token.
+// UX:
+//   1. Header summary: total seed records grouped by table.
+//   2. Big red "Remove all training data" button.
+//   3. Confirmation modal requires typing PURGE to enable.
+//   4. After purge, summary surface: tables touched, records deleted, errors.
 //
-// System config (picklists, roles, page layouts, templates, programs, work
-// types, lifecycle rules, etc.) is deliberately NOT covered by the flag —
-// the purge never touches them. The platform survives intact; only customer
-// data flagged seed is removed.
+// The pane never touches real production data — the seed_data_records table
+// is the only source of "what is seed". Real data has no entries in that
+// table and is invisible to the purge RPC.
 // =============================================================================
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { C } from '../../data/constants'
 import { Icon, LoadingState } from '../../components/UI'
 import HelpIcon from '../../components/help/HelpIcon'
-import { useToast } from '../../components/Toast'
 import { supabase } from '../../lib/supabase'
 
-const CONFIRM_PHRASE = 'PURGE ALL SEED DATA'
-const RPC_TOKEN      = 'PURGE_ALL_SEED_DATA'
+const CONFIRM_PHRASE = 'PURGE'
 
 export default function SeedDataPurgePane() {
-  const toast = useToast()
-  const [dryRun, setDryRun] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [counts, setCounts]       = useState(null)
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState(null)
+  const [modalOpen, setModalOpen] = useState(false)
   const [confirmInput, setConfirmInput] = useState('')
-  const [purging, setPurging] = useState(false)
+  const [purging, setPurging]     = useState(false)
   const [purgeResult, setPurgeResult] = useState(null)
 
-  const loadDryRun = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  const loadCounts = useCallback(async () => {
+    setLoading(true); setError(null)
     try {
-      const { data, error: rpcErr } = await supabase.rpc('seed_purge_tenant_data', { confirm_token: null })
+      const { data, error: rpcErr } = await supabase.rpc('count_seed_data')
       if (rpcErr) throw rpcErr
-      setDryRun(data)
+      setCounts(data || [])
     } catch (e) {
       setError(e.message || String(e))
     } finally {
@@ -51,222 +47,206 @@ export default function SeedDataPurgePane() {
     }
   }, [])
 
-  useEffect(() => { loadDryRun() }, [loadDryRun])
+  useEffect(() => { loadCounts() }, [loadCounts])
 
-  const nonZeroTables = useMemo(() => {
-    if (!dryRun?.per_table) return []
-    return Object.entries(dryRun.per_table)
-      .filter(([, count]) => count > 0)
-      .sort((a, b) => b[1] - a[1])
-  }, [dryRun])
+  const totalRecords = (counts || []).reduce((s, r) => s + Number(r.record_count || 0), 0)
 
-  const handlePurge = useCallback(async () => {
-    if (confirmInput.trim() !== CONFIRM_PHRASE) {
-      toast.error(`Type "${CONFIRM_PHRASE}" exactly to confirm.`)
-      return
-    }
-    setPurging(true)
-    setPurgeResult(null)
+  const handlePurge = async () => {
+    setPurging(true); setPurgeResult(null)
     try {
-      const { data, error: rpcErr } = await supabase.rpc('seed_purge_tenant_data', { confirm_token: RPC_TOKEN })
+      const { data, error: rpcErr } = await supabase.rpc('purge_seed_data')
       if (rpcErr) throw rpcErr
       setPurgeResult(data)
-      setConfirmInput('')
-      toast.success(`Purged ${data?.total_rows ?? 0} seed rows across ${Object.keys(data?.per_table ?? {}).length} tables.`)
-      // Refresh dry-run to show new state (should be all zeros)
-      await loadDryRun()
+      await loadCounts()
     } catch (e) {
-      toast.error(e.message || String(e))
-      setError(e.message || String(e))
+      setPurgeResult({ error: e.message || String(e) })
     } finally {
       setPurging(false)
+      setConfirmInput('')
     }
-  }, [confirmInput, loadDryRun, toast])
+  }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Header */}
-      <div style={{ padding: '14px 24px 10px', background: C.card, borderBottom: `1px solid ${C.border}` }}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Seed Data Purge</div>
-          <HelpIcon
-            anchors={[
-              { type: 'route', route: '/admin/seed_data_purge' },
-              { type: 'concept', concept: 'seed-data' },
-              { type: 'concept', concept: 'seed-purge' },
-            ]}
-            title="Seed Data Purge"
-          />
-        </div>
-        <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
-          Permanently deletes every row currently flagged <code>is_seed_data=true</code>. System configuration (picklists, roles, layouts, templates, programs, work types, lifecycle rules) is never touched.
-        </div>
+    <div style={{ flex: 1, overflow: 'auto', padding: '24px 28px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: C.textPrimary }}>
+          Purge Training Data
+        </h2>
+        <HelpIcon
+          anchors={[
+            { type: 'route', route: '/admin/seed_data_purge' },
+            { type: 'concept', concept: 'seed-data-purge' },
+          ]}
+          title="Purge Training Data"
+        />
       </div>
+      <p style={{ marginTop: 0, fontSize: 13, color: C.textSecondary, maxWidth: 720, lineHeight: 1.55 }}>
+        Removes every record that was inserted as initial training/seed data.
+        This action is permanent. Real production data (the 6,781 prospecting properties,
+        the 2,030 imported accounts, anything created by users in the normal
+        course of using LEAP) is <b>not</b> touched — only records explicitly
+        marked in the seed_data_records audit table will be deleted.
+      </p>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 24, background: '#f7f9fc' }}>
-        {loading && <LoadingState />}
+      {loading && <LoadingState />}
+      {error && (
+        <div style={{ padding: '12px 14px', background: '#fde8e8', color: '#a32626', fontSize: 13, borderRadius: 6, marginBottom: 16 }}>
+          Failed to load seed-data counts: {error}
+        </div>
+      )}
 
-        {error && !loading && (
+      {!loading && !error && (
+        <>
+          {/* Per-table count summary */}
           <div style={{
-            padding: 16, marginBottom: 16,
-            background: '#fce8e8', border: '1px solid #f3b4b4', borderRadius: 6,
-            color: '#8a1a1a', fontSize: 12.5, lineHeight: 1.5,
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: '16px 18px', marginTop: 18, marginBottom: 18,
           }}>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Could not load seed-data summary</div>
-            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }}>{error}</div>
-            <div style={{ marginTop: 8 }}>
-              <button
-                onClick={loadDryRun}
-                style={{
-                  background: '#fff', border: '1px solid #f3b4b4', borderRadius: 5,
-                  padding: '5px 12px', fontSize: 12, fontWeight: 600,
-                  color: '#8a1a1a', cursor: 'pointer',
-                }}
-              >Retry</button>
-            </div>
-          </div>
-        )}
-
-        {!loading && !error && dryRun && (
-          <>
-            {/* Summary card */}
-            <div style={{
-              background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-              padding: 20, marginBottom: 16,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 6 }}>
-                <div style={{ fontSize: 32, fontWeight: 700, color: dryRun.total_rows > 0 ? '#8a5a1a' : '#1a7a4e', fontFamily: 'JetBrains Mono, monospace' }}>
-                  {dryRun.total_rows.toLocaleString()}
-                </div>
-                <div style={{ fontSize: 14, color: C.textSecondary }}>
-                  rows currently flagged seed across {Object.keys(dryRun.per_table).length} tenant-data tables
-                </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 26, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>
+                {totalRecords.toLocaleString()}
               </div>
-              {dryRun.total_rows === 0 && (
-                <div style={{ fontSize: 12.5, color: '#1a7a4e', marginTop: 4 }}>
-                  Nothing to purge — the tenant-data tables are clean.
-                </div>
+              <div style={{ fontSize: 13, color: C.textSecondary }}>
+                training records across {counts?.length || 0} table{counts?.length === 1 ? '' : 's'}
+              </div>
+            </div>
+
+            {totalRecords === 0 ? (
+              <div style={{ padding: '14px 16px', background: C.page, borderRadius: 6, fontSize: 13, color: C.textMuted, textAlign: 'center' }}>
+                No training data currently loaded.
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.border}`, color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <th style={{ textAlign: 'left',  padding: '6px 0', fontWeight: 600 }}>Object</th>
+                    <th style={{ textAlign: 'right', padding: '6px 0', fontWeight: 600 }}>Seed records</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(counts || []).map(row => (
+                    <tr key={row.table_name} style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <td style={{ padding: '7px 0', color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{row.table_name}</td>
+                      <td style={{ padding: '7px 0', textAlign: 'right', color: C.textPrimary, fontWeight: 500 }}>{Number(row.record_count).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Purge button */}
+          {totalRecords > 0 && (
+            <button onClick={() => { setConfirmInput(''); setPurgeResult(null); setModalOpen(true) }}
+              style={{
+                padding: '12px 22px', fontSize: 14, fontWeight: 600,
+                background: '#d44545', color: '#fff',
+                border: '1px solid #b03030', borderRadius: 6,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                boxShadow: '0 1px 3px rgba(176, 48, 48, 0.3)',
+              }}>
+              <Icon path="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" size={14} color="#fff" />
+              Remove all training data
+            </button>
+          )}
+
+          {/* Purge result summary (after a purge runs) */}
+          {purgeResult && !purgeResult.error && (
+            <div style={{
+              marginTop: 18, padding: '14px 18px',
+              background: '#e8f8f2', border: '1px solid #2aab72', borderRadius: 8,
+              color: '#1a7a4e', fontSize: 13,
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                Training data purged.
+              </div>
+              <div>
+                {purgeResult.records_deleted?.toLocaleString() || 0} records deleted across {purgeResult.tables_touched || 0} tables.
+              </div>
+              {Array.isArray(purgeResult.errors) && purgeResult.errors.length > 0 && (
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#a35a18' }}>
+                    {purgeResult.errors.length} error{purgeResult.errors.length === 1 ? '' : 's'}
+                  </summary>
+                  <pre style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', marginTop: 6, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto' }}>
+                    {JSON.stringify(purgeResult.errors, null, 2)}
+                  </pre>
+                </details>
               )}
             </div>
+          )}
+          {purgeResult?.error && (
+            <div style={{
+              marginTop: 18, padding: '14px 18px',
+              background: '#fde8e8', border: '1px solid #a32626', borderRadius: 8,
+              color: '#a32626', fontSize: 13,
+            }}>
+              <b>Purge failed:</b> {purgeResult.error}
+            </div>
+          )}
+        </>
+      )}
 
-            {/* Per-table breakdown */}
-            {nonZeroTables.length > 0 && (
-              <div style={{
-                background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-                marginBottom: 16, overflow: 'hidden',
-              }}>
-                <div style={{
-                  padding: '10px 16px',
-                  borderBottom: `1px solid ${C.border}`,
-                  background: '#fafbfd',
-                  fontSize: 11.5, fontWeight: 700, letterSpacing: 0.3,
-                  textTransform: 'uppercase', color: C.textSecondary,
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      {/* Confirmation modal */}
+      {modalOpen && (
+        <div onClick={() => !purging && setModalOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.6)', zIndex: 9000,
+                   display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ background: C.card, borderRadius: 10, width: 'min(520px, 100%)',
+                     padding: '22px 24px',
+                     boxShadow: '0 12px 40px rgba(7,17,31,0.4)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <Icon path="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 0 0-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" size={20} color="#d44545" />
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: C.textPrimary }}>
+                Confirm: remove all training data
+              </h3>
+            </div>
+            <p style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.55 }}>
+              This will permanently delete <b>{totalRecords.toLocaleString()}</b> seed records
+              across <b>{counts?.length || 0}</b> tables. Real production data is not affected.
+              This action cannot be undone.
+            </p>
+            <p style={{ fontSize: 12.5, color: C.textSecondary, marginTop: 16, marginBottom: 6 }}>
+              Type <b style={{ fontFamily: 'JetBrains Mono, monospace', color: '#a32626' }}>PURGE</b> to confirm:
+            </p>
+            <input
+              type="text"
+              value={confirmInput}
+              onChange={(e) => setConfirmInput(e.target.value)}
+              autoFocus
+              disabled={purging}
+              style={{
+                width: '100%', padding: '9px 12px', fontSize: 14,
+                fontFamily: 'JetBrains Mono, monospace',
+                border: `1px solid ${C.border}`, borderRadius: 6,
+                background: C.page, color: C.textPrimary, outline: 'none',
+              }}
+            />
+            <div style={{ marginTop: 18, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setModalOpen(false)} disabled={purging}
+                style={{
+                  padding: '9px 14px', fontSize: 13, fontWeight: 500,
+                  background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
+                  color: C.textSecondary, cursor: purging ? 'not-allowed' : 'pointer',
                 }}>
-                  <span>Tables with seed rows</span>
-                  <button
-                    onClick={loadDryRun}
-                    style={{
-                      background: '#fff', border: `1px solid ${C.border}`, borderRadius: 5,
-                      padding: '4px 10px', fontSize: 11, fontWeight: 600,
-                      color: C.textSecondary, cursor: 'pointer',
-                      display: 'inline-flex', alignItems: 'center', gap: 4,
-                      textTransform: 'none', letterSpacing: 0,
-                    }}
-                  >
-                    <Icon path="M23 4v6h-6 M1 20v-6h6 M3.51 9a9 9 0 0114.85-3.36L23 10 M20.49 15A9 9 0 015.64 18.36L1 14" size={11} color="currentColor" />
-                    Refresh
-                  </button>
-                </div>
-                <div style={{ maxHeight: 380, overflowY: 'auto' }}>
-                  {nonZeroTables.map(([table, count]) => (
-                    <div key={table} style={{
-                      display: 'flex', justifyContent: 'space-between',
-                      padding: '8px 16px', borderBottom: `1px solid ${C.border}`,
-                      fontSize: 12.5,
-                    }}>
-                      <span style={{ fontFamily: 'JetBrains Mono, monospace', color: C.textPrimary }}>{table}</span>
-                      <span style={{ fontFamily: 'JetBrains Mono, monospace', color: C.textSecondary, fontWeight: 600 }}>
-                        {count.toLocaleString()}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Danger zone */}
-            {dryRun.total_rows > 0 && (
-              <div style={{
-                background: '#fff', border: '2px solid #e85c5c', borderRadius: 8,
-                padding: 20,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <Icon path="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z M12 9v4 M12 17h.01" size={16} color="#e85c5c" />
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#8a1a1a' }}>Danger zone</div>
-                </div>
-                <div style={{ fontSize: 12.5, color: C.textPrimary, lineHeight: 1.6, marginBottom: 12 }}>
-                  This permanently deletes every row above. It cannot be undone. Run this when you're ready to start using LEAP for real production data and no longer need any of the seed records.
-                  <br /><br />
-                  Type the phrase below exactly, then click Confirm to execute. Foreign-key constraints are deferred inside the transaction; if any production row references a seed row the entire purge rolls back automatically.
-                </div>
-
-                <div style={{ marginBottom: 10 }}>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, letterSpacing: 0.3, textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-                    Confirmation phrase
-                  </label>
-                  <input
-                    type="text"
-                    value={confirmInput}
-                    onChange={e => setConfirmInput(e.target.value)}
-                    placeholder={CONFIRM_PHRASE}
-                    disabled={purging}
-                    autoComplete="off"
-                    spellCheck={false}
-                    style={{
-                      width: '100%', maxWidth: 400, padding: '8px 12px',
-                      fontSize: 13, fontFamily: 'JetBrains Mono, monospace',
-                      border: `1px solid ${confirmInput === CONFIRM_PHRASE ? '#e85c5c' : C.border}`,
-                      borderRadius: 5, outline: 'none', boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-
-                <button
-                  onClick={handlePurge}
-                  disabled={purging || confirmInput.trim() !== CONFIRM_PHRASE}
-                  style={{
-                    background: confirmInput.trim() === CONFIRM_PHRASE ? '#e85c5c' : '#f0f3f8',
-                    color: confirmInput.trim() === CONFIRM_PHRASE ? '#fff' : C.textMuted,
-                    border: 'none', borderRadius: 5,
-                    padding: '9px 18px', fontSize: 13, fontWeight: 700,
-                    cursor: (purging || confirmInput.trim() !== CONFIRM_PHRASE) ? 'not-allowed' : 'pointer',
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                  }}
-                >
-                  <Icon path="M3 6h18 M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2 M10 11v6 M14 11v6" size={13} color="currentColor" />
-                  {purging ? 'Purging…' : `Permanently delete ${dryRun.total_rows.toLocaleString()} rows`}
-                </button>
-              </div>
-            )}
-
-            {purgeResult && purgeResult.mode === 'purged' && (
-              <div style={{
-                marginTop: 16,
-                background: '#e8f8f2', border: '1px solid #bfe7d3', borderRadius: 8,
-                padding: 16,
-              }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#1a7a4e', marginBottom: 6 }}>
-                  Purge complete — {purgeResult.total_rows.toLocaleString()} rows deleted
-                </div>
-                <div style={{ fontSize: 11.5, color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace' }}>
-                  Executed at {purgeResult.executed_at}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+                Cancel
+              </button>
+              <button
+                onClick={handlePurge}
+                disabled={confirmInput !== CONFIRM_PHRASE || purging}
+                style={{
+                  padding: '9px 16px', fontSize: 13, fontWeight: 600,
+                  background: (confirmInput === CONFIRM_PHRASE && !purging) ? '#d44545' : C.border,
+                  color: '#fff', border: 'none', borderRadius: 6,
+                  cursor: (confirmInput === CONFIRM_PHRASE && !purging) ? 'pointer' : 'not-allowed',
+                }}>
+                {purging ? 'Purging…' : 'Permanently delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
