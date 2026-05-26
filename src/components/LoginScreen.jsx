@@ -5,19 +5,53 @@ import { C } from '../data/constants'
 /**
  * LoginScreen — email + password auth against Supabase Auth.
  *
- * This screen is the first thing an unauthenticated user sees. On successful
- * login the parent AuthGate observes the auth state change and swaps this
- * component out for the main application. There is no signup flow here —
- * user accounts are created by an Admin in Energy Efficiency Services Admin, per the project's
- * role-based access model (no self-signup from the public internet).
+ * Two view modes via the local `view` state:
+ *   • 'signin'  — the standard email/password form
+ *   • 'forgot'  — a single email input that calls
+ *                 supabase.auth.resetPasswordForEmail(...)
+ *
+ * Why both live in this file (not separate routes):
+ *   AuthGate selects between LoginScreen / SetPasswordScreen / the app
+ *   based on session + URL hash. A separate /forgot route would add a
+ *   third branch with no real benefit — the recovery REQUEST has no
+ *   session, no tokens, no hash to detect. Inline mode-switch keeps
+ *   the AuthGate boundary clean and the forgot flow one click away.
+ *
+ * The actual password reset (after the user clicks the recovery email
+ * link) is handled entirely outside this file: Supabase sends a link
+ * containing #access_token=...&type=recovery; AuthGate picks that up,
+ * exchanges it for a session, and renders SetPasswordScreen. Nothing
+ * to change there — it already works for invites and worked for
+ * recovery the moment we ship this trigger.
+ *
+ * Important for invite-but-never-confirmed users (e.g. someone who got
+ * an invite email weeks ago and never clicked it): resetPasswordForEmail
+ * works on them. The resulting recovery link both CONFIRMS the email
+ * and sets the new password in one step. So this single button covers
+ * both "I forgot my password" and "I never finished signing up".
+ *
+ * There is no public signup on this screen by design — accounts are
+ * provisioned by an Admin in the Energy Efficiency Services Admin
+ * setup, per the project's role-based access model.
  */
 export default function LoginScreen() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [view, setView]             = useState('signin')   // 'signin' | 'forgot'
+  const [email, setEmail]           = useState('')
+  const [password, setPassword]     = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState(null)
+  const [error, setError]           = useState(null)
+  // Distinct from `error` so we can show a success state in the same
+  // place. Null until the recovery email has been requested.
+  const [recoveryMessage, setRecoveryMessage] = useState(null)
 
-  const handleSubmit = async (e) => {
+  const goTo = (next) => {
+    setView(next)
+    setError(null)
+    setRecoveryMessage(null)
+    setPassword('')
+  }
+
+  const handleSignIn = async (e) => {
     e.preventDefault()
     if (!hasSupabaseConfig) {
       setError('Site is not configured. Missing Supabase environment variables.')
@@ -35,8 +69,51 @@ export default function LoginScreen() {
       return
     }
     // On success the AuthGate picks up the new session and re-renders.
-    // No explicit navigation needed here.
   }
+
+  const handleForgot = async (e) => {
+    e.preventDefault()
+    if (!hasSupabaseConfig) {
+      setError('Site is not configured. Missing Supabase environment variables.')
+      return
+    }
+    const trimmed = email.trim()
+    if (!trimmed) {
+      setError('Enter the email address on your account.')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    setRecoveryMessage(null)
+
+    // redirectTo: the user lands back on the app root with
+    // #access_token=...&type=recovery in the hash. AuthGate already
+    // detects that exact shape and routes to SetPasswordScreen.
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(trimmed, {
+      redirectTo: window.location.origin,
+    })
+
+    setSubmitting(false)
+
+    if (resetError) {
+      // Supabase deliberately returns success for non-existent emails
+      // (to avoid leaking account existence). Any error we DO see is a
+      // real failure — rate limit, malformed input, network — and worth
+      // surfacing verbatim.
+      setError(resetError.message || 'Unable to send reset email.')
+      return
+    }
+
+    // Always show the same confirmation regardless of whether the
+    // email exists — same reason as above. If they typed the right
+    // address they'll receive the link; if not, nothing happens.
+    setRecoveryMessage(
+      `If an account exists for ${trimmed}, a password-reset link has been sent. ` +
+      `Check your inbox (and spam folder). The link expires in 1 hour.`
+    )
+  }
+
+  const isForgot = view === 'forgot'
 
   return (
     <div
@@ -79,7 +156,7 @@ export default function LoginScreen() {
               marginBottom: 12,
             }}
           >
-            A
+            E
           </div>
           <h1
             style={{
@@ -99,11 +176,11 @@ export default function LoginScreen() {
               color: C.textMuted,
             }}
           >
-            Sign in to continue
+            {isForgot ? 'Reset your password' : 'Sign in to continue'}
           </div>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={isForgot ? handleForgot : handleSignIn}>
           <label
             style={{
               display: 'block',
@@ -140,39 +217,43 @@ export default function LoginScreen() {
             }}
           />
 
-          <label
-            style={{
-              display: 'block',
-              fontSize: 11,
-              fontWeight: 600,
-              color: C.textSecondary,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              marginBottom: 5,
-            }}
-          >
-            Password
-          </label>
-          <input
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              fontSize: 13,
-              fontFamily: 'inherit',
-              color: C.textPrimary,
-              background: C.page,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-              outline: 'none',
-              marginBottom: 18,
-              boxSizing: 'border-box',
-            }}
-          />
+          {!isForgot && (
+            <>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: C.textSecondary,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: 5,
+                }}
+              >
+                Password
+              </label>
+              <input
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  fontSize: 13,
+                  fontFamily: 'inherit',
+                  color: C.textPrimary,
+                  background: C.page,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                  outline: 'none',
+                  marginBottom: 18,
+                  boxSizing: 'border-box',
+                }}
+              />
+            </>
+          )}
 
           {error && (
             <div
@@ -187,6 +268,23 @@ export default function LoginScreen() {
               }}
             >
               {error}
+            </div>
+          )}
+
+          {recoveryMessage && (
+            <div
+              style={{
+                background: '#ecfdf3',
+                border: '1px solid #b7e4c7',
+                color: '#1a5e3a',
+                padding: '10px 12px',
+                borderRadius: 6,
+                fontSize: 12,
+                marginBottom: 14,
+                lineHeight: 1.5,
+              }}
+            >
+              {recoveryMessage}
             </div>
           )}
 
@@ -206,9 +304,51 @@ export default function LoginScreen() {
               transition: 'background 150ms ease',
             }}
           >
-            {submitting ? 'Signing in…' : 'Sign In'}
+            {submitting
+              ? (isForgot ? 'Sending…' : 'Signing in…')
+              : (isForgot ? 'Send reset link' : 'Sign In')
+            }
           </button>
         </form>
+
+        {/* Mode toggle. Single click between sign-in and forgot-password. */}
+        <div style={{ textAlign: 'center', marginTop: 14 }}>
+          {isForgot ? (
+            <button
+              type="button"
+              onClick={() => goTo('signin')}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: C.textSecondary,
+                fontSize: 12,
+                cursor: 'pointer',
+                padding: 4,
+                fontFamily: 'inherit',
+                textDecoration: 'underline',
+              }}
+            >
+              Back to sign in
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => goTo('forgot')}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: C.textSecondary,
+                fontSize: 12,
+                cursor: 'pointer',
+                padding: 4,
+                fontFamily: 'inherit',
+                textDecoration: 'underline',
+              }}
+            >
+              Forgot password?
+            </button>
+          )}
+        </div>
 
         <div
           style={{
