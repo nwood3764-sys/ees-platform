@@ -16,7 +16,7 @@
 # valid authenticated session. See Supabase → Authentication → Policies.
 
 [build]
-  command  = "npm run build"
+  command  = "npm run build:safe"
   publish  = "dist"
 
 [build.environment]
