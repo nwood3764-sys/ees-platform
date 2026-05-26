@@ -592,33 +592,74 @@ export default function ProspectingModule({
   const [properties, setProperties] = useState([])
   const [batches, setBatches]       = useState([])
   const [counts, setCounts]         = useState(null)
-  const [loading, setLoading]       = useState(true)
+  // Per-dataset loading flags. Before this change all three lived under a
+  // single `loading` boolean wired to Promise.all([...]), which meant the
+  // fast HEAD count query (~30ms) and the fast batches fetch (~200ms) both
+  // stayed gated behind the slow paginated property load (~40s for 6,800
+  // rows over 7 sequential PostgREST round-trips). Decoupling means counts
+  // and batches paint immediately — the Home dashboard and tab badges are
+  // accurate the moment auth resolves rather than 40 seconds later.
+  const [loadingCounts,     setLoadingCounts]     = useState(true)
+  const [loadingProperties, setLoadingProperties] = useState(true)
+  const [loadingBatches,    setLoadingBatches]    = useState(true)
+  // Aggregate flag is true while ANY fetch is still in flight — used only
+  // by sections that render a single combined spinner (Map). Granular
+  // flags are preferred where the section knows which dataset it needs.
+  const loading = loadingCounts || loadingProperties || loadingBatches
   const [error, setError]           = useState(null)
   const [showImportModal, setShowImportModal] = useState(false)
 
+  // Independent loader. Each dataset writes its own state slice as soon
+  // as its fetch resolves; the slow one no longer holds the fast ones.
+  // A single `cancelled` ref guards all three against late writes after
+  // the component unmounts.
   const loadAll = async () => {
     setError(null)
-    try {
-      const [props, c, b] = await Promise.all([
-        fetchProspectingProperties(),
-        fetchProspectingCounts(),
-        fetchImportBatches(),
-      ])
-      setProperties(props)
-      setCounts(c)
-      setBatches(b)
-    } catch (err) {
-      setError(err)
-    }
+    setLoadingCounts(true); setLoadingProperties(true); setLoadingBatches(true)
+
+    // Counts: a pair of HEAD queries, ~30ms each. Lights up the Home
+    // dashboard and the section-tab badges immediately.
+    fetchProspectingCounts()
+      .then(setCounts)
+      .catch(err => setError(prev => prev || err))
+      .finally(() => setLoadingCounts(false))
+
+    // Import batches: single paginated read, currently 40 rows. Fast.
+    fetchImportBatches()
+      .then(setBatches)
+      .catch(err => setError(prev => prev || err))
+      .finally(() => setLoadingBatches(false))
+
+    // Properties: 6,800+ rows paginated 1,000 at a time. Slow today;
+    // a separate change will fetch this lazily on Properties/Map open
+    // and / or widen the page size. Until then it runs in the
+    // background while counts + batches are already visible.
+    fetchProspectingProperties()
+      .then(setProperties)
+      .catch(err => setError(prev => prev || err))
+      .finally(() => setLoadingProperties(false))
   }
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true); setError(null)
-    Promise.all([fetchProspectingProperties(), fetchProspectingCounts(), fetchImportBatches()])
-      .then(([props, c, b]) => { if (!cancelled) { setProperties(props); setCounts(c); setBatches(b) } })
-      .catch(err => { if (!cancelled) setError(err) })
-      .finally(() => { if (!cancelled) setLoading(false) })
+    setError(null)
+    setLoadingCounts(true); setLoadingProperties(true); setLoadingBatches(true)
+
+    fetchProspectingCounts()
+      .then(c    => { if (!cancelled) setCounts(c) })
+      .catch(err => { if (!cancelled) setError(prev => prev || err) })
+      .finally(() => { if (!cancelled) setLoadingCounts(false) })
+
+    fetchImportBatches()
+      .then(b    => { if (!cancelled) setBatches(b) })
+      .catch(err => { if (!cancelled) setError(prev => prev || err) })
+      .finally(() => { if (!cancelled) setLoadingBatches(false) })
+
+    fetchProspectingProperties()
+      .then(p    => { if (!cancelled) setProperties(p) })
+      .catch(err => { if (!cancelled) setError(prev => prev || err) })
+      .finally(() => { if (!cancelled) setLoadingProperties(false) })
+
     return () => { cancelled = true }
   }, [])
 
@@ -632,7 +673,18 @@ export default function ProspectingModule({
     if (id) setSelectedRecord({ table: 'properties', id, name: '' })
   }
 
-  const counts4Tabs = { properties: properties.length, imports: batches.length }
+  // Tab-badge counts: prefer the HEAD-query counts (instant on load)
+  // over the paginated list lengths (which stay at 0 for ~40 seconds
+  // while properties paginate). Once the lists arrive they take over
+  // as the source of truth — they're filtered identically to the
+  // HEAD query so the numbers always match.
+  const propertiesBadge = loadingProperties
+    ? (counts?.propertiesWithoutOpportunity ?? null)
+    : properties.length
+  const importsBadge = loadingBatches
+    ? (counts?.importBatches ?? null)
+    : batches.length
+  const counts4Tabs = { properties: propertiesBadge, imports: importsBadge }
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -669,10 +721,10 @@ export default function ProspectingModule({
           />
         ) : (
           <>
-            {sec === 'home'       && <ProspectingHome counts={counts} loading={loading} />}
-            {sec === 'properties' && <PropertiesListSection loading={loading} error={error} properties={properties} onRefresh={loadAll} onRetry={loadAll} onOpenRecord={openProperty} />}
-            {sec === 'map'        && <MapSection loading={loading} error={error} properties={properties} onRetry={loadAll} onOpenProperty={openPropertyById} />}
-            {sec === 'imports'    && <ImportsSection batches={batches} loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} onOpenImport={openImport} onOpenImportModal={() => setShowImportModal(true)} />}
+            {sec === 'home'       && <ProspectingHome counts={counts} loading={loadingCounts} />}
+            {sec === 'properties' && <PropertiesListSection loading={loadingProperties} error={error} properties={properties} onRefresh={loadAll} onRetry={loadAll} onOpenRecord={openProperty} />}
+            {sec === 'map'        && <MapSection loading={loadingProperties} error={error} properties={properties} onRetry={loadAll} onOpenProperty={openPropertyById} />}
+            {sec === 'imports'    && <ImportsSection batches={batches} loading={loadingBatches} error={error} onRefresh={loadAll} onRetry={loadAll} onOpenImport={openImport} onOpenImportModal={() => setShowImportModal(true)} />}
           </>
         )}
       </div>
