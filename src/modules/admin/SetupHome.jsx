@@ -36,6 +36,7 @@ import {
 import UnmatchedInboxPane from './UnmatchedInboxPane'
 import SeedDataPurgePane from './SeedDataPurgePane'
 import BulkPropertyImportPane from './BulkPropertyImportPane'
+import ClientErrorsPane from './ClientErrorsPane'
 
 // ---------------------------------------------------------------------------
 // Setup Home — Salesforce-style left tree nav + right content pane.
@@ -293,6 +294,7 @@ function WelcomePane({ onOpenObjectManager, onNavigate }) {
     { label: 'Page Layouts',      hint: 'Record detail layouts',                      nodeId: 'page_layouts' },
     { label: 'Email Templates',   hint: 'Outbound email templates with merge fields', nodeId: 'email_templates' },
     { label: 'Audit Log',         hint: 'Append-only history of system changes',      nodeId: 'audit_log' },
+    { label: 'Client Errors',     hint: 'Runtime exceptions captured from user sessions', nodeId: 'client_errors' },
     { label: 'Recycle Bin',       hint: 'View, restore, or purge deleted records',    nodeId: 'recycle_bin' },
   ]
 
@@ -453,6 +455,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'roles':             return <RolesPane />
     case 'permission_sets':   return <PermissionSetsPane />
     case 'help_articles':     return <HelpArticlesPane />
+    case 'client_errors':     return <ClientErrorsPane />
     case 'picklist_values':   return <NodePage title="Picklist Value Sets"     table="picklist_values"   fetcher={fetchPicklistValues}    columns={PL_COLS}             newLabel="Picklist Value"   onOpenRecord={onOpenRecord} />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'automation_rules':  return <AutomationRulesPane />

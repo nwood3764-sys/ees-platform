@@ -12,6 +12,7 @@ export const SETUP_TREE = [
       { id: 'roles',            label: 'Roles' },
       { id: 'permission_sets',  label: 'Permission Sets' },
       { id: 'help_articles',    label: 'Help Articles' },
+      { id: 'client_errors',    label: 'Client Errors' },
     ],
   },
   {
