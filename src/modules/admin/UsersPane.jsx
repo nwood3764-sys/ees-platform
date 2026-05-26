@@ -59,22 +59,50 @@ export default function UsersPane({ onOpenRecord }) {
   // session JWT is attached automatically by supabase.functions.invoke,
   // and the edge function verifies the caller's Admin role server-side
   // before sending the recovery email.
+  // Fire the admin-reset-user-password edge function. We use fetch()
+  // directly rather than supabase.functions.invoke() because invoke()
+  // discards the response body on non-2xx responses — it surfaces only
+  // the HTTP status as the error message. Our edge function returns
+  // detailed JSON like { error: "Reset email send failed: <msg>" } on
+  // 500; we need to read that to diagnose anything.
   const sendReset = async (user) => {
     setResetModal({ phase: 'sending', user })
     try {
-      const { data: result, error: invokeErr } = await supabase.functions.invoke(
-        'admin-reset-user-password',
-        { body: { user_id: user._id } },
-      )
-      if (invokeErr) {
-        setResetModal({ phase: 'error', user, message: invokeErr.message || 'Request failed.' })
+      // Get the current session JWT to send as the bearer token.
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        setResetModal({ phase: 'error', user, message: 'Not signed in.' })
         return
       }
-      if (!result?.ok) {
-        setResetModal({ phase: 'error', user, message: result?.error || 'Reset failed.' })
+
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-reset-user-password`
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey':        import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ user_id: user._id }),
+      })
+
+      // Always try to parse the body, even on 5xx. The edge function
+      // returns structured JSON in both success and error paths.
+      let payload = null
+      try { payload = await resp.json() } catch { /* fall through */ }
+
+      if (!resp.ok) {
+        const detail = payload?.error
+          || payload?.message
+          || `HTTP ${resp.status} ${resp.statusText}`
+        setResetModal({ phase: 'error', user, message: detail })
         return
       }
-      setResetModal({ phase: 'done', user, email: result.email || user.email })
+      if (!payload?.ok) {
+        setResetModal({ phase: 'error', user, message: payload?.error || 'Reset failed.' })
+        return
+      }
+      setResetModal({ phase: 'done', user, email: payload.email || user.email })
     } catch (e) {
       setResetModal({ phase: 'error', user, message: e?.message || 'Unexpected error.' })
     }
