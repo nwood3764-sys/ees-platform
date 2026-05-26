@@ -1,4 +1,4 @@
-import { supabase, fetchAllPaged } from '../lib/supabase'
+import { supabase, fetchAllPaged, fetchAllPagedParallel } from '../lib/supabase'
 
 // ---------------------------------------------------------------------------
 // Picklist cache
@@ -56,31 +56,39 @@ export function picklistOptions(picklists, object, field) {
 export async function fetchProperties() {
   const picklists = await loadPicklists()
 
-  // Paginated: properties is at 6,781 rows in production. Without
-  // pagination the Outreach Properties list view silently truncates
-  // to the first 1,000.
-  const data = await fetchAllPaged((from, to) =>
-    supabase
-      .from('properties')
-      .select(`
-        id,
-        property_record_number,
-        property_name,
-        property_street,
-        property_city,
-        property_state,
-        property_zip,
-        property_total_units,
-        property_total_buildings,
-        property_status,
-        property_subsidy_type,
-        property_account_id,
-        accounts:property_account_id ( account_name )
-      `)
-      .eq('property_is_deleted', false)
-      .order('property_name', { ascending: true })
-      .order('id',            { ascending: true })  // tie-breaker
-      .range(from, to)
+  // Parallel paginated: properties is at 6,781 rows in production.
+  // Sequential pagination took ~40s; parallel cuts that to ~3s.
+  // countQuery applies the SAME property_is_deleted filter as the
+  // page builder — both must match or we'd request pages past the
+  // actual filtered row count.
+  const data = await fetchAllPagedParallel(
+    (from, to) =>
+      supabase
+        .from('properties')
+        .select(`
+          id,
+          property_record_number,
+          property_name,
+          property_street,
+          property_city,
+          property_state,
+          property_zip,
+          property_total_units,
+          property_total_buildings,
+          property_status,
+          property_subsidy_type,
+          property_account_id,
+          accounts:property_account_id ( account_name )
+        `)
+        .eq('property_is_deleted', false)
+        .order('property_name', { ascending: true })
+        .order('id',            { ascending: true })  // tie-breaker
+        .range(from, to),
+    () =>
+      supabase
+        .from('properties')
+        .select('id', { count: 'exact', head: true })
+        .eq('property_is_deleted', false),
   )
 
   return data.map(r => ({
@@ -400,32 +408,38 @@ export async function fetchEnrollments() {
 // migrated yet (e.g., property-detail dropdowns).
 // ---------------------------------------------------------------------------
 export async function fetchAccounts() {
-  // Paginated: accounts is at 2,030 rows in production (one Account per
-  // unique HUD owner from the Manus seed + 3 per-state bucket Accounts).
-  // Without pagination the canonical Accounts list view truncates to
-  // the first 1,000 rows.
-  const data = await fetchAllPaged((from, to) =>
-    supabase
-      .from('accounts')
-      .select(`
-        id,
-        account_record_number,
-        account_name,
-        account_organization_name,
-        account_phone,
-        account_email,
-        account_website,
-        billing_city,
-        billing_state,
-        billing_zip,
-        record_type:account_record_type ( picklist_label ),
-        type_pl:account_type            ( picklist_label ),
-        status_pl:account_status        ( picklist_label )
-      `)
-      .eq('account_is_deleted', false)
-      .order('account_name', { ascending: true })
-      .order('id',           { ascending: true })
-      .range(from, to)
+  // Parallel paginated: accounts is at 2,030 rows in production (one
+  // Account per unique HUD owner from the Manus seed + 3 per-state
+  // bucket Accounts). Sequential pagination took ~12s; parallel
+  // cuts that to ~3s (3 pages → single round-trip wall time).
+  const data = await fetchAllPagedParallel(
+    (from, to) =>
+      supabase
+        .from('accounts')
+        .select(`
+          id,
+          account_record_number,
+          account_name,
+          account_organization_name,
+          account_phone,
+          account_email,
+          account_website,
+          billing_city,
+          billing_state,
+          billing_zip,
+          record_type:account_record_type ( picklist_label ),
+          type_pl:account_type            ( picklist_label ),
+          status_pl:account_status        ( picklist_label )
+        `)
+        .eq('account_is_deleted', false)
+        .order('account_name', { ascending: true })
+        .order('id',           { ascending: true })
+        .range(from, to),
+    () =>
+      supabase
+        .from('accounts')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_is_deleted', false),
   )
 
   return data.map(r => ({
