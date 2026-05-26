@@ -4,6 +4,14 @@ import './index.css'
 import App from './App.jsx'
 import SigningPortalRoot from './pages/SigningPortal.jsx'
 import ServiceAppointmentRoot from './serviceAppointments/ServiceAppointmentRoot.jsx'
+import { installGlobalErrorHandlers } from './lib/clientErrorLogger'
+
+// Catches uncaught errors and unhandled promise rejections at the
+// window level — the layer below React's ErrorBoundary, which only
+// catches errors thrown during render. Together they cover both
+// synchronous render exceptions and async failures (fetch, promise
+// chains, setTimeout callbacks).
+installGlobalErrorHandlers()
 
 // ─── Path-based routing (no router library) ──────────────────────────────────
 // Two public, unauthenticated entry points bypass <AuthGate> and the staff

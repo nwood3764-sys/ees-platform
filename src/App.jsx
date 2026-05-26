@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { Sidebar, MobileHeader, ComingSoon } from './components/UI'
 import AuthGate from './components/AuthGate'
 import { ToastProvider } from './components/Toast'
+import ErrorBoundary from './components/ErrorBoundary'
 import PasswordChangeModal from './components/PasswordChangeModal'
 import IntegrationsModal from './components/IntegrationsModal'
 import OutlookCallback from './pages/OutlookCallback'
@@ -308,7 +309,21 @@ function AuthedApp({ session }) {
           </div>
         )}
         <Suspense fallback={<ModuleLoader />}>
-          {renderModule()}
+          {/* Per-module error boundary. A crash inside any lazy module
+              is contained here — the sidebar, topbar, and the rest of
+              the chrome stay alive so the user can navigate away from
+              the broken view. resetKeys auto-clears the error when the
+              user changes modules or records, so navigating away from
+              a broken record is enough to recover.
+
+              Top-level boundary lives below in <App /> as a safety net
+              for crashes in the chrome itself. */}
+          <ErrorBoundary
+            scope={`module:${activeModule || 'unknown'}`}
+            resetKeys={[activeModule, selectedRecord?.id]}
+          >
+            {renderModule()}
+          </ErrorBoundary>
         </Suspense>
       </div>
 
@@ -337,22 +352,24 @@ export default function App() {
     && window.location.pathname === '/auth/outlook-callback'
 
   return (
-    <AuthGate>
-      {(session) => (
-        <ToastProvider>
-          <HelpProvider>
-            {isOutlookCallback
-              ? (
-                <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, -apple-system, sans-serif', background: C.page }}>
-                  <OutlookCallback />
-                </div>
-              )
-              : <AuthedApp session={session} />}
-            {/* Global help side panel — opened by any HelpIcon anywhere in the tree. */}
-            <HelpPanel />
-          </HelpProvider>
-        </ToastProvider>
-      )}
-    </AuthGate>
+    <ErrorBoundary scope="app">
+      <AuthGate>
+        {(session) => (
+          <ToastProvider>
+            <HelpProvider>
+              {isOutlookCallback
+                ? (
+                  <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, -apple-system, sans-serif', background: C.page }}>
+                    <OutlookCallback />
+                  </div>
+                )
+                : <AuthedApp session={session} />}
+              {/* Global help side panel — opened by any HelpIcon anywhere in the tree. */}
+              <HelpPanel />
+            </HelpProvider>
+          </ToastProvider>
+        )}
+      </AuthGate>
+    </ErrorBoundary>
   )
 }
