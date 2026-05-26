@@ -1,12 +1,26 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { C } from '../data/constants'
 import { Badge, Icon } from './UI'
-import ProjectReportModal from './ProjectReportModal'
-import ProjectSchedulerWizard from './scheduler/ProjectSchedulerWizard'
-import ServiceAppointmentRescheduleModal from './scheduler/ServiceAppointmentRescheduleModal'
-import WorkOrderScheduleModal from './scheduler/WorkOrderScheduleModal'
-import SendForSignatureModal from './SendForSignatureModal'
+
+// Heavy modals that only render on specific user actions are lazy-loaded
+// so they don't bloat the RecordDetail chunk that ships on every record
+// open. Combined size of the five modals: ~3,600 lines. After this
+// change they ship as five small chunks fetched on demand the first
+// time the user clicks the corresponding toolbar action.
+//
+// Why lazy each one individually rather than rolling them into a
+// single 'record-modals' chunk: each modal pulls in different
+// dependencies (the scheduler wizards drag in a multi-step state
+// machine + map components; the signature modal drags in PDF
+// preview code). A combined chunk would still be large; per-modal
+// splits give Vite the freedom to share only what's truly shared.
+const ProjectReportModal                  = lazy(() => import('./ProjectReportModal'))
+const ProjectSchedulerWizard              = lazy(() => import('./scheduler/ProjectSchedulerWizard'))
+const ServiceAppointmentRescheduleModal   = lazy(() => import('./scheduler/ServiceAppointmentRescheduleModal'))
+const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkOrderScheduleModal'))
+const SendForSignatureModal               = lazy(() => import('./SendForSignatureModal'))
+
 import { useToast } from './Toast'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl } from '../lib/urlNav'
@@ -5498,74 +5512,81 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         />
       )}
 
-      {/* Project report generator (only mounted on projects, opt-in via toolbar button) */}
-      {showReportModal && tableName === 'projects' && (
-        <ProjectReportModal
-          projectId={recordId}
-          project={record}
-          onClose={() => setShowReportModal(false)}
-          onComplete={() => { setReloadTick(t => t + 1) }}
-        />
-      )}
+      {/* Lazy-loaded modals. Each only mounts when its trigger state
+          flips true; Suspense provides a null fallback during the
+          ~50-200ms chunk download. We use null rather than a spinner
+          because these modals overlay the page — a flashing spinner
+          looks worse than the brief delay before the modal appears. */}
+      <Suspense fallback={null}>
+        {/* Project report generator (only mounted on projects, opt-in via toolbar button) */}
+        {showReportModal && tableName === 'projects' && (
+          <ProjectReportModal
+            projectId={recordId}
+            project={record}
+            onClose={() => setShowReportModal(false)}
+            onComplete={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
 
-      {/* Project Scheduler wizard (only on projects, opt-in via toolbar button) */}
-      {showSchedulerWizard && tableName === 'projects' && (
-        <ProjectSchedulerWizard
-          projectId={recordId}
-          project={record}
-          onClose={() => setShowSchedulerWizard(false)}
-          onCommitted={() => { setReloadTick(t => t + 1) }}
-        />
-      )}
+        {/* Project Scheduler wizard (only on projects, opt-in via toolbar button) */}
+        {showSchedulerWizard && tableName === 'projects' && (
+          <ProjectSchedulerWizard
+            projectId={recordId}
+            project={record}
+            onClose={() => setShowSchedulerWizard(false)}
+            onCommitted={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
 
-      {/* Project Reschedule wizard — same component, reschedule mode */}
-      {showRescheduleWizard && tableName === 'projects' && (
-        <ProjectSchedulerWizard
-          mode="reschedule"
-          projectId={recordId}
-          project={record}
-          onClose={() => setShowRescheduleWizard(false)}
-          onCommitted={() => { setReloadTick(t => t + 1) }}
-        />
-      )}
+        {/* Project Reschedule wizard — same component, reschedule mode */}
+        {showRescheduleWizard && tableName === 'projects' && (
+          <ProjectSchedulerWizard
+            mode="reschedule"
+            projectId={recordId}
+            project={record}
+            onClose={() => setShowRescheduleWizard(false)}
+            onCommitted={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
 
-      {/* Single-SA reschedule modal — opt-in via toolbar button on SA records */}
-      {showSaReschedule && tableName === 'service_appointments' && (
-        <ServiceAppointmentRescheduleModal
-          serviceAppointmentId={recordId}
-          onClose={() => setShowSaReschedule(false)}
-          onRescheduled={() => { setReloadTick(t => t + 1) }}
-        />
-      )}
+        {/* Single-SA reschedule modal — opt-in via toolbar button on SA records */}
+        {showSaReschedule && tableName === 'service_appointments' && (
+          <ServiceAppointmentRescheduleModal
+            serviceAppointmentId={recordId}
+            onClose={() => setShowSaReschedule(false)}
+            onRescheduled={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
 
-      {/* Single-WO schedule modal — opt-in via toolbar button on a Work Order
-          whose status is 'To Be Scheduled'. Reuses bulk_schedule_work_orders
-          with a one-element WO array and a pinned placement, so the engine
-          path is identical to the bulk wizard. On success the SA exists and
-          the WO flips to 'Scheduled'; the related-records area refreshes via
-          reloadTick. */}
-      {showWoSchedule && tableName === 'work_orders' && (
-        <WorkOrderScheduleModal
-          workOrderId={recordId}
-          onClose={() => setShowWoSchedule(false)}
-          onScheduled={() => { setReloadTick(t => t + 1) }}
-        />
-      )}
+        {/* Single-WO schedule modal — opt-in via toolbar button on a Work Order
+            whose status is 'To Be Scheduled'. Reuses bulk_schedule_work_orders
+            with a one-element WO array and a pinned placement, so the engine
+            path is identical to the bulk wizard. On success the SA exists and
+            the WO flips to 'Scheduled'; the related-records area refreshes via
+            reloadTick. */}
+        {showWoSchedule && tableName === 'work_orders' && (
+          <WorkOrderScheduleModal
+            workOrderId={recordId}
+            onClose={() => setShowWoSchedule(false)}
+            onScheduled={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
 
-      {/* Send-for-Signature modal — opt-in via toolbar button on signable
-          parent records. Reads template state directly from Supabase, calls
-          send-envelope, displays signing URLs. After successful send the
-          envelope row exists; the parent's Documents related-list will
-          show the signed PDF after the last recipient signs. */}
-      {showSendSignatureModal && hasActiveTemplate && (
-        <SendForSignatureModal
-          open
-          parentObject={tableName}
-          parentRecordId={recordId}
-          parentRecordLabel={record?.name || record?.project_record_number || record?.property_record_number || record?.opportunity_record_number || record?.work_order_record_number || null}
-          onClose={() => setShowSendSignatureModal(false)}
-        />
-      )}
+        {/* Send-for-Signature modal — opt-in via toolbar button on signable
+            parent records. Reads template state directly from Supabase, calls
+            send-envelope, displays signing URLs. After successful send the
+            envelope row exists; the parent's Documents related-list will
+            show the signed PDF after the last recipient signs. */}
+        {showSendSignatureModal && hasActiveTemplate && (
+          <SendForSignatureModal
+            open
+            parentObject={tableName}
+            parentRecordId={recordId}
+            parentRecordLabel={record?.name || record?.project_record_number || record?.property_record_number || record?.opportunity_record_number || record?.work_order_record_number || null}
+            onClose={() => setShowSendSignatureModal(false)}
+          />
+        )}
+      </Suspense>
     </div>
   )
 }
