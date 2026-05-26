@@ -6,6 +6,7 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { OPPORTUNITIES, PROPERTIES, BUILDINGS, CONTACTS, ENROLLMENTS } from '../data/mockData'
 import { fetchProperties, fetchBuildings, fetchUnits, fetchOpportunities, fetchContacts, fetchEnrollments, fetchAccounts } from '../data/outreachService'
+import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
 
 const SECTIONS = [
   { id: 'home',       label: 'Home'         },
@@ -386,71 +387,88 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
 
   const closeRecord = () => setSelectedRecord(null)
 
-  // All seven datasets are live from Supabase.
-  const [properties, setProperties] = useState([])
-  const [buildings, setBuildings] = useState([])
-  const [units, setUnits] = useState([])
-  const [opportunities, setOpportunities] = useState([])
-  const [contacts, setContacts] = useState([])
-  const [enrollments, setEnrollments] = useState([])
-  const [accounts, setAccounts] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  // ─── Data layer ────────────────────────────────────────────────────────
+  // Each section fetches ONLY its dataset, and only when the section is
+  // active. Cache survives unmounts, so navigating away and back returns
+  // instantly. The 5-min SWR window means a user who lingers gets a
+  // background refresh on every revisit.
+  //
+  // Home reads counts and small slices from several datasets. We treat
+  // those as eager — they're what the user sees first and they should
+  // all be loading the moment the module mounts. The big lists
+  // (properties, accounts) stay lazy: they don't load unless the user
+  // actually opens that tab.
+  //
+  // What used to happen on every mount: Promise.all of 7 fetchers,
+  // including the ~3s parallel-paginated 6,781-row properties query and
+  // the ~3s 2,030-row accounts query. ~6s of network before Home painted.
+  // What happens now: Home's small datasets fire immediately, big ones
+  // wait for the user to ask for them. Repeat visits to a section are
+  // ~0ms instead of refetching.
+  const onHome = sec === 'home'
 
-  // Extract the fetch logic so pull-to-refresh can call it without reloading
-  // the page. The initial mount uses the full loading spinner; pull-to-refresh
-  // uses a subtler inline indicator and doesn't flip the main `loading` flag.
-  const loadAll = async ({ showLoader = false } = {}) => {
-    if (showLoader) { setLoading(true) }
-    setError(null)
-    try {
-      const [p, b, u, o, c, e, a] = await Promise.all([
-        fetchProperties(),
-        fetchBuildings(),
-        fetchUnits(),
-        fetchOpportunities(),
-        fetchContacts(),
-        fetchEnrollments(),
-        fetchAccounts(),
-      ])
-      setProperties(p)
-      setBuildings(b)
-      setUnits(u)
-      setOpportunities(o)
-      setContacts(c)
-      setEnrollments(e)
-      setAccounts(a)
-    } catch (err) {
-      setError(err)
-    } finally {
-      if (showLoader) { setLoading(false) }
-    }
+  // Eager (Home reads from these): opportunities, enrollments, contacts.
+  // Buildings/units are small and used by Home counts too — keep eager.
+  const opportunitiesQ = useCachedFetch('outreach:opportunities', fetchOpportunities)
+  const enrollmentsQ   = useCachedFetch('outreach:enrollments',   fetchEnrollments)
+  const contactsQ      = useCachedFetch('outreach:contacts',      fetchContacts)
+  const buildingsQ     = useCachedFetch('outreach:buildings',     fetchBuildings)
+  const unitsQ         = useCachedFetch('outreach:units',         fetchUnits)
+
+  // Lazy (big tables). Fetched only when the user opens that section.
+  // Home shows a count card from these too; once warmed by a visit
+  // the count appears on Home from cache. Until first visit the
+  // count card shows '—'. Acceptable trade — we save 6s on first load.
+  const propertiesQ = useCachedFetch('outreach:properties', fetchProperties, {
+    enabled: sec === 'properties' || sec === 'home',
+  })
+  const accountsQ = useCachedFetch('outreach:accounts', fetchAccounts, {
+    enabled: sec === 'accounts' || sec === 'home',
+  })
+
+  // Convenience destructure so the rest of the file reads the same as
+  // before. `loading` is per-section — Home shows the combined loading
+  // state of the datasets Home actually needs.
+  const properties    = propertiesQ.data    || []
+  const buildings     = buildingsQ.data     || []
+  const units         = unitsQ.data         || []
+  const opportunities = opportunitiesQ.data || []
+  const contacts      = contactsQ.data      || []
+  const enrollments   = enrollmentsQ.data   || []
+  const accounts      = accountsQ.data      || []
+
+  // Per-section loading flag — only true when THIS section's primary
+  // dataset is on a cold load. SWR refreshes don't flip it.
+  const loading =
+    sec === 'properties' ? propertiesQ.loading :
+    sec === 'accounts'   ? accountsQ.loading   :
+    sec === 'opps'       ? opportunitiesQ.loading :
+    sec === 'buildings'  ? buildingsQ.loading  :
+    sec === 'units'      ? unitsQ.loading      :
+    sec === 'contacts'   ? contactsQ.loading   :
+    sec === 'enrollment' ? enrollmentsQ.loading :
+    // Home: loading only on the very first cold mount when nothing is cached yet.
+    (opportunitiesQ.loading && enrollmentsQ.loading && contactsQ.loading)
+
+  // First non-null error from any active section's query. Same gating
+  // as `loading` — Home only surfaces errors from the Home datasets.
+  const error =
+    sec === 'properties' ? propertiesQ.error :
+    sec === 'accounts'   ? accountsQ.error   :
+    sec === 'opps'       ? opportunitiesQ.error :
+    sec === 'buildings'  ? buildingsQ.error  :
+    sec === 'units'      ? unitsQ.error      :
+    sec === 'contacts'   ? contactsQ.error   :
+    sec === 'enrollment' ? enrollmentsQ.error :
+    (opportunitiesQ.error || enrollmentsQ.error || contactsQ.error)
+
+  // Pull-to-refresh / explicit retry. Invalidates EVERY outreach cache
+  // entry so the next render of any section refetches. This is what the
+  // user expects when they hit refresh — the whole module starts fresh,
+  // not just the current section.
+  const loadAll = () => {
+    invalidatePrefix('outreach:')
   }
-
-  useEffect(() => {
-    // Initial load shows the full loading spinner. Use a cancellation flag so
-    // a fast-navigating user can't leave a setState against an unmounted tree.
-    let cancelled = false
-    ;(async () => {
-      setLoading(true); setError(null)
-      try {
-        const [p, b, u, o, c, e, a] = await Promise.all([
-          fetchProperties(), fetchBuildings(), fetchUnits(),
-          fetchOpportunities(), fetchContacts(), fetchEnrollments(),
-          fetchAccounts(),
-        ])
-        if (cancelled) return
-        setProperties(p); setBuildings(b); setUnits(u)
-        setOpportunities(o); setContacts(c); setEnrollments(e)
-        setAccounts(a)
-      } catch (err) {
-        if (!cancelled) setError(err)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [])
 
   const hafUrgent = enrollments.filter(e => e.hafAgreement === 'Pending').length
   const counts = {

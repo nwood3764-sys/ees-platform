@@ -16,6 +16,7 @@ import {
   submitPropertyImport,
   exportProspectingPropertiesCsv,
 } from '../data/prospectingService'
+import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
 
 /**
  * Prospecting Module
@@ -589,79 +590,47 @@ export default function ProspectingModule({
   }
   const closeRecord = () => setSelectedRecord(null)
 
-  const [properties, setProperties] = useState([])
-  const [batches, setBatches]       = useState([])
-  const [counts, setCounts]         = useState(null)
-  // Per-dataset loading flags. Before this change all three lived under a
-  // single `loading` boolean wired to Promise.all([...]), which meant the
-  // fast HEAD count query (~30ms) and the fast batches fetch (~200ms) both
-  // stayed gated behind the slow paginated property load (~40s for 6,800
-  // rows over 7 sequential PostgREST round-trips). Decoupling means counts
-  // and batches paint immediately — the Home dashboard and tab badges are
-  // accurate the moment auth resolves rather than 40 seconds later.
-  const [loadingCounts,     setLoadingCounts]     = useState(true)
-  const [loadingProperties, setLoadingProperties] = useState(true)
-  const [loadingBatches,    setLoadingBatches]    = useState(true)
-  // Aggregate flag is true while ANY fetch is still in flight — used only
-  // by sections that render a single combined spinner (Map). Granular
-  // flags are preferred where the section knows which dataset it needs.
+  // ─── Data layer ────────────────────────────────────────────────────────
+  // Same lazy-cached pattern Outreach uses. Each query is keyed by an
+  // 'prospecting:' prefix so writes can invalidate the whole module's
+  // cache atomically. Cache survives unmounts, so leaving Prospecting
+  // and coming back is instant.
+  //
+  // Counts and batches are eager (small, fast, used by Home + tab
+  // badges). Properties is lazy — the slow one — only fetched when
+  // the user opens Properties or Map.
+  const countsQ = useCachedFetch('prospecting:counts', fetchProspectingCounts)
+  const batchesQ = useCachedFetch('prospecting:batches', fetchImportBatches)
+  const propertiesQ = useCachedFetch('prospecting:properties', fetchProspectingProperties, {
+    enabled: sec === 'properties' || sec === 'map',
+  })
+
+  const counts     = countsQ.data
+  const batches    = batchesQ.data    || []
+  const properties = propertiesQ.data || []
+
+  // Per-dataset loading flags. Mirror the previous local state so the
+  // rest of the file (tab badge fallback logic, section gating) reads
+  // the same way.
+  const loadingCounts     = countsQ.loading
+  const loadingBatches    = batchesQ.loading
+  const loadingProperties = propertiesQ.loading
   const loading = loadingCounts || loadingProperties || loadingBatches
-  const [error, setError]           = useState(null)
+
+  // First non-null error across the three queries. Earlier code
+  // surfaced one error at a time via setState(prev => prev || err);
+  // useCachedFetch holds the per-query error, so we just pick the
+  // first one that's set.
+  const error = countsQ.error || batchesQ.error || propertiesQ.error
+
   const [showImportModal, setShowImportModal] = useState(false)
 
-  // Independent loader. Each dataset writes its own state slice as soon
-  // as its fetch resolves; the slow one no longer holds the fast ones.
-  // A single `cancelled` ref guards all three against late writes after
-  // the component unmounts.
-  const loadAll = async () => {
-    setError(null)
-    setLoadingCounts(true); setLoadingProperties(true); setLoadingBatches(true)
-
-    // Counts: a pair of HEAD queries, ~30ms each. Lights up the Home
-    // dashboard and the section-tab badges immediately.
-    fetchProspectingCounts()
-      .then(setCounts)
-      .catch(err => setError(prev => prev || err))
-      .finally(() => setLoadingCounts(false))
-
-    // Import batches: single paginated read, currently 40 rows. Fast.
-    fetchImportBatches()
-      .then(setBatches)
-      .catch(err => setError(prev => prev || err))
-      .finally(() => setLoadingBatches(false))
-
-    // Properties: 6,800+ rows paginated 1,000 at a time. Slow today;
-    // a separate change will fetch this lazily on Properties/Map open
-    // and / or widen the page size. Until then it runs in the
-    // background while counts + batches are already visible.
-    fetchProspectingProperties()
-      .then(setProperties)
-      .catch(err => setError(prev => prev || err))
-      .finally(() => setLoadingProperties(false))
+  // Pull-to-refresh / explicit retry. Invalidates the whole
+  // prospecting cache so the next render of any visible section
+  // refetches from network.
+  const loadAll = () => {
+    invalidatePrefix('prospecting:')
   }
-
-  useEffect(() => {
-    let cancelled = false
-    setError(null)
-    setLoadingCounts(true); setLoadingProperties(true); setLoadingBatches(true)
-
-    fetchProspectingCounts()
-      .then(c    => { if (!cancelled) setCounts(c) })
-      .catch(err => { if (!cancelled) setError(prev => prev || err) })
-      .finally(() => { if (!cancelled) setLoadingCounts(false) })
-
-    fetchImportBatches()
-      .then(b    => { if (!cancelled) setBatches(b) })
-      .catch(err => { if (!cancelled) setError(prev => prev || err) })
-      .finally(() => { if (!cancelled) setLoadingBatches(false) })
-
-    fetchProspectingProperties()
-      .then(p    => { if (!cancelled) setProperties(p) })
-      .catch(err => { if (!cancelled) setError(prev => prev || err) })
-      .finally(() => { if (!cancelled) setLoadingProperties(false) })
-
-    return () => { cancelled = true }
-  }, [])
 
   const openProperty = (row) => {
     if (row?._id) setSelectedRecord({ table: 'properties', id: row._id, name: row.name })
