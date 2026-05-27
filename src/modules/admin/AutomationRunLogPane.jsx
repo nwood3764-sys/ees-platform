@@ -24,6 +24,14 @@ const COLS = [
   { field: 'outcomeMessage',  label: 'Message',        type: 'text', sortable: false, filterable: false },
 ]
 
+// One system view for now. Sorted by firedAtDisplay descending so the
+// most recent firings are at the top, matching the user expectation
+// for an audit log. Add more here if/when we want filter presets
+// (e.g. "errors only", "today only").
+const SYSTEM_VIEWS = [
+  { id: 'AV', name: 'All', filters: [], sortField: 'firedAtDisplay', sortDir: 'desc' },
+]
+
 function fmtTimestamp(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -127,10 +135,15 @@ export default function AutomationRunLogPane() {
             firing will appear here with its outcome and any error details.
           </div>
         ) : (
+          // ListView API: data + systemViews. Was passing the
+          // pre-Dec-2025 rows/rowKey shape which would show an empty
+          // table after the defensive defaults landed in 42dc6c0
+          // (instead of crashing like /m/tasks did before the fix).
           <ListView
             columns={COLS}
-            rows={shaped}
-            rowKey="_id"
+            data={shaped}
+            systemViews={SYSTEM_VIEWS}
+            defaultViewId="AV"
           />
         )}
         <div style={{ marginTop: 10, fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>

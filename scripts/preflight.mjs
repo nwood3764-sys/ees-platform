@@ -310,6 +310,46 @@ for (const file of walkSource()) {
   for (const ln of logLines) {
     warn(`console.log statement (consider removing or downgrading)`, relPath, ln)
   }
+
+  // ─── 6. ListView deprecated props ───────────────────────────────────
+  // ListView's current API: data, columns, systemViews, defaultViewId,
+  // onOpenRecord. An older draft accepted rows/rowKey/onRowClick which
+  // were never wired up to do anything meaningful. Call sites that
+  // still use the old names will mount with an empty table (after the
+  // 42dc6c0 defensive defaults landed) — silent failure that's hard
+  // to spot in code review.
+  //
+  // Static check: any JSX <ListView ... /> element using a prop name
+  // from the deprecated set is a fail. The match is intentionally
+  // loose; it'll match across multi-line JSX because we test the
+  // whole component-open span, but only inside the props of <ListView>.
+  //
+  // Two scans:
+  //   a) find every `<ListView` opening and its closing >
+  //   b) check the prop span for any deprecated key
+  const deprecatedListViewProps = ['rows=', 'rowKey=', 'onRowClick=']
+  // Skip the ListView component file itself — it legitimately uses
+  // the names internally.
+  if (!relPath.endsWith('ListView.jsx')) {
+    const lvOpens = [...source.matchAll(/<ListView\b/g)]
+    for (const open of lvOpens) {
+      const startIdx = open.index
+      const closeIdx = source.indexOf('>', startIdx)
+      if (closeIdx === -1) continue
+      const propSpan = source.slice(startIdx, closeIdx + 1)
+      const lineNum = source.slice(0, startIdx).split('\n').length
+      for (const dep of deprecatedListViewProps) {
+        if (propSpan.includes(dep)) {
+          fail(
+            `<ListView> uses deprecated prop '${dep.replace('=','')}' — ` +
+            `current API is data/columns/systemViews/defaultViewId/onOpenRecord. ` +
+            `See commit 42dc6c0 for the migration pattern.`,
+            relPath, lineNum,
+          )
+        }
+      }
+    }
+  }
 }
 
 // ─── Report ──────────────────────────────────────────────────────────────
