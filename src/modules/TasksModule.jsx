@@ -138,13 +138,21 @@ export default function TasksModule({ onNavigateToRecord, onReplaceRecord }) {
       : <ActionLink label="Complete" onClick={() => handleComplete(r._id)} accent />,
   })), [rows])
 
+  // System views for the Tasks list. Each tab in TasksModule shapes the
+  // data server-side (fetchTasks filters by section), so the system
+  // views here are purely about sort defaults. `id: 'AV'` matches the
+  // convention used in other modules' system view IDs ("All View").
+  const systemViews = useMemo(() => ([
+    { id: 'AV', name: 'All', filters: [], sortField: 'dueDateDisplay', sortDir: 'asc' },
+  ]), [])
+
   if (openedTaskId) {
     return (
       <RecordDetail
-        table="tasks"
+        tableName="tasks"
         recordId={openedTaskId}
-        onClose={() => { setOpenedTaskId(null); load() }}
-        onNavigateToRecord={(table, id) => {
+        onBack={() => { setOpenedTaskId(null); load() }}
+        onNavigateToRecord={({ table, id }) => {
           if (table === 'tasks') setOpenedTaskId(id)
           else if (onNavigateToRecord) onNavigateToRecord(table, id)
         }}
@@ -184,11 +192,20 @@ export default function TasksModule({ onNavigateToRecord, onReplaceRecord }) {
               'No tasks yet.'}
            </div>
          ) : (
+           // ListView's current API: `data` (array), `systemViews`
+           // (list of saved-view defaults), `defaultViewId`, and
+           // `onOpenRecord(row)`. The old prop names (rows/rowKey/
+           // onRowClick) were never part of this ListView and caused
+           // the /m/tasks white screen — see client_errors row CE-#####
+           // from 26-May, "Cannot read properties of undefined
+           // (reading 'find')" out of the systemViews.find() line.
            <ListView
+             data={shaped}
              columns={COLS}
-             rows={shaped}
-             rowKey="_id"
-             onRowClick={(row) => openTask(row._id)}
+             systemViews={systemViews}
+             defaultViewId="AV"
+             onRefresh={load}
+             onOpenRecord={(row) => openTask(row._id)}
            />
          )}
       </div>

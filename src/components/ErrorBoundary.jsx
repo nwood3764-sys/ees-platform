@@ -1,4 +1,4 @@
-import { Component } from 'react'
+import { Component, useEffect, useState as useReactState } from 'react'
 import { C } from '../data/constants'
 import { logClientError } from '../lib/clientErrorLogger'
 
@@ -39,6 +39,28 @@ export default class ErrorBoundary extends Component {
 
   static getDerivedStateFromError(error) {
     return { error }
+  }
+
+  // Stale-chunk detection. When Netlify deploys a new build, every JS
+  // chunk gets a new content-hash filename. A browser tab that's been
+  // open across the deploy still holds the OLD bundle hashes in memory;
+  // React.lazy() then asks for `DispatchModule-CMmxNxG7.js` which 404s.
+  // The dynamic import rejects with a TypeError whose message contains
+  // "Failed to fetch dynamically imported module" (Chrome) or
+  // "error loading dynamically imported module" (Firefox/Safari).
+  //
+  // This is one of the highest-frequency real failures in production
+  // (caught the first one in client_errors row from 26-May) and the
+  // fix is always the same: reload the page. So we recognize it and
+  // present a purpose-built screen instead of the generic "something
+  // went wrong" with the scary stack trace.
+  isStaleChunkError() {
+    const msg = String(this.state.error?.message || '')
+    return (
+      /Failed to fetch dynamically imported module/i.test(msg) ||
+      /error loading dynamically imported module/i.test(msg) ||
+      /Importing a module script failed/i.test(msg)
+    )
   }
 
   componentDidCatch(error, errorInfo) {
@@ -104,6 +126,17 @@ export default class ErrorBoundary extends Component {
 
   render() {
     if (!this.state.error) return this.props.children
+
+    // ── Stale chunk: friendly version-mismatch screen ───────────────────
+    // If we recognize the error as "the bundle hash on disk doesn't match
+    // what this tab is holding in memory", show a purpose-built screen
+    // that does the right thing automatically. No scary error message,
+    // no stack trace — just "your version is out of date, reloading…"
+    // and an auto-reload after a short delay so the user doesn't have
+    // to click anything.
+    if (this.isStaleChunkError()) {
+      return <StaleVersionScreen />
+    }
 
     const { error, logId, showDetails, copied } = this.state
     const scope = this.props.scope || 'unknown'
@@ -286,4 +319,123 @@ export default class ErrorBoundary extends Component {
       </div>
     )
   }
+}
+
+// ─── StaleVersionScreen ──────────────────────────────────────────────────
+// Rendered when ErrorBoundary detects a "failed to fetch dynamically
+// imported module" — i.e. the page's React.lazy() resolver can't find
+// a chunk file the bundle's manifest references. Almost always means a
+// deploy landed while the user's tab was open. The fix is to reload so
+// the browser picks up the new index.html with current chunk hashes.
+//
+// We auto-reload after a short countdown so the user doesn't have to do
+// anything. But: if we reload and IMMEDIATELY hit the same error again,
+// the auto-reload guard below stops us — the chunk might genuinely be
+// missing (e.g. a deploy rollback removed it) and looping wouldn't help.
+//
+// The guard uses sessionStorage so it resets on tab close — a fresh tab
+// always gets one auto-reload attempt.
+
+const STALE_RELOAD_GUARD_KEY = 'leap.staleReload.attemptedAt'
+const STALE_RELOAD_COOLDOWN_MS = 60 * 1000   // 1 minute
+const STALE_RELOAD_COUNTDOWN_SEC = 3
+
+function StaleVersionScreen() {
+  // Has this tab already tried an auto-reload in the last minute? If so,
+  // present the user with a manual button instead of looping.
+  const [autoReloadBlocked, setAutoReloadBlocked] = useReactState(() => {
+    try {
+      const t = Number(sessionStorage.getItem(STALE_RELOAD_GUARD_KEY) || 0)
+      return Date.now() - t < STALE_RELOAD_COOLDOWN_MS
+    } catch {
+      return false
+    }
+  })
+  const [seconds, setSeconds] = useReactState(STALE_RELOAD_COUNTDOWN_SEC)
+
+  useEffect(() => {
+    if (autoReloadBlocked) return
+    try { sessionStorage.setItem(STALE_RELOAD_GUARD_KEY, String(Date.now())) } catch {}
+    const id = setInterval(() => {
+      setSeconds(s => {
+        if (s <= 1) {
+          clearInterval(id)
+          // Use replace, not assign, so the broken navigation doesn't
+          // create a new history entry the user could navigate Back to.
+          window.location.reload()
+          return 0
+        }
+        return s - 1
+      })
+    }, 1000)
+    return () => clearInterval(id)
+  }, [autoReloadBlocked])
+
+  return (
+    <div style={{
+      flex: 1,
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'center',
+      padding: '64px 24px',
+      background: C.page,
+      minHeight: '100%',
+    }}>
+      <div style={{
+        maxWidth: 480, width: '100%',
+        background: C.card, border: `1px solid ${C.border}`,
+        borderRadius: 8, padding: '32px 36px',
+        boxShadow: '0 1px 3px rgba(13,26,46,0.04)',
+        fontFamily: 'Inter, -apple-system, sans-serif',
+        color: C.textPrimary,
+        textAlign: 'center',
+      }}>
+        <div style={{
+          width: 44, height: 44, borderRadius: '50%',
+          background: '#e6f7ee', margin: '0 auto 16px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+               stroke={C.emerald} strokeWidth="2"
+               strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10" />
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          </svg>
+        </div>
+        <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 8 }}>
+          A new version is available
+        </div>
+        <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 22, lineHeight: 1.5 }}>
+          The app was updated while you had this tab open. Reloading to pick up the latest version.
+        </div>
+
+        {!autoReloadBlocked ? (
+          <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 14 }}>
+            Reloading in <strong style={{ color: C.textPrimary }}>{seconds}</strong> second{seconds === 1 ? '' : 's'}…
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: '#9a3412', marginBottom: 14 }}>
+            Already tried reloading once. If this keeps happening, your network may be blocking a file.
+          </div>
+        )}
+
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            fontSize: 13,
+            padding: '8px 18px',
+            background: C.emerald,
+            border: `1px solid ${C.emeraldMid}`,
+            borderRadius: 6,
+            color: '#fff',
+            cursor: 'pointer',
+            fontFamily: 'Inter, -apple-system, sans-serif',
+            fontWeight: 500,
+          }}
+        >
+          Reload now
+        </button>
+      </div>
+    </div>
+  )
 }

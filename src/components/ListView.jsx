@@ -649,12 +649,39 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClos
 //                      with the RPC summary. Parent should reload its
 //                      data on this callback so the table reflects the
 //                      new server state.
-export function ListView({ data, columns, systemViews, defaultViewId, newLabel,
-                           renderCell, renderDetail, onNew, onOpenRecord, onRefresh,
-                           tableName, onRecordsUpdated }) {
-  const editMode = Boolean(tableName);
-  const firstView = systemViews.find(v => v.id === defaultViewId) || systemViews[0];
-  const isMobile = useIsMobile();
+export function ListView({
+  data: dataProp,
+  columns: columnsProp,
+  systemViews: systemViewsProp,
+  defaultViewId, newLabel,
+  renderCell, renderDetail, onNew, onOpenRecord, onRefresh,
+  tableName, onRecordsUpdated,
+}) {
+  // ── Defensive defaults ─────────────────────────────────────────────────
+  // The original signature treated systemViews and data as required arrays.
+  // Forgetting either at a call site produced the most painful failure
+  // mode possible: a white screen with `Cannot read properties of
+  // undefined (reading 'find')` from the firstView line, because there's
+  // no boundary to catch a top-level render throw.
+  //
+  // Production telemetry from /m/tasks (see client_errors rows from
+  // 26-May) showed exactly this failure: TasksModule was passing
+  // `rows`/`rowKey`/`onRowClick` (an older API shape), so systemViews
+  // arrived undefined and the page crashed before mounting anything.
+  //
+  // Treating these as optional with safe defaults means a misuse
+  // renders an empty-state instead of crashing the whole module.
+  // The call site still needs to be fixed to show real data, but the
+  // user sees an empty table, not a broken module.
+  const data        = Array.isArray(dataProp) ? dataProp : []
+  const columns     = Array.isArray(columnsProp) ? columnsProp : []
+  const systemViews = Array.isArray(systemViewsProp) && systemViewsProp.length > 0
+    ? systemViewsProp
+    : [{ id: '__default__', name: 'All', filters: [], sortField: null, sortDir: 'asc' }]
+
+  const editMode = Boolean(tableName)
+  const firstView = systemViews.find(v => v.id === defaultViewId) || systemViews[0]
+  const isMobile = useIsMobile()
 
   // Pull-to-refresh plumbing — attached to the mobile card scroll container
   // below. No-op when onRefresh isn't provided (so modules that haven't wired
