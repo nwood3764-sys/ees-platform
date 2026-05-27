@@ -17,6 +17,20 @@ export async function getCurrentUserId() {
 }
 
 /**
+ * Clear the in-memory user caches. Called from the AuthGate sign-out
+ * handler so a second user signing in on the same browser session
+ * doesn't inherit the previous user's app-level ID.
+ *
+ * Without this, a sign-out + sign-in cycle leaves _cachedUserId pointing
+ * at the previous user, which would silently attribute new edits to the
+ * wrong owner (saveRecord uses getCurrentUserId() to stamp updated_by).
+ */
+export function clearUserCache() {
+  _cachedUserId = null
+  _cachedUserProfile = null
+}
+
+/**
  * Get the current authenticated user's display profile — display name and role
  * name joined from users/roles. Used by module headers that render
  * "<Role> Dashboard" / "<Display Name> · <date>".

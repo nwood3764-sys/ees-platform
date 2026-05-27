@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
+import { clearUserCache } from '../data/layoutService'
+import { invalidateAll } from '../lib/useCachedFetch'
 import LoginScreen from './LoginScreen'
 import SetPasswordScreen from './SetPasswordScreen'
 
@@ -98,6 +100,13 @@ export default function AuthGate({ children }) {
       if (event === 'SIGNED_OUT') {
         setPasswordSetMode(null)
         setPasswordSetEmail(null)
+        // Wipe per-user caches so a subsequent sign-in on the same
+        // browser session starts clean. Without this, the next user
+        // inherits the previous user's app-level UUID (silent owner
+        // mis-attribution on every edit) and the read cache (silent
+        // privilege leakage if RLS differs between roles).
+        clearUserCache()
+        invalidateAll()
       }
     })
 
