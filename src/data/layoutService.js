@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { loadPicklists } from './outreachService'
+import { invalidateAll } from '../lib/useCachedFetch'
 export { loadPicklists }
 
 /**
@@ -699,6 +700,10 @@ export async function saveRecord(tableName, recordId, changes) {
     .single()
 
   if (error) throw error
+  // Nuke the cross-module cache so any other section the user opens
+  // next gets a fresh read. The cost is a re-fetch on next navigation;
+  // the benefit is no stale lists showing this record's old values.
+  invalidateAll()
   return data
 }
 
@@ -757,6 +762,9 @@ export async function insertRecord(tableName, fields) {
     .single()
 
   if (error) throw error
+  // Same reasoning as saveRecord / deleteRecord: insert affects any
+  // list view containing this table, anywhere in the app.
+  invalidateAll()
   return data
 }
 
@@ -1037,6 +1045,9 @@ export async function deleteRecord(tableName, recordId) {
     .update({ [meta.is_deleted_column]: true })
     .eq('id', recordId)
   if (error) throw error
+  // Same reasoning as saveRecord: a delete affects list views all over
+  // the app — invalidate everything so the next render is correct.
+  invalidateAll()
   return { deleted: true, column: meta.is_deleted_column }
 }
 

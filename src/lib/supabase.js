@@ -20,11 +20,99 @@ if (!url || !key) {
   )
 }
 
-export const supabase = createClient(url || '', key || '', {
+const baseClient = createClient(url || '', key || '', {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
+  },
+})
+
+// ─── Cache invalidation on writes ────────────────────────────────────────
+// Wrap the client's `.from(table)` so any insert/update/upsert/delete
+// invalidates the read cache. Without this, the lazy-cache layer holds
+// stale list views after edits — admin creates a record, navigates to
+// the list, doesn't see it. Trade-off: every write nukes the cache,
+// forcing a re-fetch on next navigation. For our scale this is the
+// right trade — alternative (per-table tag registry) is far more code
+// and a single bug means silent stale-data.
+//
+// Implementation note: we lazy-import invalidateAll to avoid a circular
+// dependency (useCachedFetch is consumed by hooks that import supabase).
+let _invalidateAll = null
+async function fireInvalidate() {
+  try {
+    if (!_invalidateAll) {
+      const mod = await import('./useCachedFetch')
+      _invalidateAll = mod.invalidateAll
+    }
+    _invalidateAll()
+  } catch {
+    // Cache module not loaded yet (e.g. during initial auth flow).
+    // No subscribers to notify; safe to swallow.
+  }
+}
+
+// Wrap a PostgrestQueryBuilder so its write methods auto-invalidate
+// once the eventual promise resolves successfully.
+function wrapQueryBuilder(qb) {
+  const WRITE_METHODS = ['insert', 'update', 'upsert', 'delete']
+  return new Proxy(qb, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop)
+      if (typeof value !== 'function') return value
+      if (!WRITE_METHODS.includes(prop)) return value.bind(target)
+      // For write methods, return a wrapper that attaches a .then()
+      // to fire invalidation after success. PostgREST query builders
+      // are thenable themselves, so we just instrument the resulting
+      // filter builder's .then by recursive proxy.
+      return function (...args) {
+        const result = value.apply(target, args)
+        return wrapThenable(result)
+      }
+    },
+  })
+}
+
+// PostgREST returns a chainable filter builder that's also thenable.
+// We Proxy it so any await/.then() fires invalidation on success.
+function wrapThenable(builder) {
+  return new Proxy(builder, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop)
+      if (prop === 'then') {
+        return (onFulfilled, onRejected) =>
+          target.then(
+            (res) => {
+              // Only invalidate when the server didn't return an error.
+              // PostgREST surfaces errors in res.error rather than throwing.
+              if (!res?.error) fireInvalidate()
+              return onFulfilled ? onFulfilled(res) : res
+            },
+            onRejected,
+          )
+      }
+      if (typeof value !== 'function') return value
+      // Re-wrap the result of chained methods (.eq, .select, etc.) so
+      // the invalidation hook stays attached through the chain.
+      return function (...args) {
+        const next = value.apply(target, args)
+        // Some chained calls return the same builder; others return a
+        // new thenable. Either way, re-wrap.
+        return next && typeof next === 'object' ? wrapThenable(next) : next
+      }
+    },
+  })
+}
+
+// Public client. Looks identical to a normal Supabase client; the only
+// difference is .from() returns a Proxy that auto-invalidates on writes.
+export const supabase = new Proxy(baseClient, {
+  get(target, prop) {
+    if (prop === 'from') {
+      return (table) => wrapQueryBuilder(target.from(table))
+    }
+    return Reflect.get(target, prop)
   },
 })
 

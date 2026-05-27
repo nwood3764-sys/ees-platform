@@ -97,6 +97,23 @@ export function invalidatePrefix(prefix) {
 }
 
 /**
+ * Nuke the entire cache. Notifies every active subscriber so they
+ * re-render and trigger a fresh fetch.
+ *
+ * Called from the centralized write paths (saveRecord, deleteRecord,
+ * createRecord) so any single mutation guarantees subsequent reads
+ * across the whole app are fresh. Trade-off: a save in one section
+ * forces a re-fetch when the user navigates to any other section.
+ * For our scale that's the right trade — the alternative (per-table
+ * invalidation registry) is significantly more code and one bug in
+ * the registry means silent stale-data forever.
+ */
+export function invalidateAll() {
+  cache.clear()
+  for (const k of subscribers.keys()) notify(k)
+}
+
+/**
  * The hook.
  *
  * @param {string} key      cache identity; same key = shared cache + dedup
