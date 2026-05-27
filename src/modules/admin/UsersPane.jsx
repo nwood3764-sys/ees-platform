@@ -102,7 +102,12 @@ export default function UsersPane({ onOpenRecord }) {
         setResetModal({ phase: 'error', user, message: payload?.error || 'Reset failed.' })
         return
       }
-      setResetModal({ phase: 'done', user, email: payload.email || user.email })
+      setResetModal({
+        phase: 'done',
+        user,
+        email: payload.email || user.email,
+        recovery_url: payload.recovery_url || null,
+      })
     } catch (e) {
       setResetModal({ phase: 'error', user, message: e?.message || 'Unexpected error.' })
     }
@@ -221,9 +226,9 @@ function ResetPasswordModal({ state, onConfirm, onClose }) {
   const email = state.email || user?.email || '(no email)'
 
   const heading =
-    phase === 'done'    ? 'Reset email sent' :
-    phase === 'error'   ? 'Reset failed'     :
-                          'Reset this user’s password?'
+    phase === 'done'    ? 'Recovery link ready' :
+    phase === 'error'   ? 'Reset failed'        :
+                          'Reset this user\u2019s password?'
 
   return (
     <div style={modalBackdrop} onClick={phase === 'sending' ? undefined : onClose}>
@@ -239,39 +244,31 @@ function ResetPasswordModal({ state, onConfirm, onClose }) {
         {phase === 'confirm' && (
           <>
             <div style={modalBody}>
-              A password-reset email will be sent to <strong>{email}</strong>.
-              The link expires in 1 hour. The user clicks it, sets a new
-              password, and signs in.
+              A one-time password-reset link will be generated for <strong>{email}</strong>.
+              The link expires in 1 hour. You'll get the link in the next screen — send
+              it to the user via email, text, or whatever channel works. They click it,
+              set a new password, and sign in.
             </div>
             <div style={modalActions}>
               <button type="button" onClick={onClose} style={btnGhost}>Cancel</button>
-              <button type="button" onClick={onConfirm} style={btnPrimary}>Send reset email</button>
+              <button type="button" onClick={onConfirm} style={btnPrimary}>Generate link</button>
             </div>
           </>
         )}
 
         {phase === 'sending' && (
           <>
-            <div style={modalBody}>Sending reset email to <strong>{email}</strong>…</div>
+            <div style={modalBody}>Generating recovery link for <strong>{email}</strong>…</div>
             <div style={modalActions}>
               <button type="button" disabled style={{ ...btnPrimary, opacity: 0.6, cursor: 'default' }}>
-                Sending…
+                Generating…
               </button>
             </div>
           </>
         )}
 
         {phase === 'done' && (
-          <>
-            <div style={modalBody}>
-              A password-reset link has been sent to <strong>{email}</strong>.
-              The user should check their inbox (and spam folder). The link
-              expires in 1 hour.
-            </div>
-            <div style={modalActions}>
-              <button type="button" onClick={onClose} style={btnPrimary}>Done</button>
-            </div>
-          </>
+          <DonePhase email={email} url={state.recovery_url} onClose={onClose} />
         )}
 
         {phase === 'error' && (
@@ -290,7 +287,103 @@ function ResetPasswordModal({ state, onConfirm, onClose }) {
   )
 }
 
-// ─── Column definitions ─────────────────────────────────────────────────────
+// ─── DonePhase ───────────────────────────────────────────────────────────────
+// Shown after the recovery link is generated. Auto-copies the link to the
+// clipboard on mount; surfaces it visibly so the admin can verify what was
+// copied; offers a Copy-again button (clipboard ops can fail in some browsers
+// without a user gesture, so we always show the URL too); offers "Open in
+// Mail" which pops the OS default mail app with a pre-filled subject/body.
+function DonePhase({ email, url, onClose }) {
+  const [copyState, setCopyState] = useState('idle') // 'idle' | 'copied' | 'failed'
+
+  // Auto-copy on first render. If permission was previously granted (or the
+  // browser allows it without a gesture in this admin context) the admin
+  // doesn't even have to click Copy.
+  useEffect(() => {
+    if (!url) return
+    if (!navigator?.clipboard?.writeText) {
+      setCopyState('failed')
+      return
+    }
+    navigator.clipboard.writeText(url)
+      .then(() => setCopyState('copied'))
+      .catch(() => setCopyState('failed'))
+  }, [url])
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
+  }
+
+  // Pre-filled mailto. The body uses %0D%0A line breaks per RFC 6068; some
+  // mail clients prefer \n, but %0D%0A is the safest cross-client encoding.
+  const subject = encodeURIComponent('Reset your LEAP password')
+  const body = encodeURIComponent(
+    `Hi,\r\n\r\n` +
+    `Use the link below to set a password and sign in to LEAP. ` +
+    `The link expires in 1 hour.\r\n\r\n` +
+    `${url}\r\n\r\n` +
+    `If you have any trouble, reply to this email and we'll help you out.\r\n`
+  )
+  const mailtoHref = url ? `mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}` : '#'
+
+  return (
+    <>
+      <div style={modalBody}>
+        Recovery link generated for <strong>{email}</strong>.
+        {copyState === 'copied' && (
+          <span style={{ marginLeft: 6, color: '#196f3d', fontSize: 12, fontWeight: 600 }}>
+            ✓ Copied to clipboard
+          </span>
+        )}
+        {copyState === 'failed' && (
+          <span style={{ marginLeft: 6, color: '#8a2d20', fontSize: 12 }}>
+            (auto-copy failed — use the Copy button below)
+          </span>
+        )}
+      </div>
+
+      {/* The URL itself, selectable + scrollable. Monospace so admins can
+          eyeball the token if needed. We render in a <pre> so long URLs
+          wrap on their own without breaking the modal layout. */}
+      <pre style={{
+        background: '#f7f9fc',
+        border: `1px solid ${C.border}`,
+        borderRadius: 4,
+        padding: '10px 12px',
+        fontSize: 11.5,
+        fontFamily: 'JetBrains Mono, monospace',
+        color: C.textPrimary,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
+        maxHeight: 120,
+        overflowY: 'auto',
+        margin: '0 0 12px 0',
+      }}>{url || ''}</pre>
+
+      <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
+        Send this link to the user via your normal email or messaging tool.
+        It works for 1 hour and can only be used once. Once they click it,
+        they'll set a new password and be signed in.
+      </div>
+
+      <div style={modalActions}>
+        <button type="button" onClick={handleCopy} style={btnGhost}>
+          {copyState === 'copied' ? 'Copied' : 'Copy link'}
+        </button>
+        <a href={mailtoHref}
+           style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>
+          Open in Mail
+        </a>
+        <button type="button" onClick={onClose} style={btnPrimary}>Done</button>
+      </div>
+    </>
+  )
+}
 // authStatus is a virtual column — its content comes from renderCell above.
 // It still has a `field` because ListView uses field for keying, sorting,
 // and filtering. The value `'Active' | 'Pending'` lives on each row inside
