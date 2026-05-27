@@ -124,21 +124,65 @@ async function logQueryError(err, context) {
   }
 }
 
+// Slow-query threshold. Wall-clock time around the awaited .then() —
+// includes network round-trip + server compute. Production target on
+// fast pages is <300ms; user-perceivable lag starts around 1s; the
+// 2000ms threshold is where we're confident this is a real regression
+// not a transient network blip.
+const SLOW_QUERY_MS = 2000
+
+let _loggingSlowQuery = false
+async function logSlowQuery(elapsedMs, context) {
+  if (_loggingSlowQuery) return
+  _loggingSlowQuery = true
+  try {
+    if (!_logClientError) {
+      const mod = await import('./clientErrorLogger')
+      _logClientError = mod.logClientError
+    }
+    // Severity=warning so this doesn't trigger an alert UI — just lands
+    // in the triage pane for periodic review.
+    const e = new Error(`Slow Supabase query: ${elapsedMs.toFixed(0)}ms`)
+    e.name = 'SlowQuery'
+    await _logClientError(e, null, { severity: 'warning', ...context })
+  } catch {
+    // Logger unavailable; nothing to do.
+  } finally {
+    _loggingSlowQuery = false
+  }
+}
+
 // PostgREST returns a chainable filter builder that's also thenable.
-// We Proxy it so any await/.then() fires invalidation on success and
-// logs to client_errors on a non-trivial failure.
+// We Proxy it so any await/.then() fires invalidation on success,
+// logs to client_errors on a non-trivial failure, and tracks
+// slow-query wall-clock time.
 function wrapThenable(builder) {
   return new Proxy(builder, {
     get(target, prop) {
       const value = Reflect.get(target, prop)
       if (prop === 'then') {
-        return (onFulfilled, onRejected) =>
-          target.then(
+        return (onFulfilled, onRejected) => {
+          // Capture start time so we can compute elapsed in the resolution
+          // handler. Using performance.now() since it's monotonic and not
+          // affected by clock adjustments mid-flight.
+          const t0 = (typeof performance !== 'undefined' && performance.now)
+            ? performance.now()
+            : Date.now()
+          return target.then(
             (res) => {
+              const elapsed = ((typeof performance !== 'undefined' && performance.now)
+                ? performance.now()
+                : Date.now()) - t0
               // Only invalidate when the server didn't return an error.
               // PostgREST surfaces errors in res.error rather than throwing.
               if (!res?.error) {
                 fireInvalidate()
+                // Slow-query telemetry. Sample only on success — failures
+                // are already logged as errors above and slow-failures
+                // are likely network/timeout issues, not query problems.
+                if (elapsed > SLOW_QUERY_MS) {
+                  logSlowQuery(elapsed, {})
+                }
               } else if (shouldLogQueryError(res.error)) {
                 logQueryError(res.error, {
                   // The current URL gives the logger enough context to
@@ -150,6 +194,7 @@ function wrapThenable(builder) {
             },
             onRejected,
           )
+        }
       }
       if (typeof value !== 'function') return value
       // Re-wrap the result of chained methods (.eq, .select, etc.) so
