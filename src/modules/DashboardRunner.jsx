@@ -3,7 +3,7 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
   FunnelChart, Funnel,
-} from 'recharts'
+} from '../lib/RechartsLazy'
 import { C, CHART_COLORS } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
 import { runReport, loadDashboard, getRowValue } from '../data/reportsService'
