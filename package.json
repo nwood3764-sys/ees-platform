@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "preflight": "node scripts/preflight.mjs",
-    "build:safe": "npm run preflight && npm run build"
+    "runtime-smoke": "node scripts/runtime-smoke.mjs",
+    "build:safe": "npm run preflight && npm run build && npm run runtime-smoke"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",
