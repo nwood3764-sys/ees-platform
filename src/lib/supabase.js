@@ -74,8 +74,59 @@ function wrapQueryBuilder(qb) {
   })
 }
 
+// Errors we deliberately don't log to client_errors — they're either
+// expected business outcomes or auth lifecycle, not diagnostic signal.
+//   PGRST116 — "no rows" / single() returned zero rows; common in lookups
+//   PGRST301 — auth lifecycle; user signed out mid-request
+//   42501   — PostgreSQL insufficient_privilege; expected when RLS denies
+//   23505   — unique_violation; surfaces as a user-facing form error
+//   23503   — foreign_key_violation; surfaces as a user-facing form error
+//   23514   — check_violation; surfaces as a user-facing form error
+//   401     — auth lifecycle
+//   403     — permission denied (same as 42501 surfaced differently)
+const SILENT_ERROR_CODES = new Set([
+  'PGRST116', 'PGRST301',
+  '42501', '23505', '23503', '23514',
+  '401', '403',
+])
+
+function shouldLogQueryError(err) {
+  if (!err) return false
+  const code = String(err.code || err.status || '')
+  if (SILENT_ERROR_CODES.has(code)) return false
+  // Network aborts (user navigated away). Not actionable.
+  if (err.message && /aborted/i.test(err.message)) return false
+  return true
+}
+
+// Lazy import the error logger to avoid a circular dependency.
+let _logClientError = null
+// Re-entry guard: the logger writes to client_errors via this same
+// proxied client. If THAT write fails and we tried to log it, we'd
+// infinite-loop. The guard makes the recursive call a no-op.
+let _loggingInProgress = false
+async function logQueryError(err, context) {
+  if (_loggingInProgress) return
+  _loggingInProgress = true
+  try {
+    if (!_logClientError) {
+      const mod = await import('./clientErrorLogger')
+      _logClientError = mod.logClientError
+    }
+    // Build a synthetic Error so the logger has a clean message + stack.
+    const e = new Error(`Supabase query failed: ${err.message || 'unknown'}`)
+    e.name = err.code ? `SupabaseError:${err.code}` : 'SupabaseError'
+    await _logClientError(e, null, { severity: 'error', ...context })
+  } catch {
+    // Logger unavailable; nothing to do.
+  } finally {
+    _loggingInProgress = false
+  }
+}
+
 // PostgREST returns a chainable filter builder that's also thenable.
-// We Proxy it so any await/.then() fires invalidation on success.
+// We Proxy it so any await/.then() fires invalidation on success and
+// logs to client_errors on a non-trivial failure.
 function wrapThenable(builder) {
   return new Proxy(builder, {
     get(target, prop) {
@@ -86,7 +137,15 @@ function wrapThenable(builder) {
             (res) => {
               // Only invalidate when the server didn't return an error.
               // PostgREST surfaces errors in res.error rather than throwing.
-              if (!res?.error) fireInvalidate()
+              if (!res?.error) {
+                fireInvalidate()
+              } else if (shouldLogQueryError(res.error)) {
+                logQueryError(res.error, {
+                  // The current URL gives the logger enough context to
+                  // know what page the failure happened on. We don't
+                  // try to infer the specific table here.
+                })
+              }
               return onFulfilled ? onFulfilled(res) : res
             },
             onRejected,
@@ -106,11 +165,23 @@ function wrapThenable(builder) {
 }
 
 // Public client. Looks identical to a normal Supabase client; the only
-// difference is .from() returns a Proxy that auto-invalidates on writes.
+// difference is .from() returns a Proxy that auto-invalidates on writes,
+// and .rpc() does the same after a successful call.
+//
+// On .rpc(): we can't tell from the call site whether the RPC is a read
+// or a write — both look like supabase.rpc('foo', args). The safest
+// default is to invalidate after every successful RPC. The cost is a
+// re-fetch on next navigation after harmless read RPCs (current_app_user_id,
+// anura_table_metadata, etc.); the benefit is no stale data after
+// mutation RPCs (publish_project_report_template, cancel_appointment, etc.).
+// On balance, the same trade-off as for .from() writes.
 export const supabase = new Proxy(baseClient, {
   get(target, prop) {
     if (prop === 'from') {
       return (table) => wrapQueryBuilder(target.from(table))
+    }
+    if (prop === 'rpc') {
+      return (fn, args, opts) => wrapThenable(target.rpc(fn, args, opts))
     }
     return Reflect.get(target, prop)
   },

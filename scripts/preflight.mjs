@@ -267,7 +267,39 @@ for (const file of walkSource()) {
     }
   }
 
-  // ─── 4. Console.log warnings ────────────────────────────────────────
+  // ─── 4. React.lazy() targets must have a default export ────────────
+  // `const X = lazy(() => import('./foo'))` fails at the first render
+  // attempt if foo has no default export — React throws and the
+  // ErrorBoundary catches it, but the user sees a fallback UI. Catch
+  // it here statically so it never reaches production.
+  //
+  // Regex matches: `lazy(() => import('./path'))` with optional
+  // whitespace, single-or-double quotes, and an optional async wrapper.
+  // We deliberately don't try to handle complex closures — they're
+  // rare and the regex would balloon.
+  const lazyImportRe = /lazy\(\s*\(\s*\)\s*=>\s*import\(\s*['"]([^'"]+)['"]\s*\)\s*\)/g
+  let lazyMatch
+  while ((lazyMatch = lazyImportRe.exec(source)) !== null) {
+    const targetSpec = lazyMatch[1]
+    if (!targetSpec.startsWith('.')) continue // skip non-relative lazy imports
+    const lineNum = source.slice(0, lazyMatch.index).split('\n').length
+    const target = resolveRelativeImport(file, targetSpec)
+    if (!target) {
+      fail(`lazy() target '${targetSpec}' does not resolve to any file`, relPath, lineNum)
+      continue
+    }
+    const targetExports = exportsOf(target)
+    if (!targetExports.has('default')) {
+      fail(
+        `lazy() target ${relative(repoRoot, target)} has no default export. ` +
+        `React.lazy requires the module to export a component as default. ` +
+        `(Available: ${[...targetExports].sort().join(', ') || '(none)'})`,
+        relPath, lineNum,
+      )
+    }
+  }
+
+  // ─── 5. Console.log warnings ────────────────────────────────────────
   // We allow console.warn and console.error (used for telemetry +
   // diagnostic logging). Just .log() in production is usually leftover
   // debug output.
