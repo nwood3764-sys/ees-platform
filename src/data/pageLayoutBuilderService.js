@@ -305,6 +305,17 @@ export async function createWidget(sectionId, {
 
   const position = await _nextWidgetPosition(sectionId)
 
+  // The database trigger trg_validate_page_layout_widget_config validates
+  // widget_config before this insert lands:
+  //   - field_group: every fields[].name must exist as a column on the
+  //     parent table.
+  //   - related_list: widget_config.table must exist; widget_config.fk
+  //     must exist on it; every columns[].name must exist on it.
+  // A violation surfaces as a PostgrestError with SQLSTATE 22023 and a
+  // message identifying the offending field/column. The caller's catch
+  // block shows e.message verbatim, which is already actionable -- no
+  // frontend translation needed.
+
   const { data, error } = await supabase
     .from('page_layout_widgets')
     .insert({
