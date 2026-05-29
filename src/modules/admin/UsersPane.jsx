@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { C } from '../../data/constants'
 import { LoadingState, ErrorState } from '../../components/UI'
 import { ListView } from '../../components/ListView'
+import HelpIcon from '../../components/help/HelpIcon'
 import { fetchUsers } from '../../data/adminService'
 import { supabase } from '../../lib/supabase'
 import InviteUserModal from './InviteUserModal'
@@ -164,7 +165,10 @@ export default function UsersPane({ onOpenRecord }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ padding: '14px 24px 10px', background: C.card, borderBottom: `1px solid ${C.border}` }}>
-        <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Users</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Users</div>
+          <HelpIcon anchors={[{ type: 'concept', concept: 'users-and-passwords' }]} />
+        </div>
         <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
           {loading
             ? 'Loading…'
