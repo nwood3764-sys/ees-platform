@@ -1,76 +1,21 @@
-// ─── inbound-email-webhook ───────────────────────────────────────────────
-// Microsoft Graph change-notification receiver for inbound email. Mirrors
-// the twilio-inbound pattern: validates the request, idempotently inserts
-// the inbound message into the `messages` table, and threads it onto the
-// correct conversation via a fallback chain.
+// ─── inbound-email-webhook v3 ────────────────────────────────────────────
+// v3 changes vs v2:
+//   1. clientState env var (GRAPH_WEBHOOK_CLIENT_STATE) is now REQUIRED.
+//      v2 fell open if unset (logged a warning, processed anyway). Any
+//      anonymous caller could POST a fake Graph notification body and
+//      inject messages/unmatched_inbox rows. v3 returns 500 if env var
+//      is unset and 401 per-entry if presented value doesn't match.
+//   2. _mock_message backdoor is now gated by INBOUND_EMAIL_ALLOW_MOCK
+//      env var (must be "true"). v2 always honored _mock_message which
+//      let any caller skip the Graph fetch and inject attacker-controlled
+//      from/subject/body straight into the messages table.
 //
-// Subscribe Graph notifications via Microsoft Graph REST:
-//   POST https://graph.microsoft.com/v1.0/subscriptions
-//   {
-//     "changeType":         "created",
-//     "notificationUrl":    "https://flyjigrijjjtcsvpgzvk.supabase.co/functions/v1/inbound-email-webhook",
-//     "resource":           "users/assessments@EES-WI.org/mailFolders('Inbox')/messages",
-//     "expirationDateTime": "<ISO-8601 ~3 days from now>",
-//     "clientState":        "<env GRAPH_WEBHOOK_CLIENT_STATE>"
-//   }
-//
-// Graph expires subscriptions every ~3 days; renewal cron is its own function
-// (renew-graph-subscriptions, deferred).
-//
-// Handshake — when a subscription is created Graph sends GET with
-//   ?validationToken=<token>
-// We must respond 200 with the token as plain text body, within 10 seconds.
-// We support this on POST too (Graph documentation differs between versions).
-//
-// Notification format (Graph POSTs JSON):
-//   {
-//     "value": [
-//       {
-//         "subscriptionId":   "...",
-//         "changeType":       "created",
-//         "resource":         "users/{mailbox}/messages/{id}",
-//         "resourceData":     { "id": "{message-id}", "@odata.type": "#Microsoft.Graph.Message" },
-//         "clientState":      "<our token>"
-//       }
-//     ]
-//   }
-//
-// On receipt the function:
-//   1. Validates clientState against GRAPH_WEBHOOK_CLIENT_STATE.
-//   2. For each notification entry: fetches the full message from Graph
-//      (real mode) OR uses inline `_mock_message` payload (mock mode).
-//   3. Resolves the thread via a three-step fallback:
-//        a. Plus-addressed conversation token in toRecipients
-//           (assessments+c_8f3a2b1d@EES-WI.org → conversations.id LIKE '8f3a2b1d%')
-//        b. In-Reply-To / References header → messages.msg_external_message_id
-//        c. Sender email → contacts.contact_email → most recent open thread
-//   4. If matched: insert messages row in 'received', rollup trigger
-//      updates conv_last_message_at / _direction / _preview / _inbound_unread.
-//   5. If unmatched: write to unmatched_inbox for triage.
-//
-// Mock-mode testing — POST with `_mock_message` payload bypasses the Graph
-// fetch:
-//   {
-//     "value":[{ "subscriptionId":"…", "changeType":"created", "resource":"users/…/messages/…",
-//                "resourceData":{"id":"mock-1"}, "clientState":"…",
-//                "_mock_message": {
-//                  "id":"mock-1",
-//                  "internetMessageId":"<some@id>",
-//                  "subject":"Re: …",
-//                  "bodyPreview":"…",
-//                  "body":{"contentType":"html","content":"<p>…</p>"},
-//                  "from":{"emailAddress":{"address":"customer@example.com","name":"Customer"}},
-//                  "toRecipients":[{"emailAddress":{"address":"assessments+c_8f3a2b1d@EES-WI.org"}}],
-//                  "internetMessageHeaders":[
-//                    {"name":"In-Reply-To","value":"<leap-…@EES-WI.org>"}
-//                  ]
-//                }
-//              }]
-//   }
-//
-// Auth: public webhook. verify_jwt=false because Microsoft Graph won't
-// present a JWT. clientState (HMAC-like shared secret) is the security
+// Auth model unchanged otherwise: verify_jwt=false because Microsoft
+// Graph won't present a JWT. clientState shared secret is THE security
 // boundary.
+//
+// Plus-address resolution still uses the generated conv_short_token
+// column (substring(id::text, 1, 8)) for exact match — same as v2.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4"
@@ -81,11 +26,7 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
-// ── Types ───────────────────────────────────────────────────────────────
-
-interface GraphRecipient {
-  emailAddress: { address: string; name?: string }
-}
+interface GraphRecipient { emailAddress: { address: string; name?: string } }
 
 interface GraphMessage {
   id?: string
@@ -106,21 +47,17 @@ interface NotificationEntry {
   resource?: string
   resourceData?: { id?: string; "@odata.type"?: string }
   clientState?: string
-  _mock_message?: GraphMessage  // mock-mode bypass
+  _mock_message?: GraphMessage
 }
 
-interface NotificationBody {
-  value?: NotificationEntry[]
-}
-
-// ── Server ──────────────────────────────────────────────────────────────
+interface NotificationBody { value?: NotificationEntry[] }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
 
-  // Subscription validation handshake — Graph sends ?validationToken=<token>
-  // (sometimes as GET, sometimes as POST with empty body). Echo the token
-  // back as plain text within 10 seconds to prove URL ownership.
+  // Graph subscription validation handshake — always allowed without auth.
+  // Graph POSTs ?validationToken=... when creating/renewing a subscription;
+  // we have to echo it back as plaintext within 10 seconds.
   const url = new URL(req.url)
   const validationToken = url.searchParams.get("validationToken")
   if (validationToken) {
@@ -130,85 +67,72 @@ Deno.serve(async (req) => {
     })
   }
 
-  if (req.method !== "POST") {
-    // Any other method gets a 200 — Graph treats non-2xx as failure and retries
-    return new Response("OK", { status: 200, headers: cors })
-  }
+  if (req.method !== "POST") return new Response("OK", { status: 200, headers: cors })
 
-  const supabaseUrl  = Deno.env.get("SUPABASE_URL")
-  const serviceKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
-  const clientState  = Deno.env.get("GRAPH_WEBHOOK_CLIENT_STATE")
+  const supabaseUrl         = Deno.env.get("SUPABASE_URL")
+  const serviceKey          = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+  const expectedClientState = Deno.env.get("GRAPH_WEBHOOK_CLIENT_STATE")
+  const allowMock           = Deno.env.get("INBOUND_EMAIL_ALLOW_MOCK") === "true"
+
   if (!supabaseUrl || !serviceKey) {
-    console.error("inbound-email-webhook: Supabase service-role key missing — cannot persist")
-    return ok()
+    console.error("inbound-email-webhook: SUPABASE_URL or SERVICE_ROLE_KEY missing")
+    return json({ error: "server misconfigured: Supabase service key missing" }, 500)
   }
 
-  // Parse body
+  // Fail-closed on missing clientState env var. v2 logged a warning and
+  // processed anyway — fail-open. Now: refuse to process if not configured.
+  if (!expectedClientState) {
+    console.error("inbound-email-webhook: GRAPH_WEBHOOK_CLIENT_STATE env var not set")
+    return json({
+      error: "Server misconfigured: GRAPH_WEBHOOK_CLIENT_STATE env var missing. Set it to the same value used when creating the Graph subscription.",
+    }, 500)
+  }
+
   let body: NotificationBody
   try { body = await req.json() as NotificationBody }
-  catch (e) {
-    console.error("inbound-email-webhook: invalid JSON body", e)
-    return ok()
-  }
+  catch (e) { console.error("inbound-email-webhook: invalid JSON body", e); return json({ error: "invalid JSON" }, 400) }
 
   if (!body?.value || !Array.isArray(body.value) || body.value.length === 0) {
-    console.warn("inbound-email-webhook: empty value array — nothing to do")
-    return ok()
+    console.warn("inbound-email-webhook: empty value array")
+    return json({ processed: 0, results: [] }, 200)
   }
 
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 
-  const results: any[] = []
+  const results: unknown[] = []
   for (const entry of body.value) {
-    // clientState validation — every notification carries the shared secret
-    // we registered in the subscription. Reject mismatches silently (Graph
-    // doesn't retry on validation, but we don't want a thrash loop either).
-    if (clientState) {
-      if (entry.clientState !== clientState) {
-        console.error("inbound-email-webhook: clientState mismatch — dropping notification", {
-          subscriptionId: entry.subscriptionId,
-        })
-        results.push({ status: "rejected", reason: "clientState mismatch" })
-        continue
-      }
-    } else {
-      console.warn("inbound-email-webhook: GRAPH_WEBHOOK_CLIENT_STATE not set — validation SKIPPED")
+    if (entry.clientState !== expectedClientState) {
+      console.error("inbound-email-webhook: clientState mismatch", { subscriptionId: entry.subscriptionId })
+      results.push({ status: "rejected", reason: "clientState mismatch" })
+      continue
     }
-
-    try {
-      const result = await processNotification(admin, entry)
-      results.push(result)
-    } catch (e) {
-      console.error("inbound-email-webhook: unhandled exception processing entry", e)
+    if (entry._mock_message && !allowMock) {
+      console.error("inbound-email-webhook: _mock_message provided but INBOUND_EMAIL_ALLOW_MOCK != 'true'")
+      results.push({ status: "rejected", reason: "_mock_message not allowed in this environment" })
+      continue
+    }
+    try { results.push(await processNotification(admin, entry, allowMock)) }
+    catch (e) {
+      console.error("inbound-email-webhook: unhandled exception", e)
       results.push({ status: "error", error: (e as Error).message })
     }
   }
 
-  return new Response(JSON.stringify({ processed: results.length, results }), {
-    status: 200,
-    headers: { ...cors, "Content-Type": "application/json" },
-  })
+  return json({ processed: results.length, results }, 200)
 })
 
-// ── Per-notification pipeline ───────────────────────────────────────────
-
-async function processNotification(admin: SupabaseClient, entry: NotificationEntry): Promise<any> {
-  // Identify the mailbox the notification belongs to (our_address for thread
-  // lookups). Resource shape: users/{mailbox}/messages/{id} or
-  // users/{mailbox}/mailFolders('Inbox')/messages/{id}.
+async function processNotification(admin: SupabaseClient, entry: NotificationEntry, allowMock: boolean): Promise<unknown> {
   const ourMailbox = extractMailboxFromResource(entry.resource || "")
   if (!ourMailbox) {
     console.error("inbound-email-webhook: could not parse mailbox from resource", entry.resource)
     return { status: "error", error: "unparseable resource" }
   }
 
-  // Fetch the message — mock-mode uses inline _mock_message; real-mode hits
-  // Graph with app-only access token.
   let message: GraphMessage | null = null
   let mode: "mock" | "real" = "mock"
-  if (entry._mock_message) {
+  if (entry._mock_message && allowMock) {
     message = entry._mock_message
     mode = "mock"
   } else {
@@ -216,10 +140,8 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
     const clientId     = Deno.env.get("OUTLOOK_CLIENT_ID")
     const clientSecret = Deno.env.get("OUTLOOK_CLIENT_SECRET")
     if (!tenantId || !clientId || !clientSecret) {
-      console.warn("inbound-email-webhook: Graph creds missing and no _mock_message — cannot fetch", {
-        resource: entry.resource,
-      })
-      return { status: "skipped", reason: "no graph creds and no mock payload" }
+      console.warn("inbound-email-webhook: Graph creds missing", { resource: entry.resource })
+      return { status: "skipped", reason: "no graph creds and no mock payload allowed" }
     }
     try {
       const accessToken = await getAppAccessToken(tenantId, clientId, clientSecret)
@@ -232,7 +154,6 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
   }
   if (!message) return { status: "error", error: "no message body" }
 
-  // Extract canonical fields we'll need throughout
   const internetMessageId = message.internetMessageId || ""
   const fromAddress       = message.from?.emailAddress?.address || ""
   const subject           = message.subject || ""
@@ -241,12 +162,10 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
   const headersByName     = headerMap(message.internetMessageHeaders || [])
 
   if (!fromAddress) {
-    console.error("inbound-email-webhook: missing From address — cannot route")
+    console.error("inbound-email-webhook: missing From address")
     return { status: "error", error: "missing From" }
   }
 
-  // Idempotency — Graph can fire duplicate notifications. Match on
-  // internetMessageId (most reliable) and fall back to the Graph message id.
   const idempotencyKey = internetMessageId || message.id || ""
   if (idempotencyKey) {
     const { data: existing } = await admin
@@ -255,16 +174,14 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
       .eq("msg_provider_message_id", idempotencyKey)
       .eq("msg_is_deleted", false)
       .maybeSingle()
-    if (existing) {
-      return { status: "duplicate", message_id: existing.id }
-    }
+    if (existing) return { status: "duplicate", message_id: existing.id }
   }
 
-  // ── Thread-resolution fallback chain ───────────────────────────────
   let conversationId: string | null = null
   let resolutionTrace = ""
 
-  // (1) Plus-addressed conversation token
+  // (1) Plus-addressed conversation token — exact match on the indexed
+  // generated column conv_short_token (= substring(id::text, 1, 8)).
   const tokenFromTo = findConversationTokenInRecipients(toRecipients)
   if (tokenFromTo) {
     const { data: convByToken } = await admin
@@ -276,7 +193,7 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
       .maybeSingle()
     if (convByToken) {
       conversationId = convByToken.id
-      resolutionTrace = `plus-address token ${tokenFromTo} → ${convByToken.conv_record_number}`
+      resolutionTrace = `plus-address token ${tokenFromTo} -> ${convByToken.conv_record_number}`
     }
   }
 
@@ -296,12 +213,12 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
         .maybeSingle()
       if (msgByMsgId?.conversation_id) {
         conversationId = msgByMsgId.conversation_id
-        resolutionTrace = `Message-ID match → ${msgByMsgId.msg_record_number}`
+        resolutionTrace = `Message-ID match -> ${msgByMsgId.msg_record_number}`
       }
     }
   }
 
-  // (3) Sender email → contact → most-recent open thread on that mailbox
+  // (3) Sender email -> contact -> most-recent open thread on that mailbox
   if (!conversationId) {
     const { data: contact } = await admin
       .from("contacts")
@@ -323,12 +240,11 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
         .maybeSingle()
       if (openThread) {
         conversationId = openThread.id
-        resolutionTrace = `sender→contact→thread match → ${openThread.conv_record_number}`
+        resolutionTrace = `sender->contact->thread match -> ${openThread.conv_record_number}`
       }
     }
   }
 
-  // ── Route the message ─────────────────────────────────────────────
   if (conversationId) {
     const { data: msgRow, error: insErr } = await admin.from("messages").insert({
       msg_record_number:        "",
@@ -359,7 +275,9 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
     }
   }
 
-  // ── Unmatched → triage inbox ───────────────────────────────────────
+  // Unmatched -> triage inbox. ON CONFLICT not used because unique constraint
+  // gives us idempotency for free: duplicate UI inserts return PGRST/23505
+  // which the caller can treat as a duplicate.
   const { data: uiRow, error: uiErr } = await admin.from("unmatched_inbox").insert({
     ui_record_number:        "",
     ui_channel:              "email",
@@ -372,7 +290,7 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
     ui_provider_message_id:  idempotencyKey || message.id || "unknown",
     ui_in_reply_to_header:   headersByName.get("in-reply-to") || null,
     ui_references_header:    headersByName.get("references") || null,
-    ui_raw_payload:          message as any,
+    ui_raw_payload:          message as unknown,
     ui_status:               "awaiting_triage",
   }).select("id, ui_record_number").single()
   if (uiErr) {
@@ -381,18 +299,14 @@ async function processNotification(admin: SupabaseClient, entry: NotificationEnt
     return { status: "error", error: uiErr.message }
   }
   return {
-    status:           "unmatched",
+    status:             "unmatched",
     mode,
     unmatched_inbox_id: uiRow.id,
-    record_number:    uiRow.ui_record_number,
-    resolution_trace: "no rule matched — sent to triage",
+    record_number:      uiRow.ui_record_number,
+    resolution_trace:   "no rule matched -- sent to triage",
   }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────
-
-// Parse 'users/<mailbox>/messages/<id>' or
-// 'users/<mailbox>/mailFolders(\'Inbox\')/messages/<id>'.
 function extractMailboxFromResource(resource: string): string | null {
   if (!resource) return null
   const m = resource.match(/users\/([^/]+)/i)
@@ -400,8 +314,6 @@ function extractMailboxFromResource(resource: string): string | null {
   return decodeURIComponent(m[1])
 }
 
-// Pull the conversation token from any toRecipient that's plus-addressed:
-//   assessments+c_8f3a2b1d@EES-WI.org → '8f3a2b1d'  (8-hex token after 'c_')
 function findConversationTokenInRecipients(recipients: GraphRecipient[]): string | null {
   for (const r of recipients) {
     const addr = r.emailAddress?.address || ""
@@ -411,15 +323,12 @@ function findConversationTokenInRecipients(recipients: GraphRecipient[]): string
   return null
 }
 
-// Extract every <id@host> token from a header value (or concatenation of
-// In-Reply-To and References).
 function extractMessageIds(s: string): string[] {
   if (!s) return []
   const matches = s.match(/<[^<>]+>/g)
   return matches ? matches : []
 }
 
-// Lowercase-keyed map of internetMessageHeaders for case-insensitive lookup.
 function headerMap(headers: { name: string; value: string }[]): Map<string, string> {
   const m = new Map<string, string>()
   for (const h of headers || []) {
@@ -448,9 +357,7 @@ async function fetchMessageFromGraph(accessToken: string, mailbox: string, messa
   const resp = await fetch(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}` +
       `?$select=id,internetMessageId,subject,bodyPreview,body,from,toRecipients,ccRecipients,internetMessageHeaders,receivedDateTime`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    },
+    { headers: { Authorization: `Bearer ${accessToken}` } },
   )
   if (!resp.ok) {
     const text = await resp.text().catch(() => "")
@@ -459,6 +366,6 @@ async function fetchMessageFromGraph(accessToken: string, mailbox: string, messa
   return await resp.json() as GraphMessage
 }
 
-function ok(): Response {
-  return new Response("OK", { status: 200, headers: cors })
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } })
 }
