@@ -1,4 +1,4 @@
-// ─── renew-graph-subscriptions ───────────────────────────────────────────
+// ─── renew-graph-subscriptions v2 ────────────────────────────────────────
 // Microsoft Graph subscriptions expire every ~3 days. Without renewal the
 // inbound-email-webhook stops receiving notifications and inbound email
 // silently goes dark. This function enumerates every Graph subscription
@@ -9,30 +9,32 @@
 // 3-day expiry). Re-runnable safely; idempotent within one window.
 //
 // Operating modes:
-//   - Mock mode (any of OUTLOOK_CLIENT_ID / _SECRET / _TENANT_ID is unset):
-//     enumerates nothing, returns {mode:'mock', would_renew:0}. Lets the
-//     cron schedule land cleanly before Azure AD is configured.
-//   - Real mode: calls Graph as described below.
+//   - Mock mode (any of OUTLOOK_CLIENT_ID / _SECRET / _TENANT_ID unset):
+//     enumerates nothing, returns {mode:'mock'}. Secret is OPTIONAL here
+//     so developers can hit the endpoint without configuring env vars —
+//     no real Graph access happens so there's nothing to protect.
+//   - Real mode: secret is REQUIRED (fail-closed). Missing env var
+//     returns 500 and logs to graph_subscription_renewal_runs so the
+//     misconfig surfaces in the audit table. Wrong secret returns 401.
 //
-// Real-mode flow:
+// v2 change vs v1: previously the secret check short-circuited if env
+// var was unset (fail-open). With Graph creds configured but secret
+// env var unset, any anonymous caller could enumerate our subscriptions
+// via /functions/v1/renew-graph-subscriptions. v2 splits the auth gate
+// by mode so real-mode is fail-closed.
+//
+// Real-mode flow (once auth passes):
 //   1. Acquire app access token via client_credentials against the
 //      common token endpoint (mirrors send-email-v1.getAppAccessToken).
-//   2. GET https://graph.microsoft.com/v1.0/subscriptions — returns every
-//      subscription the app owns across all resources (inbox messages,
-//      calendar events, etc.).
+//   2. GET /v1.0/subscriptions — returns every subscription the app owns
+//      across all resources (inbox messages, calendar events, etc.).
 //   3. For each subscription whose expirationDateTime falls inside the
-//      renewal window (default: next 24 hours), PATCH the subscription
-//      with a new expirationDateTime set to the per-resource maximum
-//      (Graph caps mail subscriptions at 4230 minutes ≈ 70 hours; we
-//      request 4200 minutes = 70h to stay just under).
+//      renewal window (default: next 24 hours), PATCH with new
+//      expirationDateTime set to RENEWAL_TARGET_MINUTES from now.
+//      (Graph caps mail subscriptions at 4230 minutes ≈ 70 hours;
+//      we request 4200 minutes to stay just under.)
 //   4. Returns a summary {mode, total_subscriptions, renewal_window_h,
 //      attempted, succeeded, failed[]} for observability via cron logs.
-//
-// Public per-call response is JSON. Pre-shared-key auth via the
-// GRAPH_RENEWAL_CRON_SECRET env var lets the pg_cron job authenticate
-// without the Supabase JWT (cron's net.http_post doesn't carry user
-// context). Mismatch → 401. Missing in mock mode → still accepted, so
-// developers can hit the endpoint without configuring the secret.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4"
 
@@ -43,31 +45,15 @@ const cors = {
 }
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-
-// Per-resource max lifetime in minutes. Graph documents these as hard caps
-// per https://learn.microsoft.com/en-us/graph/api/resources/subscription
-// We request a value just under the cap to avoid clock-skew rejections.
-// Mail (messages on a mailbox) — 4230 min; we request 4200 (70h).
-// Calendar events — 4230 min; same treatment.
-// We don't differentiate at present — 4200 is safe for both.
 const RENEWAL_TARGET_MINUTES = 4200
-
-// Renewal window. We renew anything expiring inside this window so a
-// missed cron run doesn't drop the subscription.
 const DEFAULT_RENEWAL_WINDOW_HOURS = 24
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors })
   if (req.method !== "POST")    return json({ error: "POST only" }, 405)
 
-  // Pre-shared-key auth so the pg_cron net.http_post call can reach us
-  // without needing a user JWT. In mock mode we skip the check so the
-  // function is safe to call manually before secrets are configured.
-  const expectedSecret = Deno.env.get("GRAPH_RENEWAL_CRON_SECRET")
+  const expectedSecret  = Deno.env.get("GRAPH_RENEWAL_CRON_SECRET")
   const presentedSecret = req.headers.get("x-graph-renewal-secret") || ""
-  if (expectedSecret && presentedSecret !== expectedSecret) {
-    return json({ error: "Forbidden: missing or wrong x-graph-renewal-secret" }, 401)
-  }
 
   const clientId     = Deno.env.get("OUTLOOK_CLIENT_ID")
   const clientSecret = Deno.env.get("OUTLOOK_CLIENT_SECRET")
@@ -75,8 +61,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const supabaseUrl  = Deno.env.get("SUPABASE_URL")!
   const serviceKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 
-  // Optional body to override the renewal window for one-off catch-up
-  // runs ({"renewal_window_hours": 72}).
   let renewalWindowH = DEFAULT_RENEWAL_WINDOW_HOURS
   try {
     const body = await req.json().catch(() => ({})) as { renewal_window_hours?: number }
@@ -85,9 +69,26 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   } catch { /* empty body is fine */ }
 
-  // Mock mode — no Azure AD app yet, nothing to renew. Return success
-  // so the cron job logs aren't full of failures before configuration.
   const mockMode = !clientId || !clientSecret || !tenantId
+
+  // Auth gate. Real mode = fail-closed (production safety). Mock mode =
+  // fail-open (developer-friendly; function does no real work anyway).
+  if (!mockMode) {
+    if (!expectedSecret) {
+      const admin = createClient(supabaseUrl, serviceKey)
+      await logRun(admin, {
+        mode: "real", phase: "auth",
+        error: "GRAPH_RENEWAL_CRON_SECRET env var not configured; refusing to serve in real mode",
+      })
+      return json({
+        error: "Server misconfigured: GRAPH_RENEWAL_CRON_SECRET env var missing. Set it in Supabase project env vars to match the cron job's x-graph-renewal-secret header.",
+      }, 500)
+    }
+    if (presentedSecret !== expectedSecret) {
+      return json({ error: "Forbidden: missing or wrong x-graph-renewal-secret" }, 401)
+    }
+  }
+
   if (mockMode) {
     return json({
       mode: "mock",
@@ -102,7 +103,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const admin: SupabaseClient = createClient(supabaseUrl, serviceKey)
 
-  // Real-mode work
   let accessToken: string
   try {
     accessToken = await getAppAccessToken(tenantId!, clientId!, clientSecret!)
@@ -111,9 +111,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ mode: "real", error: `Token acquisition failed: ${(e as Error).message}` }, 502)
   }
 
-  // List every subscription the app owns. Graph paginates with @odata.nextLink;
-  // for our scale we expect single-digit subscriptions (one per inbound mailbox)
-  // and a single page. Walk the link just in case.
   const subscriptions: GraphSubscription[] = []
   let nextUrl: string | null = `${GRAPH_BASE}/subscriptions`
   while (nextUrl) {
@@ -175,8 +172,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   return json(summary, 200)
 })
 
-// ─── helpers ─────────────────────────────────────────────────────────────
-
 interface GraphSubscription {
   id: string
   resource: string
@@ -202,10 +197,6 @@ async function getAppAccessToken(tenantId: string, clientId: string, clientSecre
   return j.access_token as string
 }
 
-// Lightweight observability — writes one row per cron run into a new
-// table if it exists; silently skips if the table isn't present. The
-// table is optional so this function can be deployed before any
-// schema work lands. See migration 20260520120000.
 async function logRun(admin: SupabaseClient, summary: Record<string, unknown>): Promise<void> {
   try {
     await admin.from("graph_subscription_renewal_runs").insert({
