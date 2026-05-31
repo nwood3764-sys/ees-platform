@@ -53,8 +53,44 @@ export function picklistOptions(picklists, object, field) {
 // Fetchers
 // ---------------------------------------------------------------------------
 
+// Outreach is the *pipeline* view: a property/account belongs here only once
+// it is connected to an opportunity. Unassigned properties live in Prospecting
+// until advanced. This resolves the id sets reachable from a live opportunity:
+//   - properties: opportunities.property_id
+//   - accounts:  opportunities.opportunity_account_id /
+//                opportunity_managing_account_id, plus the owner account of any
+//                opportunity-connected property.
+async function opportunityConnectedIds() {
+  const { data, error } = await supabase
+    .from('opportunities')
+    .select('property_id, opportunity_account_id, opportunity_managing_account_id')
+    .eq('opportunity_is_deleted', false)
+  if (error) throw error
+  const rows = data || []
+  const propertyIds = [...new Set(rows.map(r => r.property_id).filter(Boolean))]
+  const accountIds = new Set()
+  for (const r of rows) {
+    if (r.opportunity_account_id) accountIds.add(r.opportunity_account_id)
+    if (r.opportunity_managing_account_id) accountIds.add(r.opportunity_managing_account_id)
+  }
+  if (propertyIds.length) {
+    const { data: props, error: pErr } = await supabase
+      .from('properties')
+      .select('property_account_id')
+      .in('id', propertyIds)
+      .eq('property_is_deleted', false)
+    if (pErr) throw pErr
+    for (const p of (props || [])) if (p.property_account_id) accountIds.add(p.property_account_id)
+  }
+  return { propertyIds, accountIds: [...accountIds] }
+}
+
 export async function fetchProperties() {
   const picklists = await loadPicklists()
+
+  // Outreach pipeline scope — only properties attached to an opportunity.
+  const { propertyIds } = await opportunityConnectedIds()
+  if (propertyIds.length === 0) return []
 
   // Parallel paginated: properties is at 6,781 rows in production.
   // Sequential pagination took ~40s; parallel cuts that to ~3s.
@@ -81,6 +117,7 @@ export async function fetchProperties() {
           accounts:property_account_id ( account_name )
         `)
         .eq('property_is_deleted', false)
+        .in('id', propertyIds)
         .order('property_name', { ascending: true })
         .order('id',            { ascending: true })  // tie-breaker
         .range(from, to),
@@ -88,7 +125,8 @@ export async function fetchProperties() {
       supabase
         .from('properties')
         .select('id', { count: 'exact', head: true })
-        .eq('property_is_deleted', false),
+        .eq('property_is_deleted', false)
+        .in('id', propertyIds),
   )
 
   return data.map(r => ({
@@ -408,6 +446,9 @@ export async function fetchEnrollments() {
 // migrated yet (e.g., property-detail dropdowns).
 // ---------------------------------------------------------------------------
 export async function fetchAccounts() {
+  // Outreach pipeline scope — only accounts connected to an opportunity.
+  const { accountIds } = await opportunityConnectedIds()
+  if (accountIds.length === 0) return []
   // Parallel paginated: accounts is at 2,030 rows in production (one
   // Account per unique HUD owner from the Manus seed + 3 per-state
   // bucket Accounts). Sequential pagination took ~12s; parallel
@@ -432,6 +473,7 @@ export async function fetchAccounts() {
           status_pl:account_status        ( picklist_label )
         `)
         .eq('account_is_deleted', false)
+        .in('id', accountIds)
         .order('account_name', { ascending: true })
         .order('id',           { ascending: true })
         .range(from, to),
@@ -439,7 +481,8 @@ export async function fetchAccounts() {
       supabase
         .from('accounts')
         .select('id', { count: 'exact', head: true })
-        .eq('account_is_deleted', false),
+        .eq('account_is_deleted', false)
+        .in('id', accountIds),
   )
 
   return data.map(r => ({
