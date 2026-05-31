@@ -391,11 +391,20 @@ function buildLabelMap(sections) {
 }
 
 // Return an array of human-readable labels for required fields that are
+// Columns the database or applyInsertDefaults populates automatically — never
+// the user's responsibility, so they must never appear in a "required field
+// missing" message even though they're NOT NULL. `id` is filled by the DB
+// default (gen_random_uuid()) at insert and is the specific column that was
+// being wrongly reported as "Required field missing: Id".
+const SYSTEM_REQUIRED_EXEMPT = /(^id$|_record_number$|_owner$|_created_by$|_created_at$|_updated_by$|_updated_at$|_is_deleted$|^is_seed_data$|_is_seed_data$)/
+
 // missing from the provided values object. An empty string is treated as
-// missing; `false` and `0` are valid values.
+// missing; `false` and `0` are valid values. System/auto-populated columns
+// are skipped so they never surface in the error message.
 function findMissingRequired(requiredFields, values, labelMap) {
   const missing = []
   for (const f of requiredFields || []) {
+    if (SYSTEM_REQUIRED_EXEMPT.test(f)) continue
     const v = values?.[f]
     if (v === null || v === undefined || v === '') {
       missing.push(labelMap[f] || humanizeFieldName(f))
