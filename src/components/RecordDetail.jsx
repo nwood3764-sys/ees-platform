@@ -985,9 +985,154 @@ function EmailTemplatePreviewModal({
 // unusable. This renders a button showing the current selection; clicking it
 // opens a panel with a search input and an ascending-sorted, filtered option
 // list. Selecting an option (or the leading blank row) calls onChange(value).
-function SearchableLookup({ value, options, onChange, placeholder = '— Select —' }) {
+// QuickCreateModal — inline "+ New" for a scalar lookup field. Opens the REAL
+// create path for the lookup's target table (same insertRecord +
+// applyInsertDefaults the full form uses), scoped to the table's required
+// fields plus its record-type selector. On save, returns {id, label} so the
+// caller can select the freshly created record. The user can open the new
+// record later to fill non-required fields — this is a quick-create, not a
+// reduced create form.
+function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated }) {
+  const toast = useToast()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [fields, setFields] = useState([])      // [{name,label,type,required,lookup_table,lookup_field}]
+  const [draft, setDraft] = useState({})
+  const [picklistOpts, setPicklistOpts] = useState({})
+  const [recordTypes, setRecordTypes] = useState([])
+  const rtColumn = useMemo(() => getRecordTypeColumn(table), [table])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const meta = await fetchTableMetadata(table)
+        const required = new Set(meta.required_fields || [])
+        // System/audit columns are auto-filled by applyInsertDefaults — never
+        // surface them in the quick-create form even if NOT NULL.
+        const SYSTEM = /(_record_number$|_owner$|_created_by$|_created_at$|_updated_by$|_updated_at$|_is_deleted$|^id$)/
+        // Build the field list: the record-type selector (if the table has
+        // one) plus every required, non-system column. The name field is the
+        // lookup's label column and is virtually always required, so it lands
+        // here naturally.
+        const fieldDefs = []
+        if (rtColumn) {
+          fieldDefs.push({ name: rtColumn, label: 'Record Type', type: 'picklist', required: true })
+        }
+        for (const col of required) {
+          if (SYSTEM.test(col)) continue
+          if (col === rtColumn) continue
+          fieldDefs.push({
+            name: col,
+            label: col.replace(/^[a-z]+_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            type: col === labelField ? 'text' : 'text',
+            required: true,
+          })
+        }
+        // Load record types for the RT selector, and any picklist options.
+        let rts = []
+        if (rtColumn) {
+          rts = await fetchAvailableRecordTypes(table).catch(() => [])
+        }
+        if (cancelled) return
+        setFields(fieldDefs)
+        setRecordTypes(rts)
+        setLoading(false)
+      } catch (err) {
+        if (!cancelled) { toast.error(`Could not open create form — ${err.message || err}`); onCancel() }
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table])
+
+  const setVal = (name, v) => setDraft(d => ({ ...d, [name]: v }))
+
+  const handleSave = async () => {
+    if (saving) return
+    const missing = fields.filter(f => f.required && (draft[f.name] == null || draft[f.name] === ''))
+    if (missing.length) {
+      toast.error(missing.length === 1 ? `Required: ${missing[0].label}` : `Required: ${missing.map(f => f.label).join(', ')}`)
+      return
+    }
+    setSaving(true)
+    try {
+      const userId = await getCurrentUserId()
+      const payload = applyInsertDefaults(table, { ...draft }, userId)
+      for (const [k, v] of Object.entries(payload)) if (v === '') payload[k] = null
+      const created = await insertRecord(table, payload)
+      const label = (labelField && created?.[labelField]) || created?.id?.slice(0, 8) || 'New record'
+      toast.success(`Created ${label}`)
+      onCreated({ id: created.id, label })
+    } catch (err) {
+      toast.error(`Create failed — ${err.message || String(err)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(7,17,31,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onCancel() }}>
+      <div style={{ background: '#fff', borderRadius: 10, width: 'min(460px, 100%)', maxHeight: '85vh',
+        display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${C.border}`, fontWeight: 600,
+          fontSize: 14, color: C.textPrimary }}>
+          New {objectLabel || 'Record'}
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px' }}>
+          {loading && <div style={{ textAlign: 'center', color: C.textMuted, fontSize: 13, padding: 12 }}>Loading form…</div>}
+          {!loading && fields.length === 0 && (
+            <div style={{ color: C.textMuted, fontSize: 13 }}>This object has no required fields to capture. Save to create.</div>
+          )}
+          {!loading && fields.map(f => (
+            <div key={f.name} style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 11.5, fontWeight: 500, color: C.textSecondary,
+                marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                {f.label}{f.required && <span style={{ color: '#c0392b', marginLeft: 3 }}>*</span>}
+              </label>
+              {f.name === rtColumn ? (
+                <SearchableLookup
+                  value={draft[f.name] || ''}
+                  options={recordTypes.map(rt => ({ value: rt.id, label: rt.label || rt.picklist_label }))}
+                  onChange={(val) => setVal(f.name, val || null)}
+                  placeholder="— Select —"
+                />
+              ) : (
+                <input type="text" style={{ ...inputBase }} value={draft[f.name] || ''}
+                  onChange={e => setVal(f.name, e.target.value)} />
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.border}`, background: '#fafbfd',
+          display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={onCancel} disabled={saving}
+            style={{ background: '#fff', color: C.textPrimary, border: `1px solid ${C.border}`,
+              borderRadius: 6, padding: '6px 14px', fontSize: 12.5, fontWeight: 500,
+              cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.6 : 1 }}>
+            Cancel
+          </button>
+          <button onClick={handleSave} disabled={saving || loading}
+            style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6,
+              padding: '6px 14px', fontSize: 12.5, fontWeight: 500,
+              cursor: saving ? 'wait' : 'pointer', opacity: (saving || loading) ? 0.7 : 1 }}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function SearchableLookup({ value, options, onChange, placeholder = '— Select —',
+  allowCreate = false, createTable = null, createLabelField = null, createObjectLabel = null,
+  onCreatedOption = null }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
   const rootRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -1071,7 +1216,34 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
               )
             })}
           </div>
+          {allowCreate && createTable && (
+            <div onClick={() => { setOpen(false); setCreateOpen(true) }}
+              style={{ padding: '8px 10px', fontSize: 13, cursor: 'pointer', fontWeight: 500,
+                color: C.emerald, borderTop: `1px solid ${C.border}`, background: '#fafbfd',
+                display: 'flex', alignItems: 'center', gap: 6 }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9' }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#fafbfd' }}>
+              <span style={{ fontSize: 15, lineHeight: 1 }}>+</span>
+              New {createObjectLabel || 'record'}
+            </div>
+          )}
         </div>
+      )}
+      {createOpen && (
+        <QuickCreateModal
+          table={createTable}
+          labelField={createLabelField}
+          objectLabel={createObjectLabel}
+          onCancel={() => setCreateOpen(false)}
+          onCreated={({ id, label }) => {
+            setCreateOpen(false)
+            // Make the new record immediately selectable + selected. The parent
+            // owns the options list; hand it the new option so the label
+            // resolves without a full refetch, then select it.
+            if (onCreatedOption) onCreatedOption({ value: id, label })
+            onChange(id)
+          }}
+        />
       )}
     </div>
   )
@@ -1146,6 +1318,40 @@ function AvatarUpload({ value, userId, onChange }) {
         {err && <div style={{ fontSize: 11.5, color: '#a32626' }}>{err}</div>}
       </div>
     </div>
+  )
+}
+
+// LookupEditControl — wraps SearchableLookup for a scalar lookup field, adding
+// locally-created options so a record created via inline "+ New" is selectable
+// immediately without a round-trip refetch. Inline create is enabled by the
+// field config's allow_inline_create flag; the target table/label come from
+// lookup_table / lookup_field.
+function LookupEditControl({ field, value, baseOptions, onChange, canCreate }) {
+  const [extra, setExtra] = useState([])  // options created inline this session
+  const options = useMemo(() => {
+    if (!extra.length) return baseOptions
+    const seen = new Set(baseOptions.map(o => String(o.value)))
+    return [...baseOptions, ...extra.filter(o => !seen.has(String(o.value)))]
+  }, [baseOptions, extra])
+
+  // Humanise the target table for the "+ New …" label, e.g. accounts → Account.
+  const objectLabel = useMemo(() => {
+    if (field.create_object_label) return field.create_object_label
+    const t = (field.lookup_table || '').replace(/s$/, '').replace(/_/g, ' ')
+    return t ? t.replace(/\b\w/g, c => c.toUpperCase()) : 'record'
+  }, [field])
+
+  return (
+    <SearchableLookup
+      value={value}
+      options={options}
+      onChange={(val) => onChange(val || null)}
+      allowCreate={canCreate}
+      createTable={field.lookup_table}
+      createLabelField={field.lookup_field}
+      createObjectLabel={objectLabel}
+      onCreatedOption={(opt) => setExtra(prev => [...prev, opt])}
+    />
   )
 }
 
@@ -1230,12 +1436,18 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
     case 'lookup': {
       const opts = lookupOpts || []
       const dep = field.lookup_dependency
-      if (opts.length > 0) {
+      const canCreate = field.allow_inline_create === true && !!field.lookup_table
+      // Render the searchable control when we have options OR when inline
+      // create is enabled (so "+ New" is reachable even with an empty pool —
+      // e.g. a fresh Account lookup before any account has been linked).
+      if (opts.length > 0 || canCreate) {
         return (
-          <SearchableLookup
+          <LookupEditControl
+            field={field}
             value={v || ''}
-            options={opts}
-            onChange={(val) => onChange(field.name, val || null)}
+            baseOptions={opts}
+            onChange={(val) => onChange(field.name, val)}
+            canCreate={canCreate}
           />
         )
       }
