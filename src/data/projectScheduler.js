@@ -127,20 +127,33 @@ export async function fetchTeamLeads({ workOrderIds = null, startDate = null } =
     p_start_date: start,
   })
   if (error) throw error
-  return (data || []).map(r => ({
-    id: r.contact_id,
-    full_name: r.full_name,
-    title: r.contact_title || '',
-    crew_label: r.crew_label,
-    qualified: !!r.qualified,
-    missing_certs: r.missing_certs || null,
-  }))
+  return (data || []).map(r => {
+    const source = r.resource_source || 'contact'
+    // The lead's stable id is whichever resource it is. `id` is used by the
+    // picker as a React key and selection value; `source`/`person_id` let the
+    // caller route to the right RPC param (contact vs user).
+    const personId = source === 'user' ? r.user_id : r.contact_id
+    return {
+      id: personId,
+      person_id: personId,
+      source,                       // 'contact' | 'user'
+      contact_id: r.contact_id,     // NULL for user leads
+      user_id: r.user_id,           // NULL for contact leads
+      full_name: r.full_name,
+      title: r.contact_title || '',
+      crew_label: r.crew_label,
+      qualified: !!r.qualified,
+      missing_certs: r.missing_certs || null,
+    }
+  })
 }
 
 export async function bulkScheduleWorkOrders({
   projectId,
   workOrderIds,
-  teamLeadContactId,
+  teamLeadContactId = null,
+  teamLeadUserId = null,
+  teamLeadSource = null,   // 'contact' | 'user' — optional disambiguator
   startDate,
   endDate,
   dailyStartTime,
@@ -157,13 +170,29 @@ export async function bulkScheduleWorkOrders({
   if (!projectId)            throw new Error('projectId is required')
   if (!Array.isArray(workOrderIds) || workOrderIds.length === 0)
     throw new Error('workOrderIds must be a non-empty array')
-  if (!teamLeadContactId)    throw new Error('teamLeadContactId is required')
+
+  // Resolve the lead resource. Prefer an explicit source; otherwise infer from
+  // whichever id was supplied. Exactly one of contact/user must end up set.
+  let leadContactId = null
+  let leadUserId = null
+  if (teamLeadSource === 'user') {
+    leadUserId = teamLeadUserId
+  } else if (teamLeadSource === 'contact') {
+    leadContactId = teamLeadContactId
+  } else if (teamLeadUserId) {
+    leadUserId = teamLeadUserId
+  } else {
+    leadContactId = teamLeadContactId
+  }
+  if (!leadContactId && !leadUserId) throw new Error('a team lead (contact or user) is required')
+  if (leadContactId && leadUserId)   throw new Error('provide only one team lead resource')
   if (!startDate || !endDate) throw new Error('startDate and endDate are required')
 
   const params = {
     p_project_id: projectId,
     p_work_order_ids: workOrderIds,
-    p_team_lead_contact_id: teamLeadContactId,
+    p_team_lead_contact_id: leadContactId,
+    p_team_lead_user_id: leadUserId,
     p_start_date: startDate,
     p_end_date: endDate,
     p_commit: !!commit,
@@ -305,17 +334,32 @@ export async function dispatchRescheduleServiceAppointment({
   serviceAppointmentId,
   newStartIso,
   newEndIso,
-  newTeamLeadContactId,
+  newTeamLeadContactId = null,
+  newTeamLeadUserId = null,
+  newTeamLeadSource = null,   // 'contact' | 'user' — optional disambiguator
 }) {
   if (!serviceAppointmentId) throw new Error('serviceAppointmentId is required')
   if (!newStartIso || !newEndIso) throw new Error('newStartIso and newEndIso are required')
-  if (!newTeamLeadContactId) throw new Error('newTeamLeadContactId is required')
+
+  let leadContactId = null
+  let leadUserId = null
+  if (newTeamLeadSource === 'user') {
+    leadUserId = newTeamLeadUserId
+  } else if (newTeamLeadSource === 'contact') {
+    leadContactId = newTeamLeadContactId
+  } else if (newTeamLeadUserId) {
+    leadUserId = newTeamLeadUserId
+  } else {
+    leadContactId = newTeamLeadContactId
+  }
+  if (!leadContactId && !leadUserId) throw new Error('a new team lead (contact or user) is required')
 
   const { data, error } = await supabase.rpc('dispatch_reschedule_service_appointment', {
     p_sa_id: serviceAppointmentId,
     p_new_start_iso: newStartIso,
     p_new_end_iso: newEndIso,
-    p_new_team_lead_contact_id: newTeamLeadContactId,
+    p_new_team_lead_contact_id: leadContactId,
+    p_new_team_lead_user_id: leadUserId,
   })
   if (error) throw error
   return data || { status: 'unknown' }

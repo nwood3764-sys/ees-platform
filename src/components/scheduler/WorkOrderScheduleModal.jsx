@@ -174,10 +174,14 @@ export default function WorkOrderScheduleModal({
     setSubmitting(true); setSubmitError(null)
     try {
       const ymd = localInputToYMD(startLocal)
+      const lead = leads.find(l => l.id === newLeadId)
+      const leadParams = lead && lead.source === 'user'
+        ? { teamLeadSource: 'user', teamLeadUserId: lead.user_id ?? lead.id }
+        : { teamLeadSource: 'contact', teamLeadContactId: (lead?.contact_id ?? newLeadId) }
       const rows = await bulkScheduleWorkOrders({
         projectId: wo.project_id,
         workOrderIds: [wo.id],
-        teamLeadContactId: newLeadId,
+        ...leadParams,
         startDate: ymd,
         endDate: ymd,                     // single-day window
         pinnedPlacements: [{

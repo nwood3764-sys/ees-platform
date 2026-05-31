@@ -91,8 +91,9 @@ export default function ServiceAppointmentRescheduleModal({
               units ( id, unit_name )
             ),
             service_appointment_assignments!service_appointment_assignments_service_appointment_id_fkey (
-              id, contact_id, saa_is_deleted,
-              contacts ( id, contact_first_name, contact_last_name, contact_title )
+              id, contact_id, saa_user_id, saa_is_deleted,
+              contacts ( id, contact_first_name, contact_last_name, contact_title ),
+              users:saa_user_id ( id, user_name, user_title )
             )
           `)
           .eq('id', serviceAppointmentId)
@@ -102,12 +103,19 @@ export default function ServiceAppointmentRescheduleModal({
 
         const assignments = Array.isArray(data?.service_appointment_assignments)
           ? data.service_appointment_assignments.filter(a => !a.saa_is_deleted) : []
+        // The lead assignment is either a user-linked row or a contact whose
+        // title marks them a Team Lead.
         const leadAssign = assignments.find(a =>
+          a.saa_user_id ||
           (a.contacts?.contact_title || '').toLowerCase().includes('team lead')) || null
-        const lead = leadAssign?.contacts ? {
-          id: leadAssign.contacts.id,
-          full_name: `${leadAssign.contacts.contact_first_name || ''} ${leadAssign.contacts.contact_last_name || ''}`.trim(),
-        } : null
+        const lead = leadAssign
+          ? (leadAssign.saa_user_id && leadAssign.users
+              ? { id: leadAssign.users.id, full_name: leadAssign.users.user_name || '(user)' }
+              : (leadAssign.contacts
+                  ? { id: leadAssign.contacts.id,
+                      full_name: `${leadAssign.contacts.contact_first_name || ''} ${leadAssign.contacts.contact_last_name || ''}`.trim() }
+                  : null))
+          : null
 
         setSa(data)
         setCurrentLead(lead)
@@ -167,11 +175,14 @@ export default function ServiceAppointmentRescheduleModal({
   const submit = async () => {
     setSubmitting(true); setSubmitError(null)
     try {
+      const lead = leads.find(l => l.id === newLeadId)
       const res = await dispatchRescheduleServiceAppointment({
         serviceAppointmentId,
         newStartIso: startISO,
         newEndIso:   endISO,
-        newTeamLeadContactId: newLeadId,
+        newTeamLeadSource: lead?.source || 'contact',
+        newTeamLeadContactId: lead && lead.source === 'user' ? null : (lead?.contact_id ?? newLeadId),
+        newTeamLeadUserId:    lead && lead.source === 'user' ? (lead.user_id ?? newLeadId) : null,
       })
       if (res?.status === 'ok') {
         toast.success(`Rescheduled ${res.sa_record_number || sa?.sa_record_number || 'appointment'}.`)

@@ -256,7 +256,7 @@ export default function DispatchModule({ onNavigateToRecord }) {
       // calendar day in [start, end].
       let d = new Date(start); d.setHours(0,0,0,0)
       while (d <= end) {
-        const key = `${a.contact_id}::${toYMD(d)}`
+        const key = `${a.lane_id ?? a.contact_id}::${toYMD(d)}`
         if (!map.has(key)) map.set(key, [])
         const dayStart = new Date(d); dayStart.setHours(DAY_START_HOUR, 0, 0, 0)
         const dayEnd   = new Date(d); dayEnd.setHours(DAY_END_HOUR, 0, 0, 0)
@@ -372,7 +372,9 @@ export default function DispatchModule({ onNavigateToRecord }) {
         const row = await dispatchAssignWorkOrder({
           workOrderId: payload.wo_id,
           projectId:   payload.project_id,
-          teamLeadContactId: lane.id,
+          teamLeadSource: lane.source || 'contact',
+          teamLeadContactId: lane.source === 'user' ? null : (lane.person_id ?? lane.id),
+          teamLeadUserId:    lane.source === 'user' ? (lane.person_id ?? lane.id) : null,
           startISO: startDate.toISOString(),
           dateYMD:  ymd,
         })
@@ -388,7 +390,9 @@ export default function DispatchModule({ onNavigateToRecord }) {
           serviceAppointmentId: payload.sa_id,
           newStartIso: startDate.toISOString(),
           newEndIso:   endDate.toISOString(),
-          newTeamLeadContactId: lane.id,
+          newTeamLeadSource: lane.source || 'contact',
+          newTeamLeadContactId: lane.source === 'user' ? null : (lane.person_id ?? lane.id),
+          newTeamLeadUserId:    lane.source === 'user' ? (lane.person_id ?? lane.id) : null,
         })
         if (res?.status === 'ok') {
           toast.success(`Rescheduled ${res.sa_record_number || 'appointment'}.`)

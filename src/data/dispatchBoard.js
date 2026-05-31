@@ -48,8 +48,9 @@ export async function fetchScheduledServiceAppointmentsInRange({ startDate, endD
       ),
       projects ( id, project_record_number, project_name ),
       service_appointment_assignments!service_appointment_assignments_service_appointment_id_fkey (
-        id, contact_id, saa_is_deleted,
-        contacts ( id, contact_first_name, contact_last_name, contact_title )
+        id, contact_id, saa_user_id, saa_is_deleted,
+        contacts ( id, contact_first_name, contact_last_name, contact_title ),
+        users:saa_user_id ( id, user_name, user_title )
       )
     `)
     .eq('sa_is_deleted', false)
@@ -78,20 +79,31 @@ export async function fetchScheduledServiceAppointmentsInRange({ startDate, endD
     const unit = wo?.units || null
     const wt = wo?.work_types || null
     const project = r.projects || null
-    // service_appointment_assignments returns an array. The Team Lead is
-    // the first non-deleted assignment whose contact has 'team lead' in
-    // their title. (Crew Members live in the same table — that's coming
-    // when we build the crew composition UI.)
+    // service_appointment_assignments returns an array. The Team Lead is the
+    // user-linked assignment, or the first non-deleted assignment whose contact
+    // has 'team lead' in their title. The lead's `id` is the underlying person
+    // id (user or contact) so it matches the board lane id from fetchActiveTeamLeads.
     const assignments = Array.isArray(r.service_appointment_assignments)
       ? r.service_appointment_assignments.filter(a => !a.saa_is_deleted) : []
-    const leadAssign = assignments.find(a =>
-      (a.contacts?.contact_title || '').toLowerCase().includes('team lead'))
+    const leadAssign = assignments.find(a => a.saa_user_id)
+      || assignments.find(a => (a.contacts?.contact_title || '').toLowerCase().includes('team lead'))
       || assignments[0] || null
-    const lead = leadAssign?.contacts ? {
-      id: leadAssign.contacts.id,
-      full_name: `${leadAssign.contacts.contact_first_name || ''} ${leadAssign.contacts.contact_last_name || ''}`.trim(),
-      crew_label: parseCrewLabel(leadAssign.contacts.contact_title || ''),
-    } : null
+    let lead = null
+    if (leadAssign?.saa_user_id && leadAssign.users) {
+      lead = {
+        id: leadAssign.users.id,
+        full_name: leadAssign.users.user_name || '(user)',
+        crew_label: parseCrewLabel(leadAssign.users.user_title || ''),
+        source: 'user',
+      }
+    } else if (leadAssign?.contacts) {
+      lead = {
+        id: leadAssign.contacts.id,
+        full_name: `${leadAssign.contacts.contact_first_name || ''} ${leadAssign.contacts.contact_last_name || ''}`.trim(),
+        crew_label: parseCrewLabel(leadAssign.contacts.contact_title || ''),
+        source: 'contact',
+      }
+    }
     return {
       id: r.id,
       sa_record_number: r.sa_record_number,
@@ -121,7 +133,7 @@ export async function fetchResourceAbsencesInRange({ startDate, endDate }) {
     const endISO = upperDate.toISOString().slice(0, 19)
     const { data, error } = await supabase
       .from('resource_absences')
-      .select('id, contact_id, ra_start_datetime, ra_end_datetime, ra_reason, ra_is_deleted')
+      .select('id, contact_id, ra_user_id, ra_start_datetime, ra_end_datetime, ra_reason, ra_is_deleted')
       .eq('ra_is_deleted', false)
       .lt('ra_start_datetime', endISO)
       .gt('ra_end_datetime', startISO)
@@ -129,6 +141,10 @@ export async function fetchResourceAbsencesInRange({ startDate, endDate }) {
     return (data || []).map(r => ({
       id: r.id,
       contact_id: r.contact_id,
+      user_id: r.ra_user_id,
+      // Unified lane key — whichever resource the absence belongs to. Matches
+      // the board lane id (user or contact) from fetchActiveTeamLeads.
+      lane_id: r.ra_user_id || r.contact_id,
       start_at: r.ra_start_datetime,
       end_at: r.ra_end_datetime,
       reason: r.ra_reason || 'Out',
@@ -138,32 +154,53 @@ export async function fetchResourceAbsencesInRange({ startDate, endDate }) {
   }
 }
 
-// Active Team Leads (the lanes of the board). Same definition as the
-// scheduler wizard uses — title ILIKE '%team lead%'. Returns the
-// service_territory_id and the array of held (unexpired) certification_ids
-// so the filter rail can filter the lane list client-side.
+// Active Team Leads (the lanes of the board) — unioned across Contacts
+// (subcontractor crews, title ILIKE '%team lead%') and Users (internal W-2 crew
+// in the 'Team Lead' role). Each lane carries `source` ('contact'|'user'), the
+// service_territory_id, and the array of held (unexpired) certification_ids so
+// the filter rail can filter client-side. User leads have no tracked certs yet,
+// so their certification_ids is empty.
 export async function fetchActiveTeamLeads() {
-  const { data, error } = await supabase
-    .from('contacts')
-    .select(`
-      id, contact_first_name, contact_last_name, contact_title,
-      contact_service_territory_id,
-      contact_certifications!contact_certifications_contact_id_fkey (
-        certification_id, cc_expires_date, cc_is_deleted
-      )
-    `)
-    .eq('contact_is_deleted', false)
-    .ilike('contact_title', '%team lead%')
-    .order('contact_last_name', { ascending: true })
-  if (error) throw error
   const todayYMD = new Date().toLocaleDateString('en-CA')
-  return (data || []).map(c => {
+
+  const [contactRes, userRes] = await Promise.all([
+    supabase
+      .from('contacts')
+      .select(`
+        id, contact_first_name, contact_last_name, contact_title,
+        contact_service_territory_id,
+        contact_certifications!contact_certifications_contact_id_fkey (
+          certification_id, cc_expires_date, cc_is_deleted
+        )
+      `)
+      .eq('contact_is_deleted', false)
+      .ilike('contact_title', '%team lead%')
+      .order('contact_last_name', { ascending: true }),
+    supabase
+      .from('users')
+      .select(`
+        id, user_name, user_title, user_last_name,
+        roles:role_id!inner ( role_name ),
+        service_territory_members!service_territory_members_stm_user_id_fkey (
+          service_territory_id, stm_is_primary, stm_is_deleted
+        )
+      `)
+      .eq('user_is_deleted', false)
+      .eq('user_is_active', true)
+      .eq('roles.role_name', 'Team Lead')
+      .order('user_last_name', { ascending: true }),
+  ])
+  if (contactRes.error) throw contactRes.error
+  if (userRes.error) throw userRes.error
+
+  const contactLanes = (contactRes.data || []).map(c => {
     const certs = (Array.isArray(c.contact_certifications) ? c.contact_certifications : [])
       .filter(cc => !cc.cc_is_deleted)
       .filter(cc => !cc.cc_expires_date || cc.cc_expires_date >= todayYMD)
       .map(cc => cc.certification_id)
     return {
       id: c.id,
+      source: 'contact',
       full_name: `${c.contact_first_name || ''} ${c.contact_last_name || ''}`.trim(),
       title: c.contact_title || '',
       crew_label: parseCrewLabel(c.contact_title || ''),
@@ -171,6 +208,25 @@ export async function fetchActiveTeamLeads() {
       certification_ids: certs,
     }
   })
+
+  const userLanes = (userRes.data || []).map(u => {
+    // Prefer the primary territory membership; fall back to the first active one.
+    const memberships = (Array.isArray(u.service_territory_members) ? u.service_territory_members : [])
+      .filter(m => !m.stm_is_deleted)
+    const primary = memberships.find(m => m.stm_is_primary) || memberships[0] || null
+    return {
+      id: u.id,
+      source: 'user',
+      full_name: u.user_name || '(user)',
+      title: u.user_title || 'Team Lead',
+      crew_label: parseCrewLabel(u.user_title || ''),
+      service_territory_id: primary?.service_territory_id || null,
+      certification_ids: [],   // user certs not tracked yet
+    }
+  })
+
+  return [...userLanes, ...contactLanes]
+    .sort((a, b) => String(a.full_name).localeCompare(String(b.full_name), undefined, { sensitivity: 'base' }))
 }
 
 function parseCrewLabel(title) {
@@ -304,18 +360,29 @@ export async function fetchUnscheduledWorkOrdersForDispatch() {
 export async function dispatchAssignWorkOrder({
   workOrderId,
   projectId,
-  teamLeadContactId,
+  teamLeadContactId = null,
+  teamLeadUserId = null,
+  teamLeadSource = null,   // 'contact' | 'user'
   startISO,           // RFC3339 with explicit offset, e.g. '2026-05-18T09:00:00-05:00'
   dateYMD,            // 'YYYY-MM-DD' for the start_date/end_date single-day window
   force = false,
 }) {
-  if (!workOrderId || !projectId || !teamLeadContactId || !startISO || !dateYMD) {
-    throw new Error('workOrderId, projectId, teamLeadContactId, startISO, dateYMD are required')
+  // Resolve the lead resource (exactly one of contact/user).
+  let leadContactId = null
+  let leadUserId = null
+  if (teamLeadSource === 'user') leadUserId = teamLeadUserId
+  else if (teamLeadSource === 'contact') leadContactId = teamLeadContactId
+  else if (teamLeadUserId) leadUserId = teamLeadUserId
+  else leadContactId = teamLeadContactId
+
+  if (!workOrderId || !projectId || !startISO || !dateYMD || (!leadContactId && !leadUserId)) {
+    throw new Error('workOrderId, projectId, a team lead (contact or user), startISO, dateYMD are required')
   }
   const { data, error } = await supabase.rpc('bulk_schedule_work_orders', {
     p_project_id: projectId,
     p_work_order_ids: [workOrderId],
-    p_team_lead_contact_id: teamLeadContactId,
+    p_team_lead_contact_id: leadContactId,
+    p_team_lead_user_id: leadUserId,
     p_start_date: dateYMD,
     p_end_date: dateYMD,
     p_commit: true,

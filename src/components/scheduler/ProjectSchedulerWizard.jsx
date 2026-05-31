@@ -362,6 +362,19 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
     return out
   }, [])
 
+  // Resolve the selected Team Lead (by id) to the right scheduling params.
+  // A lead row may be a Contact (subcontractor) or a User (internal crew);
+  // bulkScheduleWorkOrders routes on source.
+  const leadParams = useCallback(() => {
+    const lead = teamLeads.find(l => l.id === teamLeadId)
+    if (!lead) return { teamLeadContactId: teamLeadId, teamLeadSource: 'contact' }
+    return {
+      teamLeadSource:   lead.source || 'contact',
+      teamLeadContactId: lead.source === 'user' ? null : (lead.contact_id ?? lead.id),
+      teamLeadUserId:    lead.source === 'user' ? (lead.user_id ?? lead.id) : null,
+    }
+  }, [teamLeads, teamLeadId])
+
   const runPreview = async (overrideIds = null, overridePins = null) => {
     setPreviewing(true); setPreviewError(null)
     // Guard against accidental callers that pass a non-array (e.g. wiring
@@ -374,7 +387,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
       const rows = await bulkScheduleWorkOrders({
         projectId,
         workOrderIds: safeOverride || orderedSelectedIds,
-        teamLeadContactId: teamLeadId,
+        ...leadParams(),
         startDate, endDate,
         dailyStartTime, dailyEndTime,
         interPropertyBufferMinutes,
@@ -397,7 +410,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
       const rows = await bulkScheduleWorkOrders({
         projectId,
         workOrderIds: orderedSelectedIds,
-        teamLeadContactId: teamLeadId,
+        ...leadParams(),
         startDate, endDate,
         dailyStartTime, dailyEndTime,
         interPropertyBufferMinutes,
