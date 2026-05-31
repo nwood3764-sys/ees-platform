@@ -946,7 +946,7 @@ export function applyInsertDefaults(tableName, fields, userId) {
  * target still shows the right value in edit mode rather than appearing
  * blank.
  */
-export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
+export async function fetchLookupOptions(lookupTable, lookupField, limit = 50, opts = {}) {
   // Discover the soft-delete column for the target table — cached for the
   // session by fetchTableMetadata, so this is essentially free on repeat
   // calls. Failure is non-fatal: we just don't filter.
@@ -956,6 +956,8 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
     isDeletedCol = meta?.is_deleted_column || null
   } catch { /* metadata RPC unavailable for this table — proceed unfiltered */ }
 
+  const { search = null, includeId = null } = opts
+
   let query = supabase
     .from(lookupTable)
     .select(`id, ${lookupField}`)
@@ -963,14 +965,38 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
     .limit(limit)
 
   if (isDeletedCol) query = query.eq(isDeletedCol, false)
+  // Server-side search: filter by the label column so the dropdown queries the
+  // full table as the user types, instead of filtering a 50-row client slice.
+  // Without this, a lookup against a large table (e.g. ~2,000 accounts) can
+  // only ever surface the alphabetically-first `limit` rows.
+  if (search && String(search).trim()) {
+    query = query.ilike(lookupField, `%${String(search).trim()}%`)
+  }
 
   const { data, error } = await query
-
   if (error) throw error
-  return (data || []).map(r => ({
+
+  const rows = (data || []).map(r => ({
     value: r.id,
     label: r[lookupField] || r.id.slice(0, 8),
   }))
+
+  // Ensure the currently-selected value is always present in the option set,
+  // even when it sorts past `limit` or doesn't match the active search. Without
+  // this, a prefilled or previously-saved lookup (e.g. an account carried over
+  // by advance-to-opportunity) renders blank because its row isn't in the page.
+  if (includeId && !rows.some(r => String(r.value) === String(includeId))) {
+    try {
+      const { data: one } = await supabase
+        .from(lookupTable)
+        .select(`id, ${lookupField}`)
+        .eq('id', includeId)
+        .maybeSingle()
+      if (one) rows.unshift({ value: one.id, label: one[lookupField] || one.id.slice(0, 8) })
+    } catch { /* selected row not fetchable — leave as-is */ }
+  }
+
+  return rows
 }
 
 /**

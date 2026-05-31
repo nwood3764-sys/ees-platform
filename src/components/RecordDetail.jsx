@@ -36,6 +36,7 @@ import { supabase } from '../lib/supabase'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
 import { MERGE_FIELD_OBJECTS, loadFieldsForObject } from '../data/mergeFieldCatalog'
+import { resolveLookupLabel } from '../data/fieldMetadataService'
 import {
   uploadDocumentTemplateAsset,
   signedDocumentTemplateAssetUrl,
@@ -1129,12 +1130,21 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated 
 
 function SearchableLookup({ value, options, onChange, placeholder = '— Select —',
   allowCreate = false, createTable = null, createLabelField = null, createObjectLabel = null,
-  onCreatedOption = null }) {
+  onCreatedOption = null, onSearch = null, selectedOption = null }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const rootRef = useRef(null)
   const inputRef = useRef(null)
+
+  // Server-side search: when onSearch is provided, debounce the query and let
+  // the parent refetch options against the full table. Local filtering still
+  // applies on top so typing feels instant against whatever is already loaded.
+  useEffect(() => {
+    if (!onSearch) return undefined
+    const t = setTimeout(() => { onSearch(query.trim()) }, 220)
+    return () => clearTimeout(t)
+  }, [query, onSearch])
 
   // Always present options ascending by label (case-insensitive, natural
   // numeric order so "950 …" sorts sensibly), regardless of fetch order.
@@ -1148,14 +1158,22 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
+    // With server-side search the option list IS the result set — don't
+    // re-filter it locally (the server already matched), or a server hit that
+    // doesn't substring-match the raw query could be hidden.
+    if (onSearch) return sorted
     if (!q) return sorted
     return sorted.filter(o => String(o.label ?? '').toLowerCase().includes(q))
-  }, [sorted, query])
+  }, [sorted, query, onSearch])
 
   const selectedLabel = useMemo(() => {
     const hit = (options || []).find(o => String(o.value) === String(value))
-    return hit ? hit.label : ''
-  }, [options, value])
+    if (hit) return hit.label
+    // Fall back to a parent-supplied selected option so the field shows its
+    // label even when the selected record isn't in the current option page.
+    if (selectedOption && String(selectedOption.value) === String(value)) return selectedOption.label
+    return ''
+  }, [options, value, selectedOption])
 
   useEffect(() => {
     if (!open) return undefined
@@ -1327,14 +1345,42 @@ function AvatarUpload({ value, userId, onChange }) {
 // field config's allow_inline_create flag; the target table/label come from
 // lookup_table / lookup_field.
 function LookupEditControl({ field, value, baseOptions, onChange, canCreate }) {
-  const [extra, setExtra] = useState([])  // options created inline this session
-  const options = useMemo(() => {
-    if (!extra.length) return baseOptions
-    const seen = new Set(baseOptions.map(o => String(o.value)))
-    return [...baseOptions, ...extra.filter(o => !seen.has(String(o.value)))]
-  }, [baseOptions, extra])
+  const [extra, setExtra] = useState([])          // options created inline this session
+  const [serverOpts, setServerOpts] = useState(null) // results from server search (null = not searched)
+  const [selectedOption, setSelectedOption] = useState(null) // resolved label for current value
 
-  // Humanise the target table for the "+ New …" label, e.g. accounts → Account.
+  const canServerSearch = !!(field.lookup_table && field.lookup_field)
+
+  // Resolve the selected value's label up front so the field shows it even if
+  // the record isn't in the initial option page (the carry-over case).
+  useEffect(() => {
+    let cancelled = false
+    if (!value || !canServerSearch) { setSelectedOption(null); return undefined }
+    const inOpts = (baseOptions || []).some(o => String(o.value) === String(value))
+    if (inOpts) { setSelectedOption(null); return undefined }
+    resolveLookupLabel(field.lookup_table, value, { nameColumn: field.lookup_field })
+      .then(label => { if (!cancelled && label) setSelectedOption({ value, label }) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [value, baseOptions, canServerSearch, field.lookup_table, field.lookup_field])
+
+  const handleSearch = useCallback(async (term) => {
+    if (!canServerSearch) return
+    // Empty term restores the base option page.
+    if (!term) { setServerOpts(null); return }
+    try {
+      const opts = await fetchLookupOptions(field.lookup_table, field.lookup_field, 50, { search: term })
+      setServerOpts(opts)
+    } catch { setServerOpts([]) }
+  }, [canServerSearch, field.lookup_table, field.lookup_field])
+
+  const options = useMemo(() => {
+    const pool = serverOpts !== null ? serverOpts : (baseOptions || [])
+    if (!extra.length) return pool
+    const seen = new Set(pool.map(o => String(o.value)))
+    return [...pool, ...extra.filter(o => !seen.has(String(o.value)))]
+  }, [serverOpts, baseOptions, extra])
+
   const objectLabel = useMemo(() => {
     if (field.create_object_label) return field.create_object_label
     const t = (field.lookup_table || '').replace(/s$/, '').replace(/_/g, ' ')
@@ -1346,6 +1392,8 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate }) {
       value={value}
       options={options}
       onChange={(val) => onChange(val || null)}
+      onSearch={canServerSearch ? handleSearch : null}
+      selectedOption={selectedOption}
       allowCreate={canCreate}
       createTable={field.lookup_table}
       createLabelField={field.lookup_field}
@@ -1437,10 +1485,12 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
       const opts = lookupOpts || []
       const dep = field.lookup_dependency
       const canCreate = field.allow_inline_create === true && !!field.lookup_table
-      // Render the searchable control when we have options OR when inline
-      // create is enabled (so "+ New" is reachable even with an empty pool —
-      // e.g. a fresh Account lookup before any account has been linked).
-      if (opts.length > 0 || canCreate) {
+      const canServerSearch = !!(field.lookup_table && field.lookup_field)
+      // Render the searchable control when we have options, inline create is
+      // enabled, server search is possible, OR a value is already set (so a
+      // carried-over / saved selection always shows its label even if its row
+      // isn't in the initial option page).
+      if (opts.length > 0 || canCreate || canServerSearch || v) {
         return (
           <LookupEditControl
             field={field}
