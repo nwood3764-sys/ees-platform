@@ -23,9 +23,10 @@ import { useToast } from '../../components/Toast'
  *                              link. The returned user_id carries through.
  *   Step 2  Program access   — which programs this technician can see/work.
  *   Step 3  Permission sets   — additive permission sets on top of the role.
- *   Step 4  Service resource  — the service territory that makes them
- *                              schedulable in Dispatch (FSL Service Resource,
- *                              linked to the User).
+ *   Step 4  Service resource  — the service territory that registers them
+ *                              as a Service Resource (FSL Service Resource,
+ *                              linked to the User). Dispatch scheduling of
+ *                              user-linked resources is being finalized.
  *   Step 5  Review & finish   — calls provision_field_technician to write
  *                              program scopes, permission sets, and the
  *                              user-linked service resource atomically.
@@ -291,10 +292,10 @@ export default function TechnicianSetupWizard({ onClose, onComplete }) {
         {/* ── Step 4: Service Resource ────────────────────────────────── */}
         {step.key === 'resource' && (
           <FormField label="Service Territory"
-            hint="Assigning a territory makes this technician a schedulable Service Resource in Dispatch. Optional — skip if they aren't scheduled yet.">
+            hint="Assigns this technician to a service territory as a Service Resource. Note: Dispatch scheduling of internal (user-linked) resources is being finalized — the resource record is created now and will become schedulable once that lands. Optional.">
             <select value={territoryId} disabled={busy}
               onChange={e => setTerritoryId(e.target.value)} style={inputStyle}>
-              <option value="">— None (not schedulable yet) —</option>
+              <option value="">— None —</option>
               {territories.map(t => (
                 <option key={t._id || t.id} value={t._id || t.id}>{t.name || t.service_territory_name}</option>
               ))}
@@ -320,7 +321,7 @@ export default function TechnicianSetupWizard({ onClose, onComplete }) {
               territoryId
                 ? (territories.find(t => (t._id || t.id) === territoryId)?.name
                    || territories.find(t => (t._id || t.id) === territoryId)?.service_territory_name || 'Selected')
-                : 'None (not schedulable yet)'
+                : 'None'
             } />
             <div style={{ marginTop: 12, fontSize: 12, color: C.textMuted }}>
               The user was created and invited in step 1. Finishing writes the program access,

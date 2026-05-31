@@ -1905,7 +1905,9 @@ export async function fetchServiceTerritoryMembers() {
         stm_owner,
         stm_updated_at,
         service_territories:service_territory_id ( service_territory_name, service_territory_state ),
-        contacts:contact_id ( contact_name, contact_role )
+        contacts:contact_id ( contact_name, contact_role ),
+        stm_user_id,
+        users:stm_user_id ( user_name, user_title )
       `)
       .eq('stm_is_deleted', false)
       .order('stm_updated_at', { ascending: false })
@@ -1913,24 +1915,33 @@ export async function fetchServiceTerritoryMembers() {
       .range(from, to)
   )
 
-  return data.map(r => ({
-    id:        r.stm_record_number || r.id,
-    _id:       r.id,
-    name:      r.contacts?.contact_name || '—',
-    contact:   r.contacts?.contact_name || '—',
-    contactRole: r.contacts?.contact_role || '',
-    territory: r.service_territories?.service_territory_name || '—',
-    state:     r.service_territories?.service_territory_state || '',
-    primary:   r.stm_is_primary ? 'Yes' : 'No',
-    effectiveStart: r.stm_effective_start_date || '',
-    effectiveEnd:   r.stm_effective_end_date   || '',
-    // Underlying FK ids for the editable list view
-    contact_id:          r.contact_id,
-    service_territory_id:r.service_territory_id,
-    stm_is_primary:      r.stm_is_primary,
-    stm_effective_start_date: r.stm_effective_start_date,
-    stm_effective_end_date:   r.stm_effective_end_date,
-  }))
+  return data.map(r => {
+    // A resource is either contact-linked (subcontractor) or user-linked
+    // (internal W-2 crew). Resolve the display person from whichever is set.
+    const personName = r.contacts?.contact_name || r.users?.user_name || '—'
+    const personRole = r.contacts?.contact_role || r.users?.user_title || ''
+    const sourceLabel = r.stm_user_id ? 'Internal (User)' : (r.contact_id ? 'Subcontractor (Contact)' : '—')
+    return {
+      id:        r.stm_record_number || r.id,
+      _id:       r.id,
+      name:      personName,
+      contact:   personName,
+      contactRole: personRole,
+      source:    sourceLabel,
+      territory: r.service_territories?.service_territory_name || '—',
+      state:     r.service_territories?.service_territory_state || '',
+      primary:   r.stm_is_primary ? 'Yes' : 'No',
+      effectiveStart: r.stm_effective_start_date || '',
+      effectiveEnd:   r.stm_effective_end_date   || '',
+      // Underlying FK ids for the editable list view
+      contact_id:          r.contact_id,
+      stm_user_id:         r.stm_user_id,
+      service_territory_id:r.service_territory_id,
+      stm_is_primary:      r.stm_is_primary,
+      stm_effective_start_date: r.stm_effective_start_date,
+      stm_effective_end_date:   r.stm_effective_end_date,
+    }
+  })
 }
 
 // Resource Absences — calendared time off / unavailability for a
