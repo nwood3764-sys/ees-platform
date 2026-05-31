@@ -109,6 +109,52 @@ function documentStoragePath(relatedObject, relatedId, docId, originalName) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Avatars (user profile photos)
+//
+// The `avatars` bucket is PUBLIC, so a profile photo is referenced by its
+// public URL stored on users.user_profile_photo_url. This replaces the old
+// "paste a URL" approach — the user uploads a file and we both store it and
+// produce the URL. upsert=true keyed on the user id so re-uploading replaces
+// the previous avatar instead of accumulating orphans.
+// ───────────────────────────────────────────────────────────────────────────
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024 // 5 MB
+const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']
+
+/**
+ * Upload a user avatar to the public `avatars` bucket and return its public URL.
+ * @param {Object} args
+ * @param {File}   args.file    image File from <input type=file>
+ * @param {string} args.userId  public.users.id the avatar belongs to (path key)
+ * @returns {Promise<string>}   public URL to store on user_profile_photo_url
+ */
+export async function uploadAvatar({ file, userId }) {
+  if (!file)   throw new Error('A file is required.')
+  if (!userId) throw new Error('A user id is required.')
+  if (file.size > AVATAR_MAX_BYTES) {
+    throw new Error(`Image is too large (${(file.size / 1048576).toFixed(1)} MB). Maximum is 5 MB.`)
+  }
+  if (file.type && !AVATAR_ALLOWED_MIME.includes(file.type)) {
+    throw new Error('Unsupported image type. Use JPG, PNG, WEBP, GIF, or HEIC.')
+  }
+  const ext = fileExt(file.name) || 'jpg'
+  // Stable path per user so re-upload overwrites; cache-buster added to the URL.
+  const path = `${userId}/avatar.${ext}`
+  const { error: upErr } = await supabase.storage
+    .from('avatars')
+    .upload(path, file, {
+      contentType: file.type || 'image/jpeg',
+      upsert: true,
+    })
+  if (upErr) throw new Error(`Upload failed: ${upErr.message}`)
+
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+  const base = data?.publicUrl
+  if (!base) throw new Error('Could not resolve the uploaded image URL.')
+  // Cache-buster so an overwritten avatar refreshes immediately in the UI.
+  return `${base}?v=${Date.now()}`
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Photos
 // ───────────────────────────────────────────────────────────────────────────
 

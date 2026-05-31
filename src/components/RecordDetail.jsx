@@ -40,6 +40,7 @@ import {
   uploadDocumentTemplateAsset,
   signedDocumentTemplateAssetUrl,
   copyDocumentTemplateAsset,
+  uploadAvatar,
 } from '../data/storageService'
 import {
   loadRecordDetailData,
@@ -1076,8 +1077,92 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
   )
 }
 
-function EditField({ field, value, onChange, picklistOpts, lookupOpts }) {
+// AvatarUpload — profile-photo control for the user_profile_photo_url field.
+// Shows the current image (if any), an Upload/Replace button that pushes the
+// file to the public `avatars` bucket, and a Remove control. The stored value
+// is the public URL. Requires the user id (recordId); in create mode the user
+// row doesn't exist yet, so we explain that the photo can be added after the
+// first save rather than failing silently.
+function AvatarUpload({ value, userId, onChange }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const inputRef = useRef(null)
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0]
+    if (file) {
+      setErr(null)
+      setBusy(true)
+      try {
+        const url = await uploadAvatar({ file, userId })
+        onChange(url)
+      } catch (ex) {
+        setErr(ex.message || 'Upload failed.')
+      } finally {
+        setBusy(false)
+        if (inputRef.current) inputRef.current.value = ''
+      }
+    }
+  }
+
+  const hasUser = !!userId
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{
+        width: 56, height: 56, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
+        background: C.cardSecondary, border: `1px solid ${C.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {value ? (
+          <img src={value} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <Icon path="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" size={24} color={C.textMuted} />
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {!hasUser ? (
+          <div style={{ fontSize: 12, color: C.textMuted }}>
+            Save the user first, then add a profile photo.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input ref={inputRef} type="file" accept="image/*"
+              onChange={handleFile} style={{ display: 'none' }} />
+            <button type="button" disabled={busy}
+              onClick={() => inputRef.current?.click()}
+              style={{ ...inputBase, width: 'auto', cursor: busy ? 'default' : 'pointer',
+                padding: '6px 12px', fontWeight: 500, opacity: busy ? 0.6 : 1 }}>
+              {busy ? 'Uploading…' : value ? 'Replace photo' : 'Upload photo'}
+            </button>
+            {value && !busy && (
+              <button type="button" onClick={() => onChange(null)}
+                style={{ background: 'transparent', border: 'none', color: C.textSecondary,
+                  fontSize: 12.5, cursor: 'pointer', textDecoration: 'underline' }}>
+                Remove
+              </button>
+            )}
+          </div>
+        )}
+        {err && <div style={{ fontSize: 11.5, color: '#a32626' }}>{err}</div>}
+      </div>
+    </div>
+  )
+}
+
+function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId, tableName }) {
   const v = value ?? ''
+
+  // User profile photo: dedicated upload control instead of a raw URL text box.
+  // Stores to the public `avatars` bucket and saves the resulting public URL.
+  if (field.name === 'user_profile_photo_url') {
+    return (
+      <AvatarUpload
+        value={v}
+        userId={recordId}
+        onChange={(url) => onChange(field.name, url)}
+      />
+    )
+  }
 
   switch (field.type) {
     case 'text': case 'phone': case 'email':
@@ -2447,7 +2532,8 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             </span>
             {isEditable ? (
               <EditField field={f} value={draft[f.name]} onChange={onChange}
-                picklistOpts={allPicklistOpts?.[f.name]} lookupOpts={allLookupOpts?.[f.name]} />
+                picklistOpts={allPicklistOpts?.[f.name]} lookupOpts={allLookupOpts?.[f.name]}
+                recordId={recordId} />
             ) : lookupLinkTarget ? (
               <button
                 type="button"
