@@ -2778,10 +2778,18 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // role/pset says they can't write it. View mode still shows the
         // value; edit mode renders the read-only display in place of the
         // input.
+        // A lookup is editable when it has preloaded options, a dependency,
+        // OR a target table (which enables server-side search and/or inline
+        // create). The old gate required preloaded options, so a lookup
+        // against a large table whose first page came back empty/unresolved
+        // was wrongly treated as read-only — rendering an inert dropdown with
+        // no search and no "+ New". Any lookup with lookup_table is editable.
+        const lookupIsEditable = f.type === 'lookup'
+          && (hasLookupOpts || !!f.lookup_dependency || !!f.lookup_table)
         const isEditable = editing
           && (f.type !== 'datetime')
           && (f.type !== 'polymorphic_lookup')
-          && (f.type !== 'lookup' || hasLookupOpts || !!f.lookup_dependency)
+          && (f.type !== 'lookup' || lookupIsEditable)
           && (f._editable !== false)
 
         // Lookup hyperlinking — turn populated lookup fields into clickable
