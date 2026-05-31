@@ -6,6 +6,7 @@ import HelpIcon from '../../components/help/HelpIcon'
 import { fetchUsers } from '../../data/adminService'
 import { supabase } from '../../lib/supabase'
 import InviteUserModal from './InviteUserModal'
+import TechnicianSetupWizard from './TechnicianSetupWizard'
 
 /**
  * UsersPane — Administration > Users.
@@ -36,6 +37,7 @@ export default function UsersPane({ onOpenRecord }) {
   // Modal state. `mode` is 'new' or 'relink'. `existingUser` carries the
   // row we're re-inviting in relink mode; null otherwise.
   const [modal, setModal] = useState(null) // { mode, existingUser }
+  const [wizardOpen, setWizardOpen] = useState(false)
 
   // Password-reset modal state. Three phases:
   //   { phase: 'confirm', user }     — admin clicked Reset, awaiting confirmation
@@ -168,6 +170,21 @@ export default function UsersPane({ onOpenRecord }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Users</div>
           <HelpIcon anchors={[{ type: 'concept', concept: 'users-and-passwords' }]} />
+          <div style={{ flex: 1 }} />
+          <button type="button" onClick={() => setWizardOpen(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: 12.5, fontWeight: 500, padding: '6px 12px', borderRadius: 6,
+              background: C.emerald, color: '#fff', border: `1px solid ${C.emeraldMid}`, cursor: 'pointer',
+            }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2"
+              strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <line x1="19" y1="8" x2="19" y2="14" /><line x1="22" y1="11" x2="16" y2="11" />
+            </svg>
+            Set Up Technician
+          </button>
         </div>
         <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
           {loading
@@ -196,6 +213,13 @@ export default function UsersPane({ onOpenRecord }) {
             ? row => row?._id && onOpenRecord({ table: 'users', id: row._id, name: row.name || row.id })
             : undefined}
           onRefresh={reload}
+        />
+      )}
+
+      {wizardOpen && (
+        <TechnicianSetupWizard
+          onClose={() => setWizardOpen(false)}
+          onComplete={() => { reload() }}
         />
       )}
 

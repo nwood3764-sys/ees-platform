@@ -22,6 +22,17 @@ export const FIELD_STAFF_TITLE_PATTERNS = [
   'Trainee',
 ]
 
+// Internal field crew are Users with one of these roles (the FSL "Service
+// Resource → User" path). Subcontractor crews remain Contacts (matched by the
+// title patterns above). fetchAllFieldStaff unions both so Dispatch sees the
+// whole schedulable workforce regardless of which kind of person each is.
+export const FIELD_STAFF_ROLE_NAMES = [
+  'Team Lead',
+  'Lead Technician',
+  'Technician in Training',
+  'Project Site Lead',
+]
+
 // Build the PostgREST OR filter for the title patterns above. Output looks
 // like `contact_title.ilike.%Team Lead%,contact_title.ilike.%Trainee%,...`.
 function buildTitleOrFilter() {
@@ -31,11 +42,29 @@ function buildTitleOrFilter() {
 }
 
 /**
- * All field-staff contacts. Returns one row per contact with display + filter
- * columns. The crew_label is the substring of contact_title between the
- * pipe characters when present (matches Dispatch Console's lane label).
+ * All field staff — the schedulable workforce — unioned across both kinds of
+ * person LEAP supports:
+ *   • Users with an internal field role (Team Lead, Lead Technician, Technician
+ *     in Training, Project Site Lead). These are W-2 crew who log in and run
+ *     Field Mobile. Tagged `source: 'user'`.
+ *   • Contacts whose title matches a field-staff pattern (subcontractor crews
+ *     scheduled but without internal logins). Tagged `source: 'contact'`.
+ *
+ * Each row has a stable shape regardless of source so Dispatch and the skills
+ * matrix treat them uniformly. `person_id` carries the underlying users.id or
+ * contacts.id; `source` says which table it came from.
  */
 export async function fetchAllFieldStaff() {
+  const [contactStaff, userStaff] = await Promise.all([
+    fetchContactFieldStaff(),
+    fetchUserFieldStaff(),
+  ])
+  return [...userStaff, ...contactStaff]
+    .sort((a, b) => String(a.full_name).localeCompare(String(b.full_name), undefined, { sensitivity: 'base' }))
+}
+
+// Contact-based field staff (subcontractor crews).
+async function fetchContactFieldStaff() {
   const { data, error } = await supabase
     .from('contacts')
     .select('id, contact_record_number, contact_full_name, contact_title, contact_email, contact_phone')
@@ -47,12 +76,40 @@ export async function fetchAllFieldStaff() {
 
   return (data || []).map(c => ({
     id:              c.id,
+    person_id:       c.id,
+    source:          'contact',
     record_number:   c.contact_record_number,
     full_name:       c.contact_full_name || '(no name)',
     title:           c.contact_title || '',
     crew_label:      parseCrewLabel(c.contact_title),
     email:           c.contact_email || null,
     phone:           c.contact_phone || null,
+  }))
+}
+
+// User-based field staff (internal W-2 crew). Joined through roles so we filter
+// by role_name without hardcoding role ids.
+async function fetchUserFieldStaff() {
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, user_record_number, user_name, user_title, user_email, user_phone, roles:role_id!inner(role_name)')
+    .eq('user_is_deleted', false)
+    .eq('user_is_active', true)
+    .in('roles.role_name', FIELD_STAFF_ROLE_NAMES)
+    .order('user_name', { ascending: true })
+
+  if (error) throw error
+
+  return (data || []).map(u => ({
+    id:              u.id,
+    person_id:       u.id,
+    source:          'user',
+    record_number:   u.user_record_number,
+    full_name:       u.user_name || '(no name)',
+    title:           u.user_title || (u.roles?.role_name ?? ''),
+    crew_label:      parseCrewLabel(u.user_title),
+    email:           u.user_email || null,
+    phone:           u.user_phone || null,
   }))
 }
 

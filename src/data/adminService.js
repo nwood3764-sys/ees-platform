@@ -863,6 +863,35 @@ export async function relinkUser({ existingUserId, roleId, title, phone } = {}) 
   })
 }
 
+// Active permission sets — for the technician setup wizard's permission-set
+// step and any other additive-permission picker.
+export async function fetchActivePermissionSets() {
+  const { data, error } = await supabase
+    .from('permission_sets')
+    .select('id, ps_name, ps_description')
+    .eq('ps_is_deleted', false)
+    .eq('ps_is_active', true)
+    .order('ps_name', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({ id: r.id, name: r.ps_name, description: r.ps_description || '' }))
+}
+
+// Finish provisioning a field technician after the user record exists. Wraps
+// the provision_field_technician RPC, which atomically writes program scopes,
+// permission sets, and the user-linked service resource (FSL Service Resource).
+export async function provisionFieldTechnician({
+  userId, programIds = [], permissionSetIds = [], serviceTerritoryId = null,
+} = {}) {
+  const { data, error } = await supabase.rpc('provision_field_technician', {
+    p_user_id: userId,
+    p_program_ids: programIds,
+    p_permission_set_ids: permissionSetIds,
+    p_service_territory_id: serviceTerritoryId,
+  })
+  if (error) throw error
+  return data
+}
+
 // Audit Log — for Administration > Audit Log
 //
 // Pulls audit_log rows joined to public.users for the performer's display
