@@ -446,19 +446,13 @@ export async function fetchEnrollments() {
 // migrated yet (e.g., property-detail dropdowns).
 // ---------------------------------------------------------------------------
 export async function fetchAccounts() {
-  // Canonical Accounts master list: ALL non-deleted accounts regardless of
-  // record type or opportunity linkage, with record-type/type/status surfaced
-  // as filterable columns. This is the Accounts tab's source of truth.
-  //
-  // NOTE: do NOT scope this to opportunity-connected accounts. Doing so hides
-  // every account that isn't yet attached to an opportunity — including any
-  // account the user just created — which makes new accounts appear to vanish
-  // on save and leaves the list empty on a clean dataset. Pipeline-scoped
-  // views that need only opportunity-linked accounts must filter separately
-  // via opportunityConnectedIds(), not here.
-  //
-  // Parallel paginated: accounts is at ~2,036 rows in production. Sequential
-  // pagination took ~12s; parallel cuts that to ~3s.
+  // Outreach pipeline scope — only accounts connected to an opportunity.
+  const { accountIds } = await opportunityConnectedIds()
+  if (accountIds.length === 0) return []
+  // Parallel paginated: accounts is at 2,030 rows in production (one
+  // Account per unique HUD owner from the Manus seed + 3 per-state
+  // bucket Accounts). Sequential pagination took ~12s; parallel
+  // cuts that to ~3s (3 pages → single round-trip wall time).
   const data = await fetchAllPagedParallel(
     (from, to) =>
       supabase
@@ -479,6 +473,7 @@ export async function fetchAccounts() {
           status_pl:account_status        ( picklist_label )
         `)
         .eq('account_is_deleted', false)
+        .in('id', accountIds)
         .order('account_name', { ascending: true })
         .order('id',           { ascending: true })
         .range(from, to),
@@ -486,7 +481,8 @@ export async function fetchAccounts() {
       supabase
         .from('accounts')
         .select('id', { count: 'exact', head: true })
-        .eq('account_is_deleted', false),
+        .eq('account_is_deleted', false)
+        .in('id', accountIds),
   )
 
   return data.map(r => ({
