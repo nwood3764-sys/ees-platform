@@ -4396,21 +4396,36 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   }, [data, recordId, loadAllEditOpts])
 
   // Advance to Opportunity — from a Property, create a new Opportunity with the
-  // property's data carried over (linkage to the property + its account/owner/
-  // state/units), then land the user on the new opportunity-create form. The
-  // record-type picker still runs so the user selects the WI program, and the
-  // remaining outreach steps (decision-maker contact, opportunity contact
-  // roles) continue on the created opportunity. A guided wizard can replace
-  // this later; the prefill contract is the seam it will plug into.
+  // property's data carried over (linkage, account/management company/site
+  // contact, location, building & unit characteristics), then land the user on
+  // the new opportunity-create form. The record-type picker still runs so the
+  // user selects the WI program, and the remaining outreach steps
+  // (decision-maker contact, opportunity contact roles) continue on the created
+  // opportunity. A guided wizard can replace this later; the prefill contract
+  // is the seam it will plug into.
   const handleAdvanceToOpportunity = useCallback(() => {
     const r = data?.record
     if (!r || !onNavigateToRecord) return
     const prefillObj = {
-      property_id:                    r.id,
-      opportunity_account_id:         r.property_account_id || null,
-      opportunity_managing_account_id: r.property_managing_account_id || null,
-      opportunity_state:              r.property_state || null,
-      opportunity_name:               r.property_name ? `${r.property_name} — Opportunity` : null,
+      // Linkage
+      property_id:                          r.id,
+      // Account / management company / site contact — the "who" of the property
+      opportunity_account_id:               r.property_account_id || null,
+      opportunity_managing_account_id:      r.property_managing_account_id || null,
+      opportunity_property_management_company: r.property_managing_account_id || null,
+      opportunity_property_site_contact:    r.property_primary_contact_id || null,
+      // Names / identifiers
+      opportunity_property_aka:             r.property_aka_name || null,
+      opportunity_subdivision_name:         r.property_subdivision_name || null,
+      opportunity_state:                    r.property_state || null,
+      opportunity_name:                     r.property_name ? `${r.property_name} — Opportunity` : null,
+      // Building & unit characteristics
+      opportunity_number_of_buildings:      r.property_total_buildings ?? r.property_number_of_buildings ?? null,
+      opportunity_total_units:              r.property_total_units ?? null,
+      opportunity_total_number_of_units:    r.property_total_number_of_units ?? null,
+      opportunity_year_built:               r.property_year_built ?? null,
+      opportunity_total_attic_sq_ft:        r.property_total_attic_sq_ft ?? null,
+      opportunity_total_building_sq_ft:     r.property_total_building_sq_ft ?? null,
     }
     // Drop nulls so the create form treats them as untouched (and required-field
     // validation still fires for anything genuinely missing).

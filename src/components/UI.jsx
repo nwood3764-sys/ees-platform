@@ -104,7 +104,6 @@ export function SectionTabs({ sections, active, onChange, counts = {}, urgentSec
     }}>
       {sections.map(s => {
         const on = s.id === active;
-        const count = counts[s.id];
         const urgent = urgentSections[s.id];
         return (
           <button key={s.id} onClick={() => onChange(s.id)} style={{
@@ -122,11 +121,6 @@ export function SectionTabs({ sections, active, onChange, counts = {}, urgentSec
             {urgent > 0 && (
               <span style={{ background: C.danger, color: '#fff', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10 }}>
                 {urgent}
-              </span>
-            )}
-            {count != null && !urgent && (
-              <span style={{ background: C.page, color: C.textMuted, fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 10 }}>
-                {count}
               </span>
             )}
           </button>
