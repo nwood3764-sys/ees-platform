@@ -261,7 +261,7 @@ export function ErrorState({ error, onRetry }) {
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 // Desktop (≥ 769px): fixed inline column. Two widths:
-//                    - Expanded (default): 240px, icon + label.
+//                    - Expanded (default): 180px, icon + label.
 //                    - Collapsed:           60px,  icon only, label via title tooltip.
 //                    A chevron toggle on the right edge swaps between the two.
 // Mobile  (≤ 768px): slide-in drawer with backdrop. Hidden until `mobileOpen`.
@@ -416,7 +416,7 @@ export function Sidebar({
 
   // Desktop: inline flex column with optional collapse toggle
   if (!isMobile) {
-    const width = isCollapsed ? 60 : 240;
+    const width = isCollapsed ? 60 : 180;
     return (
       <div
         style={{
