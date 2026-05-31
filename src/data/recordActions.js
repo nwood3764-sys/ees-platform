@@ -50,6 +50,7 @@ export const ACTION_KEYS = Object.freeze({
   EDIT:                    'edit',
   CLONE:                   'clone',
   DELETE:                  'delete',
+  ADVANCE_TO_OPPORTUNITY:  'advance_to_opportunity',
   GENERATE_REPORT:         'generate_report',
   SCHEDULE_WORK_ORDERS:    'schedule_work_orders',
   RESCHEDULE_WORK_ORDERS:  'reschedule_work_orders',
@@ -121,6 +122,18 @@ export const ACTION_COLORS = Object.freeze({
 // in RecordDetail because they need direct access to the editor state).
 // ---------------------------------------------------------------------------
 export const ACTION_REGISTRY = Object.freeze({
+  // ── Properties ────────────────────────────────────────────────────────────
+  advance_to_opportunity: {
+    key:                 ACTION_KEYS.ADVANCE_TO_OPPORTUNITY,
+    label:               'Advance to Opportunity',
+    icon:                'M13 7l5 5m0 0l-5 5m5-5H6',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['properties'],
+    defaultTier:         'primary',
+    defaultSortOrder:    15,
+    isAvailable: ({ tableName, editing }) => !editing && tableName === 'properties',
+  },
+
   edit: {
     key:                 ACTION_KEYS.EDIT,
     label:               'Edit',

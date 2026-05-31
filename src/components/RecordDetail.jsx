@@ -4254,6 +4254,29 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     setEditing(true)
   }, [data, recordId, loadAllEditOpts])
 
+  // Advance to Opportunity — from a Property, create a new Opportunity with the
+  // property's data carried over (linkage to the property + its account/owner/
+  // state/units), then land the user on the new opportunity-create form. The
+  // record-type picker still runs so the user selects the WI program, and the
+  // remaining outreach steps (decision-maker contact, opportunity contact
+  // roles) continue on the created opportunity. A guided wizard can replace
+  // this later; the prefill contract is the seam it will plug into.
+  const handleAdvanceToOpportunity = useCallback(() => {
+    const r = data?.record
+    if (!r || !onNavigateToRecord) return
+    const prefillObj = {
+      property_id:                    r.id,
+      opportunity_account_id:         r.property_account_id || null,
+      opportunity_managing_account_id: r.property_managing_account_id || null,
+      opportunity_state:              r.property_state || null,
+      opportunity_name:               r.property_name ? `${r.property_name} — Opportunity` : null,
+    }
+    // Drop nulls so the create form treats them as untouched (and required-field
+    // validation still fires for anything genuinely missing).
+    for (const k of Object.keys(prefillObj)) if (prefillObj[k] == null) delete prefillObj[k]
+    onNavigateToRecord({ table: 'opportunities', id: null, mode: 'create', prefill: prefillObj })
+  }, [data, onNavigateToRecord])
+
   // Deep clone for any lifecycle template (PRT / ET / DT) — calls the
   // table-specific clone RPC from TEMPLATE_LIFECYCLES, which atomically
   // copies the template (and any child rows the RPC chooses to copy, e.g.
@@ -4948,6 +4971,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const topbarActionHandlers = {
     [ACTION_KEYS.EDIT]:                   startEditing,
     [ACTION_KEYS.CLONE]:                  handleClone,
+    [ACTION_KEYS.ADVANCE_TO_OPPORTUNITY]: handleAdvanceToOpportunity,
     [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
