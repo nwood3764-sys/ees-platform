@@ -107,6 +107,65 @@ function buildPayload(error, errorInfo, extra = {}) {
   }
 }
 
+// ─── Stale-chunk auto-recovery ─────────────────────────────────────────────
+// When a new build is deployed, the JS chunk filenames change (content hash).
+// A browser tab that was open before the deploy still references the OLD chunk
+// names; the next lazy import (route/module switch) fails with "Failed to fetch
+// dynamically imported module" / "error loading dynamically imported module" /
+// "Importing a module script failed". This is expected and recoverable: the
+// fix is to reload the page, which pulls the current index.html and new chunks.
+//
+// We auto-reload ONCE per detection, guarded by a short-lived sessionStorage
+// timestamp so a genuinely broken deploy can't trap the user in a reload loop.
+// If we reloaded within the cooldown window already, we stop and let the error
+// surface normally (so a real, persistent failure is still visible/logged).
+//
+// Two guard keys are honored so this layer and the ErrorBoundary's
+// StaleVersionScreen (which uses 'leap.staleReload.attemptedAt') never reload
+// in quick succession — whichever fires first sets its key, and the other sees
+// a recent attempt and stands down.
+const STALE_CHUNK_RELOAD_KEY = 'ees_stale_chunk_reloaded_at'
+const STALE_CHUNK_BOUNDARY_KEY = 'leap.staleReload.attemptedAt'
+const STALE_CHUNK_COOLDOWN_MS = 60 * 1000
+
+function isStaleChunkError(err) {
+  const msg = String(err?.message || err || '')
+  return (
+    /Failed to fetch dynamically imported module/i.test(msg) ||
+    /error loading dynamically imported module/i.test(msg) ||
+    /Importing a module script failed/i.test(msg) ||
+    /dynamically imported module/i.test(msg) ||
+    // Safari/Firefox phrasings for a vanished chunk
+    /Unable to preload CSS|preload.*failed/i.test(msg)
+  )
+}
+
+// Returns true if it handled the error (triggered a reload or is within
+// cooldown), meaning the caller should NOT also log it as a hard error.
+function maybeRecoverFromStaleChunk(err) {
+  if (!isStaleChunkError(err)) return false
+  try {
+    const now = Date.now()
+    const lastGlobal = Number(sessionStorage.getItem(STALE_CHUNK_RELOAD_KEY) || 0)
+    const lastBoundary = Number(sessionStorage.getItem(STALE_CHUNK_BOUNDARY_KEY) || 0)
+    const last = Math.max(lastGlobal, lastBoundary)
+    if (now - last < STALE_CHUNK_COOLDOWN_MS) {
+      // Already tried very recently (either layer) — don't loop. Let it
+      // through to logging so a persistent failure stays visible.
+      return false
+    }
+    sessionStorage.setItem(STALE_CHUNK_RELOAD_KEY, String(now))
+    sessionStorage.setItem(STALE_CHUNK_BOUNDARY_KEY, String(now))
+  } catch { /* sessionStorage unavailable — fall through to reload anyway */ }
+  // Log a benign breadcrumb (info severity) so we can see how often this fires,
+  // then reload to pick up the new build.
+  try { logClientError(err, null, { severity: 'info', module: 'stale-chunk-reload' }) } catch { /* noop */ }
+  window.location.reload()
+  return true
+}
+
+export { isStaleChunkError, maybeRecoverFromStaleChunk }
+
 // ─── Public API ──────────────────────────────────────────────────────────
 
 /**
@@ -176,6 +235,9 @@ export function installGlobalErrorHandlers() {
   window.addEventListener('error', (event) => {
     // Filter out resource-load errors (script, img). Only log JS errors.
     if (event.error) {
+      // Stale chunk after a deploy → reload to pick up the new build instead
+      // of logging a hard error and leaving the user stuck.
+      if (maybeRecoverFromStaleChunk(event.error)) return
       logClientError(event.error, null, { severity: 'error' })
     }
   })
@@ -186,6 +248,16 @@ export function installGlobalErrorHandlers() {
       ? reason
       : new Error(typeof reason === 'string' ? reason : JSON.stringify(reason))
     err.name = err.name === 'Error' ? 'UnhandledPromiseRejection' : err.name
+    if (maybeRecoverFromStaleChunk(err)) return
     logClientError(err, null, { severity: 'error' })
+  })
+
+  // Vite emits this specifically when a lazy import()'s chunk fails to load —
+  // the most direct signal of a stale tab after a deploy. Recover immediately.
+  window.addEventListener('vite:preloadError', (event) => {
+    try { event.preventDefault() } catch { /* noop */ }
+    const err = event?.payload || new Error('Failed to fetch dynamically imported module (vite:preloadError)')
+    if (maybeRecoverFromStaleChunk(err)) return
+    logClientError(err, null, { severity: 'error', module: 'vite-preload-error' })
   })
 }
