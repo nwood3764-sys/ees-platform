@@ -171,6 +171,7 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
             <div>Value</div>
             <div>Label</div>
             <div style={{ textAlign: 'center' }}>Order</div>
+            <div style={{ textAlign: 'center' }}>State</div>
             <div style={{ textAlign: 'center' }}>Status</div>
             <div>Assigned Layout</div>
             <div style={{ textAlign: 'right' }}>Actions</div>
@@ -226,6 +227,7 @@ function RecordTypeRow({
   const [label, setLabel] = useState(row.label)
   const [value, setValue] = useState(row.value)
   const [sortOrder, setSortOrder] = useState(String(row.sortOrder))
+  const [state, setState] = useState(row.state || '')
   const [saving, setSaving] = useState(false)
 
   // Reset local state when row changes or edit is cancelled
@@ -234,8 +236,9 @@ function RecordTypeRow({
       setLabel(row.label)
       setValue(row.value)
       setSortOrder(String(row.sortOrder))
+      setState(row.state || '')
     }
-  }, [row.id, editing, row.label, row.value, row.sortOrder])
+  }, [row.id, editing, row.label, row.value, row.sortOrder, row.state])
 
   async function save() {
     if (!label.trim() || !value.trim()) {
@@ -252,6 +255,7 @@ function RecordTypeRow({
         label: label.trim(),
         value: value.trim(),
         sortOrder: parseInt(sortOrder, 10) || 0,
+        state: state.trim().toUpperCase() || null,
       })
       toast.success('Record type updated')
       onSaved()
@@ -289,6 +293,16 @@ function RecordTypeRow({
         {editing
           ? <TextInput value={sortOrder} onChange={setSortOrder} mono type="number" width={64} center />
           : <span>{row.sortOrder}</span>
+        }
+      </div>
+
+      {/* State */}
+      <div style={{ textAlign: 'center', color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }}>
+        {editing
+          ? <TextInput value={state} onChange={setState} mono width={56} center placeholder="—" />
+          : (row.state
+              ? <span>{row.state}</span>
+              : <span style={{ color: C.textMuted }} title="No state — shown for every state">All</span>)
         }
       </div>
 
@@ -372,6 +386,7 @@ function NewRecordTypeModal({
   const [value, setValue] = useState('')
   const [valueEdited, setValueEdited] = useState(false)
   const [sortOrder, setSortOrder] = useState('')
+  const [state, setState] = useState('')
   const [strategy, setStrategy] = useState('clone_master')
   const [sourceLayoutId, setSourceLayoutId] = useState('')
   const [existingLayoutId, setExistingLayoutId] = useState('')
@@ -437,6 +452,7 @@ function NewRecordTypeModal({
         value: value.trim(),
         label: label.trim(),
         sortOrder: parseInt(sortOrder, 10) || 0,
+        state: state.trim().toUpperCase() || null,
         layoutStrategy: strategy,
         sourceLayoutId: strategy === 'clone_from' ? sourceLayoutId : null,
         existingLayoutId: strategy === 'move_existing' ? existingLayoutId : null,
@@ -512,6 +528,18 @@ function NewRecordTypeModal({
             disabled={busy}
             placeholder="0"
             style={{ ...inputStyle, width: 100, fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5 }}
+          />
+        </FormField>
+
+        <FormField label="State" hint="Optional — two-letter code (e.g. WI). Leave blank to make this type available in every state.">
+          <input
+            type="text"
+            value={state}
+            onChange={e => setState(e.target.value)}
+            disabled={busy}
+            placeholder="All states"
+            maxLength={2}
+            style={{ ...inputStyle, width: 100, fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5, textTransform: 'uppercase' }}
           />
         </FormField>
 
@@ -673,7 +701,7 @@ function TextInput({ value, onChange, placeholder, mono, type = 'text', width, c
 
 // ─── Styles ────────────────────────────────────────────────────────────
 
-const GRID_COLS = '1.2fr 1.6fr 70px 90px 1.6fr minmax(220px, auto)'
+const GRID_COLS = '1.2fr 1.6fr 70px 70px 90px 1.6fr minmax(220px, auto)'
 
 const tableHeaderStyle = {
   display: 'grid',

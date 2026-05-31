@@ -4118,6 +4118,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // primitive — not on the prefill object identity (which could be a new
   // reference every parent render and cause refetch loops).
   const prefillRecordTypeValue = getRecordTypeValue(prefill)
+  // Derive the record's state from the prefill (e.g. opportunity_state seeded
+  // from a property's state when advancing to an opportunity). Used to filter
+  // the record-type picker to state-appropriate types. Falls back to null,
+  // which shows all active types.
+  const prefillState = (() => {
+    if (!prefill) return null
+    if (prefill.state) return prefill.state
+    for (const key of Object.keys(prefill)) {
+      if (key.endsWith('_state') && prefill[key]) return prefill[key]
+    }
+    return null
+  })()
   useEffect(() => {
     if (!isCreate) { setPickerEvaluated(true); return }
     let cancelled = false
@@ -4980,6 +4992,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       <RecordTypePicker
         tableName={tableName}
         objectLabel={singularizeLabel(objectLabel)}
+        state={prefillState}
         onPick={(rt) => {
           // rt can be null when the picker auto-determined no RTs exist;
           // false marks 'no picker needed' so the load effect can proceed.

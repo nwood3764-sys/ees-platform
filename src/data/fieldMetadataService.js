@@ -124,17 +124,23 @@ export function getPicklistOptions(object, field) {
   if (_picklistOptionsCache.has(key)) return _picklistOptionsCache.get(key)
 
   const promise = (async () => {
-    const data = await fetchAllPaged((from, to) =>
-      supabase
+    // Status/lifecycle fields keep their workflow sort_order; every other
+    // picklist is a choice list and sorts alphabetically by label.
+    const isLifecycle = field === 'status' || /_status$/.test(field) || field === 'stage' || /_stage$/.test(field)
+    const data = await fetchAllPaged((from, to) => {
+      let q = supabase
         .from('picklist_values')
         .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
         .eq('picklist_object', object)
         .eq('picklist_field',  field)
         .eq('picklist_is_active', true)
-        .order('picklist_sort_order', { ascending: true })
-        .order('id',                  { ascending: true })
-        .range(from, to)
-    )
+      if (isLifecycle) {
+        q = q.order('picklist_sort_order', { ascending: true }).order('id', { ascending: true })
+      } else {
+        q = q.order('picklist_label', { ascending: true }).order('id', { ascending: true })
+      }
+      return q.range(from, to)
+    })
     return data.map(r => ({
       id:        r.id,
       label:     r.picklist_label || r.picklist_value,

@@ -397,7 +397,7 @@ export async function listRecordTypesForObject(objectName) {
   // a relational embed across unrelated tables.
   const { data: types, error: tErr } = await supabase
     .from('picklist_values')
-    .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
+    .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active, picklist_state')
     .eq('picklist_object', objectName)
     .eq('picklist_field', 'record_type')
     .order('picklist_sort_order', { ascending: true })
@@ -431,13 +431,14 @@ export async function listRecordTypesForObject(objectName) {
       label: t.picklist_label || t.picklist_value,
       sortOrder: t.picklist_sort_order ?? 0,
       isActive: t.picklist_is_active !== false,
+      state: t.picklist_state || null,
       assignedLayoutId:   assigned?.id || null,
       assignedLayoutName: assigned?.page_layout_name || null,
     }
   })
 }
 
-export async function createRecordType({ object, value, label, sortOrder = 0 }) {
+export async function createRecordType({ object, value, label, sortOrder = 0, state = null }) {
   if (!object) throw new Error('createRecordType: object is required')
   if (!value)  throw new Error('createRecordType: value is required')
   if (!label)  throw new Error('createRecordType: label is required')
@@ -453,6 +454,7 @@ export async function createRecordType({ object, value, label, sortOrder = 0 }) 
       picklist_value: value,
       picklist_label: label,
       picklist_sort_order: sortOrder,
+      picklist_state: state || null,
       picklist_is_active: true,
       picklist_created_by: userId,
     })
@@ -469,6 +471,7 @@ export async function updateRecordType(id, patch) {
   if (patch.value     !== undefined) update.picklist_value      = patch.value
   if (patch.label     !== undefined) update.picklist_label      = patch.label
   if (patch.sortOrder !== undefined) update.picklist_sort_order = patch.sortOrder
+  if (patch.state     !== undefined) update.picklist_state      = patch.state || null
 
   const { data, error } = await supabase
     .from('picklist_values')
@@ -522,6 +525,7 @@ export async function createRecordTypeWithLayout({
   value,
   label,
   sortOrder = 0,
+  state = null,
   layoutStrategy = 'clone_master',
   sourceLayoutId = null,
   existingLayoutId = null,
@@ -529,7 +533,7 @@ export async function createRecordTypeWithLayout({
   if (!object) throw new Error('createRecordTypeWithLayout: object is required')
 
   // 1. Create the picklist row first — this is the anchor for every layout op.
-  const recordTypeId = await createRecordType({ object, value, label, sortOrder })
+  const recordTypeId = await createRecordType({ object, value, label, sortOrder, state })
 
   if (layoutStrategy === 'none') {
     return { recordTypeId, layoutId: null }

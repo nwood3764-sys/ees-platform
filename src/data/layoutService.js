@@ -150,20 +150,29 @@ export function getRecordTypeColumn(tableName) {
  * [{ id, value, label }]. Empty array means the object has no record-type
  * differentiation and the Create flow should skip the record-type picker.
  */
-export async function fetchAvailableRecordTypes(objectName) {
-  const { data, error } = await supabase
+export async function fetchAvailableRecordTypes(objectName, { state = null } = {}) {
+  let query = supabase
     .from('picklist_values')
-    .select('id, picklist_value, picklist_label, picklist_sort_order')
+    .select('id, picklist_value, picklist_label, picklist_state')
     .eq('picklist_object', objectName)
     .eq('picklist_field', 'record_type')
     .eq('picklist_is_active', true)
-    .order('picklist_sort_order', { ascending: true })
-    .order('picklist_label', { ascending: true })
+  // When a state is supplied, show only record types scoped to that state plus
+  // any nationwide types (picklist_state IS NULL). When no state is supplied,
+  // show everything active (the picker falls back to the full set).
+  if (state) {
+    query = query.or(`picklist_state.eq.${state},picklist_state.is.null`)
+  }
+  // Always alphabetical ascending by label — never storage/sort_order, which
+  // produces an illogical sequence for the user.
+  query = query.order('picklist_label', { ascending: true })
+  const { data, error } = await query
   if (error) throw error
   return (data || []).map(r => ({
     id:    r.id,
     value: r.picklist_value,
     label: r.picklist_label || r.picklist_value,
+    state: r.picklist_state || null,
   }))
 }
 
@@ -726,6 +735,12 @@ export async function saveRecord(tableName, recordId, changes) {
  * Used to populate <select> dropdowns in edit mode.
  */
 export async function fetchPicklistOptions(objectName, fieldName) {
+  // Status / lifecycle fields are the ONE place where sort_order is the
+  // logical order (To Be Scheduled -> Scheduled -> In Progress ...). Every
+  // other picklist is a choice list and must be alphabetical ascending so the
+  // user always sees a predictable, scannable order.
+  const isLifecycleField = (f) => f === 'status' || /_status$/.test(f) || f === 'stage' || /_stage$/.test(f)
+
   // Picklist values use the *short* field name (e.g. 'record_type', 'status',
   // 'type'), while page-layout widgets pass the actual column name on the
   // table (e.g. 'account_record_type', 'property_subsidy_type'). Try the
@@ -733,13 +748,18 @@ export async function fetchPicklistOptions(objectName, fieldName) {
   // table's prefix in front of a known short field, retry with the short
   // form. This keeps the loader resilient to both naming styles.
   const tryFetch = async (field) => {
-    const { data, error } = await supabase
+    let q = supabase
       .from('picklist_values')
-      .select('id, picklist_value, picklist_label')
+      .select('id, picklist_value, picklist_label, picklist_sort_order')
       .eq('picklist_object', objectName)
       .eq('picklist_field', field)
       .eq('picklist_is_active', true)
-      .order('picklist_sort_order', { ascending: true })
+    if (isLifecycleField(field)) {
+      q = q.order('picklist_sort_order', { ascending: true })
+    } else {
+      q = q.order('picklist_label', { ascending: true })
+    }
+    const { data, error } = await q
     if (error) throw error
     return data || []
   }
@@ -939,6 +959,7 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50) {
   let query = supabase
     .from(lookupTable)
     .select(`id, ${lookupField}`)
+    .order(lookupField, { ascending: true })
     .limit(limit)
 
   if (isDeletedCol) query = query.eq(isDeletedCol, false)
