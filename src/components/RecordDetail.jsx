@@ -978,6 +978,104 @@ function EmailTemplatePreviewModal({
 // EditField — renders the right input for a field type
 // ---------------------------------------------------------------------------
 
+// SearchableLookup — a combobox used for related-record (lookup) fields.
+// Native <select> can't offer a search box and gives no control over order,
+// which made long pickers (e.g. the Property lookup with thousands of rows)
+// unusable. This renders a button showing the current selection; clicking it
+// opens a panel with a search input and an ascending-sorted, filtered option
+// list. Selecting an option (or the leading blank row) calls onChange(value).
+function SearchableLookup({ value, options, onChange, placeholder = '— Select —' }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const rootRef = useRef(null)
+  const inputRef = useRef(null)
+
+  // Always present options ascending by label (case-insensitive, natural
+  // numeric order so "950 …" sorts sensibly), regardless of fetch order.
+  const sorted = useMemo(() => {
+    return [...(options || [])].sort((a, b) =>
+      String(a.label ?? '').localeCompare(
+        String(b.label ?? ''), undefined, { sensitivity: 'base', numeric: true },
+      ),
+    )
+  }, [options])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return sorted
+    return sorted.filter(o => String(o.label ?? '').toLowerCase().includes(q))
+  }, [sorted, query])
+
+  const selectedLabel = useMemo(() => {
+    const hit = (options || []).find(o => String(o.value) === String(value))
+    return hit ? hit.label : ''
+  }, [options, value])
+
+  useEffect(() => {
+    if (!open) return undefined
+    function onDocClick(e) {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  useEffect(() => { if (open && inputRef.current) inputRef.current.focus() }, [open])
+
+  function pick(val) {
+    onChange(val)
+    setOpen(false)
+    setQuery('')
+  }
+
+  return (
+    <div ref={rootRef} style={{ position: 'relative' }}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{ ...inputBase, cursor: 'pointer', textAlign: 'left', display: 'flex',
+          justifyContent: 'space-between', alignItems: 'center', background: '#fff' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          color: selectedLabel ? C.textPrimary : C.textMuted }}>
+          {selectedLabel || placeholder}
+        </span>
+        <span style={{ marginLeft: 8, color: C.textMuted, flexShrink: 0, fontSize: 11 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', zIndex: 60, top: 'calc(100% + 4px)', left: 0, right: 0,
+          background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6,
+          boxShadow: '0 6px 24px rgba(0,0,0,0.12)', maxHeight: 300, display: 'flex',
+          flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ padding: 8, borderBottom: `1px solid ${C.border}` }}>
+            <input ref={inputRef} type="text" value={query}
+              onChange={e => setQuery(e.target.value)} placeholder="Search…"
+              style={{ ...inputBase, padding: '6px 8px' }} />
+          </div>
+          <div style={{ overflowY: 'auto' }}>
+            <div onClick={() => pick(null)}
+              style={{ padding: '7px 10px', fontSize: 13, cursor: 'pointer', color: C.textMuted }}>
+              {placeholder}
+            </div>
+            {filtered.length === 0 ? (
+              <div style={{ padding: '7px 10px', fontSize: 13, color: C.textMuted }}>No matches</div>
+            ) : filtered.map(o => {
+              const isSel = String(o.value) === String(value)
+              return (
+                <div key={o.value} onClick={() => pick(o.value)}
+                  style={{ padding: '7px 10px', fontSize: 13, cursor: 'pointer',
+                    background: isSel ? C.emerald : '#fff', color: isSel ? '#fff' : C.textPrimary,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = '#f1f5f9' }}
+                  onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = '#fff' }}>
+                  {o.label}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EditField({ field, value, onChange, picklistOpts, lookupOpts }) {
   const v = value ?? ''
 
@@ -1049,11 +1147,11 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts }) {
       const dep = field.lookup_dependency
       if (opts.length > 0) {
         return (
-          <select style={{ ...inputBase, cursor: 'pointer' }}
-            value={v || ''} onChange={e => onChange(field.name, e.target.value || null)}>
-            <option value="">— Select —</option>
-            {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <SearchableLookup
+            value={v || ''}
+            options={opts}
+            onChange={(val) => onChange(field.name, val || null)}
+          />
         )
       }
       // Dependent lookup with empty options means the parent fields aren't
