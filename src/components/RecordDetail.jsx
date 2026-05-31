@@ -1002,7 +1002,7 @@ function EmailTemplatePreviewModal({
 // caller can select the freshly created record. The user can open the new
 // record later to fill non-required fields — this is a quick-create, not a
 // reduced create form.
-function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated }) {
+function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated, seed = null }) {
   const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -1032,6 +1032,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated 
         for (const col of required) {
           if (SYSTEM.test(col)) continue
           if (col === rtColumn) continue
+          if (seed && seed[col] != null) continue  // already known from the dependency — don't ask
           fieldDefs.push({
             name: col,
             label: col.replace(/^[a-z]+_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
@@ -1068,7 +1069,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated 
     setSaving(true)
     try {
       const userId = await getCurrentUserId()
-      const payload = applyInsertDefaults(table, { ...draft }, userId)
+      const payload = applyInsertDefaults(table, { ...(seed || {}), ...draft }, userId)
       for (const [k, v] of Object.entries(payload)) if (v === '') payload[k] = null
       const created = await insertRecord(table, payload)
       const label = (labelField && created?.[labelField]) || created?.id?.slice(0, 8) || 'New record'
@@ -1139,7 +1140,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated 
 
 function SearchableLookup({ value, options, onChange, placeholder = '— Select —',
   allowCreate = false, createTable = null, createLabelField = null, createObjectLabel = null,
-  onCreatedOption = null, onSearch = null, selectedOption = null }) {
+  onCreatedOption = null, onSearch = null, selectedOption = null, createSeed = null }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
@@ -1261,6 +1262,7 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
           table={createTable}
           labelField={createLabelField}
           objectLabel={createObjectLabel}
+          seed={createSeed}
           onCancel={() => setCreateOpen(false)}
           onCreated={({ id, label }) => {
             setCreateOpen(false)
@@ -1353,7 +1355,7 @@ function AvatarUpload({ value, userId, onChange }) {
 // immediately without a round-trip refetch. Inline create is enabled by the
 // field config's allow_inline_create flag; the target table/label come from
 // lookup_table / lookup_field.
-function LookupEditControl({ field, value, baseOptions, onChange, canCreate }) {
+function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dependencyValues = null }) {
   const [extra, setExtra] = useState([])          // options created inline this session
   const [serverOpts, setServerOpts] = useState(null) // results from server search (null = not searched)
   const [selectedOption, setSelectedOption] = useState(null) // resolved label for current value
@@ -1396,6 +1398,30 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate }) {
     return t ? t.replace(/\b\w/g, c => c.toUpperCase()) : 'record'
   }, [field])
 
+  // For a dependent lookup, seed the created record with the FK that scopes it
+  // (e.g. a new Contact created from the Site Contact field belongs to the
+  // selected Account). dep.create_seed maps the dependency parent value onto a
+  // column on the new record; fall back to a sensible default for the common
+  // contacts_for_accounts case.
+  const createSeed = useMemo(() => {
+    const dep = field.lookup_dependency
+    if (!dep || !dependencyValues) return null
+    if (dep.create_seed && typeof dep.create_seed === 'object') {
+      const seed = {}
+      for (const [srcKey, destCol] of Object.entries(dep.create_seed)) {
+        if (dependencyValues[srcKey]) seed[destCol] = dependencyValues[srcKey]
+      }
+      return Object.keys(seed).length ? seed : null
+    }
+    if (dep.kind === 'contacts_for_accounts') {
+      const acct = dependencyValues.opportunity_account_id
+        || dependencyValues.opportunity_managing_account_id
+        || dependencyValues.account_id
+      return acct ? { contact_account_id: acct } : null
+    }
+    return null
+  }, [field, dependencyValues])
+
   return (
     <SearchableLookup
       value={value}
@@ -1407,6 +1433,7 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate }) {
       createTable={field.lookup_table}
       createLabelField={field.lookup_field}
       createObjectLabel={objectLabel}
+      createSeed={createSeed}
       onCreatedOption={(opt) => setExtra(prev => [...prev, opt])}
     />
   )
@@ -1495,25 +1522,26 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
       const dep = field.lookup_dependency
       const canCreate = field.allow_inline_create === true && !!field.lookup_table
       const canServerSearch = !!(field.lookup_table && field.lookup_field)
-      // Render the searchable control when we have options, inline create is
-      // enabled, server search is possible, OR a value is already set (so a
-      // carried-over / saved selection always shows its label even if its row
-      // isn't in the initial option page).
-      if (opts.length > 0 || canCreate || canServerSearch || v) {
-        return (
-          <LookupEditControl
-            field={field}
-            value={v || ''}
-            baseOptions={opts}
-            onChange={(val) => onChange(field.name, val)}
-            canCreate={canCreate}
-          />
-        )
-      }
-      // Dependent lookup with empty options means the parent fields aren't
-      // filled in yet (or no related records exist). Render an inert select
-      // showing what's needed so the field doesn't appear silently broken.
+
+      // Dependent lookup (e.g. Site Contact scoped to the selected Account):
+      // always route through LookupEditControl with the dependency values, so
+      // the scoped option list shows and — when inline-create is enabled —
+      // "+ New" is reachable even if the scoped pool is currently empty. The
+      // new record is seeded with the dependency FK (e.g. the contact's
+      // account) so it belongs to the right parent.
       if (dep && dep.kind) {
+        if (opts.length > 0 || canCreate || v) {
+          return (
+            <LookupEditControl
+              field={field}
+              value={v || ''}
+              baseOptions={opts}
+              onChange={(val) => onChange(field.name, val)}
+              canCreate={canCreate}
+              dependencyValues={field._dependencyValues || null}
+            />
+          )
+        }
         const dependsOn = Array.isArray(dep.depends_on) ? dep.depends_on : []
         const hint = dependsOn.length > 0
           ? `— Fill ${dependsOn.map(n => n.replace(/_id$/, '').replace(/_/g, ' ')).join(' or ')} first —`
@@ -1523,6 +1551,22 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
             value="" disabled>
             <option value="">{hint}</option>
           </select>
+        )
+      }
+
+      // Plain (non-dependent) lookup. Render the searchable control when we
+      // have options, inline create is enabled, server search is possible, OR
+      // a value is already set (so a carried-over / saved selection always
+      // shows its label even if its row isn't in the initial option page).
+      if (opts.length > 0 || canCreate || canServerSearch || v) {
+        return (
+          <LookupEditControl
+            field={field}
+            value={v || ''}
+            baseOptions={opts}
+            onChange={(val) => onChange(field.name, val)}
+            canCreate={canCreate}
+          />
         )
       }
       return <span style={{ fontSize: 13, color: C.textMuted, fontStyle: 'italic' }}>Read-only</span>
@@ -2802,7 +2846,13 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
               )}
             </span>
             {isEditable ? (
-              <EditField field={f} value={draft[f.name]} onChange={onChange}
+              <EditField
+                field={f.lookup_dependency?.kind
+                  ? { ...f, _dependencyValues: Object.fromEntries(
+                      (f.lookup_dependency.depends_on || []).map(k => [k, draft[k]]).filter(([, val]) => val != null)
+                    ) }
+                  : f}
+                value={draft[f.name]} onChange={onChange}
                 picklistOpts={allPicklistOpts?.[f.name]} lookupOpts={allLookupOpts?.[f.name]}
                 recordId={recordId} />
             ) : lookupLinkTarget ? (
