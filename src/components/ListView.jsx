@@ -1361,7 +1361,7 @@ export function ListView({
                   return (
                     <TableRow key={r.id}
                               onClick={() => setSelectedRow(selectedRow?.id === r.id ? null : r)}
-                              onDoubleClick={() => !editMode && onOpenRecord && onOpenRecord(r)}
+                              onDoubleClick={() => onOpenRecord && onOpenRecord(r)}
                               selected={selectedRow?.id === r.id || isSelected}>
                       {editMode && (
                         <td style={{
