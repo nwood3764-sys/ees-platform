@@ -2786,6 +2786,7 @@ function renderRelatedValue(col, val, picklists) {
 
 function RelatedListWidget({
   widget, picklists, onNavigateToRecord, parentRecordId, onRefreshRelated,
+  parentTable, parentRecord,
 }) {
   const config = widget.widget_config || {}
   const columns = config.columns || []
@@ -2845,7 +2846,49 @@ function RelatedListWidget({
   const handleNewClick = (e) => {
     e.stopPropagation()
     if (!canNavigate) return
-    const prefillObj = fk && parentRecordId ? { [fk]: parentRecordId } : {}
+
+    // Build a prefill that carries the FULL parent chain into the new child,
+    // not just the direct FK. Example: creating an Opportunity from a Property
+    // seeds property_id (direct) AND opportunity_account_id (the property's
+    // account) so the user never re-picks context the system already knows.
+    //
+    // Mechanism, all data-driven from TABLE_META:
+    //   1. Always seed the direct FK back to this parent ({fk: parentRecordId}).
+    //   2. For each of the CHILD's declared parent FKs, find the table it points
+    //      to. If we can supply a value for that table from the current parent
+    //      record — either because the parent IS that table (use its id) or
+    //      because the parent record carries an FK to that table — seed it.
+    const prefillObj = {}
+    if (fk && parentRecordId) prefillObj[fk] = parentRecordId
+
+    const childMeta = TABLE_META[childTable]
+    if (childMeta && parentTable && parentRecord) {
+      // Map of "ancestor table" -> "value to use for an FK pointing at it",
+      // assembled from the parent record we're creating from.
+      const valueByTargetTable = {}
+      // The parent record itself satisfies FKs pointing at the parent table.
+      valueByTargetTable[parentTable] = parentRecordId
+      // Any FK the parent record carries satisfies FKs pointing at those tables.
+      const parentMeta = TABLE_META[parentTable]
+      if (parentMeta) {
+        ;(parentMeta.parents || []).forEach((pCol, i) => {
+          const targetTable = (parentMeta.parentTables || [])[i]
+          const val = parentRecord[pCol]
+          if (targetTable && val && !(targetTable in valueByTargetTable)) {
+            valueByTargetTable[targetTable] = val
+          }
+        })
+      }
+      // Now fill each of the child's parent FKs we have a value for.
+      ;(childMeta.parents || []).forEach((childFkCol, i) => {
+        const targetTable = (childMeta.parentTables || [])[i]
+        if (!targetTable) return
+        if (childFkCol in prefillObj) return // direct FK already set
+        const val = valueByTargetTable[targetTable]
+        if (val) prefillObj[childFkCol] = val
+      })
+    }
+
     onNavigateToRecord({ table: childTable, id: null, mode: 'create', prefill: prefillObj })
   }
 
@@ -5347,6 +5390,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 picklists={picklists}
                 onNavigateToRecord={onNavigateToRecord}
                 parentRecordId={recordId}
+                parentTable={tableName}
+                parentRecord={data?.record}
                 onRefreshRelated={async () => {
                   try {
                     const rows = await fetchRelatedRecords(w.widget_config, recordId)
@@ -5490,6 +5535,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                             picklists={picklists}
                             onNavigateToRecord={onNavigateToRecord}
                             parentRecordId={recordId}
+                            parentTable={tableName}
+                            parentRecord={data?.record}
                           />
                         ))}
                       {(sec.widgets || [])
