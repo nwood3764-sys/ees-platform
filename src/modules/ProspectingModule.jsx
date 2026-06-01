@@ -116,8 +116,8 @@ function ProspectingHome({ counts, loading }) {
   return (
     <div style={{ flex:1, overflow:'auto', padding:'20px 20px 24px' }}>
       <div style={{ marginBottom:20 }}>
-        <div style={{ fontSize:11, color:C.textMuted, marginBottom:2 }}>Prospecting / Home</div>
-        <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Prospecting Dashboard</h1>
+        <div style={{ fontSize:11, color:C.textMuted, marginBottom:2 }}>Outreach / Home</div>
+        <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Outreach Dashboard</h1>
         <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>Top-of-funnel properties — not yet under active engagement.</div>
       </div>
 
@@ -659,7 +659,7 @@ export default function ProspectingModule({
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div data-module-topbar="1" style={{ height: 54, background:C.card, borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', flexShrink:0 }}>
         <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-          <span style={{ color:C.textMuted }}>Prospecting</span><span style={{ color:C.textMuted }}>/</span>
+          <span style={{ color:C.textMuted }}>Outreach</span><span style={{ color:C.textMuted }}>/</span>
           <span style={{ color:C.textPrimary, fontWeight:500 }}>{SECTIONS.find(s => s.id===sec)?.label}</span>
           {/* Per-section help: anchored to the route the current section
              lives at. Falls back to the module overview when the user is
@@ -670,7 +670,7 @@ export default function ProspectingModule({
               { type:'route', route:'/m/prospecting' },
               { type:'concept', concept:'prospecting' },
             ]}
-            title={`Prospecting — ${SECTIONS.find(s => s.id===sec)?.label || ''}`}
+            title={`Outreach — ${SECTIONS.find(s => s.id===sec)?.label || ''}`}
           />
         </div>
       </div>

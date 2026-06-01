@@ -446,13 +446,11 @@ export async function fetchEnrollments() {
 // migrated yet (e.g., property-detail dropdowns).
 // ---------------------------------------------------------------------------
 export async function fetchAccounts() {
-  // Outreach pipeline scope — only accounts connected to an opportunity.
-  const { accountIds } = await opportunityConnectedIds()
-  if (accountIds.length === 0) return []
-  // Parallel paginated: accounts is at 2,030 rows in production (one
-  // Account per unique HUD owner from the Manus seed + 3 per-state
-  // bucket Accounts). Sequential pagination took ~12s; parallel
-  // cuts that to ~3s (3 pages → single round-trip wall time).
+  // The Accounts list shows every non-deleted account. It previously scoped
+  // to opportunity-connected accounts only, which hid any account created
+  // directly (e.g. a new Property Owner or Property Management Company) until
+  // it was attached to an opportunity — so a just-saved account appeared to
+  // vanish. Accounts are a first-class directory; show them all.
   const data = await fetchAllPagedParallel(
     (from, to) =>
       supabase
@@ -469,11 +467,9 @@ export async function fetchAccounts() {
           billing_state,
           billing_zip,
           record_type:account_record_type ( picklist_label ),
-          type_pl:account_type            ( picklist_label ),
           status_pl:account_status        ( picklist_label )
         `)
         .eq('account_is_deleted', false)
-        .in('id', accountIds)
         .order('account_name', { ascending: true })
         .order('id',           { ascending: true })
         .range(from, to),
@@ -481,8 +477,7 @@ export async function fetchAccounts() {
       supabase
         .from('accounts')
         .select('id', { count: 'exact', head: true })
-        .eq('account_is_deleted', false)
-        .in('id', accountIds),
+        .eq('account_is_deleted', false),
   )
 
   return data.map(r => ({
@@ -491,7 +486,6 @@ export async function fetchAccounts() {
     name: r.account_name || '—',
     orgName: r.account_organization_name || '—',
     recordType: r.record_type?.picklist_label || '—',
-    type: r.type_pl?.picklist_label || '—',
     status: r.status_pl?.picklist_label || '—',
     phone: r.account_phone || '—',
     email: r.account_email || '—',

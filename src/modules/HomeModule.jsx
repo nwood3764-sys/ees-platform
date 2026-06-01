@@ -283,7 +283,7 @@ export default function HomeModule({ onNavigate }) {
 
           {/* Chart widgets row 2 */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
-            <Widget title="Properties by Status" footer="View Outreach →" onFooter={() => onNavigate('outreach')}>
+            <Widget title="Properties by Status" footer="View Enrollment →" onFooter={() => onNavigate('outreach')}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <ResponsiveContainer width={90} height={90}>
                   <PieChart>
@@ -306,7 +306,7 @@ export default function HomeModule({ onNavigate }) {
               </div>
             </Widget>
 
-            <Widget title="Opportunities by Stage" footer="View Outreach →" onFooter={() => onNavigate('outreach')}>
+            <Widget title="Opportunities by Stage" footer="View Enrollment →" onFooter={() => onNavigate('outreach')}>
               <ResponsiveContainer width="100%" height={138}>
                 <BarChart data={oppByStage} layout="vertical" margin={{ left: 0, right: 14, top: 0, bottom: 0 }}>
                   <XAxis type="number" hide />

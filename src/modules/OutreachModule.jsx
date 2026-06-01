@@ -36,7 +36,6 @@ const ACCOUNT_COLS = [
   { field:'id',         label:'Record #',     type:'text',   sortable:true, filterable:false },
   { field:'name',       label:'Account',      type:'text',   sortable:true, filterable:true  },
   { field:'recordType', label:'Record Type',  type:'select', sortable:true, filterable:true, options:['Property Owner','Property Management Company','Partner Organization','Customer Household','EES-WI Internal','Utility','Program Administrator','Government Agency','Distributor','Standard'] },
-  { field:'type',       label:'Type',         type:'select', sortable:true, filterable:true, options:['Customer','Partner','Vendor','Internal','Prospect'] },
   { field:'status',     label:'Status',       type:'select', sortable:true, filterable:true, options:['Active','Prospect','Inactive','Archived'] },
   { field:'phone',      label:'Phone',        type:'text',   sortable:false, filterable:true },
   { field:'email',      label:'Email',        type:'text',   sortable:false, filterable:true },
@@ -183,7 +182,7 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
     <div style={{ flex: 1, overflow: 'auto', display: 'flex' }}>
       <div style={{ flex: 1, overflow: 'auto', padding: '20px 20px 24px' }}>
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Outreach / Home</div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Enrollment / Home</div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, margin: 0 }}>Outreach & Enrollment Dashboard</h1>
           <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>Nicholas Wood · Program Manager · Sunday, April 12, 2026</div>
         </div>
@@ -487,7 +486,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
       {/* Topbar */}
       <div data-module-topbar="1" style={{ height: 54, background: C.card, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-          <span style={{ color: C.textMuted }}>Outreach</span>
+          <span style={{ color: C.textMuted }}>Enrollment</span>
           <span style={{ color: C.textMuted }}>/</span>
           <span style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }} onClick={() => selectedRecord && closeRecord()}>{SECTIONS.find(s => s.id === sec)?.label}</span>
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name}</span></>}
