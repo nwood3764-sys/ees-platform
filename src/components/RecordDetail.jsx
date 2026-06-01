@@ -1144,8 +1144,30 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [menuRect, setMenuRect] = useState(null)  // trigger bounding rect for portal positioning
   const rootRef = useRef(null)
   const inputRef = useRef(null)
+  const triggerRef = useRef(null)
+  const menuRef = useRef(null)
+
+  // Measure the trigger's screen position whenever the menu opens, and keep it
+  // current on scroll/resize. The menu renders in a body portal (so no parent
+  // overflow or stacking context can clip it — the prior absolute/z-index:60
+  // panel was being hidden behind section cards), positioned with these coords.
+  useEffect(() => {
+    if (!open) return undefined
+    const measure = () => {
+      const el = triggerRef.current
+      if (el) setMenuRect(el.getBoundingClientRect())
+    }
+    measure()
+    window.addEventListener('scroll', measure, true)
+    window.addEventListener('resize', measure)
+    return () => {
+      window.removeEventListener('scroll', measure, true)
+      window.removeEventListener('resize', measure)
+    }
+  }, [open])
 
   // Server-side search: when onSearch is provided, debounce the query and let
   // the parent refetch options against the full table. Local filtering still
@@ -1188,7 +1210,9 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
   useEffect(() => {
     if (!open) return undefined
     function onDocClick(e) {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
+      const inTrigger = rootRef.current && rootRef.current.contains(e.target)
+      const inMenu = menuRef.current && menuRef.current.contains(e.target)
+      if (!inTrigger && !inMenu) setOpen(false)
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
@@ -1204,7 +1228,7 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
 
   return (
     <div ref={rootRef} style={{ position: 'relative' }}>
-      <button type="button" onClick={() => setOpen(o => !o)}
+      <button ref={triggerRef} type="button" onClick={() => setOpen(o => !o)}
         style={{ ...inputBase, cursor: 'pointer', textAlign: 'left', display: 'flex',
           justifyContent: 'space-between', alignItems: 'center', background: '#fff' }}>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -1213,10 +1237,11 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
         </span>
         <span style={{ marginLeft: 8, color: C.textMuted, flexShrink: 0, fontSize: 11 }}>▾</span>
       </button>
-      {open && (
-        <div style={{ position: 'absolute', zIndex: 60, top: 'calc(100% + 4px)', left: 0, right: 0,
+      {open && menuRect && createPortal(
+        <div ref={menuRef} style={{ position: 'fixed', zIndex: 1000,
+          top: menuRect.bottom + 4, left: menuRect.left, width: menuRect.width,
           background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6,
-          boxShadow: '0 6px 24px rgba(0,0,0,0.12)', maxHeight: 300, display: 'flex',
+          boxShadow: '0 6px 24px rgba(0,0,0,0.18)', maxHeight: 300, display: 'flex',
           flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: 8, borderBottom: `1px solid ${C.border}` }}>
             <input ref={inputRef} type="text" value={query}
@@ -1255,7 +1280,8 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
               New {createObjectLabel || 'record'}
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
       {createOpen && (
         <QuickCreateModal
