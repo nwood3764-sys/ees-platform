@@ -104,7 +104,7 @@ const ENR_COLS = [
 ]
 
 // Saved views
-const OPP_VIEWS  = [{ id:'OV-01', name:'All Opportunities',    filters:[], sortField:'closeDate', sortDir:'asc' }, { id:'OV-02', name:'Reservation Obtained', filters:[{ field:'stage', label:'Stage', op:'equals', value:'Opportunity — Reservation Obtained' }], sortField:'closeDate', sortDir:'asc' }, { id:'OV-03', name:'Application Submitted', filters:[{ field:'stage', label:'Stage', op:'equals', value:'Opportunity — Application Submitted' }], sortField:'closeDate', sortDir:'asc' }]
+const OPP_VIEWS  = [{ id:'OV-01', name:'All Opportunities',    filters:[], sortField:'id', sortDir:'asc' }, { id:'OV-02', name:'Reservation Obtained', filters:[{ field:'stage', label:'Stage', op:'equals', value:'Opportunity — Reservation Obtained' }], sortField:'id', sortDir:'asc' }, { id:'OV-03', name:'Application Submitted', filters:[{ field:'stage', label:'Stage', op:'equals', value:'Opportunity — Application Submitted' }], sortField:'id', sortDir:'asc' }]
 const PROP_VIEWS = [{ id:'PV-01', name:'All Properties',  filters:[], sortField:'name', sortDir:'asc' }, { id:'PV-02', name:'Enrolled',        filters:[{ field:'status', label:'Status', op:'equals', value:'Enrolled' }],        sortField:'name', sortDir:'asc' }, { id:'PV-03', name:'Outreach Active', filters:[{ field:'status', label:'Status', op:'equals', value:'Outreach Active' }], sortField:'name', sortDir:'asc' }]
 const ACC_VIEWS  = [
   { id:'AV-01', name:'All Accounts',          filters:[], sortField:'name', sortDir:'asc' },

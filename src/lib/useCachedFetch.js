@@ -60,9 +60,17 @@ async function runFetch(key, fetcher) {
       const data = await fetcher()
       cache.set(key, { data, error: null, fetchedAt: Date.now() })
     } catch (err) {
-      // Cache the error too — repeated mounts in an error state
-      // shouldn't keep re-firing the broken fetcher.
-      cache.set(key, { data: null, error: err, fetchedAt: Date.now() })
+      // A failed *background* refresh must not destroy data we already
+      // have — otherwise a transient error on revalidate makes a list
+      // that just rendered go empty ("records appear then disappear").
+      // Keep the last good data and attach the error; only store a null
+      // dataset when this was a cold load with nothing cached yet.
+      const prior = cache.get(key)
+      if (prior && prior.data != null) {
+        cache.set(key, { data: prior.data, error: err, fetchedAt: prior.fetchedAt })
+      } else {
+        cache.set(key, { data: null, error: err, fetchedAt: Date.now() })
+      }
     } finally {
       inflight.delete(key)
       notify(key)
