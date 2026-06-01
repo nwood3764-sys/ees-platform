@@ -446,11 +446,13 @@ export async function fetchEnrollments() {
 // migrated yet (e.g., property-detail dropdowns).
 // ---------------------------------------------------------------------------
 export async function fetchAccounts() {
-  // The Accounts list shows every non-deleted account. It previously scoped
-  // to opportunity-connected accounts only, which hid any account created
-  // directly (e.g. a new Property Owner or Property Management Company) until
-  // it was attached to an opportunity — so a just-saved account appeared to
-  // vanish. Accounts are a first-class directory; show them all.
+  // Enrollment Accounts list — only accounts connected to an opportunity.
+  // The 2,000+ seed accounts belong to Outreach (prospecting) until a property
+  // is advanced and an account is created/linked through that flow. An account
+  // created directly is reachable from the Account record and global search;
+  // it appears in this list once it is tied to an opportunity.
+  const { accountIds } = await opportunityConnectedIds()
+  if (accountIds.length === 0) return []
   const data = await fetchAllPagedParallel(
     (from, to) =>
       supabase
@@ -470,6 +472,7 @@ export async function fetchAccounts() {
           status_pl:account_status        ( picklist_label )
         `)
         .eq('account_is_deleted', false)
+        .in('id', accountIds)
         .order('account_name', { ascending: true })
         .order('id',           { ascending: true })
         .range(from, to),
@@ -477,7 +480,8 @@ export async function fetchAccounts() {
       supabase
         .from('accounts')
         .select('id', { count: 'exact', head: true })
-        .eq('account_is_deleted', false),
+        .eq('account_is_deleted', false)
+        .in('id', accountIds),
   )
 
   return data.map(r => ({
