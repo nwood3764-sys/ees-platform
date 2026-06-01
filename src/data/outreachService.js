@@ -88,15 +88,14 @@ async function opportunityConnectedIds() {
 export async function fetchProperties() {
   const picklists = await loadPicklists()
 
-  // Outreach pipeline scope — only properties attached to an opportunity.
-  const { propertyIds } = await opportunityConnectedIds()
-  if (propertyIds.length === 0) return []
-
+  // Object lists show all records, like a Salesforce list view. Each app
+  // (Outreach, Enrollment, Qualification, Field) can see every property; it is
+  // the app's home screen and dashboard that filter to that app's relevant
+  // opportunities and projects — not the object lists. Default list views can
+  // still be filtered via the view selector.
+  //
   // Parallel paginated: properties is at 6,781 rows in production.
   // Sequential pagination took ~40s; parallel cuts that to ~3s.
-  // countQuery applies the SAME property_is_deleted filter as the
-  // page builder — both must match or we'd request pages past the
-  // actual filtered row count.
   const data = await fetchAllPagedParallel(
     (from, to) =>
       supabase
@@ -117,7 +116,6 @@ export async function fetchProperties() {
           accounts:property_account_id ( account_name )
         `)
         .eq('property_is_deleted', false)
-        .in('id', propertyIds)
         .order('property_name', { ascending: true })
         .order('id',            { ascending: true })  // tie-breaker
         .range(from, to),
@@ -125,8 +123,7 @@ export async function fetchProperties() {
       supabase
         .from('properties')
         .select('id', { count: 'exact', head: true })
-        .eq('property_is_deleted', false)
-        .in('id', propertyIds),
+        .eq('property_is_deleted', false),
   )
 
   return data.map(r => ({
@@ -446,13 +443,8 @@ export async function fetchEnrollments() {
 // migrated yet (e.g., property-detail dropdowns).
 // ---------------------------------------------------------------------------
 export async function fetchAccounts() {
-  // Enrollment Accounts list — only accounts connected to an opportunity.
-  // The 2,000+ seed accounts belong to Outreach (prospecting) until a property
-  // is advanced and an account is created/linked through that flow. An account
-  // created directly is reachable from the Account record and global search;
-  // it appears in this list once it is tied to an opportunity.
-  const { accountIds } = await opportunityConnectedIds()
-  if (accountIds.length === 0) return []
+  // Object lists show all records, like a Salesforce list view. Every app sees
+  // all accounts; the app's home/dashboard does the filtering, not this list.
   const data = await fetchAllPagedParallel(
     (from, to) =>
       supabase
@@ -472,7 +464,6 @@ export async function fetchAccounts() {
           status_pl:account_status        ( picklist_label )
         `)
         .eq('account_is_deleted', false)
-        .in('id', accountIds)
         .order('account_name', { ascending: true })
         .order('id',           { ascending: true })
         .range(from, to),
@@ -480,8 +471,7 @@ export async function fetchAccounts() {
       supabase
         .from('accounts')
         .select('id', { count: 'exact', head: true })
-        .eq('account_is_deleted', false)
-        .in('id', accountIds),
+        .eq('account_is_deleted', false),
   )
 
   return data.map(r => ({
