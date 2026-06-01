@@ -335,8 +335,30 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
 
 function LiveListView({ loading, error, data, onRetry, ...rest }) {
   if (loading) return <LoadingState />
-  if (error)   return <ErrorState error={error} onRetry={onRetry} />
-  return <ListView data={data} {...rest} />
+  // Full error screen only when we have nothing to show. If a background
+  // refresh failed but we still hold previously-loaded rows, show the rows
+  // with a small non-blocking banner rather than blanking the list — a
+  // transient refresh error must never hide records the user already had.
+  const hasData = Array.isArray(data) && data.length > 0
+  if (error && !hasData) return <ErrorState error={error} onRetry={onRetry} />
+  return (
+    <div>
+      {error && hasData && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 12, padding: '8px 12px', margin: '0 0 10px', borderRadius: 6,
+          background: '#fdf3e7', border: '1px solid #e8a949', color: '#7a5b1e', fontSize: 12.5 }}>
+          <span>Couldn’t refresh just now — showing the last loaded data.</span>
+          {onRetry && (
+            <button onClick={onRetry} style={{ background: 'transparent', border: '1px solid #e8a949',
+              color: '#7a5b1e', borderRadius: 5, padding: '3px 10px', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+      <ListView data={data} {...rest} />
+    </div>
+  )
 }
 
 export default function OutreachModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
@@ -503,7 +525,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' })}
+            onRecordCreated={(r) => { invalidatePrefix('outreach:'); replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' }) }}
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
