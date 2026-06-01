@@ -10,15 +10,15 @@
 
 export const OBJECT_CATALOG = [
   // ─── CRM & OUTREACH ────────────────────────────────────────────────────
-  { table: 'accounts',                      label: 'Account',                     pluralLabel: 'Accounts',                     module: 'CRM & Outreach',        description: 'Organization or household — record types: Property Owner, PMC, Partner Org, Customer Household, EES-WI Internal, etc.' },
-  { table: 'account_contact_relations',     label: 'Account Contact Role',        pluralLabel: 'Account Contact Roles',        module: 'CRM & Outreach',        description: 'Junction — secondary contact relationships beyond a contact\'s primary account.' },
-  { table: 'properties',                    label: 'Property',                    pluralLabel: 'Properties',                   module: 'CRM & Outreach',        description: 'Physical site with one or more buildings.' },
-  { table: 'buildings',                     label: 'Building',                    pluralLabel: 'Buildings',                    module: 'CRM & Outreach',        description: 'Structure within a property — contains units.' },
-  { table: 'units',                         label: 'Unit',                        pluralLabel: 'Units',                        module: 'CRM & Outreach',        description: 'Individual dwelling within a building.' },
-  { table: 'contacts',                      label: 'Contact',                     pluralLabel: 'Contacts',                     module: 'CRM & Outreach',        description: 'Person associated with an account — internal staff, property owner contact, partner tech, tenant, etc.' },
-  { table: 'opportunities',                 label: 'Opportunity',                 pluralLabel: 'Opportunities',                module: 'CRM & Outreach',        description: 'Pipeline record — potential project at a property.' },
-  { table: 'opportunity_contact_roles',     label: 'Opportunity Contact Role',    pluralLabel: 'Opportunity Contact Roles',    module: 'CRM & Outreach',        description: 'Stakeholder role on an opportunity.' },
-  { table: 'opportunity_line_items',        label: 'Opportunity Line Item',       pluralLabel: 'Opportunity Line Items',       module: 'CRM & Outreach',        description: 'Scope-of-work line on an opportunity.' },
+  { table: 'accounts',                      label: 'Account',                     pluralLabel: 'Accounts',                     module: 'CRM & Enrollment',        description: 'Organization or household — record types: Property Owner, PMC, Partner Org, Customer Household, EES-WI Internal, etc.' },
+  { table: 'account_contact_relations',     label: 'Account Contact Role',        pluralLabel: 'Account Contact Roles',        module: 'CRM & Enrollment',        description: 'Junction — secondary contact relationships beyond a contact\'s primary account.' },
+  { table: 'properties',                    label: 'Property',                    pluralLabel: 'Properties',                   module: 'CRM & Enrollment',        description: 'Physical site with one or more buildings.' },
+  { table: 'buildings',                     label: 'Building',                    pluralLabel: 'Buildings',                    module: 'CRM & Enrollment',        description: 'Structure within a property — contains units.' },
+  { table: 'units',                         label: 'Unit',                        pluralLabel: 'Units',                        module: 'CRM & Enrollment',        description: 'Individual dwelling within a building.' },
+  { table: 'contacts',                      label: 'Contact',                     pluralLabel: 'Contacts',                     module: 'CRM & Enrollment',        description: 'Person associated with an account — internal staff, property owner contact, partner tech, tenant, etc.' },
+  { table: 'opportunities',                 label: 'Opportunity',                 pluralLabel: 'Opportunities',                module: 'CRM & Enrollment',        description: 'Pipeline record — potential project at a property.' },
+  { table: 'opportunity_contact_roles',     label: 'Opportunity Contact Role',    pluralLabel: 'Opportunity Contact Roles',    module: 'CRM & Enrollment',        description: 'Stakeholder role on an opportunity.' },
+  { table: 'opportunity_line_items',        label: 'Opportunity Line Item',       pluralLabel: 'Opportunity Line Items',       module: 'CRM & Enrollment',        description: 'Scope-of-work line on an opportunity.' },
 
   // ─── QUALIFICATION ─────────────────────────────────────────────────────
   { table: 'assessments',                   label: 'Assessment',                  pluralLabel: 'Assessments',                  module: 'Qualification',         description: 'Energy audit / ASHRAE Level 2 assessment.' },
@@ -131,7 +131,7 @@ export const OBJECT_CATALOG = [
 
 // Module order for sidebar / list grouping
 export const MODULE_ORDER = [
-  'CRM & Outreach',
+  'CRM & Enrollment',
   'Qualification',
   'Field Operations',
   'Incentives',
