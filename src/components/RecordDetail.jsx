@@ -5258,6 +5258,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   }, [emailPreviewRendering, emailPreviewParentRecord, recordId, data, toast])
 
   const handleSave = async () => {
+    // Guard against double-submit: a fast double-click or a slow insert can
+    // fire this twice before the first call resolves, creating duplicate
+    // records (this is how the duplicate accounts were created). If a save is
+    // already in flight, ignore re-entry.
+    if (saving) return
     setSaving(true)
 
     if (isInsertMode) {
