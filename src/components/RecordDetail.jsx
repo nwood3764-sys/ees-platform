@@ -1020,7 +1020,19 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         const required = new Set(meta.required_fields || [])
         // System/audit columns are auto-filled by applyInsertDefaults — never
         // surface them in the quick-create form even if NOT NULL.
-        const SYSTEM = /(_record_number$|_owner$|_created_by$|_created_at$|_updated_by$|_updated_at$|_is_deleted$|^id$)/
+        const SYSTEM = /(_record_number$|_owner$|_created_by$|_created_at$|_updated_by$|_updated_at$|_is_deleted$|^id$|^is_seed_data$)/
+        // Columns a DB trigger populates automatically — NOT NULL but must not
+        // be shown (e.g. contacts.contact_name is derived from first + last by
+        // the trg_contact_name trigger).
+        const DERIVED = {
+          contacts: ['contact_name'],
+        }
+        const derivedCols = new Set(DERIVED[table] || [])
+        // Extra fields to require on quick-create beyond the DB NOT NULL set,
+        // for data quality (e.g. always capture an email on a new contact).
+        const EXTRA_REQUIRED = {
+          contacts: [{ name: 'contact_email', label: 'Email', type: 'email' }],
+        }
         // Build the field list: the record-type selector (if the table has
         // one) plus every required, non-system column. The name field is the
         // lookup's label column and is virtually always required, so it lands
@@ -1032,6 +1044,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         for (const col of required) {
           if (SYSTEM.test(col)) continue
           if (col === rtColumn) continue
+          if (derivedCols.has(col)) continue              // trigger fills it
           if (seed && seed[col] != null) continue  // already known from the dependency — don't ask
           fieldDefs.push({
             name: col,
@@ -1039,6 +1052,11 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
             type: col === labelField ? 'text' : 'text',
             required: true,
           })
+        }
+        for (const extra of (EXTRA_REQUIRED[table] || [])) {
+          if (fieldDefs.some(f => f.name === extra.name)) continue
+          if (seed && seed[extra.name] != null) continue
+          fieldDefs.push({ ...extra, required: true })
         }
         // Load record types for the RT selector, and any picklist options.
         let rts = []
@@ -1111,7 +1129,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                   placeholder="— Select —"
                 />
               ) : (
-                <input type="text" style={{ ...inputBase }} value={draft[f.name] || ''}
+                <input type={f.type === 'email' ? 'email' : 'text'} style={{ ...inputBase }} value={draft[f.name] || ''}
                   onChange={e => setVal(f.name, e.target.value)} />
               )}
             </div>
