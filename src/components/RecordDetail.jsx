@@ -1445,6 +1445,11 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
         || dependencyValues.account_id
       return acct ? { contact_account_id: acct } : null
     }
+    if (dep.kind === 'buildings_for_property') {
+      const prop = dependencyValues.property_id
+        || dependencyValues.opportunity_property_id
+      return prop ? { property_id: prop } : null
+    }
     return null
   }, [field, dependencyValues])
 

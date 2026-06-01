@@ -1061,6 +1061,20 @@ export async function fetchDependentLookupOptions(field, record) {
         label: r.contact_name || r.id.slice(0, 8),
       }))
     }
+    case 'buildings_for_property': {
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_buildings_for_property', {
+        p_property_ids: dependencyValues,
+        p_include_building_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.building_name || r.id.slice(0, 8),
+      }))
+    }
     default:
       throw new Error(`Unknown lookup_dependency kind: ${dep.kind}`)
   }
