@@ -5,6 +5,7 @@ import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
 import { usePullToRefresh } from '../lib/usePullToRefresh';
 import { Badge, Icon, TableRow, ProgramTag } from './UI';
+import HelpIcon from './help/HelpIcon';
 import {
   getEditableFieldsForTable,
   getPicklistOptions,
@@ -1762,6 +1763,8 @@ export function ListView({
           </button>
           {showColPicker && <ColumnPicker columns={columns} alwaysOn={ALWAYS_ON_COLS} visibleColumns={visibleColumns} onChange={(next) => { setVisibleColumns(next); setIsDirty(true); }} onClose={() => setShowColPicker(false)} triggerRect={colPickerRect} />}
         </div>
+
+        {persistEnabled && <HelpIcon anchors={[{ type: 'concept', concept: 'list-views' }, { type: 'concept', concept: 'column-visibility' }]} title="List views & columns" />}
 
         {/* Active filter chips */}
         {activeFilters.map((f, i) => (
