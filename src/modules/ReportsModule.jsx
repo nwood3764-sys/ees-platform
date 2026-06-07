@@ -374,35 +374,35 @@ export default function ReportsModule({
           )}
           {sec === 'folders' && (
             <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll}
-              data={folders} columns={FOLDER_COLS} systemViews={FOLDER_VIEWS} defaultViewId="FV-01"
+              data={folders} listObject="report_folders" listModule="reports" columns={FOLDER_COLS} systemViews={FOLDER_VIEWS} defaultViewId="FV-01"
               newLabel="Folder"
               onNew={() => setSelectedRecord({ table:'report_folders', id:null, mode:'create' })}
               onOpenRecord={openRecord} />
           )}
           {sec === 'reports' && (
             <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll}
-              data={reports} columns={REPORT_COLS} systemViews={REPORT_VIEWS} defaultViewId="RV-01"
+              data={reports} listObject="reports" listModule="reports" columns={REPORT_COLS} systemViews={REPORT_VIEWS} defaultViewId="RV-01"
               newLabel="Report"
               onNew={() => setSelectedRecord({ table:'reports', id:null, mode:'create' })}
               onOpenRecord={openRecord} />
           )}
           {sec === 'dashboard_folders' && (
             <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll}
-              data={dashboardFolders} columns={DASHBOARD_FOLDER_COLS} systemViews={DASHBOARD_FOLDER_VIEWS} defaultViewId="DFV-01"
+              data={dashboardFolders} listObject="dashboard_folders" listModule="reports" columns={DASHBOARD_FOLDER_COLS} systemViews={DASHBOARD_FOLDER_VIEWS} defaultViewId="DFV-01"
               newLabel="Folder"
               onNew={() => setSelectedRecord({ table:'dashboard_folders', id:null, mode:'create' })}
               onOpenRecord={openRecord} />
           )}
           {sec === 'dashboards' && (
             <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll}
-              data={dashboards} columns={DASHBOARD_COLS} systemViews={DASHBOARD_VIEWS} defaultViewId="DV-01"
+              data={dashboards} listObject="dashboards" listModule="reports" columns={DASHBOARD_COLS} systemViews={DASHBOARD_VIEWS} defaultViewId="DV-01"
               newLabel="Dashboard"
               onNew={() => setSelectedRecord({ table:'dashboards', id:null, mode:'create' })}
               onOpenRecord={openRecord} />
           )}
           {sec === 'scheduled' && (
             <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll}
-              data={schedules} columns={SCHED_COLS} systemViews={SCHED_VIEWS} defaultViewId="SV-01"
+              data={schedules} listObject="scheduled_reports" listModule="reports" columns={SCHED_COLS} systemViews={SCHED_VIEWS} defaultViewId="SV-01"
               newLabel="Schedule"
               onNew={() => setSelectedRecord({ table:'scheduled_reports', id:null, mode:'create' })}
               onOpenRecord={openRecord} />

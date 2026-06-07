@@ -3473,14 +3473,6 @@ function RelatedListWidget({
             <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {title}
             </span>
-            <span style={{
-              background: C.page, color: C.textSecondary,
-              fontSize: 11, fontWeight: 600,
-              padding: '1px 8px', borderRadius: 10,
-              fontFamily: 'JetBrains Mono, monospace',
-            }}>
-              {allRows.length}
-            </span>
             {editable && (
               <span style={{
                 background: 'rgba(62,207,142,0.14)', color: '#2aab72',
@@ -3786,12 +3778,9 @@ function RelatedListWidget({
                   padding: '8px 14px',
                   borderTop: `1px solid ${C.border}`,
                   background: '#fafbfd',
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
                   fontSize: 11.5,
                 }}>
-                  <span style={{ color: C.textMuted }}>
-                    Showing {shownRows.length} of {allRows.length}
-                  </span>
                   {listUrl ? (
                     <a
                       href={listUrl}
@@ -3802,7 +3791,7 @@ function RelatedListWidget({
                       onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline' }}
                       onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none' }}
                     >
-                      View All ({allRows.length}) →
+                      View All →
                     </a>
                   ) : (
                     <span
@@ -3812,7 +3801,7 @@ function RelatedListWidget({
                         cursor: 'not-allowed',
                       }}
                     >
-                      View All ({allRows.length}) →
+                      View All →
                     </span>
                   )}
                 </div>

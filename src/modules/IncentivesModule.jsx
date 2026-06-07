@@ -342,8 +342,8 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} />}
-        {sec==='requests' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={requests} columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell}  onOpenRecord={openRecord}/>}
-        {sec==='received' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={receipts} columns={PMT_COLS} systemViews={PMT_VIEWS} defaultViewId="PTV-01" newLabel="Payment Receipt"         onNew={()=>{}} renderCell={pmtCell}  onOpenRecord={openRecord}/>}
+        {sec==='requests' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={requests} listObject="project_payment_requests" listModule="incentives" columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell}  onOpenRecord={openRecord}/>}
+        {sec==='received' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={receipts} listObject="payment_receipts" listModule="incentives" columns={PMT_COLS} systemViews={PMT_VIEWS} defaultViewId="PTV-01" newLabel="Payment Receipt"         onNew={()=>{}} renderCell={pmtCell}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>
