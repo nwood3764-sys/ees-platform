@@ -173,7 +173,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // user lands on /search?q=... (typically from the search modal's "View
 // all results" footer button or a shared link).
 const KNOWN_MODULES = new Set([
-  'home', 'tasks', 'outreach', 'prospecting', 'qualification', 'field', 'dispatch', 'incentives',
+  'home', 'tasks', 'outreach', 'prospecting', 'qualification', 'field', 'planning', 'implementation', 'dispatch', 'incentives',
   'stock', 'fleet', 'reports', 'admin', 'portal', 'search', 'help',
 ])
 

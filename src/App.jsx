@@ -34,6 +34,8 @@ const OutreachModule      = lazy(() => import('./modules/OutreachModule'))
 const ProspectingModule   = lazy(() => import('./modules/ProspectingModule'))
 const QualificationModule = lazy(() => import('./modules/QualificationModule'))
 const FieldModule         = lazy(() => import('./modules/FieldModule'))
+const ProjectPlanningModule       = lazy(() => import('./modules/ProjectPlanningModule'))
+const ProjectImplementationModule = lazy(() => import('./modules/ProjectImplementationModule'))
 const DispatchModule      = lazy(() => import('./modules/DispatchModule'))
 const IncentivesModule    = lazy(() => import('./modules/IncentivesModule'))
 const StockModule         = lazy(() => import('./modules/StockModule'))
@@ -215,6 +217,8 @@ function AuthedApp({ session }) {
       case 'prospecting':   return <ProspectingModule {...navProps} />
       case 'qualification': return <QualificationModule {...navProps} />
       case 'field':         return <FieldModule {...navProps} />
+      case 'planning':      return <ProjectPlanningModule {...navProps} />
+      case 'implementation':return <ProjectImplementationModule {...navProps} />
       case 'dispatch':      return <DispatchModule {...navProps} />
       case 'incentives':    return <IncentivesModule {...navProps} />
       case 'stock':         return <StockModule {...navProps} />
