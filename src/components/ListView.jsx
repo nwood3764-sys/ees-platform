@@ -1271,8 +1271,7 @@ export function ListView({
 
   const activeViewName = [...systemViews, ...personalViews].find(v => v.id === activeViewId)?.name || systemViews[0]?.name;
 
-  const totalAmount = columns.some(c => c.field === 'amount') ? filtered.reduce((s, r) => s + (r.amount || 0), 0) : null;
-  const totalUnits = columns.some(c => c.field === 'units') ? filtered.reduce((s, r) => s + (r.units || 0), 0) : null;
+
 
   // Default cell renderer
   const defaultCell = (col, r) => {
@@ -1433,17 +1432,6 @@ export function ListView({
               <button onClick={clearAll} style={{ background: 'none', border: 'none', fontSize: 12, color: C.textMuted, cursor: 'pointer', padding: '4px 6px' }}>Clear all</button>
             </div>
           )}
-        </div>
-
-        {/* Thin stats strip */}
-        <div style={{
-          padding: '6px 14px', background: C.page, borderBottom: `1px solid ${C.border}`,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          fontSize: 12, color: C.textSecondary, flexShrink: 0,
-        }}>
-          <span>{filtered.length} record{filtered.length === 1 ? '' : 's'}</span>
-          {totalAmount !== null && <span>${Math.round(totalAmount / 1000)}K pipeline</span>}
-          {totalUnits !== null && totalAmount === null && <span>{filtered.reduce((s, r) => s + (r.units || 0), 0).toLocaleString()} units</span>}
         </div>
 
         {/* Minimal card list — ID + name + status, high density */}
@@ -1652,10 +1640,6 @@ export function ListView({
 
         {/* Right side */}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          {totalAmount !== null && <span style={{ fontSize: 12, color: C.textSecondary }}>${Math.round(totalAmount / 1000)}K pipeline</span>}
-          {totalUnits !== null && <span style={{ fontSize: 12, color: C.textMuted }}>{filtered.reduce((s, r) => s + (r.units || 0), 0).toLocaleString()} units</span>}
-          <span style={{ fontSize: 12, color: C.textMuted }}>{filtered.length} records</span>
-
           <div style={{ position: 'relative' }}>
             <input placeholder="Search..." value={globalSearch} onChange={e => setGlobalSearch(e.target.value)}
               style={{ background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 9px 5px 27px', fontSize: 12, color: C.textPrimary, width: 160, outline: 'none' }} />
