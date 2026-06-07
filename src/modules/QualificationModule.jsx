@@ -5,12 +5,14 @@ import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorStat
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchAssessments, fetchIncentiveApplications, fetchEfrReports } from '../data/qualificationService'
+import { fetchOpportunities } from '../data/outreachService'
 
 const SECTIONS = [
   { id:'home',        label:'Home'                   },
   { id:'assessments', label:'Assessments'            },
   { id:'applications',label:'Incentive Applications' },
   { id:'efr',         label:'EFR Reports'            },
+  { id:'opportunities', label:'Opportunities'        },
 ]
 
 const ASMT_COLS = [
@@ -65,6 +67,18 @@ const IA_VIEWS = [
   { id:'IV-04', name:'To Be Submitted',     filters:[{ field:'status', label:'Status', op:'equals', value:'Incentive Application To Be Submitted' }], sortField:'property', sortDir:'asc' },
 ]
 const EFR_VIEWS = [{ id:'EV-01', name:'All EFR Reports', filters:[], sortField:'scheduledDate', sortDir:'asc' }]
+
+const OPP_COLS = [
+  { field:'id',        label:'Record #',    type:'text',   sortable:true, filterable:false },
+  { field:'name',      label:'Opportunity', type:'text',   sortable:true, filterable:true  },
+  { field:'property',  label:'Property',    type:'text',   sortable:true, filterable:true  },
+  { field:'stage',     label:'Stage',       type:'text',   sortable:true, filterable:true  },
+  { field:'program',   label:'Program',     type:'text',   sortable:true, filterable:true  },
+  { field:'amount',    label:'Amount',      type:'text',   sortable:true, filterable:false },
+  { field:'closeDate', label:'Close',       type:'date',   sortable:true, filterable:true  },
+  { field:'state',     label:'State',       type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
+]
+const OPP_VIEWS = [{ id:'QOP-01', name:'All Opportunities', filters:[], sortField:'closeDate', sortDir:'asc' }]
 
 function QualHome({ setSec, assessments, applications, efrReports }) {
   const toReview = assessments.filter(a => a.status === 'Assessment Completed — To Be Reviewed')
@@ -241,12 +255,13 @@ export default function QualificationModule({ selectedRecord: navSelectedRecord,
     else setSelectedRecordLocal(rec)
   }
 
-  const SEC_TABLE = {'assessments': 'assessments', 'applications': 'incentive_applications', 'efr': 'efr_reports'}
+  const SEC_TABLE = {'assessments': 'assessments', 'applications': 'incentive_applications', 'efr': 'efr_reports', 'opportunities': 'opportunities'}
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
   const [assessments, setAssessments] = useState([])
   const [applications, setApplications] = useState([])
   const [efrReports, setEfrReports] = useState([])
+  const [opportunities, setOpportunities] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -254,10 +269,10 @@ export default function QualificationModule({ selectedRecord: navSelectedRecord,
   const loadAll = async () => {
     setError(null)
     try {
-      const [a, i, e] = await Promise.all([
-        fetchAssessments(), fetchIncentiveApplications(), fetchEfrReports(),
+      const [a, i, e, o] = await Promise.all([
+        fetchAssessments(), fetchIncentiveApplications(), fetchEfrReports(), fetchOpportunities(),
       ])
-      setAssessments(a); setApplications(i); setEfrReports(e)
+      setAssessments(a); setApplications(i); setEfrReports(e); setOpportunities(o)
     } catch (err) {
       setError(err)
     }
@@ -266,15 +281,15 @@ export default function QualificationModule({ selectedRecord: navSelectedRecord,
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(null)
-    Promise.all([fetchAssessments(), fetchIncentiveApplications(), fetchEfrReports()])
-      .then(([a, i, e]) => { if (!cancelled) { setAssessments(a); setApplications(i); setEfrReports(e) } })
+    Promise.all([fetchAssessments(), fetchIncentiveApplications(), fetchEfrReports(), fetchOpportunities()])
+      .then(([a, i, e, o]) => { if (!cancelled) { setAssessments(a); setApplications(i); setEfrReports(e); setOpportunities(o) } })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [])
 
   const corrections = applications.filter(a => a.status === 'Incentive Application Corrections Needed').length
-  const counts = { assessments: assessments.length, applications: applications.length, efr: efrReports.length }
+  const counts = { assessments: assessments.length, applications: applications.length, efr: efrReports.length, opportunities: opportunities.length }
   const urgentSections = { home: corrections }
 
   return (
@@ -301,6 +316,7 @@ export default function QualificationModule({ selectedRecord: navSelectedRecord,
         {sec==='assessments'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={assessments} listObject="assessments" listModule="qualification" columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => setSelectedRecord({ table: 'assessments', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='applications' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={applications} listObject="incentive_applications" listModule="qualification" columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => setSelectedRecord({ table: 'incentive_applications', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='efr'          && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={efrReports}  listObject="efr_reports" listModule="qualification" columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => setSelectedRecord({ table: 'efr_reports', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {sec==='opportunities'&& <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} listObject="opportunities_qualification" listModule="qualification" columns={OPP_COLS} systemViews={OPP_VIEWS} defaultViewId="QOP-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>
