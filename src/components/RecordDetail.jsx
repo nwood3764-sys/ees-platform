@@ -2790,7 +2790,7 @@ const tdStyle = { padding: '10px 14px', color: C.textPrimary, verticalAlign: 'mi
 // FieldGroup widget — view mode OR edit mode
 // ---------------------------------------------------------------------------
 
-function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons, onNavigateToRecord, requiredFields }) {
+function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons, onNavigateToRecord, requiredFields, tableName }) {
   const fields = widget.widget_config?.fields || []
   if (fields.length === 0) return null
 
@@ -2848,7 +2848,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
           buildings: ['building_name'],
           units: ['unit_name'],
         }
-        const isDerivedField = (DERIVED_READONLY[table] || []).includes(f.name)
+        const isDerivedField = (DERIVED_READONLY[tableName] || []).includes(f.name)
         const isEditable = editing
           && (f.type !== 'datetime')
           && (f.type !== 'polymorphic_lookup')
@@ -4346,7 +4346,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
           return <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
             editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts}
             onRefreshRecord={onRefreshRecord} recordId={recordId} fieldDisabledReasons={fieldDisabledReasons}
-            onNavigateToRecord={onNavigateToRecord} requiredFields={requiredFields} />
+            onNavigateToRecord={onNavigateToRecord} requiredFields={requiredFields} tableName={tableName} />
         }
         if (w.widget_type === 'section_config_editor') {
           return <SectionConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
