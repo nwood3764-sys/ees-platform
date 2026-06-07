@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -29,7 +30,7 @@ import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
  * widget config on the Property page layout).
  */
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id: 'home',       label: 'Home'       },
   { id: 'properties', label: 'Properties' },
   { id: 'map',        label: 'Map'        },
@@ -567,6 +568,7 @@ export default function ProspectingModule({
   onReplaceRecord,
 } = {}) {
   const urlDriven = !!onNavigateToRecord
+  const SECTIONS = useModuleSections('prospecting', CODE_SECTIONS)
   const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
   const sec = sectionFromUrl || secLocal
   const setSec = (s) => {

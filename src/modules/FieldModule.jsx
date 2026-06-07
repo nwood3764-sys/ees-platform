@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
@@ -10,7 +11,7 @@ import { fetchPaymentRequests } from '../data/incentivesService'
 import { fetchTechnicians, fetchCertifications, fetchTimeSheets, fetchUpcomingAbsences } from '../data/peopleService'
 import { getCurrentUserProfile } from '../data/layoutService'
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id:'home',                 label:'Home'                },
   { id:'service_appointments', label:'Service Appointments'},
   { id:'projects',             label:'Projects'            },
@@ -692,6 +693,7 @@ function ServiceAppointmentsInbox({ onOpenRecord }) {
 }
 
 export default function FieldModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+  const SECTIONS = useModuleSections('field', CODE_SECTIONS)
   // Navigation is URL-driven when App passes nav props (the default in the
   // shipping app). The local-state fallback path remains so this module can
   // still mount in isolation (tests, storybooks, future embeds).

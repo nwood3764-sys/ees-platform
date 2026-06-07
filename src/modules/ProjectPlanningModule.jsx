@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { SectionTabs, LoadingState, ErrorState } from '../components/UI'
@@ -19,7 +20,7 @@ import { fetchPartnerOrganizations } from '../data/portalService'
 // records per the platform rule; default views surface the planning-relevant
 // slices.
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id: 'home',          label: 'Dashboard'      },
   { id: 'projects',      label: 'Projects'       },
   { id: 'workorders',    label: 'Work Orders'    },
@@ -202,6 +203,7 @@ function partnerKind() {
 }
 
 export default function ProjectPlanningModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+  const SECTIONS = useModuleSections('planning', CODE_SECTIONS)
   const [sec, setSec] = useState(sectionFromUrl || 'home')
   const [projects, setProjects] = useState([])
   const [workOrders, setWorkOrders] = useState([])

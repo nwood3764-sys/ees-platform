@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -15,7 +16,7 @@ import ScheduleEditor from './ScheduleEditor'
 
 // ─── Section definitions ──────────────────────────────────────────────────
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id: 'home',           label: 'Home' },
   { id: 'folders',        label: 'Report Folders' },
   { id: 'reports',        label: 'All Reports' },
@@ -206,6 +207,7 @@ export default function ReportsModule({
   // URL-driven nav when App passes nav props (the default in shipping app);
   // local-state fallback so this module can mount in isolation.
   const urlDriven = !!onNavigateToRecord
+  const SECTIONS = useModuleSections('reports', CODE_SECTIONS)
   const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
   const sec = sectionFromUrl || secLocal
   const setSec = (s) => {

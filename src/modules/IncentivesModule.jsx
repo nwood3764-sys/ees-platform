@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
@@ -6,7 +7,7 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchPaymentRequests, fetchPaymentReceipts } from '../data/incentivesService'
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id:'home',     label:'Home'                       },
   { id:'requests', label:'Project Payment Requests'   },
   { id:'received', label:'Payment Receipt'            },
@@ -259,6 +260,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 }
 
 export default function IncentivesModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+  const SECTIONS = useModuleSections('incentives', CODE_SECTIONS)
   // Navigation is URL-driven when App passes nav props (the default in the
   // shipping app). The local-state fallback path remains so this module can
   // still mount in isolation (tests, future embeds).

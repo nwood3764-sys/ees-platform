@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
 import { C, CHART_COLORS } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
@@ -6,7 +7,7 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchPortalUsers, fetchPartnerOrganizations } from '../data/portalService'
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id: 'home',     label: 'Home' },
   { id: 'users',    label: 'Portal Users' },
   { id: 'partners', label: 'Partner Organizations' },
@@ -193,6 +194,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 // ---------------------------------------------------------------------------
 
 export default function PortalModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+  const SECTIONS = useModuleSections('portal', CODE_SECTIONS)
   // Navigation is URL-driven when App passes nav props (the default in the
   // shipping app). The local-state fallback path remains so this module can
   // still mount in isolation (tests, future embeds).

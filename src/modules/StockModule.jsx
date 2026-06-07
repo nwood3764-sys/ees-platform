@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
@@ -15,7 +16,7 @@ import {
 // Section & column definitions
 // ---------------------------------------------------------------------------
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id: 'home',      label: 'Home'              },
   { id: 'inventory', label: 'Inventory On-Hand' },
   { id: 'products',  label: 'Product Catalog'   },
@@ -232,6 +233,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 // ---------------------------------------------------------------------------
 
 export default function StockModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+  const SECTIONS = useModuleSections('stock', CODE_SECTIONS)
   // Navigation is URL-driven when App passes nav props (the default in the
   // shipping app). The local-state fallback path remains so this module can
   // still mount in isolation (tests, future embeds).

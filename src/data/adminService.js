@@ -873,6 +873,60 @@ export async function setRecordTypePicklistValues(recordTypeId, object, field, v
   return data
 }
 
+// ── Module section-tab configuration ─────────────────────────────────────
+// Modules are Salesforce-style apps; their tab strip is DB-driven via
+// module_sections so admins can reorder/rename/show-hide without code.
+export async function fetchModuleSections(moduleId) {
+  const { data, error } = await supabase
+    .from('module_sections')
+    .select('id, ms_module_id, ms_section_id, ms_label, ms_sort_order, ms_is_visible, ms_is_system, ms_object_table')
+    .eq('ms_module_id', moduleId)
+    .eq('ms_is_deleted', false)
+    .order('ms_sort_order', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({
+    _id: r.id,
+    moduleId: r.ms_module_id,
+    sectionId: r.ms_section_id,
+    label: r.ms_label,
+    sortOrder: r.ms_sort_order,
+    visible: r.ms_is_visible,
+    isSystem: r.ms_is_system,
+    objectTable: r.ms_object_table,
+  }))
+}
+
+// All sections across all modules (for the Setup editor's module list).
+export async function fetchAllModuleSections() {
+  const { data, error } = await supabase
+    .from('module_sections')
+    .select('id, ms_module_id, ms_section_id, ms_label, ms_sort_order, ms_is_visible, ms_is_system, ms_object_table')
+    .eq('ms_is_deleted', false)
+    .order('ms_module_id', { ascending: true })
+    .order('ms_sort_order', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({
+    _id: r.id,
+    moduleId: r.ms_module_id,
+    sectionId: r.ms_section_id,
+    label: r.ms_label,
+    sortOrder: r.ms_sort_order,
+    visible: r.ms_is_visible,
+    isSystem: r.ms_is_system,
+    objectTable: r.ms_object_table,
+  }))
+}
+
+export async function saveModuleSections(moduleId, sections) {
+  // sections: [{ section_id, label, sort_order, is_visible }]
+  const { data, error } = await supabase.rpc('set_module_sections', {
+    p_module_id: moduleId,
+    p_sections: sections,
+  })
+  if (error) throw error
+  return data
+}
+
 // Users — for Administration > Users
 //
 // Includes the role name (joined) and a `hasAuthLink` boolean derived from

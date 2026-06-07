@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -20,7 +21,7 @@ import { fetchTasks, markTaskComplete, reopenTask } from '../data/tasksService'
 // Complete / Reopen button that flips status without leaving the list.
 // ---------------------------------------------------------------------------
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id: 'mine',      label: 'My Tasks'   },
   { id: 'all',       label: 'All Tasks'  },
   { id: 'automated', label: 'Automated'  },
@@ -56,6 +57,7 @@ function PriorityChip({ priority }) {
 }
 
 export default function TasksModule({ onNavigateToRecord, onReplaceRecord }) {
+  const SECTIONS = useModuleSections('tasks', CODE_SECTIONS)
   const toast = useToast()
   const [section, setSection] = useState('mine')
   const [rows, setRows] = useState([])

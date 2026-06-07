@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
 import { C, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
@@ -7,7 +8,7 @@ import RecordDetail from '../components/RecordDetail'
 import { fetchAssessments, fetchIncentiveApplications, fetchEfrReports } from '../data/qualificationService'
 import { fetchOpportunities } from '../data/outreachService'
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id:'home',        label:'Home'                   },
   { id:'assessments', label:'Assessments'            },
   { id:'applications',label:'Incentive Applications' },
@@ -229,6 +230,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 }
 
 export default function QualificationModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+  const SECTIONS = useModuleSections('qualification', CODE_SECTIONS)
   // Navigation is URL-driven when App passes nav props (the default in the
   // shipping app). The local-state fallback path remains so this module can
   // still mount in isolation (tests, future embeds).

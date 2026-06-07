@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
@@ -8,7 +9,7 @@ import { OPPORTUNITIES, PROPERTIES, BUILDINGS, CONTACTS, ENROLLMENTS } from '../
 import { fetchProperties, fetchBuildings, fetchUnits, fetchOpportunities, fetchContacts, fetchEnrollments, fetchAccounts } from '../data/outreachService'
 import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id: 'home',       label: 'Home'         },
   { id: 'opps',       label: 'Opportunities' },
   { id: 'accounts',   label: 'Accounts'      },
@@ -366,6 +367,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
   // shipping app). The local-state fallback path remains so this module can
   // still mount in isolation (tests, future embeds).
   const urlDriven = !!onNavigateToRecord
+  const SECTIONS = useModuleSections('outreach', CODE_SECTIONS)
   const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
   const sec = sectionFromUrl || secLocal
   const setSec = (s) => {

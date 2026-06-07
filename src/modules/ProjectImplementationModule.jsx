@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useModuleSections } from '../lib/useModuleSections'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { SectionTabs, LoadingState, ErrorState } from '../components/UI'
@@ -16,7 +17,7 @@ import { fetchOpportunities } from '../data/outreachService'
 // show ALL records per the platform rule; default views surface the in-flight
 // slices.
 
-const SECTIONS = [
+const CODE_SECTIONS = [
   { id: 'home',          label: 'Dashboard'      },
   { id: 'workorders',    label: 'Work Orders'    },
   { id: 'projects',      label: 'Active Projects'},
@@ -179,6 +180,7 @@ const OPP_COLS = [
 const OPP_VIEWS = [{ id:'IOP-01', name:'All Opportunities', filters:[], sortField:'closeDate', sortDir:'asc' }]
 
 export default function ProjectImplementationModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+  const SECTIONS = useModuleSections('implementation', CODE_SECTIONS)
   const [sec, setSec] = useState(sectionFromUrl || 'home')
   const [projects, setProjects] = useState([])
   const [workOrders, setWorkOrders] = useState([])
