@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { C } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
@@ -701,7 +702,7 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
 // on — editing one persists an override carrying its __system_base id.
 function ViewSelector({
   activeViewId, systemViews, personalViews, onSelect, onClose,
-  onEditView, onDeleteView, onSetDefault, persistEnabled,
+  onEditView, onDeleteView, onSetDefault, persistEnabled, triggerRect,
 }) {
   const ref = useRef();
   const [hoverId, setHoverId] = useState(null);
@@ -710,6 +711,12 @@ function ViewSelector({
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
+
+  // A saved view created by overriding a system view carries systemBase = that
+  // system view's id. Hide the in-code system view when an override exists, so
+  // it shows once (in Saved Views) rather than duplicated in both sections.
+  const overriddenBaseIds = new Set(personalViews.map(v => v.systemBase).filter(Boolean));
+  const visibleSystemViews = systemViews.filter(v => !overriddenBaseIds.has(v.id));
 
   const IconBtn = ({ title, onClick, children, danger }) => (
     <button title={title} onClick={(e) => { e.stopPropagation(); onClick(); }}
@@ -758,15 +765,25 @@ function ViewSelector({
     );
   };
 
-  return (
+  // Position via body portal so the dropdown escapes the toolbar's overflow
+  // clip (which was cutting off the Saved Views section). Anchored to the
+  // trigger's rect with a viewport-aware max-height so a long list scrolls
+  // internally instead of running off-screen.
+  const rect = triggerRect;
+  const top = rect ? rect.bottom + 4 : 0;
+  const left = rect ? rect.left : 0;
+  const maxH = rect ? Math.max(180, window.innerHeight - rect.bottom - 16) : 380;
+
+  const menu = (
     <div ref={ref} style={{
-      position: 'absolute', top: '100%', left: 0, zIndex: 300,
+      position: 'fixed', top, left, zIndex: 4000,
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-      boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 280, marginTop: 4, overflow: 'hidden'
+      boxShadow: '0 8px 28px rgba(7,17,31,0.22)', minWidth: 280,
+      maxHeight: maxH, overflowY: 'auto', overflowX: 'hidden',
     }}>
-      <div style={{ padding: '8px 0', maxHeight: 380, overflowY: 'auto' }}>
+      <div style={{ padding: '8px 0' }}>
         <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>System Views</div>
-        {systemViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
+        {visibleSystemViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
         {personalViews.length > 0 && (
           <>
             <div style={{ height: 1, background: C.border, margin: '6px 0' }} />
@@ -777,6 +794,8 @@ function ViewSelector({
       </div>
     </div>
   );
+
+  return createPortal(menu, document.body);
 }
 
 // ── Save View Modal ──────────────────────────────────────────────────────────
@@ -961,6 +980,7 @@ export function ListView({
   const [openFilterCol, setOpenFilterCol] = useState(null);
   const [activeViewId, setActiveViewId] = useState(defaultViewId);
   const [showViewSel, setShowViewSel] = useState(false);
+  const [viewSelRect, setViewSelRect] = useState(null);
   const [showSave, setShowSave] = useState(false);
   const [personalViews, setPersonalViews] = useState([]);
   // ── Saved-view persistence (active when listObject or tableName present) ──
@@ -1137,6 +1157,14 @@ export function ListView({
 
   const clearAll = () => { setActiveFilters([]); setSortField(null); setSortDir('asc'); setIsDirty(false); setActiveViewId(defaultViewId); };
 
+  // Toggle the view selector, capturing the trigger's screen rect so the
+  // portal'd dropdown can anchor to it (escapes toolbar overflow clipping).
+  const toggleViewSel = (e) => {
+    const btn = e.currentTarget.closest('button') || e.currentTarget;
+    setViewSelRect(btn.getBoundingClientRect());
+    setShowViewSel(v => !v);
+  };
+
   // ── Selection helpers (edit mode only) ──────────────────────────────────
   // We key on row._id (the underlying uuid) and fall back to row.id since
   // some legacy data shapes only have id. The bulk_update_records RPC
@@ -1281,7 +1309,7 @@ export function ListView({
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {/* View selector — takes remaining space */}
             <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-              <button onClick={() => setShowViewSel(v => !v)}
+              <button onClick={toggleViewSel}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
@@ -1293,7 +1321,7 @@ export function ListView({
                 {isDirty && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.amber, flexShrink: 0 }} />}
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}><path d="M19 9l-7 7-7-7" /></svg>
               </button>
-              {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} />}
+              {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} triggerRect={viewSelRect} />}
             </div>
 
             {/* Search toggle */}
@@ -1593,14 +1621,14 @@ export function ListView({
       <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: '8px 24px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
         {/* View selector */}
         <div style={{ position: 'relative' }}>
-          <button onClick={() => setShowViewSel(v => !v)}
+          <button onClick={toggleViewSel}
             style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 13, color: C.textPrimary, cursor: 'pointer', fontWeight: 500 }}>
             <Icon path="M4 6h16M4 10h16M4 14h16M4 18h16" size={13} color={C.textSecondary} />
             {activeViewName}
             {isDirty && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.amber, flexShrink: 0 }} />}
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}><path d="M19 9l-7 7-7-7" /></svg>
           </button>
-          {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} />}
+          {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} triggerRect={viewSelRect} />}
         </div>
 
         {/* Active filter chips */}
