@@ -694,6 +694,83 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
   );
 }
 
+// ── Column Picker ────────────────────────────────────────────────────────────
+// Portaled checklist for choosing which columns show in the current view.
+// Always-on columns (id/name) are shown checked and disabled. Toggling updates
+// the parent's visibleColumns and marks the view dirty so it can be saved.
+function ColumnPicker({ columns, alwaysOn, visibleColumns, onChange, onClose, triggerRect }) {
+  const ref = useRef();
+  useEffect(() => {
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  // Current visible set: null means all columns visible.
+  const isVisible = (field) =>
+    !Array.isArray(visibleColumns) || visibleColumns.includes(field) || alwaysOn.includes(field);
+
+  const toggle = (field) => {
+    if (alwaysOn.includes(field)) return;
+    // Materialize the current set (from null = all) then flip this field.
+    const base = Array.isArray(visibleColumns)
+      ? new Set(visibleColumns)
+      : new Set(columns.map(c => c.field));
+    if (base.has(field)) base.delete(field); else base.add(field);
+    // Keep result in catalog order; if it equals the full catalog, collapse
+    // back to null (= "all", the default) so we don't persist a redundant set.
+    const ordered = columns.map(c => c.field).filter(f => base.has(f) || alwaysOn.includes(f));
+    const isAll = ordered.length === columns.length;
+    onChange(isAll ? null : ordered);
+  };
+
+  const rect = triggerRect;
+  const top = rect ? rect.bottom + 4 : 0;
+  const left = rect ? rect.left : 0;
+  const maxH = rect ? Math.max(200, window.innerHeight - rect.bottom - 16) : 400;
+
+  const menu = (
+    <div ref={ref} style={{
+      position: 'fixed', top, left, zIndex: 4000,
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+      boxShadow: '0 8px 28px rgba(7,17,31,0.22)', minWidth: 240,
+      maxHeight: maxH, overflowY: 'auto', overflowX: 'hidden',
+    }}>
+      <div style={{ padding: '8px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>Columns</span>
+        {Array.isArray(visibleColumns) && (
+          <span onClick={() => onChange(null)} style={{ cursor: 'pointer', color: C.emerald, fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>Show all</span>
+        )}
+      </div>
+      <div style={{ padding: '2px 0 8px' }}>
+        {columns.map(col => {
+          const on = isVisible(col.field);
+          const locked = alwaysOn.includes(col.field);
+          return (
+            <div key={col.field}
+              onClick={() => toggle(col.field)}
+              style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 14px',
+                       cursor: locked ? 'default' : 'pointer', opacity: locked ? 0.55 : 1 }}
+              onMouseEnter={e => { if (!locked) e.currentTarget.style.background = C.page; }}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+              <span style={{
+                width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+                border: `1.5px solid ${on ? C.emerald : C.borderDark}`,
+                background: on ? C.emerald : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {on && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={3}><polyline points="20 6 9 17 4 12" /></svg>}
+              </span>
+              <span style={{ fontSize: 13, color: C.textPrimary }}>{col.label}{locked && <span style={{ color: C.textMuted, fontSize: 11 }}> (always shown)</span>}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+  return createPortal(menu, document.body);
+}
+
 // ── View Selector ────────────────────────────────────────────────────────────
 // Lists system views and saved (persisted) views. When persistence is enabled
 // (onEditView/onDeleteView/onSetDefault provided), each row exposes hover
@@ -956,6 +1033,9 @@ export function ListView({
   // user sees an empty table, not a broken module.
   const data        = Array.isArray(dataProp) ? dataProp : []
   const columns     = Array.isArray(columnsProp) ? columnsProp : []
+  // Columns that can never be hidden: the primary 'name' (the row's click
+  // target / label) and 'id' (record number, the leading identity column).
+  const ALWAYS_ON_COLS = ['id', 'name'];
   const systemViews = Array.isArray(systemViewsProp) && systemViewsProp.length > 0
     ? systemViewsProp
     : [{ id: '__default__', name: 'All', filters: [], sortField: null, sortDir: 'asc' }]
@@ -991,6 +1071,24 @@ export function ListView({
   const [sortField, setSortField] = useState(firstView?.sortField || null);
   const [sortDir, setSortDir] = useState(firstView?.sortDir || 'asc');
   const [activeFilters, setActiveFilters] = useState([...(firstView?.filters || [])]);
+  // Column visibility for the active view. null = show all columns (default).
+  // When set, it's an array of column field names to show, in the catalog's
+  // order. The record-identity columns ('name', and the record-number 'id'
+  // shown first) are always kept so a row is never un-clickable / unlabeled.
+  const [visibleColumns, setVisibleColumns] = useState(null);
+  const [showColPicker, setShowColPicker] = useState(false);
+  const [colPickerRect, setColPickerRect] = useState(null);
+
+  // The columns actually rendered: full catalog when visibleColumns is null,
+  // otherwise the catalog filtered to the visible set (preserving catalog
+  // order) with always-on columns forced in. Header, rows, and the mobile
+  // card all map over effectiveColumns so a hidden column disappears
+  // everywhere consistently.
+  const effectiveColumns = useMemo(() => {
+    if (!Array.isArray(visibleColumns)) return columns;
+    const show = new Set([...visibleColumns, ...ALWAYS_ON_COLS]);
+    return columns.filter(c => show.has(c.field));
+  }, [columns, visibleColumns]);
   const [openFilterCol, setOpenFilterCol] = useState(null);
   const [activeViewId, setActiveViewId] = useState(defaultViewId);
   const [showViewSel, setShowViewSel] = useState(false);
@@ -1094,7 +1192,7 @@ export function ListView({
   // separately via localStorage.
   const handleSave = async ({ name, scope, isDefault }) => {
     if (!persistEnabled) {
-      const v = { id: 'pv' + Date.now(), name, filters: [...activeFilters], sortField, sortDir };
+      const v = { id: 'pv' + Date.now(), name, filters: [...activeFilters], sortField, sortDir, visibleColumns };
       setPersonalViews(prev => [...prev, v]);
       setActiveViewId(v.id);
       setIsDirty(false); setShowSave(false); setEditingView(null);
@@ -1103,7 +1201,7 @@ export function ListView({
     const common = {
       name, scope: scope || 'personal', isDefault: !!isDefault,
       object: persistObject, module: listModule || persistObject,
-      filters: [...activeFilters], sortField, sortDir,
+      filters: [...activeFilters], sortField, sortDir, visibleColumns,
       // Preserve a system view's origin id when editing one, so the selector
       // can overlay the saved version on the in-code constant.
       systemBase: editingView?.systemBase || (editingView && !editingView._persisted ? editingView.id : null),
@@ -1135,6 +1233,7 @@ export function ListView({
     setActiveFilters(v.filters || []);
     setSortField(v.sortField || null);
     setSortDir(v.sortDir || 'asc');
+    setVisibleColumns(Array.isArray(v.visibleColumns) ? v.visibleColumns : null);
     setEditingView(v);
     setShowSave(true);
     setShowViewSel(false);
@@ -1157,6 +1256,7 @@ export function ListView({
         name: v.name, scope: 'personal', isDefault: true,
         object: persistObject, module: listModule || persistObject,
         filters: v.filters || [], sortField: v.sortField || null, sortDir: v.sortDir || 'asc',
+        visibleColumns: Array.isArray(v.visibleColumns) ? v.visibleColumns : null,
         systemBase: v.id,
       });
     }
@@ -1168,6 +1268,7 @@ export function ListView({
     setActiveFilters(v.filters || []);
     setSortField(v.sortField || null);
     setSortDir(v.sortDir || 'asc');
+    setVisibleColumns(Array.isArray(v.visibleColumns) ? v.visibleColumns : null);
     setIsDirty(false);
   };
 
@@ -1650,6 +1751,18 @@ export function ListView({
           {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} onNewView={handleNewView} triggerRect={viewSelRect} />}
         </div>
 
+        {/* Column picker */}
+        <div style={{ position: 'relative' }}>
+          <button onClick={(e) => { setColPickerRect((e.currentTarget.closest('button') || e.currentTarget).getBoundingClientRect()); setShowColPicker(v => !v); }}
+            title="Choose columns"
+            style={{ display: 'flex', alignItems: 'center', gap: 7, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 13, color: C.textPrimary, cursor: 'pointer', fontWeight: 500 }}>
+            <Icon path="M3 3h7v18H3zM14 3h7v7h-7zM14 14h7v7h-7z" size={13} color={C.textSecondary} />
+            Columns
+            {Array.isArray(visibleColumns) && <span style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{effectiveColumns.length}/{columns.length}</span>}
+          </button>
+          {showColPicker && <ColumnPicker columns={columns} alwaysOn={ALWAYS_ON_COLS} visibleColumns={visibleColumns} onChange={(next) => { setVisibleColumns(next); setIsDirty(true); }} onClose={() => setShowColPicker(false)} triggerRect={colPickerRect} />}
+        </div>
+
         {/* Active filter chips */}
         {activeFilters.map((f, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#e8f3fb', border: `1px solid #b8d8f0`, borderRadius: 5, padding: '4px 8px', fontSize: 12 }}>
@@ -1738,7 +1851,7 @@ export function ListView({
             <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
               <colgroup>
                 {editMode && <col style={{ width: 36 }} />}
-                {columns.map(col => {
+                {effectiveColumns.map(col => {
                   const w = colWidths[col.field];
                   // Sized columns get their explicit px. Once ANY column is
                   // sized the table switches to fixed layout, so unsized
@@ -1766,7 +1879,7 @@ export function ListView({
                       />
                     </th>
                   )}
-                  {columns.map(col => (
+                  {effectiveColumns.map(col => (
                     <SortableHeader key={col.field} col={col} sortField={sortField} sortDir={sortDir} onSort={handleSort}
                       activeFilters={activeFilters} onFilterApply={handleFilterApply} openFilterCol={openFilterCol} setOpenFilterCol={setOpenFilterCol}
                       onResizeStart={onResizeStart} onResizeReset={resetColumn}
@@ -1799,7 +1912,7 @@ export function ListView({
                           <ListCheckbox checked={isSelected} onChange={() => toggleRow(r)} />
                         </td>
                       )}
-                      {columns.map(col => {
+                      {effectiveColumns.map(col => {
                         // Edit-mode wrapping: when this column is editable on
                         // the underlying table, replace the cell with an
                         // EditableCell that intercepts double-click.
@@ -1889,7 +2002,7 @@ export function ListView({
 
             {renderDetail ? renderDetail(selectedRow) : (
               <div>
-                {columns.filter(c => !['id', 'name', 'status', 'stage'].includes(c.field)).map(col => {
+                {effectiveColumns.filter(c => !['id', 'name', 'status', 'stage'].includes(c.field)).map(col => {
                   const v = selectedRow[col.field];
                   const display = col.field === 'amount'
                     ? (typeof v === 'number' ? `$${v.toLocaleString()}` : (v == null || v === '' ? '—' : String(v)))
