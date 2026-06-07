@@ -10,6 +10,13 @@ import {
   searchLookupOptions,
   bulkUpdateRecords,
 } from '../data/fieldMetadataService';
+import {
+  fetchSavedViewsForObject,
+  createSavedView,
+  updateSavedView,
+  deleteSavedView,
+  getCurrentRoleId,
+} from '../data/listViewsService';
 
 // ── Column-width persistence ─────────────────────────────────────────────────
 // Excel-style draggable column widths. Widths are stored per list under a
@@ -687,38 +694,84 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
 }
 
 // ── View Selector ────────────────────────────────────────────────────────────
-function ViewSelector({ activeViewId, systemViews, personalViews, onSelect, onClose }) {
+// Lists system views and saved (persisted) views. When persistence is enabled
+// (onEditView/onDeleteView/onSetDefault provided), each row exposes hover
+// actions: set-default (star), edit, delete. A default view shows a filled
+// star regardless of hover. System views are editable too when persistence is
+// on — editing one persists an override carrying its __system_base id.
+function ViewSelector({
+  activeViewId, systemViews, personalViews, onSelect, onClose,
+  onEditView, onDeleteView, onSetDefault, persistEnabled,
+}) {
   const ref = useRef();
+  const [hoverId, setHoverId] = useState(null);
   useEffect(() => {
     const h = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  const Row = ({ v }) => (
-    <div onClick={() => { onSelect(v); onClose(); }}
-      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', cursor: 'pointer', background: v.id === activeViewId ? '#e8f8f2' : 'transparent' }}
-      onMouseEnter={e => { if (v.id !== activeViewId) e.currentTarget.style.background = C.page; }}
-      onMouseLeave={e => { if (v.id !== activeViewId) e.currentTarget.style.background = 'transparent'; }}>
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={v.id === activeViewId ? C.emerald : 'transparent'} strokeWidth={2.5}><polyline points="20 6 9 17 4 12" /></svg>
-      <span style={{ fontSize: 13, color: v.id === activeViewId ? C.emerald : C.textPrimary, fontWeight: v.id === activeViewId ? 600 : 400 }}>{v.name}</span>
-    </div>
+  const IconBtn = ({ title, onClick, children, danger }) => (
+    <button title={title} onClick={(e) => { e.stopPropagation(); onClick(); }}
+      style={{ background: 'transparent', border: 'none', padding: 3, cursor: 'pointer',
+               display: 'flex', alignItems: 'center', color: danger ? '#a32626' : C.textMuted, borderRadius: 4 }}
+      onMouseEnter={e => e.currentTarget.style.background = C.page}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+      {children}
+    </button>
   );
+
+  const Row = ({ v, editable }) => {
+    const active = v.id === activeViewId;
+    const hovered = hoverId === v.id;
+    return (
+      <div onClick={() => { onSelect(v); onClose(); }}
+        onMouseEnter={() => setHoverId(v.id)}
+        onMouseLeave={() => setHoverId(null)}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px 8px 14px',
+                 cursor: 'pointer', background: active ? '#e8f8f2' : (hovered ? C.page : 'transparent') }}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={active ? C.emerald : 'transparent'} strokeWidth={2.5}><polyline points="20 6 9 17 4 12" /></svg>
+        <span style={{ flex: 1, fontSize: 13, color: active ? C.emerald : C.textPrimary, fontWeight: active ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {v.name}
+        </span>
+        {v.isDefault && (
+          <svg width="11" height="11" viewBox="0 0 24 24" fill={C.amber} stroke={C.amber} strokeWidth={1.5} title="Default view">
+            <polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9" />
+          </svg>
+        )}
+        {persistEnabled && editable && hovered && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {!v.isDefault && (
+              <IconBtn title="Set as default" onClick={() => onSetDefault(v)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9" /></svg>
+              </IconBtn>
+            )}
+            <IconBtn title="Edit view" onClick={() => onEditView(v)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+            </IconBtn>
+            <IconBtn title="Delete view" danger onClick={() => onDeleteView(v)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
+            </IconBtn>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div ref={ref} style={{
       position: 'absolute', top: '100%', left: 0, zIndex: 300,
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-      boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 260, marginTop: 4, overflow: 'hidden'
+      boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 280, marginTop: 4, overflow: 'hidden'
     }}>
-      <div style={{ padding: '8px 0' }}>
+      <div style={{ padding: '8px 0', maxHeight: 380, overflowY: 'auto' }}>
         <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>System Views</div>
-        {systemViews.map(v => <Row key={v.id} v={v} />)}
+        {systemViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
         {personalViews.length > 0 && (
           <>
             <div style={{ height: 1, background: C.border, margin: '6px 0' }} />
-            <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>My Views</div>
-            {personalViews.map(v => <Row key={v.id} v={v} />)}
+            <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Saved Views</div>
+            {personalViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
           </>
         )}
       </div>
@@ -727,19 +780,45 @@ function ViewSelector({ activeViewId, systemViews, personalViews, onSelect, onCl
 }
 
 // ── Save View Modal ──────────────────────────────────────────────────────────
-function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClose }) {
-  const [name, setName] = useState('');
-  const [shared, setShared] = useState(false);
+// Handles both "save current as new view" and editing an existing saved view.
+// scope: 'personal' | 'role' | 'shared'. When persistence is off (no
+// listObject), only the name is meaningful and onSave falls back to local.
+function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClose, editing, persistEnabled, hasRole }) {
+  const [name, setName] = useState(editing?.name || '');
+  const [scope, setScope] = useState(editing?.scope || 'personal');
+  const [isDefault, setIsDefault] = useState(editing?.isDefault || false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const scopeOpts = [
+    { id: 'personal', label: 'Only me' },
+    ...(hasRole ? [{ id: 'role', label: 'My role' }] : []),
+    { id: 'shared', label: 'Everyone' },
+  ];
+
+  const commit = async () => {
+    if (!name.trim() || saving) return;
+    setSaving(true); setErr(null);
+    try {
+      await onSave({ name: name.trim(), scope, isDefault });
+    } catch (e) {
+      setErr(e.message || String(e));
+      setSaving(false);
+    }
+  };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: C.card, borderRadius: 10, padding: 28, width: 400, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 6 }}>Save List View</div>
-        <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 20 }}>Save your current filters and sort as a named view.</div>
+      <div style={{ background: C.card, borderRadius: 10, padding: 28, width: 420, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 6 }}>{editing ? 'Edit List View' : 'Save List View'}</div>
+        <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 20 }}>
+          {editing ? 'Update this view with the current filters, sort, and column widths.' : 'Save your current filters, sort, and column widths as a named view.'}
+        </div>
 
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary, marginBottom: 5 }}>View Name</div>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. My WI Work Orders"
+          <input value={name} autoFocus onChange={e => setName(e.target.value)} placeholder="e.g. My WI Work Orders"
+            onKeyDown={e => { if (e.key === 'Enter') commit(); }}
             style={{ width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 10px', fontSize: 13, color: C.textPrimary, outline: 'none', boxSizing: 'border-box' }} />
         </div>
 
@@ -763,18 +842,38 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClos
           </div>
         )}
 
-        <div onClick={() => setShared(!shared)} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22, cursor: 'pointer' }}>
-          <div style={{ width: 36, height: 20, borderRadius: 10, background: shared ? C.emerald : C.borderDark, position: 'relative', transition: 'background 0.2s' }}>
-            <div style={{ position: 'absolute', top: 3, left: shared ? 18 : 3, width: 14, height: 14, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
-          </div>
-          <span style={{ fontSize: 13, color: C.textSecondary }}>Share with my role</span>
-        </div>
+        {persistEnabled && (
+          <>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary, marginBottom: 6 }}>Visible to</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {scopeOpts.map(o => (
+                  <button key={o.id} onClick={() => setScope(o.id)}
+                    style={{ flex: 1, padding: '7px 0', fontSize: 12, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+                             background: scope === o.id ? '#e8f8f2' : C.page,
+                             border: `1px solid ${scope === o.id ? C.emerald : C.border}`,
+                             color: scope === o.id ? '#1a7a4e' : C.textSecondary }}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div onClick={() => setIsDefault(!isDefault)} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22, cursor: 'pointer' }}>
+              <div style={{ width: 36, height: 20, borderRadius: 10, background: isDefault ? C.emerald : C.borderDark, position: 'relative', transition: 'background 0.2s' }}>
+                <div style={{ position: 'absolute', top: 3, left: isDefault ? 18 : 3, width: 14, height: 14, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+              </div>
+              <span style={{ fontSize: 13, color: C.textSecondary }}>Make this my default view</span>
+            </div>
+          </>
+        )}
+
+        {err && <div style={{ background: '#fde8e8', color: '#a32626', fontSize: 12, padding: '8px 10px', borderRadius: 6, marginBottom: 14 }}>{err}</div>}
 
         <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => name.trim() && onSave({ name: name.trim(), shared })}
-            disabled={!name.trim()}
-            style={{ flex: 1, background: name.trim() ? C.emerald : C.borderDark, color: '#fff', border: 'none', borderRadius: 6, padding: 10, fontSize: 13, fontWeight: 600, cursor: name.trim() ? 'pointer' : 'default' }}>
-            Save View
+          <button onClick={commit} disabled={!name.trim() || saving}
+            style={{ flex: 1, background: (name.trim() && !saving) ? C.emerald : C.borderDark, color: '#fff', border: 'none', borderRadius: 6, padding: 10, fontSize: 13, fontWeight: 600, cursor: (name.trim() && !saving) ? 'pointer' : 'default' }}>
+            {saving ? 'Saving…' : (editing ? 'Save Changes' : 'Save View')}
           </button>
           <button onClick={onClose} style={{ flex: 1, background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: 10, fontSize: 13, cursor: 'pointer' }}>
             Cancel
@@ -804,6 +903,7 @@ export function ListView({
   defaultViewId, newLabel,
   renderCell, renderDetail, onNew, onOpenRecord, onRefresh,
   tableName, onRecordsUpdated, storageKey,
+  listObject, listModule,
 }) {
   // ── Defensive defaults ─────────────────────────────────────────────────
   // The original signature treated systemViews and data as required arrays.
@@ -863,6 +963,14 @@ export function ListView({
   const [showViewSel, setShowViewSel] = useState(false);
   const [showSave, setShowSave] = useState(false);
   const [personalViews, setPersonalViews] = useState([]);
+  // ── Saved-view persistence (active when listObject or tableName present) ──
+  // persistObject is the object key under which views are stored/loaded. When
+  // absent, the selector keeps the prior local-only behavior so nothing breaks.
+  const persistObject = listObject || tableName || null;
+  const persistEnabled = Boolean(persistObject);
+  const [hasRole, setHasRole] = useState(false);
+  const [editingView, setEditingView] = useState(null); // saved view being edited, or null
+  const [defaultViewOverride, setDefaultViewOverride] = useState(null); // persisted default id
   const [globalSearch, setGlobalSearch] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
@@ -907,6 +1015,112 @@ export function ListView({
   // Drop stale overlay entries when parent reloads data.
   useEffect(() => { if (editMode) setOverlay(new Map()); }, [data, editMode]);
 
+  // Load persisted saved views for this object. Runs when persistObject is
+  // known. Applies a persisted default view on first load if one exists and
+  // the user hasn't already navigated/dirtied the view.
+  const reloadSavedViews = async () => {
+    if (!persistObject) return;
+    try {
+      const views = await fetchSavedViewsForObject(persistObject);
+      setPersonalViews(views);
+      const def = views.find(v => v.isDefault);
+      if (def) setDefaultViewOverride(def.id);
+      return views;
+    } catch {
+      // Non-fatal: a failure to load saved views must not blank the list or
+      // crash the selector — the user still gets system views.
+      return [];
+    }
+  };
+  useEffect(() => {
+    let cancelled = false;
+    if (!persistObject) { setPersonalViews([]); return; }
+    (async () => {
+      const views = await fetchSavedViewsForObject(persistObject).catch(() => []);
+      if (cancelled) return;
+      setPersonalViews(views);
+      const def = views.find(v => v.isDefault);
+      // Only auto-apply the persisted default on initial mount (view still on
+      // the module's defaultViewId and not dirtied by the user).
+      if (def && !isDirty && activeViewId === defaultViewId) {
+        setDefaultViewOverride(def.id);
+        setActiveViewId(def.id);
+        setActiveFilters(def.filters || []);
+        setSortField(def.sortField || null);
+        setSortDir(def.sortDir || 'asc');
+      }
+      getCurrentRoleId().then(rid => { if (!cancelled) setHasRole(Boolean(rid)); }).catch(() => {});
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persistObject]);
+
+  // Save: when persistence is enabled, write to saved_list_views and reload;
+  // otherwise fall back to the prior local-only behavior. `editingView` set =>
+  // update that view; else create new. Visible columns currently captured as
+  // null (column-set selection is a follow-up); column WIDTHS persist
+  // separately via localStorage.
+  const handleSave = async ({ name, scope, isDefault }) => {
+    if (!persistEnabled) {
+      const v = { id: 'pv' + Date.now(), name, filters: [...activeFilters], sortField, sortDir };
+      setPersonalViews(prev => [...prev, v]);
+      setActiveViewId(v.id);
+      setIsDirty(false); setShowSave(false); setEditingView(null);
+      return;
+    }
+    const common = {
+      name, scope: scope || 'personal', isDefault: !!isDefault,
+      object: persistObject, module: listModule || persistObject,
+      filters: [...activeFilters], sortField, sortDir,
+      // Preserve a system view's origin id when editing one, so the selector
+      // can overlay the saved version on the in-code constant.
+      systemBase: editingView?.systemBase || (editingView && !editingView._persisted ? editingView.id : null),
+    };
+    if (editingView && editingView._persisted) {
+      await updateSavedView(editingView.id, common);
+    } else {
+      const newId = await createSavedView(common);
+      setActiveViewId(newId);
+    }
+    await reloadSavedViews();
+    setIsDirty(false); setShowSave(false); setEditingView(null);
+  };
+
+  const handleEditView = (v) => {
+    // Load the view's settings into the working state, then open the modal in
+    // edit mode so Save Changes re-persists with any tweaks.
+    setActiveViewId(v.id);
+    setActiveFilters(v.filters || []);
+    setSortField(v.sortField || null);
+    setSortDir(v.sortDir || 'asc');
+    setEditingView(v);
+    setShowSave(true);
+    setShowViewSel(false);
+  };
+
+  const handleDeleteView = async (v) => {
+    if (!v._persisted) { setPersonalViews(prev => prev.filter(x => x.id !== v.id)); return; }
+    await deleteSavedView(v.id);
+    if (activeViewId === v.id) clearAll();
+    await reloadSavedViews();
+  };
+
+  const handleSetDefault = async (v) => {
+    if (!persistEnabled) return;
+    if (v._persisted) {
+      await updateSavedView(v.id, { isDefault: true, object: persistObject });
+    } else {
+      // Setting a system view as default persists an override row for it.
+      await createSavedView({
+        name: v.name, scope: 'personal', isDefault: true,
+        object: persistObject, module: listModule || persistObject,
+        filters: v.filters || [], sortField: v.sortField || null, sortDir: v.sortDir || 'asc',
+        systemBase: v.id,
+      });
+    }
+    await reloadSavedViews();
+  };
+
   const applyView = v => {
     setActiveViewId(v.id);
     setActiveFilters(v.filters || []);
@@ -922,14 +1136,6 @@ export function ListView({
   const removeFilter = i => { setActiveFilters(prev => prev.filter((_, j) => j !== i)); setIsDirty(true); };
 
   const clearAll = () => { setActiveFilters([]); setSortField(null); setSortDir('asc'); setIsDirty(false); setActiveViewId(defaultViewId); };
-
-  const handleSave = ({ name }) => {
-    const v = { id: 'pv' + Date.now(), name, filters: [...activeFilters], sortField, sortDir };
-    setPersonalViews(prev => [...prev, v]);
-    setActiveViewId(v.id);
-    setIsDirty(false);
-    setShowSave(false);
-  };
 
   // ── Selection helpers (edit mode only) ──────────────────────────────────
   // We key on row._id (the underlying uuid) and fall back to row.id since
@@ -1087,7 +1293,7 @@ export function ListView({
                 {isDirty && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.amber, flexShrink: 0 }} />}
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}><path d="M19 9l-7 7-7-7" /></svg>
               </button>
-              {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} />}
+              {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} />}
             </div>
 
             {/* Search toggle */}
@@ -1361,7 +1567,7 @@ export function ListView({
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
         </button>
 
-        {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => setShowSave(false)} />}
+        {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
         {showFilterSheet && (
           <MobileFilterSheet
             columns={columns}
@@ -1394,7 +1600,7 @@ export function ListView({
             {isDirty && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.amber, flexShrink: 0 }} />}
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}><path d="M19 9l-7 7-7-7" /></svg>
           </button>
-          {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} />}
+          {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} />}
         </div>
 
         {/* Active filter chips */}
@@ -1661,7 +1867,7 @@ export function ListView({
         )}
       </div>
 
-      {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => setShowSave(false)} />}
+      {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
       {editMode && bulkPanelOpen && (
         <BulkEditModal
           tableName={tableName}
