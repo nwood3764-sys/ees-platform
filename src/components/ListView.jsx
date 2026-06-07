@@ -702,7 +702,7 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
 // on — editing one persists an override carrying its __system_base id.
 function ViewSelector({
   activeViewId, systemViews, personalViews, onSelect, onClose,
-  onEditView, onDeleteView, onSetDefault, persistEnabled, triggerRect,
+  onEditView, onDeleteView, onSetDefault, onNewView, persistEnabled, triggerRect,
 }) {
   const ref = useRef();
   const [hoverId, setHoverId] = useState(null);
@@ -789,6 +789,20 @@ function ViewSelector({
             <div style={{ height: 1, background: C.border, margin: '6px 0' }} />
             <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Saved Views</div>
             {personalViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
+          </>
+        )}
+        {persistEnabled && (
+          <>
+            <div style={{ height: 1, background: C.border, margin: '6px 0' }} />
+            <div
+              onClick={() => { onNewView && onNewView(); onClose(); }}
+              onMouseEnter={e => e.currentTarget.style.background = C.page}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px 9px 14px',
+                       cursor: 'pointer', color: C.emerald, fontWeight: 600, fontSize: 13 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              New View
+            </div>
           </>
         )}
       </div>
@@ -1104,6 +1118,16 @@ export function ListView({
     setIsDirty(false); setShowSave(false); setEditingView(null);
   };
 
+  const handleNewView = () => {
+    // Open the Save modal in create mode. Captures the current filters/sort as
+    // the starting point for the new view (the user can clear them in the list
+    // first if they want a clean view). Clears any edit target so the modal
+    // shows "Save View", not "Save Changes".
+    setEditingView(null);
+    setShowSave(true);
+    setShowViewSel(false);
+  };
+
   const handleEditView = (v) => {
     // Load the view's settings into the working state, then open the modal in
     // edit mode so Save Changes re-persists with any tweaks.
@@ -1327,7 +1351,7 @@ export function ListView({
                 {isDirty && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.amber, flexShrink: 0 }} />}
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}><path d="M19 9l-7 7-7-7" /></svg>
               </button>
-              {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} triggerRect={viewSelRect} />}
+              {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} onNewView={handleNewView} triggerRect={viewSelRect} />}
             </div>
 
             {/* Search toggle */}
@@ -1623,7 +1647,7 @@ export function ListView({
             {isDirty && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.amber, flexShrink: 0 }} />}
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}><path d="M19 9l-7 7-7-7" /></svg>
           </button>
-          {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} triggerRect={viewSelRect} />}
+          {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} onNewView={handleNewView} triggerRect={viewSelRect} />}
         </div>
 
         {/* Active filter chips */}
