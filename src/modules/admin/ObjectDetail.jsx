@@ -6,14 +6,16 @@ import {
   fetchPageLayoutsFor,
   fetchValidationsFor, fetchAutomationsFor,
   fetchPicklistsFor,
+  fetchFieldMetadata,
 } from '../../data/adminService'
 import RecordTypesPane from './RecordTypesPane'
 import LayoutsPane from './LayoutsPane'
 import LayoutEditor from './LayoutEditor'
 import FieldPicklistEditor from './FieldPicklistEditor'
+import FieldCreateEditModal from './FieldCreateEditModal'
 
 // ---------------------------------------------------------------------------
-// Object Detail — Salesforce-style per-object configuration page.
+// Object Detail — per-object configuration page.
 // Sub-tabs: Details, Fields & Relationships, Page Layouts, Record Types,
 // Validation Rules, Automation Rules, Related Lookups (incoming FKs).
 // ---------------------------------------------------------------------------
@@ -45,16 +47,15 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
   // the pane reports.
   const [recordTypesCount, setRecordTypesCount] = useState(null)
   const [layoutsCount, setLayoutsCount] = useState(null)
+  // Field create/edit modal: { mode:'create'|'edit', column? } | null
+  const [fieldModal, setFieldModal] = useState(null)
+  const [fieldMeta, setFieldMeta] = useState({})
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    // When the object itself changes (or when the deep-link's initialSubTab /
-    // initialLayoutId change because the user clicked Edit Page Layout from
-    // a different record), reset to the deep-link's target. If initialLayoutId
-    // is set we also force sub='layouts' since opening a specific layout
-    // outside the layouts tab makes no sense.
     setSub(initialLayoutId ? 'layouts' : (initialSubTab || 'details'))
     setSelectedLayoutId(initialLayoutId || null)
     setRecordTypesCount(null)
@@ -67,8 +68,9 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
       fetchValidationsFor(obj.table).catch(() => []),
       fetchAutomationsFor(obj.table).catch(() => []),
       fetchPicklistsFor(obj.table).catch(() => []),
+      fetchFieldMetadata(obj.table).catch(() => ({})),
     ])
-      .then(([cols, fks, layouts, vals, autos, pls]) => {
+      .then(([cols, fks, layouts, vals, autos, pls, meta]) => {
         if (cancelled) return
         setColumns(cols)
         setIncomingFKs(fks)
@@ -76,15 +78,14 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
         setValidations(vals)
         setAutomations(autos)
         setPicklists(pls)
+        setFieldMeta(meta)
       })
       .catch(err => { if (!cancelled) setError(err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [obj.table, initialSubTab, initialLayoutId])
+  }, [obj.table, initialSubTab, initialLayoutId, refreshKey])
 
-  // Count badges for tabs — mirrors Salesforce's counts in object setup.
-  // recordtypes prefers the live count reported by RecordTypesPane; falls
-  // back to the initial picklists fetch before the pane has loaded.
+  // Count badges for tabs.
   const counts = {
     fields:      columns.length,
     layouts:     layoutsCount ?? pageLayouts.length,
@@ -156,7 +157,10 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
                 : <FieldsPane
                     columns={columns}
                     picklistFields={new Set(picklists.filter(p => p.field !== 'record_type').map(p => p.field))}
+                    fieldMeta={fieldMeta}
                     onOpenField={setSelectedField}
+                    onNewField={() => setFieldModal({ mode: 'create' })}
+                    onEditField={(col) => setFieldModal({ mode: 'edit', column: col })}
                   />
             )}
             {sub === 'layouts' && (
@@ -180,6 +184,17 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
           </>
         )}
       </div>
+
+      {fieldModal && (
+        <FieldCreateEditModal
+          mode={fieldModal.mode}
+          object={obj.table}
+          objectLabel={obj.pluralLabel || obj.label}
+          column={fieldModal.column}
+          onClose={() => setFieldModal(null)}
+          onSaved={() => setRefreshKey(k => k + 1)}
+        />
+      )}
     </div>
   )
 }
@@ -234,7 +249,7 @@ function PaneSearch({ value, onChange, placeholder }) {
   )
 }
 
-function FieldsPane({ columns, picklistFields = new Set(), onOpenField }) {
+function FieldsPane({ columns, picklistFields = new Set(), fieldMeta = {}, onOpenField, onNewField, onEditField }) {
   const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState('ordinal')   // 'ordinal' | 'name'
   const [sortDir, setSortDir] = useState('asc')        // 'asc' | 'desc'
@@ -249,6 +264,7 @@ function FieldsPane({ columns, picklistFields = new Set(), onOpenField }) {
     let list = needle
       ? columns.filter(c =>
           (c.column_name || '').toLowerCase().includes(needle) ||
+          (fieldMeta[c.column_name]?.label || '').toLowerCase().includes(needle) ||
           fmtType(c).toLowerCase().includes(needle) ||
           (c.references_table ? `${c.references_table}.${c.references_column}` : '').toLowerCase().includes(needle)
         )
@@ -260,7 +276,7 @@ function FieldsPane({ columns, picklistFields = new Set(), onOpenField }) {
       return sortDir === 'asc' ? cmp : -cmp
     })
     return list
-  }, [columns, needle, sortKey, sortDir])
+  }, [columns, needle, sortKey, sortDir, fieldMeta])
 
   const Arrow = ({ active }) => (
     <span style={{ marginLeft: 4, opacity: active ? 1 : 0.25, fontSize: 9 }}>
@@ -268,13 +284,21 @@ function FieldsPane({ columns, picklistFields = new Set(), onOpenField }) {
     </span>
   )
 
+  const GRID = '32px 1.6fr 1.4fr 1.1fr 0.6fr 0.5fr 1.2fr 70px'
+
   return (
     <div style={{ padding: '16px 24px' }}>
-      <PaneSearch value={q} onChange={setQ} placeholder="Search fields…" />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+        <div style={{ flex: 1 }}><PaneSearch value={q} onChange={setQ} placeholder="Search fields…" /></div>
+        <button onClick={onNewField}
+          style={{ padding: '8px 14px', borderRadius: 6, border: 'none', background: C.emerald, color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Icon path="M12 5v14M5 12h14" size={13} color="currentColor" /> New Field
+        </button>
+      </div>
       <Card title={`Fields & Relationships (${shown.length}${needle ? ` of ${columns.length}` : ''})`} noBody>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '32px 2fr 1.4fr 0.6fr 0.6fr 1.4fr',
+          gridTemplateColumns: GRID,
           gap: 0,
           fontSize: 11, fontWeight: 600, color: C.textMuted,
           textTransform: 'uppercase', letterSpacing: '0.04em',
@@ -283,17 +307,20 @@ function FieldsPane({ columns, picklistFields = new Set(), onOpenField }) {
         }}>
           <div onClick={() => toggleSort('ordinal')} style={{ cursor: 'pointer', userSelect: 'none' }}># <Arrow active={sortKey === 'ordinal'} /></div>
           <div onClick={() => toggleSort('name')} style={{ cursor: 'pointer', userSelect: 'none' }}>Field Name <Arrow active={sortKey === 'name'} /></div>
+          <div>Label</div>
           <div>Data Type</div>
           <div style={{ textAlign: 'center' }}>Required</div>
           <div style={{ textAlign: 'center' }}>PK/FK</div>
           <div>References</div>
+          <div style={{ textAlign: 'right' }}>Actions</div>
         </div>
         {shown.map(c => {
           const isPicklist = picklistFields.has(c.column_name)
+          const meta = fieldMeta[c.column_name]
           return (
           <div key={c.column_name} style={{
             display: 'grid',
-            gridTemplateColumns: '32px 2fr 1.4fr 0.6fr 0.6fr 1.4fr',
+            gridTemplateColumns: GRID,
             gap: 0,
             alignItems: 'center',
             padding: '9px 14px',
@@ -324,6 +351,12 @@ function FieldsPane({ columns, picklistFields = new Set(), onOpenField }) {
                   PICKLIST
                 </span>
               )}
+              {meta?.isCustom && (
+                <span style={{ fontFamily: 'Inter, sans-serif', fontSize: 9.5, fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: '#eef0fb', color: '#4a4a9a' }} title="Custom field">CUSTOM</span>
+              )}
+            </div>
+            <div style={{ color: meta?.label ? C.textPrimary : C.textMuted, fontSize: 11.5 }}>
+              {meta?.label || '—'}
             </div>
             <div style={{ color: C.textSecondary, fontSize: 11.5 }}>
               {fmtType(c)}
@@ -350,6 +383,13 @@ function FieldsPane({ columns, picklistFields = new Set(), onOpenField }) {
             </div>
             <div style={{ color: C.textSecondary, fontSize: 11.5, fontFamily: 'JetBrains Mono, monospace' }}>
               {c.references_table ? `${c.references_table}.${c.references_column}` : <span style={{ color: C.textMuted, fontFamily: 'inherit' }}>—</span>}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span onClick={() => onEditField && onEditField(c.column_name)}
+                style={{ cursor: 'pointer', fontSize: 11, color: C.emerald, fontWeight: 600 }}
+                title="Edit field label, help text, description, tier, history">
+                Edit
+              </span>
             </div>
           </div>
           )

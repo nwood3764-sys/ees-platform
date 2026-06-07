@@ -971,6 +971,63 @@ export async function reorderFieldValues(ids) {
   }
 }
 
+// ── Field metadata + DDL field creation ──────────────────────────────────
+// Field metadata (label, help, description, tier, history flag) lives in
+// field_metadata keyed by (object, column). New fields add a real column via
+// the admin_add_custom_field RPC (whitelisted ALTER TABLE), then record
+// metadata. Editing metadata uses admin_upsert_field_metadata.
+export async function fetchFieldMetadata(object) {
+  const { data, error } = await supabase
+    .from('field_metadata')
+    .select('fm_object, fm_column, fm_label, fm_help_text, fm_description, fm_example_value, fm_financial_tier, fm_track_history, fm_data_type, fm_is_custom')
+    .eq('fm_object', object)
+    .eq('fm_is_deleted', false)
+  if (error) throw error
+  const map = {}
+  for (const r of (data || [])) {
+    map[r.fm_column] = {
+      object: r.fm_object, column: r.fm_column, label: r.fm_label,
+      helpText: r.fm_help_text, description: r.fm_description, exampleValue: r.fm_example_value,
+      financialTier: r.fm_financial_tier, trackHistory: r.fm_track_history,
+      dataType: r.fm_data_type, isCustom: r.fm_is_custom,
+    }
+  }
+  return map
+}
+
+export async function addCustomField(params) {
+  // params: { object, column, label, dataType, helpText, description, exampleValue, financialTier, trackHistory, fkTable }
+  const { data, error } = await supabase.rpc('admin_add_custom_field', {
+    p_object: params.object,
+    p_column: params.column,
+    p_label: params.label,
+    p_data_type: params.dataType,
+    p_help_text: params.helpText || null,
+    p_description: params.description || null,
+    p_example_value: params.exampleValue || null,
+    p_financial_tier: params.financialTier ?? 1,
+    p_track_history: params.trackHistory ?? false,
+    p_fk_table: params.fkTable || null,
+  })
+  if (error) throw error
+  return data
+}
+
+export async function upsertFieldMetadata(params) {
+  const { data, error } = await supabase.rpc('admin_upsert_field_metadata', {
+    p_object: params.object,
+    p_column: params.column,
+    p_label: params.label,
+    p_help_text: params.helpText || null,
+    p_description: params.description || null,
+    p_example_value: params.exampleValue || null,
+    p_financial_tier: params.financialTier ?? 1,
+    p_track_history: params.trackHistory ?? false,
+  })
+  if (error) throw error
+  return data
+}
+
 // Users — for Administration > Users
 //
 // Includes the role name (joined) and a `hasAuthLink` boolean derived from
