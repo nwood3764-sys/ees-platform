@@ -1027,6 +1027,8 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         const DERIVED = {
           contacts: ['contact_name'],
           opportunities: ['opportunity_name'],
+          buildings: ['building_name'],
+          units: ['unit_name'],
         }
         const derivedCols = new Set(DERIVED[table] || [])
         // Extra fields to require on quick-create beyond the DB NOT NULL set,
@@ -2843,6 +2845,8 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         const DERIVED_READONLY = {
           contacts: ['contact_name'],
           opportunities: ['opportunity_name'],
+          buildings: ['building_name'],
+          units: ['unit_name'],
         }
         const isDerivedField = (DERIVED_READONLY[table] || []).includes(f.name)
         const isEditable = editing
