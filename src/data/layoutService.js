@@ -509,17 +509,18 @@ export async function resolveLookups(lookupRequests) {
     byTable.get(key).ids.add(req.value)
   }
 
-  for (const [, { table, field, ids }] of byTable) {
-    const idArr = Array.from(ids)
-    const { data } = await supabase
-      .from(table)
-      .select(`id, ${field}`)
-      .in('id', idArr)
-
-    for (const row of data || []) {
-      resolved.set(row.id, { label: row[field], table })
-    }
-  }
+  await Promise.all(
+    Array.from(byTable.values()).map(async ({ table, field, ids }) => {
+      const idArr = Array.from(ids)
+      const { data } = await supabase
+        .from(table)
+        .select(`id, ${field}`)
+        .in('id', idArr)
+      for (const row of data || []) {
+        resolved.set(row.id, { label: row[field], table })
+      }
+    })
+  )
 
   return resolved
 }
@@ -585,22 +586,24 @@ export async function resolvePolymorphicLookups(requests) {
     byTable.get(tbl).add(req.value)
   }
 
-  for (const [table, idSet] of byTable) {
-    const displayCol = POLY_DISPLAY_COL[table]
-    const idArr = Array.from(idSet)
-    try {
-      const { data } = await supabase
-        .from(table)
-        .select(`id, ${displayCol}`)
-        .in('id', idArr)
-      for (const row of data || []) {
-        resolved.set(row.id, { label: row[displayCol] || String(row.id).slice(0, 8), table })
+  await Promise.all(
+    Array.from(byTable.entries()).map(async ([table, idSet]) => {
+      const displayCol = POLY_DISPLAY_COL[table]
+      const idArr = Array.from(idSet)
+      try {
+        const { data } = await supabase
+          .from(table)
+          .select(`id, ${displayCol}`)
+          .in('id', idArr)
+        for (const row of data || []) {
+          resolved.set(row.id, { label: row[displayCol] || String(row.id).slice(0, 8), table })
+        }
+      } catch {
+        // RLS denies, table doesn't exist, etc. Skip silently — the renderer
+        // falls back to displaying the raw UUID.
       }
-    } catch {
-      // RLS denies, table doesn't exist, etc. Skip silently — the renderer
-      // falls back to displaying the raw UUID.
-    }
-  }
+    })
+  )
 
   return resolved
 }
@@ -691,14 +694,23 @@ export async function loadRecordDetailData(tableName, recordId) {
   ])
   const lookups = new Map([...staticLookups, ...polyLookups])
 
-  // Pre-fetch related list data
+  // Pre-fetch related list data. Previously this was a serial for-loop with an
+  // await per related list, so a record with N related lists incurred N
+  // sequential round-trips before first render — the dominant cause of slow
+  // record loads. Collect every related-list widget and fetch them in parallel.
+  const relatedWidgets = []
   for (const sec of layoutData.sections) {
     for (const w of sec.widgets) {
       if (w.widget_type === 'related_list' && w.widget_config) {
-        w._relatedData = await fetchRelatedRecords(w.widget_config, recordId)
+        relatedWidgets.push(w)
       }
     }
   }
+  await Promise.all(
+    relatedWidgets.map(async (w) => {
+      w._relatedData = await fetchRelatedRecords(w.widget_config, recordId)
+    })
+  )
 
   return {
     record,
