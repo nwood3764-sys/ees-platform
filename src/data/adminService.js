@@ -580,18 +580,34 @@ export async function fetchSavedListViewDef(id) {
   }
 }
 
-// Run a saved list view's query and return up to `limit` rows. Applies the
-// stored filters and sort. Operators supported mirror the list-view builder:
-// equals, not_equals, contains, starts_with, gt, gte, lt, lte, is_empty,
-// is_not_empty. Unknown operators are ignored (no-op) so a malformed filter
-// never blocks the whole preview.
+// Run a saved list view's query and return up to `limit` rows. Best-effort and
+// defensive: list-view filter/sort fields are stored as *logical* names that
+// the per-module services map to prefixed real columns (and some are FK-to-
+// picklist UUIDs). Rather than replicate that mapping, the preview resolves the
+// table's real columns and only applies the soft-delete guard, filters, and
+// sort whose columns actually exist on the table. Anything that doesn't map is
+// skipped, so the widget always renders recent rows instead of erroring.
 export async function fetchListViewPreview({ object, filters = [], sortField = null, sortDirection = 'asc', limit = 8 }) {
   if (!object) return []
+
+  // Resolve the real column set for this table.
+  let realCols = new Set()
+  try {
+    const cols = await describeObject(object)
+    for (const c of (cols || [])) realCols.add(c.column_name)
+  } catch { /* if this fails, fall back to no column-aware clauses */ }
+  const has = (c) => realCols.size === 0 || realCols.has(c)
+
+  // Soft-delete guard: prefer the prefixed column, then a bare is_deleted.
+  const prefix = object.replace(/s$/, '')
+  const softDelCol = realCols.has(`${prefix}_is_deleted`) ? `${prefix}_is_deleted`
+    : realCols.has('is_deleted') ? 'is_deleted' : null
+
   let q = supabase.from(object).select('*')
-  // Soft-delete aware: most business tables carry is_deleted.
-  q = q.or('is_deleted.is.null,is_deleted.eq.false')
+  if (softDelCol) q = q.or(`${softDelCol}.is.null,${softDelCol}.eq.false`)
+
   for (const f of filters) {
-    if (!f || !f.field) continue
+    if (!f || !f.field || !has(f.field)) continue   // skip logical fields that aren't real columns
     const col = f.field, val = f.value
     switch (f.operator) {
       case 'equals':       q = q.eq(col, val); break
@@ -607,7 +623,16 @@ export async function fetchListViewPreview({ object, filters = [], sortField = n
       default: break
     }
   }
-  if (sortField) q = q.order(sortField, { ascending: sortDirection !== 'desc', nullsFirst: false })
+
+  if (sortField && has(sortField)) {
+    q = q.order(sortField, { ascending: sortDirection !== 'desc', nullsFirst: false })
+  } else {
+    // Fall back to a stable recent-first order if the table has updated_at-ish.
+    const recentCol = realCols.has(`${prefix}_updated_at`) ? `${prefix}_updated_at`
+      : realCols.has('updated_at') ? 'updated_at' : null
+    if (recentCol) q = q.order(recentCol, { ascending: false, nullsFirst: false })
+  }
+
   q = q.limit(limit)
   const { data, error } = await q
   if (error) throw error
