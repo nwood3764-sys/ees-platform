@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
 import { useToast } from '../../components/Toast'
@@ -31,6 +31,36 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
   const [modalOpen, setModalOpen] = useState(false)
   const [busyRowId, setBusyRowId] = useState(null)
   const [editingRowId, setEditingRowId] = useState(null)
+  const [q, setQ] = useState('')
+  const [sortKey, setSortKey] = useState('label')   // value|label|order|state|status
+  const [sortDir, setSortDir] = useState('asc')
+
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(key); setSortDir('asc') }
+  }
+
+  const visibleRows = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    let list = needle
+      ? rows.filter(r => JSON.stringify(r).toLowerCase().includes(needle))
+      : [...rows]
+    const get = (r) => {
+      switch (sortKey) {
+        case 'value':  return (r.value || '').toLowerCase()
+        case 'order':  return r.sortOrder ?? 0
+        case 'state':  return (r.state || '').toLowerCase()
+        case 'status': return (r.status || r.active ? 'a' : 'z')
+        default:       return (r.label || '').toLowerCase()
+      }
+    }
+    list.sort((a, b) => {
+      const av = get(a), bv = get(b)
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return list
+  }, [rows, q, sortKey, sortDir])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -137,15 +167,28 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
         <div style={{ fontSize: 13.5, color: C.textSecondary }}>
           {rows.length === 0
             ? 'No record types defined yet.'
-            : `${rows.length} record type${rows.length === 1 ? '' : 's'}`}
+            : `${visibleRows.length}${q.trim() ? ` of ${rows.length}` : ''} record type${rows.length === 1 ? '' : 's'}`}
         </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          style={buttonPrimaryStyle}
-        >
-          <Icon path="M12 5v14M5 12h14" size={13} color="currentColor" />
-          New Record Type
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {rows.length > 0 && (
+            <div style={{ position: 'relative', width: 220 }}>
+              <input
+                value={q} onChange={e => setQ(e.target.value)} placeholder="Search record types…"
+                style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px 7px 30px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12.5, background: C.page, color: C.textPrimary, outline: 'none' }}
+              />
+              <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              </span>
+            </div>
+          )}
+          <button
+            onClick={() => setModalOpen(true)}
+            style={buttonPrimaryStyle}
+          >
+            <Icon path="M12 5v14M5 12h14" size={13} color="currentColor" />
+            New Record Type
+          </button>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -168,16 +211,16 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
         }}>
           {/* Desktop table header */}
           <div style={tableHeaderStyle}>
-            <div>Value</div>
-            <div>Label</div>
-            <div style={{ textAlign: 'center' }}>Order</div>
-            <div style={{ textAlign: 'center' }}>State</div>
-            <div style={{ textAlign: 'center' }}>Status</div>
+            <div onClick={() => toggleSort('value')} style={{ cursor: 'pointer', userSelect: 'none' }}>Value <SortArrow active={sortKey === 'value'} dir={sortDir} /></div>
+            <div onClick={() => toggleSort('label')} style={{ cursor: 'pointer', userSelect: 'none' }}>Label <SortArrow active={sortKey === 'label'} dir={sortDir} /></div>
+            <div onClick={() => toggleSort('order')} style={{ textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}>Order <SortArrow active={sortKey === 'order'} dir={sortDir} /></div>
+            <div onClick={() => toggleSort('state')} style={{ textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}>State <SortArrow active={sortKey === 'state'} dir={sortDir} /></div>
+            <div onClick={() => toggleSort('status')} style={{ textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}>Status <SortArrow active={sortKey === 'status'} dir={sortDir} /></div>
             <div>Assigned Layout</div>
             <div style={{ textAlign: 'right' }}>Actions</div>
           </div>
 
-          {rows.map(row => (
+          {visibleRows.map(row => (
             <RecordTypeRow
               key={row.id}
               row={row}
@@ -700,6 +743,14 @@ function TextInput({ value, onChange, placeholder, mono, type = 'text', width, c
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────
+
+function SortArrow({ active, dir }) {
+  return (
+    <span style={{ marginLeft: 4, opacity: active ? 1 : 0.25, fontSize: 9 }}>
+      {active ? (dir === 'asc' ? '▲' : '▼') : '▲'}
+    </span>
+  )
+}
 
 const GRID_COLS = '1.2fr 1.6fr 70px 70px 90px 1.6fr minmax(220px, auto)'
 

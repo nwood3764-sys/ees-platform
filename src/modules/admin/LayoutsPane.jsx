@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
 import { useToast } from '../../components/Toast'
@@ -38,6 +38,35 @@ export default function LayoutsPane({
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [roles, setRoles] = useState([])
   const [recordTypes, setRecordTypes] = useState([])
+  const [q, setQ] = useState('')
+  const [sortKey, setSortKey] = useState('name')   // name|recordType|role|updated
+  const [sortDir, setSortDir] = useState('asc')
+
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(key); setSortDir('asc') }
+  }
+
+  const visibleRows = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    let list = needle
+      ? rows.filter(l => JSON.stringify(l).toLowerCase().includes(needle))
+      : [...rows]
+    const get = (l) => {
+      switch (sortKey) {
+        case 'recordType': return (l.recordTypeLabel || '').toLowerCase()
+        case 'role':       return (l.roleName || '').toLowerCase()
+        case 'updated':    return l.updatedAt || ''
+        default:           return (l.name || '').toLowerCase()
+      }
+    }
+    list.sort((a, b) => {
+      const av = get(a), bv = get(b)
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return list
+  }, [rows, q, sortKey, sortDir])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -97,12 +126,25 @@ export default function LayoutsPane({
         <div style={{ fontSize: 13.5, color: C.textSecondary }}>
           {rows.length === 0
             ? 'No layouts for this object yet.'
-            : `${rows.length} layout${rows.length === 1 ? '' : 's'}`}
+            : `${visibleRows.length}${q.trim() ? ` of ${rows.length}` : ''} layout${rows.length === 1 ? '' : 's'}`}
         </div>
-        <button onClick={() => setModalOpen(true)} style={buttonPrimaryStyle}>
-          <Icon path="M12 5v14M5 12h14" size={13} color="currentColor" />
-          New Layout
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {rows.length > 0 && (
+            <div style={{ position: 'relative', width: 220 }}>
+              <input
+                value={q} onChange={e => setQ(e.target.value)} placeholder="Search layouts…"
+                style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px 7px 30px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12.5, background: C.page, color: C.textPrimary, outline: 'none' }}
+              />
+              <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              </span>
+            </div>
+          )}
+          <button onClick={() => setModalOpen(true)} style={buttonPrimaryStyle}>
+            <Icon path="M12 5v14M5 12h14" size={13} color="currentColor" />
+            New Layout
+          </button>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -124,14 +166,14 @@ export default function LayoutsPane({
         }}>
           <div style={tableHeaderStyle}>
             <div>Record #</div>
-            <div>Name</div>
-            <div>Record Type</div>
-            <div>Role</div>
+            <div onClick={() => toggleSort('name')} style={{ cursor: 'pointer', userSelect: 'none' }}>Name <SortArrow active={sortKey === 'name'} dir={sortDir} /></div>
+            <div onClick={() => toggleSort('recordType')} style={{ cursor: 'pointer', userSelect: 'none' }}>Record Type <SortArrow active={sortKey === 'recordType'} dir={sortDir} /></div>
+            <div onClick={() => toggleSort('role')} style={{ cursor: 'pointer', userSelect: 'none' }}>Role <SortArrow active={sortKey === 'role'} dir={sortDir} /></div>
             <div style={{ textAlign: 'center' }}>Default</div>
-            <div>Updated</div>
+            <div onClick={() => toggleSort('updated')} style={{ cursor: 'pointer', userSelect: 'none' }}>Updated <SortArrow active={sortKey === 'updated'} dir={sortDir} /></div>
             <div style={{ textAlign: 'right' }}>Actions</div>
           </div>
-          {rows.map(l => (
+          {visibleRows.map(l => (
             <LayoutRow
               key={l._id}
               layout={l}
@@ -549,6 +591,14 @@ function DeleteLayoutModal({ layout, onClose, onConfirm }) {
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────
+
+function SortArrow({ active, dir }) {
+  return (
+    <span style={{ marginLeft: 4, opacity: active ? 1 : 0.25, fontSize: 9 }}>
+      {active ? (dir === 'asc' ? '▲' : '▼') : '▲'}
+    </span>
+  )
+}
 
 const GRID_COLS = '120px 2fr 1.2fr 1.1fr 80px 110px 100px'
 
