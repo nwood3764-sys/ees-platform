@@ -1280,7 +1280,16 @@ export function ListView({
     if (col.field === 'program') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}` }}><ProgramTag value={v} /></td>;
     if (col.field === 'id') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>{v}</td>;
     if (col.field === 'name') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</td>;
-    if (col.field === 'amount') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>${v ? Number(v).toLocaleString() : '—'}</td>;
+    if (col.field === 'amount') {
+      // `v` may arrive already-formatted (e.g. "$1,234" or "—") from a
+      // service's fmtAmount, or as a raw number. Only number-format when it's
+      // actually numeric; otherwise render the string as-is. Prevents the
+      // "$NaN" artifact from double-formatting a formatted string.
+      const display = (typeof v === 'number')
+        ? `$${v.toLocaleString()}`
+        : (v == null || v === '' ? '—' : String(v));
+      return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{display}</td>;
+    }
     if (col.field === 'email') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: '#1a5a8a', fontSize: 12 }}>{v}</td>;
     return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: v ? C.textSecondary : C.textMuted, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v || '—'}</td>;
   };
@@ -1858,7 +1867,9 @@ export function ListView({
               <div>
                 {columns.filter(c => !['id', 'name', 'status', 'stage'].includes(c.field)).map(col => {
                   const v = selectedRow[col.field];
-                  const display = col.field === 'amount' ? `$${v ? Number(v).toLocaleString() : '0'}` : (v || '—');
+                  const display = col.field === 'amount'
+                    ? (typeof v === 'number' ? `$${v.toLocaleString()}` : (v == null || v === '' ? '—' : String(v)))
+                    : (v || '—');
                   return (
                     <div key={col.field} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: `1px solid ${C.border}`, gap: 12 }}>
                       <span style={{ color: C.textMuted, fontSize: 12, flexShrink: 0 }}>{col.label}</span>
