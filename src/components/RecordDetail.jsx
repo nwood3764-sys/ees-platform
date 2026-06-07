@@ -1026,6 +1026,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         // the trg_contact_name trigger).
         const DERIVED = {
           contacts: ['contact_name'],
+          opportunities: ['opportunity_name'],
         }
         const derivedCols = new Set(DERIVED[table] || [])
         // Extra fields to require on quick-create beyond the DB NOT NULL set,
@@ -2835,11 +2836,21 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // no search and no "+ New". Any lookup with lookup_table is editable.
         const lookupIsEditable = f.type === 'lookup'
           && (hasLookupOpts || !!f.lookup_dependency || !!f.lookup_table)
+        // Trigger-derived name fields are never user-editable — the DB
+        // overwrites any value on write (trg_contact_name, trg_opportunity_name).
+        // Keep them read-only in edit mode so users aren't presented an input
+        // whose value silently won't stick.
+        const DERIVED_READONLY = {
+          contacts: ['contact_name'],
+          opportunities: ['opportunity_name'],
+        }
+        const isDerivedField = (DERIVED_READONLY[table] || []).includes(f.name)
         const isEditable = editing
           && (f.type !== 'datetime')
           && (f.type !== 'polymorphic_lookup')
           && (f.type !== 'lookup' || lookupIsEditable)
           && (f._editable !== false)
+          && !isDerivedField
 
         // Lookup hyperlinking — turn populated lookup fields into clickable
         // links to the parent record (Salesforce parity). Three things must
