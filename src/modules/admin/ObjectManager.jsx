@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
-import { OBJECT_CATALOG, MODULE_ORDER, getObjectsGrouped } from './objectCatalog'
+import { OBJECT_CATALOG } from './objectCatalog'
 import { fetchRecordCount } from '../../data/adminService'
 
 // ---------------------------------------------------------------------------
@@ -47,18 +47,14 @@ export default function ObjectManager({ onOpenObject }) {
     )
   }, [search])
 
-  const grouped = useMemo(() => {
-    const g = {}
-    for (const m of MODULE_ORDER) g[m] = []
-    for (const o of filtered) {
-      if (!g[o.module]) g[o.module] = []
-      g[o.module].push(o)
-    }
-    for (const m of Object.keys(g)) {
-      g[m].sort((a, b) => a.label.localeCompare(b.label))
-    }
-    return g
-  }, [filtered])
+  // One flat alphabetical list. Modules are Salesforce-style apps over one
+  // shared database — every object is accessible from every app — so grouping
+  // the Object Manager by module is misleading. Sort by label, like SF's own
+  // Object Manager.
+  const sorted = useMemo(
+    () => [...filtered].sort((a, b) => a.label.localeCompare(b.label)),
+    [filtered]
+  )
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -70,7 +66,7 @@ export default function ObjectManager({ onOpenObject }) {
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}>Object Manager</div>
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
-            {OBJECT_CATALOG.length} objects across {MODULE_ORDER.length} modules
+            {OBJECT_CATALOG.length} objects
           </div>
         </div>
         <div style={{ position: 'relative', width: 320 }}>
@@ -117,33 +113,17 @@ export default function ObjectManager({ onOpenObject }) {
         <div style={{ textAlign: 'right' }}>Records</div>
       </div>
 
-      {/* Grouped rows */}
+      {/* Flat alphabetical rows */}
       <div style={{ flex: 1, overflow: 'auto', background: C.card }}>
-        {MODULE_ORDER.map(mod => {
-          const items = grouped[mod] || []
-          if (items.length === 0) return null
-          return (
-            <div key={mod}>
-              <div style={{
-                padding: '8px 24px', background: '#f4f6fa',
-                fontSize: 10.5, fontWeight: 700, color: C.textSecondary,
-                textTransform: 'uppercase', letterSpacing: '0.08em',
-                borderBottom: `1px solid ${C.border}`, borderTop: `1px solid ${C.border}`,
-              }}>
-                {mod} <span style={{ color: C.textMuted, fontWeight: 500 }}>· {items.length}</span>
-              </div>
-              {items.map(o => (
-                <ObjectRow
-                  key={o.table}
-                  obj={o}
-                  count={counts[o.table]}
-                  loading={loadingCounts}
-                  onClick={() => onOpenObject(o)}
-                />
-              ))}
-            </div>
-          )
-        })}
+        {sorted.map(o => (
+          <ObjectRow
+            key={o.table}
+            obj={o}
+            count={counts[o.table]}
+            loading={loadingCounts}
+            onClick={() => onOpenObject(o)}
+          />
+        ))}
 
         {filtered.length === 0 && (
           <div style={{ padding: 40, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
