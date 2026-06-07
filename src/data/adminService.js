@@ -927,6 +927,50 @@ export async function saveModuleSections(moduleId, sections) {
   return data
 }
 
+// ── Picklist VALUE management (add / rename / activate / reorder) ─────────
+// Values live in picklist_values, scoped by (object, field). Deactivation is
+// is_active=false (there is no is_deleted column on this table). Writes are
+// gated by the table's RLS (app_user_can('picklist_values', ...)).
+export async function addFieldValue(object, field, value, label, sortOrder) {
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .insert({
+      picklist_object: object,
+      picklist_field: field,
+      picklist_value: value,
+      picklist_label: label || value,
+      picklist_sort_order: sortOrder ?? 0,
+      picklist_is_active: true,
+    })
+    .select('id')
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateFieldValue(id, patch) {
+  // patch: { label?, value?, sortOrder?, isActive? }
+  const upd = {}
+  if (patch.label !== undefined) upd.picklist_label = patch.label
+  if (patch.value !== undefined) upd.picklist_value = patch.value
+  if (patch.sortOrder !== undefined) upd.picklist_sort_order = patch.sortOrder
+  if (patch.isActive !== undefined) upd.picklist_is_active = patch.isActive
+  const { error } = await supabase.from('picklist_values').update(upd).eq('id', id)
+  if (error) throw error
+}
+
+// Persist a full reordering: array of value ids in desired order.
+export async function reorderFieldValues(ids) {
+  // Sequential updates keep it simple and within RLS; lists are short.
+  for (let i = 0; i < ids.length; i++) {
+    const { error } = await supabase
+      .from('picklist_values')
+      .update({ picklist_sort_order: i })
+      .eq('id', ids[i])
+    if (error) throw error
+  }
+}
+
 // Users — for Administration > Users
 //
 // Includes the role name (joined) and a `hasAuthLink` boolean derived from

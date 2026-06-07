@@ -22,7 +22,6 @@ export const SETUP_TREE = [
     children: [
       { id: 'object_manager',  label: 'Object Manager' },
       { id: 'record_types',    label: 'Record Types' },
-      { id: 'picklist_values', label: 'All Picklist Values (reference)' },
     ],
   },
   {

@@ -74,7 +74,7 @@ export const OBJECT_CATALOG = [
 
   // ─── PEOPLE ────────────────────────────────────────────────────────────
   { table: 'users',                         label: 'User',                        pluralLabel: 'Users',                        module: 'People',                description: 'Energy Efficiency Services login account — auth + role + permissions. Linked to a contact via contacts.contact_user_id.' },
-  { table: 'skills',                        label: 'Skill',                       pluralLabel: 'Skills',                       module: 'People',                description: 'Master catalog of skills (Salesforce Field Service: Skill). E.g., BPI Building Analyst, EPA 608, OSHA 30.' },
+  { table: 'skills',                        label: 'Skill',                       pluralLabel: 'Skills',                       module: 'People',                description: 'Master catalog of skills. E.g., BPI Building Analyst, EPA 608, OSHA 30.' },
   { table: 'contact_skills',                label: 'Contact Skill',               pluralLabel: 'Contact Skills',               module: 'People',                description: 'Junction (FSL ServiceResourceSkill) — a contact has a skill, with effective dates that handle cert expiry.' },
   { table: 'work_type_skill_requirements',  label: 'Work Type Skill Requirement', pluralLabel: 'Work Type Skill Requirements', module: 'People',                description: 'Junction (FSL SkillRequirement) — skills required to perform a Work Type. Drives the assignment matching engine.' },
   { table: 'time_sheets',                   label: 'Time Sheet',                  pluralLabel: 'Time Sheets',                  module: 'People',                description: 'Weekly time sheet header.' },
@@ -95,7 +95,7 @@ export const OBJECT_CATALOG = [
   { table: 'project_report_templates',                          label: 'Project Report Template',     pluralLabel: 'Project Report Templates',     module: 'Configuration',         description: 'Reusable layout for generated PDF project reports.' },
   { table: 'project_report_template_sections',                  label: 'Report Section',              pluralLabel: 'Report Sections',              module: 'Configuration',         description: 'Ordered section within a project report template.' },
   { table: 'project_report_template_record_type_assignments',   label: 'Report Template Assignment',  pluralLabel: 'Report Template Assignments',  module: 'Configuration',         description: 'Maps a project record type to a report template.' },
-  { table: 'automation_rules',              label: 'Automation Rule',             pluralLabel: 'Automation Rules',             module: 'Configuration',         description: 'Trigger-based action (Salesforce Flow equivalent).' },
+  { table: 'automation_rules',              label: 'Automation Rule',             pluralLabel: 'Automation Rules',             module: 'Configuration',         description: 'Trigger-based action (automation flow).' },
   { table: 'validation_rules',              label: 'Validation Rule',             pluralLabel: 'Validation Rules',             module: 'Configuration',         description: 'Pre-save rule that blocks with an error message.' },
   { table: 'picklist_values',               label: 'Picklist Value',              pluralLabel: 'Picklist Values',              module: 'Configuration',         description: 'Central picklist dictionary for every dropdown.' },
 
@@ -108,7 +108,7 @@ export const OBJECT_CATALOG = [
   { table: 'roles',                         label: 'Role',                        pluralLabel: 'Roles',                        module: 'Security',              description: 'User role for row-level and field-level security.' },
   { table: 'permissions',                   label: 'Permission',                  pluralLabel: 'Permissions',                  module: 'Security',              description: 'Named permission (module / object / action).' },
   { table: 'role_permissions',              label: 'Role Permission',             pluralLabel: 'Role Permissions',             module: 'Security',              description: 'Junction — which permissions a role has.' },
-  { table: 'field_permissions',             label: 'Field Permission',            pluralLabel: 'Field Permissions',            module: 'Security',              description: 'Per-role, per-field visibility (Salesforce FLS).' },
+  { table: 'field_permissions',             label: 'Field Permission',            pluralLabel: 'Field Permissions',            module: 'Security',              description: 'Per-role, per-field visibility.' },
 
   // ─── USER INTERFACE (page layouts, list views, widgets) ───────────────
   { table: 'page_layouts',                  label: 'Page Layout',                 pluralLabel: 'Page Layouts',                 module: 'User Interface',        description: 'Record detail layout — sections and widgets.' },

@@ -456,7 +456,6 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'permission_sets':   return <PermissionSetsPane />
     case 'help_articles':     return <HelpArticlesPane />
     case 'client_errors':     return <ClientErrorsPane />
-    case 'picklist_values':   return <NodePage title="All Picklist Values (reference)"     table="picklist_values"   fetcher={fetchPicklistValues}    columns={PL_COLS}             newLabel="Picklist Value"   onOpenRecord={onOpenRecord} note="This is a global read-across of every picklist value in the system. To manage a field's values and which ones are available per record type, open Object Manager → the object → Fields & Relationships → the picklist field." />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'module_sections':   return <ModuleSectionsPane />
     case 'automation_rules':  return <AutomationRulesPane />
