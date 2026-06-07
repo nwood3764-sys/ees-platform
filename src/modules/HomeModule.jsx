@@ -6,6 +6,9 @@ import { fetchProperties, fetchOpportunities } from '../data/outreachService'
 import { fetchProjects, fetchWorkOrders } from '../data/fieldService'
 import { fetchPaymentRequests, fetchPaymentReceipts } from '../data/incentivesService'
 import { fetchIncentiveApplications } from '../data/qualificationService'
+import { resolveHomePage } from '../data/adminService'
+import { getTemplate } from './admin/homePageTemplates'
+import HomeComponentRenderer from './admin/HomeComponentRenderer'
 
 function Widget({ title, subtitle, children, footer, onFooter }) {
   return (
@@ -45,10 +48,19 @@ const groupCount = (arr, key) => {
   return Array.from(m, ([name, value]) => ({ name, value }))
 }
 
-export default function HomeModule({ onNavigate }) {
+export default function HomeModule({ onNavigate, onOpenSetup }) {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+
+  // Custom (admin-configured) home page, if one is assigned to this user's role
+  // or set as the org default. null = use the built-in home below.
+  const [customPage, setCustomPage] = useState(undefined) // undefined=loading, null=none, obj=page
+  useEffect(() => {
+    let cancelled = false
+    resolveHomePage().then(p => { if (!cancelled) setCustomPage(p || null) }).catch(() => { if (!cancelled) setCustomPage(null) })
+    return () => { cancelled = true }
+  }, [])
 
   const [properties, setProperties] = useState([])
   const [opportunities, setOpportunities] = useState([])
@@ -186,6 +198,49 @@ export default function HomeModule({ onNavigate }) {
       <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:8, padding:24 }}>
         <div style={{ color:'#b03a2e', fontSize:13, fontWeight:600 }}>Could not load dashboard</div>
         <div style={{ color:C.textMuted, fontSize:12, fontFamily:'JetBrains Mono, monospace', maxWidth:560, textAlign:'center' }}>{String(error.message || error)}</div>
+      </div>
+    )
+  }
+
+  // A configured home page short-circuits the built-in dashboard. It renders the
+  // saved template regions and components, with an Edit entry point to the
+  // Home Page builder in Setup.
+  if (customPage) {
+    const tmpl = getTemplate(customPage.template)
+    const comps = customPage.components || []
+    return (
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div data-module-topbar="1" style={{ height: 54, background: C.card, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+            <span style={{ color: C.textMuted }}>Home</span>
+            <span style={{ color: C.textMuted }}>/</span>
+            <span style={{ color: C.textPrimary, fontWeight: 500 }}>{customPage.name || 'Home'}</span>
+          </div>
+          {onOpenSetup && (
+            <button onClick={() => onOpenSetup('home_pages')}
+              style={{ background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 14px', fontSize: 12.5, color: C.textSecondary, cursor: 'pointer', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Icon path="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" size={13} color="currentColor" /> Edit Page
+            </button>
+          )}
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 12, color: C.textMuted }}>{greeting}, Nicholas Wood · {today}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            {tmpl.regions.map(region => {
+              const regionComps = comps.filter(c => c.region === region.key).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+              return (
+                <div key={region.key} style={{ flex: region.flex, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {regionComps.map(c => (
+                    <HomeComponentRenderer key={c.id} component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }} onNavigate={onNavigate} />
+                  ))}
+                  {regionComps.length === 0 && <div style={{ color: C.textMuted, fontSize: 12, padding: 12 }}>&nbsp;</div>}
+                </div>
+              )
+            })}
+          </div>
+        </div>
       </div>
     )
   }

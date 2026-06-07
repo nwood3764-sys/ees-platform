@@ -38,6 +38,7 @@ import SeedDataPurgePane from './SeedDataPurgePane'
 import BulkPropertyImportPane from './BulkPropertyImportPane'
 import ClientErrorsPane from './ClientErrorsPane'
 import ModuleSectionsPane from './ModuleSectionsPane'
+import HomePageBuilder from './HomePageBuilder'
 
 // ---------------------------------------------------------------------------
 // Setup Home — Salesforce-style left tree nav + right content pane.
@@ -458,6 +459,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'client_errors':     return <ClientErrorsPane />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'module_sections':   return <ModuleSectionsPane />
+    case 'home_pages':        return <HomePageBuilder />
     case 'automation_rules':  return <AutomationRulesPane />
     case 'automation_run_log': return <AutomationRunLogPane />
     case 'lifecycle_builder': return <LifecycleBuilderPane />

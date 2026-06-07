@@ -1028,6 +1028,58 @@ export async function upsertFieldMetadata(params) {
   return data
 }
 
+// ── Home/app page builder ────────────────────────────────────────────────
+export async function fetchHomePages() {
+  const { data, error } = await supabase
+    .from('home_pages')
+    .select('id, hp_name, hp_template, hp_role_id, hp_is_active, hp_is_default, hp_updated_at')
+    .eq('hp_is_deleted', false)
+    .order('hp_updated_at', { ascending: false })
+  if (error) throw error
+  return (data || []).map(r => ({
+    id: r.id, name: r.hp_name, template: r.hp_template, roleId: r.hp_role_id,
+    isActive: r.hp_is_active, isDefault: r.hp_is_default, updatedAt: r.hp_updated_at,
+  }))
+}
+
+export async function fetchHomePage(pageId) {
+  const [{ data: page, error: e1 }, { data: comps, error: e2 }] = await Promise.all([
+    supabase.from('home_pages').select('id, hp_name, hp_template, hp_role_id, hp_is_active, hp_is_default').eq('id', pageId).single(),
+    supabase.from('home_page_components').select('id, hpc_region, hpc_type, hpc_source_id, hpc_title, hpc_config, hpc_sort_order').eq('hpc_page_id', pageId).eq('hpc_is_deleted', false).order('hpc_sort_order', { ascending: true }),
+  ])
+  if (e1) throw e1
+  if (e2) throw e2
+  return {
+    id: page.id, name: page.hp_name, template: page.hp_template, roleId: page.hp_role_id,
+    isActive: page.hp_is_active, isDefault: page.hp_is_default,
+    components: (comps || []).map(c => ({
+      id: c.id, region: c.hpc_region, type: c.hpc_type, sourceId: c.hpc_source_id,
+      title: c.hpc_title, config: c.hpc_config || {}, sortOrder: c.hpc_sort_order,
+    })),
+  }
+}
+
+export async function saveHomePage(page, components) {
+  const { data, error } = await supabase.rpc('save_home_page', {
+    p_page: {
+      id: page.id || null, name: page.name, template: page.template,
+      role_id: page.roleId || null, is_active: !!page.isActive, is_default: !!page.isDefault,
+    },
+    p_components: components.map((c, i) => ({
+      region: c.region, type: c.type, source_id: c.sourceId || null,
+      title: c.title || null, config: c.config || {}, sort_order: i,
+    })),
+  })
+  if (error) throw error
+  return data
+}
+
+export async function resolveHomePage() {
+  const { data, error } = await supabase.rpc('resolve_home_page_for_current_user')
+  if (error) throw error
+  return data // null when no configured page
+}
+
 // Users — for Administration > Users
 //
 // Includes the role name (joined) and a `hasAuthLink` boolean derived from
