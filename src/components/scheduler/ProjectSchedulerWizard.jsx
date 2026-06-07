@@ -363,7 +363,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
   }, [])
 
   // Resolve the selected Team Lead (by id) to the right scheduling params.
-  // A lead row may be a Contact (subcontractor) or a User (internal crew);
+  // A lead row may be a Contact (service provider) or a User (internal crew);
   // bulkScheduleWorkOrders routes on source.
   const leadParams = useCallback(() => {
     const lead = teamLeads.find(l => l.id === teamLeadId)

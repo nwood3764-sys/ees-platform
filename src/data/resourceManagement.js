@@ -23,7 +23,7 @@ export const FIELD_STAFF_TITLE_PATTERNS = [
 ]
 
 // Internal field crew are Users with one of these roles (the FSL "Service
-// Resource → User" path). Subcontractor crews remain Contacts (matched by the
+// Resource → User" path). Service provider crews remain Contacts (matched by the
 // title patterns above). fetchAllFieldStaff unions both so Dispatch sees the
 // whole schedulable workforce regardless of which kind of person each is.
 export const FIELD_STAFF_ROLE_NAMES = [
@@ -47,7 +47,7 @@ function buildTitleOrFilter() {
  *   • Users with an internal field role (Team Lead, Lead Technician, Technician
  *     in Training, Project Site Lead). These are W-2 crew who log in and run
  *     Field Mobile. Tagged `source: 'user'`.
- *   • Contacts whose title matches a field-staff pattern (subcontractor crews
+ *   • Contacts whose title matches a field-staff pattern (service provider crews
  *     scheduled but without internal logins). Tagged `source: 'contact'`.
  *
  * Each row has a stable shape regardless of source so Dispatch and the skills
@@ -63,7 +63,7 @@ export async function fetchAllFieldStaff() {
     .sort((a, b) => String(a.full_name).localeCompare(String(b.full_name), undefined, { sensitivity: 'base' }))
 }
 
-// Contact-based field staff (subcontractor crews).
+// Contact-based field staff (service provider crews).
 async function fetchContactFieldStaff() {
   const { data, error } = await supabase
     .from('contacts')

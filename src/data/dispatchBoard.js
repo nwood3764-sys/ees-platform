@@ -155,7 +155,7 @@ export async function fetchResourceAbsencesInRange({ startDate, endDate }) {
 }
 
 // Active Team Leads (the lanes of the board) — unioned across Contacts
-// (subcontractor crews, title ILIKE '%team lead%') and Users (internal W-2 crew
+// (service provider crews, title ILIKE '%team lead%') and Users (internal W-2 crew
 // in the 'Team Lead' role). Each lane carries `source` ('contact'|'user'), the
 // service_territory_id, and the array of held (unexpired) certification_ids so
 // the filter rail can filter client-side. User leads have no tracked certs yet,

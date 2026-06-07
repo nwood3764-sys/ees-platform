@@ -1376,7 +1376,7 @@ const ST_COLS = [
 const STM_COLS = [
   { field: 'id',             label: 'Record #', type: 'text', sortable: true, filterable: false, editable: false },
   { field: 'name',           label: 'Resource',  type: 'text',  sortable: true, filterable: true,  editable: false },  // display copy of contact name
-  { field: 'source',         label: 'Source',    type: 'text',  sortable: true, filterable: true,  editable: false },  // Internal (User) vs Subcontractor (Contact)
+  { field: 'source',         label: 'Source',    type: 'text',  sortable: true, filterable: true,  editable: false },  // Internal (User) vs Service Provider (Contact)
   { field: 'territory',      label: 'Territory', type: 'text',  sortable: true, filterable: true,  columnName: 'service_territory_id' },
   { field: 'contact',        label: 'Contact',   type: 'text',  sortable: true, filterable: true,  columnName: 'contact_id' },
   { field: 'contactRole',    label: 'Role',      type: 'text',  sortable: true, filterable: true,  editable: false },  // lives on contacts

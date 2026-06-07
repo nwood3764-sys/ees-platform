@@ -22,7 +22,7 @@ import { supabase } from '../lib/supabase'
 // portal articles. 'all'-audience articles are visible to everyone.
 
 const ADMIN_ROLES = new Set(['Admin'])
-const PORTAL_ROLES = new Set(['Property Owner','Property Manager','Subcontractor Partner'])
+const PORTAL_ROLES = new Set(['Property Owner','Property Manager','Service Provider Partner'])
 
 export function audienceForRoleName(roleName) {
   if (!roleName) return null

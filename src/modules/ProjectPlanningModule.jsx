@@ -14,10 +14,10 @@ import { fetchPartnerOrganizations } from '../data/portalService'
 // built per building/unit, crew assignment, and scheduling — owned by Project
 // Managers and Project Coordinators, days/weeks ahead of execution. Home is a
 // live planning dashboard; Projects/Work Orders are the prep queues; Workforce
-// shows the technicians, subcontractors, and service providers available to
-// assign; Opportunities is included because all work flows from there. Lists
-// show ALL records per the platform rule; default views surface the
-// planning-relevant slices.
+// shows the technicians and service providers available to assign;
+// Opportunities is included because all work flows from there. Lists show ALL
+// records per the platform rule; default views surface the planning-relevant
+// slices.
 
 const SECTIONS = [
   { id: 'home',          label: 'Dashboard'      },
@@ -61,14 +61,13 @@ function Dashboard({ workOrders, projects, opportunities, technicians, partners,
   const woByStatus   = useMemo(() => groupCount(workOrders, 'status').map(d => ({ ...d, name: shortStatus(d.name) })), [workOrders])
   const projByStatus = useMemo(() => groupCount(projects, 'status').map(d => ({ ...d, name: shortStatus(d.name) })), [projects])
 
-  const subcontractors = partners.filter(p => /sub/i.test(p.partnerType)).length
-  const serviceProviders = partners.filter(p => /service|provider/i.test(p.partnerType)).length
+  const serviceProviders = partners.length
 
   const kpis = [
     { label: 'Projects To Schedule', value: projToSchedule, sub: `${projects.length} total projects`, color: C.amber,   go: 'projects' },
     { label: 'Work Orders To Build', value: woToSchedule,   sub: 'Awaiting scheduling',              color: C.sky,     go: 'workorders' },
     { label: 'Technicians',          value: technicians.length, sub: `${activeTechs} active`,        color: C.emerald, go: 'workforce' },
-    { label: 'Partner Orgs',         value: partners.length, sub: `${subcontractors} subs · ${serviceProviders} providers`, color: C.purple || '#8b5cf6', go: 'workforce' },
+    { label: 'Service Providers',    value: serviceProviders, sub: 'Partner organizations',          color: C.purple || '#8b5cf6', go: 'workforce' },
   ]
 
   return (
@@ -122,9 +121,7 @@ function Dashboard({ workOrders, projects, opportunities, technicians, partners,
         <Widget title="Workforce Available" subtitle="Internal crews and partners to assign" footer="View Workforce →" onFooter={() => onGo('workforce')}>
           <div style={{ fontSize: 12, color: C.textSecondary, lineHeight: 1.9 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Technicians (internal)</span><span style={{ fontWeight: 600, color: C.textPrimary }}>{technicians.length}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Subcontractors</span><span style={{ fontWeight: 600, color: C.textPrimary }}>{subcontractors}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Service Providers</span><span style={{ fontWeight: 600, color: C.textPrimary }}>{serviceProviders}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Other partner orgs</span><span style={{ fontWeight: 600, color: C.textPrimary }}>{Math.max(0, partners.length - subcontractors - serviceProviders)}</span></div>
           </div>
         </Widget>
       </div>
@@ -181,12 +178,12 @@ const OPP_COLS = [
 const OPP_VIEWS = [{ id:'POP-01', name:'All Opportunities', filters:[], sortField:'closeDate', sortDir:'asc' }]
 
 // Workforce — internal technicians (contacts) + partner organizations
-// (subcontractors and service providers). Unified into one tab with a
-// "kind" column so planners see everyone assignable in one place.
+// (service providers). Unified into one tab with a "kind" column so planners
+// see everyone assignable in one place.
 const WF_COLS = [
   { field:'id',        label:'Record #', type:'text',   sortable:true, filterable:false },
   { field:'name',      label:'Name',     type:'text',   sortable:true, filterable:true  },
-  { field:'kind',      label:'Kind',     type:'select', sortable:true, filterable:true, options:['Technician','Subcontractor','Service Provider','Partner'] },
+  { field:'kind',      label:'Kind',     type:'select', sortable:true, filterable:true, options:['Technician','Service Provider'] },
   { field:'role',      label:'Role / Type', type:'text', sortable:true, filterable:true },
   { field:'status',    label:'Status',   type:'text',   sortable:true, filterable:true  },
   { field:'phone',     label:'Phone',    type:'text',   sortable:false,filterable:false },
@@ -196,14 +193,12 @@ const WF_COLS = [
 const WF_VIEWS = [
   { id:'PWF-01', name:'All Workforce',     filters:[], sortField:'name', sortDir:'asc' },
   { id:'PWF-02', name:'Technicians',       filters:[{ field:'kind', label:'Kind', op:'equals', value:'Technician' }],       sortField:'name', sortDir:'asc' },
-  { id:'PWF-03', name:'Subcontractors',    filters:[{ field:'kind', label:'Kind', op:'equals', value:'Subcontractor' }],    sortField:'name', sortDir:'asc' },
   { id:'PWF-04', name:'Service Providers', filters:[{ field:'kind', label:'Kind', op:'equals', value:'Service Provider' }], sortField:'name', sortDir:'asc' },
 ]
 
-function partnerKind(partnerType) {
-  if (/sub/i.test(partnerType)) return 'Subcontractor'
-  if (/service|provider/i.test(partnerType)) return 'Service Provider'
-  return 'Partner'
+function partnerKind() {
+  // All partner organizations are service providers in EES terminology.
+  return 'Service Provider'
 }
 
 export default function ProjectPlanningModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
@@ -245,7 +240,7 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
     }))
     const partnerRows = partners.map(p => ({
       id: p.id, _id: p._id, _table: 'accounts',
-      name: p.name, kind: partnerKind(p.partnerType), role: p.partnerType || '—',
+      name: p.name, kind: partnerKind(), role: p.partnerType || '—',
       status: p.status, phone: p.phone,
       location: [p.city, p.state].filter(x => x && x !== '—').join(', ') || '—',
       bpi: '—',

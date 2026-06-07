@@ -1916,11 +1916,12 @@ export async function fetchServiceTerritoryMembers() {
   )
 
   return data.map(r => {
-    // A resource is either contact-linked (subcontractor) or user-linked
+    // A resource is either contact-linked (service provider) or user-linked
+    // (internal W-2 crew). Surface which for the Setup resources list.
     // (internal W-2 crew). Resolve the display person from whichever is set.
     const personName = r.contacts?.contact_name || r.users?.user_name || '—'
     const personRole = r.contacts?.contact_role || r.users?.user_title || ''
-    const sourceLabel = r.stm_user_id ? 'Internal (User)' : (r.contact_id ? 'Subcontractor (Contact)' : '—')
+    const sourceLabel = r.stm_user_id ? 'Internal (User)' : (r.contact_id ? 'Service Provider (Contact)' : '—')
     return {
       id:        r.stm_record_number || r.id,
       _id:       r.id,
