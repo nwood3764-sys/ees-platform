@@ -3,7 +3,7 @@ import { C } from '../../data/constants'
 import { Icon, SectionTabs } from '../../components/UI'
 import {
   describeObject, describeIncomingFKs,
-  fetchRecordCount, fetchPageLayoutsFor,
+  fetchPageLayoutsFor,
   fetchValidationsFor, fetchAutomationsFor,
   fetchPicklistsFor,
 } from '../../data/adminService'
@@ -31,7 +31,6 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
   const [sub, setSub] = useState(initialSubTab)
   const [columns, setColumns] = useState([])
   const [incomingFKs, setIncomingFKs] = useState([])
-  const [recordCount, setRecordCount] = useState(null)
   const [pageLayouts, setPageLayouts] = useState([])
   const [validations, setValidations] = useState([])
   const [automations, setAutomations] = useState([])
@@ -62,17 +61,15 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
     Promise.all([
       describeObject(obj.table),
       describeIncomingFKs(obj.table),
-      fetchRecordCount(obj.table),
       fetchPageLayoutsFor(obj.table).catch(() => []),
       fetchValidationsFor(obj.table).catch(() => []),
       fetchAutomationsFor(obj.table).catch(() => []),
       fetchPicklistsFor(obj.table).catch(() => []),
     ])
-      .then(([cols, fks, count, layouts, vals, autos, pls]) => {
+      .then(([cols, fks, layouts, vals, autos, pls]) => {
         if (cancelled) return
         setColumns(cols)
         setIncomingFKs(fks)
-        setRecordCount(count)
         setPageLayouts(layouts)
         setValidations(vals)
         setAutomations(autos)
@@ -120,10 +117,6 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
             API Name: {obj.table}
           </div>
           <div style={{ fontSize: 12, color: C.textMuted }}>·</div>
-          <div style={{ fontSize: 12, color: C.textMuted }}>
-            {recordCount != null ? recordCount.toLocaleString() : '—'} records
-          </div>
-          <div style={{ fontSize: 12, color: C.textMuted }}>·</div>
           <div style={{ fontSize: 12, color: C.textMuted }}>{obj.module}</div>
         </div>
         <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 5 }}>{obj.description}</div>
@@ -149,7 +142,7 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
         )}
         {!loading && !error && (
           <>
-            {sub === 'details'     && <DetailsPane obj={obj} columns={columns} recordCount={recordCount} />}
+            {sub === 'details'     && <DetailsPane obj={obj} columns={columns} />}
             {sub === 'fields'      && <FieldsPane columns={columns} />}
             {sub === 'layouts' && (
               selectedLayoutId
@@ -178,7 +171,7 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
 
 // ─── Panes ──────────────────────────────────────────────────────────────
 
-function DetailsPane({ obj, columns, recordCount }) {
+function DetailsPane({ obj, columns }) {
   const requiredCount = columns.filter(c => c.is_nullable === 'NO').length
   const fkCount       = columns.filter(c => c.is_foreign_key).length
   const pkCount       = columns.filter(c => c.is_primary_key).length
@@ -192,7 +185,6 @@ function DetailsPane({ obj, columns, recordCount }) {
         <KV label="Description"   value={obj.description} />
       </Card>
       <Card title="Data Profile">
-        <KV label="Record Count"     value={recordCount != null ? recordCount.toLocaleString() : '—'} mono />
         <KV label="Total Columns"    value={columns.length}  mono />
         <KV label="Required Columns" value={requiredCount}   mono />
         <KV label="Primary Keys"     value={pkCount}         mono />
@@ -202,10 +194,45 @@ function DetailsPane({ obj, columns, recordCount }) {
   )
 }
 
+function PaneSearch({ value, onChange, placeholder }) {
+  return (
+    <div style={{ position: 'relative', width: 300, marginBottom: 12 }}>
+      <input
+        type="text"
+        placeholder={placeholder || 'Quick Find'}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{
+          width: '100%', padding: '7px 12px 7px 32px',
+          border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 13,
+          background: C.page, color: C.textPrimary, outline: 'none', boxSizing: 'border-box',
+        }}
+        onFocus={e => e.currentTarget.style.borderColor = C.emerald}
+        onBlur={e => e.currentTarget.style.borderColor = C.border}
+      />
+      <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+      </span>
+    </div>
+  )
+}
+
 function FieldsPane({ columns }) {
+  const [q, setQ] = useState('')
+  const needle = q.trim().toLowerCase()
+  const shown = needle
+    ? columns.filter(c =>
+        (c.column_name || '').toLowerCase().includes(needle) ||
+        fmtType(c).toLowerCase().includes(needle) ||
+        (c.references_table ? `${c.references_table}.${c.references_column}` : '').toLowerCase().includes(needle)
+      )
+    : columns
   return (
     <div style={{ padding: '16px 24px' }}>
-      <Card title={`Fields & Relationships (${columns.length})`} noBody>
+      <PaneSearch value={q} onChange={setQ} placeholder="Search fields…" />
+      <Card title={`Fields & Relationships (${shown.length}${needle ? ` of ${columns.length}` : ''})`} noBody>
         <div style={{
           display: 'grid',
           gridTemplateColumns: '32px 2fr 1.4fr 0.6fr 0.6fr 1.4fr',
@@ -222,7 +249,7 @@ function FieldsPane({ columns }) {
           <div style={{ textAlign: 'center' }}>PK/FK</div>
           <div>References</div>
         </div>
-        {columns.map(c => (
+        {shown.map(c => (
           <div key={c.column_name} style={{
             display: 'grid',
             gridTemplateColumns: '32px 2fr 1.4fr 0.6fr 0.6fr 1.4fr',
@@ -273,12 +300,16 @@ function FieldsPane({ columns }) {
 
 
 function ValidationsPane({ rules }) {
+  const [q, setQ] = useState('')
   if (rules.length === 0) {
     return <EmptyPane label="Validation Rules" hint="No validation rules defined for this object. Add rows to validation_rules with related_object set to this table name." />
   }
+  const needle = q.trim().toLowerCase()
+  const shown = needle ? rules.filter(r => JSON.stringify(r).toLowerCase().includes(needle)) : rules
   return (
     <div style={{ padding: '16px 24px' }}>
-      <Card title={`Validation Rules (${rules.length})`} noBody>
+      <PaneSearch value={q} onChange={setQ} placeholder="Search validation rules…" />
+      <Card title={`Validation Rules (${shown.length}${needle ? ` of ${rules.length}` : ''})`} noBody>
         <SimpleTable
           columns={[
             { label: 'Name',          field: 'name',           width: '1.6fr' },
@@ -287,7 +318,7 @@ function ValidationsPane({ rules }) {
             { label: 'Error Message', field: 'errorMessage',   width: '2fr' },
             { label: 'Active',        field: 'status',         width: '90px' },
           ]}
-          rows={rules}
+          rows={shown}
         />
       </Card>
     </div>
@@ -295,12 +326,16 @@ function ValidationsPane({ rules }) {
 }
 
 function AutomationsPane({ rules }) {
+  const [q, setQ] = useState('')
   if (rules.length === 0) {
     return <EmptyPane label="Automation Rules" hint="No automation rules trigger on this object. Add rows to automation_rules with trigger_object set to this table name." />
   }
+  const needle = q.trim().toLowerCase()
+  const shown = needle ? rules.filter(r => JSON.stringify(r).toLowerCase().includes(needle)) : rules
   return (
     <div style={{ padding: '16px 24px' }}>
-      <Card title={`Automation Rules (${rules.length})`} noBody>
+      <PaneSearch value={q} onChange={setQ} placeholder="Search automation rules…" />
+      <Card title={`Automation Rules (${shown.length}${needle ? ` of ${rules.length}` : ''})`} noBody>
         <SimpleTable
           columns={[
             { label: '#',          field: 'executionOrder', width: '40px', center: true, mono: true },
@@ -311,7 +346,7 @@ function AutomationsPane({ rules }) {
             { label: 'Target',     field: 'targetObject',   width: '1fr' },
             { label: 'Active',     field: 'status',         width: '90px' },
           ]}
-          rows={rules}
+          rows={shown}
         />
       </Card>
     </div>
@@ -319,19 +354,23 @@ function AutomationsPane({ rules }) {
 }
 
 function RelatedPane({ fks }) {
+  const [q, setQ] = useState('')
   if (fks.length === 0) {
     return <EmptyPane label="Related Lookups" hint="No other tables have foreign keys pointing to this object." />
   }
+  const needle = q.trim().toLowerCase()
+  const shown = needle ? fks.filter(r => JSON.stringify(r).toLowerCase().includes(needle)) : fks
   return (
     <div style={{ padding: '16px 24px' }}>
-      <Card title={`Related Lookups — Child Tables (${fks.length})`} noBody>
+      <PaneSearch value={q} onChange={setQ} placeholder="Search related tables…" />
+      <Card title={`Related Lookups — Child Tables (${shown.length}${needle ? ` of ${fks.length}` : ''})`} noBody>
         <SimpleTable
           columns={[
             { label: 'Referencing Table',  field: 'referencing_table',  width: '1.6fr', mono: true },
             { label: 'Referencing Column', field: 'referencing_column', width: '1.6fr', mono: true },
             { label: 'References Our',     field: 'referenced_column',  width: '1fr',   mono: true },
           ]}
-          rows={fks}
+          rows={shown}
           noMap
         />
       </Card>

@@ -1,39 +1,15 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
 import { OBJECT_CATALOG } from './objectCatalog'
-import { fetchRecordCount } from '../../data/adminService'
 
 // ---------------------------------------------------------------------------
-// Object Manager — searchable list of every Energy Efficiency Services object, grouped by module.
-// Clicking an object opens ObjectDetail for it.
+// Object Manager — searchable flat alphabetical list of every Energy
+// Efficiency Services object. Clicking an object opens ObjectDetail for it.
 // ---------------------------------------------------------------------------
 
 export default function ObjectManager({ onOpenObject }) {
   const [search, setSearch] = useState('')
-  const [counts, setCounts] = useState({})   // { tableName: number }
-  const [loadingCounts, setLoadingCounts] = useState(true)
-
-  // Load record counts for every table in parallel. RLS filters to what
-  // the current user can see, so the counts reflect *their* visibility —
-  // which is actually what an admin wants to see in the Object Manager.
-  useEffect(() => {
-    let cancelled = false
-    setLoadingCounts(true)
-    Promise.all(
-      OBJECT_CATALOG.map(async o => ({
-        table: o.table,
-        count: await fetchRecordCount(o.table),
-      }))
-    ).then(results => {
-      if (cancelled) return
-      const m = {}
-      for (const r of results) m[r.table] = r.count
-      setCounts(m)
-      setLoadingCounts(false)
-    })
-    return () => { cancelled = true }
-  }, [])
 
   // Filter by search term — matches label, plural, table name, or module
   const filtered = useMemo(() => {
@@ -103,14 +79,13 @@ export default function ObjectManager({ onOpenObject }) {
       {/* Table header */}
       <div style={{
         padding: '9px 24px', background: '#fafbfd', borderBottom: `1px solid ${C.border}`,
-        display: 'grid', gridTemplateColumns: '1.6fr 1.6fr 1fr 1fr 100px', gap: 16,
+        display: 'grid', gridTemplateColumns: '1.6fr 1.6fr 1fr 1.2fr', gap: 16,
         fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em',
       }}>
         <div>Label</div>
         <div>API Name (Table)</div>
         <div>Module</div>
         <div>Description</div>
-        <div style={{ textAlign: 'right' }}>Records</div>
       </div>
 
       {/* Flat alphabetical rows */}
@@ -119,8 +94,6 @@ export default function ObjectManager({ onOpenObject }) {
           <ObjectRow
             key={o.table}
             obj={o}
-            count={counts[o.table]}
-            loading={loadingCounts}
             onClick={() => onOpenObject(o)}
           />
         ))}
@@ -135,7 +108,7 @@ export default function ObjectManager({ onOpenObject }) {
   )
 }
 
-function ObjectRow({ obj, count, loading, onClick }) {
+function ObjectRow({ obj, onClick }) {
   const [hover, setHover] = useState(false)
   return (
     <div
@@ -145,7 +118,7 @@ function ObjectRow({ obj, count, loading, onClick }) {
       style={{
         padding: '11px 24px',
         display: 'grid',
-        gridTemplateColumns: '1.6fr 1.6fr 1fr 1fr 100px',
+        gridTemplateColumns: '1.6fr 1.6fr 1fr 1.2fr',
         gap: 16,
         alignItems: 'center',
         fontSize: 12.5,
@@ -162,14 +135,6 @@ function ObjectRow({ obj, count, loading, onClick }) {
       <div style={{ color: C.textSecondary }}>{obj.module}</div>
       <div style={{ color: C.textMuted, fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {obj.description}
-      </div>
-      <div style={{
-        textAlign: 'right',
-        color: count == null || loading ? C.textMuted : C.textPrimary,
-        fontFamily: 'JetBrains Mono, monospace',
-        fontSize: 12,
-      }}>
-        {loading && count == null ? '…' : (count != null ? count.toLocaleString() : '—')}
       </div>
     </div>
   )
