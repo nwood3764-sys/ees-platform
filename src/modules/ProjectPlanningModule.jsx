@@ -1,23 +1,136 @@
-import { useState, useEffect } from 'react'
-import { C } from '../data/constants'
-import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
+import { useState, useEffect, useMemo } from 'react'
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
+import { C, CHART_COLORS, fmt } from '../data/constants'
+import { SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchProjects, fetchWorkOrders } from '../data/fieldService'
+import { fetchOpportunities } from '../data/outreachService'
+import { fetchTechnicians } from '../data/peopleService'
+import { fetchPartnerOrganizations } from '../data/portalService'
 
 // ── Project Planning ─────────────────────────────────────────────────────────
 // Office-side project preparation (lifecycle stage 7): work plans, work orders
 // built per building/unit, crew assignment, and scheduling — owned by Project
-// Managers and Project Coordinators, days/weeks ahead of execution. Reads the
-// same projects/work_orders objects as Field; oriented to the prep queue.
-// Per the platform rule, the lists show ALL records; default views surface the
+// Managers and Project Coordinators, days/weeks ahead of execution. Home is a
+// live planning dashboard; Projects/Work Orders are the prep queues; Workforce
+// shows the technicians, subcontractors, and service providers available to
+// assign; Opportunities is included because all work flows from there. Lists
+// show ALL records per the platform rule; default views surface the
 // planning-relevant slices.
 
 const SECTIONS = [
-  { id: 'home',       label: 'Home'        },
-  { id: 'projects',   label: 'Projects'    },
-  { id: 'workorders', label: 'Work Orders' },
+  { id: 'home',          label: 'Dashboard'      },
+  { id: 'projects',      label: 'Projects'       },
+  { id: 'workorders',    label: 'Work Orders'    },
+  { id: 'workforce',     label: 'Workforce'      },
+  { id: 'opportunities', label: 'Opportunities'  },
 ]
+
+const groupCount = (arr, key) => {
+  const m = new Map()
+  for (const r of arr) m.set(r[key] || '—', (m.get(r[key] || '—') || 0) + 1)
+  return Array.from(m, ([name, value]) => ({ name, value }))
+}
+const shortStatus = s => (s || '—').replace(/^Work Order /, '').replace(/^Project /, '')
+
+function Widget({ title, subtitle, children, footer, onFooter }) {
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>{subtitle}</div>}
+      </div>
+      <div style={{ flex: 1, padding: '12px 14px 8px' }}>{children}</div>
+      {footer && (
+        <div style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span onClick={onFooter} style={{ color: '#1a5a8a', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>{footer}</span>
+          <span style={{ color: C.textMuted, fontSize: 10 }}>Live</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Dashboard({ workOrders, projects, opportunities, technicians, partners, onGo }) {
+  const projToSchedule = projects.filter(p => p.status === 'Project To Be Scheduled').length
+  const woToSchedule   = workOrders.filter(w => w.status === 'Work Order To Be Scheduled').length
+  const activeTechs    = technicians.filter(t => /active/i.test(t.status)).length || technicians.length
+  const pipeline       = opportunities.reduce((s, o) => s + (o._amountRaw || 0), 0)
+
+  const woByStatus   = useMemo(() => groupCount(workOrders, 'status').map(d => ({ ...d, name: shortStatus(d.name) })), [workOrders])
+  const projByStatus = useMemo(() => groupCount(projects, 'status').map(d => ({ ...d, name: shortStatus(d.name) })), [projects])
+
+  const subcontractors = partners.filter(p => /sub/i.test(p.partnerType)).length
+  const serviceProviders = partners.filter(p => /service|provider/i.test(p.partnerType)).length
+
+  const kpis = [
+    { label: 'Projects To Schedule', value: projToSchedule, sub: `${projects.length} total projects`, color: C.amber,   go: 'projects' },
+    { label: 'Work Orders To Build', value: woToSchedule,   sub: 'Awaiting scheduling',              color: C.sky,     go: 'workorders' },
+    { label: 'Technicians',          value: technicians.length, sub: `${activeTechs} active`,        color: C.emerald, go: 'workforce' },
+    { label: 'Partner Orgs',         value: partners.length, sub: `${subcontractors} subs · ${serviceProviders} providers`, color: C.purple || '#8b5cf6', go: 'workforce' },
+  ]
+
+  return (
+    <div style={{ padding: 24, overflow: 'auto' }}>
+      <h2 style={{ margin: '0 0 4px', fontSize: 18, color: C.textPrimary }}>Project Planning</h2>
+      <p style={{ margin: '0 0 16px', color: C.textSecondary, fontSize: 13, maxWidth: 660 }}>
+        Office-side preparation: build work orders per building and unit, assign crews and partners, order materials,
+        and schedule the work ahead of field execution. Use the Workforce tab to see who's available to assign.
+      </p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
+        {kpis.map(s => (
+          <div key={s.label} onClick={() => onGo(s.go)}
+            style={{ background: C.card, border: `1px solid ${C.border}`, borderTop: `3px solid ${s.color}`, borderRadius: 8, padding: '16px 18px', cursor: 'pointer' }}
+            onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'}
+            onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+            <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>{s.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: s.color, fontFamily: 'JetBrains Mono, monospace', marginBottom: 4 }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: C.textMuted }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
+        <Widget title="Projects by Status" subtitle={`Total: ${projects.length} · Pipeline ${fmt(pipeline)}`} footer="View Projects →" onFooter={() => onGo('projects')}>
+          <ResponsiveContainer width="100%" height={150}>
+            <BarChart data={projByStatus} layout="vertical" margin={{ left: 0, right: 20, top: 0, bottom: 0 }}>
+              <XAxis type="number" hide /><YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fill: C.textSecondary }} />
+              <Tooltip /><Bar dataKey="value" fill={C.emerald} radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Widget>
+
+        <Widget title="Work Orders by Status" subtitle={`Total: ${workOrders.length}`} footer="View Work Orders →" onFooter={() => onGo('workorders')}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <ResponsiveContainer width={100} height={130}>
+              <PieChart><Pie data={woByStatus} cx="50%" cy="50%" innerRadius={24} outerRadius={46} dataKey="value" strokeWidth={0}>{woByStatus.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</Pie><Tooltip /></PieChart>
+            </ResponsiveContainer>
+            <div style={{ flex: 1, fontSize: 11, color: C.textSecondary }}>
+              {woByStatus.map((d, i) => (
+                <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>{d.name}</span>
+                  <span style={{ fontWeight: 600, color: C.textPrimary }}>{d.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Widget>
+
+        <Widget title="Workforce Available" subtitle="Internal crews and partners to assign" footer="View Workforce →" onFooter={() => onGo('workforce')}>
+          <div style={{ fontSize: 12, color: C.textSecondary, lineHeight: 1.9 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Technicians (internal)</span><span style={{ fontWeight: 600, color: C.textPrimary }}>{technicians.length}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Subcontractors</span><span style={{ fontWeight: 600, color: C.textPrimary }}>{subcontractors}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Service Providers</span><span style={{ fontWeight: 600, color: C.textPrimary }}>{serviceProviders}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Other partner orgs</span><span style={{ fontWeight: 600, color: C.textPrimary }}>{Math.max(0, partners.length - subcontractors - serviceProviders)}</span></div>
+          </div>
+        </Widget>
+      </div>
+    </div>
+  )
+}
 
 const PROJ_COLS = [
   { field:'id',         label:'Record #', type:'text',   sortable:true, filterable:false },
@@ -31,8 +144,6 @@ const PROJ_COLS = [
   { field:'endDate',    label:'End',      type:'date',   sortable:true, filterable:true  },
   { field:'state',      label:'State',    type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
 ]
-
-// Planning is the prep queue: surface projects not yet in the field first.
 const PROJ_VIEWS = [
   { id:'PPJ-01', name:'All Projects',     filters:[], sortField:'startDate', sortDir:'asc' },
   { id:'PPJ-02', name:'To Be Scheduled',  filters:[{ field:'status', label:'Status', op:'equals', value:'Project To Be Scheduled' }], sortField:'id', sortDir:'asc' },
@@ -51,18 +162,57 @@ const WO_COLS = [
   { field:'duration',     label:'Est.',      type:'text',   sortable:false,filterable:false },
   { field:'state',        label:'State',     type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
 ]
-
-// Planning surfaces work orders awaiting scheduling/assignment first.
 const WO_VIEWS = [
   { id:'PWO-01', name:'All Work Orders',   filters:[], sortField:'scheduledDate', sortDir:'asc' },
   { id:'PWO-02', name:'To Be Scheduled',   filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order To Be Scheduled' }], sortField:'id', sortDir:'asc' },
   { id:'PWO-03', name:'Scheduled',         filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order Scheduled' }],       sortField:'scheduledDate', sortDir:'asc' },
 ]
 
+const OPP_COLS = [
+  { field:'id',        label:'Record #', type:'text',   sortable:true, filterable:false },
+  { field:'name',      label:'Opportunity', type:'text', sortable:true, filterable:true },
+  { field:'property',  label:'Property', type:'text',   sortable:true, filterable:true  },
+  { field:'stage',     label:'Stage',    type:'text',   sortable:true, filterable:true  },
+  { field:'program',   label:'Program',  type:'text',   sortable:true, filterable:true  },
+  { field:'amount',    label:'Amount',   type:'text',   sortable:true, filterable:false },
+  { field:'closeDate', label:'Close',    type:'date',   sortable:true, filterable:true  },
+  { field:'state',     label:'State',    type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
+]
+const OPP_VIEWS = [{ id:'POP-01', name:'All Opportunities', filters:[], sortField:'closeDate', sortDir:'asc' }]
+
+// Workforce — internal technicians (contacts) + partner organizations
+// (subcontractors and service providers). Unified into one tab with a
+// "kind" column so planners see everyone assignable in one place.
+const WF_COLS = [
+  { field:'id',        label:'Record #', type:'text',   sortable:true, filterable:false },
+  { field:'name',      label:'Name',     type:'text',   sortable:true, filterable:true  },
+  { field:'kind',      label:'Kind',     type:'select', sortable:true, filterable:true, options:['Technician','Subcontractor','Service Provider','Partner'] },
+  { field:'role',      label:'Role / Type', type:'text', sortable:true, filterable:true },
+  { field:'status',    label:'Status',   type:'text',   sortable:true, filterable:true  },
+  { field:'phone',     label:'Phone',    type:'text',   sortable:false,filterable:false },
+  { field:'location',  label:'Location', type:'text',   sortable:true, filterable:true  },
+  { field:'bpi',       label:'BPI',      type:'text',   sortable:true, filterable:true  },
+]
+const WF_VIEWS = [
+  { id:'PWF-01', name:'All Workforce',     filters:[], sortField:'name', sortDir:'asc' },
+  { id:'PWF-02', name:'Technicians',       filters:[{ field:'kind', label:'Kind', op:'equals', value:'Technician' }],       sortField:'name', sortDir:'asc' },
+  { id:'PWF-03', name:'Subcontractors',    filters:[{ field:'kind', label:'Kind', op:'equals', value:'Subcontractor' }],    sortField:'name', sortDir:'asc' },
+  { id:'PWF-04', name:'Service Providers', filters:[{ field:'kind', label:'Kind', op:'equals', value:'Service Provider' }], sortField:'name', sortDir:'asc' },
+]
+
+function partnerKind(partnerType) {
+  if (/sub/i.test(partnerType)) return 'Subcontractor'
+  if (/service|provider/i.test(partnerType)) return 'Service Provider'
+  return 'Partner'
+}
+
 export default function ProjectPlanningModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
   const [sec, setSec] = useState(sectionFromUrl || 'home')
   const [projects, setProjects] = useState([])
   const [workOrders, setWorkOrders] = useState([])
+  const [opportunities, setOpportunities] = useState([])
+  const [technicians, setTechnicians] = useState([])
+  const [partners, setPartners] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [selectedRecord, setSelectedRecord] = useState(navSelectedRecord || null)
@@ -73,8 +223,10 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
   const loadAll = async () => {
     setLoading(true); setError(null)
     try {
-      const [p, w] = await Promise.all([fetchProjects(), fetchWorkOrders()])
-      setProjects(p); setWorkOrders(w)
+      const [p, w, o, t, pr] = await Promise.all([
+        fetchProjects(), fetchWorkOrders(), fetchOpportunities(), fetchTechnicians(), fetchPartnerOrganizations(),
+      ])
+      setProjects(p); setWorkOrders(w); setOpportunities(o); setTechnicians(t); setPartners(pr)
     } catch (e) {
       setError(e)
     } finally {
@@ -83,10 +235,34 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
   }
   useEffect(() => { loadAll() }, [])
 
+  // Unified workforce rows for the Workforce tab.
+  const workforce = useMemo(() => {
+    const techRows = technicians.map(t => ({
+      id: t.id, _id: t._id, _table: 'contacts',
+      name: t.name, kind: 'Technician', role: t.title || '—',
+      status: t.status, phone: t.phone, location: '—',
+      bpi: t.bpiCertified === 'Yes' ? `Yes (exp ${t.bpiExpiry})` : 'No',
+    }))
+    const partnerRows = partners.map(p => ({
+      id: p.id, _id: p._id, _table: 'accounts',
+      name: p.name, kind: partnerKind(p.partnerType), role: p.partnerType || '—',
+      status: p.status, phone: p.phone,
+      location: [p.city, p.state].filter(x => x && x !== '—').join(', ') || '—',
+      bpi: '—',
+    }))
+    return [...techRows, ...partnerRows]
+  }, [technicians, partners])
+
   const openRecord = (table, id) => {
     const rec = { table, id, mode: 'view' }
     setSelectedRecord(rec)
     if (onNavigateToRecord) onNavigateToRecord(rec)
+  }
+  const openOpp = (_table, id) => openRecord('opportunities', id)
+  // Workforce rows carry their own target table (contacts vs accounts).
+  const openWorkforce = (_table, id) => {
+    const row = workforce.find(r => r.id === id || r._id === id)
+    if (row) openRecord(row._table, row._id)
   }
   const changeSection = (next) => {
     setSec(next)
@@ -106,7 +282,6 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
     )
   }
 
-  // LiveListView wrapper — same loading/error pattern as other modules
   function LiveListView({ loading, error, data, onRetry, ...rest }) {
     if (loading) return <LoadingState />
     if (error) return <ErrorState error={error} onRetry={onRetry} />
@@ -120,17 +295,13 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
       </div>
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {sec === 'home' && (
-          <div style={{ padding: 24, overflow: 'auto' }}>
-            <h2 style={{ margin: '0 0 6px', fontSize: 18, color: C.textPrimary }}>Project Planning</h2>
-            <p style={{ margin: 0, color: C.textSecondary, fontSize: 14, maxWidth: 620 }}>
-              Office-side project preparation: build work orders per building and unit, assign crews,
-              order materials, and schedule the work ahead of field execution. Use the Projects and
-              Work Orders tabs to work the planning queue.
-            </p>
-          </div>
+          loading ? <LoadingState /> : error ? <ErrorState error={error} onRetry={loadAll} /> :
+          <Dashboard workOrders={workOrders} projects={projects} opportunities={opportunities} technicians={technicians} partners={partners} onGo={changeSection} />
         )}
-        {sec === 'projects'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}   listObject="projects_planning" listModule="planning" columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PPJ-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'workorders' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders} listObject="work_orders_planning" listModule="planning" columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="PWO-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'projects'      && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}      listObject="projects_planning"      listModule="planning" columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PPJ-01" newLabel="Project"     onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })}     onOpenRecord={openRecord} />}
+        {sec === 'workorders'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders}    listObject="work_orders_planning"   listModule="planning" columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="PWO-01" newLabel="Work Order"  onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })}  onOpenRecord={openRecord} />}
+        {sec === 'workforce'     && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workforce}     listObject="workforce_planning"     listModule="planning" columns={WF_COLS}   systemViews={WF_VIEWS}   defaultViewId="PWF-01" onOpenRecord={openWorkforce} />}
+        {sec === 'opportunities' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} listObject="opportunities_planning" listModule="planning" columns={OPP_COLS}  systemViews={OPP_VIEWS}  defaultViewId="POP-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openOpp} />}
       </div>
     </div>
   )

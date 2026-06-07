@@ -1,23 +1,131 @@
-import { useState, useEffect } from 'react'
-import { C } from '../data/constants'
-import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
+import { useState, useEffect, useMemo } from 'react'
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
+import { C, CHART_COLORS, fmt } from '../data/constants'
+import { SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import { fetchProjects, fetchWorkOrders } from '../data/fieldService'
+import { fetchOpportunities } from '../data/outreachService'
 
 // ── Project Implementation ───────────────────────────────────────────────────
 // Field-side execution (lifecycle stage 8): Team Leads run crews and complete
 // work orders per work plan, capture before/after evidence, and the Project
 // Coordinator tracks daily progress while the Director of Field Services manages
-// real-time execution. Reads the same projects/work_orders objects as Field;
-// oriented to the active-execution and verification queue. Lists show ALL
-// records per the platform rule; default views surface the in-flight slices.
+// real-time execution. Home is a live execution dashboard (work orders + active
+// projects); Opportunities is included because all work flows from there. Lists
+// show ALL records per the platform rule; default views surface the in-flight
+// slices.
 
 const SECTIONS = [
-  { id: 'home',       label: 'Home'             },
-  { id: 'workorders', label: 'Work Orders'      },
-  { id: 'projects',   label: 'Active Projects'  },
+  { id: 'home',          label: 'Dashboard'      },
+  { id: 'workorders',    label: 'Work Orders'    },
+  { id: 'projects',      label: 'Active Projects'},
+  { id: 'opportunities', label: 'Opportunities'  },
 ]
+
+const groupCount = (arr, key) => {
+  const m = new Map()
+  for (const r of arr) m.set(r[key] || '—', (m.get(r[key] || '—') || 0) + 1)
+  return Array.from(m, ([name, value]) => ({ name, value }))
+}
+const shortStatus = s => (s || '—').replace(/^Work Order /, '').replace(/^Project /, '')
+
+function Widget({ title, subtitle, children, footer, onFooter }) {
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>{subtitle}</div>}
+      </div>
+      <div style={{ flex: 1, padding: '12px 14px 8px' }}>{children}</div>
+      {footer && (
+        <div style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span onClick={onFooter} style={{ color: '#1a5a8a', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>{footer}</span>
+          <span style={{ color: C.textMuted, fontSize: 10 }}>Live</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Dashboard({ workOrders, projects, opportunities, onGo }) {
+  const woInProgress = workOrders.filter(w => w.status === 'Work Order In Progress').length
+  const woToVerify   = workOrders.filter(w => w.status === 'Work Order To Be Verified').length
+  const woCorrections= workOrders.filter(w => w.status === 'Work Order Corrections Needed').length
+  const projActive   = projects.filter(p => p.status === 'Project In Progress').length
+  const pipeline     = opportunities.reduce((s, o) => s + (o._amountRaw || 0), 0)
+
+  const woByStatus = useMemo(() => groupCount(workOrders, 'status').map(d => ({ ...d, name: shortStatus(d.name) })), [workOrders])
+  const woByTeam   = useMemo(() => groupCount(workOrders.filter(w => w.teamLead), 'teamLead'), [workOrders])
+  const projByStatus = useMemo(() => groupCount(projects, 'status').map(d => ({ ...d, name: shortStatus(d.name) })), [projects])
+
+  const kpis = [
+    { label: 'Work Orders In Progress', value: woInProgress,  sub: 'Active in the field now', color: C.purple || '#8b5cf6', go: 'workorders' },
+    { label: 'Awaiting Verification',   value: woToVerify,    sub: 'Submitted, pending review', color: C.amber, go: 'workorders' },
+    { label: 'Corrections Needed',      value: woCorrections, sub: 'Kicked back to crews',     color: C.danger || '#d6455d', go: 'workorders' },
+    { label: 'Active Projects',         value: projActive,    sub: `${projects.length} total projects`, color: C.emerald, go: 'projects' },
+  ]
+
+  return (
+    <div style={{ padding: 24, overflow: 'auto' }}>
+      <h2 style={{ margin: '0 0 4px', fontSize: 18, color: C.textPrimary }}>Project Implementation</h2>
+      <p style={{ margin: '0 0 16px', color: C.textSecondary, fontSize: 13, maxWidth: 660 }}>
+        Field-side execution: Team Leads complete work orders per work plan and capture before/after evidence;
+        the Project Coordinator tracks daily progress and the verification queue.
+      </p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
+        {kpis.map(s => (
+          <div key={s.label} onClick={() => onGo(s.go)}
+            style={{ background: C.card, border: `1px solid ${C.border}`, borderTop: `3px solid ${s.color}`, borderRadius: 8, padding: '16px 18px', cursor: 'pointer' }}
+            onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'}
+            onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+            <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>{s.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: s.color, fontFamily: 'JetBrains Mono, monospace', marginBottom: 4 }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: C.textMuted }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
+        <Widget title="Work Orders by Status" subtitle={`Total: ${workOrders.length}`} footer="View Work Orders →" onFooter={() => onGo('workorders')}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <ResponsiveContainer width={100} height={120}>
+              <PieChart><Pie data={woByStatus} cx="50%" cy="50%" innerRadius={24} outerRadius={46} dataKey="value" strokeWidth={0}>{woByStatus.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</Pie><Tooltip /></PieChart>
+            </ResponsiveContainer>
+            <div style={{ flex: 1, fontSize: 11, color: C.textSecondary }}>
+              {woByStatus.map((d, i) => (
+                <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>{d.name}</span>
+                  <span style={{ fontWeight: 600, color: C.textPrimary }}>{d.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Widget>
+
+        <Widget title="Active Work by Team Lead" subtitle="Open work orders per lead" footer="View Work Orders →" onFooter={() => onGo('workorders')}>
+          <ResponsiveContainer width="100%" height={140}>
+            <BarChart data={woByTeam} layout="vertical" margin={{ left: 0, right: 20, top: 0, bottom: 0 }}>
+              <XAxis type="number" hide /><YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 11, fill: C.textSecondary }} />
+              <Tooltip /><Bar dataKey="value" fill={C.emerald} radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Widget>
+
+        <Widget title="Projects by Status" subtitle={`Pipeline value: ${fmt(pipeline)}`} footer="View Active Projects →" onFooter={() => onGo('projects')}>
+          <ResponsiveContainer width="100%" height={140}>
+            <BarChart data={projByStatus} layout="vertical" margin={{ left: 0, right: 20, top: 0, bottom: 0 }}>
+              <XAxis type="number" hide /><YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fill: C.textSecondary }} />
+              <Tooltip /><Bar dataKey="value" fill={C.sky} radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Widget>
+      </div>
+    </div>
+  )
+}
 
 const WO_COLS = [
   { field:'id',           label:'Record #',  type:'text',   sortable:true, filterable:false },
@@ -32,7 +140,6 @@ const WO_COLS = [
   { field:'state',        label:'State',     type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
 ]
 
-// Implementation surfaces work that is live in the field or awaiting verification.
 const WO_VIEWS = [
   { id:'IWO-01', name:'All Work Orders',   filters:[], sortField:'scheduledDate', sortDir:'asc' },
   { id:'IWO-02', name:'In Progress',       filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order In Progress' }],          sortField:'scheduledDate', sortDir:'asc' },
@@ -59,10 +166,23 @@ const PROJ_VIEWS = [
   { id:'IPJ-03', name:'To Be Verified',filters:[{ field:'status', label:'Status', op:'equals', value:'Project To Be Verified' }], sortField:'startDate', sortDir:'asc' },
 ]
 
+const OPP_COLS = [
+  { field:'id',        label:'Record #', type:'text',   sortable:true, filterable:false },
+  { field:'name',      label:'Opportunity', type:'text', sortable:true, filterable:true },
+  { field:'property',  label:'Property', type:'text',   sortable:true, filterable:true  },
+  { field:'stage',     label:'Stage',    type:'text',   sortable:true, filterable:true  },
+  { field:'program',   label:'Program',  type:'text',   sortable:true, filterable:true  },
+  { field:'amount',    label:'Amount',   type:'text',   sortable:true, filterable:false },
+  { field:'closeDate', label:'Close',    type:'date',   sortable:true, filterable:true  },
+  { field:'state',     label:'State',    type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
+]
+const OPP_VIEWS = [{ id:'IOP-01', name:'All Opportunities', filters:[], sortField:'closeDate', sortDir:'asc' }]
+
 export default function ProjectImplementationModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
   const [sec, setSec] = useState(sectionFromUrl || 'home')
   const [projects, setProjects] = useState([])
   const [workOrders, setWorkOrders] = useState([])
+  const [opportunities, setOpportunities] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [selectedRecord, setSelectedRecord] = useState(navSelectedRecord || null)
@@ -73,8 +193,8 @@ export default function ProjectImplementationModule({ selectedRecord: navSelecte
   const loadAll = async () => {
     setLoading(true); setError(null)
     try {
-      const [p, w] = await Promise.all([fetchProjects(), fetchWorkOrders()])
-      setProjects(p); setWorkOrders(w)
+      const [p, w, o] = await Promise.all([fetchProjects(), fetchWorkOrders(), fetchOpportunities()])
+      setProjects(p); setWorkOrders(w); setOpportunities(o)
     } catch (e) {
       setError(e)
     } finally {
@@ -88,6 +208,7 @@ export default function ProjectImplementationModule({ selectedRecord: navSelecte
     setSelectedRecord(rec)
     if (onNavigateToRecord) onNavigateToRecord(rec)
   }
+  const openOpp = (_table, id) => openRecord('opportunities', id)
   const changeSection = (next) => {
     setSec(next)
     if (onSectionChange) onSectionChange(next)
@@ -106,7 +227,6 @@ export default function ProjectImplementationModule({ selectedRecord: navSelecte
     )
   }
 
-  // LiveListView wrapper — same loading/error pattern as other modules
   function LiveListView({ loading, error, data, onRetry, ...rest }) {
     if (loading) return <LoadingState />
     if (error) return <ErrorState error={error} onRetry={onRetry} />
@@ -120,17 +240,12 @@ export default function ProjectImplementationModule({ selectedRecord: navSelecte
       </div>
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {sec === 'home' && (
-          <div style={{ padding: 24, overflow: 'auto' }}>
-            <h2 style={{ margin: '0 0 6px', fontSize: 18, color: C.textPrimary }}>Project Implementation</h2>
-            <p style={{ margin: 0, color: C.textSecondary, fontSize: 14, maxWidth: 620 }}>
-              Field-side execution: Team Leads complete work orders per work plan and capture
-              before/after evidence; the Project Coordinator tracks daily progress and verification.
-              Use the Work Orders tab for the active execution and verification queue.
-            </p>
-          </div>
+          loading ? <LoadingState /> : error ? <ErrorState error={error} onRetry={loadAll} /> :
+          <Dashboard workOrders={workOrders} projects={projects} opportunities={opportunities} onGo={changeSection} />
         )}
-        {sec === 'workorders' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders} listObject="work_orders_implementation" listModule="implementation" columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="IWO-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'projects'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}   listObject="projects_implementation" listModule="implementation" columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="IPJ-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'workorders'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders}    listObject="work_orders_implementation" listModule="implementation" columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="IWO-01" newLabel="Work Order"  onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })}  onOpenRecord={openRecord} />}
+        {sec === 'projects'      && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}      listObject="projects_implementation"    listModule="implementation" columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="IPJ-01" newLabel="Project"     onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })}     onOpenRecord={openRecord} />}
+        {sec === 'opportunities' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} listObject="opportunities_implementation" listModule="implementation" columns={OPP_COLS}  systemViews={OPP_VIEWS}  defaultViewId="IOP-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openOpp} />}
       </div>
     </div>
   )
