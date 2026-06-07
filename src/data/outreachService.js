@@ -42,6 +42,15 @@ export function loadPicklists() {
     }
     return { byId, valueById, byField }
   })()
+  // CRITICAL: never let a *rejected* promise stay memoized. The old code
+  // cached _picklistPromise unconditionally, so a single transient failure
+  // of the picklist fetch (more likely now that more queries fire on mount)
+  // poisoned every fetcher that awaits loadPicklists() — opportunities,
+  // contacts, enrollments — for the entire page session. Each would reject,
+  // and on a cold load useCachedFetch stored {data:null}, rendering an empty
+  // list ("No opportunitys yet") even though the row fetch itself returned
+  // 200. Clearing the memo on rejection lets the next call retry.
+  _picklistPromise.catch(() => { _picklistPromise = null })
   return _picklistPromise
 }
 
