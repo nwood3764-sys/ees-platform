@@ -117,6 +117,17 @@ input, select, textarea {
   100% { background-position: -200% 0; }
 }
 
+/* ─── Adjustable column widths (ListView) ──────────────────────────────────
+   When a list view has user-sized columns it switches to table-layout:fixed
+   and carries data-colfixed. Force every body/header cell to clip so content
+   in a narrowed column truncates cleanly with an ellipsis instead of
+   spilling past its column border. Header cells keep their own layout. */
+table[data-colfixed="1"] td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Respect OS-level reduced-motion preference. Users who enable "Reduce
    Motion" in iOS/macOS accessibility settings get instant transitions and
    no shimmer/slide animations. Keeps the app usable for vestibular

@@ -11,6 +11,130 @@ import {
   bulkUpdateRecords,
 } from '../data/fieldMetadataService';
 
+// ── Column-width persistence ─────────────────────────────────────────────────
+// Excel-style draggable column widths. Widths are stored per list under a
+// stable localStorage key so a user's sizing survives reloads and navigation.
+//
+// Key derivation: callers may pass an explicit `storageKey`. When absent we
+// build one from (tableName || defaultViewId) PLUS a short signature of the
+// column field set. The signature guards against the case where two different
+// lists share a defaultViewId code (e.g. AV-01 appears in several modules) —
+// their column sets differ, so their keys differ, and their widths stay
+// independent. No call-site changes required for any of the 8 modules.
+const COLWIDTH_NS = 'ees.colwidths.';
+const COL_MIN_WIDTH = 64;   // px — never let a column collapse below this
+const COL_MAX_WIDTH = 900;  // px — sanity cap so a stray drag can't run away
+
+function columnSignature(columns) {
+  // Order-sensitive join of field names, hashed to a short stable token.
+  const src = columns.map(c => c.field).join('|');
+  let h = 0;
+  for (let i = 0; i < src.length; i++) { h = (h * 31 + src.charCodeAt(i)) | 0; }
+  return (h >>> 0).toString(36);
+}
+
+function resolveStorageKey({ storageKey, tableName, defaultViewId, columns }) {
+  if (storageKey) return COLWIDTH_NS + storageKey;
+  const base = tableName || defaultViewId || 'list';
+  return `${COLWIDTH_NS}${base}.${columnSignature(columns)}`;
+}
+
+function readStoredWidths(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch { return {}; }
+}
+
+function writeStoredWidths(key, widths) {
+  try { localStorage.setItem(key, JSON.stringify(widths)); }
+  catch { /* storage disabled / quota — widths simply won't persist */ }
+}
+
+function clampWidth(px) {
+  return Math.max(COL_MIN_WIDTH, Math.min(COL_MAX_WIDTH, Math.round(px)));
+}
+
+// defaultColWidth — starting width (px) for a column that the user hasn't
+// explicitly sized yet, used once the table is in fixed-layout mode. Tuned by
+// field role and data type so unsized columns look reasonable rather than
+// collapsing to equal slices. Authors can override per column via
+// `col.defaultWidth`.
+function defaultColWidth(col) {
+  if (col.defaultWidth != null) return col.defaultWidth;
+  if (col.field === 'id') return 120;
+  if (col.field === 'name') return 240;
+  if (col.field === 'status' || col.field === 'stage') return 200;
+  if (col.field === 'program') return 160;
+  if (col.field === 'email') return 200;
+  if (col.field === 'amount' || col.field === 'units' || col.field === 'buildings') return 110;
+  if (col.type === 'date') return 130;
+  if (col.type === 'select') return 150;
+  return 160;
+}
+
+// useColumnWidths — owns the per-field width map plus the drag interaction.
+// Returns the width map (field → px), a getter, and a pointer-down handler to
+// wire onto each resize grip. Pointer events (not mouse) so it works with
+// trackpads and touch-capable laptops; capture-phase listeners on window so a
+// fast drag that leaves the <th> doesn't drop the gesture.
+function useColumnWidths({ enabled, storageKey, columns }) {
+  const [widths, setWidths] = useState(() => (enabled ? readStoredWidths(storageKey) : {}));
+
+  // Reset/reload when the target list changes (key changes) so we don't carry
+  // one list's widths onto another that mounted into the same component slot.
+  useEffect(() => {
+    if (!enabled) return;
+    setWidths(readStoredWidths(storageKey));
+  }, [storageKey, enabled]);
+
+  const dragRef = useRef(null); // { field, startX, startWidth }
+
+  const onResizeStart = (field, e, currentWidth) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragRef.current = { field, startX: e.clientX, startWidth: currentWidth };
+
+    const onMove = (ev) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const next = clampWidth(d.startWidth + (ev.clientX - d.startX));
+      setWidths(prev => (prev[d.field] === next ? prev : { ...prev, [d.field]: next }));
+    };
+    const onUp = () => {
+      const d = dragRef.current;
+      dragRef.current = null;
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      // Persist on release using the freshest state.
+      setWidths(prev => { writeStoredWidths(storageKey, prev); return prev; });
+      if (d) {}
+    };
+
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  // Double-click a grip to reset that one column to auto width.
+  const resetColumn = (field) => {
+    setWidths(prev => {
+      if (!(field in prev)) return prev;
+      const next = { ...prev };
+      delete next[field];
+      writeStoredWidths(storageKey, next);
+      return next;
+    });
+  };
+
+  return { widths, onResizeStart, resetColumn };
+}
+
 // ── Filter Dropdown ──────────────────────────────────────────────────────────
 function FilterDropdown({ col, activeFilters, onApply, onClose }) {
   const colF = activeFilters.filter(f => f.field === col.field);
@@ -488,10 +612,11 @@ function MobileFilterSheet({
 }
 
 // ── Sortable Header ──────────────────────────────────────────────────────────
-function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilterApply, openFilterCol, setOpenFilterCol }) {
+function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilterApply, openFilterCol, setOpenFilterCol, onResizeStart, onResizeReset, currentWidth }) {
   const isFiltered = activeFilters.some(f => f.field === col.field);
   const isSorted = sortField === col.field;
   const isOpen = openFilterCol === col.field;
+  const [gripHover, setGripHover] = useState(false);
 
   const handleSort = () => {
     if (!col.sortable) return;
@@ -533,6 +658,29 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
       </div>
       {isOpen && col.filterable && (
         <FilterDropdown col={col} activeFilters={activeFilters} onApply={onFilterApply} onClose={() => setOpenFilterCol(null)} />
+      )}
+      {onResizeStart && (
+        // Resize grip — sits on the column's right border. Drag to size,
+        // double-click to reset this column to auto. 7px hit area for easy
+        // grabbing; the visible 2px line only shows on hover/drag.
+        <div
+          onPointerDown={(e) => onResizeStart(col.field, e, currentWidth)}
+          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); onResizeReset && onResizeReset(col.field); }}
+          onMouseEnter={() => setGripHover(true)}
+          onMouseLeave={() => setGripHover(false)}
+          title="Drag to resize · double-click to reset"
+          style={{
+            position: 'absolute', top: 0, right: -3, width: 7, height: '100%',
+            cursor: 'col-resize', zIndex: 6, touchAction: 'none',
+            display: 'flex', justifyContent: 'center',
+          }}
+        >
+          <div style={{
+            width: 2, height: '100%',
+            background: gripHover ? C.emerald : 'transparent',
+            transition: 'background 120ms',
+          }} />
+        </div>
       )}
     </th>
   );
@@ -655,7 +803,7 @@ export function ListView({
   systemViews: systemViewsProp,
   defaultViewId, newLabel,
   renderCell, renderDetail, onNew, onOpenRecord, onRefresh,
-  tableName, onRecordsUpdated,
+  tableName, onRecordsUpdated, storageKey,
 }) {
   // ── Defensive defaults ─────────────────────────────────────────────────
   // The original signature treated systemViews and data as required arrays.
@@ -682,6 +830,22 @@ export function ListView({
   const editMode = Boolean(tableName)
   const firstView = systemViews.find(v => v.id === defaultViewId) || systemViews[0]
   const isMobile = useIsMobile()
+
+  // Excel-style adjustable column widths. Desktop only — the mobile view is a
+  // card list with no columns to size. Key is stable per list (see
+  // resolveStorageKey) so each object's widths persist independently.
+  const colWidthKey = useMemo(
+    () => resolveStorageKey({ storageKey, tableName, defaultViewId, columns }),
+    [storageKey, tableName, defaultViewId, columns]
+  );
+  const { widths: colWidths, onResizeStart, resetColumn } = useColumnWidths({
+    enabled: !isMobile,
+    storageKey: colWidthKey,
+    columns,
+  });
+  // Once the user has sized any column, the table switches to fixed layout so
+  // those widths are authoritative and header/body cells stay locked together.
+  const hasCustomWidths = Object.keys(colWidths).length > 0;
 
   // Pull-to-refresh plumbing — attached to the mobile card scroll container
   // below. No-op when onRefresh isn't provided (so modules that haven't wired
@@ -1322,7 +1486,19 @@ export function ListView({
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         <div style={{ flex: 1, overflow: 'auto', padding: '14px 24px 24px' }}>
           <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
+              <colgroup>
+                {editMode && <col style={{ width: 36 }} />}
+                {columns.map(col => {
+                  const w = colWidths[col.field];
+                  // Sized columns get their explicit px. Once ANY column is
+                  // sized the table switches to fixed layout, so unsized
+                  // columns need a width too — fall back to a type-based
+                  // default so they don't all collapse to equal slices.
+                  const colW = w != null ? w : (hasCustomWidths ? defaultColWidth(col) : undefined);
+                  return <col key={col.field} style={colW != null ? { width: colW } : undefined} />;
+                })}
+              </colgroup>
               <thead>
                 <tr>
                   {editMode && (
@@ -1343,7 +1519,9 @@ export function ListView({
                   )}
                   {columns.map(col => (
                     <SortableHeader key={col.field} col={col} sortField={sortField} sortDir={sortDir} onSort={handleSort}
-                      activeFilters={activeFilters} onFilterApply={handleFilterApply} openFilterCol={openFilterCol} setOpenFilterCol={setOpenFilterCol} />
+                      activeFilters={activeFilters} onFilterApply={handleFilterApply} openFilterCol={openFilterCol} setOpenFilterCol={setOpenFilterCol}
+                      onResizeStart={onResizeStart} onResizeReset={resetColumn}
+                      currentWidth={colWidths[col.field] != null ? colWidths[col.field] : defaultColWidth(col)} />
                   ))}
                 </tr>
               </thead>
