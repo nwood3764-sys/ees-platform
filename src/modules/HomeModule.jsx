@@ -48,7 +48,7 @@ const groupCount = (arr, key) => {
   return Array.from(m, ([name, value]) => ({ name, value }))
 }
 
-export default function HomeModule({ onNavigate, onOpenSetup }) {
+export default function HomeModule({ onNavigate, onOpenSetup, onOpenRecord }) {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
@@ -233,7 +233,7 @@ export default function HomeModule({ onNavigate, onOpenSetup }) {
               return (
                 <div key={region.key} style={{ flex: region.flex, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
                   {regionComps.map(c => (
-                    <HomeComponentRenderer key={c.id} component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }} onNavigate={onNavigate} />
+                    <HomeComponentRenderer key={c.id} component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }} onNavigate={(table, id) => onOpenRecord && onOpenRecord({ table, id, mode: 'view' })} />
                   ))}
                   {regionComps.length === 0 && <div style={{ color: C.textMuted, fontSize: 12, padding: 12 }}>&nbsp;</div>}
                 </div>

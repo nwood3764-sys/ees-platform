@@ -41,7 +41,7 @@ export default function HomePageBuilder() {
       setSources({
         dashboards: dbs.map(d => ({ id: d.id, name: d.name || d.dashboard_name || 'Dashboard' })),
         reports: reps.map(r => ({ id: r.id, name: r.name || r.report_name || 'Report' })),
-        listViews: lvs.map(v => ({ id: v.id, name: v.name || v.label || 'List View', object: v.object || v.listObject })),
+        listViews: lvs.map(v => ({ id: v._id || v.id, name: v.name || v.label || 'List View', object: v.object || v.listObject })),
         roles: roles.map(r => ({ id: r.id, name: r.name || r.role_name || 'Role' })),
       })
       setLoading(false)

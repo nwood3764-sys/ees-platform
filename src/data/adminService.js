@@ -558,6 +558,62 @@ export async function fetchSavedListViews() {
   })
 }
 
+// Fetch a single saved list view's definition (object, columns, filters, sort)
+// by its real UUID. Used by the home-page List View component to render a live
+// preview.
+export async function fetchSavedListViewDef(id) {
+  const { data, error } = await supabase
+    .from('saved_list_views')
+    .select('id, list_view_name, list_view_object, list_view_visible_columns, list_view_filters, list_view_sort_field, list_view_sort_direction')
+    .eq('id', id)
+    .eq('is_deleted', false)
+    .single()
+  if (error) throw error
+  return {
+    id: data.id,
+    name: data.list_view_name || '(untitled)',
+    object: data.list_view_object || '',
+    visibleColumns: Array.isArray(data.list_view_visible_columns) ? data.list_view_visible_columns : [],
+    filters: Array.isArray(data.list_view_filters) ? data.list_view_filters : [],
+    sortField: data.list_view_sort_field || null,
+    sortDirection: data.list_view_sort_direction || 'asc',
+  }
+}
+
+// Run a saved list view's query and return up to `limit` rows. Applies the
+// stored filters and sort. Operators supported mirror the list-view builder:
+// equals, not_equals, contains, starts_with, gt, gte, lt, lte, is_empty,
+// is_not_empty. Unknown operators are ignored (no-op) so a malformed filter
+// never blocks the whole preview.
+export async function fetchListViewPreview({ object, filters = [], sortField = null, sortDirection = 'asc', limit = 8 }) {
+  if (!object) return []
+  let q = supabase.from(object).select('*')
+  // Soft-delete aware: most business tables carry is_deleted.
+  q = q.or('is_deleted.is.null,is_deleted.eq.false')
+  for (const f of filters) {
+    if (!f || !f.field) continue
+    const col = f.field, val = f.value
+    switch (f.operator) {
+      case 'equals':       q = q.eq(col, val); break
+      case 'not_equals':   q = q.neq(col, val); break
+      case 'contains':     q = q.ilike(col, `%${val}%`); break
+      case 'starts_with':  q = q.ilike(col, `${val}%`); break
+      case 'gt':           q = q.gt(col, val); break
+      case 'gte':          q = q.gte(col, val); break
+      case 'lt':           q = q.lt(col, val); break
+      case 'lte':          q = q.lte(col, val); break
+      case 'is_empty':     q = q.is(col, null); break
+      case 'is_not_empty': q = q.not(col, 'is', null); break
+      default: break
+    }
+  }
+  if (sortField) q = q.order(sortField, { ascending: sortDirection !== 'desc', nullsFirst: false })
+  q = q.limit(limit)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
 // ---------------------------------------------------------------------------
 // Service Territories — geographic regions field staff are assigned to.
 // Hierarchical: parent_territory_id + top_level_territory_id self-refs.

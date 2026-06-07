@@ -135,8 +135,9 @@ function TaskListCard({ title, onNavigate }) {
   const [tasks, setTasks] = useState(null)
   useEffect(() => {
     let cancelled = false
-    import('../../data/tasksService').then(m => (m.fetchMyTasks ? m.fetchMyTasks() : Promise.resolve([])))
-      .then(rows => { if (!cancelled) setTasks(rows || []) })
+    import('../../data/tasksService')
+      .then(m => (m.fetchTasks ? m.fetchTasks('mine') : Promise.resolve([])))
+      .then(rows => { if (!cancelled) setTasks((rows || []).filter(t => t.status !== 'Completed')) })
       .catch(() => { if (!cancelled) setTasks([]) })
     return () => { cancelled = true }
   }, [])
@@ -146,9 +147,12 @@ function TaskListCard({ title, onNavigate }) {
         {tasks === null && <div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>Loading tasks…</div>}
         {tasks && tasks.length === 0 && <div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>No open tasks.</div>}
         {tasks && tasks.slice(0, 8).map(t => (
-          <div key={t.id} onClick={() => onNavigate && onNavigate('tasks', t.id)}
-            style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}`, fontSize: 12.5, color: C.textPrimary, cursor: onNavigate ? 'pointer' : 'default' }}>
-            {t.title || t.name || t.subject || '(untitled task)'}
+          <div key={t._id} onClick={() => onNavigate && onNavigate('tasks', t._id)}
+            style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}`, fontSize: 12.5, color: C.textPrimary, cursor: onNavigate ? 'pointer' : 'default', display: 'flex', justifyContent: 'space-between', gap: 10 }}
+            onMouseEnter={e => { if (onNavigate) e.currentTarget.style.background = '#f7faf9' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</span>
+            {t.isOverdue && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: '#b03a2e' }}>OVERDUE</span>}
           </div>
         ))}
       </div>
@@ -181,13 +185,105 @@ function EmbeddedReport({ title, sourceId }) {
   )
 }
 
+// Column-name → human label. Strips a leading "<object>_" prefix and the
+// trailing "_id" on FK columns, then title-cases.
+function humanizeColumn(col, object) {
+  let c = col
+  if (object && c.startsWith(object.replace(/s$/, '') + '_')) c = c.slice(object.replace(/s$/, '').length + 1)
+  c = c.replace(/_id$/, '').replace(/_/g, ' ').trim()
+  return c.replace(/\b\w/g, m => m.toUpperCase())
+}
+
+function formatCell(v) {
+  if (v === null || v === undefined || v === '') return '—'
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+  if (typeof v === 'object') return Array.isArray(v) ? `${v.length} item${v.length === 1 ? '' : 's'}` : '—'
+  const s = String(v)
+  // ISO date / datetime → short date
+  if (/^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})?/.test(s)) {
+    const d = new Date(s)
+    if (!isNaN(d)) return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  }
+  return s.length > 40 ? s.slice(0, 38) + '…' : s
+}
+
+// Pick which columns to display: the saved view's visibleColumns if set, else a
+// sensible default — prefer a record-number/name column first, a status/stage,
+// and a date, falling back to the first few non-system keys.
+function pickColumns(visibleColumns, rows, object) {
+  if (Array.isArray(visibleColumns) && visibleColumns.length > 0) return visibleColumns.slice(0, 4)
+  if (!rows.length) return []
+  const keys = Object.keys(rows[0])
+  const SYS = new Set(['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'is_deleted'])
+  const pref = []
+  const nameCol = keys.find(k => /(_record_number|_name)$/.test(k)) || keys.find(k => k === 'name')
+  if (nameCol) pref.push(nameCol)
+  const statusCol = keys.find(k => /(_status|status|_stage|stage)$/.test(k) && !pref.includes(k))
+  if (statusCol) pref.push(statusCol)
+  const dateCol = keys.find(k => /(_date|_at)$/.test(k) && !SYS.has(k) && !pref.includes(k))
+  if (dateCol) pref.push(dateCol)
+  for (const k of keys) {
+    if (pref.length >= 4) break
+    if (!SYS.has(k) && !pref.includes(k) && !k.endsWith('_id')) pref.push(k)
+  }
+  return pref.slice(0, 4)
+}
+
 function EmbeddedListView({ title, sourceId, sources, onNavigate }) {
-  const view = sources.listViews?.find(v => v.id === sourceId)
+  const [state, setState] = useState({ status: 'loading', def: null, rows: [] })
+  useEffect(() => {
+    let cancelled = false
+    if (!sourceId) { setState({ status: 'empty', def: null, rows: [] }); return }
+    ;(async () => {
+      try {
+        const svc = await import('../../data/adminService')
+        const def = await svc.fetchSavedListViewDef(sourceId)
+        const rows = await svc.fetchListViewPreview({
+          object: def.object, filters: def.filters,
+          sortField: def.sortField, sortDirection: def.sortDirection, limit: 8,
+        })
+        if (!cancelled) setState({ status: 'ready', def, rows })
+      } catch (e) {
+        if (!cancelled) setState({ status: 'error', def: null, rows: [], error: e.message || String(e) })
+      }
+    })()
+    return () => { cancelled = true }
+  }, [sourceId])
+
+  const { status, def, rows } = state
+  const heading = title || def?.name || 'List View'
+
+  if (status === 'loading') return <CardShell title={heading}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>Loading…</div></CardShell>
+  if (status === 'empty')   return <CardShell title={heading}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>No list view selected.</div></CardShell>
+  if (status === 'error')   return <CardShell title={heading}><div style={{ padding: 14, color: '#b03a2e', fontSize: 12 }}>Could not load this list view.</div></CardShell>
+
+  const cols = pickColumns(def.visibleColumns, rows, def.object)
+  const nameKey = cols[0]
+
   return (
-    <CardShell title={title}>
-      <div style={{ padding: 14, fontSize: 12, color: C.textMuted }}>
-        {view ? `List view "${view.name}" on ${view.object || 'records'}.` : 'No list view selected.'}
-      </div>
+    <CardShell title={heading} right={<span style={{ fontSize: 11, color: C.textMuted }}>{rows.length === 8 ? '8+' : rows.length}</span>}>
+      {rows.length === 0 ? (
+        <div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>No matching records.</div>
+      ) : (
+        <div style={{ overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: cols.map((_, i) => i === 0 ? '1.6fr' : '1fr').join(' '), padding: '8px 14px', background: '#fafbfd', borderBottom: `1px solid ${C.border}`, fontSize: 10.5, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            {cols.map(c => <div key={c} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{humanizeColumn(c, def.object)}</div>)}
+          </div>
+          {rows.map(r => (
+            <div key={r.id}
+              onClick={() => onNavigate && onNavigate(def.object, r.id)}
+              style={{ display: 'grid', gridTemplateColumns: cols.map((_, i) => i === 0 ? '1.6fr' : '1fr').join(' '), padding: '8px 14px', borderBottom: `1px solid ${C.border}`, fontSize: 12, color: C.textPrimary, cursor: onNavigate ? 'pointer' : 'default' }}
+              onMouseEnter={e => { if (onNavigate) e.currentTarget.style.background = '#f7faf9' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
+              {cols.map((c, i) => (
+                <div key={c} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: i === 0 ? (onNavigate ? C.emerald : C.textPrimary) : C.textSecondary, fontWeight: i === 0 ? 500 : 400 }}>
+                  {formatCell(r[c])}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </CardShell>
   )
 }
