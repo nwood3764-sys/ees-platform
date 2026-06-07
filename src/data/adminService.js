@@ -779,6 +779,100 @@ export async function fetchPicklistsFor(tableName) {
   }))
 }
 
+// ── Per-record-type picklist availability (Salesforce hierarchy) ──────────
+// Object → Field → (picklist) values → per Record Type, which values apply.
+//
+// Distinct picklist FIELDS on an object (each is a managed picklist field).
+// Returns [{ field, valueCount }] excluding 'record_type' itself (record types
+// are managed in their own pane, not as a value list here).
+export async function fetchPicklistFieldsFor(tableName) {
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('picklist_field')
+    .eq('picklist_object', tableName)
+    .eq('picklist_is_active', true)
+  if (error) throw error
+  const counts = {}
+  for (const r of (data || [])) {
+    if (r.picklist_field === 'record_type') continue
+    counts[r.picklist_field] = (counts[r.picklist_field] || 0) + 1
+  }
+  return Object.entries(counts)
+    .map(([field, valueCount]) => ({ field, valueCount }))
+    .sort((a, b) => a.field.localeCompare(b.field))
+}
+
+// All active values for ONE field on an object, in sort order.
+export async function fetchFieldValues(tableName, field) {
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
+    .eq('picklist_object', tableName)
+    .eq('picklist_field', field)
+    .order('picklist_sort_order', { ascending: true })
+    .order('picklist_value', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({
+    _id: r.id,
+    value: r.picklist_value,
+    label: r.picklist_label || r.picklist_value,
+    sortOrder: r.picklist_sort_order ?? 0,
+    active: r.picklist_is_active !== false,
+  }))
+}
+
+// Record types for an object (rows where picklist_field='record_type').
+export async function fetchRecordTypesFor(tableName) {
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
+    .eq('picklist_object', tableName)
+    .eq('picklist_field', 'record_type')
+    .order('picklist_label', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({
+    _id: r.id,
+    value: r.picklist_value,
+    label: r.picklist_label || r.picklist_value,
+    sortOrder: r.picklist_sort_order ?? 0,
+    active: r.picklist_is_active !== false,
+  }))
+}
+
+// Current per-record-type assignments for an object+field. Returns a map of
+// record_type_id -> Set(value_id). A record type ABSENT from the map (no rows)
+// means "universal" — every value applies (Salesforce default).
+export async function fetchRecordTypeValueAssignments(tableName, field) {
+  // Resolve the field's value ids first, then pull assignments for them.
+  const vals = await fetchFieldValues(tableName, field)
+  const valueIds = vals.map(v => v._id)
+  if (valueIds.length === 0) return { map: {}, valueIds: [] }
+  const { data, error } = await supabase
+    .from('picklist_value_record_type_assignments')
+    .select('pvrta_record_type_id, pvrta_picklist_value_id')
+    .eq('pvrta_is_deleted', false)
+    .in('pvrta_picklist_value_id', valueIds)
+  if (error) throw error
+  const map = {}
+  for (const r of (data || [])) {
+    (map[r.pvrta_record_type_id] ||= new Set()).add(r.pvrta_picklist_value_id)
+  }
+  return { map, valueIds }
+}
+
+// Replace the available-value set for one (record type, field). Empty array =
+// universal (all values). Drives the per-record-type editor's Save.
+export async function setRecordTypePicklistValues(recordTypeId, object, field, valueIds) {
+  const { data, error } = await supabase.rpc('set_record_type_picklist_values', {
+    p_record_type_id: recordTypeId,
+    p_object: object,
+    p_field: field,
+    p_value_ids: valueIds,
+  })
+  if (error) throw error
+  return data
+}
+
 // Users — for Administration > Users
 //
 // Includes the role name (joined) and a `hasAuthLink` boolean derived from

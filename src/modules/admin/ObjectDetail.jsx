@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { C } from '../../data/constants'
 import { Icon, SectionTabs } from '../../components/UI'
 import {
@@ -10,6 +10,7 @@ import {
 import RecordTypesPane from './RecordTypesPane'
 import LayoutsPane from './LayoutsPane'
 import LayoutEditor from './LayoutEditor'
+import FieldPicklistEditor from './FieldPicklistEditor'
 
 // ---------------------------------------------------------------------------
 // Object Detail — Salesforce-style per-object configuration page.
@@ -29,6 +30,7 @@ const SUB_TABS = [
 
 export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', initialLayoutId = null }) {
   const [sub, setSub] = useState(initialSubTab)
+  const [selectedField, setSelectedField] = useState(null)
   const [columns, setColumns] = useState([])
   const [incomingFKs, setIncomingFKs] = useState([])
   const [pageLayouts, setPageLayouts] = useState([])
@@ -122,7 +124,7 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
         <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 5 }}>{obj.description}</div>
       </div>
 
-      <SectionTabs sections={SUB_TABS} active={sub} onChange={(id) => { setSub(id); setSelectedLayoutId(null) }} counts={counts} />
+      <SectionTabs sections={SUB_TABS} active={sub} onChange={(id) => { setSub(id); setSelectedLayoutId(null); setSelectedField(null) }} counts={counts} />
 
       <div style={{ flex: 1, overflow: 'auto', background: C.page }}>
         {loading && (
@@ -143,7 +145,20 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
         {!loading && !error && (
           <>
             {sub === 'details'     && <DetailsPane obj={obj} columns={columns} />}
-            {sub === 'fields'      && <FieldsPane columns={columns} />}
+            {sub === 'fields'      && (
+              selectedField
+                ? <FieldPicklistEditor
+                    objectName={obj.table}
+                    objectLabel={obj.pluralLabel || obj.label}
+                    field={selectedField}
+                    onBack={() => setSelectedField(null)}
+                  />
+                : <FieldsPane
+                    columns={columns}
+                    picklistFields={new Set(picklists.filter(p => p.field !== 'record_type').map(p => p.field))}
+                    onOpenField={setSelectedField}
+                  />
+            )}
             {sub === 'layouts' && (
               selectedLayoutId
                 ? <LayoutEditor
@@ -219,16 +234,40 @@ function PaneSearch({ value, onChange, placeholder }) {
   )
 }
 
-function FieldsPane({ columns }) {
+function FieldsPane({ columns, picklistFields = new Set(), onOpenField }) {
   const [q, setQ] = useState('')
+  const [sortKey, setSortKey] = useState('ordinal')   // 'ordinal' | 'name'
+  const [sortDir, setSortDir] = useState('asc')        // 'asc' | 'desc'
   const needle = q.trim().toLowerCase()
-  const shown = needle
-    ? columns.filter(c =>
-        (c.column_name || '').toLowerCase().includes(needle) ||
-        fmtType(c).toLowerCase().includes(needle) ||
-        (c.references_table ? `${c.references_table}.${c.references_column}` : '').toLowerCase().includes(needle)
-      )
-    : columns
+
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(key); setSortDir('asc') }
+  }
+
+  const shown = useMemo(() => {
+    let list = needle
+      ? columns.filter(c =>
+          (c.column_name || '').toLowerCase().includes(needle) ||
+          fmtType(c).toLowerCase().includes(needle) ||
+          (c.references_table ? `${c.references_table}.${c.references_column}` : '').toLowerCase().includes(needle)
+        )
+      : [...columns]
+    list.sort((a, b) => {
+      let cmp
+      if (sortKey === 'name') cmp = (a.column_name || '').localeCompare(b.column_name || '')
+      else cmp = (a.ordinal_position || 0) - (b.ordinal_position || 0)
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return list
+  }, [columns, needle, sortKey, sortDir])
+
+  const Arrow = ({ active }) => (
+    <span style={{ marginLeft: 4, opacity: active ? 1 : 0.25, fontSize: 9 }}>
+      {active ? (sortDir === 'asc' ? '▲' : '▼') : '▲'}
+    </span>
+  )
+
   return (
     <div style={{ padding: '16px 24px' }}>
       <PaneSearch value={q} onChange={setQ} placeholder="Search fields…" />
@@ -242,14 +281,16 @@ function FieldsPane({ columns }) {
           padding: '10px 14px', background: '#fafbfd',
           borderBottom: `1px solid ${C.border}`,
         }}>
-          <div>#</div>
-          <div>Field Name</div>
+          <div onClick={() => toggleSort('ordinal')} style={{ cursor: 'pointer', userSelect: 'none' }}># <Arrow active={sortKey === 'ordinal'} /></div>
+          <div onClick={() => toggleSort('name')} style={{ cursor: 'pointer', userSelect: 'none' }}>Field Name <Arrow active={sortKey === 'name'} /></div>
           <div>Data Type</div>
           <div style={{ textAlign: 'center' }}>Required</div>
           <div style={{ textAlign: 'center' }}>PK/FK</div>
           <div>References</div>
         </div>
-        {shown.map(c => (
+        {shown.map(c => {
+          const isPicklist = picklistFields.has(c.column_name)
+          return (
           <div key={c.column_name} style={{
             display: 'grid',
             gridTemplateColumns: '32px 2fr 1.4fr 0.6fr 0.6fr 1.4fr',
@@ -262,8 +303,27 @@ function FieldsPane({ columns }) {
             <div style={{ color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
               {c.ordinal_position}
             </div>
-            <div style={{ color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
-              {c.column_name}
+            <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isPicklist ? (
+                <span
+                  onClick={() => onOpenField && onOpenField(c.column_name)}
+                  style={{ color: C.emerald, fontWeight: 500, cursor: 'pointer' }}
+                  title="Manage picklist values & per-record-type availability"
+                >
+                  {c.column_name}
+                </span>
+              ) : (
+                <span style={{ color: C.textPrimary }}>{c.column_name}</span>
+              )}
+              {isPicklist && (
+                <span
+                  onClick={() => onOpenField && onOpenField(c.column_name)}
+                  style={{ cursor: 'pointer', fontFamily: 'Inter, sans-serif', fontSize: 9.5, fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: '#e8f3fb', color: '#1a5a8a' }}
+                  title="Manage picklist values & per-record-type availability"
+                >
+                  PICKLIST
+                </span>
+              )}
             </div>
             <div style={{ color: C.textSecondary, fontSize: 11.5 }}>
               {fmtType(c)}
@@ -292,7 +352,8 @@ function FieldsPane({ columns }) {
               {c.references_table ? `${c.references_table}.${c.references_column}` : <span style={{ color: C.textMuted, fontFamily: 'inherit' }}>—</span>}
             </div>
           </div>
-        ))}
+          )
+        })}
       </Card>
     </div>
   )
