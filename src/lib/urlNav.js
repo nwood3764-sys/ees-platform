@@ -137,6 +137,30 @@ export function getTableListUrl(table) {
   return `/m/${moduleId}/${section}`
 }
 
+// Reverse of TABLE_LIST_SECTION_MAP — section id back to its table name for
+// the handful of sections whose id differs from the table.
+const SECTION_TABLE_MAP = Object.fromEntries(
+  Object.entries(TABLE_LIST_SECTION_MAP).map(([table, section]) => [section, table])
+)
+
+/**
+ * Resolve the underlying table for a module's current list section. Used by
+ * the topbar Setup gear so that, on a list page (no record open), it can still
+ * deep-link to that object's setup instead of the generic Setup home.
+ *
+ * Sections whose id equals the table name resolve directly; the few that
+ * differ (workorders→work_orders, etc.) come from SECTION_TABLE_MAP. The
+ * candidate is validated against TABLE_MODULE_MAP for the active module, so a
+ * non-object section (e.g. a module "home" or dashboard tab) returns null and
+ * the gear falls back to generic Setup.
+ */
+export function getTableForSection(moduleId, section) {
+  if (!moduleId || !section) return null
+  const candidate = SECTION_TABLE_MAP[section] || section
+  if (TABLE_MODULE_MAP[candidate] === moduleId) return candidate
+  return null
+}
+
 // Regex matching a UUID v4 — the only ID format we accept in record URLs.
 // Record-number formats (PROJ-00001, ENV-00002, ...) are NOT accepted here
 // because the RecordDetail loader takes a UUID. If we want record-number

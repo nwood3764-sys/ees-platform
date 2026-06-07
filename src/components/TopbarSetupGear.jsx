@@ -24,6 +24,7 @@ import { getRecordTypeColumn, getCurrentUserProfile } from '../data/layoutServic
  */
 export default function TopbarSetupGear({
   selectedRecord,
+  listTable,
   onOpenSetup,
 }) {
   const [open, setOpen] = useState(false)
@@ -34,6 +35,11 @@ export default function TopbarSetupGear({
   // if the user navigates from one record to another with the menu closed.
   const [resolvedRecordTypeId, setResolvedRecordTypeId] = useState(null)
   const wrapRef = useRef(null)
+
+  // The object the gear acts on: the open record's table when viewing a
+  // record, otherwise the current list page's table (so the gear deep-links to
+  // the right object's setup from a list, not the generic Setup home).
+  const effectiveTable = selectedRecord?.table || listTable || null
 
   // Admin gate — fetch once on mount.
   useEffect(() => {
@@ -84,7 +90,7 @@ export default function TopbarSetupGear({
     if (busy) return
     setBusy(true)
     try {
-      const tableName = selectedRecord?.table
+      const tableName = effectiveTable
       if (!tableName) return
       // Find the default page layout for (object, record_type). Falls back to
       // the object's default layout if no record-type-specific one exists.
@@ -132,15 +138,15 @@ export default function TopbarSetupGear({
     } finally {
       setBusy(false)
     }
-  }, [selectedRecord, resolvedRecordTypeId, onOpenSetup, busy])
+  }, [effectiveTable, resolvedRecordTypeId, onOpenSetup, busy])
 
   const handleEditObject = useCallback(() => {
     setOpen(false)
     if (!onOpenSetup) return
-    const tableName = selectedRecord?.table
+    const tableName = effectiveTable
     if (tableName) onOpenSetup('objects', tableName)
     else onOpenSetup('objects')
-  }, [onOpenSetup, selectedRecord])
+  }, [onOpenSetup, effectiveTable])
 
   const handleEditRecordTypes = useCallback(() => {
     setOpen(false)
@@ -148,10 +154,10 @@ export default function TopbarSetupGear({
     // Edit Record Types lives inside ObjectDetail under the Record Types
     // sub-tab. We deep-link to that object with a query param the AdminModule
     // reads to pre-select the recordtypes sub-tab.
-    const tableName = selectedRecord?.table
+    const tableName = effectiveTable
     if (tableName) onOpenSetup('objects', tableName, { initialSubTab: 'recordtypes' })
     else onOpenSetup('objects')
-  }, [onOpenSetup, selectedRecord])
+  }, [onOpenSetup, effectiveTable])
 
   const handleOpenSetup = useCallback(() => {
     setOpen(false)
@@ -212,9 +218,9 @@ export default function TopbarSetupGear({
           }}>
             Setup
           </div>
-          {onRecordPage ? (
+          {effectiveTable ? (
             <>
-              <MenuItem label="Edit Page Layout"  hint="For this object + record type" onClick={handleEditPageLayout} disabled={busy} />
+              <MenuItem label="Edit Page Layout"  hint={onRecordPage ? 'For this object + record type' : 'Default layout for this object'} onClick={handleEditPageLayout} disabled={busy} />
               <MenuItem label="Edit Object"        hint="Columns, validations, record types" onClick={handleEditObject} />
               <MenuItem label="Edit Record Types"  hint="Activate, rename, reorder" onClick={handleEditRecordTypes} />
               <div style={{ borderTop: `1px solid ${C.border}`, margin: '4px 0' }} />

@@ -17,7 +17,7 @@ import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
 import { useIsMobile } from './lib/useMediaQuery'
-import { useUrlNavigation } from './lib/urlNav'
+import { useUrlNavigation, getTableForSection } from './lib/urlNav'
 
 // ─── Lazy-loaded modules ─────────────────────────────────────────────────────
 // Each module becomes its own webpack/rollup chunk. Only the active module's
@@ -296,6 +296,7 @@ function AuthedApp({ session }) {
                 <NotificationBell onNavigateToRecord={navigateToRecord} />
                 <TopbarSetupGear
                   selectedRecord={selectedRecord}
+                  listTable={getTableForSection(activeModule, sectionFromUrl)}
                   onOpenSetup={navigateToSetup}
                 />
                 <TopbarUserMenu
