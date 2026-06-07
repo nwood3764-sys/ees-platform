@@ -290,7 +290,6 @@ function WelcomePane({ onOpenObjectManager, onNavigate }) {
     { label: 'Users',             hint: 'Energy Efficiency Services user accounts',                        nodeId: 'users' },
     { label: 'Roles',             hint: 'Row-level and field-level security roles',   nodeId: 'roles' },
     { label: 'Permission Sets',   hint: 'Additive grants on top of role baseline',    nodeId: 'permission_sets' },
-    { label: 'Picklist Value Sets', hint: 'Central dictionary for every dropdown',    nodeId: 'picklist_values' },
     { label: 'Page Layouts',      hint: 'Record detail layouts',                      nodeId: 'page_layouts' },
     { label: 'Email Templates',   hint: 'Outbound email templates with merge fields', nodeId: 'email_templates' },
     { label: 'Audit Log',         hint: 'Append-only history of system changes',      nodeId: 'audit_log' },
@@ -456,7 +455,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'permission_sets':   return <PermissionSetsPane />
     case 'help_articles':     return <HelpArticlesPane />
     case 'client_errors':     return <ClientErrorsPane />
-    case 'picklist_values':   return <NodePage title="Picklist Value Sets"     table="picklist_values"   fetcher={fetchPicklistValues}    columns={PL_COLS}             newLabel="Picklist Value"   onOpenRecord={onOpenRecord} />
+    case 'picklist_values':   return <NodePage title="All Picklist Values (reference)"     table="picklist_values"   fetcher={fetchPicklistValues}    columns={PL_COLS}             newLabel="Picklist Value"   onOpenRecord={onOpenRecord} note="This is a global read-across of every picklist value in the system. To manage a field's values and which ones are available per record type, open Object Manager → the object → Fields & Relationships → the picklist field." />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'automation_rules':  return <AutomationRulesPane />
     case 'automation_run_log': return <AutomationRunLogPane />
@@ -492,7 +491,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
 
 // ─── NodePage — generic wrapper that loads data + renders a ListView ───
 
-function NodePage({ title, table, fetcher, columns, newLabel, onOpenRecord }) {
+function NodePage({ title, table, fetcher, columns, newLabel, onOpenRecord, note }) {
   const [data, setData]       = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
@@ -518,6 +517,11 @@ function NodePage({ title, table, fetcher, columns, newLabel, onOpenRecord }) {
           {loading ? 'Loading…' : `${data.length} record${data.length === 1 ? '' : 's'}`}
         </div>
       </div>
+      {note && (
+        <div style={{ padding: '9px 24px', background: '#f0f6fc', borderBottom: `1px solid ${C.border}`, fontSize: 12, color: '#1a5a8a', lineHeight: 1.5 }}>
+          {note}
+        </div>
+      )}
       {loading && <LoadingState />}
       {error && !loading && <ErrorState error={error} />}
       {!loading && !error && (

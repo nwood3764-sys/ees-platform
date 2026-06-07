@@ -21,8 +21,8 @@ export const SETUP_TREE = [
     icon: 'M4 7v10a2 2 0 002 2h12a2 2 0 002-2V7M4 7a2 2 0 012-2h12a2 2 0 012 2M4 7l2 3h12l2-3M8 13h8M8 17h5',
     children: [
       { id: 'object_manager',  label: 'Object Manager' },
-      { id: 'picklist_values', label: 'Picklist Value Sets' },
       { id: 'record_types',    label: 'Record Types' },
+      { id: 'picklist_values', label: 'All Picklist Values (reference)' },
     ],
   },
   {
