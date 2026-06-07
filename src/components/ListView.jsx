@@ -1058,17 +1058,15 @@ export function ListView({
     (async () => {
       const views = await fetchSavedViewsForObject(persistObject).catch(() => []);
       if (cancelled) return;
+      // Strictly additive: populate the selector only. We deliberately do NOT
+      // auto-apply a default view's filters/sort on mount — doing so mutates
+      // the active filter/sort state during initial render, which risks
+      // interfering with the list's own data load. The default is surfaced as
+      // a star in the selector; the user applies it by clicking. This keeps the
+      // saved-views layer incapable of affecting which rows render on load.
       setPersonalViews(views);
       const def = views.find(v => v.isDefault);
-      // Only auto-apply the persisted default on initial mount (view still on
-      // the module's defaultViewId and not dirtied by the user).
-      if (def && !isDirty && activeViewId === defaultViewId) {
-        setDefaultViewOverride(def.id);
-        setActiveViewId(def.id);
-        setActiveFilters(def.filters || []);
-        setSortField(def.sortField || null);
-        setSortDir(def.sortDir || 'asc');
-      }
+      if (def) setDefaultViewOverride(def.id);
       getCurrentRoleId().then(rid => { if (!cancelled) setHasRole(Boolean(rid)); }).catch(() => {});
     })();
     return () => { cancelled = true; };
