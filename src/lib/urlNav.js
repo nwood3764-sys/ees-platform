@@ -155,9 +155,15 @@ const SECTION_TABLE_MAP = Object.fromEntries(
  * the gear falls back to generic Setup.
  */
 export function getTableForSection(moduleId, section) {
-  if (!moduleId || !section) return null
+  if (!section) return null
   const candidate = SECTION_TABLE_MAP[section] || section
-  if (TABLE_MODULE_MAP[candidate] === moduleId) return candidate
+  // Modules are Salesforce-style apps over one shared database — the same
+  // object's list can appear in many modules — so resolve the section to its
+  // table whenever the candidate is a real object, regardless of which module
+  // is active. (Previously this required TABLE_MODULE_MAP[candidate]===moduleId,
+  // which broke the Setup gear on every module the object wasn't "assigned" to,
+  // e.g. Project Planning / Implementation, leaving only generic Setup.)
+  if (Object.prototype.hasOwnProperty.call(TABLE_MODULE_MAP, candidate)) return candidate
   return null
 }
 
