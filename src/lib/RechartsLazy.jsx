@@ -121,6 +121,16 @@ import { useState as _useState, useEffect as _useEffect } from 'react'
 
 let _rechartsModule = null
 
+// Placeholder that renders nothing — used for every recharts component name
+// until the real module loads, so consumers can write <R.PieChart> etc.
+// unconditionally without crashing on the first paint.
+const _Empty = () => null
+
+// Proxy returned while recharts is still loading: any property access yields
+// the no-op component, so an entire chart subtree renders to nothing until
+// the real components arrive, then a re-render swaps in the real module.
+const _loadingProxy = new Proxy({}, { get: () => _Empty })
+
 export function useRecharts() {
   const [mod, setMod] = _useState(_rechartsModule)
   _useEffect(() => {
@@ -132,5 +142,5 @@ export function useRecharts() {
     })
     return () => { cancelled = true }
   }, [])
-  return mod
+  return mod || _loadingProxy
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
+import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -54,6 +54,7 @@ function Widget({ title, subtitle, children, footer, onFooter }) {
 }
 
 function Dashboard({ workOrders, projects, opportunities, technicians, partners, onGo }) {
+  const R = useRecharts()
   const projToSchedule = projects.filter(p => p.status === 'Project To Be Scheduled').length
   const woToSchedule   = workOrders.filter(w => w.status === 'Work Order To Be Scheduled').length
   const activeTechs    = technicians.filter(t => /active/i.test(t.status)).length || technicians.length
@@ -94,19 +95,19 @@ function Dashboard({ workOrders, projects, opportunities, technicians, partners,
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
         <Widget title="Projects by Status" subtitle={`Total: ${projects.length} · Pipeline ${fmt(pipeline)}`} footer="View Projects →" onFooter={() => onGo('projects')}>
-          <ResponsiveContainer width="100%" height={150}>
-            <BarChart data={projByStatus} layout="vertical" margin={{ left: 0, right: 20, top: 0, bottom: 0 }}>
-              <XAxis type="number" hide /><YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fill: C.textSecondary }} />
-              <Tooltip /><Bar dataKey="value" fill={C.emerald} radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <R.ResponsiveContainer width="100%" height={150}>
+            <R.BarChart data={projByStatus} layout="vertical" margin={{ left: 0, right: 20, top: 0, bottom: 0 }}>
+              <R.XAxis type="number" hide /><R.YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fill: C.textSecondary }} />
+              <R.Tooltip /><R.Bar dataKey="value" fill={C.emerald} radius={[0, 4, 4, 0]} />
+            </R.BarChart>
+          </R.ResponsiveContainer>
         </Widget>
 
         <Widget title="Work Orders by Status" subtitle={`Total: ${workOrders.length}`} footer="View Work Orders →" onFooter={() => onGo('workorders')}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <ResponsiveContainer width={100} height={130}>
-              <PieChart><Pie data={woByStatus} cx="50%" cy="50%" innerRadius={24} outerRadius={46} dataKey="value" strokeWidth={0}>{woByStatus.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</Pie><Tooltip /></PieChart>
-            </ResponsiveContainer>
+            <R.ResponsiveContainer width={100} height={130}>
+              <R.PieChart><R.Pie data={woByStatus} cx="50%" cy="50%" innerRadius={24} outerRadius={46} dataKey="value" strokeWidth={0}>{woByStatus.map((_, i) => <R.Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</R.Pie><R.Tooltip /></R.PieChart>
+            </R.ResponsiveContainer>
             <div style={{ flex: 1, fontSize: 11, color: C.textSecondary }}>
               {woByStatus.map((d, i) => (
                 <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>

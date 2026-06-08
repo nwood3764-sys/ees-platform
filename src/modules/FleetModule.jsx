@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
+import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -72,6 +72,7 @@ const KIT_VIEWS = [
 // ---------------------------------------------------------------------------
 
 function FleetHome({ setSec, vehicles, activities, kits }) {
+  const R = useRecharts()
   const active = vehicles.filter(v => v.status === 'Active').length
   const inMaint = vehicles.filter(v => v.status === 'In Maintenance').length
   const totalMiles = vehicles.reduce((s, v) => s + (v.odometer || 0), 0)
@@ -130,14 +131,16 @@ function FleetHome({ setSec, vehicles, activities, kits }) {
           {byType.length === 0 ? (
             <div style={{ fontSize:12, color:C.textMuted, padding:'20px 0' }}>No vehicle activities logged.</div>
           ) : (
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={byType} layout="vertical" margin={{ left:0, right:14, top:0, bottom:0 }}>
-                <XAxis type="number" tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize:10, fill:C.textSecondary }} tickLine={false} axisLine={false} width={130} />
-                <Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
-                <Bar dataKey="value" radius={[0,4,4,0]} fill={C.emerald} />
-              </BarChart>
-            </ResponsiveContainer>
+            R && (
+            <R.ResponsiveContainer width="100%" height={160}>
+              <R.BarChart data={byType} layout="vertical" margin={{ left:0, right:14, top:0, bottom:0 }}>
+                <R.XAxis type="number" tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
+                <R.YAxis type="category" dataKey="name" tick={{ fontSize:10, fill:C.textSecondary }} tickLine={false} axisLine={false} width={130} />
+                <R.Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
+                <R.Bar dataKey="value" radius={[0,4,4,0]} fill={C.emerald} />
+              </R.BarChart>
+            </R.ResponsiveContainer>
+            )
           )}
         </div>
 

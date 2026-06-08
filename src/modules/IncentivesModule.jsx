@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from '../lib/RechartsLazy'
+import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -59,6 +59,7 @@ function pmtCell(col, r) {
 }
 
 function IncentivesHome({ setSec, requests, receipts }) {
+  const R = useRecharts()
   const toPrepare    = requests.filter(r => r.status==='Payment Request To Be Prepared'||r.status==='Payment Request To Be Verified')
   const toSubmit     = requests.filter(r => r.status==='Payment Request To Be Submitted')
   const awaitReview  = requests.filter(r => r.status.includes('Awaiting')||r.status==='Payment Request Under Review')
@@ -147,9 +148,9 @@ function IncentivesHome({ setSec, requests, receipts }) {
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Project Payment Requests by Status</div></div>
             <div style={{ padding:'12px 14px', display:'flex', gap:10, alignItems:'center' }}>
-              <ResponsiveContainer width={80} height={80}>
-                <PieChart><Pie data={prByStatus} cx="50%" cy="50%" innerRadius={18} outerRadius={36} dataKey="value" strokeWidth={0}>{prByStatus.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}</Pie></PieChart>
-              </ResponsiveContainer>
+              <R.ResponsiveContainer width={80} height={80}>
+                <R.PieChart><R.Pie data={prByStatus} cx="50%" cy="50%" innerRadius={18} outerRadius={36} dataKey="value" strokeWidth={0}>{prByStatus.map((_,i)=><R.Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}</R.Pie></R.PieChart>
+              </R.ResponsiveContainer>
               <div style={{ flex:1 }}>
                 {prByStatus.map((d,i)=>(
                   <div key={d.name} style={{ display:'flex', justifyContent:'space-between', marginBottom:2 }}>
@@ -165,13 +166,13 @@ function IncentivesHome({ setSec, requests, receipts }) {
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Pipeline by Program ($K)</div></div>
             <div style={{ padding:'10px 14px' }}>
-              <ResponsiveContainer width="100%" height={130}>
-                <BarChart data={pipelineByProgram} layout="vertical" margin={{ left:0, right:14, top:0, bottom:0 }}>
-                  <XAxis type="number" hide/><YAxis type="category" dataKey="name" tick={{ fontSize:9, fill:C.textMuted }} tickLine={false} axisLine={false} width={100}/>
-                  <Tooltip formatter={v=>[`$${v}K`,'Amount']} contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }}/>
-                  <Bar dataKey="value" radius={[0,4,4,0]} fill={C.emerald}/>
-                </BarChart>
-              </ResponsiveContainer>
+              <R.ResponsiveContainer width="100%" height={130}>
+                <R.BarChart data={pipelineByProgram} layout="vertical" margin={{ left:0, right:14, top:0, bottom:0 }}>
+                  <R.XAxis type="number" hide/><R.YAxis type="category" dataKey="name" tick={{ fontSize:9, fill:C.textMuted }} tickLine={false} axisLine={false} width={100}/>
+                  <R.Tooltip formatter={v=>[`$${v}K`,'Amount']} contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }}/>
+                  <R.Bar dataKey="value" radius={[0,4,4,0]} fill={C.emerald}/>
+                </R.BarChart>
+              </R.ResponsiveContainer>
             </div>
             <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Report →</span></div>
           </div>
@@ -179,14 +180,14 @@ function IncentivesHome({ setSec, requests, receipts }) {
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Payments Received ($K)</div><div style={{ fontSize:11, color:C.textMuted, marginTop:1 }}>Rolling 6 months</div></div>
             <div style={{ padding:'10px 14px' }}>
-              <ResponsiveContainer width="100%" height={130}>
-                <LineChart data={receivedByMonth} margin={{ left:0, right:14, top:8, bottom:0 }}>
-                  <XAxis dataKey="month" tick={{ fontSize:10, fill:C.textSecondary }} tickLine={false} axisLine={false}/>
-                  <YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false}/>
-                  <Tooltip formatter={v=>[`$${v}K`,'Received']} contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }}/>
-                  <Line type="monotone" dataKey="value" stroke={C.emerald} strokeWidth={2} dot={{ fill:C.emerald, r:3 }}/>
-                </LineChart>
-              </ResponsiveContainer>
+              <R.ResponsiveContainer width="100%" height={130}>
+                <R.LineChart data={receivedByMonth} margin={{ left:0, right:14, top:8, bottom:0 }}>
+                  <R.XAxis dataKey="month" tick={{ fontSize:10, fill:C.textSecondary }} tickLine={false} axisLine={false}/>
+                  <R.YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false}/>
+                  <R.Tooltip formatter={v=>[`$${v}K`,'Received']} contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }}/>
+                  <R.Line type="monotone" dataKey="value" stroke={C.emerald} strokeWidth={2} dot={{ fill:C.emerald, r:3 }}/>
+                </R.LineChart>
+              </R.ResponsiveContainer>
             </div>
             <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={()=>setSec('received')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Receipts →</span></div>
           </div>

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
+import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -307,6 +307,7 @@ function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, on
 }
 
 function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrews = [] }) {
+  const R = useRecharts()
   const toVerify    = workOrders.filter(w => w.status === 'Work Order To Be Verified')
   const corrections = workOrders.filter(w => w.status === 'Work Order Corrections Needed')
   const toSchedProj = projects.filter(p => p.status === 'Project To Be Scheduled')
@@ -382,9 +383,9 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Work Orders by Status</div></div>
             <div style={{ padding:'12px 14px', display:'flex', gap:10, alignItems:'center' }}>
-              <ResponsiveContainer width={80} height={80}>
-                <PieChart><Pie data={woByStatus} cx="50%" cy="50%" innerRadius={18} outerRadius={36} dataKey="value" strokeWidth={0}>{woByStatus.map((_,i) => <Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}</Pie></PieChart>
-              </ResponsiveContainer>
+              <R.ResponsiveContainer width={80} height={80}>
+                <R.PieChart><R.Pie data={woByStatus} cx="50%" cy="50%" innerRadius={18} outerRadius={36} dataKey="value" strokeWidth={0}>{woByStatus.map((_,i) => <R.Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}</R.Pie></R.PieChart>
+              </R.ResponsiveContainer>
               <div style={{ flex:1 }}>
                 {woByStatus.map((d,i) => (
                   <div key={d.name} style={{ display:'flex', justifyContent:'space-between', marginBottom:2 }}>

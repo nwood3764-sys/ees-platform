@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
+import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -50,6 +50,7 @@ function Widget({ title, subtitle, children, footer, onFooter }) {
 }
 
 function Dashboard({ workOrders, projects, opportunities, onGo }) {
+  const R = useRecharts()
   const woInProgress = workOrders.filter(w => w.status === 'Work Order In Progress').length
   const woToVerify   = workOrders.filter(w => w.status === 'Work Order To Be Verified').length
   const woCorrections= workOrders.filter(w => w.status === 'Work Order Corrections Needed').length
@@ -91,9 +92,9 @@ function Dashboard({ workOrders, projects, opportunities, onGo }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
         <Widget title="Work Orders by Status" subtitle={`Total: ${workOrders.length}`} footer="View Work Orders →" onFooter={() => onGo('workorders')}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <ResponsiveContainer width={100} height={120}>
-              <PieChart><Pie data={woByStatus} cx="50%" cy="50%" innerRadius={24} outerRadius={46} dataKey="value" strokeWidth={0}>{woByStatus.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</Pie><Tooltip /></PieChart>
-            </ResponsiveContainer>
+            <R.ResponsiveContainer width={100} height={120}>
+              <R.PieChart><R.Pie data={woByStatus} cx="50%" cy="50%" innerRadius={24} outerRadius={46} dataKey="value" strokeWidth={0}>{woByStatus.map((_, i) => <R.Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</R.Pie><R.Tooltip /></R.PieChart>
+            </R.ResponsiveContainer>
             <div style={{ flex: 1, fontSize: 11, color: C.textSecondary }}>
               {woByStatus.map((d, i) => (
                 <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
@@ -107,21 +108,21 @@ function Dashboard({ workOrders, projects, opportunities, onGo }) {
         </Widget>
 
         <Widget title="Active Work by Team Lead" subtitle="Open work orders per lead" footer="View Work Orders →" onFooter={() => onGo('workorders')}>
-          <ResponsiveContainer width="100%" height={140}>
-            <BarChart data={woByTeam} layout="vertical" margin={{ left: 0, right: 20, top: 0, bottom: 0 }}>
-              <XAxis type="number" hide /><YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 11, fill: C.textSecondary }} />
-              <Tooltip /><Bar dataKey="value" fill={C.emerald} radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <R.ResponsiveContainer width="100%" height={140}>
+            <R.BarChart data={woByTeam} layout="vertical" margin={{ left: 0, right: 20, top: 0, bottom: 0 }}>
+              <R.XAxis type="number" hide /><R.YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 11, fill: C.textSecondary }} />
+              <R.Tooltip /><R.Bar dataKey="value" fill={C.emerald} radius={[0, 4, 4, 0]} />
+            </R.BarChart>
+          </R.ResponsiveContainer>
         </Widget>
 
         <Widget title="Projects by Status" subtitle={`Pipeline value: ${fmt(pipeline)}`} footer="View Active Projects →" onFooter={() => onGo('projects')}>
-          <ResponsiveContainer width="100%" height={140}>
-            <BarChart data={projByStatus} layout="vertical" margin={{ left: 0, right: 20, top: 0, bottom: 0 }}>
-              <XAxis type="number" hide /><YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fill: C.textSecondary }} />
-              <Tooltip /><Bar dataKey="value" fill={C.sky} radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <R.ResponsiveContainer width="100%" height={140}>
+            <R.BarChart data={projByStatus} layout="vertical" margin={{ left: 0, right: 20, top: 0, bottom: 0 }}>
+              <R.XAxis type="number" hide /><R.YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fill: C.textSecondary }} />
+              <R.Tooltip /><R.Bar dataKey="value" fill={C.sky} radius={[0, 4, 4, 0]} />
+            </R.BarChart>
+          </R.ResponsiveContainer>
         </Widget>
       </div>
     </div>

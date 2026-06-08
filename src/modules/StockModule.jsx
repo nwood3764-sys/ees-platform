@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
+import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -96,6 +96,7 @@ const EQ_VIEWS = [
 // ---------------------------------------------------------------------------
 
 function StockHome({ setSec, products, inventory, requests, equipment }) {
+  const R = useRecharts()
   // KPI calculations
   const totalSkus = products.length
   const totalOnHand = inventory.reduce((s, r) => s + r.quantityOnHand, 0)
@@ -147,13 +148,13 @@ function StockHome({ setSec, products, inventory, requests, equipment }) {
             <div style={{ fontSize:12, color:C.textMuted, padding:'20px 0' }}>No inventory loaded yet.</div>
           ) : (
             <div style={{ display:'flex', gap:12, alignItems:'center' }}>
-              <ResponsiveContainer width={130} height={130}>
-                <PieChart>
-                  <Pie data={invByFamily} cx="50%" cy="50%" innerRadius={32} outerRadius={60} dataKey="value" strokeWidth={0}>
-                    {invByFamily.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
+              <R.ResponsiveContainer width={130} height={130}>
+                <R.PieChart>
+                  <R.Pie data={invByFamily} cx="50%" cy="50%" innerRadius={32} outerRadius={60} dataKey="value" strokeWidth={0}>
+                    {invByFamily.map((_, i) => <R.Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                  </R.Pie>
+                </R.PieChart>
+              </R.ResponsiveContainer>
               <div style={{ flex:1 }}>
                 {invByFamily.map((d, i) => (
                   <div key={d.name} style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
@@ -174,14 +175,14 @@ function StockHome({ setSec, products, inventory, requests, equipment }) {
           {reqByStatus.length === 0 ? (
             <div style={{ fontSize:12, color:C.textMuted, padding:'20px 0' }}>No materials requests loaded.</div>
           ) : (
-            <ResponsiveContainer width="100%" height={150}>
-              <BarChart data={reqByStatus} margin={{ left:0, right:10, top:8, bottom:0 }}>
-                <XAxis dataKey="name" tick={{ fontSize:10, fill:C.textSecondary }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
-                <Bar dataKey="value" radius={[4,4,0,0]} fill={C.emerald} />
-              </BarChart>
-            </ResponsiveContainer>
+            <R.ResponsiveContainer width="100%" height={150}>
+              <R.BarChart data={reqByStatus} margin={{ left:0, right:10, top:8, bottom:0 }}>
+                <R.XAxis dataKey="name" tick={{ fontSize:10, fill:C.textSecondary }} tickLine={false} axisLine={false} />
+                <R.YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
+                <R.Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
+                <R.Bar dataKey="value" radius={[4,4,0,0]} fill={C.emerald} />
+              </R.BarChart>
+            </R.ResponsiveContainer>
           )}
         </div>
       </div>

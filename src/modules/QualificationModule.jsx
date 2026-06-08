@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
+import { useRecharts } from '../lib/RechartsLazy'
 import { C, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -82,6 +82,7 @@ const OPP_COLS = [
 const OPP_VIEWS = [{ id:'QOP-01', name:'All Opportunities', filters:[], sortField:'closeDate', sortDir:'asc' }]
 
 function QualHome({ setSec, assessments, applications, efrReports }) {
+  const R = useRecharts()
   const toReview = assessments.filter(a => a.status === 'Assessment Completed — To Be Reviewed')
   const verified = assessments.filter(a => a.status === 'Assessment Verified')
   const corrections = applications.filter(a => a.status === 'Incentive Application Corrections Needed')
@@ -125,14 +126,14 @@ function QualHome({ setSec, assessments, applications, efrReports }) {
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Assessments by Status</div></div>
             <div style={{ padding:'10px 14px' }}>
-              <ResponsiveContainer width="100%" height={120}>
-                <BarChart data={asmtByStatus} margin={{ left:0, right:10, top:8, bottom:0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
-                  <Bar dataKey="value" radius={[4,4,0,0]} fill={C.sky} />
-                </BarChart>
-              </ResponsiveContainer>
+              <R.ResponsiveContainer width="100%" height={120}>
+                <R.BarChart data={asmtByStatus} margin={{ left:0, right:10, top:8, bottom:0 }}>
+                  <R.XAxis dataKey="name" tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
+                  <R.YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
+                  <R.Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
+                  <R.Bar dataKey="value" radius={[4,4,0,0]} fill={C.sky} />
+                </R.BarChart>
+              </R.ResponsiveContainer>
             </div>
             <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('assessments')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Assessments →</span></div>
           </div>
@@ -140,20 +141,20 @@ function QualHome({ setSec, assessments, applications, efrReports }) {
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Incentive Applications by Status</div></div>
             <div style={{ padding:'10px 14px' }}>
-              <ResponsiveContainer width="100%" height={120}>
-                <BarChart data={[
+              <R.ResponsiveContainer width="100%" height={120}>
+                <R.BarChart data={[
                   { name:'To Prepare', value: applications.filter(a => a.status.includes('To Be')).length },
                   { name:'Submitted',  value: applications.filter(a => a.status.includes('Submitted')).length },
                   { name:'Pre-Approved',value:applications.filter(a => a.status === 'Incentive Application Pre-Approved').length },
                   { name:'Approved',   value: applications.filter(a => a.status === 'Incentive Application Approved').length },
                   { name:'Corrections',value: corrections.length },
                 ]} margin={{ left:0, right:10, top:8, bottom:0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
-                  <Bar dataKey="value" radius={[4,4,0,0]} fill={C.emerald} />
-                </BarChart>
-              </ResponsiveContainer>
+                  <R.XAxis dataKey="name" tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
+                  <R.YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
+                  <R.Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
+                  <R.Bar dataKey="value" radius={[4,4,0,0]} fill={C.emerald} />
+                </R.BarChart>
+              </R.ResponsiveContainer>
             </div>
             <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('applications')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Applications →</span></div>
           </div>

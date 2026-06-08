@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from '../lib/RechartsLazy'
+import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -153,6 +153,7 @@ function contactCell(col, r) {
 }
 
 function OutreachHome({ setSec, properties, opportunities, enrollments, contacts }) {
+  const R = useRecharts()
   const enrolled = properties.filter(p => p.status === 'Enrolled')
   const hafPending = enrollments.filter(e => e.hafAgreement === 'Pending')
   const iqInProgress = enrollments.filter(e => e.incomeQual === 'In Progress')
@@ -210,14 +211,14 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
           <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
             <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}><div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Opportunities by Stage</div></div>
             <div style={{ padding: '10px 14px' }}>
-              <ResponsiveContainer width="100%" height={145}>
-                <BarChart data={oppByStage} layout="vertical" margin={{ left: 0, right: 14, top: 0, bottom: 0 }}>
-                  <XAxis type="number" hide />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: C.textMuted }} tickLine={false} axisLine={false} width={120} />
-                  <Tooltip contentStyle={{ fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 5 }} />
-                  <Bar dataKey="value" radius={[0, 4, 4, 0]} fill={C.emerald} />
-                </BarChart>
-              </ResponsiveContainer>
+              <R.ResponsiveContainer width="100%" height={145}>
+                <R.BarChart data={oppByStage} layout="vertical" margin={{ left: 0, right: 14, top: 0, bottom: 0 }}>
+                  <R.XAxis type="number" hide />
+                  <R.YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: C.textMuted }} tickLine={false} axisLine={false} width={120} />
+                  <R.Tooltip contentStyle={{ fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 5 }} />
+                  <R.Bar dataKey="value" radius={[0, 4, 4, 0]} fill={C.emerald} />
+                </R.BarChart>
+              </R.ResponsiveContainer>
             </div>
             <div style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}` }}><span onClick={() => setSec('opps')} style={{ color: '#1a5a8a', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>View Opportunities →</span></div>
           </div>
@@ -225,9 +226,9 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
           <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
             <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}><div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Properties by Status</div></div>
             <div style={{ padding: '12px 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
-              <ResponsiveContainer width={90} height={90}>
-                <PieChart><Pie data={propByStatus} cx="50%" cy="50%" innerRadius={20} outerRadius={40} dataKey="value" strokeWidth={0}>{propByStatus.map((_, i) => <Cell key={i} fill={CHART_COLORS[i]} />)}</Pie></PieChart>
-              </ResponsiveContainer>
+              <R.ResponsiveContainer width={90} height={90}>
+                <R.PieChart><R.Pie data={propByStatus} cx="50%" cy="50%" innerRadius={20} outerRadius={40} dataKey="value" strokeWidth={0}>{propByStatus.map((_, i) => <R.Cell key={i} fill={CHART_COLORS[i]} />)}</R.Pie></R.PieChart>
+              </R.ResponsiveContainer>
               <div style={{ flex: 1 }}>
                 {propByStatus.map((d, i) => (
                   <div key={d.name} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -243,14 +244,14 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
           <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
             <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}><div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Pipeline by State ($K)</div></div>
             <div style={{ padding: '10px 14px' }}>
-              <ResponsiveContainer width="100%" height={120}>
-                <BarChart data={pipelineByState} margin={{ left: 0, right: 10, top: 8, bottom: 0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.textSecondary }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: C.textMuted }} tickLine={false} axisLine={false} />
-                  <Tooltip formatter={v => [`$${v}K`, 'Pipeline']} contentStyle={{ fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 5 }} />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={C.purple} />
-                </BarChart>
-              </ResponsiveContainer>
+              <R.ResponsiveContainer width="100%" height={120}>
+                <R.BarChart data={pipelineByState} margin={{ left: 0, right: 10, top: 8, bottom: 0 }}>
+                  <R.XAxis dataKey="name" tick={{ fontSize: 11, fill: C.textSecondary }} tickLine={false} axisLine={false} />
+                  <R.YAxis tick={{ fontSize: 10, fill: C.textMuted }} tickLine={false} axisLine={false} />
+                  <R.Tooltip formatter={v => [`$${v}K`, 'Pipeline']} contentStyle={{ fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 5 }} />
+                  <R.Bar dataKey="value" radius={[4, 4, 0, 0]} fill={C.purple} />
+                </R.BarChart>
+              </R.ResponsiveContainer>
             </div>
             <div style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}` }}><span style={{ color: '#1a5a8a', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>View Report →</span></div>
           </div>
