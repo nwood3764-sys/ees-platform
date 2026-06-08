@@ -194,11 +194,15 @@ function humanizeColumn(col, object) {
   return c.replace(/\b\w/g, m => m.toUpperCase())
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function formatCell(v) {
   if (v === null || v === undefined || v === '') return '—'
   if (typeof v === 'boolean') return v ? 'Yes' : 'No'
   if (typeof v === 'object') return Array.isArray(v) ? `${v.length} item${v.length === 1 ? '' : 's'}` : '—'
   const s = String(v)
+  // Raw UUID FK value with no resolved label — show a dash rather than an opaque id
+  if (UUID_RE.test(s)) return '—'
   // ISO date / datetime → short date
   if (/^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})?/.test(s)) {
     const d = new Date(s)
@@ -215,16 +219,23 @@ function pickColumns(visibleColumns, rows, object) {
   if (!rows.length) return []
   const keys = Object.keys(rows[0])
   const SYS = new Set(['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'is_deleted'])
+  // A column whose non-empty sampled values are all bare UUIDs is an unresolved
+  // FK (e.g. *_status/*_record_type → picklist_values.id) — opaque to a reader.
+  const isUuidColumn = (k) => {
+    const vals = rows.map(r => r[k]).filter(v => v !== null && v !== undefined && v !== '')
+    return vals.length > 0 && vals.every(v => typeof v === 'string' && UUID_RE.test(v))
+  }
+  const usable = (k) => !SYS.has(k) && !k.endsWith('_id') && !isUuidColumn(k)
   const pref = []
   const nameCol = keys.find(k => /(_record_number|_name)$/.test(k)) || keys.find(k => k === 'name')
   if (nameCol) pref.push(nameCol)
-  const statusCol = keys.find(k => /(_status|status|_stage|stage)$/.test(k) && !pref.includes(k))
+  const statusCol = keys.find(k => /(_status|status|_stage|stage)$/.test(k) && !pref.includes(k) && !isUuidColumn(k))
   if (statusCol) pref.push(statusCol)
   const dateCol = keys.find(k => /(_date|_at)$/.test(k) && !SYS.has(k) && !pref.includes(k))
   if (dateCol) pref.push(dateCol)
   for (const k of keys) {
     if (pref.length >= 4) break
-    if (!SYS.has(k) && !pref.includes(k) && !k.endsWith('_id')) pref.push(k)
+    if (usable(k) && !pref.includes(k)) pref.push(k)
   }
   return pref.slice(0, 4)
 }
