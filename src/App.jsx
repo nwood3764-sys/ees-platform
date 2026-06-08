@@ -12,6 +12,7 @@ import HelpPanel from './components/help/HelpPanel'
 import HelpTopbarButton from './components/help/HelpTopbarButton'
 import TopbarSetupGear from './components/TopbarSetupGear'
 import TopbarUserMenu from './components/TopbarUserMenu'
+import AssistantPanel from './components/AssistantPanel'
 import NotificationBell from './components/NotificationBell'
 import { C, NAV_MODULES } from './data/constants'
 import { supabase } from './lib/supabase'
@@ -344,6 +345,12 @@ function AuthedApp({ session }) {
           onClose={() => setIntegrationsOpen(false)}
         />
       )}
+
+      <AssistantPanel
+        activeModule={activeModule}
+        selectedRecord={selectedRecord}
+        listTable={getTableForSection(activeModule, sectionFromUrl)}
+      />
     </div>
   )
 }
