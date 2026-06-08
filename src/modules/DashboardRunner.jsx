@@ -358,11 +358,21 @@ function buildChartData(result, widget) {
   const limit        = cfg.limit         || 20
   if (!groupCol) return []
 
+  // Resolve the real column definitions from the report so picklist/FK
+  // group values resolve to labels and via_path columns read correctly.
+  // getRowValue needs the column's _is_picklist / via_path metadata; a bare
+  // { name } object skips label resolution and reads the wrong key.
+  const cols       = result.columns || []
+  const groupField = cols.find(c => c.name === groupCol) || { name: groupCol }
+  const measFieldDef = measureField
+    ? (cols.find(c => c.name === measureField) || { name: measureField })
+    : null
+
   // Group rows by the resolved value of groupCol (FK labels and picklist
   // labels already substituted by getRowValue).
   const buckets = new Map()
   for (const row of result.rows) {
-    const k = getRowValue(row, { name: groupCol }, result) ?? '—'
+    const k = getRowValue(row, groupField, result) ?? '—'
     const key = String(k)
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key).push(row)
@@ -372,13 +382,13 @@ function buildChartData(result, widget) {
   const aggregated = []
   for (const [name, bucketRows] of buckets) {
     let value
-    if (measureType === 'count' || !measureField) {
+    if (measureType === 'count' || !measFieldDef) {
       value = bucketRows.length
     } else {
       // Pull resolved values for the measure field; coerce to numbers
       const nums = []
       for (const row of bucketRows) {
-        const v = getRowValue(row, { name: measureField }, result)
+        const v = getRowValue(row, measFieldDef, result)
         if (v == null || v === '') continue
         const n = typeof v === 'number' ? v : parseFloat(v)
         if (Number.isFinite(n)) nums.push(n)
