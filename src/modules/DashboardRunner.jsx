@@ -1,9 +1,5 @@
 import { useState, useEffect } from 'react'
-import {
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
-  FunnelChart, Funnel,
-} from '../lib/RechartsLazy'
+import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
 import { runReport, loadDashboard, getRowValue } from '../data/reportsService'
@@ -368,16 +364,6 @@ function buildChartData(result, widget) {
     ? (cols.find(c => c.name === measureField) || { name: measureField })
     : null
 
-  try {
-    console.log('[CHARTDBG]', widget?.dw_title, JSON.stringify({
-      groupCol, measureType, measureField,
-      rows: (result.rows || []).length,
-      cols: cols.map(c => c.name),
-      sampleRow: (result.rows || [])[0] || null,
-      groupVals: (result.rows || []).slice(0, 5).map(r => getRowValue(r, groupField, result)),
-    }))
-  } catch (e) { console.log('[CHARTDBG] err', e?.message) }
-
   // Group rows by the resolved value of groupCol (FK labels and picklist
   // labels already substituted by getRowValue).
   const buckets = new Map()
@@ -427,64 +413,72 @@ function buildChartData(result, widget) {
 }
 
 function BarWidget({ result, widget }) {
+  const R = useRecharts()
   const data = buildChartData(result, widget)
+  if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={data}>
-        <XAxis dataKey="name" tick={{ fontSize:10 }} />
-        <YAxis tick={{ fontSize:10 }} />
-        <Tooltip />
-        <Bar dataKey="value" fill={C.emerald} />
-      </BarChart>
-    </ResponsiveContainer>
+    <R.ResponsiveContainer width="100%" height={240}>
+      <R.BarChart data={data}>
+        <R.XAxis dataKey="name" tick={{ fontSize:10 }} />
+        <R.YAxis tick={{ fontSize:10 }} />
+        <R.Tooltip />
+        <R.Bar dataKey="value" fill={C.emerald} />
+      </R.BarChart>
+    </R.ResponsiveContainer>
   )
 }
 
 function LineWidget({ result, widget }) {
+  const R = useRecharts()
   const data = buildChartData(result, widget)
+  if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <LineChart data={data}>
-        <XAxis dataKey="name" tick={{ fontSize:10 }} />
-        <YAxis tick={{ fontSize:10 }} />
-        <Tooltip />
-        <Line type="monotone" dataKey="value" stroke={C.emerald} strokeWidth={2} />
-      </LineChart>
-    </ResponsiveContainer>
+    <R.ResponsiveContainer width="100%" height={240}>
+      <R.LineChart data={data}>
+        <R.XAxis dataKey="name" tick={{ fontSize:10 }} />
+        <R.YAxis tick={{ fontSize:10 }} />
+        <R.Tooltip />
+        <R.Line type="monotone" dataKey="value" stroke={C.emerald} strokeWidth={2} />
+      </R.LineChart>
+    </R.ResponsiveContainer>
   )
 }
 
 function PieWidget({ result, widget, donut }) {
+  const R = useRecharts()
   const data = buildChartData(result, widget)
+  if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <PieChart>
-        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%"
+    <R.ResponsiveContainer width="100%" height={240}>
+      <R.PieChart>
+        <R.Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%"
           outerRadius={80} innerRadius={donut ? 40 : 0}
           label={(e) => e.name}>
           {data.map((_, i) => (
-            <Cell key={i} fill={(CHART_COLORS && CHART_COLORS[i % CHART_COLORS.length]) || C.emerald} />
+            <R.Cell key={i} fill={(CHART_COLORS && CHART_COLORS[i % CHART_COLORS.length]) || C.emerald} />
           ))}
-        </Pie>
-        <Tooltip />
-      </PieChart>
-    </ResponsiveContainer>
+        </R.Pie>
+        <R.Tooltip />
+      </R.PieChart>
+    </R.ResponsiveContainer>
   )
 }
 
 function FunnelWidget({ result, widget }) {
+  const R = useRecharts()
   const data = buildChartData(result, widget).sort((a, b) => b.value - a.value)
+  if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <FunnelChart>
-        <Tooltip />
-        <Funnel data={data} dataKey="value" nameKey="name" isAnimationActive={false}>
+    <R.ResponsiveContainer width="100%" height={240}>
+      <R.FunnelChart>
+        <R.Tooltip />
+        <R.Funnel data={data} dataKey="value" nameKey="name" isAnimationActive={false}>
           {data.map((_, i) => (
-            <Cell key={i} fill={(CHART_COLORS && CHART_COLORS[i % CHART_COLORS.length]) || C.emerald} />
+            <R.Cell key={i} fill={(CHART_COLORS && CHART_COLORS[i % CHART_COLORS.length]) || C.emerald} />
           ))}
-        </Funnel>
-      </FunnelChart>
-    </ResponsiveContainer>
+        </R.Funnel>
+      </R.FunnelChart>
+    </R.ResponsiveContainer>
   )
 }
 

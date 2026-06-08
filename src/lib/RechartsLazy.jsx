@@ -99,3 +99,38 @@ export const LabelList          = lazyChart('LabelList')
 export const Scatter            = lazyChart('Scatter')
 export const ScatterChart       = lazyChart('ScatterChart')
 export const ZAxis              = lazyChart('ZAxis')
+
+// ── Whole-namespace loader ────────────────────────────────────────────────
+//
+// The per-component lazy wrappers above are NOT safe for charts that rely
+// on recharts' children introspection (PieChart reading <Pie>/<Cell>,
+// BarChart reading <Bar>, cartesian charts reading <XAxis>/<YAxis>). When
+// each child is its own Suspense-wrapped lazy component, the parent chart
+// cannot recognize the child element types and renders an empty <svg>
+// surface with no data layers.
+//
+// useRecharts() loads the entire recharts module once (same shared promise,
+// same Vite chunk) and returns the real namespace. Consumers render real,
+// directly-composed components inside a single boundary — e.g.
+//
+//   const R = useRecharts()
+//   if (!R) return null
+//   return <R.ResponsiveContainer ...><R.PieChart>...<R.Pie/>...</R.PieChart></R.ResponsiveContainer>
+//
+import { useState as _useState, useEffect as _useEffect } from 'react'
+
+let _rechartsModule = null
+
+export function useRecharts() {
+  const [mod, setMod] = _useState(_rechartsModule)
+  _useEffect(() => {
+    if (_rechartsModule) { setMod(_rechartsModule); return }
+    let cancelled = false
+    rechartsPromise.then(m => {
+      _rechartsModule = m
+      if (!cancelled) setMod(m)
+    })
+    return () => { cancelled = true }
+  }, [])
+  return mod
+}
