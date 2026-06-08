@@ -20,6 +20,16 @@ import {
   getCurrentRoleId,
 } from '../data/listViewsService';
 
+// Pluralize an object label for empty-state copy. Handles the common English
+// cases that a naive `+ 's'` gets wrong: consonant+y → -ies (Property →
+// Properties), sibilant endings → -es (Address → Addresses, Box → Boxes).
+function pluralizeLabel(label) {
+  if (!label) return 'records';
+  if (/[^aeiou]y$/i.test(label)) return label.slice(0, -1) + 'ies';
+  if (/(s|x|z|ch|sh)$/i.test(label)) return label + 'es';
+  return label + 's';
+}
+
 // ── Column-width persistence ─────────────────────────────────────────────────
 // Excel-style draggable column widths. Widths are stored per list under a
 // stable localStorage key so a user's sizing survives reloads and navigation.
@@ -1634,7 +1644,7 @@ export function ListView({
                 </svg>
               </div>
               <div style={{ fontSize: 15, fontWeight: 500, color: C.textPrimary }}>
-                {data.length === 0 ? `No ${newLabel ? newLabel.toLowerCase() + 's' : 'records'} yet` : 'No matching records'}
+                {data.length === 0 ? `No ${pluralizeLabel(newLabel ? newLabel.toLowerCase() : '')} yet` : 'No matching records'}
               </div>
               <div style={{ fontSize: 13, maxWidth: 260, lineHeight: 1.4 }}>
                 {data.length === 0
@@ -1849,7 +1859,7 @@ export function ListView({
 
       {/* Table + detail panel */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
-        <div style={{ flex: 1, overflow: 'auto', padding: '14px 24px 24px' }}>
+        <div style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '14px 24px 24px' }}>
           <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'auto' }}>
             <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
               <colgroup>
@@ -1894,7 +1904,7 @@ export function ListView({
                 {filtered.length === 0 ? (
                   <tr><td colSpan={columns.length + (editMode ? 1 : 0)} style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
                     {data.length === 0
-                      ? <>No {newLabel ? newLabel.toLowerCase() + 's' : 'records'} yet. <span onClick={onNew} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Create one</span></>
+                      ? <>No {pluralizeLabel(newLabel ? newLabel.toLowerCase() : '')} yet. <span onClick={onNew} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Create one</span></>
                       : <>No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span></>
                     }
                   </td></tr>
