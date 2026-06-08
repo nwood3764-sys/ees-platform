@@ -52,32 +52,15 @@ export async function commitAssistantActions({ actions, context = null, aiAssist
 }
 
 // The ad-hoc assistant flow is a single shared flow row that anchors
-// assistant-initiated runs that the user has not saved as a named task. It is
-// created once per tenant and reused. Saved tasks (future) pass their own
-// flowId and bypass this.
+// assistant-initiated runs the user has not saved as a named task. Resolved
+// (and created once) server-side by resolve_adhoc_assistant_flow, which is
+// SECURITY DEFINER and sets owner_id to the current app user — the client
+// never inserts into flows directly (owner_id is NOT NULL and RLS-guarded).
 let _adhocFlowIdCache = null
 async function getOrCreateAdhocFlowId() {
   if (_adhocFlowIdCache) return _adhocFlowIdCache
-  const { data: existing } = await supabase
-    .from('flows')
-    .select('id')
-    .eq('flow_name', 'AI Assistant — Ad-hoc')
-    .eq('is_deleted', false)
-    .maybeSingle()
-  if (existing?.id) { _adhocFlowIdCache = existing.id; return existing.id }
-
-  const { data: created, error } = await supabase
-    .from('flows')
-    .insert({
-      flow_record_number: '',
-      flow_name: 'AI Assistant — Ad-hoc',
-      flow_description: 'System flow anchoring ad-hoc AI assistant actions that were not saved as a named task.',
-      flow_type: 'screen',
-      flow_status: 'active',
-    })
-    .select('id')
-    .single()
+  const { data, error } = await supabase.rpc('resolve_adhoc_assistant_flow')
   if (error) throw error
-  _adhocFlowIdCache = created.id
-  return created.id
+  _adhocFlowIdCache = data
+  return data
 }

@@ -48,7 +48,7 @@ const cors = {
 const MODEL = "claude-sonnet-4-20250514"
 const PRICE_INPUT_PER_MTOK  = 3.00
 const PRICE_OUTPUT_PER_MTOK = 15.00
-const MAX_TURNS = 6   // tool-use loop ceiling per request
+const MAX_TURNS = 8   // tool-use loop ceiling per request
 
 interface RecordContext {
   object?:      string   // table name of the record the user is viewing
@@ -273,6 +273,7 @@ Deno.serve(async (req) => {
   const proposedActions: unknown[] = []
   let totalIn = 0, totalOut = 0
   let finalText = ""
+  let endedNaturally = false
 
   try {
     for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -311,7 +312,7 @@ Deno.serve(async (req) => {
       if (textBlocks.length) finalText = textBlocks.join("\n")
 
       const toolUses = blocks.filter(b => b.type === "tool_use")
-      if (toolUses.length === 0) break   // model is done
+      if (toolUses.length === 0) { endedNaturally = true; break }   // model is done
 
       // Record the assistant turn, then answer each tool_use.
       messages.push({ role: "assistant", content: blocks })
@@ -344,6 +345,35 @@ Deno.serve(async (req) => {
 
       messages.push({ role: "user", content: toolResults })
       // Loop: model sees tool results and continues or finishes.
+    }
+
+    // If the loop exhausted MAX_TURNS while still mid-tool-use, the model never
+    // composed a closing answer — finalText holds only interim narration. Make
+    // one more call with tool_choice:none to force a text-only final reply.
+    if (!endedNaturally) {
+      const closeResp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 1000,
+          system: SYSTEM_PROMPT,
+          tools: TOOLS.map((t) => { const c = { ...t }; delete (c as any).mutating; return c }),
+          tool_choice: { type: "none" },
+          messages: [...messages, { role: "user", content: "Give your final answer now in plain text, using what you have already gathered. Do not call any more tools." }],
+        }),
+      })
+      if (closeResp.ok) {
+        const cd = await closeResp.json()
+        totalIn  += cd?.usage?.input_tokens  ?? 0
+        totalOut += cd?.usage?.output_tokens ?? 0
+        const closeText = (cd?.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n")
+        if (closeText) finalText = closeText
+      }
     }
   } catch (e) {
     await logUsage(admin, {
@@ -401,7 +431,16 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
     if (name === "describe_object") {
       const { data, error } = await userClient.rpc("describe_object_columns", { p_table: input.object })
       if (error) return JSON.stringify({ error: error.message })
-      return JSON.stringify({ object: input.object, columns: data })
+      // Trim to essentials — full metadata can be tens of KB and bloats the
+      // loop's context, burning turns. Keep name/type/fk/label only.
+      const cols = (Array.isArray(data) ? data : []).map((c: any) => ({
+        column: c.column_name,
+        type: c.data_type,
+        nullable: c.is_nullable === "YES",
+        pk: c.is_primary_key || undefined,
+        fk: c.is_foreign_key ? (c.references_table || true) : undefined,
+      }))
+      return JSON.stringify({ object: input.object, columns: cols })
     }
     if (name === "query_records") {
       const limit = Math.min(Math.max(Number(input.limit) || 25, 1), 100)
