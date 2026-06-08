@@ -368,6 +368,16 @@ function buildChartData(result, widget) {
     ? (cols.find(c => c.name === measureField) || { name: measureField })
     : null
 
+  try {
+    console.log('[CHARTDBG]', widget?.dw_title, JSON.stringify({
+      groupCol, measureType, measureField,
+      rows: (result.rows || []).length,
+      cols: cols.map(c => c.name),
+      sampleRow: (result.rows || [])[0] || null,
+      groupVals: (result.rows || []).slice(0, 5).map(r => getRowValue(r, groupField, result)),
+    }))
+  } catch (e) { console.log('[CHARTDBG] err', e?.message) }
+
   // Group rows by the resolved value of groupCol (FK labels and picklist
   // labels already substituted by getRowValue).
   const buckets = new Map()
