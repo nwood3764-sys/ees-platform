@@ -793,13 +793,17 @@ export async function loadFilterValueOptions(primaryTable, columnName) {
   }
 
   if (col.is_foreign_key && col.references_table === 'picklist_values') {
-    // picklist_object/picklist_field are stored as the full table + column
-    // names (see loadPicklistLabels), not singularized.
+    // picklist_object is the full table name. picklist_field equals the
+    // column name for most picklists (e.g. opportunity_status), but the
+    // record-type column maps to the bare 'record_type' key. Query the
+    // candidate keys so both conventions resolve.
+    const fieldKeys = [columnName]
+    if (/(^|_)record_type$/.test(columnName)) fieldKeys.push('record_type')
     const { data, error } = await supabase
       .from('picklist_values')
       .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
       .eq('picklist_object', primaryTable)
-      .eq('picklist_field', columnName)
+      .in('picklist_field', fieldKeys)
       .eq('picklist_is_active', true)
       .order('picklist_sort_order', { ascending: true })
     if (error) { console.warn('picklist value options load failed:', error.message); return { kind: null, options: [] } }
