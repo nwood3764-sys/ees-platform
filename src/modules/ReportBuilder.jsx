@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { Icon, LoadingState, ErrorState } from '../components/UI'
+import SearchableCombo from '../components/SearchableCombo'
 import {
   loadReport, saveReport, cloneReport,
   loadFieldTree, loadRelatedObjectFields,
   listPrimaryObjectOptions,
   listObjectColumns,
+  loadFilterValueOptions,
 } from '../data/reportsService'
 import { supabase } from '../lib/supabase'
 
@@ -582,6 +584,7 @@ function FiltersTab({ report, updateReport, filters, setFilters, primaryObject, 
                     filter={f}
                     idx={idx}
                     fieldTree={fieldTree}
+                    primaryObject={primaryObject}
                     onUpdate={(patch) => updateFilter(idx, patch)}
                     onRemove={() => removeFilter(idx)}
                   />
@@ -611,7 +614,32 @@ function FiltersTab({ report, updateReport, filters, setFilters, primaryObject, 
 
 // ─── Filter row components ────────────────────────────────────────────────
 
-function RegularFilterRow({ filter: f, idx, fieldTree, onUpdate, onRemove }) {
+function RegularFilterRow({ filter: f, idx, fieldTree, onUpdate, onRemove, primaryObject }) {
+  const [valueOpts, setValueOpts] = useState({ kind: null, options: [] })
+  const [valueLoading, setValueLoading] = useState(false)
+
+  // Operators that compare against a discrete value (where a value picker
+  // makes sense). Range/null/relative-date operators skip the picker.
+  const VALUE_PICKER_OPS = new Set(['equals', 'not_equals'])
+  const NO_VALUE_OPS = new Set(['is_null', 'is_not_null', 'this_month', 'this_year'])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!f.field_name || !primaryObject || !VALUE_PICKER_OPS.has(f.operator)) {
+      setValueOpts({ kind: null, options: [] })
+      return
+    }
+    setValueLoading(true)
+    loadFilterValueOptions(primaryObject, f.field_name)
+      .then(res => { if (!cancelled) setValueOpts(res || { kind: null, options: [] }) })
+      .catch(() => { if (!cancelled) setValueOpts({ kind: null, options: [] }) })
+      .finally(() => { if (!cancelled) setValueLoading(false) })
+    return () => { cancelled = true }
+  }, [f.field_name, f.operator, primaryObject]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const showValuePicker = VALUE_PICKER_OPS.has(f.operator) && valueOpts.kind !== null && valueOpts.options.length > 0
+  const hideValue = NO_VALUE_OPS.has(f.operator)
+
   return (
     <>
       <div style={{
@@ -619,16 +647,12 @@ function RegularFilterRow({ filter: f, idx, fieldTree, onUpdate, onRemove }) {
         gap:8, alignItems:'center',
       }}>
         <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
-        <select
+        <SearchableCombo
           value={f.field_name || ''}
-          onChange={e => onUpdate({ field_name: e.target.value })}
-          style={inputStyle()}
-        >
-          <option value="">— Field —</option>
-          {fieldTree?.primary?.columns.map(c => (
-            <option key={c.name} value={c.name}>{c.name}</option>
-          ))}
-        </select>
+          options={columnsToOptions(fieldTree?.primary?.columns)}
+          onChange={v => onUpdate({ field_name: v, value: '' })}
+          placeholder="— Field —"
+        />
         <select
           value={f.operator}
           onChange={e => onUpdate({ operator: e.target.value })}
@@ -636,13 +660,28 @@ function RegularFilterRow({ filter: f, idx, fieldTree, onUpdate, onRemove }) {
         >
           {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
         </select>
-        <input
-          type="text"
-          value={f.value || ''}
-          onChange={e => onUpdate({ value: e.target.value })}
-          placeholder={f.is_runtime_prompt ? 'Default value (optional)' : 'Value'}
-          style={inputStyle()}
-        />
+        {hideValue ? (
+          <div style={{ fontSize:11, color:C.textMuted, fontStyle:'italic', alignSelf:'center' }}>
+            No value needed
+          </div>
+        ) : showValuePicker ? (
+          <SearchableCombo
+            value={f.value || ''}
+            options={valueOpts.options}
+            loading={valueLoading}
+            onChange={v => onUpdate({ value: v })}
+            placeholder={f.is_runtime_prompt ? 'Default value (optional)' : 'Value'}
+            allowFreeText
+          />
+        ) : (
+          <input
+            type="text"
+            value={f.value || ''}
+            onChange={e => onUpdate({ value: e.target.value })}
+            placeholder={f.is_runtime_prompt ? 'Default value (optional)' : (valueLoading ? 'Loading values…' : 'Value')}
+            style={inputStyle()}
+          />
+        )}
         <button onClick={onRemove} style={miniBtn(true)}>×</button>
       </div>
       <div style={{
@@ -852,16 +891,12 @@ function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree
               gap:8, marginBottom:8, alignItems:'center',
             }}>
               <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
-              <select
+              <SearchableCombo
                 value={g.field_name}
-                onChange={e => updateGrouping(idx, { field_name: e.target.value })}
-                style={inputStyle()}
-              >
-                <option value="">— Field —</option>
-                {fieldTree?.primary?.columns.map(c => (
-                  <option key={c.name} value={c.name}>{c.name}</option>
-                ))}
-              </select>
+                options={columnsToOptions(fieldTree?.primary?.columns)}
+                onChange={v => updateGrouping(idx, { field_name: v })}
+                placeholder="— Field —"
+              />
               <select
                 value={g.sort_direction}
                 onChange={e => updateGrouping(idx, { sort_direction: e.target.value })}
@@ -913,20 +948,16 @@ function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree
                   gap:8, marginBottom:8, alignItems:'center',
                 }}>
                   <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
-                  <select
+                  <SearchableCombo
                     value={cg.name}
-                    onChange={e => {
+                    options={columnsToOptions(fieldTree?.primary?.columns)}
+                    onChange={v => {
                       const cols = [...(report.rpt_column_groupings || [])]
-                      cols[idx] = { ...cols[idx], name: e.target.value }
+                      cols[idx] = { ...cols[idx], name: v }
                       updateReport({ rpt_column_groupings: cols })
                     }}
-                    style={inputStyle()}
-                  >
-                    <option value="">— Field —</option>
-                    {fieldTree?.primary?.columns.map(c => (
-                      <option key={c.name} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
+                    placeholder="— Field —"
+                  />
                   <select
                     value={cg.sort_direction || 'asc'}
                     onChange={e => {
@@ -965,21 +996,17 @@ function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree
                   <option value="min">Min of</option>
                   <option value="max">Max of</option>
                 </select>
-                <select
+                <SearchableCombo
                   value={(report.rpt_charts?.[0]?.measure_field) || ''}
                   disabled={(report.rpt_charts?.[0]?.measure_type) === 'count' || !report.rpt_charts?.[0]?.measure_type}
-                  onChange={e => {
+                  options={columnsToOptions(fieldTree?.primary?.columns)}
+                  onChange={v => {
                     const charts = report.rpt_charts || []
-                    const first = { ...(charts[0] || {}), measure_field: e.target.value }
+                    const first = { ...(charts[0] || {}), measure_field: v }
                     updateReport({ rpt_charts: [first, ...charts.slice(1)] })
                   }}
-                  style={inputStyle()}
-                >
-                  <option value="">— Field (not needed for Count) —</option>
-                  {fieldTree?.primary?.columns.map(c => (
-                    <option key={c.name} value={c.name}>{c.name}</option>
-                  ))}
-                </select>
+                  placeholder="— Field (not needed for Count) —"
+                />
               </div>
               <div style={{ fontSize:11, color:C.textMuted, marginTop:4 }}>
                 What goes in each cell of the matrix. Count is the row count;
@@ -1138,6 +1165,24 @@ function fieldLabel() {
     display: 'block', fontSize: 11, fontWeight: 500, color: C.textSecondary,
     marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5,
   }
+}
+
+// Turn a raw column name into a readable label, e.g. opportunity_state →
+// "Opportunity State". Keeps the raw name available as secondary text so the
+// user can still search/recognise the underlying column.
+function humanizeFieldName(name) {
+  return String(name)
+    .replace(/_/g, ' ')
+    .replace(/\bid\b/i, 'ID')
+    .replace(/\b\w/g, m => m.toUpperCase())
+}
+
+function columnsToOptions(columns) {
+  return (columns || []).map(c => ({
+    value: c.name,
+    label: humanizeFieldName(c.name),
+    secondary: c.name,
+  }))
 }
 
 function inputStyle() {

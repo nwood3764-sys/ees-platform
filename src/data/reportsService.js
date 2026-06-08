@@ -763,6 +763,82 @@ async function loadPicklistLabels(pairs) {
 }
 
 /**
+ * For a given (primaryTable, columnName), return the set of selectable
+ * filter values, or null when the column should stay free-text.
+ *
+ *   - Picklist / record-type column (FK → picklist_values): returns the
+ *     active picklist values for this (object=table, field=column) pair,
+ *     each as { value: picklist_values.id, label, secondary }. The id is
+ *     stored because evalFilterOnRow compares against the raw row value,
+ *     which is the UUID.
+ *   - FK → a real table with a known name column: returns up to a cap of
+ *     referenced records as { value: id, label: <name column> }.
+ *   - Anything else (text, number, date, boolean, unknown FK): returns null
+ *     so the caller falls back to a free-text combo.
+ *
+ * Returns { kind: 'picklist'|'fk'|null, options: [...] }.
+ */
+export async function loadFilterValueOptions(primaryTable, columnName) {
+  if (!primaryTable || !columnName) return { kind: null, options: [] }
+  const cols = await describeColumns(primaryTable)
+  const col = cols.find(c => c.column_name === columnName)
+  if (!col) return { kind: null, options: [] }
+
+  // Boolean → fixed true/false options.
+  if (col.data_type === 'boolean') {
+    return { kind: 'fk', options: [
+      { value: 'true',  label: 'True' },
+      { value: 'false', label: 'False' },
+    ] }
+  }
+
+  if (col.is_foreign_key && col.references_table === 'picklist_values') {
+    // picklist_object/picklist_field are stored as the full table + column
+    // names (see loadPicklistLabels), not singularized.
+    const { data, error } = await supabase
+      .from('picklist_values')
+      .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
+      .eq('picklist_object', primaryTable)
+      .eq('picklist_field', columnName)
+      .eq('picklist_is_active', true)
+      .order('picklist_sort_order', { ascending: true })
+    if (error) { console.warn('picklist value options load failed:', error.message); return { kind: null, options: [] } }
+    const options = (data || []).map(r => ({
+      value: r.id,
+      label: r.picklist_label || r.picklist_value,
+      secondary: r.picklist_value && r.picklist_label && r.picklist_value !== r.picklist_label ? r.picklist_value : undefined,
+    }))
+    return { kind: 'picklist', options }
+  }
+
+  if (col.is_foreign_key && col.references_table) {
+    const candidates = TABLE_NAME_COLUMNS[col.references_table]
+    if (!candidates) return { kind: null, options: [] }
+    const refCols = await describeColumns(col.references_table)
+    const nameCol = candidates.find(n => refCols.some(rc => rc.column_name === n))
+    if (!nameCol) return { kind: null, options: [] }
+    // Cap the referenced-record list — these can be large. The combo filters
+    // client-side over whatever we load; 500 covers configuration-style FKs
+    // (programs, territories, record types). For very large reference tables
+    // (e.g. properties) the user can still type the underlying id verbatim
+    // via the free-text fallback if their target isn't in the first 500.
+    const softDeleteCol = refCols.find(rc => rc.column_name === 'is_deleted')
+      ? 'is_deleted'
+      : (refCols.find(rc => rc.column_name.endsWith('_is_deleted'))?.column_name || null)
+    let q = supabase.from(col.references_table).select(`id, ${nameCol}`).limit(500)
+    if (softDeleteCol) q = q.eq(softDeleteCol, false)
+    q = q.order(nameCol, { ascending: true })
+    const { data, error } = await q
+    if (error) { console.warn('FK value options load failed:', error.message); return { kind: null, options: [] } }
+    const options = (data || []).map(r => ({ value: r.id, label: r[nameCol] != null ? String(r[nameCol]) : '(unnamed)' }))
+    return { kind: 'fk', options }
+  }
+
+  return { kind: null, options: [] }
+}
+
+
+/**
  * Apply a filter-logic expression (e.g. '1 AND (2 OR 3)') to a row set
  * client-side. Each filter row evaluated per-row produces a boolean,
  * indexed by rfilt_filter_index. The expression is parsed via shunting-
