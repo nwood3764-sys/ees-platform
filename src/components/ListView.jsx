@@ -1858,7 +1858,7 @@ export function ListView({
       )}
 
       {/* Table + detail panel */}
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex' }}>
         <div style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '14px 24px 24px' }}>
           <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'auto' }}>
             <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
