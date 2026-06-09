@@ -51,7 +51,7 @@ function verbFor(type) {
     : 'Action'
 }
 
-function ActionCard({ action, onConfirm, onDismiss, onSave, busy, committed }) {
+function ActionCard({ action, onConfirm, onDismiss, onSave, busy, committed, inBatch }) {
   return (
     <div style={{
       border: `1px solid ${C.border}`, borderRadius: 8, background: C.card,
@@ -71,14 +71,25 @@ function ActionCard({ action, onConfirm, onDismiss, onSave, busy, committed }) {
       {committed ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
           <div style={{ fontSize: 12, color: C.emeraldMid, fontWeight: 600 }}>✓ Done</div>
-          <button
-            type="button" onClick={onSave}
-            style={{
-              height: 28, padding: '0 10px', border: `1px solid ${C.border}`, borderRadius: 6,
-              cursor: 'pointer', background: C.cardSecondary || '#f7f9fc', color: C.textSecondary,
-              fontSize: 12, fontFamily: 'inherit',
-            }}
-          >Save as task</button>
+          {/* Save-as-task only makes sense for a standalone action. A single
+              card lifted out of a multi-record batch wouldn't replay correctly. */}
+          {!inBatch && (
+            <button
+              type="button" onClick={onSave}
+              style={{
+                height: 28, padding: '0 10px', border: `1px solid ${C.border}`, borderRadius: 6,
+                cursor: 'pointer', background: C.cardSecondary || '#f7f9fc', color: C.textSecondary,
+                fontSize: 12, fontFamily: 'inherit',
+              }}
+            >Save as task</button>
+          )}
+        </div>
+      ) : inBatch ? (
+        /* Part of a multi-record batch: no per-card commit. The actions must run
+           together in one RPC call so {{ref:...}} parent→child links resolve.
+           The batch banner above is the only commit/dismiss control. */
+        <div style={{ fontSize: 12, color: C.textMuted, marginTop: 8, fontStyle: 'italic' }}>
+          Part of the batch above — confirm them together.
         </div>
       ) : (
         <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -362,6 +373,17 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     }))
   }, [])
 
+  // Dismiss a whole multi-record batch at once. Marks every uncommitted action
+  // as resolved so the batch banner and all cards collapse together.
+  const dismissAllActions = useCallback((turnIdx) => {
+    setTurns(t => t.map((tn, i) => {
+      if (i !== turnIdx) return tn
+      const committed = new Set(tn.committed)
+      ;(tn.actions || []).forEach((_, ai) => committed.add(ai))
+      return { ...tn, committed }
+    }))
+  }, [])
+
   // Save a confirmed action as a repeatable task (no question steps for now —
   // the action template is captured verbatim; guided questions can be added by
   // editing the saved flow later).
@@ -513,14 +535,24 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
                     <div style={{ fontSize: 12, color: C.textSecondary }}>
                       {turn.actions.length} records will be created together, linked in order.
                     </div>
-                    <button
-                      type="button" disabled={busy} onClick={() => confirmAllActions(ti)}
-                      style={{
-                        height: 30, padding: '0 14px', border: 'none', borderRadius: 6,
-                        cursor: busy ? 'wait' : 'pointer', background: C.emerald, color: '#fff',
-                        fontWeight: 600, fontSize: 12, fontFamily: 'inherit', whiteSpace: 'nowrap',
-                      }}
-                    >Confirm all</button>
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <button
+                        type="button" disabled={busy} onClick={() => dismissAllActions(ti)}
+                        style={{
+                          height: 30, padding: '0 12px', border: `1px solid ${C.border}`, borderRadius: 6,
+                          cursor: busy ? 'wait' : 'pointer', background: C.card, color: C.textSecondary,
+                          fontWeight: 600, fontSize: 12, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                        }}
+                      >Dismiss all</button>
+                      <button
+                        type="button" disabled={busy} onClick={() => confirmAllActions(ti)}
+                        style={{
+                          height: 30, padding: '0 14px', border: 'none', borderRadius: 6,
+                          cursor: busy ? 'wait' : 'pointer', background: C.emerald, color: '#fff',
+                          fontWeight: 600, fontSize: 12, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                        }}
+                      >Confirm all</button>
+                    </div>
                   </div>
                 )}
                 {(turn.actions || []).map((action, ai) => (
@@ -529,6 +561,7 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
                     action={action}
                     busy={busy}
                     committed={turn.committed?.has(ai)}
+                    inBatch={(turn.actions || []).length > 1}
                     onConfirm={() => confirmAction(ti, ai)}
                     onDismiss={() => dismissAction(ti, ai)}
                     onSave={() => setSaveTarget(action)}
