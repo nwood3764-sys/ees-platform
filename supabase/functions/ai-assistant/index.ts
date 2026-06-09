@@ -182,6 +182,24 @@ const TOOLS = [
     },
   },
   {
+    name: "create_report",
+    description: "Propose creating a NEW saved report definition in the Reports module that persists for future use. Does NOT execute immediately — shown to the user for confirmation. Use this when the user asks to create, build, or save a report (not just run or query data). Choose the primary object the report is built on, the columns to include, and any simple filters. Before calling, use describe_object on the primary object so you use real column names for selected_fields and filters.",
+    mutating: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Report name shown in the Reports module" },
+        primary_object: { type: "string", description: "Primary object/table the report is built on, e.g. properties" },
+        description: { type: "string" },
+        format: { type: "string", description: "tabular | summary | matrix. Default tabular." },
+        selected_fields: { type: "array", description: "Columns to include. Array of { field_name, field_table, label } using real column names from describe_object.", items: { type: "object" } },
+        filters: { type: "array", description: "Optional filters. Array of { field_name, field_table, operator, value }.", items: { type: "object" } },
+        summary: { type: "string", description: "One-line human summary of the report being created" },
+      },
+      required: ["name", "primary_object", "summary"],
+    },
+  },
+  {
     name: "global_search",
     description: "Search across LEAP objects for records matching a text query. Read-only. Use when the user refers to a record by name and you need its id.",
     input_schema: {
@@ -419,6 +437,19 @@ function lowerToAction(name: string, input: any): Record<string, unknown> {
         type: "status_change", object: input.object, record_id: input.record_id,
         status_field: input.status_field || null, to_status_id: input.to_status_id,
         note: input.note || null, summary: input.summary,
+      }
+    case "create_report":
+      return {
+        type: "report_create",
+        report: {
+          name: input.name,
+          primary_object: input.primary_object,
+          description: input.description || null,
+          format: input.format || "tabular",
+          selected_fields: input.selected_fields || [],
+          filters: input.filters || [],
+        },
+        summary: input.summary,
       }
     default:
       return { type: "unknown", name, input }
