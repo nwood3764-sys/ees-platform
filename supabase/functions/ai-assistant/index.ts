@@ -110,13 +110,14 @@ const TOOLS = [
   },
   {
     name: "create_record",
-    description: "Propose creating one row on any object. This does NOT execute immediately — it is shown to the user for confirmation. Provide the object and a flat map of column → value.",
+    description: "Propose creating one row on any object. This does NOT execute immediately — it is shown to the user for confirmation. Provide the object and a flat map of column → value. To create several related records in ONE batch (e.g. an account plus a property, building, and contact under it), give each create a short `ref`, and in a later create reference an earlier record's not-yet-known id with the token {{ref:NAME}} as the foreign-key value. The batch runs in array order and substitutes the real id at commit. Parents MUST appear before their children.",
     mutating: true,
     input_schema: {
       type: "object",
       properties: {
         object: { type: "string" },
-        values: { type: "object", description: "Map of column name to value" },
+        values: { type: "object", description: "Map of column name to value. A foreign-key value may be the token {{ref:NAME}} to link to another record created earlier in this same batch." },
+        ref: { type: "string", description: "Optional short label (e.g. 'acct') so later records in this batch can link to this one via {{ref:acct}}." },
         summary: { type: "string", description: "One-line human summary of what this creates" },
       },
       required: ["object","values","summary"],
@@ -157,21 +158,21 @@ const TOOLS = [
   // ----- Option A: curated high-value verbs (lower to generic proposed actions) -----
   {
     name: "create_work_order",
-    description: "Propose creating a work order. Curated shortcut for the common field-service request. Shown to the user for confirmation.",
+    description: "Propose creating a work order. Curated shortcut for the common field-service request. Shown to the user for confirmation. Supports `ref` and {{ref:NAME}} the same way as create_record for multi-record batches.",
     mutating: true,
     input_schema: {
       type: "object",
-      properties: { values: { type: "object", description: "work_orders column → value map" }, summary: { type: "string" } },
+      properties: { values: { type: "object", description: "work_orders column → value map" }, ref: { type: "string", description: "Optional batch label for back-references." }, summary: { type: "string" } },
       required: ["values","summary"],
     },
   },
   {
     name: "create_contact",
-    description: "Propose creating a contact. Curated shortcut. Shown to the user for confirmation.",
+    description: "Propose creating a contact. Curated shortcut. Shown to the user for confirmation. Supports `ref` and {{ref:NAME}} the same way as create_record for multi-record batches.",
     mutating: true,
     input_schema: {
       type: "object",
-      properties: { values: { type: "object", description: "contacts column → value map" }, summary: { type: "string" } },
+      properties: { values: { type: "object", description: "contacts column → value map" }, ref: { type: "string", description: "Optional batch label for back-references." }, summary: { type: "string" } },
       required: ["values","summary"],
     },
   },
@@ -245,20 +246,38 @@ const SYSTEM_PROMPT = `You are the LEAP assistant for Energy Efficiency Services
 
 You help the signed-in user take actions by plain conversation: creating records, updating fields, changing statuses, running reports, looking things up. You operate strictly within the user's own permissions — if an action is refused, explain plainly and stop; never try to work around a permission.
 
-Rules:
-- Before proposing a create or update on an object, call describe_object for it (unless you already did this conversation) so you use real column names.
-- When the user names a record (e.g. "the North Willow work order"), use global_search or query_records to resolve its id before acting on it. Never invent ids.
-- The user is often typing fast, dictating by voice-to-text, or misspelling. Treat their wording for any entity as approximate. When a term that must map to a real value looks misspelled, mis-heard, or only approximate, call fuzzy_resolve to ground it:
-    • kind='record' for record names (properties, contacts, work orders, …).
-    • kind='picklist' for statuses, record types, work types, and other picklist values — pass the object, and the field when you know it (e.g. work_order_status).
-  Then:
-    • If one candidate clearly dominates (high score, no close rival), proceed with it but ALWAYS state the correction in plain words first — e.g. 'I read "North Willo" as North Willow' or 'I took "verifyed" to mean the Verified status'. Put corrections in your reply text and in each proposed action's summary, so the confirmation card shows exactly what you matched.
-    • If several candidates are close, or the best score is weak, do NOT guess. List the top candidates and ask the user which they meant before proposing any action.
-- For ordinary misspelled English words that are not entities (e.g. "verifyed", "shedule"), silently read them correctly, but reflect the corrected wording back in your reply and the action summary so the user can confirm you understood ('I read that as: verify work order WO-2841').
-- Never set a status column with update_record. Use change_status, which validates transitions. For the target status, resolve it with fuzzy_resolve kind='picklist' and pass the returned id as to_status_id.
-- Every mutating action you choose is shown to the user for explicit confirmation before it runs — you never execute changes yourself. Describe clearly what you are about to do and why, including any spelling/entity corrections you applied.
-- Be concise and concrete. Use the record context provided if present.
-- Never fabricate field values, dates, amounts, or names. If you don't know a value, ask the user or leave it out.`
+## Plan the whole request before proposing anything
+
+When the user asks for several related records in one breath ("create an account with a property, a building, and a contact"), treat it as ONE job. Plan all of it, then propose it as ONE batch the user confirms once — never do one record and wait. The records are created together, in dependency order, in a single confirmation.
+
+Dependency order is always parent then child: account → property → building → unit, and contacts/opportunities hang off the account. A child record needs its parent's id, which does not exist until the batch runs. To link them, give each create a short 'ref' (e.g. "acct", "prop") and put the token {{ref:NAME}} in the child's foreign-key value. Example for "account + property + building + contact":
+1. create_record accounts, ref "acct", values {account_name: ...}
+2. create_record properties, ref "prop", values {..., property_account_id: "{{ref:acct}}"}
+3. create_record buildings, ref "bldg", values {..., property_id: "{{ref:prop}}"}
+4. create_record contacts, values {..., contact_account_id: "{{ref:acct}}"}
+List parents before children. The batch substitutes the real ids at commit time.
+
+## No holes — gather every required field first
+
+Before proposing any create, call describe_object on each object so you use real column names AND know which fields are required. Required fields (NOT NULL with no default) MUST be filled. Never propose a create that leaves a required field empty — it will fail.
+
+Fill what you can safely derive, and ask the user — in ONE consolidated question — for anything required that you cannot infer. Specifically:
+- A person's full name must be split into first and last name, and most contact records also need a combined full-name field — set all of them (e.g. contact_first_name, contact_last_name, contact_name). If a name is ambiguous to split, ask.
+- US state must be the two-letter postal code (WI, NC, CO, MI, IN), never the spelled-out name — there is a 2-character constraint. Convert it yourself.
+- A property address needs street, city, state, and ZIP. ZIP is required; if the user did not give one, ask for it. Do not invent a ZIP.
+- A building needs a name/number; if the user says "1 building" without a label, use "Building 1" (or ask if they would prefer a specific name).
+
+If several required pieces are missing, ask for all of them together in one message, then proceed. Do not drip one question at a time.
+
+## Resolving names and typos
+
+When the user names an existing record, resolve its id with global_search or query_records before acting; never invent ids. Treat the user's wording as approximate — if a term might be misspelled or mis-heard, use fuzzy_resolve, and always state any correction you applied. For statuses/record types/work types, resolve the value with fuzzy_resolve kind='picklist' and use the returned id (e.g. as to_status_id for change_status). Never set a status column with update_record.
+
+## Confirmation and after
+
+Every mutating action is shown to the user for explicit confirmation before it runs — you never execute changes yourself. Describe clearly what you are about to do, including any corrections or derived values you applied. After the user confirms, the system creates the records and reports back each one's id; the interface shows the user a link to every created record, so once a record is created you can refer to it as done and let the user open it from the card. Do not claim you cannot link to a record — the interface handles the link once creation succeeds.
+
+Be concise and concrete. Use the record context provided if present. Never fabricate field values, dates, amounts, or names. If you don't know a required value, ask.`
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
@@ -459,11 +478,11 @@ Deno.serve(async (req) => {
 function lowerToAction(name: string, input: any): Record<string, unknown> {
   switch (name) {
     case "create_work_order":
-      return { type: "record_create", object: "work_orders", values: input.values, summary: input.summary }
+      return { type: "record_create", object: "work_orders", values: input.values, ref: input.ref || undefined, summary: input.summary }
     case "create_contact":
-      return { type: "record_create", object: "contacts", values: input.values, summary: input.summary }
+      return { type: "record_create", object: "contacts", values: input.values, ref: input.ref || undefined, summary: input.summary }
     case "create_record":
-      return { type: "record_create", object: input.object, values: input.values, summary: input.summary }
+      return { type: "record_create", object: input.object, values: input.values, ref: input.ref || undefined, summary: input.summary }
     case "update_record":
       return { type: "record_update", object: input.object, record_id: input.record_id, values: input.values, summary: input.summary }
     case "change_status":

@@ -233,12 +233,12 @@ function FreeTextStep({ onSubmit, busy }) {
   )
 }
 
-export default function AssistantPanel({ activeModule, selectedRecord, listTable }) {
+export default function AssistantPanel({ activeModule, selectedRecord, listTable, onNavigateToRecord }) {
   const toast = useToast()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  // turns: [{ role:'user'|'assistant', text, actions?:[], committed?:Set }]
+  // turns: [{ role:'user'|'assistant', text, actions?:[], committed?:Set, createdLinks?:[{table,id,label}] }]
   const [turns, setTurns] = useState([])
   const [history, setHistory] = useState([])  // opaque continuity for the edge fn
   const [tasks, setTasks] = useState([])
@@ -294,21 +294,47 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     }
   }, [input, busy, history, selectedRecord, listTable, toast])
 
-  const confirmAction = useCallback(async (turnIdx, actionIdx) => {
+  // Build a {table,id,label} link list from a commit result's per-action rows.
+  const linksFromResult = useCallback((result, actions) => {
+    const rows = result?.results || []
+    const links = []
+    rows.forEach((r, i) => {
+      if (r?.outcome === 'ok' && r?.created_id && (r?.object || actions[i]?.object)) {
+        const table = r.object || actions[i]?.object
+        const label = actions[i]?.summary || `${table} record`
+        links.push({ table, id: r.created_id, label })
+      }
+    })
+    return links
+  }, [])
+
+  // Commit a set of actions together (one RPC call so {{ref:...}} links resolve),
+  // mark them committed, surface created-record links, and feed a short note
+  // back into history so the next turn knows the records exist.
+  const commitSet = useCallback(async (turnIdx, actionIndices) => {
     setBusy(true)
     try {
       const turn = turns[turnIdx]
-      const action = turn.actions[actionIdx]
+      const actions = actionIndices.map(i => turn.actions[i])
       const ctx = buildContext(selectedRecord, listTable)
-      const result = await commitAssistantActions({ actions: [action], context: ctx })
+      const result = await commitAssistantActions({ actions, context: ctx })
       const ok = result?.ok !== false
       if (ok) {
-        toast.success('Action completed')
+        const links = linksFromResult(result, actions)
+        toast.success(actions.length > 1 ? `Created ${links.length} records` : 'Action completed')
         setTurns(t => t.map((tn, i) => {
           if (i !== turnIdx) return tn
-          const committed = new Set(tn.committed); committed.add(actionIdx)
-          return { ...tn, committed }
+          const committed = new Set(tn.committed); actionIndices.forEach(ai => committed.add(ai))
+          const createdLinks = [...(tn.createdLinks || []), ...links]
+          return { ...tn, committed, createdLinks }
         }))
+        // Feed created ids back so a follow-up ("give me the link", "add a
+        // contact to it") has the real ids and never goes blind.
+        if (links.length) {
+          const note = 'Created (the user can open each from its link): ' +
+            links.map(l => `${l.table} ${l.id}`).join('; ') + '.'
+          setHistory(h => [...h, { role: 'user', content: `[system: ${note}]` }])
+        }
       } else {
         const msg = result?.results?.find(r => r.outcome === 'error')?.message || 'Action was refused'
         toast.error(msg)
@@ -318,7 +344,15 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     } finally {
       setBusy(false)
     }
-  }, [turns, selectedRecord, listTable, toast])
+  }, [turns, selectedRecord, listTable, toast, linksFromResult])
+
+  const confirmAction = useCallback((turnIdx, actionIdx) => commitSet(turnIdx, [actionIdx]), [commitSet])
+
+  const confirmAllActions = useCallback((turnIdx) => {
+    const turn = turns[turnIdx]
+    const indices = (turn?.actions || []).map((_, i) => i).filter(i => !turn.committed?.has(i))
+    if (indices.length) commitSet(turnIdx, indices)
+  }, [turns, commitSet])
 
   const dismissAction = useCallback((turnIdx, actionIdx) => {
     setTurns(t => t.map((tn, i) => {
@@ -468,6 +502,27 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
                 }}>
                   {turn.text}
                 </div>
+                {/* Multi-record batch: one confirmation for the whole set, so
+                    parent→child links resolve together. */}
+                {(turn.actions || []).length > 1 && (turn.actions || []).some((_, ai) => !turn.committed?.has(ai)) && (
+                  <div style={{
+                    marginTop: 8, padding: 10, border: `1px solid ${C.border}`, borderRadius: 8,
+                    background: C.cardSecondary || '#f7f9fc', display: 'flex', alignItems: 'center',
+                    justifyContent: 'space-between', gap: 8,
+                  }}>
+                    <div style={{ fontSize: 12, color: C.textSecondary }}>
+                      {turn.actions.length} records will be created together, linked in order.
+                    </div>
+                    <button
+                      type="button" disabled={busy} onClick={() => confirmAllActions(ti)}
+                      style={{
+                        height: 30, padding: '0 14px', border: 'none', borderRadius: 6,
+                        cursor: busy ? 'wait' : 'pointer', background: C.emerald, color: '#fff',
+                        fontWeight: 600, fontSize: 12, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                      }}
+                    >Confirm all</button>
+                  </div>
+                )}
                 {(turn.actions || []).map((action, ai) => (
                   <ActionCard
                     key={ai}
@@ -479,6 +534,30 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
                     onSave={() => setSaveTarget(action)}
                   />
                 ))}
+                {/* Links to every record created from this turn. */}
+                {(turn.createdLinks || []).length > 0 && (
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {turn.createdLinks.map((lnk, li) => (
+                      <button
+                        key={li}
+                        type="button"
+                        onClick={() => onNavigateToRecord?.({ table: lnk.table, id: lnk.id, mode: 'view' })}
+                        title={`/${lnk.table}/${lnk.id}`}
+                        style={{
+                          textAlign: 'left', border: `1px solid ${C.border}`, borderRadius: 8,
+                          background: C.card, padding: '8px 12px', cursor: 'pointer',
+                          fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 8,
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.emeraldMid} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                        </svg>
+                        <span style={{ fontSize: 13, color: C.emeraldMid, fontWeight: 600 }}>Open {lnk.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
             {busy && <div style={{ color: C.textMuted, fontSize: 13 }}>Working…</div>}
