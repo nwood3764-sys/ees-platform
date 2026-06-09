@@ -16,7 +16,8 @@
 //
 // Confirmation model:
 //   • Read-only tools (describe_object, query_records, run_report,
-//     global_search) execute immediately and feed back into the loop.
+//     global_search, fuzzy_resolve) execute immediately and feed back into the
+//     loop.
 //   • Mutating tools (record_create, record_update, status_change, and the
 //     curated Option-A actions) are NOT executed here. They are returned to
 //     the client as a `proposed_actions` array for explicit user
@@ -30,11 +31,13 @@
 // Tool catalog:
 //   Option A (curated, high-value verbs):
 //     create_work_order, change_status, run_report, create_contact,
-//     schedule_crew, provision_technician, add_custom_field
+//     create_report
 //   Option B (generic, any object):
 //     describe_object, query_records, create_record, update_record
+//   Resolution helpers: global_search, fuzzy_resolve
 //   All curated tools lower to the same {record_create|record_update|
-//   status_change} proposed-action shape that commit_screen_flow_run accepts.
+//   status_change|report_create} proposed-action shape that
+//   commit_screen_flow_run accepts.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4"
@@ -217,6 +220,25 @@ const TOOLS = [
       required: ["query"],
     },
   },
+  {
+    name: "fuzzy_resolve",
+    description:
+      "Resolve a possibly-misspelled or voice-to-text term to a REAL value in LEAP, returning ranked candidates with a similarity score (0-1). Read-only. Use this whenever the user's wording for an entity might be misspelled, mis-heard, or approximate and it must map to an actual stored value before you act. Two kinds:\n" +
+      "• kind='record' — match a record by name (uses global_search). Returns records with their id. Use for properties, contacts, accounts, work orders, opportunities, etc. (e.g. user says 'North Willo' → property 'North Willow').\n" +
+      "• kind='picklist' — match a picklist/enum value such as a status, record type, or work type for a given object, optionally a specific field (e.g. object='work_orders', term='verifyed' → status 'Verified'). Returns the picklist value id (use as to_status_id for change_status when the field is a status).\n" +
+      "Decision rule: if exactly one candidate scores >= 0.6 and clearly dominates, treat it as the match but STILL state the correction to the user ('I read \"North Willo\" as North Willow'). If several are close or the top score is low, present the top candidates and ask which they meant. Never silently substitute a guess.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", description: "'record' or 'picklist'" },
+        term: { type: "string", description: "The user's (possibly misspelled) term to resolve" },
+        object: { type: "string", description: "Table/object to scope to. Required for kind='picklist'; optional filter for kind='record'." },
+        field: { type: "string", description: "picklist only: restrict to one picklist field, e.g. work_order_status. Omit to search all fields on the object." },
+        limit: { type: "integer", description: "Max candidates, default 5, ceiling 25" },
+      },
+      required: ["kind", "term"],
+    },
+  },
 ]
 
 const SYSTEM_PROMPT = `You are the LEAP assistant for Energy Efficiency Services of Wisconsin. LEAP is the company's operations platform (CRM, field service, incentives, inventory).
@@ -226,8 +248,15 @@ You help the signed-in user take actions by plain conversation: creating records
 Rules:
 - Before proposing a create or update on an object, call describe_object for it (unless you already did this conversation) so you use real column names.
 - When the user names a record (e.g. "the North Willow work order"), use global_search or query_records to resolve its id before acting on it. Never invent ids.
-- Never set a status column with update_record. Use change_status, which validates transitions.
-- Every mutating action you choose is shown to the user for explicit confirmation before it runs — you never execute changes yourself. Describe clearly what you are about to do and why.
+- The user is often typing fast, dictating by voice-to-text, or misspelling. Treat their wording for any entity as approximate. When a term that must map to a real value looks misspelled, mis-heard, or only approximate, call fuzzy_resolve to ground it:
+    • kind='record' for record names (properties, contacts, work orders, …).
+    • kind='picklist' for statuses, record types, work types, and other picklist values — pass the object, and the field when you know it (e.g. work_order_status).
+  Then:
+    • If one candidate clearly dominates (high score, no close rival), proceed with it but ALWAYS state the correction in plain words first — e.g. 'I read "North Willo" as North Willow' or 'I took "verifyed" to mean the Verified status'. Put corrections in your reply text and in each proposed action's summary, so the confirmation card shows exactly what you matched.
+    • If several candidates are close, or the best score is weak, do NOT guess. List the top candidates and ask the user which they meant before proposing any action.
+- For ordinary misspelled English words that are not entities (e.g. "verifyed", "shedule"), silently read them correctly, but reflect the corrected wording back in your reply and the action summary so the user can confirm you understood ('I read that as: verify work order WO-2841').
+- Never set a status column with update_record. Use change_status, which validates transitions. For the target status, resolve it with fuzzy_resolve kind='picklist' and pass the returned id as to_status_id.
+- Every mutating action you choose is shown to the user for explicit confirmation before it runs — you never execute changes yourself. Describe clearly what you are about to do and why, including any spelling/entity corrections you applied.
 - Be concise and concrete. Use the record context provided if present.
 - Never fabricate field values, dates, amounts, or names. If you don't know a value, ask the user or leave it out.`
 
@@ -505,6 +534,42 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
       const { data, error } = await userClient.from("reports").select("*").eq("id", input.report_id).maybeSingle()
       if (error) return JSON.stringify({ error: error.message })
       return JSON.stringify({ report: data })
+    }
+    if (name === "fuzzy_resolve") {
+      const term = String(input.term ?? "").trim()
+      if (!term) return JSON.stringify({ error: "Provide a term to resolve." })
+      const limit = Math.min(Math.max(Number(input.limit) || 5, 1), 25)
+      const kind = input.kind === "picklist" ? "picklist" : "record"
+
+      if (kind === "picklist") {
+        if (!input.object) return JSON.stringify({ error: "kind='picklist' requires an object." })
+        const { data, error } = await userClient.rpc("fuzzy_resolve_picklist", {
+          p_object: input.object,
+          p_term: term,
+          p_field: input.field || null,
+          p_limit: limit,
+        })
+        if (error) return JSON.stringify({ error: error.message })
+        const candidates = (Array.isArray(data) ? data : []).map((r: any) => ({
+          id: r.id, field: r.picklist_field, value: r.value, label: r.label,
+          score: Math.round((Number(r.score) || 0) * 100) / 100,
+        }))
+        return JSON.stringify({ kind, term, object: input.object, field: input.field || null, candidates })
+      }
+
+      // kind === 'record': lean on global_search (RLS-scoped record matching).
+      const { data, error } = await userClient.rpc("global_search", {
+        p_query: term,
+        p_limit_per_object: limit,
+        p_object_type: input.object || null,
+      })
+      if (error) return JSON.stringify({ error: error.message })
+      const candidates = (Array.isArray(data) ? data : []).map((r: any) => ({
+        id: r.id, object: r.table_name, object_label: r.object_label,
+        label: r.primary_label, secondary: r.secondary_label || undefined,
+        record_number: r.record_number || undefined, match_rank: r.match_rank,
+      }))
+      return JSON.stringify({ kind, term, object: input.object || null, candidates })
     }
     return JSON.stringify({ error: `Unknown read tool ${name}` })
   } catch (e) {
