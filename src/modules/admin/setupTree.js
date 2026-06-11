@@ -30,7 +30,7 @@ export const SETUP_TREE = [
     icon: 'M13 10V3L4 14h7v7l9-11h-7z',
     children: [
       { id: 'lifecycle_builder', label: 'Lifecycle Builder' },
-      { id: 'automation_rules', label: 'Flows (Automation Rules)' },
+      { id: 'flow_builder', label: 'Flow Builder' },
       { id: 'automation_run_log', label: 'Automation Run Log' },
       { id: 'validation_rules', label: 'Validation Rules' },
     ],

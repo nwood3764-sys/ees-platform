@@ -9,7 +9,7 @@ import RolesPane from './permissions/RolesPane'
 import PermissionSetsPane from './permissions/PermissionSetsPane'
 import HelpArticlesPane from './help/HelpArticlesPane'
 import LifecycleBuilderPane from './LifecycleBuilderPane'
-import AutomationRulesPane from './AutomationRulesPane'
+import FlowBuilderPane from './FlowBuilderPane'
 import AutomationRunLogPane from './AutomationRunLogPane'
 import {
   fetchPrograms, fetchWorkTypes,
@@ -460,7 +460,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'module_sections':   return <ModuleSectionsPane />
     case 'home_pages':        return <HomePageBuilder />
-    case 'automation_rules':  return <AutomationRulesPane />
+    case 'flow_builder':  return <FlowBuilderPane />
     case 'automation_run_log': return <AutomationRunLogPane />
     case 'lifecycle_builder': return <LifecycleBuilderPane />
     case 'validation_rules':  return <NodePage title="Validation Rules"        table="validation_rules"  fetcher={fetchValidationRules}   columns={VR_COLS}             newLabel="Validation Rule"  onOpenRecord={onOpenRecord} />
