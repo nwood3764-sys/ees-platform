@@ -12,12 +12,13 @@ import {
 import {
   SCREEN_ELEMENT_TYPES, SILENT_ELEMENT_TYPES, QUESTION_TYPES,
   TRIGGER_EVENTS, SILENT_ACTION_TYPES, SCREEN_ACTION_TYPES, DECISION_OPERATORS,
+  UPDATE_CONDITIONS, validateFlow, updateRecordTargets,
   listFlows, getFlow, getFlowElements, getFlowRuns,
   createFlow, updateFlowMeta, saveFlowElements,
   publishFlow, setFlowActive, archiveFlow, cloneFlow,
   enableRecordCreateDispatch, disableRecordCreateDispatch,
   fetchTriggerObjects, fetchStatusValues, fetchObjectColumns, fetchObjectDateColumns,
-  fetchRoles, fetchEmailTemplates,
+  fetchRoles, fetchEmailTemplates, fetchWorkTypes,
 } from '../../data/flowBuilderService'
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -271,19 +272,28 @@ function FlowEditor({ flowId, onBack, toast }) {
         getFlow(flowId), getFlowElements(flowId), getFlowRuns(flowId),
       ])
       setFlow(f)
+      // Build id → middle-list-index map for resolving branch targets back into
+      // the editor's target_order references. Middle index = position among
+      // non-start/finish elements, which is what saveFlowElements writes back.
+      const mids = (els || []).filter(e => e.fe_element_type !== 'start' && e.fe_element_type !== 'finish')
+      const orderById = new Map()
+      mids.forEach((e, idx) => orderById.set(e.id, idx))
       // Strip the fixed start/finish brackets; the editor manages only middle.
       setElements(
-        (els || [])
-          .filter(e => e.fe_element_type !== 'start' && e.fe_element_type !== 'finish')
-          .map(e => ({
-            _key: uniqueId(),
-            fe_element_type: e.fe_element_type,
-            fe_order: e.fe_order,
-            fe_label: e.fe_label || '',
-            fe_api_name: e.fe_api_name || '',
-            fe_config: e.fe_config || {},
-            fe_decision_branches: e.fe_decision_branches || [],
-          }))
+        mids.map((e, idx) => ({
+          _key: uniqueId(),
+          fe_element_type: e.fe_element_type,
+          fe_order: idx,
+          fe_label: e.fe_label || '',
+          fe_api_name: e.fe_api_name || '',
+          fe_config: e.fe_config || {},
+          fe_decision_branches: (e.fe_decision_branches || []).map(b => ({
+            condition: b.condition || { field: '', op: 'eq', value: '' },
+            target_order: b.next_element_id != null && orderById.has(b.next_element_id)
+              ? orderById.get(b.next_element_id) : null,
+            label: b.label || '',
+          })),
+        }))
       )
       setRuns(rs || [])
     } catch (e) { setError(e.message || String(e)) }
@@ -303,8 +313,8 @@ function FlowEditor({ flowId, onBack, toast }) {
       fe_label: '',
       fe_api_name: '',
       fe_config: type === 'screen' ? { question_type: 'text', options: [], required: false }
-               : type === 'decision' ? { conditions: [] }
-               : { action_type: (isSilent ? SILENT_ACTION_TYPES : SCREEN_ACTION_TYPES)[0].value, config: {} },
+               : type === 'decision' ? {}
+               : { action_type: (isSilent ? SILENT_ACTION_TYPES : SCREEN_ACTION_TYPES)[0].value, action_config: {} },
       fe_decision_branches: [],
     }])
   }
@@ -331,6 +341,8 @@ function FlowEditor({ flowId, onBack, toast }) {
     try {
       // Re-bracket with start/finish at the persistence boundary. The service
       // chains them linearly by fe_order; start=0, middle=1..n, finish=last.
+      // Editor branch target_order is a middle-list index (0-based); shift by +1
+      // so it lines up with the bracketed fe_order the service resolves against.
       const ordered = [
         { fe_element_type: 'start', fe_label: 'Start', fe_config: {}, fe_decision_branches: [], fe_order: 0 },
         ...elements.map((e, i) => ({
@@ -338,7 +350,11 @@ function FlowEditor({ flowId, onBack, toast }) {
           fe_label: e.fe_label || null,
           fe_api_name: e.fe_api_name || null,
           fe_config: e.fe_config || {},
-          fe_decision_branches: e.fe_decision_branches || [],
+          fe_decision_branches: (e.fe_decision_branches || []).map(b => ({
+            ...b,
+            target_order: (b.target_order !== undefined && b.target_order !== null)
+              ? Number(b.target_order) + 1 : null,
+          })),
           fe_order: i + 1,
         })),
         { fe_element_type: 'finish', fe_label: 'Finish', fe_config: {}, fe_decision_branches: [], fe_order: elements.length + 1 },
@@ -377,7 +393,18 @@ function FlowEditor({ flowId, onBack, toast }) {
       <LifecycleBar
         flow={flow} busy={busy}
         onSaveElements={saveElements} saving={saving}
-        onPublish={() => doLifecycle(() => publishFlow(flowId), 'Published')}
+        onPublish={() => {
+          const problems = validateFlow(flow, [
+            { fe_element_type: 'start' },
+            ...elements,
+            { fe_element_type: 'finish' },
+          ])
+          if (problems.length > 0) {
+            toast.error(`Can't publish yet: ${problems[0]}${problems.length > 1 ? ` (+${problems.length - 1} more)` : ''}`)
+            return
+          }
+          doLifecycle(() => publishFlow(flowId), 'Published')
+        }}
         onActivate={() => doLifecycle(() => setFlowActive(flowId, true), 'Activated')}
         onDeactivate={() => doLifecycle(() => setFlowActive(flowId, false), 'Deactivated')}
         onArchive={() => doLifecycle(() => archiveFlow(flowId), 'Archived')}
@@ -539,6 +566,7 @@ function Canvas({ isSilent, elementTypes, elements, flow, onAdd, onUpdate, onRem
           total={elements.length}
           isSilent={isSilent}
           flow={flow}
+          elements={elements}
           onUpdate={(patch) => onUpdate(el._key, patch)}
           onRemove={() => onRemove(el._key)}
           onMove={(dir) => onMove(el._key, dir)}
@@ -577,7 +605,7 @@ function Bracket({ label, sub, top }) {
   )
 }
 
-function ElementCard({ el, index, total, isSilent, flow, onUpdate, onRemove, onMove }) {
+function ElementCard({ el, index, total, isSilent, flow, elements, onUpdate, onRemove, onMove }) {
   const typeLabel = el.fe_element_type.charAt(0).toUpperCase() + el.fe_element_type.slice(1)
   return (
     <div style={{
@@ -608,7 +636,7 @@ function ElementCard({ el, index, total, isSilent, flow, onUpdate, onRemove, onM
       </div>
 
       {el.fe_element_type === 'screen'   && <ScreenEditor el={el} onUpdate={onUpdate} />}
-      {el.fe_element_type === 'decision' && <DecisionEditor el={el} flow={flow} onUpdate={onUpdate} />}
+      {el.fe_element_type === 'decision' && <DecisionEditor el={el} flow={flow} elements={elements} onUpdate={onUpdate} />}
       {el.fe_element_type === 'action'   && <ActionEditor el={el} flow={flow} isSilent={isSilent} onUpdate={onUpdate} />}
     </div>
   )
@@ -668,49 +696,79 @@ function ScreenEditor({ el, onUpdate }) {
 
 // ─── Decision element editor ─────────────────────────────────────────────────
 
-function DecisionEditor({ el, flow, onUpdate }) {
+function DecisionEditor({ el, flow, elements, onUpdate }) {
   const [columns, setColumns] = useState([])
-  const conditions = el.fe_config?.conditions || []
+  const branches = el.fe_decision_branches || []
   const obj = flow.flow_trigger_object || flow.flow_launch_object
 
   useEffect(() => {
     if (obj) fetchObjectColumns(obj).then(setColumns).catch(() => setColumns([]))
   }, [obj])
 
-  const setConditions = (c) => onUpdate({ fe_config: { ...el.fe_config, conditions: c } })
-  const addCond = () => setConditions([...conditions, { field: '', operator: 'eq', value: '' }])
+  // Branch target options: every other middle element by its list index.
+  const targetOptions = (elements || [])
+    .map((e, idx) => ({ value: String(idx), label: `${idx + 1}. ${e.fe_label || e.fe_element_type}` }))
+    .filter((_, idx) => elements[idx]._key !== el._key)
+
+  const setBranches = (b) => onUpdate({ fe_decision_branches: b })
+  const addBranch = () => setBranches([
+    ...branches, { condition: { field: '', op: 'eq', value: '' }, target_order: null, label: '' },
+  ])
+  const updateBranch = (i, patch) =>
+    setBranches(branches.map((b, idx) => idx === i ? { ...b, ...patch } : b))
   const updateCond = (i, patch) =>
-    setConditions(conditions.map((c, idx) => idx === i ? { ...c, ...patch } : c))
-  const removeCond = (i) => setConditions(conditions.filter((_, idx) => idx !== i))
+    setBranches(branches.map((b, idx) => idx === i ? { ...b, condition: { ...b.condition, ...patch } } : b))
+  const removeBranch = (i) => setBranches(branches.filter((_, idx) => idx !== i))
 
   const needsValue = (op) => op !== 'is_null' && op !== 'not_null'
 
   return (
     <div>
       <div style={{ fontSize: 12, color: '#4a5e7a', marginBottom: 6 }}>
-        Branches to the next element only if all conditions are met.
+        Each branch checks one field on the triggering record. The first matching
+        branch jumps to its target element; if none match, the flow continues to
+        the next element in order.
       </div>
-      {conditions.map((c, i) => (
-        <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-          <div style={{ flex: 2 }}>
-            <SearchableCombo value={c.field} options={columns}
-              onChange={(v) => updateCond(i, { field: v })} placeholder="Field…" allowFreeText />
+      {branches.length === 0 && (
+        <div style={{ fontSize: 13, color: '#8fa0b8', marginBottom: 8 }}>No branches yet.</div>
+      )}
+      {branches.map((b, i) => (
+        <div key={i} style={{ border: '1px solid #e4e9f2', borderRadius: 6, padding: 8, marginBottom: 8 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+            <input style={{ ...inputStyle, flex: 1, margin: 0 }} value={b.label || ''}
+              placeholder="Branch label (optional)" onChange={e => updateBranch(i, { label: e.target.value })} />
+            <button style={buttonSmDangerStyle} onClick={() => removeBranch(i)}>
+              <Icon path="M6 18L18 6M6 6l12 12" size={12} />
+            </button>
           </div>
-          <div style={{ flex: 1 }}>
-            <SearchableCombo value={c.operator} options={DECISION_OPERATORS}
-              onChange={(v) => updateCond(i, { operator: v })} />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+            <div style={{ flex: 2 }}>
+              <SearchableCombo value={b.condition?.field || ''} options={columns}
+                onChange={(v) => updateCond(i, { field: v })} placeholder="Field…" allowFreeText />
+            </div>
+            <div style={{ flex: 1 }}>
+              <SearchableCombo value={b.condition?.op || 'eq'} options={DECISION_OPERATORS}
+                onChange={(v) => updateCond(i, { op: v })} />
+            </div>
+            {needsValue(b.condition?.op || 'eq') && (
+              <input style={{ ...inputStyle, flex: 1, margin: 0 }} value={b.condition?.value || ''}
+                placeholder="value" onChange={e => updateCond(i, { value: e.target.value })} />
+            )}
           </div>
-          {needsValue(c.operator) && (
-            <input style={{ ...inputStyle, flex: 1, margin: 0 }} value={c.value}
-              placeholder="value" onChange={e => updateCond(i, { value: e.target.value })} />
-          )}
-          <button style={buttonSmDangerStyle} onClick={() => removeCond(i)}>
-            <Icon path="M6 18L18 6M6 6l12 12" size={12} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: '#4a5e7a' }}>Jump to</span>
+            <div style={{ flex: 1 }}>
+              <SearchableCombo
+                value={b.target_order != null ? String(b.target_order) : ''}
+                options={targetOptions}
+                onChange={(v) => updateBranch(i, { target_order: v === '' ? null : Number(v) })}
+                placeholder="Next element (default)" />
+            </div>
+          </div>
         </div>
       ))}
-      <button style={buttonSmSecondaryStyle} onClick={addCond}>
-        <Icon path="M12 5v14M5 12h14" size={12} /> Add Condition
+      <button style={buttonSmSecondaryStyle} onClick={addBranch}>
+        <Icon path="M12 5v14M5 12h14" size={12} /> Add Branch
       </button>
     </div>
   )
@@ -721,31 +779,51 @@ function DecisionEditor({ el, flow, onUpdate }) {
 function ActionEditor({ el, flow, isSilent, onUpdate }) {
   const actionTypes = isSilent ? SILENT_ACTION_TYPES : SCREEN_ACTION_TYPES
   const actionType = el.fe_config?.action_type || actionTypes[0].value
-  const cfg = el.fe_config?.config || {}
+  const ac = el.fe_config?.action_config || {}
 
-  const [statusValues, setStatusValues] = useState([])
   const [roles, setRoles] = useState([])
   const [templates, setTemplates] = useState([])
+  const [workTypes, setWorkTypes] = useState([])
+  const [statusValues, setStatusValues] = useState([])
   const [columns, setColumns] = useState([])
-  const targetObject = cfg.object || flow.flow_trigger_object || flow.flow_launch_object
+
+  const triggerObj = flow.flow_trigger_object || flow.flow_launch_object
+
+  // For update_record status options we need the status values of the resolved
+  // target object: 'self' = trigger object, else parent_<x> maps to <x>s.
+  const targetObjectForStatus = (() => {
+    const t = ac.target
+    if (!t || t === 'self') return triggerObj
+    const m = { parent_project: 'projects', parent_opportunity: 'opportunities',
+      parent_account: 'accounts', parent_property: 'properties',
+      parent_building: 'buildings', parent_assessment: 'assessments' }
+    return m[t] || triggerObj
+  })()
 
   useEffect(() => {
-    if (actionType === 'status_change' && targetObject) {
-      fetchStatusValues(targetObject).then(setStatusValues).catch(() => setStatusValues([]))
-    }
-    if (actionType === 'task_create') {
+    if (actionType === 'create_task' || actionType === 'create_work_order') {
       fetchRoles().then(setRoles).catch(() => setRoles([]))
     }
     if (actionType === 'send_email') {
+      fetchRoles().then(setRoles).catch(() => setRoles([]))
       fetchEmailTemplates().then(setTemplates).catch(() => setTemplates([]))
     }
-    if ((actionType === 'record_update' || actionType === 'record_create') && targetObject) {
-      fetchObjectColumns(targetObject).then(setColumns).catch(() => setColumns([]))
+    if (actionType === 'create_work_order') {
+      fetchWorkTypes().then(setWorkTypes).catch(() => setWorkTypes([]))
     }
-  }, [actionType, targetObject])
+  }, [actionType])
 
-  const setActionType = (v) => onUpdate({ fe_config: { ...el.fe_config, action_type: v, config: {} } })
-  const setCfg = (patch) => onUpdate({ fe_config: { ...el.fe_config, action_type: actionType, config: { ...cfg, ...patch } } })
+  useEffect(() => {
+    if (actionType === 'update_record' && targetObjectForStatus) {
+      fetchStatusValues(targetObjectForStatus).then(setStatusValues).catch(() => setStatusValues([]))
+      fetchObjectColumns(targetObjectForStatus).then(setColumns).catch(() => setColumns([]))
+    }
+  }, [actionType, targetObjectForStatus])
+
+  const setActionType = (v) =>
+    onUpdate({ fe_config: { ...el.fe_config, action_type: v, action_config: {} } })
+  const setAc = (patch) =>
+    onUpdate({ fe_config: { ...el.fe_config, action_type: actionType, action_config: { ...ac, ...patch } } })
 
   return (
     <div>
@@ -753,47 +831,85 @@ function ActionEditor({ el, flow, isSilent, onUpdate }) {
         <SearchableCombo value={actionType} options={actionTypes} onChange={setActionType} />
       </FormField>
 
-      {(actionType === 'record_create' || actionType === 'record_update' || actionType === 'status_change') && (
-        <FormField label="Target object">
-          <input style={inputStyle} value={cfg.object || ''}
-            placeholder="e.g. tasks, work_orders"
-            onChange={e => setCfg({ object: e.target.value })} />
-        </FormField>
-      )}
-
-      {actionType === 'status_change' && (
-        <FormField label="New status">
-          <SearchableCombo value={cfg.status || ''} options={statusValues}
-            onChange={(v) => setCfg({ status: v })} placeholder="Select status…" allowFreeText />
-        </FormField>
-      )}
-
-      {(actionType === 'record_create' || actionType === 'record_update') && (
-        <FormField label="Field values (JSON)" hint='e.g. {"work_order_status":"Work Order Scheduled"}'>
-          <textarea style={textareaStyle} rows={2}
-            value={cfg.values_json ?? (cfg.values ? JSON.stringify(cfg.values) : '')}
-            onChange={e => setCfg({ values_json: e.target.value })} />
-        </FormField>
-      )}
-
-      {actionType === 'task_create' && (
+      {actionType === 'create_task' && (
         <>
-          <FormField label="Task subject">
-            <input style={inputStyle} value={cfg.subject || ''}
-              onChange={e => setCfg({ subject: e.target.value })} />
+          <FormField label="Task subject" hint="Shown as the task name.">
+            <input style={inputStyle} value={ac.task_name || ''}
+              onChange={e => setAc({ task_name: e.target.value })} />
           </FormField>
-          <FormField label="Assign to role">
-            <SearchableCombo value={cfg.owner_role_id || ''} options={roles}
-              onChange={(v) => setCfg({ owner_role_id: v })} placeholder="Select role…" />
+          <FormField label="Assign to role" hint="The first active user with this role is assigned.">
+            <SearchableCombo value={ac.assigned_role || ''} options={roles}
+              onChange={(v) => setAc({ assigned_role: v })} placeholder="Select role…" />
+          </FormField>
+          <FormField label="Due in (days)" hint="Days from when the flow runs. Defaults to 1.">
+            <input style={inputStyle} type="number" value={ac.due_days ?? ''}
+              placeholder="1" onChange={e => setAc({ due_days: e.target.value === '' ? null : Number(e.target.value) })} />
           </FormField>
         </>
       )}
 
       {actionType === 'send_email' && (
-        <FormField label="Email template">
-          <SearchableCombo value={cfg.template_id || ''} options={templates}
-            onChange={(v) => setCfg({ template_id: v })} placeholder="Select template…" />
-        </FormField>
+        <>
+          <FormField label="Email template" hint="Matched by template name.">
+            <SearchableCombo value={ac.template || ''} options={templates}
+              onChange={(v) => setAc({ template: v })} placeholder="Select template…" allowFreeText />
+          </FormField>
+          <FormField label="Recipient role">
+            <SearchableCombo value={ac.recipient_role || ''} options={roles}
+              onChange={(v) => setAc({ recipient_role: v })} placeholder="Select role…" />
+          </FormField>
+        </>
+      )}
+
+      {actionType === 'create_work_order' && (
+        <>
+          <FormField label="Work type" hint="Matched by work type name. The bill of materials and work plan come from the work type.">
+            <SearchableCombo value={ac.work_type || ''} options={workTypes}
+              onChange={(v) => setAc({ work_type: v })} placeholder="Select work type…" allowFreeText />
+          </FormField>
+          <FormField label="Assign to role">
+            <SearchableCombo value={ac.assigned_role || ''} options={roles}
+              onChange={(v) => setAc({ assigned_role: v })} placeholder="Select role…" />
+          </FormField>
+          <FormField label="Work order name (optional)" hint="Defaults to the work type name.">
+            <input style={inputStyle} value={ac.name || ''}
+              onChange={e => setAc({ name: e.target.value })} />
+          </FormField>
+        </>
+      )}
+
+      {actionType === 'update_record' && (
+        <>
+          <FormField label="What to update" hint="The triggering record, or a parent in its lineage.">
+            <SearchableCombo value={ac.target || ''} options={updateRecordTargets()}
+              onChange={(v) => setAc({ target: v })} placeholder="Select target…" />
+          </FormField>
+          <FormField label="Only when" hint="Optional guard. 'All work orders verified' applies to a work order trigger updating its parent project.">
+            <SearchableCombo value={ac.condition || 'always'} options={UPDATE_CONDITIONS}
+              onChange={(v) => setAc({ condition: v })} />
+          </FormField>
+          <FormField label="Set status to" hint="Pick a status to advance the target record. Leave blank to set a plain field instead.">
+            <SearchableCombo value={ac.new_status || ''} options={statusValues}
+              onChange={(v) => setAc({ new_status: v, set_field: '', set_value: '' })}
+              placeholder="Select status…" allowFreeText />
+          </FormField>
+          {!ac.new_status && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <FormField label="Or set field">
+                  <SearchableCombo value={ac.set_field || ''} options={columns}
+                    onChange={(v) => setAc({ set_field: v })} placeholder="Field…" allowFreeText />
+                </FormField>
+              </div>
+              <div style={{ flex: 1 }}>
+                <FormField label="To value">
+                  <input style={inputStyle} value={ac.set_value || ''}
+                    onChange={e => setAc({ set_value: e.target.value })} />
+                </FormField>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

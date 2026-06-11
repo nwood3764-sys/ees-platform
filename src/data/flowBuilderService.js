@@ -48,26 +48,68 @@ export const TRIGGER_EVENTS = [
   { value: 'date_based',    label: 'Date reached' },
 ]
 
-// Action subtypes. Silent and screen share the executor library
-// (_automation_action_*); the editor surfaces the same set for both modes.
+// Action subtypes the silent-flow interpreter actually implements. These map
+// 1:1 to the _automation_action_* executor functions. Screen and silent share
+// the same executor library.
 export const SILENT_ACTION_TYPES = [
-  { value: 'record_create',  label: 'Create record' },
-  { value: 'record_update',  label: 'Update record' },
-  { value: 'status_change',  label: 'Change status' },
-  { value: 'task_create',    label: 'Create task' },
-  { value: 'send_email',     label: 'Send email' },
+  { value: 'update_record',     label: 'Update / change status' },
+  { value: 'create_task',       label: 'Create task' },
+  { value: 'send_email',        label: 'Send email' },
+  { value: 'create_work_order', label: 'Create work order' },
 ]
 export const SCREEN_ACTION_TYPES = SILENT_ACTION_TYPES
 
 export const DECISION_OPERATORS = [
-  { value: 'eq',        label: 'equals' },
-  { value: 'neq',       label: 'does not equal' },
-  { value: 'gt',        label: 'greater than' },
-  { value: 'lt',        label: 'less than' },
-  { value: 'is_null',   label: 'is empty' },
-  { value: 'not_null',  label: 'is not empty' },
-  { value: 'contains',  label: 'contains' },
+  { value: 'eq',       label: 'equals' },
+  { value: 'neq',      label: 'does not equal' },
+  { value: 'is_null',  label: 'is empty' },
+  { value: 'not_null', label: 'is not empty' },
 ]
+
+export const UPDATE_CONDITIONS = [
+  { value: 'always', label: 'Always' },
+  { value: 'all_work_orders_verified', label: 'All work orders verified (work order → project only)' },
+]
+
+// Client-side pre-publish validation. Returns an array of human-readable
+// problems; empty means the flow is publishable.
+export function validateFlow(flow, elements) {
+  const problems = []
+  const mids = elements.filter(e => e.fe_element_type !== 'start' && e.fe_element_type !== 'finish')
+
+  if (flow.flow_type === 'silent') {
+    if (!flow.flow_trigger_object) problems.push('Set a trigger object before publishing.')
+    if (!flow.flow_trigger_event)  problems.push('Set a trigger event before publishing.')
+    if (mids.length === 0) problems.push('Add at least one action or decision; an empty silent flow does nothing.')
+  }
+
+  mids.forEach((el, i) => {
+    const n = el.fe_label || `${el.fe_element_type} #${i + 1}`
+    if (el.fe_element_type === 'action') {
+      const at = el.fe_config?.action_type
+      const ac = el.fe_config?.action_config || {}
+      if (!at) problems.push(`Action "${n}": choose an action type.`)
+      if (at === 'create_task' && !ac.task_name) problems.push(`Action "${n}": task subject is required.`)
+      if (at === 'create_task' && !ac.assigned_role) problems.push(`Action "${n}": assign a role.`)
+      if (at === 'send_email' && !ac.template) problems.push(`Action "${n}": choose an email template.`)
+      if (at === 'send_email' && !ac.recipient_role) problems.push(`Action "${n}": choose a recipient role.`)
+      if (at === 'update_record') {
+        if (!ac.target) problems.push(`Action "${n}": choose what to update.`)
+        if (!ac.new_status && !ac.set_field) problems.push(`Action "${n}": set a new status or a field value.`)
+      }
+      if (at === 'create_work_order' && !ac.work_type) problems.push(`Action "${n}": choose a work type.`)
+      if (at === 'create_work_order' && !ac.assigned_role) problems.push(`Action "${n}": assign a role.`)
+    }
+    if (el.fe_element_type === 'screen') {
+      if (!el.fe_label) problems.push(`Screen #${i + 1}: enter the question text.`)
+    }
+    if (el.fe_element_type === 'decision') {
+      const branches = (el.fe_decision_branches || []).filter(b => b?.condition?.field)
+      if (branches.length === 0) problems.push(`Decision "${n}": add at least one condition branch.`)
+    }
+  })
+  return problems
+}
 
 // ─── Flow list / get ─────────────────────────────────────────────────────────
 
@@ -195,7 +237,9 @@ export async function saveFlowElements(flowId, elements) {
     .eq('is_deleted', false)
   if (delErr) throw delErr
 
-  // Build ordered rows: start, …middle…, finish.
+  // Build ordered rows: start, …middle…, finish. Branch target references in
+  // the editor use target_order (index into this ordered list); they are
+  // resolved to real element ids after insert.
   const ordered = [...elements].sort((a, b) => a.fe_order - b.fe_order)
   const rows = ordered.map((el, i) => ({
     fe_record_number: '',
@@ -205,7 +249,8 @@ export async function saveFlowElements(flowId, elements) {
     fe_label: el.fe_label || null,
     fe_api_name: el.fe_api_name || null,
     fe_config: el.fe_config || {},
-    fe_decision_branches: el.fe_decision_branches || [],
+    // branches re-resolved below; insert empty to satisfy NOT NULL/default
+    fe_decision_branches: [],
     owner_id: uid,
     created_by: uid,
     updated_by: uid,
@@ -214,15 +259,48 @@ export async function saveFlowElements(flowId, elements) {
   const { data: inserted, error: insErr } = await supabase
     .from('flow_elements')
     .insert(rows)
-    .select('id, fe_order, fe_element_type, fe_decision_branches')
+    .select('id, fe_order, fe_element_type')
   if (insErr) throw insErr
 
-  // Rewire linear next-element pointers in fe_order sequence.
   const byOrder = [...inserted].sort((a, b) => a.fe_order - b.fe_order)
+  const idByOrder = new Map(byOrder.map(r => [r.fe_order, r.id]))
+
+  // Rewire linear next-element pointers in fe_order sequence.
   for (let i = 0; i < byOrder.length - 1; i++) {
     await supabase.from('flow_elements')
       .update({ fe_next_element_id: byOrder[i + 1].id })
       .eq('id', byOrder[i].id)
+  }
+
+  // Resolve and persist decision branches. Each editor branch carries
+  // { condition:{field,op,value}, target_order, label }. We write the
+  // interpreter shape: { condition, next_element_id, label }. target_order is
+  // the fe_order of the destination element; unset/invalid targets fall through
+  // to the element's linear next (handled by the interpreter's default path).
+  for (let i = 0; i < ordered.length; i++) {
+    const el = ordered[i]
+    if (el.fe_element_type !== 'decision') continue
+    const branches = (el.fe_decision_branches || [])
+      .filter(b => b && b.condition && b.condition.field)
+      .map(b => {
+        const tgt = (b.target_order !== undefined && b.target_order !== null)
+          ? idByOrder.get(Number(b.target_order))
+          : null
+        return {
+          condition: {
+            field: b.condition.field,
+            op: b.condition.op || 'eq',
+            value: b.condition.value ?? null,
+          },
+          next_element_id: tgt || null,
+          label: b.label || null,
+        }
+      })
+    if (branches.length > 0) {
+      await supabase.from('flow_elements')
+        .update({ fe_decision_branches: branches })
+        .eq('id', idByOrder.get(i))
+    }
   }
   return inserted
 }
@@ -339,22 +417,52 @@ export async function fetchObjectDateColumns(object) {
     .map(c => ({ value: c.name, label: c.name }))
 }
 
+// Roles for action assignment. The silent-flow executor resolves the assignee
+// by ROLE NAME via _automation_resolve_role_user, so the value must be the
+// role name, not the id.
 export async function fetchRoles() {
   const { data, error } = await supabase
     .from('roles')
-    .select('id, name')
-    .eq('is_deleted', false)
-    .order('name', { ascending: true })
+    .select('role_name')
+    .eq('role_is_active', true)
+    .order('role_name', { ascending: true })
   if (error) throw error
-  return (data || []).map(r => ({ value: r.id, label: r.name }))
+  return (data || []).map(r => ({ value: r.role_name, label: r.role_name }))
 }
 
+// Email templates. The send_email executor matches on template NAME via
+// action_config.template, so the value is the name.
 export async function fetchEmailTemplates() {
   const { data, error } = await supabase
     .from('email_templates')
-    .select('id, name')
+    .select('name')
     .eq('is_deleted', false)
     .order('name', { ascending: true })
   if (error) throw error
-  return (data || []).map(r => ({ value: r.id, label: r.name }))
+  return (data || []).map(r => ({ value: r.name, label: r.name }))
+}
+
+// Work types for create_work_order. Executor matches on work_type_name.
+export async function fetchWorkTypes() {
+  const { data, error } = await supabase
+    .from('work_types')
+    .select('work_type_name')
+    .eq('work_type_is_deleted', false)
+    .order('work_type_name', { ascending: true })
+  if (error) return []
+  return (data || []).map(r => ({ value: r.work_type_name, label: r.work_type_name }))
+}
+
+// update_record targets: self, or a supported parent in the lineage. These are
+// the exact tokens _automation_action_update_record accepts.
+export function updateRecordTargets() {
+  return [
+    { value: 'self',               label: 'This record' },
+    { value: 'parent_project',     label: 'Parent Project' },
+    { value: 'parent_opportunity', label: 'Parent Opportunity' },
+    { value: 'parent_account',     label: 'Parent Account' },
+    { value: 'parent_property',    label: 'Parent Property' },
+    { value: 'parent_building',    label: 'Parent Building' },
+    { value: 'parent_assessment',  label: 'Parent Assessment' },
+  ]
 }
