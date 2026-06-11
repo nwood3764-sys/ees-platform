@@ -302,7 +302,7 @@ function FlowEditor({ flowId, onBack, toast }) {
       fe_order: prev.length,
       fe_label: '',
       fe_api_name: '',
-      fe_config: type === 'screen' ? { questions: [] }
+      fe_config: type === 'screen' ? { question_type: 'text', options: [], required: false }
                : type === 'decision' ? { conditions: [] }
                : { action_type: (isSilent ? SILENT_ACTION_TYPES : SCREEN_ACTION_TYPES)[0].value, config: {} },
       fe_decision_branches: [],
@@ -617,44 +617,51 @@ function ElementCard({ el, index, total, isSilent, flow, onUpdate, onRemove, onM
 // ─── Screen element editor ───────────────────────────────────────────────────
 
 function ScreenEditor({ el, onUpdate }) {
-  const questions = el.fe_config?.questions || []
-  const setQuestions = (q) => onUpdate({ fe_config: { ...el.fe_config, questions: q } })
+  // In this platform a screen element IS a single question: the question text
+  // is fe_label, and fe_config carries { question_type, options, required }.
+  const cfg = el.fe_config || {}
+  const questionType = cfg.question_type || 'text'
+  const options = cfg.options || []
 
-  const addQuestion = () => setQuestions([
-    ...questions, { key: `q_${questions.length + 1}`, label: '', type: 'text', required: false },
-  ])
-  const updateQuestion = (i, patch) =>
-    setQuestions(questions.map((q, idx) => idx === i ? { ...q, ...patch } : q))
-  const removeQuestion = (i) =>
-    setQuestions(questions.filter((_, idx) => idx !== i))
+  const setCfg = (patch) => onUpdate({ fe_config: { ...cfg, ...patch } })
+
+  const setOption = (i, val) =>
+    setCfg({ options: options.map((o, idx) => idx === i ? val : o) })
+  const addOption = () => setCfg({ options: [...options, ''] })
+  const removeOption = (i) => setCfg({ options: options.filter((_, idx) => idx !== i) })
 
   return (
     <div>
-      {questions.length === 0 && (
-        <div style={{ fontSize: 13, color: '#8fa0b8', marginBottom: 8 }}>No questions yet.</div>
-      )}
-      {questions.map((q, i) => (
-        <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-          <input style={{ ...inputStyle, flex: 2, margin: 0 }} value={q.label}
-            placeholder="Question label" onChange={e => updateQuestion(i, { label: e.target.value })} />
-          <input style={{ ...inputStyle, flex: 1, margin: 0 }} value={q.key}
-            placeholder="key" onChange={e => updateQuestion(i, { key: e.target.value })} />
-          <div style={{ flex: 1 }}>
-            <SearchableCombo value={q.type} options={QUESTION_TYPES}
-              onChange={(v) => updateQuestion(i, { type: v })} />
-          </div>
-          <label style={{ fontSize: 12, color: '#4a5e7a', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input type="checkbox" checked={!!q.required}
-              onChange={e => updateQuestion(i, { required: e.target.checked })} /> Req
-          </label>
-          <button style={buttonSmDangerStyle} onClick={() => removeQuestion(i)}>
-            <Icon path="M6 18L18 6M6 6l12 12" size={12} />
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <div style={{ flex: 1 }}>
+          <FormField label="Question type">
+            <SearchableCombo value={questionType} options={QUESTION_TYPES}
+              onChange={(v) => setCfg({ question_type: v })} />
+          </FormField>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'flex-end', gap: 6, fontSize: 13, color: '#4a5e7a', paddingBottom: 12 }}>
+          <input type="checkbox" checked={!!cfg.required}
+            onChange={e => setCfg({ required: e.target.checked })} /> Required
+        </label>
+      </div>
+
+      {questionType === 'picklist' && (
+        <div>
+          <div style={{ fontSize: 12, color: '#4a5e7a', marginBottom: 6 }}>Options</div>
+          {options.map((o, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              <input style={{ ...inputStyle, flex: 1, margin: 0 }} value={o}
+                placeholder={`Option ${i + 1}`} onChange={e => setOption(i, e.target.value)} />
+              <button style={buttonSmDangerStyle} onClick={() => removeOption(i)}>
+                <Icon path="M6 18L18 6M6 6l12 12" size={12} />
+              </button>
+            </div>
+          ))}
+          <button style={buttonSmSecondaryStyle} onClick={addOption}>
+            <Icon path="M12 5v14M5 12h14" size={12} /> Add Option
           </button>
         </div>
-      ))}
-      <button style={buttonSmSecondaryStyle} onClick={addQuestion}>
-        <Icon path="M12 5v14M5 12h14" size={12} /> Add Question
-      </button>
+      )}
     </div>
   )
 }
