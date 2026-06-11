@@ -128,7 +128,7 @@ function FlowList({ onOpen, onCreated, toast }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
         <h2 style={{ margin: 0, fontSize: 19, color: '#0d1a2e' }}>Flow Builder</h2>
-        <HelpIcon anchor="flow_builder" title="Flow Builder" />
+        <HelpIcon anchors={[{ type: 'route', route: '/admin/flow_builder' }, { type: 'concept', concept: 'flow-builder' }]} title="Flow Builder" />
       </div>
       <p style={{ margin: '4px 0 16px', color: '#4a5e7a', fontSize: 14 }}>
         Build guided screen flows and silent automation flows. Screen flows are
@@ -369,7 +369,7 @@ function FlowEditor({ flowId, onBack, toast }) {
         <Badge map={TYPE_BADGE} value={flow.flow_type} />
         <Badge map={STATUS_BADGE} value={flow.flow_status} />
         <span style={{ marginLeft: 'auto' }} />
-        <HelpIcon anchor="flow_builder" title="Flow Builder" />
+        <HelpIcon anchors={[{ type: 'route', route: '/admin/flow_builder' }, { type: 'concept', concept: 'flow-builder' }]} title="Flow Builder" />
       </div>
 
       <LifecycleBar
