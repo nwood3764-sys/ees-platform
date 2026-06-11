@@ -100,16 +100,17 @@ function FlowList({ onOpen, onCreated, toast }) {
   if (rows === null) return <LoadingState />
 
   const columns = [
-    { name: 'flow_record_number', label: 'Number', width: 120 },
-    { name: 'flow_name',          label: 'Flow' },
-    { name: 'flow_type',          label: 'Type', width: 110 },
-    { name: 'flow_status',        label: 'Status', width: 110 },
-    { name: 'trigger_summary',    label: 'Trigger / Launch' },
-    { name: 'flow_current_version', label: 'Ver.', width: 70 },
+    { field: 'flow_record_number', label: 'Number', type: 'text', sortable: true, primary: true },
+    { field: 'flow_name',          label: 'Flow', type: 'text', sortable: true, filterable: true },
+    { field: 'flow_type',          label: 'Type', type: 'text', sortable: true, filterable: true },
+    { field: 'flow_status',        label: 'Status', type: 'text', sortable: true, filterable: true },
+    { field: 'trigger_summary',    label: 'Trigger / Launch', type: 'text', sortable: true },
+    { field: 'flow_current_version', label: 'Ver.', type: 'number', sortable: true },
   ]
 
   const data = rows.map(r => ({
     ...r,
+    id: r.id,
     _id: r.id,
     trigger_summary: r.flow_type === 'screen'
       ? (r.flow_launch_object ? `Launch: ${r.flow_launch_object}` : 'Launch: (unset)')
@@ -119,8 +120,9 @@ function FlowList({ onOpen, onCreated, toast }) {
   }))
 
   const renderCell = (row, col) => {
-    if (col.name === 'flow_status') return <Badge map={STATUS_BADGE} value={row.flow_status} />
-    if (col.name === 'flow_type')   return <Badge map={TYPE_BADGE} value={row.flow_type} />
+    const key = col.field || col.name
+    if (key === 'flow_status') return <Badge map={STATUS_BADGE} value={row.flow_status} />
+    if (key === 'flow_type')   return <Badge map={TYPE_BADGE} value={row.flow_type} />
     return undefined
   }
 
@@ -148,15 +150,15 @@ function FlowList({ onOpen, onCreated, toast }) {
         data={data}
         columns={columns}
         systemViews={[
-          { id: 'all',      label: 'All Flows',  filter: () => true },
-          { id: 'screen',   label: 'Screen',     filter: r => r.flow_type === 'screen' },
-          { id: 'silent',   label: 'Silent',     filter: r => r.flow_type === 'silent' },
-          { id: 'active',   label: 'Active',     filter: r => r.flow_status === 'active' },
-          { id: 'draft',    label: 'Drafts',     filter: r => r.flow_status === 'draft' },
-          { id: 'archived', label: 'Archived',   filter: r => r.flow_status === 'archived' },
+          { id: 'all',      name: 'All Flows', filters: [], sortField: 'flow_record_number', sortDir: 'desc' },
+          { id: 'screen',   name: 'Screen',    filters: [{ field: 'flow_type', op: 'equals', value: 'screen' }], sortField: 'flow_name', sortDir: 'asc' },
+          { id: 'silent',   name: 'Silent',    filters: [{ field: 'flow_type', op: 'equals', value: 'silent' }], sortField: 'flow_name', sortDir: 'asc' },
+          { id: 'active',   name: 'Active',    filters: [{ field: 'flow_status', op: 'equals', value: 'active' }], sortField: 'flow_name', sortDir: 'asc' },
+          { id: 'draft',    name: 'Drafts',    filters: [{ field: 'flow_status', op: 'equals', value: 'draft' }], sortField: 'flow_name', sortDir: 'asc' },
+          { id: 'archived', name: 'Archived',  filters: [{ field: 'flow_status', op: 'equals', value: 'archived' }], sortField: 'flow_name', sortDir: 'asc' },
         ]}
         defaultViewId="all"
-        newLabel="New Flow"
+        newLabel="Flow"
         onNew={() => setShowNew(true)}
         onOpenRecord={(row) => onOpen(row._id)}
         onRefresh={load}
