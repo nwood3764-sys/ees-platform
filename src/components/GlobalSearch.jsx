@@ -1,5 +1,5 @@
 /**
- * Global Search — Salesforce-style universal search across all major Anura
+ * Global Search — Salesforce-style universal search across all major LEAP
  * objects. Backed by the public.global_search RPC which returns up to 5
  * matches per object type (in the dropdown) or up to 200 (on the dedicated
  * results page) from 17 tables.
@@ -478,9 +478,9 @@ export function GlobalSearchInline({
           onChange={e => { setQuery(e.target.value); setOpen(true) }}
           onFocus={() => setOpen(true)}
           placeholder={isMobile
-            ? 'Search Anura…'
+            ? 'Search LEAP…'
             : 'Search accounts, projects, work orders, properties…'}
-          aria-label="Search Anura"
+          aria-label="Search LEAP"
           style={{
             flex: 1,
             border: 'none', outline: 'none', background: 'transparent',

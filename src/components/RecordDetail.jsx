@@ -191,7 +191,7 @@ function singularizeLabel(word) {
 // || ...` fallback chains that used to live inline). `parents` lists FK columns
 // in breadcrumb order — innermost (most specific) parent first. `parentTables`
 // gives the table for each parent FK so the breadcrumb crumbs are clickable.
-// Adding a new object to Anura now just means adding one row here.
+// Adding a new object to LEAP now just means adding one row here.
 const TABLE_META = {
   accounts:                  { module: 'Enrollment',       label: 'Accounts',             nameColumn: 'account_name',           recordNumberColumn: 'account_record_number',           statusColumn: 'account_status',           parents: ['parent_account_id'],                              parentTables: ['accounts'] },
   contacts:                  { module: 'Enrollment',       label: 'Contacts',             nameColumn: 'contact_name',           recordNumberColumn: 'contact_record_number',           statusColumn: 'contact_status',           parents: ['contact_account_id'],                             parentTables: ['accounts'] },

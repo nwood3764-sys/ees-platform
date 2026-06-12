@@ -429,7 +429,7 @@ export default function SearchResultsPage({
           type="text"
           value={inputValue}
           onChange={e => setInputValue(e.target.value)}
-          placeholder="Search Anura…"
+          placeholder="Search LEAP…"
           autoFocus={!searchQuery}
           style={{
             flex: 1, border: 'none', outline: 'none', background: 'transparent',
@@ -519,7 +519,7 @@ export default function SearchResultsPage({
               padding: '60px 24px', textAlign: 'center', color: C.textMuted, fontSize: 13,
             }}>
               <div style={{ color: C.textSecondary, fontWeight: 500, fontSize: 15, marginBottom: 6 }}>
-                Search Anura
+                Search LEAP
               </div>
               Type at least 2 characters to search across accounts, contacts,
               properties, projects, work orders, and more.
