@@ -36,7 +36,6 @@ import {
 // ───────────────────────────────────────────────────────────────────────────
 
 const STATUS_BADGE = {
-  draft:     { bg: '#eef2f7', color: '#4a5e7a', label: 'Draft' },
   active:    { bg: '#e7f8f0', color: '#1d7a52', label: 'Active' },
   inactive:  { bg: '#fef3c7', color: '#8a6d1f', label: 'Inactive' },
   archived:  { bg: '#f3f4f6', color: '#6b7280', label: 'Archived' },
@@ -155,7 +154,7 @@ function FlowList({ onOpen, onCreated, toast }) {
           { id: 'screen',   name: 'Screen',    filters: [{ field: 'flow_type', op: 'equals', value: 'screen' }], sortField: 'flow_name', sortDir: 'asc' },
           { id: 'silent',   name: 'Silent',    filters: [{ field: 'flow_type', op: 'equals', value: 'silent' }], sortField: 'flow_name', sortDir: 'asc' },
           { id: 'active',   name: 'Active',    filters: [{ field: 'flow_status', op: 'equals', value: 'active' }], sortField: 'flow_name', sortDir: 'asc' },
-          { id: 'draft',    name: 'Drafts',    filters: [{ field: 'flow_status', op: 'equals', value: 'draft' }], sortField: 'flow_name', sortDir: 'asc' },
+          { id: 'inactive', name: 'Inactive', filters: [{ field: 'flow_status', op: 'equals', value: 'inactive' }], sortField: 'flow_name', sortDir: 'asc' },
           { id: 'archived', name: 'Archived',  filters: [{ field: 'flow_status', op: 'equals', value: 'archived' }], sortField: 'flow_name', sortDir: 'asc' },
         ]}
         defaultViewId="all"

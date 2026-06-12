@@ -174,7 +174,7 @@ export async function createFlow({ name, description, flowType, launchObject,
       flow_name: name,
       flow_description: description || null,
       flow_type: flowType,
-      flow_status: 'draft',
+      flow_status: 'inactive',
       flow_launch_object: flowType === 'screen' ? (launchObject || null) : null,
       flow_launch_contexts:
         flowType === 'screen' && launchObject ? [{ object: launchObject }] : [],
