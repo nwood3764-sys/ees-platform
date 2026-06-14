@@ -615,9 +615,26 @@ export async function resolvePolymorphicLookups(requests) {
 export async function fetchRelatedRecords(config, parentRecordId) {
   const { table, fk, is_deleted_col, columns, sort_field, sort_dir } = config
 
+  // Build the select. Plain columns are listed by name. A column of
+  // type 'lookup' (with lookup_table + lookup_field) is fetched as a
+  // PostgREST embedded resource so the related list can show the FK's
+  // human name (e.g. the contact's name) instead of a raw UUID. The
+  // embed is aliased to the column name so the flattening step below can
+  // find it: `<colName>:<fk_col>(<name_col>)`.
+  const selectParts = ['id']
+  const lookupCols = []
+  for (const c of columns) {
+    if (c.type === 'lookup' && c.lookup_table && c.lookup_field && c.fk_column) {
+      selectParts.push(`${c.name}:${c.fk_column}(${c.lookup_field})`)
+      lookupCols.push(c)
+    } else {
+      selectParts.push(c.name)
+    }
+  }
+
   let query = supabase
     .from(table)
-    .select('id, ' + columns.map(c => c.name).join(', '))
+    .select(selectParts.join(', '))
     .eq(fk, parentRecordId)
 
   if (is_deleted_col) {
@@ -632,7 +649,22 @@ export async function fetchRelatedRecords(config, parentRecordId) {
 
   const { data, error } = await query
   if (error) throw error
-  return data || []
+
+  // Flatten embedded lookup objects to their display string so the cell
+  // renderer receives a plain value. `row[colName]` arrives as
+  // { <lookup_field>: 'Josiah Brazle' } | null; collapse it to the string.
+  const rows = data || []
+  if (lookupCols.length) {
+    for (const row of rows) {
+      for (const c of lookupCols) {
+        const embedded = row[c.name]
+        row[c.name] = embedded && typeof embedded === 'object'
+          ? (embedded[c.lookup_field] ?? null)
+          : (embedded ?? null)
+      }
+    }
+  }
+  return rows
 }
 
 /**
