@@ -200,6 +200,7 @@ const TABLE_META = {
   buildings:                 { module: 'Enrollment',       label: 'Buildings',            nameColumn: 'building_name',          recordNumberColumn: 'building_record_number',          statusColumn: 'building_status',          parents: ['property_id'],                                    parentTables: ['properties'] },
   units:                     { module: 'Enrollment',       label: 'Units',                nameColumn: 'unit_name',              recordNumberColumn: 'unit_record_number',              statusColumn: 'unit_status',              parents: ['building_id', 'property_id'],                     parentTables: ['buildings', 'properties'] },
   opportunities:             { module: 'Enrollment',       label: 'Opportunities',        nameColumn: 'opportunity_name',       recordNumberColumn: 'opportunity_record_number',       statusColumn: 'opportunity_status',       parents: ['property_id', 'opportunity_account_id'],          parentTables: ['properties', 'accounts'] },
+  opportunity_contact_roles: { module: 'Enrollment',       label: 'Contact Role',         nameColumn: 'ocr_name',               recordNumberColumn: 'ocr_record_number',               statusColumn: null,                       parents: ['opportunity_id', 'contact_id'],                   parentTables: ['opportunities', 'contacts'] },
   property_programs:         { module: 'Enrollment',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'property_id', 'building_id'],       parentTables: ['projects', 'properties', 'buildings'] },
   projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id'],                                    parentTables: ['properties'] },
@@ -360,7 +361,7 @@ const FIELD_PREFIXES = [
   'contact_', 'property_', 'opportunity_', 'work_order_', 'project_',
   'building_', 'unit_', 'assessment_', 'vehicle_', 'va_', 'account_',
   'product_item_', 'product_', 'equipment_', 'ia_', 'ppr_', 'user_',
-  'skill_', 'cs_', 'acr_', 'wtsr_', 'mr_',
+  'skill_', 'cs_', 'acr_', 'wtsr_', 'mr_', 'ocr_',
 ]
 
 function humanizeFieldName(col) {
@@ -1029,6 +1030,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
           opportunities: ['opportunity_name'],
           buildings: ['building_name'],
           units: ['unit_name'],
+          opportunity_contact_roles: ['ocr_name'],
         }
         const derivedCols = new Set(DERIVED[table] || [])
         // Extra fields to require on quick-create beyond the DB NOT NULL set,
@@ -1465,6 +1467,13 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
         || dependencyValues.opportunity_managing_account_id
         || dependencyValues.account_id
       return acct ? { contact_account_id: acct } : null
+    }
+    if (dep.kind === 'contacts_for_opportunity') {
+      // Quick-creating a contact from an opportunity contact role: the new
+      // contact belongs to the opportunity's account. The account id isn't on
+      // the contact-role draft directly, so seeding is deferred — the contact
+      // can be reparented after creation if needed. No reliable seed here.
+      return null
     }
     if (dep.kind === 'buildings_for_property') {
       const prop = dependencyValues.property_id

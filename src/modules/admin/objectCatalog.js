@@ -17,7 +17,7 @@ export const OBJECT_CATALOG = [
   { table: 'units',                         label: 'Unit',                        pluralLabel: 'Units',                        module: 'CRM & Enrollment',        description: 'Individual dwelling within a building.' },
   { table: 'contacts',                      label: 'Contact',                     pluralLabel: 'Contacts',                     module: 'CRM & Enrollment',        description: 'Person associated with an account — internal staff, property owner contact, partner tech, tenant, etc.' },
   { table: 'opportunities',                 label: 'Opportunity',                 pluralLabel: 'Opportunities',                module: 'CRM & Enrollment',        description: 'Pipeline record — potential project at a property.' },
-  { table: 'opportunity_contact_roles',     label: 'Opportunity Contact Role',    pluralLabel: 'Opportunity Contact Roles',    module: 'CRM & Enrollment',        description: 'Stakeholder role on an opportunity.' },
+  { table: 'opportunity_contact_roles',     label: 'Contact Role',    pluralLabel: 'Contact Roles',    module: 'CRM & Enrollment',        description: 'Stakeholder role on an opportunity.' },
   { table: 'opportunity_line_items',        label: 'Opportunity Line Item',       pluralLabel: 'Opportunity Line Items',       module: 'CRM & Enrollment',        description: 'Scope-of-work line on an opportunity.' },
 
   // ─── QUALIFICATION ─────────────────────────────────────────────────────
