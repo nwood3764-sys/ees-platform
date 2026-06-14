@@ -399,13 +399,28 @@ function buildLabelMap(sections) {
 // being wrongly reported as "Required field missing: Id".
 const SYSTEM_REQUIRED_EXEMPT = /(^id$|_record_number$|_owner$|_created_by$|_created_at$|_updated_by$|_updated_at$|_is_deleted$|^is_seed_data$|_is_seed_data$)/
 
+// Per-table columns that are NOT NULL but populated by a BEFORE INSERT/UPDATE
+// trigger, never by the user. These must be exempt from the client-side
+// required-field check or the form blocks a save the database would accept.
+// Mirrors the DERIVED map in the create form. Example: opportunity_contact_roles
+// .ocr_name is generated as "<Role> — <Contact>" by trg_ocr_name.
+const TRIGGER_DERIVED_REQUIRED = {
+  contacts: ['contact_name'],
+  opportunities: ['opportunity_name'],
+  buildings: ['building_name'],
+  units: ['unit_name'],
+  opportunity_contact_roles: ['ocr_name'],
+}
+
 // missing from the provided values object. An empty string is treated as
 // missing; `false` and `0` are valid values. System/auto-populated columns
 // are skipped so they never surface in the error message.
-function findMissingRequired(requiredFields, values, labelMap) {
+function findMissingRequired(requiredFields, values, labelMap, tableName = null) {
+  const derived = new Set(TRIGGER_DERIVED_REQUIRED[tableName] || [])
   const missing = []
   for (const f of requiredFields || []) {
     if (SYSTEM_REQUIRED_EXEMPT.test(f)) continue
+    if (derived.has(f)) continue
     const v = values?.[f]
     if (v === null || v === undefined || v === '') {
       missing.push(labelMap[f] || humanizeFieldName(f))
@@ -5293,7 +5308,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         // system fields the user never saw.
         const meta = await fetchTableMetadata(tableName)
         const labelMap = buildLabelMap(data?.sections)
-        const missing = findMissingRequired(meta.required_fields, fields, labelMap)
+        const missing = findMissingRequired(meta.required_fields, fields, labelMap, tableName)
         if (missing.length) {
           toast.error(
             missing.length === 1
@@ -5351,7 +5366,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       const meta = await fetchTableMetadata(tableName)
       const labelMap = buildLabelMap(data?.sections)
       const merged = { ...data.record, ...changes }
-      const missing = findMissingRequired(meta.required_fields, merged, labelMap)
+      const missing = findMissingRequired(meta.required_fields, merged, labelMap, tableName)
       if (missing.length) {
         toast.error(
           missing.length === 1
