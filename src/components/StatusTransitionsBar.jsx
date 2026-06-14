@@ -127,8 +127,8 @@ export default function StatusTransitionsBar({
     try {
       const { data, error } = await supabase.rpc('change_record_status', {
         p_object:        tableName,
-        p_status_field:  statusField,
         p_record_id:     recordId,
+        p_status_field:  statusField,
         p_to_status_id:  txn.st_to_status_id,
         p_note:          note?.trim() || null,
       })

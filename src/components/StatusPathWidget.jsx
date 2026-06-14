@@ -156,7 +156,7 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
         p_object:        tableName,
         p_record_id:     parentRecordId,
         p_status_field:  statusField,
-        p_new_status_id: targetStatusId,
+        p_to_status_id:  targetStatusId,
       })
       if (error) throw error
       toast.success(`Status changed to "${targetLabel}"`)
