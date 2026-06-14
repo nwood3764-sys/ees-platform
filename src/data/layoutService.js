@@ -893,6 +893,13 @@ export function applyInsertDefaults(tableName, fields, userId) {
     if (!fields.acr_record_number) fields.acr_record_number = 'NEW'
     if (!fields.acr_owner)         fields.acr_owner         = userId
     if (!fields.acr_created_by)    fields.acr_created_by    = userId
+  } else if (tableName === 'opportunity_contact_roles') {
+    // No owner column — a contact role belongs to its parent opportunity.
+    // ocr_record_number is populated by trg_ocr_rn (BEFORE INSERT); ocr_name
+    // is populated by trg_ocr_name. Pass a placeholder record number so NOT
+    // NULL + findMissingRequired both pass; the trigger overwrites it.
+    if (!fields.ocr_record_number) fields.ocr_record_number = 'NEW'
+    if (!fields.ocr_created_by)    fields.ocr_created_by    = userId
   } else if (tableName === 'contact_skills') {
     if (!fields.cs_record_number) fields.cs_record_number = 'NEW'
     if (!fields.cs_owner)         fields.cs_owner         = userId
