@@ -103,6 +103,7 @@ const TABLE_COLUMN_PREFIX = {
   incentive_applications:            'ia',
   messages:                          'msg',
   opportunities:                     'opportunity',
+  opportunity_contact_roles:         'ocr',
   outbound_mailboxes:                'outbound_mailbox',
   products:                          'product',
   projects:                          'project',
