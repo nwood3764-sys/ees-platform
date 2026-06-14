@@ -42,7 +42,7 @@ const WO_COLS = [
   { field:'property',     label:'Property',  type:'text',   sortable:true, filterable:true  },
   { field:'building',     label:'Building',  type:'text',   sortable:true, filterable:true  },
   { field:'workType',     label:'Work Type', type:'select', sortable:true, filterable:true, options:['HP - Air to Air Install','Air Sealing - Multifamily','Insulation - Attic','Boiler Replacement','PTAC Install','Blower Door Diagnostic','Shop Kit - Equipment','Travel - Drive to Site','ASHRAE Level 2'] },
-  { field:'status',       label:'Status',    type:'select', sortable:true, filterable:true, options:['Work Order To Be Scheduled','Work Order Scheduled','Work Order In Progress','Work Order Submitted','Work Order To Be Verified','Work Order Corrections Needed','Work Order Verified','Work Order Complete'] },
+  { field:'status',       label:'Status',    type:'select', sortable:true, filterable:true, options:['New','To Be Scheduled','To Be Assigned','Assigned','To Be Accepted','Scheduled','In Progress','To Be Verified','Corrections Needed','Verified','Unable to Complete','Closed'] },
   { field:'teamLead',     label:'Team Lead', type:'select', sortable:true, filterable:true, options:['J. Martinez','K. Chen','A. Williams','D. Okonkwo','P. Nair'] },
   { field:'scheduledDate',label:'Scheduled', type:'date',   sortable:true, filterable:true  },
   { field:'duration',     label:'Est.',      type:'text',   sortable:false,filterable:false },
@@ -56,9 +56,9 @@ const PROJ_VIEWS = [
 ]
 const WO_VIEWS = [
   { id:'WOV-01', name:'All Work Orders',   filters:[], sortField:'scheduledDate', sortDir:'asc' },
-  { id:'WOV-02', name:'To Be Verified',    filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order To Be Verified' }],    sortField:'scheduledDate', sortDir:'asc' },
-  { id:'WOV-03', name:'Corrections Needed',filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order Corrections Needed' }], sortField:'scheduledDate', sortDir:'asc' },
-  { id:'WOV-04', name:'In Progress Today', filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order In Progress' }],         sortField:'scheduledDate', sortDir:'asc' },
+  { id:'WOV-02', name:'To Be Verified',    filters:[{ field:'status', label:'Status', op:'equals', value:'To Be Verified' }],    sortField:'scheduledDate', sortDir:'asc' },
+  { id:'WOV-03', name:'Corrections Needed',filters:[{ field:'status', label:'Status', op:'equals', value:'Corrections Needed' }], sortField:'scheduledDate', sortDir:'asc' },
+  { id:'WOV-04', name:'In Progress Today', filters:[{ field:'status', label:'Status', op:'equals', value:'In Progress' }],         sortField:'scheduledDate', sortDir:'asc' },
 ]
 
 // ─── Field-staff views (folded in from the old People module) ───────────────
@@ -308,10 +308,10 @@ function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, on
 
 function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrews = [] }) {
   const R = useRecharts()
-  const toVerify    = workOrders.filter(w => w.status === 'Work Order To Be Verified')
-  const corrections = workOrders.filter(w => w.status === 'Work Order Corrections Needed')
+  const toVerify    = workOrders.filter(w => w.status === 'To Be Verified')
+  const corrections = workOrders.filter(w => w.status === 'Corrections Needed')
   const toSchedProj = projects.filter(p => p.status === 'Project To Be Scheduled')
-  const inProgress  = workOrders.filter(w => w.status === 'Work Order In Progress')
+  const inProgress  = workOrders.filter(w => w.status === 'In Progress')
 
   // Header identity — pulled once from the current Supabase auth session and
   // joined to the app-level users/roles tables. Null while loading and also
@@ -344,11 +344,11 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
 
   const woByStatus = [
     { name:'In Progress',    value: inProgress.length },
-    { name:'Scheduled',      value: workOrders.filter(w=>w.status==='Work Order Scheduled').length },
+    { name:'Scheduled',      value: workOrders.filter(w=>w.status==='Scheduled').length },
     { name:'To Be Verified', value: toVerify.length },
     { name:'Corrections',    value: corrections.length },
-    { name:'Complete',       value: workOrders.filter(w=>w.status==='Work Order Complete' || w.status==='Work Order Verified').length },
-    { name:'Unscheduled',    value: workOrders.filter(w=>w.status==='Work Order To Be Scheduled').length },
+    { name:'Complete',       value: workOrders.filter(w=>w.status==='Closed' || w.status==='Verified').length },
+    { name:'Unscheduled',    value: workOrders.filter(w=>w.status==='To Be Scheduled').length },
   ]
 
   return (
@@ -816,7 +816,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
     return () => { cancelled = true }
   }, [scheduleDate])
 
-  const urgentCount = workOrders.filter(w => w.status==='Work Order To Be Verified'||w.status==='Work Order Corrections Needed').length
+  const urgentCount = workOrders.filter(w => w.status==='To Be Verified'||w.status==='Corrections Needed').length
   const counts = {
     projects:    projects.length,
     workorders:  workOrders.length,

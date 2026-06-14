@@ -1,12 +1,14 @@
 import { supabase } from '../lib/supabase'
 import { loadPicklists } from './outreachService'
 
-// DB work-order statuses are short ("In Progress"); the UI filter options
-// are long ("Work Order In Progress"). Map between them for display so the
-// filter dropdowns still match.
+// Work-order status is stored bare in the DB ("In Progress", "To Be Scheduled")
+// per the live work_order_status picklist, which is the source of truth. The UI
+// speaks that same bare vocabulary — no prefixing. Legacy long-form values
+// ("In Progress") are stripped back to bare on the way through so any
+// stale data renders correctly.
 const workOrderStatusLabel = raw => {
   if (!raw) return '—'
-  return raw.startsWith('Work Order') ? raw : `Work Order ${raw}`
+  return raw.startsWith('Work Order ') ? raw.slice('Work Order '.length) : raw
 }
 
 // Palette of fixed crew colors. Index by order of appearance so Alpha crew

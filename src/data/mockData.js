@@ -97,18 +97,18 @@ export const PROJECTS = [
 ];
 
 export const WORK_ORDERS = [
-  { id:'WO-00141', name:'Heat Pump Install — Unit 101',      project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'HP - Air to Air Install',   status:'Work Order Complete',            teamLead:'J. Martinez', scheduledDate:'2026-04-08', duration:'4h', state:'WI' },
-  { id:'WO-00142', name:'Heat Pump Install — Unit 102',      project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'HP - Air to Air Install',   status:'Work Order To Be Verified',      teamLead:'J. Martinez', scheduledDate:'2026-04-10', duration:'4h', state:'WI' },
-  { id:'WO-00143', name:'Heat Pump Install — Unit 103',      project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'HP - Air to Air Install',   status:'Work Order In Progress',         teamLead:'J. Martinez', scheduledDate:'2026-04-12', duration:'4h', state:'WI' },
-  { id:'WO-00144', name:'Air Sealing — Building B',          project:'PROJ-00001', property:'North Willow Apartments',  building:'Building B', workType:'Air Sealing - Multifamily', status:'Work Order Scheduled',           teamLead:'K. Chen',     scheduledDate:'2026-04-14', duration:'6h', state:'WI' },
-  { id:'WO-00145', name:'Attic Insulation — Building A',     project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'Insulation - Attic',        status:'Work Order To Be Scheduled',     teamLead:'',            scheduledDate:'',           duration:'5h', state:'WI' },
-  { id:'WO-00146', name:'Boiler Replacement — Main Mech',    project:'PROJ-00003', property:'River Bluff Senior Living', building:'Main',       workType:'Boiler Replacement',        status:'Work Order Scheduled',           teamLead:'J. Martinez', scheduledDate:'2026-04-15', duration:'8h', state:'WI' },
-  { id:'WO-00147', name:'PTAC Install — Unit 101',           project:'PROJ-00004', property:'Aspen Court Residences',   building:'Building A', workType:'PTAC Install',              status:'Work Order In Progress',         teamLead:'K. Chen',     scheduledDate:'2026-04-12', duration:'3h', state:'CO' },
-  { id:'WO-00148', name:'PTAC Install — Unit 102',           project:'PROJ-00004', property:'Aspen Court Residences',   building:'Building A', workType:'PTAC Install',              status:'Work Order Scheduled',           teamLead:'K. Chen',     scheduledDate:'2026-04-13', duration:'3h', state:'CO' },
-  { id:'WO-00149', name:'Weatherization — Block 1',          project:'PROJ-00002', property:'Capitol View Townhomes',   building:'Block 1',    workType:'Air Sealing - Multifamily', status:'Work Order To Be Scheduled',     teamLead:'',            scheduledDate:'',           duration:'6h', state:'WI' },
-  { id:'WO-00150', name:'Blower Door Test — Building A',     project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'Blower Door Diagnostic',    status:'Work Order Corrections Needed',  teamLead:'J. Martinez', scheduledDate:'2026-04-12', duration:'2h', state:'WI' },
-  { id:'WO-00151', name:'Shop Kit — Heat Pump Units (x4)',   project:'PROJ-00001', property:'Madison Shop',             building:'Shop',       workType:'Shop Kit - Equipment',      status:'Work Order Complete',            teamLead:'D. Okonkwo',  scheduledDate:'2026-04-08', duration:'2h', state:'WI' },
-  { id:'WO-00152', name:'Drive to Site — Martinez Crew',     project:'PROJ-00001', property:'North Willow Apartments',  building:'—',          workType:'Travel - Drive to Site',    status:'Work Order In Progress',         teamLead:'J. Martinez', scheduledDate:'2026-04-12', duration:'1h', state:'WI' },
+  { id:'WO-00141', name:'Heat Pump Install — Unit 101',      project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'HP - Air to Air Install',   status:'Closed',            teamLead:'J. Martinez', scheduledDate:'2026-04-08', duration:'4h', state:'WI' },
+  { id:'WO-00142', name:'Heat Pump Install — Unit 102',      project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'HP - Air to Air Install',   status:'To Be Verified',      teamLead:'J. Martinez', scheduledDate:'2026-04-10', duration:'4h', state:'WI' },
+  { id:'WO-00143', name:'Heat Pump Install — Unit 103',      project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'HP - Air to Air Install',   status:'In Progress',         teamLead:'J. Martinez', scheduledDate:'2026-04-12', duration:'4h', state:'WI' },
+  { id:'WO-00144', name:'Air Sealing — Building B',          project:'PROJ-00001', property:'North Willow Apartments',  building:'Building B', workType:'Air Sealing - Multifamily', status:'Scheduled',           teamLead:'K. Chen',     scheduledDate:'2026-04-14', duration:'6h', state:'WI' },
+  { id:'WO-00145', name:'Attic Insulation — Building A',     project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'Insulation - Attic',        status:'To Be Scheduled',     teamLead:'',            scheduledDate:'',           duration:'5h', state:'WI' },
+  { id:'WO-00146', name:'Boiler Replacement — Main Mech',    project:'PROJ-00003', property:'River Bluff Senior Living', building:'Main',       workType:'Boiler Replacement',        status:'Scheduled',           teamLead:'J. Martinez', scheduledDate:'2026-04-15', duration:'8h', state:'WI' },
+  { id:'WO-00147', name:'PTAC Install — Unit 101',           project:'PROJ-00004', property:'Aspen Court Residences',   building:'Building A', workType:'PTAC Install',              status:'In Progress',         teamLead:'K. Chen',     scheduledDate:'2026-04-12', duration:'3h', state:'CO' },
+  { id:'WO-00148', name:'PTAC Install — Unit 102',           project:'PROJ-00004', property:'Aspen Court Residences',   building:'Building A', workType:'PTAC Install',              status:'Scheduled',           teamLead:'K. Chen',     scheduledDate:'2026-04-13', duration:'3h', state:'CO' },
+  { id:'WO-00149', name:'Weatherization — Block 1',          project:'PROJ-00002', property:'Capitol View Townhomes',   building:'Block 1',    workType:'Air Sealing - Multifamily', status:'To Be Scheduled',     teamLead:'',            scheduledDate:'',           duration:'6h', state:'WI' },
+  { id:'WO-00150', name:'Blower Door Test — Building A',     project:'PROJ-00001', property:'North Willow Apartments',  building:'Building A', workType:'Blower Door Diagnostic',    status:'Corrections Needed',  teamLead:'J. Martinez', scheduledDate:'2026-04-12', duration:'2h', state:'WI' },
+  { id:'WO-00151', name:'Shop Kit — Heat Pump Units (x4)',   project:'PROJ-00001', property:'Madison Shop',             building:'Shop',       workType:'Shop Kit - Equipment',      status:'Closed',            teamLead:'D. Okonkwo',  scheduledDate:'2026-04-08', duration:'2h', state:'WI' },
+  { id:'WO-00152', name:'Drive to Site — Martinez Crew',     project:'PROJ-00001', property:'North Willow Apartments',  building:'—',          workType:'Travel - Drive to Site',    status:'In Progress',         teamLead:'J. Martinez', scheduledDate:'2026-04-12', duration:'1h', state:'WI' },
 ];
 
 export const PROJECT_PAYMENT_REQUESTS = [
@@ -135,9 +135,9 @@ export const SCHEDULE_CREWS = [
     members:['J. Martinez','A. Williams','T. Kim'], vehicle:'Box Truck 04',
     initials:'JM', color:'#3ecf8e',
     jobs:[
-      { name:'Drive to Site',            property:'North Willow Apartments', workType:'Travel',              start:7.0,  duration:1.0, status:'Work Order In Progress',        color:'#8fa0b8' },
-      { name:'HP Install — Unit 103',    property:'North Willow Apartments', workType:'HP Install',          start:8.0,  duration:4.0, status:'Work Order In Progress',        color:'#7eb3e8' },
-      { name:'Blower Door Test — Bldg A',property:'North Willow Apartments', workType:'Blower Door',         start:13.0, duration:2.0, status:'Work Order Corrections Needed', color:'#e85c5c' },
+      { name:'Drive to Site',            property:'North Willow Apartments', workType:'Travel',              start:7.0,  duration:1.0, status:'In Progress',        color:'#8fa0b8' },
+      { name:'HP Install — Unit 103',    property:'North Willow Apartments', workType:'HP Install',          start:8.0,  duration:4.0, status:'In Progress',        color:'#7eb3e8' },
+      { name:'Blower Door Test — Bldg A',property:'North Willow Apartments', workType:'Blower Door',         start:13.0, duration:2.0, status:'Corrections Needed', color:'#e85c5c' },
     ]
   },
   {
@@ -145,9 +145,9 @@ export const SCHEDULE_CREWS = [
     members:['K. Chen','M. Reyes','S. Park'], vehicle:'Box Truck 07',
     initials:'KC', color:'#7eb3e8',
     jobs:[
-      { name:'Drive to Site',            property:'Aspen Court Residences',  workType:'Travel',              start:7.0,  duration:1.0, status:'Work Order In Progress',  color:'#8fa0b8' },
-      { name:'PTAC Install — Unit 101',  property:'Aspen Court Residences',  workType:'PTAC Install',        start:8.0,  duration:3.0, status:'Work Order In Progress',  color:'#7eb3e8' },
-      { name:'PTAC Install — Unit 102',  property:'Aspen Court Residences',  workType:'PTAC Install',        start:11.5, duration:3.0, status:'Work Order Scheduled',    color:'#e8a949' },
+      { name:'Drive to Site',            property:'Aspen Court Residences',  workType:'Travel',              start:7.0,  duration:1.0, status:'In Progress',  color:'#8fa0b8' },
+      { name:'PTAC Install — Unit 101',  property:'Aspen Court Residences',  workType:'PTAC Install',        start:8.0,  duration:3.0, status:'In Progress',  color:'#7eb3e8' },
+      { name:'PTAC Install — Unit 102',  property:'Aspen Court Residences',  workType:'PTAC Install',        start:11.5, duration:3.0, status:'Scheduled',    color:'#e8a949' },
     ]
   },
   {

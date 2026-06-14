@@ -439,7 +439,7 @@ function AutomationRuleEditor({ mode, initial, onClose, onSaved }) {
                 hint="Fires when the record reaches this status">
                 <PickerOrText options={statusOptions} value={triggerStatus}
                   onChange={setTriggerStatus}
-                  placeholder="e.g. Work Order Submitted" />
+                  placeholder="e.g. To Be Verified" />
               </FormField>
             )}
           </section>
@@ -461,7 +461,7 @@ function AutomationRuleEditor({ mode, initial, onClose, onSaved }) {
                   <PickerOrText options={emailTemplateOptions}
                     value={actionConfig.template}
                     onChange={v => updateConfig({ template: v })}
-                    placeholder="e.g. Work Order Scheduled — Team Lead" />
+                    placeholder="e.g. Scheduled — Team Lead" />
                 </FormField>
                 <FormField label="Recipient role" required>
                   <PickerOrText options={roleOptions}

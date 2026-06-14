@@ -51,9 +51,9 @@ function Widget({ title, subtitle, children, footer, onFooter }) {
 
 function Dashboard({ workOrders, projects, opportunities, onGo }) {
   const R = useRecharts()
-  const woInProgress = workOrders.filter(w => w.status === 'Work Order In Progress').length
-  const woToVerify   = workOrders.filter(w => w.status === 'Work Order To Be Verified').length
-  const woCorrections= workOrders.filter(w => w.status === 'Work Order Corrections Needed').length
+  const woInProgress = workOrders.filter(w => w.status === 'In Progress').length
+  const woToVerify   = workOrders.filter(w => w.status === 'To Be Verified').length
+  const woCorrections= workOrders.filter(w => w.status === 'Corrections Needed').length
   const projActive   = projects.filter(p => p.status === 'Project In Progress').length
   const pipeline     = opportunities.reduce((s, o) => s + (o._amountRaw || 0), 0)
 
@@ -135,7 +135,7 @@ const WO_COLS = [
   { field:'property',     label:'Property',  type:'text',   sortable:true, filterable:true  },
   { field:'building',     label:'Building',  type:'text',   sortable:true, filterable:true  },
   { field:'workType',     label:'Work Type', type:'select', sortable:true, filterable:true, options:['HP - Air to Air Install','Air Sealing - Multifamily','Insulation - Attic','Boiler Replacement','PTAC Install','Blower Door Diagnostic','Shop Kit - Equipment','Travel - Drive to Site','ASHRAE Level 2'] },
-  { field:'status',       label:'Status',    type:'select', sortable:true, filterable:true, options:['Work Order To Be Scheduled','Work Order Scheduled','Work Order In Progress','Work Order Submitted','Work Order To Be Verified','Work Order Corrections Needed','Work Order Verified','Work Order Complete'] },
+  { field:'status',       label:'Status',    type:'select', sortable:true, filterable:true, options:['New','To Be Scheduled','To Be Assigned','Assigned','To Be Accepted','Scheduled','In Progress','To Be Verified','Corrections Needed','Verified','Unable to Complete','Closed'] },
   { field:'teamLead',     label:'Team Lead', type:'select', sortable:true, filterable:true, options:['J. Martinez','K. Chen','A. Williams','D. Okonkwo','P. Nair'] },
   { field:'scheduledDate',label:'Scheduled', type:'date',   sortable:true, filterable:true  },
   { field:'duration',     label:'Est.',      type:'text',   sortable:false,filterable:false },
@@ -144,9 +144,9 @@ const WO_COLS = [
 
 const WO_VIEWS = [
   { id:'IWO-01', name:'All Work Orders',   filters:[], sortField:'scheduledDate', sortDir:'asc' },
-  { id:'IWO-02', name:'In Progress',       filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order In Progress' }],          sortField:'scheduledDate', sortDir:'asc' },
-  { id:'IWO-03', name:'To Be Verified',    filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order To Be Verified' }],       sortField:'scheduledDate', sortDir:'asc' },
-  { id:'IWO-04', name:'Corrections Needed',filters:[{ field:'status', label:'Status', op:'equals', value:'Work Order Corrections Needed' }],   sortField:'scheduledDate', sortDir:'asc' },
+  { id:'IWO-02', name:'In Progress',       filters:[{ field:'status', label:'Status', op:'equals', value:'In Progress' }],          sortField:'scheduledDate', sortDir:'asc' },
+  { id:'IWO-03', name:'To Be Verified',    filters:[{ field:'status', label:'Status', op:'equals', value:'To Be Verified' }],       sortField:'scheduledDate', sortDir:'asc' },
+  { id:'IWO-04', name:'Corrections Needed',filters:[{ field:'status', label:'Status', op:'equals', value:'Corrections Needed' }],   sortField:'scheduledDate', sortDir:'asc' },
 ]
 
 const PROJ_COLS = [
