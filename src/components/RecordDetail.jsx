@@ -3392,6 +3392,15 @@ function RelatedListWidget({
       })
     }
 
+    // Contact Role: the Contact must always be chosen by the user, never
+    // pre-seeded from the chain. Seeding contact_id makes the field show a raw
+    // id before any selection and lets a contact be added without a deliberate
+    // pick. Keep opportunity_id (it scopes the contact picker) but drop the
+    // contact so the field starts blank.
+    if (childTable === 'opportunity_contact_roles') {
+      delete prefillObj.contact_id
+    }
+
     onNavigateToRecord({ table: childTable, id: null, mode: 'create', prefill: prefillObj })
   }
 
