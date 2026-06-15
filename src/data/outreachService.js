@@ -371,70 +371,43 @@ export async function fetchContacts() {
 // each enrollment has its own independent status.
 
 export async function fetchEnrollments() {
+  const picklists = await loadPicklists()
   const data = await fetchAllPaged((from, to) =>
     supabase
-      .from('property_programs')
+      .from('enrollments')
       .select(`
         id,
-        status,
-        enrollment_date,
-        affordability_category,
-        census_tract,
-        is_dac,
+        enrollment_record_number,
+        enrollment_name,
+        enrollment_record_type,
+        enrollment_status,
+        enrollment_state,
+        enrollment_total_units,
+        enrollment_qualifying_mode,
+        enrollment_determination_date,
         property_id,
-        program_id,
-        properties:property_id ( property_name, property_state, property_total_units ),
-        programs:program_id ( name, short_name, state )
+        properties:property_id ( property_name, property_state, property_total_units )
       `)
-      .order('enrollment_date', { ascending: false, nullsFirst: false })
-      .order('id',              { ascending: true })
+      .eq('enrollment_is_deleted', false)
+      .order('enrollment_created_at', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: true })
       .range(from, to)
   )
 
-  // The list-view columns defined in the Outreach module expect a set of
-  // sub-status fields (hafAgreement, incomeQual, censusTract, rentRoll,
-  // dacDesignation). property_programs.status is a single text lifecycle,
-  // so we derive those sub-statuses from the main status string. The
-  // dedicated tracking columns live on related docs/records and get wired
-  // in a follow-up pass.
-  const derive = status => {
-    const s = status || ''
-    const hafAgreement =
-      s.includes('HAF Agreement Pending') ? 'Pending' :
-      (s.includes('Complete') || s.includes('Executed') || s.includes('Income Qualification') || s.includes('Census Tract')) ? 'Executed' :
-      'Not Started'
-    const incomeQual =
-      s.includes('Income Qualification In Progress') ? 'In Progress' :
-      s.includes('Complete') ? 'Complete' :
-      s.includes('Review') ? 'In Review' :
-      'Not Started'
-    const censusTract =
-      s.includes('Census Tract Verification') ? 'Pending' :
-      s.includes('Complete') ? 'Verified' :
-      'Pending'
-    return { hafAgreement, incomeQual, censusTract }
-  }
-
   return data.map(r => {
-    const d = derive(r.status)
-    // Strip "Enrollment — " prefix for the name column, keep full for status
     const propertyName = r.properties?.property_name || '—'
-    const programShort = r.programs?.short_name || r.programs?.name || '—'
     return {
-      id: r.id.slice(0, 8).toUpperCase(),
+      id: r.enrollment_record_number || r.id.slice(0, 8).toUpperCase(),
       _id: r.id,
-      name: `${propertyName} – ${programShort}`,
+      name: r.enrollment_name || propertyName,
       property: propertyName,
-      program: programShort,
-      status: r.status || '—',
+      recordType: picklists.byId.get(r.enrollment_record_type) || '—',
+      status: picklists.byId.get(r.enrollment_status) || '—',
+      qualifyingMode: r.enrollment_qualifying_mode || 'Not Run',
+      determinationDate: r.enrollment_determination_date || '',
       owner: 'Nicholas Wood',
-      hafAgreement: d.hafAgreement,
-      incomeQual: d.incomeQual,
-      censusTract: d.censusTract,
-      dacDesignation: r.is_dac ? 'Yes' : 'No',
-      rentRoll: d.hafAgreement === 'Executed' ? 'Received' : 'Not Received',
-      state: r.properties?.property_state || r.programs?.state || '',
-      units: r.properties?.property_total_units || 0,
+      state: r.enrollment_state || r.properties?.property_state || '',
+      units: r.enrollment_total_units || r.properties?.property_total_units || 0,
     }
   })
 }

@@ -90,18 +90,15 @@ const CONTACT_COLS = [
   { field:'state',  label:'State',       type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
 ]
 const ENR_COLS = [
-  { field:'id',            label:'Record #',    type:'text',   sortable:true, filterable:false },
-  { field:'name',          label:'Enrollment',  type:'text',   sortable:true, filterable:true  },
-  { field:'property',      label:'Property',    type:'text',   sortable:true, filterable:true  },
-  { field:'program',       label:'Program',     type:'select', sortable:true, filterable:true, options:['WI-IRA-MF-HOMES','WI-IRA-MF-HEAR','WI-IRA-SF-HOMES','CO - Denver','WI - FOE','MI-IRA-MF-HOMES'] },
-  { field:'status',        label:'Status',      type:'select', sortable:true, filterable:true, options:['Enrollment — Outreach Active','Enrollment — HAF Agreement Pending','Enrollment — HAF Agreement Executed','Enrollment — Income Qualification In Progress','Enrollment — Census Tract Verification Pending','Enrollment — Complete','Enrollment — On Hold'] },
-  { field:'owner',         label:'Owner',       type:'select', sortable:true, filterable:true, options:['Marcus Reid','Priya Nair','Lisa Tanaka'] },
-  { field:'hafAgreement',  label:'HAF',         type:'select', sortable:true, filterable:true, options:['Not Started','Pending','Executed'] },
-  { field:'incomeQual',    label:'Income Qual', type:'select', sortable:true, filterable:true, options:['Not Started','In Progress','In Review','Complete'] },
-  { field:'censusTract',   label:'Census Tract',type:'select', sortable:true, filterable:true, options:['Pending','Verified'] },
-  { field:'dacDesignation',label:'DAC',         type:'select', sortable:true, filterable:true, options:['Yes','No','Unknown'] },
-  { field:'rentRoll',      label:'Rent Roll',   type:'select', sortable:true, filterable:true, options:['Not Received','In Review','Received'] },
-  { field:'state',         label:'State',       type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
+  { field:'id',               label:'Record #',     type:'text',   sortable:true, filterable:false },
+  { field:'name',             label:'Enrollment',   type:'text',   sortable:true, filterable:true  },
+  { field:'property',         label:'Property',     type:'text',   sortable:true, filterable:true  },
+  { field:'recordType',       label:'Record Type',  type:'select', sortable:true, filterable:true, options:['WI-IRA-SF','WI-IRA-MF','NC-IRA-SF','NC-IRA-MF','MI-IRA-SF','MI-IRA-MF'] },
+  { field:'status',           label:'Status',       type:'select', sortable:true, filterable:true, options:['Enrollment To Be Prepared','Enrollment To Be Verified','Enrollment Verified','Enrollment Submitted — Awaiting Program Response','Enrollment Approved','Enrollment Corrections Needed','Enrollment Denied','Enrollment Withdrawn'] },
+  { field:'qualifyingMode',   label:'Income Qual',  type:'select', sortable:true, filterable:true, options:['Not Run','Entire Building','Individual Tenants'] },
+  { field:'determinationDate',label:'Determined',   type:'date',   sortable:true, filterable:true  },
+  { field:'owner',            label:'Owner',        type:'select', sortable:true, filterable:true, options:['Nicholas Wood'] },
+  { field:'state',            label:'State',        type:'select', sortable:true, filterable:true, options:['WI','NC','MI'] },
 ]
 
 // Saved views
@@ -116,7 +113,7 @@ const ACC_VIEWS  = [
 const BLDG_VIEWS = [{ id:'BV-01', name:'All Buildings', filters:[], sortField:'name', sortDir:'asc' }]
 const UNIT_VIEWS = [{ id:'UV-01', name:'All Units', filters:[], sortField:'unit', sortDir:'asc' }]
 const CONT_VIEWS = [{ id:'CV-01', name:'All Contacts', filters:[], sortField:'name', sortDir:'asc' }]
-const ENR_VIEWS  = [{ id:'EV-01', name:'All Enrollments', filters:[], sortField:'status', sortDir:'asc' }, { id:'EV-02', name:'HAF Pending',          filters:[{ field:'hafAgreement', label:'HAF', op:'equals', value:'Pending' }],            sortField:'property', sortDir:'asc' }, { id:'EV-03', name:'Income Qual In Progress', filters:[{ field:'incomeQual', label:'Income Qual', op:'equals', value:'In Progress' }], sortField:'property', sortDir:'asc' }, { id:'EV-04', name:'Enrollment Complete', filters:[{ field:'status', label:'Status', op:'equals', value:'Enrollment — Complete' }], sortField:'property', sortDir:'asc' }]
+const ENR_VIEWS  = [{ id:'EV-01', name:'All Enrollments', filters:[], sortField:'status', sortDir:'asc' }, { id:'EV-02', name:'To Be Verified', filters:[{ field:'status', label:'Status', op:'equals', value:'Enrollment To Be Verified' }], sortField:'property', sortDir:'asc' }, { id:'EV-03', name:'Income Qual Not Run', filters:[{ field:'qualifyingMode', label:'Income Qual', op:'equals', value:'Not Run' }], sortField:'property', sortDir:'asc' }, { id:'EV-04', name:'Approved', filters:[{ field:'status', label:'Status', op:'equals', value:'Enrollment Approved' }], sortField:'property', sortDir:'asc' }]
 
 function StatusDot({ value }) {
   const green = ['Executed', 'Complete', 'Verified', 'Received']
@@ -131,7 +128,7 @@ function StatusDot({ value }) {
 }
 
 function enrollmentCell(col, r) {
-  if (['hafAgreement', 'incomeQual', 'censusTract', 'rentRoll'].includes(col.field)) {
+  if (col.field === 'qualifyingMode') {
     return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}` }}><StatusDot value={r[col.field]} /></td>
   }
   return undefined
@@ -155,9 +152,9 @@ function contactCell(col, r) {
 function OutreachHome({ setSec, properties, opportunities, enrollments, contacts }) {
   const R = useRecharts()
   const enrolled = properties.filter(p => p.status === 'Enrolled')
-  const hafPending = enrollments.filter(e => e.hafAgreement === 'Pending')
-  const iqInProgress = enrollments.filter(e => e.incomeQual === 'In Progress')
-  const needsAction = enrollments.filter(e => e.status !== 'Enrollment — Complete' && e.status !== 'Enrollment — Outreach Active')
+  const iqNotRun = enrollments.filter(e => e.qualifyingMode === 'Not Run')
+  const toBeVerified = enrollments.filter(e => e.status === 'Enrollment To Be Verified')
+  const needsAction = enrollments.filter(e => e.status !== 'Enrollment Approved' && e.status !== 'Enrollment Verified' && e.status !== 'Enrollment Withdrawn' && e.status !== 'Enrollment Denied')
   const pipeline = opportunities.reduce((s, r) => s + (r._amountRaw || 0), 0)
 
   // Group by count for charts
@@ -193,8 +190,8 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
           {[
             { label: 'Active Pipeline',        value: fmt(pipeline),      sub: `${opportunities.length} opportunities`, color: C.emerald, action: () => setSec('opps')       },
             { label: 'Properties Enrolled',    value: enrolled.length,    sub: `${enrolled.reduce((s,r)=>s+(Number(r.units)||0),0)} units`, color: C.sky, action: () => setSec('properties') },
-            { label: 'Enrollments Need Action',value: needsAction.length, sub: 'Awaiting documents',    color: C.amber,  action: () => setSec('enrollment')  },
-            { label: 'HAF Agreements Pending', value: hafPending.length,  sub: 'Signature required',   color: C.danger, urgent: hafPending.length > 0, action: () => setSec('enrollment') },
+            { label: 'Enrollments Need Action',value: needsAction.length, sub: 'In progress',          color: C.amber,  action: () => setSec('enrollment')  },
+            { label: 'Income Qual Not Run',    value: iqNotRun.length,    sub: 'Run qualification',   color: C.sky,    urgent: iqNotRun.length > 0, action: () => setSec('enrollment') },
           ].map(s => (
             <div key={s.label} onClick={s.action}
               style={{ background: C.card, border: `2px solid ${s.urgent ? C.danger : C.border}`, borderTop: `3px solid ${s.color}`, borderRadius: 8, padding: '14px 16px', cursor: 'pointer' }}
@@ -264,20 +261,18 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
             <span style={{ background: needsAction.length > 0 ? C.amber : '#e8f8f2', color: needsAction.length > 0 ? '#8a5a0a' : '#1a7a4e', fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 10 }}>{needsAction.length}</span>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>{['Record #','Enrollment','Property','Program','Status','HAF','Income Qual','Action'].map(h => <th key={h} style={{ padding: '9px 12px', textAlign: 'left', color: C.textMuted, fontWeight: 500, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>{['Record #','Enrollment','Property','Record Type','Status','Income Qual','Action'].map(h => <th key={h} style={{ padding: '9px 12px', textAlign: 'left', color: C.textMuted, fontWeight: 500, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>)}</tr></thead>
             <tbody>
               {needsAction.map(e => (
                 <TableRow key={e.id}>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}`, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 }}>{e.id}</td>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</td>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}`, color: C.textSecondary }}>{e.property}</td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}><ProgramTag value={e.program} /></td>
+                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}><ProgramTag value={e.recordType} /></td>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}><Badge s={e.status} /></td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}><StatusDot value={e.hafAgreement} /></td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}><StatusDot value={e.incomeQual} /></td>
+                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}><StatusDot value={e.qualifyingMode} /></td>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}>
-                    {e.hafAgreement === 'Pending' && <button style={{ background: '#fef3e2', color: '#8a5a0a', border: `1px solid #f0d8a0`, borderRadius: 5, padding: '3px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer', marginRight: 4 }}>Send HAF</button>}
-                    {e.incomeQual === 'In Progress' && <button style={{ background: '#e8f3fb', color: '#1a5a8a', border: `1px solid #b8d8f0`, borderRadius: 5, padding: '3px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Upload IQ</button>}
+                    {e.qualifyingMode === 'Not Run' && <button onClick={() => openRecord(e)} style={{ background: '#e8f3fb', color: '#1a5a8a', border: `1px solid #b8d8f0`, borderRadius: 5, padding: '3px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Run Income Qual</button>}
                   </td>
                 </TableRow>
               ))}
@@ -290,8 +285,8 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
       {/* Right sidebar */}
       <div style={{ width: 280, flexShrink: 0, background: C.page, borderLeft: `1px solid ${C.border}`, padding: '20px 14px', overflowY: 'auto' }}>
         {[
-          { title: 'HAF Agreements Pending', items: hafPending,    badge: hafPending.length,   color: C.danger, btnLabel: 'Send HAF Agreement' },
-          { title: 'Income Qual In Progress', items: iqInProgress, badge: iqInProgress.length, color: '#1a5a8a', btnLabel: null },
+          { title: 'Income Qual Not Run', items: iqNotRun,    badge: iqNotRun.length,    color: '#1a5a8a', btnLabel: null },
+          { title: 'To Be Verified', items: toBeVerified, badge: toBeVerified.length, color: C.amber, btnLabel: null },
         ].map(sec => (
           <div key={sec.title} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
             <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -305,7 +300,7 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
                   onMouseEnter={ev => ev.currentTarget.style.background = '#f7f9fc'}
                   onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
                   <div style={{ color: sec.color, fontSize: 12, fontWeight: 500, marginBottom: 2 }}>{e.property}</div>
-                  <div style={{ color: C.textMuted, fontSize: 11 }}>{e.program} · {e.units} units</div>
+                  <div style={{ color: C.textMuted, fontSize: 11 }}>{e.recordType} · {e.units} units</div>
                 </div>
               ))}
             <div style={{ padding: '9px 14px', borderTop: `1px solid ${C.border}` }}><span onClick={() => setSec('enrollment')} style={{ color: '#1a5a8a', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>View All</span></div>
@@ -400,7 +395,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
     buildings: 'buildings',
     units: 'units',
     contacts: 'contacts',
-    enrollment: 'property_programs',
+    enrollment: 'enrollments',
   }
 
   const openRecord = (row) => {
@@ -494,7 +489,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
     invalidatePrefix('outreach:')
   }
 
-  const hafUrgent = enrollments.filter(e => e.hafAgreement === 'Pending').length
+  const hafUrgent = enrollments.filter(e => e.qualifyingMode === 'Not Run').length
   const counts = {
     opps: opportunities.length,
     accounts: accounts.length,
@@ -539,7 +534,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
         {sec === 'buildings'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={buildings}    listObject="buildings" listModule="outreach" columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec === 'units'      && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={units}        listObject="units" listModule="outreach" columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec === 'contacts'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={contacts}     listObject="contacts" listModule="outreach" columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => setSelectedRecord({ table: 'contacts', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={contactCell} />}
-        {sec === 'enrollment' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={enrollments}  listObject="property_programs" listModule="outreach" columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'property_programs', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
+        {sec === 'enrollment' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={enrollments}  listObject="enrollments" listModule="outreach" columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'enrollments', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
         </>)}
       </div>
     </div>
