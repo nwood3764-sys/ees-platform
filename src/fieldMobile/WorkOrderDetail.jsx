@@ -24,7 +24,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import MobileShell from './MobileShell'
 import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
-  clockIn, clockOut, captureStepPhoto, markUnableToComplete, signedPhotoUrl,
+  captureStepPhoto, markUnableToComplete, signedPhotoUrl,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
@@ -41,6 +41,17 @@ function fmtSchedule(iso) {
       hour: 'numeric', minute: '2-digit',
     }).format(new Date(iso)).replace(',', '').replace(' at ', ' · ')
   } catch { return '' }
+}
+
+// Format an evidence-derived duration (minutes, from first→last photo) as a
+// compact "Xh Ym" / "Ym" string.
+function fmtDuration(minutes) {
+  if (minutes == null || isNaN(minutes)) return '—'
+  const total = Math.round(minutes)
+  if (total < 60) return `${total}m`
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
 }
 function isStepDone(s) { return DONE_STATUSES.includes((s.status || '').toLowerCase()) }
 function isStepCorrections(s) { return (s.status || '').toLowerCase().includes('correction') }
@@ -100,7 +111,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
   if (error)   return <MobileShell title="Work Order" onBack={() => navigate('/field')}><Empty tone="error">{error}</Empty></MobileShell>
   if (!detail) return null
 
-  const { header, steps, open_clock_session } = detail
+  const { header, steps } = detail
   const orderedSteps = (steps || []).slice().sort(
     (a, b) => (a.execution_order ?? 1e9) - (b.execution_order ?? 1e9)
   )
@@ -108,24 +119,6 @@ export default function WorkOrderDetail({ woId, navigate }) {
   const allDone = orderedSteps.length > 0 && actionableIdx === -1
   const woStatus = (header.work_order_status || '').toLowerCase()
   const canSubmit = allDone && (woStatus.includes('in progress') || woStatus.includes('correction'))
-  const isClockedIn = !!open_clock_session
-
-  // ── Clock handlers ──────────────────────────────────────────────────────
-  // Time + GPS only. Odometer is vehicle/driver accountability and belongs to
-  // the Fleet vehicle check-out/check-in flow for the responsible driver, not
-  // to a technician's per-job clock action.
-  const handleClockIn = async () => {
-    setBusy('clock')
-    try { await clockIn(woId); flash('Clocked in.'); await load() }
-    catch (e) { flash(e.message || 'Clock in failed.', 'error') }
-    finally { setBusy(null) }
-  }
-  const handleClockOut = async () => {
-    setBusy('clock')
-    try { const r = await clockOut(woId); flash(`Clocked out · ${Math.round(r.wte_duration_minutes||0)} min.`); await load() }
-    catch (e) { flash(e.message || 'Clock out failed.', 'error') }
-    finally { setBusy(null) }
-  }
 
   // ── Step handlers ───────────────────────────────────────────────────────
   const handleComplete = async (step) => {
@@ -193,9 +186,18 @@ export default function WorkOrderDetail({ woId, navigate }) {
         <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 18, color: C.textPrimary, marginBottom: 6 }}>
           {header.property_name || header.work_order_name || 'Work Order'}
         </div>
-        {(header.building_address || header.unit) && (
-          <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
-            {header.building_address}{header.unit ? ` · Unit ${header.unit}` : ''}
+        {header.property_address && (
+          <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
+            </svg>
+            {header.property_address}
+          </div>
+        )}
+        {(header.building || header.unit) && (
+          <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4, display: 'flex', gap: 14 }}>
+            {header.building && <span><strong style={{ color: C.textPrimary }}>Building</strong> {header.building}</span>}
+            {header.unit && <span><strong style={{ color: C.textPrimary }}>Unit</strong> {header.unit}</span>}
           </div>
         )}
         {header.work_type_name && (
@@ -219,25 +221,25 @@ export default function WorkOrderDetail({ woId, navigate }) {
         </span>
       </div>
 
-      {/* Clock in/out */}
-      <div style={{ marginBottom: 14 }}>
-        {isClockedIn ? (
-          <button onClick={handleClockOut} disabled={busy === 'clock'}
-            style={busy === 'clock' ? btnDisabled : { ...btnSecondary, borderColor: C.sky, color: '#1a5a8a' }}>
-            {busy === 'clock' ? 'Working…' : 'Clock Out'}
-          </button>
-        ) : (
-          <button onClick={handleClockIn} disabled={busy === 'clock'}
-            style={busy === 'clock' ? btnDisabled : btnSecondary}>
-            {busy === 'clock' ? 'Working…' : 'Clock In'}
-          </button>
-        )}
-        {isClockedIn && (
-          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 6, textAlign: 'center' }}>
-            Clocked in · session {open_clock_session.wte_record_number}
+      {/* Time on site — derived from evidence (first photo → last photo). No
+          manual clock: every work order is bracketed by photos. */}
+      {(detail.first_photo_at || detail.duration_minutes != null) && (
+        <div style={{
+          ...card, padding: '12px 14px', marginBottom: 14,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.textSecondary, fontSize: 13 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" />
+            </svg>
+            Time on site
           </div>
-        )}
-      </div>
+          <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, color: C.textPrimary }}>
+            {detail.duration_minutes != null ? fmtDuration(detail.duration_minutes)
+              : detail.first_photo_at ? 'In progress' : '—'}
+          </div>
+        </div>
+      )}
 
       {/* Steps */}
       <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 13, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, margin: '4px 2px 10px' }}>

@@ -88,7 +88,7 @@ export default function TodaySchedule({ navigate }) {
   )
 
   return (
-    <MobileShell title="Today's Schedule" right={signOutBtn}>
+    <MobileShell title="Schedule" right={signOutBtn}>
       {/* Date selector */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <button onClick={() => setDateStr(addDays(dateStr, -1))}
@@ -167,9 +167,16 @@ export default function TodaySchedule({ navigate }) {
                 {r.property_name || r.work_order_name || 'Work Order'}
               </div>
 
-              {(r.building_address || r.unit) && (
+              {r.property_address && (
                 <div style={{ fontSize: 13, color: C.textSecondary }}>
-                  {r.building_address}{r.unit ? ` · Unit ${r.unit}` : ''}
+                  {r.property_address}
+                </div>
+              )}
+
+              {(r.building || r.unit) && (
+                <div style={{ fontSize: 12.5, color: C.textSecondary, display: 'flex', gap: 12 }}>
+                  {r.building && <span><strong style={{ color: C.textPrimary }}>Bldg</strong> {r.building}</span>}
+                  {r.unit && <span><strong style={{ color: C.textPrimary }}>Unit</strong> {r.unit}</span>}
                 </div>
               )}
 

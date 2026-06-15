@@ -67,8 +67,8 @@ export default function MapView({ navigate }) {
 
   useEffect(() => { load() }, [load])
 
-  const addressable = rows.filter(r => r.building_address)
-  const routeUrl = routeUrlFor(addressable.map(r => r.building_address))
+  const addressable = rows.filter(r => r.property_address)
+  const routeUrl = routeUrlFor(addressable.map(r => r.property_address))
 
   return (
     <MobileShell title="Map · Today's Stops" onBack={() => navigate('/field')}>
@@ -106,9 +106,14 @@ export default function MapView({ navigate }) {
               </span>
             </div>
 
-            {r.building_address ? (
+            {r.property_address ? (
               <div style={{ fontSize: 13, color: C.textSecondary }}>
-                {r.building_address}{r.unit ? ` · Unit ${r.unit}` : ''}
+                {r.property_address}
+                {(r.building || r.unit) && (
+                  <div style={{ marginTop: 2, color: C.textMuted }}>
+                    {r.building ? `Bldg ${r.building}` : ''}{r.building && r.unit ? ' · ' : ''}{r.unit ? `Unit ${r.unit}` : ''}
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ fontSize: 13, color: C.textMuted, fontStyle: 'italic' }}>
@@ -116,9 +121,9 @@ export default function MapView({ navigate }) {
               </div>
             )}
 
-            {r.building_address && (
+            {r.property_address && (
               <a
-                href={navUrlFor(r.building_address)} target="_blank" rel="noopener noreferrer"
+                href={navUrlFor(r.property_address)} target="_blank" rel="noopener noreferrer"
                 style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                   textDecoration: 'none', background: C.cardSecondary, color: C.emeraldMid,
