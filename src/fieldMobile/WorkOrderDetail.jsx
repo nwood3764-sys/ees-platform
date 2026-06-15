@@ -24,8 +24,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import MobileShell from './MobileShell'
 import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
-  clockIn, clockOut, captureStepPhoto,
+  clockIn, clockOut, captureStepPhoto, markUnableToComplete,
 } from './fieldMobileService'
+import { uploadPhoto } from '../data/storageService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
 
 const DONE_STATUSES = ['completed', 'verified', 'not applicable']
@@ -77,6 +78,8 @@ export default function WorkOrderDetail({ woId, navigate }) {
   const [error, setError]     = useState(null)
   const [busy, setBusy]       = useState(null)   // step id or action key currently mutating
   const [toast, setToast]     = useState(null)
+  const [success, setSuccess] = useState(null)   // success overlay message, or null
+  const [unableOpen, setUnableOpen] = useState(false)
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -113,13 +116,13 @@ export default function WorkOrderDetail({ woId, navigate }) {
   // to a technician's per-job clock action.
   const handleClockIn = async () => {
     setBusy('clock')
-    try { await clockIn(woId); flash('Clocked in.'); await load({ silent: true }) }
+    try { await clockIn(woId); flash('Clocked in.'); await load() }
     catch (e) { flash(e.message || 'Clock in failed.', 'error') }
     finally { setBusy(null) }
   }
   const handleClockOut = async () => {
     setBusy('clock')
-    try { const r = await clockOut(woId); flash(`Clocked out · ${Math.round(r.wte_duration_minutes||0)} min.`); await load({ silent: true }) }
+    try { const r = await clockOut(woId); flash(`Clocked out · ${Math.round(r.wte_duration_minutes||0)} min.`); await load() }
     catch (e) { flash(e.message || 'Clock out failed.', 'error') }
     finally { setBusy(null) }
   }
@@ -140,10 +143,30 @@ export default function WorkOrderDetail({ woId, navigate }) {
     setBusy('submit')
     try {
       await submitWorkOrder(woId)
-      flash('Submitted for verification.')
       await load()
+      setSuccess('Submitted for verification')
     } catch (e) {
       flash(e.message || 'Submission failed.', 'error')
+    } finally { setBusy(null) }
+  }
+
+  const handleUnable = async ({ reason, note, photoFile }) => {
+    setBusy('unable')
+    try {
+      // Attach the photo to the work order first (if provided), then mark.
+      if (photoFile) {
+        await uploadPhoto({
+          file: photoFile, relatedObject: 'work_orders', relatedId: woId,
+          photoType: 'general', applyWatermark: true,
+          caption: 'Unable to Complete evidence',
+        })
+      }
+      await markUnableToComplete(woId, { reason, note })
+      setUnableOpen(false)
+      await load()
+      setSuccess('Reported · sent to coordinator')
+    } catch (e) {
+      flash(e.message || 'Could not submit.', 'error')
     } finally { setBusy(null) }
   }
 
@@ -231,7 +254,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
             isActionable={(i === actionableIdx || isStepCorrections(step)) && !isStepDone(step)}
             busy={busy === step.work_step_id}
             onComplete={() => handleComplete(step)}
-            onPhotoUploaded={async (msg) => { flash(msg); await load({ silent: true }) }}
+            onPhotoUploaded={async (msg) => { flash(msg); await load() }}
             onPhotoError={(msg) => flash(msg, 'error')}
           />
         ))}
@@ -267,7 +290,169 @@ export default function WorkOrderDetail({ woId, navigate }) {
           </button>
         )}
       </div>
+
+      {/* Unable to Complete — available whenever the WO is actively In Progress
+          (or Corrections). Always reachable so a technician can report a
+          blocker at any point. */}
+      {(woStatus.includes('in progress') || woStatus.includes('correction')) && (
+        <div style={{ marginTop: 10 }}>
+          <button
+            onClick={() => setUnableOpen(true)}
+            disabled={busy === 'unable'}
+            style={{
+              ...btnSecondary, borderColor: '#e8b4b4', color: '#a3342f',
+            }}
+          >
+            Unable to Complete
+          </button>
+        </div>
+      )}
+
+      {unableOpen && (
+        <UnableModal
+          busy={busy === 'unable'}
+          onCancel={() => setUnableOpen(false)}
+          onSubmit={handleUnable}
+        />
+      )}
+
+      {success && (
+        <SuccessOverlay message={success} onDone={() => { setSuccess(null); navigate('/field') }} />
+      )}
     </MobileShell>
+  )
+}
+
+// ─── SuccessOverlay ──────────────────────────────────────────────────────────
+// Animated checkmark confirmation. Auto-dismisses to the schedule.
+function SuccessOverlay({ message, onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 1900)
+    return () => clearTimeout(t)
+  }, [onDone])
+  return (
+    <div
+      onClick={onDone}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'rgba(7,17,31,0.72)', backdropFilter: 'blur(2px)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: 18, padding: 24, textAlign: 'center',
+      }}
+    >
+      <div style={{
+        width: 96, height: 96, borderRadius: '50%', background: C.emerald,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'wopop 360ms cubic-bezier(0.16,1,0.3,1)',
+        boxShadow: '0 8px 32px rgba(62,207,142,0.5)',
+      }}>
+        <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#062018"
+          strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </div>
+      <div style={{ color: '#fff', fontFamily: FONT, fontWeight: 700, fontSize: 18 }}>{message}</div>
+      <style>{`@keyframes wopop{0%{transform:scale(0.3);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}`}</style>
+    </div>
+  )
+}
+
+// ─── UnableModal ─────────────────────────────────────────────────────────────
+// Reason (required) + optional notes + optional photo, then routes the WO to
+// Unable to Complete for the Project Coordinator's workflow.
+function UnableModal({ busy, onCancel, onSubmit }) {
+  const [reason, setReason] = useState('')
+  const [note, setNote] = useState('')
+  const [photoFile, setPhotoFile] = useState(null)
+  const fileRef = useRef(null)
+
+  const reasons = [
+    'Site access problem',
+    'Missing materials or equipment',
+    'Unsafe conditions',
+    'Customer not available',
+    'Scope mismatch',
+    'Other',
+  ]
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,17,31,0.55)',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: C.card, width: '100%', maxWidth: 520,
+        borderTopLeftRadius: 16, borderTopRightRadius: 16,
+        padding: 20, paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)',
+        maxHeight: '88dvh', overflowY: 'auto',
+      }}>
+        <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 18, color: C.textPrimary, marginBottom: 4 }}>
+          Unable to Complete
+        </div>
+        <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16 }}>
+          This sends the work order back to your coordinator with the reason below.
+        </div>
+
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 8 }}>
+          Reason <span style={{ color: C.danger }}>*</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {reasons.map(r => (
+            <button key={r} onClick={() => setReason(r)}
+              style={{
+                appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                border: `1px solid ${reason === r ? C.emerald : C.borderDark}`,
+                background: reason === r ? '#e8f8f0' : C.card,
+                color: C.textPrimary, fontFamily: FONT, fontSize: 14, fontWeight: 600,
+                borderRadius: 8, padding: '12px 14px', minHeight: 44,
+              }}>
+              {r}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 8 }}>
+          Notes
+        </div>
+        <textarea
+          value={note} onChange={(e) => setNote(e.target.value)}
+          placeholder="Add any detail the coordinator needs…"
+          rows={3}
+          style={{
+            width: '100%', boxSizing: 'border-box', fontFamily: FONT, fontSize: 14,
+            border: `1px solid ${C.borderDark}`, borderRadius: 8, padding: 12,
+            marginBottom: 16, resize: 'vertical', color: C.textPrimary,
+          }}
+        />
+
+        <input ref={fileRef} type="file" accept="image/*" capture="environment"
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value=''; if (f) setPhotoFile(f) }}
+          style={{ display: 'none' }} />
+        <button onClick={() => fileRef.current?.click()}
+          style={{
+            ...btnSecondary, marginBottom: 16,
+            borderColor: photoFile ? C.emerald : C.borderDark,
+            color: photoFile ? C.emeraldMid : C.textPrimary,
+          }}>
+          {photoFile ? 'Photo attached ✓ — tap to replace' : 'Add a photo (optional)'}
+        </button>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel} disabled={busy}
+            style={{ ...btnSecondary, flex: 1 }}>
+            Cancel
+          </button>
+          <button
+            onClick={() => onSubmit({ reason, note, photoFile })}
+            disabled={busy || !reason}
+            style={(busy || !reason)
+              ? { ...btnDisabled, flex: 1 }
+              : { ...btnPrimary, flex: 1, background: '#c0492f', color: '#fff' }}>
+            {busy ? 'Submitting…' : 'Report'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

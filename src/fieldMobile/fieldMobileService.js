@@ -113,6 +113,14 @@ export async function submitWorkOrder(woId) {
   return assertOutcome(unwrapRpcRow(data), 'Work order could not be submitted.')
 }
 
+export async function markUnableToComplete(woId, { reason, note = null } = {}) {
+  const { data, error } = await supabase.rpc('mark_work_order_unable_to_complete', {
+    p_wo_id: woId, p_reason: reason, p_note: note,
+  })
+  if (error) throw error
+  return assertOutcome(unwrapRpcRow(data), 'Could not mark work order Unable to Complete.')
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Clock in / out  (captures GPS automatically)
 // ───────────────────────────────────────────────────────────────────────────
