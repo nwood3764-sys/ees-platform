@@ -26,6 +26,7 @@ import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
+import IncomeQualificationPanel from './IncomeQualificationPanel'
 import ConversationPanelWidget from './ConversationPanel'
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
@@ -5958,6 +5959,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               parentRecordId={recordId}
             />
           ))}
+
+        {/* Income Qualification — runs the multifamily HUD categorical
+            qualification tool against this enrollment (incentive application):
+            classifies the property, generates the IRA application PDF and
+            tenant data XLSX, saves both to the record, writes a determination.
+            Only on incentive_applications, Related tab. */}
+        {!isInsertMode && activeTab === 'Related' && tableName === 'incentive_applications' && (
+          <IncomeQualificationPanel incentiveApplicationId={recordId} />
+        )}
 
         {/* Conversation panel — Service Cloud Messaging-style split-pane
             (thread list left, active thread + composer right). Self-contained:
