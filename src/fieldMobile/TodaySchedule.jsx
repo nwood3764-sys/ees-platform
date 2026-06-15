@@ -12,6 +12,10 @@ import MobileShell from './MobileShell'
 import { fetchTodaySchedule, chicagoToday, signOut } from './fieldMobileService'
 import { C, FONT, MONO, card, statusChip } from './styles'
 
+// Injected at build time by vite.config define. Fallback for safety if a
+// build path didn't define it.
+const BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'dev'
+
 function MapIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -193,6 +197,14 @@ export default function TodaySchedule({ navigate }) {
             </button>
           )
         })}
+      </div>
+
+      <div style={{
+        textAlign: 'center', marginTop: 20, paddingTop: 12,
+        borderTop: `1px solid ${C.border}`,
+        fontFamily: MONO, fontSize: 11, color: C.textMuted,
+      }}>
+        EES Field · build {BUILD_ID}
       </div>
     </MobileShell>
   )

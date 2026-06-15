@@ -1,5 +1,18 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execSync } from 'node:child_process'
+
+// Build identifier: short git SHA + UTC build date. Surfaced in the field PWA
+// footer so a technician (or Nicholas during testing) can confirm at a glance
+// which build is loaded after a reload. Falls back gracefully if git isn't
+// available in the build environment (Netlify provides COMMIT_REF).
+function buildId() {
+  let sha = process.env.COMMIT_REF || ''
+  try { if (!sha) sha = execSync('git rev-parse --short HEAD').toString().trim() } catch { /* noop */ }
+  sha = (sha || 'local').slice(0, 7)
+  const date = new Date().toISOString().slice(0, 16).replace('T', ' ')
+  return `${sha} · ${date}Z`
+}
 
 // EES-WI LEAP build config
 // - React.lazy already code-splits per module (see App.jsx). This config
@@ -17,6 +30,9 @@ import react from '@vitejs/plugin-react'
 // error inside one of the cycle members.
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId()),
+  },
   build: {
     // Silence the 500KB warning — our bundle is well-segmented now and the
     // individual chunks are small. Raise the threshold so CI logs stay clean.
