@@ -18,9 +18,10 @@ export const C = {
   textPrimary:  '#0d1a2e',
   textSecondary:'#4a5e7a',
   textMuted:    '#8fa0b8',
-  amber:        '#e8a949',
+  amber:        '#7eb3e8',
+  navWarn:      '#4a5e7a',
+  danger:       '#4a6da8',
   sky:          '#7eb3e8',
-  danger:       '#e85c5c',
   navActive:    'rgba(255,255,255,0.96)',
   navInactive:  'rgba(255,255,255,0.62)',
 }
@@ -32,12 +33,13 @@ export const MONO = "'JetBrains Mono', ui-monospace, monospace"
 // here; unknown statuses fall back to a neutral chip.
 export function statusChip(status) {
   const s = (status || '').toLowerCase()
-  if (s.includes('correction')) return { bg: '#fdecec', color: '#a3342f', dot: C.danger }
+  if (s.includes('correction')) return { bg: '#e8f0fb', color: '#2a5a8a', dot: C.sky }
   if (s.includes('verified'))   return { bg: '#e8f8f0', color: '#1a7a4f', dot: C.emerald }
   if (s.includes('complete'))   return { bg: '#e8f8f0', color: '#1a7a4f', dot: C.emerald }
   if (s.includes('in progress'))return { bg: '#e8f3fb', color: '#1a5a8a', dot: C.sky }
-  if (s.includes('to be verif'))return { bg: '#fef3e2', color: '#8a5a0a', dot: C.amber }
-  if (s.includes('submitted'))  return { bg: '#fef3e2', color: '#8a5a0a', dot: C.amber }
+  if (s.includes('to be verif'))return { bg: '#e8f0fb', color: '#2a5a8a', dot: C.sky }
+  if (s.includes('submitted'))  return { bg: '#e8f0fb', color: '#2a5a8a', dot: C.sky }
+  if (s.includes('unable'))     return { bg: '#eceff4', color: '#4a5e7a', dot: C.textSecondary }
   if (s.includes('scheduled'))  return { bg: '#e8f3fb', color: '#1a5a8a', dot: C.sky }
   if (s.includes('assigned'))   return { bg: '#e8f3fb', color: '#1a5a8a', dot: C.sky }
   return { bg: C.page, color: C.textSecondary, dot: C.textMuted }

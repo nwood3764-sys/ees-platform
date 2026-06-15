@@ -223,7 +223,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
       <div style={{ marginBottom: 14 }}>
         {isClockedIn ? (
           <button onClick={handleClockOut} disabled={busy === 'clock'}
-            style={busy === 'clock' ? btnDisabled : { ...btnSecondary, borderColor: C.amber, color: '#8a5a0a' }}>
+            style={busy === 'clock' ? btnDisabled : { ...btnSecondary, borderColor: C.sky, color: '#1a5a8a' }}>
             {busy === 'clock' ? 'Working…' : 'Clock Out'}
           </button>
         ) : (
@@ -265,8 +265,8 @@ export default function WorkOrderDetail({ woId, navigate }) {
         {woStatus.includes('to be verified') ? (
           <div style={{
             ...card, padding: 14, textAlign: 'center',
-            background: '#fef3e2', borderColor: '#f0d9a8',
-            color: '#8a5a0a', fontFamily: FONT, fontWeight: 600, fontSize: 14,
+            background: '#e8f0fb', borderColor: '#bcd4ee',
+            color: '#2a5a8a', fontFamily: FONT, fontWeight: 600, fontSize: 14,
           }}>
             Submitted for verification. A coordinator will review this work order.
           </div>
@@ -300,7 +300,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
             onClick={() => setUnableOpen(true)}
             disabled={busy === 'unable'}
             style={{
-              ...btnSecondary, borderColor: '#e8b4b4', color: '#a3342f',
+              ...btnSecondary, borderColor: C.borderDark, color: C.textSecondary,
             }}
           >
             Unable to Complete
@@ -447,7 +447,7 @@ function UnableModal({ busy, onCancel, onSubmit }) {
             disabled={busy || !reason}
             style={(busy || !reason)
               ? { ...btnDisabled, flex: 1 }
-              : { ...btnPrimary, flex: 1, background: '#c0492f', color: '#fff' }}>
+              : { ...btnPrimary, flex: 1, background: C.sidebar, color: '#fff' }}>
             {busy ? 'Submitting…' : 'Report'}
           </button>
         </div>
@@ -542,8 +542,8 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
       {/* Corrections comment */}
       {corrections && (step.pc_comment || step.psl_comment) && (
         <div style={{
-          background: '#fdecec', border: `1px solid #f5c6c6`, borderRadius: 8,
-          padding: '8px 10px', marginBottom: 8, fontSize: 12.5, color: '#a3342f',
+          background: '#e8f0fb', border: `1px solid #bcd4ee`, borderRadius: 8,
+          padding: '8px 10px', marginBottom: 8, fontSize: 12.5, color: '#2a5a8a',
         }}>
           <strong>Corrections:</strong> {step.pc_comment || step.psl_comment}
         </div>
