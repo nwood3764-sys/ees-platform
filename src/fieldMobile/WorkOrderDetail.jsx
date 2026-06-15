@@ -5,7 +5,7 @@
 // clock session.
 //
 // Behavior:
-//   • Clock in / out — captures GPS automatically, prompts odometer; writes
+//   • Clock in / out — captures GPS automatically; writes
 //     work_order_time_entries via clock_in/out_work_order.
 //   • Steps complete IN ORDER — a step is actionable only when every lower
 //     execution_order step is Completed/Verified/Not Applicable.
@@ -95,23 +95,18 @@ export default function WorkOrderDetail({ woId, navigate }) {
   const isClockedIn = !!open_clock_session
 
   // ── Clock handlers ──────────────────────────────────────────────────────
+  // Time + GPS only. Odometer is vehicle/driver accountability and belongs to
+  // the Fleet vehicle check-out/check-in flow for the responsible driver, not
+  // to a technician's per-job clock action.
   const handleClockIn = async () => {
-    const odo = window.prompt('Odometer reading (optional):', '')
-    if (odo === null) return // cancelled
-    const odometer = odo.trim() === '' ? null : Number(odo)
-    if (odometer !== null && Number.isNaN(odometer)) { flash('Odometer must be a number.', 'error'); return }
     setBusy('clock')
-    try { await clockIn(woId, { odometer }); flash('Clocked in.'); await load() }
+    try { await clockIn(woId); flash('Clocked in.'); await load() }
     catch (e) { flash(e.message || 'Clock in failed.', 'error') }
     finally { setBusy(null) }
   }
   const handleClockOut = async () => {
-    const odo = window.prompt('Odometer reading on clock-out (optional):', '')
-    if (odo === null) return
-    const odometer = odo.trim() === '' ? null : Number(odo)
-    if (odometer !== null && Number.isNaN(odometer)) { flash('Odometer must be a number.', 'error'); return }
     setBusy('clock')
-    try { const r = await clockOut(woId, { odometer }); flash(`Clocked out · ${Math.round(r.wte_duration_minutes||0)} min.`); await load() }
+    try { const r = await clockOut(woId); flash(`Clocked out · ${Math.round(r.wte_duration_minutes||0)} min.`); await load() }
     catch (e) { flash(e.message || 'Clock out failed.', 'error') }
     finally { setBusy(null) }
   }
@@ -240,7 +235,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
 // ─── StepCard ────────────────────────────────────────────────────────────────
 function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhotoUploaded, onPhotoError }) {
   const fileRef = useRef(null)
-  const [pendingLeg, setPendingLeg] = useState('general')
+  const legRef  = useRef('general')   // synchronous — no state race with the picker
   const [uploading, setUploading] = useState(false)
 
   const done = isStepDone(step)
@@ -252,20 +247,26 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
   const needsAfter  = step.photo_after_required
   const reqCount    = step.photos_required_count || 0
 
+  // Open the picker SYNCHRONOUSLY inside the tap handler. Mobile browsers
+  // (iOS Safari, Android Chrome) only honor a programmatic file-input click
+  // while still inside the user-gesture call stack — a setTimeout defer
+  // silently no-ops, which is why the camera never opened. The leg is stored
+  // in a ref (not state) so onFile reads the correct value without waiting
+  // for a re-render.
   const triggerCapture = (leg) => {
-    setPendingLeg(leg)
-    // Defer the click so pendingLeg is set before onChange fires.
-    setTimeout(() => fileRef.current && fileRef.current.click(), 0)
+    legRef.current = leg
+    if (fileRef.current) fileRef.current.click()
   }
 
   const onFile = async (e) => {
     const file = e.target.files && e.target.files[0]
     e.target.value = '' // allow re-selecting the same file
     if (!file) return
+    const leg = legRef.current
     setUploading(true)
     try {
-      await captureStepPhoto({ file, workStepId: step.work_step_id, photoType: pendingLeg })
-      onPhotoUploaded(`Photo captured (${pendingLeg}) · ${step.name}`)
+      await captureStepPhoto({ file, workStepId: step.work_step_id, photoType: leg })
+      onPhotoUploaded(`Photo captured (${leg}) · ${step.name}`)
     } catch (err) {
       onPhotoError(err.message || 'Photo upload failed.')
     } finally {
