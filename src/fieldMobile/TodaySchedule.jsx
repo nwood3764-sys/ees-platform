@@ -175,7 +175,7 @@ export default function TodaySchedule({ navigate }) {
         borderTop: `1px solid ${C.border}`,
         fontFamily: MONO, fontSize: 11, color: C.textMuted,
       }}>
-        EES Field · build {BUILD_ID}
+        LEAP Pad · build {BUILD_ID}
       </div>
     </AppChrome>
   )

@@ -1,7 +1,7 @@
 {
-  "name": "Energy Efficiency Services — Field",
-  "short_name": "EES Field",
-  "description": "Field technician work order execution for Energy Efficiency Services.",
+  "name": "LEAP Pad",
+  "short_name": "LEAP Pad",
+  "description": "LEAP Pad — field technician work order execution for EES-WI.",
   "start_url": "/field",
   "scope": "/field",
   "display": "standalone",

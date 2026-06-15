@@ -162,7 +162,7 @@ function Drawer({ open, onClose, navigate }) {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               color: '#062018', fontWeight: 800, fontSize: 14, fontFamily: FONT,
             }}>E</div>
-            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16 }}>EES Field</span>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16 }}>LEAP Pad</span>
           </div>
           <button onClick={onClose} aria-label="Close menu" style={{
             appearance: 'none', border: 'none', background: 'transparent',
@@ -199,7 +199,7 @@ function Drawer({ open, onClose, navigate }) {
             padding: '10px 18px 16px', fontFamily: MONO, fontSize: 10,
             color: C.navInactive, lineHeight: 1.5,
           }}>
-            EES Field<br />build {BUILD_ID}
+            LEAP Pad<br />build {BUILD_ID}
           </div>
         </div>
       </aside>

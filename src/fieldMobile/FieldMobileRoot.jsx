@@ -71,6 +71,8 @@ export default function FieldMobileRoot() {
   // Override the staff-app body styles for a normal mobile scroll surface,
   // and set the viewport background so overscroll doesn't flash white.
   useEffect(() => {
+    const prevTitle = document.title
+    document.title = 'LEAP Pad'
     const prev = {
       htmlOverflow: document.documentElement.style.overflow,
       htmlHeight:   document.documentElement.style.height,
@@ -84,6 +86,7 @@ export default function FieldMobileRoot() {
     document.body.style.height              = 'auto'
     document.body.style.background          = C.page
     return () => {
+      document.title = prevTitle
       document.documentElement.style.overflow = prev.htmlOverflow
       document.documentElement.style.height   = prev.htmlHeight
       document.body.style.overflow            = prev.bodyOverflow
