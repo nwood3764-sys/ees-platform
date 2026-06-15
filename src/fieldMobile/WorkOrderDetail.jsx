@@ -66,11 +66,12 @@ export default function WorkOrderDetail({ woId, navigate }) {
   const [busy, setBusy]       = useState(null)   // step id or action key currently mutating
   const [toast, setToast]     = useState(null)
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null)
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
+    setError(null)
     try { setDetail(await fetchWorkOrderDetail(woId)) }
-    catch (e) { setError(e.message || 'Could not load work order.'); setDetail(null) }
-    finally { setLoading(false) }
+    catch (e) { setError(e.message || 'Could not load work order.'); if (!silent) setDetail(null) }
+    finally { if (!silent) setLoading(false) }
   }, [woId])
 
   useEffect(() => { load() }, [load])
@@ -100,13 +101,13 @@ export default function WorkOrderDetail({ woId, navigate }) {
   // to a technician's per-job clock action.
   const handleClockIn = async () => {
     setBusy('clock')
-    try { await clockIn(woId); flash('Clocked in.'); await load() }
+    try { await clockIn(woId); flash('Clocked in.'); await load({ silent: true }) }
     catch (e) { flash(e.message || 'Clock in failed.', 'error') }
     finally { setBusy(null) }
   }
   const handleClockOut = async () => {
     setBusy('clock')
-    try { const r = await clockOut(woId); flash(`Clocked out · ${Math.round(r.wte_duration_minutes||0)} min.`); await load() }
+    try { const r = await clockOut(woId); flash(`Clocked out · ${Math.round(r.wte_duration_minutes||0)} min.`); await load({ silent: true }) }
     catch (e) { flash(e.message || 'Clock out failed.', 'error') }
     finally { setBusy(null) }
   }
@@ -117,7 +118,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
     try {
       await completeWorkStep(step.work_step_id)
       flash(`Step completed: ${step.name}`)
-      await load()
+      await load({ silent: true })
     } catch (e) {
       flash(e.message || 'Could not complete step.', 'error')
     } finally { setBusy(null) }
@@ -128,7 +129,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
     try {
       await submitWorkOrder(woId)
       flash('Submitted for verification.')
-      await load()
+      await load({ silent: true })
     } catch (e) {
       flash(e.message || 'Submission failed.', 'error')
     } finally { setBusy(null) }
@@ -210,7 +211,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
             isActionable={(i === actionableIdx || isStepCorrections(step)) && !isStepDone(step)}
             busy={busy === step.work_step_id}
             onComplete={() => handleComplete(step)}
-            onPhotoUploaded={async (msg) => { flash(msg); await load() }}
+            onPhotoUploaded={async (msg) => { flash(msg); await load({ silent: true }) }}
             onPhotoError={(msg) => flash(msg, 'error')}
           />
         ))}

@@ -79,54 +79,67 @@ export async function fetchWorkOrderDetail(woId) {
 // Step completion + WO submission
 // ───────────────────────────────────────────────────────────────────────────
 
+// RPC outcome vocabularies differ across the platform:
+//   • Task A step/WO RPCs return 'success' | 'noop' | 'blocked' | 'error'
+//   • The clock RPCs (this module) return 'ok' | 'error'
+// Treat ok/success/noop as success (noop = already in target state, benign).
+// Treat blocked/error (or anything unrecognized) as a surfaced failure
+// carrying the server's own message. A 'blocked' is a real precondition the
+// user must resolve (e.g. evidence gap) — surfaced as an Error so the screen
+// shows the message, but it is not a crash.
+const SUCCESS_OUTCOMES = new Set(['ok', 'success', 'noop'])
+
+function unwrapRpcRow(data) {
+  return Array.isArray(data) ? data[0] : data
+}
+
+function assertOutcome(row, fallbackMsg) {
+  if (!row) return row
+  if (!SUCCESS_OUTCOMES.has(row.outcome)) {
+    throw new Error(row.message || fallbackMsg)
+  }
+  return row
+}
+
 export async function completeWorkStep(stepId) {
   const { data, error } = await supabase.rpc('complete_work_step', { p_step_id: stepId })
   if (error) throw error
-  // RPC returns TABLE(...); supabase surfaces it as an array.
-  const row = Array.isArray(data) ? data[0] : data
-  if (row && row.outcome !== 'ok') throw new Error(row.message || 'Step could not be completed.')
-  return row
+  return assertOutcome(unwrapRpcRow(data), 'Step could not be completed.')
 }
 
 export async function submitWorkOrder(woId) {
   const { data, error } = await supabase.rpc('submit_work_order_for_verification', { p_wo_id: woId })
   if (error) throw error
-  const row = Array.isArray(data) ? data[0] : data
-  if (row && row.outcome !== 'ok') throw new Error(row.message || 'Work order could not be submitted.')
-  return row
+  return assertOutcome(unwrapRpcRow(data), 'Work order could not be submitted.')
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Clock in / out  (captures GPS automatically; odometer passed in)
+// Clock in / out  (captures GPS automatically)
 // ───────────────────────────────────────────────────────────────────────────
 
-export async function clockIn(woId, { odometer = null, saId = null } = {}) {
+export async function clockIn(woId, { saId = null } = {}) {
   const pos = await getPosition()
   const { data, error } = await supabase.rpc('clock_in_work_order', {
     p_wo_id:     woId,
     p_latitude:  pos.latitude,
     p_longitude: pos.longitude,
-    p_odometer:  odometer,
+    p_odometer:  null,
     p_sa_id:     saId,
   })
   if (error) throw error
-  const row = Array.isArray(data) ? data[0] : data
-  if (row && row.outcome !== 'ok') throw new Error(row.message || 'Clock in failed.')
-  return row
+  return assertOutcome(unwrapRpcRow(data), 'Clock in failed.')
 }
 
-export async function clockOut(woId, { odometer = null } = {}) {
+export async function clockOut(woId) {
   const pos = await getPosition()
   const { data, error } = await supabase.rpc('clock_out_work_order', {
     p_wo_id:     woId,
     p_latitude:  pos.latitude,
     p_longitude: pos.longitude,
-    p_odometer:  odometer,
+    p_odometer:  null,
   })
   if (error) throw error
-  const row = Array.isArray(data) ? data[0] : data
-  if (row && row.outcome !== 'ok') throw new Error(row.message || 'Clock out failed.')
-  return row
+  return assertOutcome(unwrapRpcRow(data), 'Clock out failed.')
 }
 
 // ───────────────────────────────────────────────────────────────────────────
