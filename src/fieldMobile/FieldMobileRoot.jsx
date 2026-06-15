@@ -148,11 +148,16 @@ export default function FieldMobileRoot() {
 
   return (
     <div style={{
-      minHeight: '100dvh', background: C.page, color: C.textPrimary,
+      // Own scroll container: bound to the viewport height and scroll
+      // internally, independent of the staff app's `html, body { overflow:
+      // hidden }` base rule. This is what lets long step lists scroll on
+      // mobile. height (not minHeight) + overflowY:auto is the key.
+      height: '100dvh',
+      overflowY: 'auto',
+      WebkitOverflowScrolling: 'touch',
+      overscrollBehavior: 'contain',
+      background: C.page, color: C.textPrimary,
       fontFamily: FONT,
-      // iOS safe-area padding so the bottom bar / content clears the home
-      // indicator and the top clears the notch.
-      paddingTop: 'env(safe-area-inset-top)',
     }}>
       {screen}
     </div>

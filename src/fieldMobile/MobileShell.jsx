@@ -17,7 +17,7 @@ function ChevronLeft() {
 
 export default function MobileShell({ title, onBack, right, children }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100dvh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       <header style={{
         position: 'sticky', top: 0, zIndex: 20,
         background: C.sidebar, color: C.navActive,
@@ -49,7 +49,7 @@ export default function MobileShell({ title, onBack, right, children }) {
         </div>
         {right}
       </header>
-      <main style={{ flex: 1, padding: 14, boxSizing: 'border-box' }}>
+      <main style={{ flex: 1, padding: 14, paddingBottom: 'calc(env(safe-area-inset-bottom) + 28px)', boxSizing: 'border-box' }}>
         {children}
       </main>
     </div>
