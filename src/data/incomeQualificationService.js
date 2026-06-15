@@ -84,66 +84,92 @@ function contractsFromHud(hud, totalAssisted) {
   }]
 }
 
-async function resolveRunRecord(incentiveApplicationId) {
-  // Load the incentive application + its property.
-  const { data: ia, error: iaErr } = await supabase
-    .from('incentive_applications')
+async function resolveRunRecord(enrollmentId) {
+  // Load the enrollment + its parent property. The enrollment carries the
+  // tool's full field set on the record itself; we read those fields first and
+  // fall back to the linked property's HUD jsonb to populate anything not yet
+  // filled on the enrollment (e.g. a freshly created record).
+  const { data: enr, error: enrErr } = await supabase
+    .from('enrollments')
     .select(`
-      id, ia_record_number, ia_name, ia_program_name, ia_program_year,
-      program_id, property_id, building_id,
-      ia_total_number_of_units, ia_total_number_of_occupied_units,
+      id, enrollment_record_number, enrollment_name, property_id, opportunity_id,
+      enrollment_hud_property_id, enrollment_property_name, enrollment_site_address,
+      enrollment_city, enrollment_state, enrollment_zip, enrollment_county,
+      enrollment_total_units, enrollment_assisted_units,
+      enrollment_property_category, enrollment_is_202_811, enrollment_is_opportunity_zone,
+      enrollment_owner_organization, enrollment_owner_type, enrollment_owner_address,
+      enrollment_owner_phone, enrollment_owner_email,
+      enrollment_management_agent, enrollment_management_phone, enrollment_management_email,
+      enrollment_hud_program, enrollment_hud_contract_number,
+      enrollment_br_studio, enrollment_br_1, enrollment_br_2,
+      enrollment_br_3, enrollment_br_4, enrollment_br_5plus,
       properties:property_id (
         id, property_name, property_hud_property_id,
         property_street, property_city, property_state, property_zip,
         property_total_units, property_hud_contracts
       )
     `)
-    .eq('id', incentiveApplicationId)
+    .eq('id', enrollmentId)
     .single()
-  if (iaErr) throw new Error(`Incentive application load failed: ${iaErr.message}`)
-  if (!ia) throw new Error('Incentive application not found.')
-  const prop = ia.properties
-  if (!prop) throw new Error('This incentive application has no linked property.')
+  if (enrErr) throw new Error(`Enrollment load failed: ${enrErr.message}`)
+  if (!enr) throw new Error('Enrollment not found.')
+  const prop = enr.properties
+  if (!prop) throw new Error('This enrollment has no linked property.')
 
   const hud = prop.property_hud_contracts || null
-  const totalUnits = Number(prop.property_total_units) || Number(ia.ia_total_number_of_units) || 0
-  // LEAP doesn't store an explicit assisted-units column on the property; the
-  // primary contract's assisted units live in the jsonb only as bedroom_mix
-  // sums for the WI load. Use the bedroom-mix sum when present, else fall back
-  // to total units (categorical pathway treats the whole building as assisted).
-  const brTotal = brTotalFromMix(hud?.bedroom_mix)
-  const brSum = brTotal.reduce((a, b) => a + b, 0)
-  const assistedUnits = brSum > 0 ? brSum : totalUnits
 
-  const programString = [hud?.primary_program, hud?.elig_pathway, ia.ia_program_name]
-    .filter(Boolean).join(' ')
+  // Prefer the enrollment's own bedroom breakdown; fall back to the property
+  // HUD bedroom_mix when the enrollment hasn't been populated yet.
+  const enrBr = [
+    enr.enrollment_br_studio, enr.enrollment_br_1, enr.enrollment_br_2,
+    enr.enrollment_br_3, enr.enrollment_br_4, enr.enrollment_br_5plus,
+  ].map(n => Number(n) || 0)
+  const brTotal = enrBr.some(n => n > 0) ? enrBr : brTotalFromMix(hud?.bedroom_mix)
+  const brSum = brTotal.reduce((a, b) => a + b, 0)
+
+  const totalUnits = Number(enr.enrollment_total_units) || Number(prop.property_total_units) || 0
+  const assistedUnits = Number(enr.enrollment_assisted_units) || (brSum > 0 ? brSum : totalUnits)
+
+  // value-with-fallback helper: enrollment field, then property/HUD source
+  const v = (enrVal, fallback) => (enrVal != null && enrVal !== '' ? enrVal : (fallback ?? ''))
+
+  const category = v(enr.enrollment_property_category, hud?.category)
+  const programString = [
+    enr.enrollment_hud_program, hud?.primary_program, hud?.elig_pathway,
+  ].filter(Boolean).join(' ')
 
   return {
     // identifiers
-    _incentiveApplicationId: ia.id,
-    _iaName: ia.ia_name,
-    _iaRecordNumber: ia.ia_record_number,
-    _programId: ia.program_id || null,
+    _enrollmentId: enr.id,
+    _enrollmentName: enr.enrollment_name,
+    _enrollmentRecordNumber: enr.enrollment_record_number,
     _propertyId: prop.id,
-    _buildingId: ia.building_id || null,
+    _opportunityId: enr.opportunity_id || null,
     // tool `r` shape
-    property_id: prop.property_hud_property_id || prop.id,
-    name: prop.property_name || '(unnamed property)',
-    address: prop.property_street || '',
-    city: prop.property_city || '',
-    state: prop.property_state || 'WI',
-    zip: prop.property_zip || '',
-    county: '',
+    property_id: v(enr.enrollment_hud_property_id, prop.property_hud_property_id || prop.id),
+    name: v(enr.enrollment_property_name, prop.property_name) || '(unnamed property)',
+    address: v(enr.enrollment_site_address, prop.property_street),
+    city: v(enr.enrollment_city, prop.property_city),
+    state: v(enr.enrollment_state, prop.property_state) || 'WI',
+    zip: v(enr.enrollment_zip, prop.property_zip),
+    county: v(enr.enrollment_county, ''),
     total_units: totalUnits,
     assisted_units: assistedUnits,
-    category: hud?.category || '',
-    owner_org: '', owner_type: '', owner_addr: '', owner_city: '',
-    owner_state: prop.property_state || 'WI', owner_zip: '',
-    owner_phone: '', owner_email: '',
-    mgmt_org: '', mgmt_phone: '', mgmt_email: '',
-    is_202_811: hud?.is_202_811 ? 'Y' : 'N',
-    is_opp_zone: hud?.is_opp_zone ? 'Y' : 'N',
-    programs: [hud?.primary_program, hud?.elig_pathway].filter(Boolean),
+    category,
+    owner_org: v(enr.enrollment_owner_organization, ''),
+    owner_type: v(enr.enrollment_owner_type, ''),
+    owner_addr: v(enr.enrollment_owner_address, ''),
+    owner_city: '',
+    owner_state: v(enr.enrollment_state, prop.property_state) || 'WI',
+    owner_zip: '',
+    owner_phone: v(enr.enrollment_owner_phone, ''),
+    owner_email: v(enr.enrollment_owner_email, ''),
+    mgmt_org: v(enr.enrollment_management_agent, ''),
+    mgmt_phone: v(enr.enrollment_management_phone, ''),
+    mgmt_email: v(enr.enrollment_management_email, ''),
+    is_202_811: enr.enrollment_is_202_811 || hud?.is_202_811 ? 'Y' : 'N',
+    is_opp_zone: enr.enrollment_is_opportunity_zone || hud?.is_opp_zone ? 'Y' : 'N',
+    programs: [enr.enrollment_hud_program, hud?.primary_program, hud?.elig_pathway].filter(Boolean),
     _programString: programString,
     br_total: brTotal,
     contracts: contractsFromHud(hud, assistedUnits),
@@ -354,8 +380,8 @@ function buildApplicationPdfBlob(r, determination) {
 
 // ─── Public: classify only (no side effects) ───────────────────────────────
 
-export async function classifyIncentiveApplication(incentiveApplicationId) {
-  const r = await resolveRunRecord(incentiveApplicationId)
+export async function classifyEnrollment(enrollmentId) {
+  const r = await resolveRunRecord(enrollmentId)
   const pathways = eligClass(r._programString)
   const mode = pathways.length > 0 ? 'Entire Building' : 'Individual Tenants'
   const subsidizedPct = r.total_units ? Math.round((r.assisted_units / r.total_units) * 100) : 0
@@ -372,11 +398,11 @@ export async function classifyIncentiveApplication(incentiveApplicationId) {
 
 // ─── Public: run = classify + generate files + persist determination ───────
 
-export async function runIncomeQualification(incentiveApplicationId) {
-  if (!incentiveApplicationId) throw new Error('runIncomeQualification: incentiveApplicationId is required')
+export async function runIncomeQualification(enrollmentId) {
+  if (!enrollmentId) throw new Error('runIncomeQualification: enrollmentId is required')
   const userId = await getCurrentUserId()
 
-  const det = await classifyIncentiveApplication(incentiveApplicationId)
+  const det = await classifyEnrollment(enrollmentId)
   const r = det.record
 
   // Generate both files as Blobs, wrap as File so uploadDocument gets a name.
@@ -389,77 +415,55 @@ export async function runIncomeQualification(incentiveApplicationId) {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })
 
-  // Upload both to the incentive application (→ program-applications bucket).
+  // Upload both to the enrollment record.
   const pdfDoc = await uploadDocument({
     file: pdfFile,
-    relatedObject: 'incentive_applications',
-    relatedId: incentiveApplicationId,
+    relatedObject: 'enrollments',
+    relatedId: enrollmentId,
     documentType: 'income_qualification_application',
     name: pdfName,
     category: 'Income Qualification',
-    programId: r._programId,
   })
   const xlsxDoc = await uploadDocument({
     file: xlsxFile,
-    relatedObject: 'incentive_applications',
-    relatedId: incentiveApplicationId,
+    relatedObject: 'enrollments',
+    relatedId: enrollmentId,
     documentType: 'income_qualification_tenant_sheet',
     name: xlsxName,
     category: 'Income Qualification',
-    programId: r._programId,
   })
 
-  // Persist the determination. program_id and owner_id are NOT NULL on the
-  // legacy table; status is NOT NULL. qual_number auto-fills via trigger.
-  const insertRow = {
-    program_id: r._programId,
-    property_id: r._propertyId,
-    building_id: r._buildingId,
-    incentive_application_id: incentiveApplicationId,
-    status: det.mode === 'Entire Building' ? 'Qualified — Entire Building' : 'Pending — Individual Tenants',
-    qualification_method: det.mode === 'Entire Building' ? 'Categorical' : 'Individual',
-    iq_qualifying_mode: det.mode,
-    iq_eligibility_pathways: det.pathways.join('; ') || null,
-    iq_required_proof: det.requiredProof,
-    iq_total_units: det.totalUnits,
-    iq_assisted_units: det.assistedUnits,
-    iq_subsidized_share_pct: det.subsidizedSharePct,
-    iq_application_pdf_document_id: pdfDoc.id,
-    iq_tenant_xlsx_document_id: xlsxDoc.id,
-    qualification_date: new Date().toISOString().slice(0, 10),
-    hud_property_id: r.property_id,
-    site_address: r.address,
-    owner_id: userId,
-    created_by: userId,
+  // Persist the determination back onto the enrollment record itself. The
+  // enrollment IS the home for these fields — the tool computes them and saves
+  // the values on the record (the PDF is the rendered snapshot of the same).
+  const updateRow = {
+    enrollment_qualifying_mode: det.mode,
+    enrollment_eligibility_pathways: det.pathways.join('; ') || null,
+    enrollment_required_proof: det.requiredProof,
+    enrollment_categorical_eligibility: det.pathways.join('; ') || 'None detected — verify',
+    enrollment_determination_date: new Date().toISOString().slice(0, 10),
+    enrollment_total_units: det.totalUnits,
+    enrollment_assisted_units: det.assistedUnits,
+    enrollment_subsidized_share_pct: det.subsidizedSharePct,
+    enrollment_updated_by: userId,
+    enrollment_updated_at: new Date().toISOString(),
   }
-  const { data: iqRow, error: iqErr } = await supabase
-    .from('income_qualifications')
-    .insert(insertRow)
+  const { data: enrRow, error: updErr } = await supabase
+    .from('enrollments')
+    .update(updateRow)
+    .eq('id', enrollmentId)
     .select()
     .single()
-  if (iqErr) throw new Error(`income_qualifications insert failed: ${iqErr.message}`)
+  if (updErr) throw new Error(`Enrollment determination update failed: ${updErr.message}`)
 
-  return { determination: det, pdfDocument: pdfDoc, xlsxDocument: xlsxDoc, qualification: iqRow }
+  return { determination: det, pdfDocument: pdfDoc, xlsxDocument: xlsxDoc, enrollment: enrRow }
 }
 
-// ─── Public: history for a record (determinations + their files) ───────────
+// ─── Public: documents (PDF + XLSX) attached to the enrollment ─────────────
 
-export async function listIncomeQualifications(incentiveApplicationId) {
-  if (!incentiveApplicationId) return []
-  const { data, error } = await supabase
-    .from('income_qualifications')
-    .select('*')
-    .eq('incentive_application_id', incentiveApplicationId)
-    .eq('is_deleted', false)
-    .order('created_at', { ascending: false })
-  if (error) throw new Error(`income_qualifications list failed: ${error.message}`)
-  return data || []
-}
-
-// Documents (PDF + XLSX) attached to the incentive application, hydrated with
-// signed URLs, filtered to the income-qualification document types.
-export async function listIncomeQualificationDocuments(incentiveApplicationId) {
-  const docs = await listDocuments('incentive_applications', incentiveApplicationId)
+export async function listIncomeQualificationDocuments(enrollmentId) {
+  if (!enrollmentId) return []
+  const docs = await listDocuments('enrollments', enrollmentId)
   const iqDocs = docs.filter(d =>
     d.document_type === 'income_qualification_application' ||
     d.document_type === 'income_qualification_tenant_sheet')

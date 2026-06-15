@@ -5961,12 +5961,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           ))}
 
         {/* Income Qualification — runs the multifamily HUD categorical
-            qualification tool against this enrollment (incentive application):
-            classifies the property, generates the IRA application PDF and
-            tenant data XLSX, saves both to the record, writes a determination.
-            Only on incentive_applications, Related tab. */}
-        {!isInsertMode && activeTab === 'Related' && tableName === 'incentive_applications' && (
-          <IncomeQualificationPanel incentiveApplicationId={recordId} />
+            qualification tool against this enrollment: classifies the
+            enrollment (own fields, property HUD fallback), generates the IRA
+            application PDF and tenant data XLSX, saves both to the record, and
+            writes the determination back onto the enrollment. Only on
+            enrollments, Related tab. */}
+        {!isInsertMode && activeTab === 'Related' && tableName === 'enrollments' && (
+          <IncomeQualificationPanel enrollmentId={recordId} />
         )}
 
         {/* Conversation panel — Service Cloud Messaging-style split-pane

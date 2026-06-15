@@ -2,23 +2,23 @@ import { useState, useEffect, useCallback } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import {
-  classifyIncentiveApplication,
+  classifyEnrollment,
   runIncomeQualification,
-  listIncomeQualifications,
   listIncomeQualificationDocuments,
 } from '../data/incomeQualificationService'
 
 // ---------------------------------------------------------------------------
 // IncomeQualificationPanel
 //
-// Standalone card on the incentive application (program enrollment) record.
-// Runs the multifamily HUD categorical income-qualification tool: classifies
-// the linked property, generates the IRA application PDF + tenant data XLSX,
-// saves both to the record, and writes a determination row. Shows prior runs
-// and their downloadable files.
+// Standalone card on the Enrollment record. Runs the multifamily HUD
+// categorical income-qualification tool: classifies the enrollment (from its
+// own fields, falling back to the linked property's HUD data), generates the
+// IRA application PDF + tenant data XLSX, saves both to the enrollment, and
+// writes the determination back onto the enrollment record. Shows the
+// generated files with download links.
 //
 // Palette: navy / sky only. The source tool used a green/gold/flag-red theme;
-// here we conform to the LEAP design system (no red/orange — blocked/неeligible
+// here we conform to the LEAP design system (no red/orange — blocked/ineligible
 // states use sky/navy).
 // ---------------------------------------------------------------------------
 
@@ -45,31 +45,26 @@ function ModeBadge({ mode }) {
   )
 }
 
-export default function IncomeQualificationPanel({ incentiveApplicationId }) {
+export default function IncomeQualificationPanel({ enrollmentId }) {
   const [preview, setPreview] = useState(null)
   const [previewing, setPreviewing] = useState(false)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)
-  const [history, setHistory] = useState([])
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
-    if (!incentiveApplicationId) return
+    if (!enrollmentId) return
     setLoading(true)
     try {
-      const [h, d] = await Promise.all([
-        listIncomeQualifications(incentiveApplicationId),
-        listIncomeQualificationDocuments(incentiveApplicationId),
-      ])
-      setHistory(h)
+      const d = await listIncomeQualificationDocuments(enrollmentId)
       setDocs(d)
     } catch (e) {
-      setError(e?.message || 'Failed to load income qualification history.')
+      setError(e?.message || 'Failed to load income qualification files.')
     } finally {
       setLoading(false)
     }
-  }, [incentiveApplicationId])
+  }, [enrollmentId])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -77,21 +72,19 @@ export default function IncomeQualificationPanel({ incentiveApplicationId }) {
   // before running (no files, no persistence).
   useEffect(() => {
     let cancelled = false
-    if (!incentiveApplicationId) return
+    if (!enrollmentId) return
     setPreviewing(true)
-    classifyIncentiveApplication(incentiveApplicationId)
+    classifyEnrollment(enrollmentId)
       .then(det => { if (!cancelled) setPreview(det) })
       .catch(e => { if (!cancelled) setError(e?.message || 'Classification failed.') })
       .finally(() => { if (!cancelled) setPreviewing(false) })
     return () => { cancelled = true }
-  }, [incentiveApplicationId])
-
-  const docById = id => docs.find(d => d.id === id) || null
+  }, [enrollmentId])
 
   async function handleRun() {
     setRunning(true); setError(null)
     try {
-      await runIncomeQualification(incentiveApplicationId)
+      await runIncomeQualification(enrollmentId)
       await refresh()
     } catch (e) {
       setError(e?.message || 'Income qualification run failed.')
@@ -184,37 +177,6 @@ export default function IncomeQualificationPanel({ incentiveApplicationId }) {
               <span style={{ ...labelStyle, color: C.sky }}>Download</span>
             </a>
           ))}
-        </div>
-      )}
-
-      {/* Determination history */}
-      {history.length > 0 && (
-        <div style={{ marginTop: 18 }}>
-          <div style={{ marginBottom: 8 }}><span style={labelStyle}>Run History</span></div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {history.map(h => {
-              const pdf = docById(h.iq_application_pdf_document_id)
-              const xlsx = docById(h.iq_tenant_xlsx_document_id)
-              return (
-                <div key={h.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-                  borderBottom: `1px solid ${C.border}`, padding: '8px 0', fontSize: 12.5,
-                }}>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace', color: C.textMuted }}>
-                    {h.qual_number || h.id.slice(0, 8)}
-                  </span>
-                  <ModeBadge mode={h.iq_qualifying_mode || '—'} />
-                  <span style={{ color: C.textSecondary }}>{h.qualification_date}</span>
-                  <span style={{ color: C.textMuted }}>
-                    {h.iq_assisted_units}/{h.iq_total_units} units · {h.iq_subsidized_share_pct}%
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  {pdf?._url && <a href={pdf._url} target="_blank" rel="noreferrer" style={{ color: C.sky, textDecoration: 'none' }}>PDF</a>}
-                  {xlsx?._url && <a href={xlsx._url} target="_blank" rel="noreferrer" style={{ color: C.sky, textDecoration: 'none' }}>XLSX</a>}
-                </div>
-              )
-            })}
-          </div>
         </div>
       )}
     </div>
