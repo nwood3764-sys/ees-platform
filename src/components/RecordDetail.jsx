@@ -27,6 +27,7 @@ import { getTableListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
+import { runIncomeQualification } from '../data/incomeQualificationService'
 import ConversationPanelWidget from './ConversationPanel'
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
@@ -4467,6 +4468,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // clone_project_report_template RPC to copy the PRT plus all PRTS rows
   // atomically; lands the user on the new clone via onNavigateToRecord.
   const [cloningTemplate, setCloningTemplate] = useState(false)
+  const [runningIncomeQual, setRunningIncomeQual] = useState(false)
   const [previewingPdf, setPreviewingPdf] = useState(false)
   // Document Template Preview modal state. Opens when the author clicks
   // 'Preview' on a document_templates record — they pick a parent record
@@ -4848,6 +4850,29 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     for (const k of Object.keys(prefillObj)) if (prefillObj[k] == null) delete prefillObj[k]
     onNavigateToRecord({ table: 'opportunities', id: null, mode: 'create', prefill: prefillObj })
   }, [data, onNavigateToRecord])
+
+  // Run Income Qualification — one-tap. Classifies the enrollment, generates
+  // the IRA application PDF + tenant data XLSX, saves both to the record, and
+  // writes the determination + unpacked HUD/property fields back onto the
+  // enrollment. Then reloads so the populated fields render immediately.
+  const handleRunIncomeQualification = useCallback(async () => {
+    if (runningIncomeQual) return
+    setRunningIncomeQual(true)
+    try {
+      const result = await runIncomeQualification(recordId)
+      const mode = result?.determination?.mode || 'Determined'
+      await reload()
+      if (typeof window !== 'undefined') {
+        window.alert(`Income Qualification complete: ${mode}. Application PDF and tenant data sheet saved to this enrollment.`)
+      }
+    } catch (e) {
+      if (typeof window !== 'undefined') {
+        window.alert(`Income Qualification failed: ${e?.message || e}`)
+      }
+    } finally {
+      setRunningIncomeQual(false)
+    }
+  }, [runningIncomeQual, recordId, reload])
 
   // Deep clone for any lifecycle template (PRT / ET / DT) — calls the
   // table-specific clone RPC from TEMPLATE_LIFECYCLES, which atomically
@@ -5550,6 +5575,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.EDIT]:                   startEditing,
     [ACTION_KEYS.CLONE]:                  handleClone,
     [ACTION_KEYS.ADVANCE_TO_OPPORTUNITY]: handleAdvanceToOpportunity,
+    [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: handleRunIncomeQualification,
     [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
@@ -5573,6 +5599,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // on the TopbarActions buttons. Mirrors the prior inline `disabled={…}`
   // gates so the runtime feel matches.
   const topbarPendingByKey = {
+    [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: runningIncomeQual,
     [ACTION_KEYS.RESEND_SIGNING_EMAIL]: envelopeBusy,
     [ACTION_KEYS.VOID_ENVELOPE]:        envelopeBusy,
     [ACTION_KEYS.PREVIEW_PDF]:          previewingPdf,

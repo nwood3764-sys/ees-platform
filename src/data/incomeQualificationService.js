@@ -445,9 +445,42 @@ export async function runIncomeQualification(enrollmentId) {
     enrollment_total_units: det.totalUnits,
     enrollment_assisted_units: det.assistedUnits,
     enrollment_subsidized_share_pct: det.subsidizedSharePct,
+    // Unpack the resolved HUD/property/site identity onto the record so a run
+    // fully populates the enrollment (not just the determination). Only write
+    // values that resolved, so an existing populated field is never blanked.
+    enrollment_hud_property_id: r.property_id || undefined,
+    enrollment_property_name: r.name || undefined,
+    enrollment_site_address: r.address || undefined,
+    enrollment_city: r.city || undefined,
+    enrollment_state: r.state || undefined,
+    enrollment_zip: r.zip || undefined,
+    enrollment_county: r.county || undefined,
+    enrollment_property_category: r.category || undefined,
+    enrollment_is_202_811: r.is_202_811 === 'Y' ? true : undefined,
+    enrollment_is_opportunity_zone: r.is_opp_zone === 'Y' ? true : undefined,
+    enrollment_owner_organization: r.owner_org || undefined,
+    enrollment_owner_type: r.owner_type || undefined,
+    enrollment_owner_address: r.owner_addr || undefined,
+    enrollment_owner_phone: r.owner_phone || undefined,
+    enrollment_owner_email: r.owner_email || undefined,
+    enrollment_management_agent: r.mgmt_org || undefined,
+    enrollment_management_phone: r.mgmt_phone || undefined,
+    enrollment_management_email: r.mgmt_email || undefined,
+    enrollment_hud_program: (r.contracts?.[0]?.program) || undefined,
+    enrollment_hud_contract_number: (r.contracts?.[0]?.contract_number) || undefined,
+    enrollment_hud_tracs_status: (r.contracts?.[0]?.tracs_status) || undefined,
+    enrollment_hud_contract_expiration: (r.contracts?.[0]?.expiration) || undefined,
+    enrollment_br_studio: r.br_total?.[0] ?? undefined,
+    enrollment_br_1: r.br_total?.[1] ?? undefined,
+    enrollment_br_2: r.br_total?.[2] ?? undefined,
+    enrollment_br_3: r.br_total?.[3] ?? undefined,
+    enrollment_br_4: r.br_total?.[4] ?? undefined,
+    enrollment_br_5plus: r.br_total?.[5] ?? undefined,
     enrollment_updated_by: userId,
     enrollment_updated_at: new Date().toISOString(),
   }
+  // Strip undefined so PostgREST doesn't null-overwrite unresolved fields.
+  for (const k of Object.keys(updateRow)) if (updateRow[k] === undefined) delete updateRow[k]
   const { data: enrRow, error: updErr } = await supabase
     .from('enrollments')
     .update(updateRow)
