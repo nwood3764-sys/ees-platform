@@ -24,7 +24,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import MobileShell from './MobileShell'
 import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
-  clockIn, clockOut, captureStepPhoto, markUnableToComplete,
+  clockIn, clockOut, captureStepPhoto, markUnableToComplete, signedPhotoUrl,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
@@ -534,6 +534,11 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
         </div>
       )}
 
+      {/* Captured photos — always viewable, even after the step is completed. */}
+      {Array.isArray(step.photos) && step.photos.length > 0 && (
+        <PhotoStrip photos={step.photos} />
+      )}
+
       {/* Corrections comment */}
       {corrections && (step.pc_comment || step.psl_comment) && (
         <div style={{
@@ -618,6 +623,73 @@ function CaptureBtn({ label, onClick, disabled, done }) {
     >
       <CameraIcon /> {label}{done ? ' ✓' : ''}
     </button>
+  )
+}
+
+// ─── PhotoStrip ──────────────────────────────────────────────────────────────
+// Renders thumbnails for a step's captured photos (private work-evidence
+// bucket → short-lived signed URLs). Always shown, including on completed
+// steps, so the technician can review what they captured. Tap to view full.
+function PhotoStrip({ photos }) {
+  const [urls, setUrls] = useState({})   // photo.id -> signedUrl
+  const [zoom, setZoom] = useState(null) // signedUrl being viewed full-screen
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const entries = await Promise.all(
+        photos.map(async (p) => [p.id, await signedPhotoUrl(p.bucket, p.path)])
+      )
+      if (!cancelled) setUrls(Object.fromEntries(entries.filter(([, u]) => u)))
+    })()
+    return () => { cancelled = true }
+  }, [photos])
+
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+      {photos.map((p) => {
+        const url = urls[p.id]
+        const legColor = (p.photo_type || '').toLowerCase() === 'before' ? C.sky
+          : (p.photo_type || '').toLowerCase() === 'after' ? C.emeraldMid : C.textMuted
+        return (
+          <div key={p.id} style={{ position: 'relative' }}>
+            <button
+              onClick={() => url && setZoom(url)}
+              style={{
+                width: 72, height: 72, borderRadius: 8, overflow: 'hidden',
+                border: `1px solid ${C.border}`, padding: 0, cursor: url ? 'pointer' : 'default',
+                background: C.cardSecondary, display: 'block',
+              }}
+            >
+              {url
+                ? <img src={url} alt={p.photo_type || 'photo'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : <span style={{ fontSize: 10, color: C.textMuted }}>…</span>}
+            </button>
+            {p.photo_type && p.photo_type.toLowerCase() !== 'general' && (
+              <span style={{
+                position: 'absolute', bottom: 3, left: 3,
+                background: legColor, color: '#fff', fontSize: 9, fontWeight: 700,
+                borderRadius: 4, padding: '1px 4px', textTransform: 'capitalize',
+              }}>
+                {p.photo_type}
+              </span>
+            )}
+          </div>
+        )
+      })}
+
+      {zoom && (
+        <div
+          onClick={() => setZoom(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 110, background: 'rgba(7,17,31,0.92)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+          }}
+        >
+          <img src={zoom} alt="" style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8 }} />
+        </div>
+      )}
+    </div>
   )
 }
 

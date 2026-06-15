@@ -121,6 +121,21 @@ export async function markUnableToComplete(woId, { reason, note = null } = {}) {
   return assertOutcome(unwrapRpcRow(data), 'Could not mark work order Unable to Complete.')
 }
 
+// Sign a private storage object for viewing. Photos live in work-evidence
+// (private bucket); a short-lived signed URL lets the technician view what
+// they captured. Returns null on failure rather than throwing — a thumbnail
+// that won't load shouldn't break the screen.
+export async function signedPhotoUrl(bucket, path, { expiresIn = 3600 } = {}) {
+  if (!bucket || !path) return null
+  try {
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn)
+    if (error) return null
+    return data?.signedUrl || null
+  } catch {
+    return null
+  }
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Clock in / out  (captures GPS automatically)
 // ───────────────────────────────────────────────────────────────────────────
