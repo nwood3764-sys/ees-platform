@@ -19,7 +19,7 @@
  * purged on activate.
  * ───────────────────────────────────────────────────────────────────────── */
 
-const CACHE_VERSION = 'ees-field-v1'
+const CACHE_VERSION = 'ees-field-v2'
 const SHELL_URLS = [
   '/field',
   '/field-app.webmanifest',
@@ -44,6 +44,10 @@ self.addEventListener('activate', (event) => {
   )
 })
 
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting()
+})
+
 function isSupabase(url) {
   return url.hostname.endsWith('.supabase.co') || url.hostname.endsWith('.supabase.in')
 }
@@ -58,33 +62,26 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return
   if (isSupabase(url)) return
 
-  // Navigation → network-first, fall back to cached shell.
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req)
-        .then((res) => {
-          const copy = res.clone()
-          caches.open(CACHE_VERSION).then((c) => c.put('/field', copy)).catch(() => {})
-          return res
-        })
-        .catch(() => caches.match('/field').then((r) => r || caches.match(req)))
-    )
-    return
-  }
-
-  // Static assets → stale-while-revalidate.
+  // Network-first for ALL same-origin GETs (navigation + assets). When online,
+  // the freshest deployed build always wins — no stale chunks served from a
+  // previously cached index.html. The cache is only a fallback for offline
+  // (basement / no-signal field use, per the field-mobile spec). This trades a
+  // little extra network for correctness: a technician on signal is never
+  // stuck on an old build, and one with no signal still boots the last-seen
+  // version.
   event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            const copy = res.clone()
-            caches.open(CACHE_VERSION).then((c) => c.put(req, copy)).catch(() => {})
-          }
-          return res
-        })
-        .catch(() => cached)
-      return cached || network
-    })
+    fetch(req)
+      .then((res) => {
+        if (res && res.status === 200 && res.type === 'basic') {
+          const copy = res.clone()
+          caches.open(CACHE_VERSION).then((c) => c.put(req, copy)).catch(() => {})
+        }
+        return res
+      })
+      .catch(() =>
+        caches.match(req).then((cached) =>
+          cached || (req.mode === 'navigate' ? caches.match('/field') : undefined)
+        )
+      )
   )
 })

@@ -104,12 +104,34 @@ export default function FieldMobileRoot() {
 
   // Register the field service worker, scoped to /field. Other surfaces don't
   // register a worker; the scope keeps the staff app and customer flows out of
-  // the cache entirely. Fire-and-forget — a registration failure (e.g. SW
-  // unsupported) must not block the app.
+  // the cache entirely. On finding a new version, activate it immediately and
+  // reload once so the technician picks up the latest build without a manual
+  // reinstall. Fire-and-forget — failure must not block the app.
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    let reloaded = false
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded) return
+      reloaded = true
+      window.location.reload()
+    })
     navigator.serviceWorker
       .register('/sw.js', { scope: '/field' })
+      .then((reg) => {
+        // If an updated worker is waiting, tell it to take over now.
+        if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING')
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing
+          if (!nw) return
+          nw.addEventListener('statechange', () => {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              reg.waiting?.postMessage('SKIP_WAITING')
+            }
+          })
+        })
+        // Proactively check for a new build on each mount.
+        reg.update?.()
+      })
       .catch((err) => { console.warn('Field SW registration failed:', err?.message || err) })
   }, [])
 
