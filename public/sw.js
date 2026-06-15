@@ -19,7 +19,15 @@
  * purged on activate.
  * ───────────────────────────────────────────────────────────────────────── */
 
-const CACHE_VERSION = 'ees-field-v2'
+// CACHE_VERSION carries the build SHA, injected at build time by the
+// emit-service-worker plugin in vite.config.js (it rewrites the __SW_VERSION__
+// token below to ees-field-<sha>). This is what makes the file BYTE-DIFFERENT
+// on every deploy — without it sw.js is identical across builds, the browser's
+// update check finds no change, a stale worker is never replaced, and the
+// technician stays pinned to an old bundle. If the token is ever left
+// un-rewritten (dev/un-built copy), fall back to a static dev version.
+const RAW_VERSION = '__SW_VERSION__'
+const CACHE_VERSION = RAW_VERSION.startsWith('ees-field-') ? RAW_VERSION : 'ees-field-dev'
 const SHELL_URLS = [
   '/field',
   '/field-app.webmanifest',

@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback } from 'react'
 import MobileShell from './MobileShell'
 import { fetchTodaySchedule, chicagoToday, signOut } from './fieldMobileService'
 import { C, FONT, MONO, card, statusChip } from './styles'
+import UpdateControls from './UpdateControls'
 
 // Injected at build time by vite.config define. Fallback for safety if a
 // build path didn't define it.
@@ -205,6 +206,8 @@ export default function TodaySchedule({ navigate }) {
           )
         })}
       </div>
+
+      <UpdateControls />
 
       <div style={{
         textAlign: 'center', marginTop: 20, paddingTop: 12,

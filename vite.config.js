@@ -1,17 +1,43 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+
+// Bare short git SHA, reused by both the footer build id and the service
+// worker cache version. Netlify provides COMMIT_REF; local falls back to git.
+function buildSha() {
+  let sha = process.env.COMMIT_REF || ''
+  try { if (!sha) sha = execSync('git rev-parse --short HEAD').toString().trim() } catch { /* noop */ }
+  return (sha || 'local').slice(0, 7)
+}
 
 // Build identifier: short git SHA + UTC build date. Surfaced in the field PWA
 // footer so a technician (or Nicholas during testing) can confirm at a glance
-// which build is loaded after a reload. Falls back gracefully if git isn't
-// available in the build environment (Netlify provides COMMIT_REF).
+// which build is loaded after a reload.
 function buildId() {
-  let sha = process.env.COMMIT_REF || ''
-  try { if (!sha) sha = execSync('git rev-parse --short HEAD').toString().trim() } catch { /* noop */ }
-  sha = (sha || 'local').slice(0, 7)
   const date = new Date().toISOString().slice(0, 16).replace('T', ' ')
-  return `${sha} · ${date}Z`
+  return `${buildSha()} · ${date}Z`
+}
+
+// Emit sw.js with a per-build CACHE_VERSION so the file is byte-different on
+// every deploy. Without this the service worker source is identical across
+// builds: the browser's update check (reg.update()) sees no byte change,
+// installs no new worker, and the technician stays pinned to a stale bundle
+// forever — exactly the failure that left old chunks (and old red styling) on
+// the device after a deploy. Reads the authored public/sw.js, rewrites the
+// __SW_VERSION__ placeholder to ees-field-<sha>, and overwrites the copied
+// asset in the output.
+function emitServiceWorker() {
+  const sha = buildSha()
+  return {
+    name: 'emit-service-worker',
+    apply: 'build',
+    generateBundle() {
+      let src = readFileSync('public/sw.js', 'utf8')
+      src = src.split('__SW_VERSION__').join(`ees-field-${sha}`)
+      this.emitFile({ type: 'asset', fileName: 'sw.js', source: src })
+    },
+  }
 }
 
 // EES-WI LEAP build config
@@ -29,9 +55,10 @@ function buildId() {
 // at module-load with "Cannot access '_' before initialization" — a TDZ
 // error inside one of the cycle members.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), emitServiceWorker()],
   define: {
     __BUILD_ID__: JSON.stringify(buildId()),
+    __BUILD_SHA__: JSON.stringify(buildSha()),
   },
   build: {
     // Silence the 500KB warning — our bundle is well-segmented now and the
