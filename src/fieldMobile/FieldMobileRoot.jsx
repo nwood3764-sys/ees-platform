@@ -2,8 +2,10 @@
 // Top-level component for the technician PWA at /field/*. Path-based routing
 // (no router library — matches /sa/* and /sign/* elsewhere in the app):
 //
-//   /field            → TodaySchedule
+//   /field            → HomeScreen
+//   /field/schedule   → TodaySchedule
 //   /field/map        → MapView
+//   /field/knowledge  → KnowledgeScreen
 //   /field/wo/<id>    → WorkOrderDetail
 //
 // AUTH: unlike /sa/* (customer, unauthenticated) this surface is for
@@ -21,8 +23,10 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { clearUserCache } from '../data/layoutService'
 import LoginScreen from '../components/LoginScreen'
+import HomeScreen from './HomeScreen'
 import TodaySchedule from './TodaySchedule'
 import MapView from './MapView'
+import KnowledgeScreen from './KnowledgeScreen'
 import WorkOrderDetail from './WorkOrderDetail'
 import { C, FONT } from './styles'
 
@@ -138,14 +142,20 @@ export default function FieldMobileRoot() {
   if (loading) return <Centered>Loading…</Centered>
   if (!session) return <LoginScreen />
 
-  // Path dispatch. parts = ['field'] | ['field','map'] | ['field','wo','<id>']
+  // Path dispatch.
+  // parts = ['field'] | ['field','schedule'] | ['field','map']
+  //       | ['field','knowledge'] | ['field','wo','<id>']
   const parts = path.split('/').filter(Boolean)
 
   let screen
   if (parts.length === 1) {
+    screen = <HomeScreen navigate={navigate} />
+  } else if (parts[1] === 'schedule') {
     screen = <TodaySchedule navigate={navigate} />
   } else if (parts[1] === 'map') {
     screen = <MapView navigate={navigate} />
+  } else if (parts[1] === 'knowledge') {
+    screen = <KnowledgeScreen navigate={navigate} />
   } else if (parts[1] === 'wo' && parts[2]) {
     screen = <WorkOrderDetail woId={parts[2]} navigate={navigate} />
   } else {
@@ -161,7 +171,7 @@ export default function FieldMobileRoot() {
               fontWeight: 700, fontSize: 14, borderRadius: 8, padding: '10px 16px',
             }}
           >
-            Today's Schedule
+            Home
           </button>
         </div>
       </Centered>

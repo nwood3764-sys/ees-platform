@@ -8,24 +8,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback } from 'react'
-import MobileShell from './MobileShell'
-import { fetchTodaySchedule, chicagoToday, signOut } from './fieldMobileService'
+import AppChrome from './AppChrome'
+import { fetchTodaySchedule, chicagoToday } from './fieldMobileService'
 import { C, FONT, MONO, card, statusChip } from './styles'
-import UpdateControls from './UpdateControls'
 
 // Injected at build time by vite.config define. Fallback for safety if a
 // build path didn't define it.
 const BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'dev'
-
-function MapIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
-      <line x1="8" y1="2" x2="8" y2="18" /><line x1="16" y1="6" x2="16" y2="22" />
-    </svg>
-  )
-}
 
 function fmtTime(iso) {
   if (!iso) return '—'
@@ -74,22 +63,8 @@ export default function TodaySchedule({ navigate }) {
 
   useEffect(() => { load(dateStr) }, [dateStr, load])
 
-  const signOutBtn = (
-    <button
-      onClick={async () => { await signOut() }}
-      style={{
-        appearance: 'none', border: '1px solid rgba(255,255,255,0.22)',
-        background: 'transparent', color: C.navActive, cursor: 'pointer',
-        fontFamily: FONT, fontWeight: 600, fontSize: 12,
-        borderRadius: 6, padding: '6px 10px',
-      }}
-    >
-      Sign out
-    </button>
-  )
-
   return (
-    <MobileShell title="Schedule" right={signOutBtn}>
+    <AppChrome title="Schedule" activeKey="schedule" navigate={navigate}>
       {/* Date selector */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <button onClick={() => setDateStr(addDays(dateStr, -1))}
@@ -113,22 +88,6 @@ export default function TodaySchedule({ navigate }) {
         <button onClick={() => setDateStr(addDays(dateStr, 1))}
           style={dateNavBtn} aria-label="Next day">›</button>
       </div>
-
-      {/* Map View entry */}
-      {rows.length > 0 && (
-        <button
-          onClick={() => navigate('/field/map')}
-          style={{
-            ...card, width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-            padding: '12px 14px', marginBottom: 12, cursor: 'pointer',
-            color: C.textPrimary, fontFamily: FONT, fontWeight: 600, fontSize: 14,
-            background: C.card,
-          }}
-        >
-          <span style={{ color: C.emeraldMid, display: 'flex' }}><MapIcon /></span>
-          View stops on map
-        </button>
-      )}
 
       {loading && <Empty>Loading your stops…</Empty>}
       {error && <Empty tone="error">{error}</Empty>}
@@ -207,8 +166,6 @@ export default function TodaySchedule({ navigate }) {
         })}
       </div>
 
-      <UpdateControls />
-
       <div style={{
         textAlign: 'center', marginTop: 20, paddingTop: 12,
         borderTop: `1px solid ${C.border}`,
@@ -216,7 +173,7 @@ export default function TodaySchedule({ navigate }) {
       }}>
         EES Field · build {BUILD_ID}
       </div>
-    </MobileShell>
+    </AppChrome>
   )
 }
 

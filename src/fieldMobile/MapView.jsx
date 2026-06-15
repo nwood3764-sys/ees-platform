@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback } from 'react'
-import MobileShell from './MobileShell'
+import AppChrome from './AppChrome'
 import { fetchTodaySchedule, chicagoToday } from './fieldMobileService'
 import { C, FONT, MONO, card } from './styles'
 
@@ -71,7 +71,7 @@ export default function MapView({ navigate }) {
   const routeUrl = routeUrlFor(addressable.map(r => r.property_address))
 
   return (
-    <MobileShell title="Map · Today's Stops" onBack={() => navigate('/field')}>
+    <AppChrome title="Map · Today's Stops" activeKey="map" navigate={navigate}>
       {loading && <Empty>Loading stops…</Empty>}
       {error && <Empty tone="error">{error}</Empty>}
       {!loading && !error && rows.length === 0 && <Empty>No stops for today.</Empty>}
@@ -137,7 +137,7 @@ export default function MapView({ navigate }) {
           </div>
         ))}
       </div>
-    </MobileShell>
+    </AppChrome>
   )
 }
 
