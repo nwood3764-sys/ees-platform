@@ -121,6 +121,8 @@ export async function fetchProperties() {
           property_total_buildings,
           property_status,
           property_subsidy_type,
+          property_hud_property_id,
+          property_hud_contracts,
           property_account_id,
           accounts:property_account_id ( account_name )
         `)
@@ -135,18 +137,27 @@ export async function fetchProperties() {
         .eq('property_is_deleted', false),
   )
 
-  return data.map(r => ({
-    id: r.property_record_number || r.id,
-    _id: r.id,
-    name: r.property_name || '',
-    owner: r.accounts?.account_name || '—',
-    address: [r.property_street, r.property_city].filter(Boolean).join(', '),
-    units: r.property_total_units ?? 0,
-    buildings: r.property_total_buildings ?? 0,
-    status: picklists.byId.get(r.property_status) || '—',
-    subsidy: picklists.byId.get(r.property_subsidy_type) || '—',
-    state: r.property_state || '',
-  }))
+  return data.map(r => {
+    const hud = r.property_hud_contracts || {}
+    return {
+      id: r.property_record_number || r.id,
+      _id: r.id,
+      name: r.property_name || '',
+      owner: r.accounts?.account_name || '—',
+      address: [r.property_street, r.property_city].filter(Boolean).join(', '),
+      units: r.property_total_units ?? 0,
+      buildings: r.property_total_buildings ?? 0,
+      status: picklists.byId.get(r.property_status) || '—',
+      subsidy: picklists.byId.get(r.property_subsidy_type) || '—',
+      state: r.property_state || '',
+      hudId: r.property_hud_property_id || '',
+      hudCategory: hud.category || '',
+      hudProgram: hud.primary_program || '',
+      hudContract: hud.primary_contract_number || '',
+      hudTracs: hud.primary_tracs_status || '',
+      hud202811: hud.is_202_811 === true ? 'Yes' : hud.is_202_811 === false ? 'No' : '',
+    }
+  })
 }
 
 export async function fetchBuildings() {

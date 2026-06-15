@@ -1747,7 +1747,7 @@ export function ListView({
   }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Toolbar */}
       <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: '8px 24px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
         {/* View selector */}
@@ -1858,7 +1858,7 @@ export function ListView({
       )}
 
       {/* Table + detail panel */}
-      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex' }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
         <div style={{ flex: '1 1 0', minWidth: 0, width: 0, overflow: 'auto', padding: '14px 24px 24px' }}>
           <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'auto' }}>
             <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>

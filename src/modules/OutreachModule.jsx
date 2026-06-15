@@ -52,6 +52,12 @@ const PROP_COLS = [
   { field:'buildings', label:'Bldgs',    type:'text',   sortable:true, filterable:false },
   { field:'status',    label:'Status',   type:'select', sortable:true, filterable:true, options:['Prospect','Outreach Active','In Progress','Enrolled'] },
   { field:'subsidy',   label:'Subsidy',  type:'select', sortable:true, filterable:true, options:['Section 8 / HUD','LIHTC','NOAH','DAC','NEST Community'] },
+  { field:'hudId',       label:'HUD Property ID', type:'text',   sortable:true, filterable:true  },
+  { field:'hudCategory', label:'HUD Category',    type:'text',   sortable:true, filterable:true  },
+  { field:'hudProgram',  label:'HUD Program',     type:'text',   sortable:true, filterable:true  },
+  { field:'hudContract', label:'Contract #',      type:'text',   sortable:true, filterable:true  },
+  { field:'hudTracs',    label:'TRACS Status',    type:'text',   sortable:true, filterable:true  },
+  { field:'hud202811',   label:'202/811',         type:'select', sortable:true, filterable:true, options:['Yes','No'] },
   { field:'state',     label:'State',    type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
 ]
 const BLDG_COLS = [
