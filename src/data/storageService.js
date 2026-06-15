@@ -212,6 +212,7 @@ export async function uploadPhoto({
   const userId = await getCurrentUserId().catch(() => null)
   const insertRow = {
     id: photoId,
+    file_url: path,
     storage_bucket: bucket,
     storage_path_original: path,
     apply_watermark: !!applyWatermark,
