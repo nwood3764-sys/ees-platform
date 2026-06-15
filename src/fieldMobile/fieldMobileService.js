@@ -1,0 +1,164 @@
+// ─── fieldMobileService.js ───────────────────────────────────────────────────
+// Data layer for the technician PWA (/field/*). Thin wrappers over the
+// verified production RPCs plus a geolocation helper and the photo-capture
+// path that writes the before/after photo_type tokens the approval gate
+// keys off.
+//
+// RPCs used (all live on flyjigrijjjtcsvpgzvk, verified this build):
+//   my_service_appointments(p_date)                → today's stops
+//   work_order_detail_for_technician(p_wo_id)       → header + steps + gap state
+//   complete_work_step(p_step_id)                   → evidence-gated step close
+//   submit_work_order_for_verification(p_wo_id)     → In Progress → To Be Verified
+//   clock_in_work_order / clock_out_work_order      → time entries w/ GPS + odo
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { supabase } from '../lib/supabase'
+import { uploadPhoto } from '../data/storageService'
+
+// ───────────────────────────────────────────────────────────────────────────
+// Geolocation
+//
+// Wraps navigator.geolocation in a promise. Never rejects hard — a clock
+// action must still be possible in a basement with no GPS fix. On failure
+// we resolve { latitude: null, longitude: null } and let the caller record
+// the time entry without coordinates rather than block the technician.
+// ───────────────────────────────────────────────────────────────────────────
+export function getPosition({ timeoutMs = 8000 } = {}) {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      resolve({ latitude: null, longitude: null, accuracy: null })
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({
+        latitude:  pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracy:  pos.coords.accuracy,
+      }),
+      () => resolve({ latitude: null, longitude: null, accuracy: null }),
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 30000 },
+    )
+  })
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Today's Schedule
+// ───────────────────────────────────────────────────────────────────────────
+
+// p_date is a YYYY-MM-DD string in America/Chicago (the RPC compares against
+// that zone). Default to today in Chicago time.
+export function chicagoToday() {
+  // en-CA gives YYYY-MM-DD; timeZone shifts to Chicago before formatting.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+}
+
+export async function fetchTodaySchedule(dateStr) {
+  const p_date = dateStr || chicagoToday()
+  const { data, error } = await supabase.rpc('my_service_appointments', { p_date })
+  if (error) throw error
+  return data || []
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Work Order detail
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function fetchWorkOrderDetail(woId) {
+  const { data, error } = await supabase.rpc('work_order_detail_for_technician', { p_wo_id: woId })
+  if (error) throw error
+  if (!data || data.outcome !== 'ok') {
+    throw new Error(data?.message || 'Failed to load work order.')
+  }
+  return data
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Step completion + WO submission
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function completeWorkStep(stepId) {
+  const { data, error } = await supabase.rpc('complete_work_step', { p_step_id: stepId })
+  if (error) throw error
+  // RPC returns TABLE(...); supabase surfaces it as an array.
+  const row = Array.isArray(data) ? data[0] : data
+  if (row && row.outcome !== 'ok') throw new Error(row.message || 'Step could not be completed.')
+  return row
+}
+
+export async function submitWorkOrder(woId) {
+  const { data, error } = await supabase.rpc('submit_work_order_for_verification', { p_wo_id: woId })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (row && row.outcome !== 'ok') throw new Error(row.message || 'Work order could not be submitted.')
+  return row
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Clock in / out  (captures GPS automatically; odometer passed in)
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function clockIn(woId, { odometer = null, saId = null } = {}) {
+  const pos = await getPosition()
+  const { data, error } = await supabase.rpc('clock_in_work_order', {
+    p_wo_id:     woId,
+    p_latitude:  pos.latitude,
+    p_longitude: pos.longitude,
+    p_odometer:  odometer,
+    p_sa_id:     saId,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (row && row.outcome !== 'ok') throw new Error(row.message || 'Clock in failed.')
+  return row
+}
+
+export async function clockOut(woId, { odometer = null } = {}) {
+  const pos = await getPosition()
+  const { data, error } = await supabase.rpc('clock_out_work_order', {
+    p_wo_id:     woId,
+    p_latitude:  pos.latitude,
+    p_longitude: pos.longitude,
+    p_odometer:  odometer,
+  })
+  if (error) throw error
+  const row = Array.isArray(data) ? data[0] : data
+  if (row && row.outcome !== 'ok') throw new Error(row.message || 'Clock out failed.')
+  return row
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Photo capture
+//
+// photoType MUST be 'before' | 'after' | 'general' to match the evidence
+// gate. The detail screen passes the leg the step requires. Reuses the
+// canonical uploadPhoto (bucket-routed to work-evidence, EXIF/watermark via
+// the process-photo edge function).
+// ───────────────────────────────────────────────────────────────────────────
+export async function captureStepPhoto({ file, workStepId, photoType }) {
+  if (!['before', 'after', 'general'].includes(photoType)) {
+    throw new Error(`captureStepPhoto: photoType must be before|after|general, got "${photoType}".`)
+  }
+  return uploadPhoto({
+    file,
+    relatedObject: 'work_steps',
+    relatedId:     workStepId,
+    workStepId,
+    photoType,
+    applyWatermark: true,
+  })
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Session / identity
+// ───────────────────────────────────────────────────────────────────────────
+export async function getSession() {
+  const { data } = await supabase.auth.getSession()
+  return data?.session || null
+}
+
+export async function signOut() {
+  await supabase.auth.signOut()
+}

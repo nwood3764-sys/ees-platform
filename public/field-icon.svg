@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#07111f"/>
+  <!-- Safe-zone mark centered; stays inside the maskable 80% safe area. -->
+  <g transform="translate(256 256)">
+    <circle r="150" fill="none" stroke="#3ecf8e" stroke-width="22"/>
+    <path d="M -70 10 L -20 60 L 80 -55"
+          fill="none" stroke="#3ecf8e" stroke-width="30"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

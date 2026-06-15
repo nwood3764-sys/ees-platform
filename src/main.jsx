@@ -4,6 +4,7 @@ import './index.css'
 import App from './App.jsx'
 import SigningPortalRoot from './pages/SigningPortal.jsx'
 import ServiceAppointmentRoot from './serviceAppointments/ServiceAppointmentRoot.jsx'
+import FieldMobileRoot from './fieldMobile/FieldMobileRoot.jsx'
 import { installGlobalErrorHandlers } from './lib/clientErrorLogger'
 
 // Catches uncaught errors and unhandled promise rejections at the
@@ -27,6 +28,11 @@ installGlobalErrorHandlers()
 //     account; the create-service-appointment edge function enforces input validation,
 //     territory containment, and the advisory-lock-based conflict check.
 //
+//   /field or /field/*                 → FieldMobileRoot
+//     Technician mobile PWA. Authenticated internal staff (field crew), but
+//     bypasses the staff sidebar/topbar chrome for a dedicated one-handed
+//     field surface. Enforces its own Supabase Auth gate (reuses LoginScreen).
+//
 // Anything else goes through the normal authenticated App tree.
 //
 // Netlify SPA fallback (netlify.toml: /* → /index.html, 200) means direct
@@ -36,11 +42,13 @@ installGlobalErrorHandlers()
 const pathname                  = window.location.pathname
 const isSigningRoute            = pathname.startsWith('/sign/')
 const isServiceAppointmentRoute = pathname === '/sa' || pathname.startsWith('/sa/')
+const isFieldRoute              = pathname === '/field' || pathname.startsWith('/field/')
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     {isSigningRoute ? <SigningPortalRoot />
      : isServiceAppointmentRoute ? <ServiceAppointmentRoot />
+     : isFieldRoute ? <FieldMobileRoot />
      : <App />}
   </StrictMode>,
 )

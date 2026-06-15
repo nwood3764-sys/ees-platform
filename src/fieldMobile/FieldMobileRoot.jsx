@@ -1,0 +1,160 @@
+// ─── FieldMobileRoot.jsx ─────────────────────────────────────────────────────
+// Top-level component for the technician PWA at /field/*. Path-based routing
+// (no router library — matches /sa/* and /sign/* elsewhere in the app):
+//
+//   /field            → TodaySchedule
+//   /field/map        → MapView
+//   /field/wo/<id>    → WorkOrderDetail
+//
+// AUTH: unlike /sa/* (customer, unauthenticated) this surface is for
+// authenticated internal staff (field technicians). It bypasses the staff
+// CHROME (Sidebar/MobileHeader/desktop AuthGate) but enforces a real
+// Supabase Auth session via its own lightweight gate, reusing the shared
+// LoginScreen. No staff sidebar, no desktop layout — a dedicated one-handed
+// field surface.
+//
+// Netlify SPA fallback (/* → /index.html, 200) means a direct hit or PWA
+// launch to any /field/* path serves index.html, so main.jsx dispatch runs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { useState, useEffect, useCallback } from 'react'
+import { supabase } from '../lib/supabase'
+import { clearUserCache } from '../data/layoutService'
+import LoginScreen from '../components/LoginScreen'
+import TodaySchedule from './TodaySchedule'
+import MapView from './MapView'
+import WorkOrderDetail from './WorkOrderDetail'
+import { C, FONT } from './styles'
+
+// Lightweight client-side navigation. pushState + a popstate listener; every
+// screen calls navigate() rather than touching history directly, so the back
+// button works and deep links resolve.
+export function useFieldPath() {
+  const [path, setPath] = useState(
+    typeof window !== 'undefined' ? window.location.pathname : '/field'
+  )
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname)
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  const navigate = useCallback((to) => {
+    if (to === window.location.pathname) return
+    window.history.pushState(null, '', to)
+    setPath(to)
+  }, [])
+  return { path, navigate }
+}
+
+function Centered({ children }) {
+  return (
+    <div style={{
+      minHeight: '100dvh', display: 'flex', alignItems: 'center',
+      justifyContent: 'center', background: C.page, color: C.textMuted,
+      fontFamily: FONT, fontSize: 14, padding: 24, textAlign: 'center',
+    }}>
+      {children}
+    </div>
+  )
+}
+
+export default function FieldMobileRoot() {
+  const [session, setSession] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const { path, navigate } = useFieldPath()
+
+  // Override the staff-app body styles for a normal mobile scroll surface,
+  // and set the viewport background so overscroll doesn't flash white.
+  useEffect(() => {
+    const prev = {
+      htmlOverflow: document.documentElement.style.overflow,
+      htmlHeight:   document.documentElement.style.height,
+      bodyOverflow: document.body.style.overflow,
+      bodyHeight:   document.body.style.height,
+      bodyBg:       document.body.style.background,
+    }
+    document.documentElement.style.overflow = 'auto'
+    document.documentElement.style.height   = 'auto'
+    document.body.style.overflow            = 'auto'
+    document.body.style.height              = 'auto'
+    document.body.style.background          = C.page
+    return () => {
+      document.documentElement.style.overflow = prev.htmlOverflow
+      document.documentElement.style.height   = prev.htmlHeight
+      document.body.style.overflow            = prev.bodyOverflow
+      document.body.style.height              = prev.bodyHeight
+      document.body.style.background          = prev.bodyBg
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return
+      setSession(data?.session || null)
+      setLoading(false)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (cancelled) return
+      setSession(s || null)
+      if (event === 'SIGNED_OUT') clearUserCache()
+    })
+    return () => { cancelled = true; sub?.subscription?.unsubscribe?.() }
+  }, [])
+
+  // Register the field service worker, scoped to /field. Other surfaces don't
+  // register a worker; the scope keeps the staff app and customer flows out of
+  // the cache entirely. Fire-and-forget — a registration failure (e.g. SW
+  // unsupported) must not block the app.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/field' })
+      .catch((err) => { console.warn('Field SW registration failed:', err?.message || err) })
+  }, [])
+
+  if (loading) return <Centered>Loading…</Centered>
+  if (!session) return <LoginScreen />
+
+  // Path dispatch. parts = ['field'] | ['field','map'] | ['field','wo','<id>']
+  const parts = path.split('/').filter(Boolean)
+
+  let screen
+  if (parts.length === 1) {
+    screen = <TodaySchedule navigate={navigate} />
+  } else if (parts[1] === 'map') {
+    screen = <MapView navigate={navigate} />
+  } else if (parts[1] === 'wo' && parts[2]) {
+    screen = <WorkOrderDetail woId={parts[2]} navigate={navigate} />
+  } else {
+    screen = (
+      <Centered>
+        <div>
+          <div style={{ fontSize: 15, color: C.textPrimary, marginBottom: 8 }}>Page not found</div>
+          <button
+            onClick={() => navigate('/field')}
+            style={{
+              appearance: 'none', border: 'none', cursor: 'pointer',
+              background: C.emerald, color: '#062018', fontFamily: FONT,
+              fontWeight: 700, fontSize: 14, borderRadius: 8, padding: '10px 16px',
+            }}
+          >
+            Today's Schedule
+          </button>
+        </div>
+      </Centered>
+    )
+  }
+
+  return (
+    <div style={{
+      minHeight: '100dvh', background: C.page, color: C.textPrimary,
+      fontFamily: FONT,
+      // iOS safe-area padding so the bottom bar / content clears the home
+      // indicator and the top clears the notch.
+      paddingTop: 'env(safe-area-inset-top)',
+    }}>
+      {screen}
+    </div>
+  )
+}
