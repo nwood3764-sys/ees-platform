@@ -15,6 +15,7 @@ import TopbarUserMenu from './components/TopbarUserMenu'
 import AssistantPanel from './components/AssistantPanel'
 import NotificationBell from './components/NotificationBell'
 import { C, NAV_MODULES } from './data/constants'
+import { fetchAccessibleModules, moduleAllowed, fetchCanUseViewAs, fetchAllRoles, fetchModuleAccessForRole } from './data/layoutService'
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
 import { useIsMobile } from './lib/useMediaQuery'
@@ -46,6 +47,71 @@ const AdminModule         = lazy(() => import('./modules/admin'))
 const PortalModule        = lazy(() => import('./modules/PortalModule'))
 const SearchResultsPage   = lazy(() => import('./modules/SearchResultsPage'))
 const HelpCenterPage      = lazy(() => import('./pages/HelpCenterPage'))
+
+// ─── View As control ─────────────────────────────────────────────────────────
+// Topbar dropdown for permitted users (Admin / Project Coordinator) to preview
+// another role's module navigation for troubleshooting. Simulates nav only —
+// never identity or data access. Excludes the user's inability to escalate:
+// the picker lists roles, and the server (module_access_for_role) re-checks
+// permission, so this is a UI convenience over a server-enforced capability.
+function ViewAsControl({ roles, active, onStart, onExit }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={() => (active ? onExit() : setOpen(o => !o))}
+        title="View as role (troubleshooting)"
+        aria-label="View as role"
+        style={{
+          appearance: 'none', cursor: 'pointer',
+          width: 32, height: 32, borderRadius: 6,
+          background: active ? '#07111f' : 'transparent',
+          border: `1px solid ${active ? '#07111f' : C.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+          stroke={active ? '#7eb3e8' : C.textSecondary}
+          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" />
+        </svg>
+      </button>
+      {open && !active && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+          <div style={{
+            position: 'absolute', top: 38, right: 0, zIndex: 41,
+            width: 240, maxHeight: 360, overflowY: 'auto',
+            background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(13,26,46,0.16)', padding: 6,
+          }}>
+            <div style={{
+              padding: '6px 10px 8px', fontSize: 11, fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: 0.4, color: C.textMuted,
+            }}>
+              View navigation as
+            </div>
+            {roles.map(r => (
+              <button
+                key={r.id}
+                onClick={() => { setOpen(false); onStart(r.id, r.role_name) }}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left', appearance: 'none',
+                  cursor: 'pointer', background: 'transparent', border: 'none',
+                  padding: '9px 10px', borderRadius: 6, fontSize: 13.5, color: C.textPrimary,
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = C.page)}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                {r.role_name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 // ─── Module loading fallback ─────────────────────────────────────────────────
 // Shown while a lazy chunk is in flight. Minimal + branded so the user sees
@@ -93,6 +159,65 @@ function AuthedApp({ session }) {
     closeRecord,
     replaceRecord,
   } = useUrlNavigation()
+
+  // Module-level access. Loaded once per session; until it resolves we render
+  // nothing role-gated (avoids a flash of modules the user can't keep). Admin
+  // resolves to ['*'] and sees everything. Field/trade roles see only their
+  // granted modules; portal roles see none of the internal app.
+  const [accessibleModules, setAccessibleModules] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    fetchAccessibleModules()
+      .then(list => { if (!cancelled) setAccessibleModules(list) })
+      .catch(() => { if (!cancelled) setAccessibleModules([]) })
+    return () => { cancelled = true }
+  }, [])
+
+  // The sidebar list filtered to what this user may access.
+  // ── View As (troubleshooting) ──────────────────────────────────────────────
+  // A permitted user (Admin / Project Coordinator) can simulate another role's
+  // module visibility. This overrides ONLY the nav set — never identity or data
+  // access. viewAs = { roleId, roleName, modules } when active, else null.
+  const [canViewAs, setCanViewAs] = useState(false)
+  const [viewAsRoles, setViewAsRoles] = useState([])
+  const [viewAs, setViewAs] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    fetchCanUseViewAs().then(async (ok) => {
+      if (cancelled || !ok) return
+      setCanViewAs(true)
+      try { setViewAsRoles(await fetchAllRoles()) } catch { /* non-fatal */ }
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  const startViewAs = async (roleId, roleName) => {
+    try {
+      const modules = await fetchModuleAccessForRole(roleId)
+      setViewAs({ roleId, roleName, modules })
+      navigateToModule('home')
+    } catch { /* surfaced by toast elsewhere; keep current view on failure */ }
+  }
+  const exitViewAs = () => { setViewAs(null) }
+
+  // Effective module access = simulated set when View As is active, else own.
+  const effectiveAccess = viewAs ? viewAs.modules : accessibleModules
+
+  const navModules = effectiveAccess
+    ? NAV_MODULES.filter(m => moduleAllowed(effectiveAccess, m.id))
+    : NAV_MODULES
+
+  // Guard: if the URL points at a module the user can't access, redirect to
+  // their first allowed module (or home). Runs once access is known.
+  useEffect(() => {
+    if (!effectiveAccess) return
+    if (activeModule && activeModule !== 'search' && activeModule !== 'help'
+        && !moduleAllowed(effectiveAccess, activeModule)) {
+      const fallback = navModules[0]?.id || 'home'
+      navigateToModule(fallback)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveAccess, activeModule])
 
   // Mobile menu drawer state. Desktop ignores this entirely — the Sidebar
   // component only honors mobileOpen when useIsMobile() is true.
@@ -194,6 +319,14 @@ function AuthedApp({ session }) {
   }
 
   const renderModule = () => {
+    // Module access guard. While access is resolving, or when the active
+    // module isn't permitted (the redirect effect will move us), render a
+    // neutral loading state rather than flash a module the user can't keep.
+    if (!effectiveAccess) return <ModuleLoader />
+    if (activeModule && activeModule !== 'search' && activeModule !== 'help'
+        && !moduleAllowed(effectiveAccess, activeModule)) {
+      return <ModuleLoader />
+    }
     // All modules accept the same nav-prop bundle so any of them can drive
     // record-detail open/close via the URL. Modules without a record-detail
     // surface (HomeModule, PortalModule today) ignore them; the prop is
@@ -253,6 +386,7 @@ function AuthedApp({ session }) {
         onMobileClose={() => setMobileMenuOpen(false)}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(c => !c)}
+        modules={navModules}
       />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         <MobileHeader
@@ -310,8 +444,43 @@ function AuthedApp({ session }) {
                   onChangePassword={() => setPasswordModalOpen(true)}
                   onOpenIntegrations={() => setIntegrationsOpen(true)}
                 />
+                {canViewAs && (
+                  <ViewAsControl
+                    roles={viewAsRoles}
+                    active={viewAs}
+                    onStart={startViewAs}
+                    onExit={exitViewAs}
+                  />
+                )}
               </div>
             )}
+          </div>
+        )}
+        {viewAs && (
+          <div style={{
+            flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 12, padding: '7px 14px',
+            background: '#07111f', color: 'rgba(255,255,255,0.96)',
+            fontSize: 13, fontWeight: 600,
+          }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7eb3e8"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" />
+              </svg>
+              Viewing as <span style={{ color: '#7eb3e8' }}>{viewAs.roleName}</span> — navigation is simulated; your data access is unchanged
+            </span>
+            <button
+              onClick={exitViewAs}
+              style={{
+                appearance: 'none', cursor: 'pointer',
+                background: 'rgba(255,255,255,0.12)', color: '#fff',
+                border: '1px solid rgba(255,255,255,0.22)', borderRadius: 6,
+                fontSize: 12, fontWeight: 700, padding: '4px 12px',
+              }}
+            >
+              Exit
+            </button>
           </div>
         )}
         <Suspense fallback={<ModuleLoader />}>

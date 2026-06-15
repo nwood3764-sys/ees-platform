@@ -28,6 +28,8 @@ export async function getCurrentUserId() {
 export function clearUserCache() {
   _cachedUserId = null
   _cachedUserProfile = null
+  _cachedAccessibleModules = null
+  _cachedCanViewAs = null
 }
 
 /**
@@ -69,6 +71,55 @@ export async function getCurrentUserProfile() {
 
   _cachedUserProfile = profile
   return profile
+}
+
+// Module-level access for the main app. Returns the set of NAV_MODULES ids the
+// current user may see. Admin resolves to the sentinel ['*'] meaning "all".
+// Cached per session alongside the profile; cleared by clearUserCache().
+let _cachedAccessibleModules = null
+export async function fetchAccessibleModules() {
+  if (_cachedAccessibleModules) return _cachedAccessibleModules
+  const { data, error } = await supabase.rpc('my_accessible_modules')
+  if (error) throw error
+  const list = Array.isArray(data) ? data : []
+  _cachedAccessibleModules = list
+  return list
+}
+
+// True if the user may access a given module id, honoring the '*' admin token.
+export function moduleAllowed(accessible, moduleId) {
+  if (!accessible) return false
+  if (accessible.includes('*')) return true
+  return accessible.includes(moduleId)
+}
+
+// ── View As (role-preview troubleshooting) ──────────────────────────────────
+// Whether the current user may use View As at all (Admin or granted role).
+let _cachedCanViewAs = null
+export async function fetchCanUseViewAs() {
+  if (_cachedCanViewAs !== null) return _cachedCanViewAs
+  const { data, error } = await supabase.rpc('can_use_view_as')
+  if (error) { _cachedCanViewAs = false; return false }
+  _cachedCanViewAs = !!data
+  return _cachedCanViewAs
+}
+
+// All active roles, for the View As picker.
+export async function fetchAllRoles() {
+  const { data, error } = await supabase
+    .from('roles')
+    .select('id, role_name')
+    .eq('role_is_active', true)
+    .order('role_name', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+// The module set a given role would see — used to simulate that role's nav.
+export async function fetchModuleAccessForRole(roleId) {
+  const { data, error } = await supabase.rpc('module_access_for_role', { p_role_id: roleId })
+  if (error) throw error
+  return Array.isArray(data) ? data : []
 }
 
 /**

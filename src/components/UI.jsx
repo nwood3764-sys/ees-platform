@@ -277,6 +277,7 @@ export function Sidebar({
   onMobileClose,
   collapsed = false,
   onToggleCollapse,
+  modules = NAV_MODULES,
 }) {
   const isMobile = useIsMobile();
   // `collapsed` only applies on desktop — the mobile drawer always shows full labels.
@@ -363,7 +364,7 @@ export function Sidebar({
 
       {/* Nav */}
       <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto', overflowX: 'hidden' }}>
-        {NAV_MODULES.map(m => {
+        {modules.map(m => {
           const on = m.id === activeModule;
           // Mobile rows are a bit taller for easier tapping (44px tap target minimum)
           const rowPadding = isMobile
