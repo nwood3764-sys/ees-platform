@@ -385,8 +385,9 @@ export async function fetchEnrollments() {
         enrollment_total_units,
         enrollment_qualifying_mode,
         enrollment_determination_date,
+        enrollment_site_address,
         property_id,
-        properties:property_id ( property_name, property_state, property_total_units )
+        properties:property_id ( property_name, property_street, property_city, property_state, property_zip, property_total_units )
       `)
       .eq('enrollment_is_deleted', false)
       .order('enrollment_created_at', { ascending: false, nullsFirst: false })
@@ -395,12 +396,15 @@ export async function fetchEnrollments() {
   )
 
   return data.map(r => {
-    const propertyName = r.properties?.property_name || '—'
+    const addr = r.properties?.property_street
+      || r.enrollment_site_address
+      || r.properties?.property_name
+      || '—'
     return {
       id: r.enrollment_record_number || r.id.slice(0, 8).toUpperCase(),
       _id: r.id,
-      name: r.enrollment_name || propertyName,
-      property: propertyName,
+      name: addr,
+      property: addr,
       recordType: picklists.byId.get(r.enrollment_record_type) || '—',
       status: picklists.byId.get(r.enrollment_status) || '—',
       qualifyingMode: r.enrollment_qualifying_mode || 'Not Run',

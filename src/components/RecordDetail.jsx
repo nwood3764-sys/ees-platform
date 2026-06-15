@@ -4861,7 +4861,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     try {
       const result = await runIncomeQualification(recordId)
       const mode = result?.determination?.mode || 'Determined'
-      await reload()
+      setReloadTick(t => t + 1)
       if (typeof window !== 'undefined') {
         window.alert(`Income Qualification complete: ${mode}. Application PDF and tenant data sheet saved to this enrollment.`)
       }
@@ -4872,7 +4872,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     } finally {
       setRunningIncomeQual(false)
     }
-  }, [runningIncomeQual, recordId, reload])
+  }, [runningIncomeQual, recordId])
 
   // Deep clone for any lifecycle template (PRT / ET / DT) — calls the
   // table-specific clone RPC from TEMPLATE_LIFECYCLES, which atomically
