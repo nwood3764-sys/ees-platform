@@ -1,49 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <radialGradient id="pad" cx="40%" cy="34%" r="78%">
-      <stop offset="0%" stop-color="#b3d4f4"/>
-      <stop offset="52%" stop-color="#7eb3e8"/>
-      <stop offset="100%" stop-color="#4c83bf"/>
-    </radialGradient>
     <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#0d2138"/>
+      <stop offset="0%" stop-color="#0e2440"/>
       <stop offset="100%" stop-color="#07111f"/>
     </linearGradient>
-    <!-- Clip = full disc MINUS a wedge, so veins/highlight never spill off-pad -->
-    <clipPath id="padclip">
-      <path d="M 256 248
-               m -150 0
-               a 150 150 0 1 0 300 0
-               a 150 150 0 1 0 -300 0 Z
-               M 256 248 L 414 286 L 414 316 Z"
-            clip-rule="evenodd"/>
-    </clipPath>
+    <linearGradient id="pad" x1="0.25" y1="0" x2="0.75" y2="1">
+      <stop offset="0%" stop-color="#9ec8ef"/>
+      <stop offset="50%" stop-color="#7eb3e8"/>
+      <stop offset="100%" stop-color="#5d97d2"/>
+    </linearGradient>
   </defs>
-
+  <rect width="512" height="512" fill="#07111f"/>
   <rect width="512" height="512" fill="url(#water)"/>
-
-  <!-- Ripples -->
-  <g fill="none" stroke="#7eb3e8" stroke-opacity="0.15" stroke-width="6">
-    <ellipse cx="256" cy="320" rx="150" ry="36"/>
-    <ellipse cx="256" cy="320" rx="194" ry="50"/>
+  <g fill="none" stroke="#7eb3e8" stroke-opacity="0.13" stroke-width="5">
+    <ellipse cx="256" cy="342" rx="160" ry="34"/>
+    <ellipse cx="256" cy="348" rx="202" ry="46"/>
   </g>
-
-  <!-- Disc -->
-  <circle cx="256" cy="248" r="150" fill="url(#pad)"/>
-
-  <!-- Notch wedge cut (paint water color over the disc) -->
-  <path d="M 256 248 L 414 286 L 414 316 Z" fill="url(#water)"/>
-  <path d="M 256 248 L 414 286 L 414 316 Z" fill="#0a1a2e"/>
-
-  <!-- Veins + rim, clipped to the pad shape -->
-  <g clip-path="url(#padclip)">
-    <g stroke="#2a4f78" stroke-opacity="0.5" stroke-width="7" stroke-linecap="round" fill="none">
-      <path d="M 256 248 L 250 100"/>
-      <path d="M 256 248 L 140 160"/>
-      <path d="M 256 248 L 112 262"/>
-      <path d="M 256 248 L 150 358"/>
-      <path d="M 256 248 L 250 396"/>
-    </g>
-    <circle cx="256" cy="248" r="146" fill="none" stroke="#c3ddf6" stroke-opacity="0.45" stroke-width="6"/>
+  <path d="M 256.0,250.0 L 174.2,387.0 L 165.7,381.6 L 157.9,375.4 L 150.7,368.5 L 144.3,360.9 L 138.6,352.8 L 133.5,344.4 L 129.0,335.7 L 125.0,326.9 L 121.2,318.0 L 117.8,309.1 L 114.5,300.1 L 111.4,291.0 L 108.6,281.7 L 106.2,272.3 L 104.3,262.6 L 103.2,252.8 L 102.8,242.9 L 103.5,232.9 L 105.1,223.1 L 107.7,213.5 L 111.2,204.2 L 115.4,195.2 L 120.3,186.6 L 125.6,178.3 L 131.3,170.3 L 137.3,162.6 L 143.5,155.0 L 150.0,147.7 L 156.8,140.6 L 164.0,133.9 L 171.6,127.6 L 179.8,121.9 L 188.5,116.9 L 197.6,112.8 L 207.0,109.7 L 216.8,107.5 L 226.6,106.2 L 236.5,105.7 L 246.3,105.9 L 256.0,106.7 L 265.6,107.8 L 275.1,109.1 L 284.5,110.7 L 293.9,112.4 L 303.3,114.5 L 312.8,116.9 L 322.1,119.9 L 331.3,123.5 L 340.2,127.8 L 348.7,133.0 L 356.7,139.0 L 364.0,145.7 L 370.6,153.1 L 376.6,161.1 L 381.9,169.5 L 386.6,178.1 L 390.8,187.0 L 394.7,196.0 L 398.3,205.1 L 401.5,214.3 L 404.4,223.6 L 406.9,233.2 L 408.8,242.9 L 410.0,252.8 L 410.3,262.7 L 409.8,272.7 L 408.2,282.6 L 405.7,292.2 L 402.2,301.5 L 398.0,310.5 L 393.1,319.1 L 387.7,327.2 L 382.1,335.1 L 376.2,342.7 L 370.2,350.2 L 364.1,357.5 L 357.7,364.7 L 351.1,371.7 L 344.0,378.5 L 336.5,384.9 Z" fill="url(#pad)"/>
+  <g stroke="#2f567f" stroke-opacity="0.42" stroke-width="6" stroke-linecap="round" fill="none">
+    <path d="M 256 250 L 138.9 237.5"/><path d="M 256 250 L 160.1 186.3"/><path d="M 256 250 L 202.2 150.4"/><path d="M 256 250 L 256.0 137.4"/><path d="M 256 250 L 309.8 150.4"/><path d="M 256 250 L 351.9 186.3"/><path d="M 256 250 L 373.1 237.5"/>
   </g>
+  <ellipse cx="206" cy="198" rx="72" ry="44" fill="#cae1f7" opacity="0.16"/>
 </svg>
