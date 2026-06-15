@@ -293,6 +293,60 @@ export async function listPhotos(relatedObject, relatedId, { workStepId = null }
 }
 
 /**
+ * Aggregate every live photo across ALL of a work order's steps.
+ *
+ * Photos are anchored at the work-step grain (related_object='work_steps',
+ * related_id=<step id>, work_step_id set). A work order's photo gallery wants
+ * the union across its steps, each tagged with the step it belongs to so the
+ * UI can label and filter by work step. listPhotos() can't express this — it
+ * matches a single (related_object, related_id) pair — so this walks
+ * work_steps → photos for the given work order.
+ *
+ * Each returned row is a photos row plus:
+ *   _work_step_id    — the owning step's id (filter key)
+ *   _work_step_name  — the owning step's human-readable name (tag/label)
+ *
+ * Ordered by step name then capture time so the gallery groups naturally.
+ * Returns raw rows; caller hydrates signed URLs via hydratePhotoUrls.
+ */
+export async function listWorkOrderPhotos(workOrderId) {
+  if (!workOrderId) return []
+
+  // 1. Steps for this work order (id → name map).
+  const { data: steps, error: stepErr } = await supabase
+    .from('work_steps')
+    .select('id, work_step_name')
+    .eq('work_order_id', workOrderId)
+  if (stepErr) throw new Error(`work order steps load failed: ${stepErr.message}`)
+  if (!steps || steps.length === 0) return []
+
+  const stepNameById = new Map(steps.map(s => [s.id, s.work_step_name]))
+  const stepIds = steps.map(s => s.id)
+
+  // 2. All live photos linked to any of those steps.
+  const { data: photos, error: photoErr } = await supabase
+    .from('photos')
+    .select('*')
+    .in('work_step_id', stepIds)
+    .eq('is_deleted', false)
+    .order('taken_at', { ascending: true })
+  if (photoErr) throw new Error(`work order photos load failed: ${photoErr.message}`)
+
+  // 3. Tag each photo with its step id/name; sort by step name then time.
+  return (photos || [])
+    .map(p => ({
+      ...p,
+      _work_step_id: p.work_step_id,
+      _work_step_name: stepNameById.get(p.work_step_id) || 'Unassigned step',
+    }))
+    .sort((a, b) => {
+      const n = (a._work_step_name || '').localeCompare(b._work_step_name || '')
+      if (n !== 0) return n
+      return (a.taken_at || '').localeCompare(b.taken_at || '')
+    })
+}
+
+/**
  * Soft-delete a photo. The storage objects are intentionally kept so the
  * record remains restorable from the Recycle Bin. Permanent purge is an
  * admin-only path (handled elsewhere).

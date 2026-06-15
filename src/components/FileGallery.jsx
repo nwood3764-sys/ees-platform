@@ -7,6 +7,7 @@ import {
   defaultPhotoBucket,
   uploadPhoto,
   listPhotos,
+  listWorkOrderPhotos,
   hydratePhotoUrls,
   softDeletePhoto,
   reprocessPhoto,
@@ -61,6 +62,14 @@ export default function FileGalleryWidget({
 }) {
   const config = widget.widget_config || {}
   const target = config.target === 'documents' ? 'documents' : 'photos'
+  // Work-order photo galleries aggregate across every step of the work order,
+  // tagging each photo with its work step. Active only on a work_orders record
+  // with no specific step pinned in config (a step-scoped widget keeps the
+  // single-step behavior via listPhotos).
+  const isWorkOrderPhotoGallery =
+    target === 'photos' &&
+    parentTable === 'work_orders' &&
+    !config.work_step_id
   const isMobile = useIsMobile()
   const toast = useToast()
   const fileInputRef = useRef(null)
@@ -76,6 +85,7 @@ export default function FileGalleryWidget({
   const [lightboxIdx, setLightboxIdx] = useState(null) // photos only
   const [previewDoc, setPreviewDoc] = useState(null)   // documents only — modal preview
   const [confirmDelete, setConfirmDelete] = useState(null) // {id, name}
+  const [stepFilter, setStepFilter] = useState('all')      // WO gallery: 'all' | work_step_id
 
   // Photos-only: detect a misconfigured widget (e.g. on a property) so we
   // can show a clear message instead of letting the user click Upload and
@@ -96,9 +106,11 @@ export default function FileGalleryWidget({
     setError(null)
     try {
       if (target === 'photos') {
-        const rows = await listPhotos(parentTable, parentRecordId, {
-          workStepId: config.work_step_id || null,
-        })
+        const rows = isWorkOrderPhotoGallery
+          ? await listWorkOrderPhotos(parentRecordId)
+          : await listPhotos(parentTable, parentRecordId, {
+              workStepId: config.work_step_id || null,
+            })
         const hydrated = await hydratePhotoUrls(rows)
         setItems(hydrated)
       } else {
@@ -112,9 +124,29 @@ export default function FileGalleryWidget({
       setLoading(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentTable, parentRecordId, target, config.work_step_id])
+  }, [parentTable, parentRecordId, target, config.work_step_id, isWorkOrderPhotoGallery])
 
   useEffect(() => { refresh() }, [refresh])
+
+  // Work-order gallery: build the step filter options (distinct steps present
+  // in the loaded photos, with counts) and the filtered view.
+  const stepOptions = useMemo(() => {
+    if (!isWorkOrderPhotoGallery) return []
+    const counts = new Map() // step_id → { name, count }
+    for (const p of items) {
+      const id = p._work_step_id || 'unassigned'
+      const name = p._work_step_name || 'Unassigned step'
+      const cur = counts.get(id) || { id, name, count: 0 }
+      cur.count += 1
+      counts.set(id, cur)
+    }
+    return Array.from(counts.values()).sort((a, b) => a.name.localeCompare(b.name))
+  }, [items, isWorkOrderPhotoGallery])
+
+  const visiblePhotos = useMemo(() => {
+    if (!isWorkOrderPhotoGallery || stepFilter === 'all') return items
+    return items.filter(p => (p._work_step_id || 'unassigned') === stepFilter)
+  }, [items, stepFilter, isWorkOrderPhotoGallery])
 
   // Photos with a 'pending' watermark won't have their watermarked URL on
   // first load. Poll lightly while any are pending so the UI catches up
@@ -387,13 +419,24 @@ export default function FileGalleryWidget({
                   : null}
               />
             ) : target === 'photos' ? (
-              <PhotoGrid
-                photos={items}
-                isMobile={isMobile}
-                onOpen={(idx) => setLightboxIdx(idx)}
-                onReprocess={handleReprocess}
-                onDelete={(p) => setConfirmDelete({ id: p.id, name: p.photo_number || 'photo' })}
-              />
+              <>
+                {isWorkOrderPhotoGallery && stepOptions.length > 1 && (
+                  <StepFilterBar
+                    options={stepOptions}
+                    total={items.length}
+                    value={stepFilter}
+                    onChange={setStepFilter}
+                  />
+                )}
+                <PhotoGrid
+                  photos={visiblePhotos}
+                  isMobile={isMobile}
+                  showStepTag={isWorkOrderPhotoGallery}
+                  onOpen={(idx) => setLightboxIdx(idx)}
+                  onReprocess={handleReprocess}
+                  onDelete={(p) => setConfirmDelete({ id: p.id, name: p.photo_number || 'photo' })}
+                />
+              </>
             ) : (
               <DocumentList
                 documents={items}
@@ -407,9 +450,9 @@ export default function FileGalleryWidget({
       </div>
 
       {/* Lightbox — photos only, full-screen overlay */}
-      {target === 'photos' && lightboxIdx !== null && items[lightboxIdx] && (
+      {target === 'photos' && lightboxIdx !== null && visiblePhotos[lightboxIdx] && (
         <Lightbox
-          photos={items}
+          photos={visiblePhotos}
           startIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
           onIndexChange={setLightboxIdx}
@@ -599,7 +642,40 @@ function SkeletonGrid({ mode, isMobile }) {
   )
 }
 
-function PhotoGrid({ photos, isMobile, onOpen, onReprocess, onDelete }) {
+function StepFilterBar({ options, total, value, onChange }) {
+  const chip = (active) => ({
+    appearance: 'none', cursor: 'pointer',
+    border: `1px solid ${active ? C.emeraldMid : C.border}`,
+    background: active ? '#e8f8f0' : C.card,
+    color: active ? '#1a7a4f' : C.textSecondary,
+    fontSize: 11.5, fontWeight: 600,
+    padding: '4px 10px', borderRadius: 14,
+    whiteSpace: 'nowrap',
+  })
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6,
+      flexWrap: 'wrap', marginBottom: 12,
+    }}>
+      <span style={{
+        fontSize: 11, fontWeight: 600, color: C.textMuted,
+        textTransform: 'uppercase', letterSpacing: 0.4, marginRight: 2,
+      }}>
+        Work step
+      </span>
+      <button style={chip(value === 'all')} onClick={() => onChange('all')}>
+        All ({total})
+      </button>
+      {options.map(o => (
+        <button key={o.id} style={chip(value === o.id)} onClick={() => onChange(o.id)}>
+          {o.name} ({o.count})
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function PhotoGrid({ photos, isMobile, showStepTag, onOpen, onReprocess, onDelete }) {
   return (
     <div style={{
       display: 'grid',
@@ -610,6 +686,7 @@ function PhotoGrid({ photos, isMobile, onOpen, onReprocess, onDelete }) {
         <PhotoTile
           key={p.id}
           photo={p}
+          showStepTag={showStepTag}
           onOpen={() => onOpen(idx)}
           onReprocess={() => onReprocess(p.id)}
           onDelete={() => onDelete(p)}
@@ -619,7 +696,7 @@ function PhotoGrid({ photos, isMobile, onOpen, onReprocess, onDelete }) {
   )
 }
 
-function PhotoTile({ photo, onOpen, onReprocess, onDelete }) {
+function PhotoTile({ photo, showStepTag, onOpen, onReprocess, onDelete }) {
   const status = photo.watermark_status
   const url = photo._thumbUrl
   const [hover, setHover] = useState(false)
@@ -674,8 +751,8 @@ function PhotoTile({ photo, onOpen, onReprocess, onDelete }) {
           title={photo.watermark_error || 'Retry processing'}
           style={{
             position: 'absolute', top: 6, left: 6,
-            background: '#fef2f2', color: '#b03a2e',
-            border: '1px solid #fca5a5', borderRadius: 10,
+            background: '#e8f0fb', color: '#2a5a8a',
+            border: '1px solid #7eb3e8', borderRadius: 10,
             fontSize: 10, fontWeight: 600,
             padding: '2px 7px', cursor: 'pointer',
             textTransform: 'uppercase', letterSpacing: 0.4,
@@ -683,7 +760,7 @@ function PhotoTile({ photo, onOpen, onReprocess, onDelete }) {
           }}
         >
           <Icon path="M4 4v5h5 M20 20v-5h-5 M5.5 9.5a8 8 0 0114-3 M18.5 14.5a8 8 0 01-14 3"
-            size={9} color="#b03a2e" />
+            size={9} color="#2a5a8a" />
           Retry
         </button>
       )}
@@ -707,6 +784,38 @@ function PhotoTile({ photo, onOpen, onReprocess, onDelete }) {
         <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"
           size={12} color="#fff" />
       </button>
+
+      {/* Work-step tag + capture-type badge (work-order aggregate gallery).
+          Bottom-anchored chips so the photo reads as evidence for a specific
+          step. Step name is the primary tag; before/after is secondary. */}
+      {showStepTag && (
+        <div style={{
+          position: 'absolute', left: 6, right: 6, bottom: 6,
+          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
+          pointerEvents: 'none',
+        }}>
+          <span style={{
+            maxWidth: '100%',
+            background: 'rgba(7,17,31,0.82)', color: '#fff',
+            fontSize: 10, fontWeight: 600,
+            padding: '2px 7px', borderRadius: 10,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {photo._work_step_name || 'Step'}
+          </span>
+          {(photo.photo_type === 'before' || photo.photo_type === 'after') && (
+            <span style={{
+              background: photo.photo_type === 'before' ? '#e8f3fb' : '#e8f8f0',
+              color: photo.photo_type === 'before' ? '#1a5a8a' : '#1a7a4f',
+              fontSize: 9, fontWeight: 700,
+              padding: '2px 6px', borderRadius: 10,
+              textTransform: 'uppercase', letterSpacing: 0.4,
+            }}>
+              {photo.photo_type}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Bottom caption strip — only when there's a caption */}
       {photo.caption && (
