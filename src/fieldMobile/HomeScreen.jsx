@@ -11,8 +11,9 @@
 // the Schedule screen uses, so Home and Schedule never disagree.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useEffect } from 'react'
-import AppChrome from './AppChrome'
+import { useState, useEffect, useCallback } from 'react'
+import AppChrome, { PullIndicator } from './AppChrome'
+import { usePullToRefresh } from './usePullToRefresh'
 import { fetchTodaySchedule, chicagoToday } from './fieldMobileService'
 import { C, FONT, MONO, card, statusChip } from './styles'
 
@@ -64,27 +65,29 @@ export default function HomeScreen({ navigate }) {
   const [error, setError]     = useState(null)
   const [name, setName]       = useState('')
 
+  const load = useCallback(async () => {
+    try {
+      setError(null)
+      const data = await fetchTodaySchedule(chicagoToday())
+      setRows(data)
+      const n = data?.[0]?.technician_first_name || data?.[0]?.technician_name || ''
+      setName(typeof n === 'string' ? n.split(' ')[0] : '')
+    } catch (e) {
+      setError(e.message || 'Could not load today’s schedule.')
+    }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
-    async function load() {
-      try {
-        setLoading(true); setError(null)
-        const data = await fetchTodaySchedule(chicagoToday())
-        if (cancelled) return
-        setRows(data)
-        // Best-effort first name from the first row's technician field if the
-        // RPC exposes one; otherwise leave blank (greeting still reads well).
-        const n = data?.[0]?.technician_first_name || data?.[0]?.technician_name || ''
-        setName(typeof n === 'string' ? n.split(' ')[0] : '')
-      } catch (e) {
-        if (!cancelled) setError(e.message || 'Could not load today’s schedule.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
+    ;(async () => {
+      setLoading(true)
+      await load()
+      if (!cancelled) setLoading(false)
+    })()
     return () => { cancelled = true }
-  }, [])
+  }, [load])
+
+  const pr = usePullToRefresh(load)
 
   const total = rows.length
   const remaining = rows.filter(isRemaining)
@@ -92,6 +95,7 @@ export default function HomeScreen({ navigate }) {
 
   return (
     <AppChrome title="Home" activeKey="home" navigate={navigate}>
+      <PullIndicator {...pr} />
       {/* Greeting block */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontFamily: FONT, fontSize: 22, fontWeight: 800, color: C.textPrimary }}>

@@ -198,3 +198,37 @@ export async function getSession() {
 export async function signOut() {
   await supabase.auth.signOut()
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Knowledge base
+//
+// Published help articles scoped to the technician's audience ('all' +
+// 'internal'). RLS gates what's readable; we additionally filter to published,
+// non-deleted rows. List returns lightweight rows (no body) grouped client-side
+// by category; fetchArticle pulls the full markdown body on demand.
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function fetchKnowledgeArticles() {
+  const { data, error } = await supabase
+    .from('help_articles')
+    .select('id, ha_slug, ha_title, ha_summary, ha_category, ha_audience')
+    .in('ha_audience', ['all', 'internal'])
+    .eq('ha_is_published', true)
+    .eq('ha_is_deleted', false)
+    .order('ha_category', { ascending: true })
+    .order('ha_title', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+export async function fetchKnowledgeArticle(slug) {
+  const { data, error } = await supabase
+    .from('help_articles')
+    .select('id, ha_slug, ha_title, ha_summary, ha_category, ha_body_markdown')
+    .eq('ha_slug', slug)
+    .eq('ha_is_published', true)
+    .eq('ha_is_deleted', false)
+    .maybeSingle()
+  if (error) throw error
+  return data || null
+}

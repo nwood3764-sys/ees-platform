@@ -5,7 +5,8 @@
 //   /field            → HomeScreen
 //   /field/schedule   → TodaySchedule
 //   /field/map        → MapView
-//   /field/knowledge  → KnowledgeScreen
+//   /field/knowledge  → KnowledgeScreen (list)
+//   /field/knowledge/<slug> → KnowledgeArticle (reader)
 //   /field/wo/<id>    → WorkOrderDetail
 //
 // AUTH: unlike /sa/* (customer, unauthenticated) this surface is for
@@ -26,7 +27,7 @@ import LoginScreen from '../components/LoginScreen'
 import HomeScreen from './HomeScreen'
 import TodaySchedule from './TodaySchedule'
 import MapView from './MapView'
-import KnowledgeScreen from './KnowledgeScreen'
+import KnowledgeScreen, { KnowledgeArticle } from './KnowledgeScreen'
 import WorkOrderDetail from './WorkOrderDetail'
 import { C, FONT } from './styles'
 
@@ -154,6 +155,8 @@ export default function FieldMobileRoot() {
     screen = <TodaySchedule navigate={navigate} />
   } else if (parts[1] === 'map') {
     screen = <MapView navigate={navigate} />
+  } else if (parts[1] === 'knowledge' && parts[2]) {
+    screen = <KnowledgeArticle slug={parts[2]} navigate={navigate} />
   } else if (parts[1] === 'knowledge') {
     screen = <KnowledgeScreen navigate={navigate} />
   } else if (parts[1] === 'wo' && parts[2]) {

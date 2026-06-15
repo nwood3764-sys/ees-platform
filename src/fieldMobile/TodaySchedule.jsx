@@ -8,7 +8,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback } from 'react'
-import AppChrome from './AppChrome'
+import AppChrome, { PullIndicator } from './AppChrome'
+import { usePullToRefresh } from './usePullToRefresh'
 import { fetchTodaySchedule, chicagoToday } from './fieldMobileService'
 import { C, FONT, MONO, card, statusChip } from './styles'
 
@@ -63,8 +64,11 @@ export default function TodaySchedule({ navigate }) {
 
   useEffect(() => { load(dateStr) }, [dateStr, load])
 
+  const pr = usePullToRefresh(useCallback(() => load(dateStr), [load, dateStr]))
+
   return (
     <AppChrome title="Schedule" activeKey="schedule" navigate={navigate}>
+      <PullIndicator {...pr} />
       {/* Date selector */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <button onClick={() => setDateStr(addDays(dateStr, -1))}

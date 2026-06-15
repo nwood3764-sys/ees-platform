@@ -53,6 +53,44 @@ const RefreshIcon = ({ spinning }) => (
 )
 const SignOutIcon = () => <Icon size={20} paths={<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>} />
 
+// Spinner icon reused by the pull-to-refresh indicator.
+function SpinnerIcon({ spinning }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+      style={spinning ? { animation: 'ees-spin 0.8s linear infinite' } : undefined}>
+      <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  )
+}
+
+// Pull-to-refresh indicator. Driven by the usePullToRefresh hook state; render
+// it as the first child inside an AppChrome data screen. Fixed under the header,
+// revealed by drag, becomes a spinner while refreshing.
+export function PullIndicator({ pull, ready, refreshing, triggerDistance = 70, maxPull = 110 }) {
+  const visible = pull > 0 || refreshing
+  if (!visible) return null
+  return (
+    <>
+      <style>{'@keyframes ees-spin{to{transform:rotate(360deg)}}'}</style>
+      <div style={{
+        position: 'fixed', top: 'calc(env(safe-area-inset-top) + 60px)', left: 0, right: 0,
+        display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8,
+        height: 34, zIndex: 30, pointerEvents: 'none',
+        color: ready || refreshing ? C.emeraldMid : C.textMuted,
+        fontFamily: FONT, fontWeight: 700, fontSize: 12,
+        opacity: refreshing ? 1 : Math.min(1, pull / triggerDistance),
+        transform: `translateY(${refreshing ? 0 : Math.min(pull, maxPull) - 34}px)`,
+        transition: pull > 0 ? 'none' : 'transform 0.2s ease, opacity 0.2s ease',
+      }}>
+        <SpinnerIcon spinning={refreshing} />
+        {refreshing ? 'Refreshing…' : ready ? 'Release to refresh' : 'Pull to refresh'}
+      </div>
+    </>
+  )
+}
+
 // ─── Tabs ────────────────────────────────────────────────────────────────────
 const TABS = [
   { key: 'home',     label: 'Home',     path: '/field',          Icon: HomeIcon },

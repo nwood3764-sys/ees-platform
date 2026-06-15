@@ -1,12 +1,21 @@
 // ─── KnowledgeScreen.jsx ─────────────────────────────────────────────────────
-// Field knowledge base — placeholder surface. Reached from the drawer. The
-// content (work-type guides, reference docs, safety) is a separate build; this
-// gives the drawer link a real destination with the app shell rather than a
-// dead 404, and an honest empty state.
+// Field knowledge base. Two modes driven by the route:
+//   /field/knowledge          → searchable list of published articles
+//                               (audience all/internal), grouped by category
+//   /field/knowledge/<slug>   → full article, markdown-rendered
+//
+// Content is the real help_articles table, scoped to the technician's audience;
+// RLS gates readability. Reuses the in-tree dependency-free markdown renderer
+// so no bundle bloat. No red/orange; navy/emerald/sky only.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import AppChrome from './AppChrome'
-import { C, FONT } from './styles'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import AppChrome, { PullIndicator } from './AppChrome'
+import MobileShell from './MobileShell'
+import { usePullToRefresh } from './usePullToRefresh'
+import { fetchKnowledgeArticles, fetchKnowledgeArticle } from './fieldMobileService'
+import { renderMarkdown } from '../components/help/markdown'
+import { C, FONT, card } from './styles'
 
 function BookIcon() {
   return (
@@ -18,33 +27,199 @@ function BookIcon() {
   )
 }
 
+function ArrowIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+    </svg>
+  )
+}
+
+// Normalize category casing so "admin"/"Admin" group together for display.
+function normCat(c) {
+  const t = (c || 'General').trim()
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
+// ─── List mode ───────────────────────────────────────────────────────────────
 export default function KnowledgeScreen({ navigate }) {
+  const [rows, setRows]       = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState(null)
+  const [query, setQuery]     = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      setError(null)
+      setRows(await fetchKnowledgeArticles())
+    } catch (e) {
+      setError(e.message || 'Could not load the knowledge base.')
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => { setLoading(true); await load(); if (!cancelled) setLoading(false) })()
+    return () => { cancelled = true }
+  }, [load])
+
+  const pr = usePullToRefresh(load)
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter(r =>
+      (r.ha_title || '').toLowerCase().includes(q) ||
+      (r.ha_summary || '').toLowerCase().includes(q) ||
+      (r.ha_category || '').toLowerCase().includes(q)
+    )
+  }, [rows, query])
+
+  const grouped = useMemo(() => {
+    const m = new Map()
+    for (const r of filtered) {
+      const cat = normCat(r.ha_category)
+      if (!m.has(cat)) m.set(cat, [])
+      m.get(cat).push(r)
+    }
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [filtered])
+
   return (
     <AppChrome title="Knowledge base" activeKey={null} navigate={navigate}>
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        justifyContent: 'center', textAlign: 'center',
-        padding: '48px 24px', gap: 14,
-      }}>
-        <BookIcon />
-        <div style={{ fontFamily: FONT, fontSize: 17, fontWeight: 700, color: C.textPrimary }}>
-          Knowledge base
+      <PullIndicator {...pr} />
+
+      {/* Search */}
+      <input
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        placeholder="Search articles"
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          appearance: 'none', WebkitAppearance: 'none',
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 8, padding: '12px 14px', marginBottom: 14,
+          fontFamily: FONT, fontSize: 15, color: C.textPrimary,
+        }}
+      />
+
+      {loading && (
+        <div style={{ ...card, padding: 24, textAlign: 'center', color: C.textMuted, fontFamily: FONT, fontSize: 14 }}>
+          Loading articles…
         </div>
-        <div style={{ fontFamily: FONT, fontSize: 14, color: C.textSecondary, maxWidth: 320, lineHeight: 1.5 }}>
-          Work-type guides, reference documents, and field procedures will live
-          here. This section is being built.
+      )}
+      {error && (
+        <div style={{ ...card, padding: 24, textAlign: 'center', color: C.danger, fontFamily: FONT, fontSize: 14 }}>
+          {error}
         </div>
-        <button
-          onClick={() => navigate('/field')}
-          style={{
-            marginTop: 8, appearance: 'none', border: 'none', cursor: 'pointer',
-            background: C.emerald, color: '#062018', fontFamily: FONT,
-            fontWeight: 700, fontSize: 14, borderRadius: 8, padding: '11px 18px',
-          }}
-        >
-          Back to Home
-        </button>
-      </div>
+      )}
+
+      {!loading && !error && grouped.length === 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '40px 20px', gap: 12 }}>
+          <BookIcon />
+          <div style={{ fontFamily: FONT, fontSize: 15, color: C.textSecondary }}>
+            {query ? 'No articles match your search.' : 'No articles available yet.'}
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && grouped.map(([cat, items]) => (
+        <div key={cat} style={{ marginBottom: 18 }}>
+          <div style={{
+            fontFamily: FONT, fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+            textTransform: 'uppercase', color: C.textMuted, margin: '0 2px 8px',
+          }}>
+            {cat}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {items.map(a => (
+              <button
+                key={a.id}
+                onClick={() => navigate(`/field/knowledge/${a.ha_slug}`)}
+                style={{
+                  ...card, width: '100%', textAlign: 'left', appearance: 'none', cursor: 'pointer',
+                  padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                }}
+              >
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
+                    {a.ha_title}
+                  </span>
+                  {a.ha_summary && (
+                    <span style={{
+                      display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 2,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {a.ha_summary}
+                    </span>
+                  )}
+                </span>
+                <span style={{ color: C.emeraldMid, flexShrink: 0, display: 'flex' }}><ArrowIcon /></span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </AppChrome>
+  )
+}
+
+// ─── Article reader mode ─────────────────────────────────────────────────────
+// Full-screen (MobileShell) with a back chevron to the list — matches the
+// WorkOrderDetail reading pattern; no tab bar while reading.
+export function KnowledgeArticle({ slug, navigate }) {
+  const [article, setArticle] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        setLoading(true); setError(null)
+        const a = await fetchKnowledgeArticle(slug)
+        if (cancelled) return
+        if (!a) setError('Article not found.')
+        else setArticle(a)
+      } catch (e) {
+        if (!cancelled) setError(e.message || 'Could not load this article.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [slug])
+
+  return (
+    <MobileShell title={article?.ha_title || 'Article'} onBack={() => navigate('/field/knowledge')}>
+      {loading && (
+        <div style={{ ...card, padding: 24, textAlign: 'center', color: C.textMuted, fontFamily: FONT, fontSize: 14 }}>
+          Loading…
+        </div>
+      )}
+      {error && (
+        <div style={{ ...card, padding: 24, textAlign: 'center', color: C.danger, fontFamily: FONT, fontSize: 14 }}>
+          {error}
+        </div>
+      )}
+      {!loading && !error && article && (
+        <div style={{ ...card, padding: 18 }}>
+          <div style={{ fontFamily: FONT, fontSize: 20, fontWeight: 800, color: C.textPrimary, marginBottom: 6 }}>
+            {article.ha_title}
+          </div>
+          {article.ha_summary && (
+            <div style={{ fontFamily: FONT, fontSize: 14, color: C.textSecondary, marginBottom: 14, lineHeight: 1.5 }}>
+              {article.ha_summary}
+            </div>
+          )}
+          <div
+            className="ees-md"
+            style={{ fontFamily: FONT, fontSize: 15, color: C.textPrimary, lineHeight: 1.6 }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(article.ha_body_markdown || '') }}
+          />
+        </div>
+      )}
+    </MobileShell>
   )
 }
