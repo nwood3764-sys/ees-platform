@@ -347,13 +347,51 @@ export function buildPath({ activeModule, selectedRecord, section, subsection, a
  * Routes that bypass this hook entirely (handled at the entrypoint or in
  * App.jsx exact-path checks): /sign/* and /auth/outlook-callback.
  */
+// ── Create-prefill stash ────────────────────────────────────────────────
+//
+// The URL is the source of truth for navigation, and a create URL is just
+// "/<table>/new" — it carries NO field values (FKs/PII must never go in the
+// URL). But a related-list "New" needs to hand the create form the parent
+// context (e.g. project_id and the resolved opportunity/property/building
+// chain) so the new child is pre-populated. That object cannot ride in the
+// URL, so any time state is (re)derived from the URL — popstate, or the
+// URL-is-truth reconciliation — the prefill is lost and the form opens blank.
+//
+// This module-scoped stash bridges that gap for EVERY object, not just one:
+//   • navigateToRecord({mode:'create', prefill}) writes the prefill here,
+//     keyed by the create target ("<table>/new").
+//   • Whenever a create selectedRecord is produced from the URL, we re-attach
+//     the stashed prefill for that exact key.
+// It is single-use per key: consumed (cleared) once the matching create
+// record has been hydrated, so a later blank "/<table>/new" stays blank.
+let pendingPrefill = null   // { key: '<table>/new', prefill: {...} }
+
+const prefillKeyFor = (rec) =>
+  rec && rec.mode === 'create' && rec.table ? `${rec.table}/new` : null
+
+// Re-attach a stashed prefill onto a URL-derived nav state, if one matches.
+// Does not clear the stash — clearing happens after the create record is
+// actually mounted (consumePendingPrefill), so a re-render that re-parses the
+// URL before mount doesn't drop it.
+function attachPendingPrefill(navState) {
+  const rec = navState?.selectedRecord
+  const key = prefillKeyFor(rec)
+  if (key && pendingPrefill && pendingPrefill.key === key && !rec.prefill) {
+    return { ...navState, selectedRecord: { ...rec, prefill: pendingPrefill.prefill } }
+  }
+  return navState
+}
+
 export function useUrlNavigation() {
-  const [state, setState] = useState(() => parsePath(window.location.pathname, window.location.search))
+  const [state, setState] = useState(() =>
+    attachPendingPrefill(parsePath(window.location.pathname, window.location.search)))
 
   // popstate fires on browser back/forward. Re-parse and re-hydrate state
-  // from the URL — the URL is the source of truth.
+  // from the URL — the URL is the source of truth. Re-attach any stashed
+  // prefill so a create form reached via history navigation still carries
+  // its parent context.
   useEffect(() => {
-    const onPop = () => setState(parsePath(window.location.pathname, window.location.search))
+    const onPop = () => setState(attachPendingPrefill(parsePath(window.location.pathname, window.location.search)))
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
@@ -383,10 +421,12 @@ export function useUrlNavigation() {
   }, [])
 
   const navigateToModule = useCallback((moduleId) => {
+    pendingPrefill = null
     push({ activeModule: moduleId, selectedRecord: null, section: null, subsection: null, searchQuery: null, searchType: null })
   }, [push])
 
   const navigateToSection = useCallback((sectionId) => {
+    pendingPrefill = null
     setState((prev) => {
       const next = { ...prev, section: sectionId, subsection: null, selectedRecord: null, searchQuery: null, searchType: null }
       const path = buildPath(next)
@@ -440,6 +480,13 @@ export function useUrlNavigation() {
   const navigateToRecord = useCallback((rec) => {
     // rec: { table, id, mode, prefill? }
     if (!rec?.table) return
+    // Stash any create-prefill so it survives the URL round-trip. The URL we
+    // push ("/<table>/new") can't carry it; attachPendingPrefill re-attaches
+    // it whenever this create record is re-derived from the URL.
+    const key = prefillKeyFor(rec)
+    if (key && rec.prefill && Object.keys(rec.prefill).length > 0) {
+      pendingPrefill = { key, prefill: rec.prefill }
+    }
     setState((prev) => {
       const mod = TABLE_MODULE_MAP[rec.table] || prev.activeModule
       const next = { activeModule: mod, selectedRecord: { ...rec }, section: null, subsection: null, searchQuery: null, searchType: null }
@@ -469,6 +516,7 @@ export function useUrlNavigation() {
   }, [])
 
   const closeRecord = useCallback(() => {
+    pendingPrefill = null   // leaving any record clears a pending create-prefill
     setState((prev) => {
       const next = { activeModule: prev.activeModule, selectedRecord: null, section: prev.section, subsection: prev.subsection, searchQuery: null, searchType: null }
       const path = buildPath(next)
@@ -478,6 +526,17 @@ export function useUrlNavigation() {
   }, [])
 
   const replaceRecord = useCallback((rec) => {
+    // Clear a consumed prefill only when this replace is NOT itself carrying a
+    // fresh create-prefill. ProjectPlanning/Implementation route related-list
+    // creates through replaceRecord, so a blanket clear here would wipe the
+    // prefill before the create form mounts. A create rec with its own prefill
+    // re-stashes below; a view transition (post-save) clears.
+    const key = prefillKeyFor(rec)
+    if (key && rec.prefill && Object.keys(rec.prefill).length > 0) {
+      pendingPrefill = { key, prefill: rec.prefill }
+    } else {
+      pendingPrefill = null
+    }
     setState((prev) => {
       const mod = TABLE_MODULE_MAP[rec?.table] || prev.activeModule
       const next = { activeModule: mod, selectedRecord: rec ? { ...rec } : null, section: null, subsection: null, searchQuery: null, searchType: null }
