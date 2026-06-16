@@ -415,6 +415,22 @@ const TRIGGER_DERIVED_REQUIRED = {
   projects: ['project_name'],
 }
 
+// Per-table name fields populated by a BEFORE INSERT/UPDATE trigger that the
+// DB overwrites on every write. These are never user-editable — any input the
+// user types is silently discarded — so every create/edit surface must render
+// them read-only. Module-level so both FieldGroupWidget and QuickCreateModal
+// enforce the same contract.
+const DERIVED_READONLY = {
+  contacts: ['contact_name'],
+  opportunities: ['opportunity_name'],
+  buildings: ['building_name'],
+  units: ['unit_name'],
+  opportunity_contact_roles: ['ocr_name'],
+  projects: ['project_name'],
+}
+const isDerivedReadonlyField = (table, name) =>
+  (DERIVED_READONLY[table] || []).includes(name)
+
 // missing from the provided values object. An empty string is treated as
 // missing; `false` and `0` are valid values. System/auto-populated columns
 // are skipped so they never surface in the error message.
@@ -1102,7 +1118,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
 
   const handleSave = async () => {
     if (saving) return
-    const missing = fields.filter(f => f.required && (draft[f.name] == null || draft[f.name] === ''))
+    const missing = fields.filter(f => f.required && !isDerivedReadonlyField(table, f.name) && (draft[f.name] == null || draft[f.name] === ''))
     if (missing.length) {
       toast.error(missing.length === 1 ? `Required: ${missing[0].label}` : `Required: ${missing.map(f => f.label).join(', ')}`)
       return
@@ -1138,13 +1154,20 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
           {!loading && fields.length === 0 && (
             <div style={{ color: C.textMuted, fontSize: 13 }}>This object has no required fields to capture. Save to create.</div>
           )}
-          {!loading && fields.map(f => (
+          {!loading && fields.map(f => {
+            const derivedReadonly = isDerivedReadonlyField(table, f.name)
+            return (
             <div key={f.name} style={{ marginBottom: 14 }}>
               <label style={{ display: 'block', fontSize: 11.5, fontWeight: 500, color: C.textSecondary,
                 marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                {f.label}{f.required && <span style={{ color: '#c0392b', marginLeft: 3 }}>*</span>}
+                {f.label}{f.required && !derivedReadonly && <span style={{ color: '#c0392b', marginLeft: 3 }}>*</span>}
+                {derivedReadonly && <span style={{ color: C.textMuted, marginLeft: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>auto-generated</span>}
               </label>
-              {f.name === rtColumn ? (
+              {derivedReadonly ? (
+                <div style={{ ...inputBase, background: C.cardSecondary, color: C.textMuted, cursor: 'not-allowed' }}>
+                  {draft[f.name] || '— set on save —'}
+                </div>
+              ) : f.name === rtColumn ? (
                 <SearchableLookup
                   value={draft[f.name] || ''}
                   options={recordTypes.map(rt => ({ value: rt.id, label: rt.label || rt.picklist_label }))}
@@ -1156,7 +1179,8 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                   onChange={e => setVal(f.name, e.target.value)} />
               )}
             </div>
-          ))}
+            )
+          })}
         </div>
         <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.border}`, background: '#fafbfd',
           display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -2866,17 +2890,10 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         const lookupIsEditable = f.type === 'lookup'
           && (hasLookupOpts || !!f.lookup_dependency || !!f.lookup_table)
         // Trigger-derived name fields are never user-editable — the DB
-        // overwrites any value on write (trg_contact_name, trg_opportunity_name).
-        // Keep them read-only in edit mode so users aren't presented an input
-        // whose value silently won't stick.
-        const DERIVED_READONLY = {
-          contacts: ['contact_name'],
-          opportunities: ['opportunity_name'],
-          buildings: ['building_name'],
-          units: ['unit_name'],
-          projects: ['project_name'],
-        }
-        const isDerivedField = (DERIVED_READONLY[tableName] || []).includes(f.name)
+        // overwrites any value on write (trg_contact_name, trg_opportunity_name,
+        // trg_project_name, etc). Read-only in edit mode so users aren't
+        // presented an input whose value silently won't stick.
+        const isDerivedField = isDerivedReadonlyField(tableName, f.name)
         const isEditable = editing
           && (f.type !== 'datetime')
           && (f.type !== 'polymorphic_lookup')
