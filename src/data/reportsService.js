@@ -416,7 +416,12 @@ export async function loadReport(reportId) {
   if (!reportId || reportId === 'new') return null
 
   const [reportRes, filtersRes, groupingsRes, calcRes] = await Promise.all([
-    supabase.from('reports').select('*').eq('id', reportId).eq('is_deleted', false).single(),
+    // maybeSingle() — a zero-row result (soft-deleted or hidden by the reports
+    // RLS read policy) must return null, not throw a PostgREST coercion error.
+    // runReport() already handles a null load via its "Report not found" path,
+    // and DashboardRunner catches that per-widget, so one inaccessible report
+    // degrades to a single empty widget instead of blanking the dashboard.
+    supabase.from('reports').select('*').eq('id', reportId).eq('is_deleted', false).maybeSingle(),
     supabase.from('report_filters').select('*').eq('rfilt_report_id', reportId).eq('is_deleted', false).order('rfilt_filter_index'),
     supabase.from('report_groupings').select('*').eq('rgr_report_id', reportId).eq('is_deleted', false).order('rgr_grouping_level'),
     supabase.from('report_calculated_fields').select('*').eq('rcf_report_id', reportId).eq('is_deleted', false).order('rcf_display_order'),
@@ -426,6 +431,8 @@ export async function loadReport(reportId) {
   if (filtersRes.error) throw filtersRes.error
   if (groupingsRes.error) throw groupingsRes.error
   if (calcRes.error) throw calcRes.error
+
+  if (!reportRes.data) return null
 
   return {
     report:           reportRes.data,
@@ -1579,13 +1586,24 @@ export async function fetchDashboards({ folderId = null } = {}) {
 export async function loadDashboard(dashboardId) {
   if (!dashboardId || dashboardId === 'new') return null
   const [dashRes, widgetsRes, filtersRes] = await Promise.all([
-    supabase.from('dashboards').select('*').eq('id', dashboardId).eq('is_deleted', false).single(),
+    // maybeSingle() — NOT single(). A zero-row result here is a legitimate
+    // outcome (row soft-deleted, or hidden from this user by the dashboards
+    // RLS read policy), not an exception. single() throws a PostgREST coercion
+    // error on zero rows, which previously propagated up and blanked the entire
+    // home screen when the embedded home dashboard wasn't readable. We surface a
+    // typed, catchable error instead so the renderer shows an empty-state card.
+    supabase.from('dashboards').select('*').eq('id', dashboardId).eq('is_deleted', false).maybeSingle(),
     supabase.from('dashboard_widgets').select('*').eq('dw_dashboard_id', dashboardId).eq('is_deleted', false).order('dw_position_row').order('dw_position_col'),
     supabase.from('dashboard_filters').select('*').eq('dfilt_dashboard_id', dashboardId).eq('is_deleted', false).order('dfilt_display_order'),
   ])
   if (dashRes.error)    throw dashRes.error
   if (widgetsRes.error) throw widgetsRes.error
   if (filtersRes.error) throw filtersRes.error
+  if (!dashRes.data) {
+    const e = new Error('Dashboard not found or not accessible')
+    e.code = 'DASHBOARD_NOT_VISIBLE'
+    throw e
+  }
   return {
     dashboard: dashRes.data,
     widgets:   widgetsRes.data || [],
