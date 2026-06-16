@@ -388,7 +388,7 @@ function AuthedApp({ session }) {
         onToggleCollapse={() => setSidebarCollapsed(c => !c)}
         modules={navModules}
       />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, minHeight: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         <MobileHeader
           onOpenMenu={() => setMobileMenuOpen(true)}
           moduleLabel={NAV_MODULES.find(m => m.id === activeModule)?.label || 'Energy Efficiency Services'}
