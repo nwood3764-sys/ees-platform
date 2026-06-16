@@ -345,7 +345,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
   const hasData = Array.isArray(data) && data.length > 0
   if (error && !hasData) return <ErrorState error={error} onRetry={onRetry} />
   return (
-    <div>
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {error && hasData && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           gap: 12, padding: '8px 12px', margin: '0 0 10px', borderRadius: 6,
@@ -525,7 +525,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
 
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
 
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
