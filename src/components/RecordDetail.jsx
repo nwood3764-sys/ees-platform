@@ -204,7 +204,7 @@ const TABLE_META = {
   opportunities:             { module: 'Enrollment',       label: 'Opportunities',        nameColumn: 'opportunity_name',       recordNumberColumn: 'opportunity_record_number',       statusColumn: 'opportunity_status',       parents: ['property_id', 'building_id', 'opportunity_account_id'],          parentTables: ['properties', 'buildings', 'accounts'] },
   opportunity_contact_roles: { module: 'Enrollment',       label: 'Contact Role',         nameColumn: 'ocr_name',               recordNumberColumn: 'ocr_record_number',               statusColumn: null,                       parents: ['opportunity_id', 'contact_id'],                   parentTables: ['opportunities', 'contacts'] },
   property_programs:         { module: 'Enrollment',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
-  work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'property_id', 'building_id'],       parentTables: ['projects', 'properties', 'buildings'] },
+  work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
   projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id', 'building_id', 'project_account_id'],                     parentTables: ['properties', 'buildings', 'accounts'] },
   assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id'],                     parentTables: ['properties', 'buildings'] },
   incentive_applications:    { module: 'Qualification',  label: 'Applications',         nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['property_id'],                                    parentTables: ['properties'] },
@@ -413,6 +413,7 @@ const TRIGGER_DERIVED_REQUIRED = {
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],
   projects: ['project_name'],
+  work_orders: ['work_order_name'],
 }
 
 // Per-table name fields populated by a BEFORE INSERT/UPDATE trigger that the
@@ -427,6 +428,7 @@ const DERIVED_READONLY = {
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],
   projects: ['project_name'],
+  work_orders: ['work_order_name'],
 }
 const isDerivedReadonlyField = (table, name) =>
   (DERIVED_READONLY[table] || []).includes(name)
@@ -3436,6 +3438,15 @@ function RelatedListWidget({
     // consumed by that effect and stripped before insert.
     if (childTable === 'projects' && parentTable === 'opportunities' && parentRecord?.opportunity_name) {
       prefillObj.__derivedNameBase = parentRecord.opportunity_name
+    }
+
+    // Work Orders derive their name (trg_work_order_inherit_parent_fields) as
+    // "<project_name> - <unit_number> - <work_type_name>". When created from a
+    // project, seed the project name as the base hint so the create form shows
+    // the composed name on open rather than a blank box. unit/work type append
+    // as the user selects them; the DB trigger is the authority on final value.
+    if (childTable === 'work_orders' && parentTable === 'projects' && parentRecord?.project_name) {
+      prefillObj.__derivedNameBase = parentRecord.project_name
     }
 
     onNavigateToRecord({ table: childTable, id: null, mode: 'create', prefill: prefillObj })
