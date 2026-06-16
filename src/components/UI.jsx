@@ -411,7 +411,7 @@ export function Sidebar({
 
   // Desktop: inline flex column with optional collapse toggle
   if (!isMobile) {
-    const width = isCollapsed ? 60 : 180;
+    const width = isCollapsed ? 60 : 164;
     return (
       <div
         style={{

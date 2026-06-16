@@ -1426,7 +1426,7 @@ export function ListView({
         : (v == null || v === '' ? '—' : String(v));
       return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{display}</td>;
     }
-    if (col.field === 'email') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: '#1a5a8a', fontSize: 12 }}>{v}</td>;
+    if (col.field === 'email') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: '#1a5a8a', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</td>;
     return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: v ? C.textSecondary : C.textMuted, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v || '—'}</td>;
   };
 
@@ -1859,19 +1859,20 @@ export function ListView({
 
       {/* Table + detail panel */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
-        <div style={{ flex: '1 1 0', minWidth: 0, width: 0, overflow: 'auto', padding: '14px 24px 24px' }}>
+        <div style={{ flex: '1 1 0', minWidth: 0, width: 0, overflow: 'auto', padding: '14px 14px 24px' }}>
           <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
-            <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
+            <table data-colfixed={'1'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
               <colgroup>
                 {editMode && <col style={{ width: 36 }} />}
                 {effectiveColumns.map(col => {
                   const w = colWidths[col.field];
-                  // Sized columns get their explicit px. Once ANY column is
-                  // sized the table switches to fixed layout, so unsized
-                  // columns need a width too — fall back to a type-based
-                  // default so they don't all collapse to equal slices.
-                  const colW = w != null ? w : (hasCustomWidths ? defaultColWidth(col) : undefined);
-                  return <col key={col.field} style={colW != null ? { width: colW } : undefined} />;
+                  // Always size columns: explicit drag width if set, otherwise
+                  // a type-based default. Fixed layout + per-column widths packs
+                  // columns to sensible sizes and distributes any remainder
+                  // evenly, instead of auto-layout dumping all slack into the
+                  // trailing text columns (email/phone) and leaving mid-table gaps.
+                  const colW = w != null ? w : defaultColWidth(col);
+                  return <col key={col.field} style={{ width: colW }} />;
                 })}
               </colgroup>
               <thead>
