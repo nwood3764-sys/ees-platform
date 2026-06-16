@@ -172,7 +172,7 @@ function PropertiesListSection({ loading, error, properties, onRefresh, onRetry,
           Export CSV
         </button>
       </div>
-      <div style={{ flex:1, overflow:'hidden' }}>
+      <div style={{ flex:1, minHeight:0, display:'flex', overflow:'hidden' }}>
         <ListView
           tableName="properties"
           data={properties}
@@ -543,7 +543,7 @@ function ImportsSection({ batches, loading, error, onRefresh, onRetry, onOpenImp
           New Import
         </button>
       </div>
-      <div style={{ flex:1, overflow:'hidden' }}>
+      <div style={{ flex:1, minHeight:0, display:'flex', overflow:'hidden' }}>
         <ListView
           data={batches}
           columns={IMPORT_COLS}

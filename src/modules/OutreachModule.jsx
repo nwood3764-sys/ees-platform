@@ -9,63 +9,6 @@ import { OPPORTUNITIES, PROPERTIES, BUILDINGS, CONTACTS, ENROLLMENTS } from '../
 import { fetchProperties, fetchBuildings, fetchUnits, fetchOpportunities, fetchContacts, fetchEnrollments, fetchAccounts } from '../data/outreachService'
 import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
 
-// ─── TEMP scroll diagnostic ─────────────────────────────────────────────────
-// Mounts a small fixed overlay that walks up the DOM from a table cell and
-// reports each ancestor's clientHeight / scrollHeight / overflow / minHeight.
-// Purpose: read the ACTUAL live layout on the affected session to find which
-// container's height is collapsing. REMOVE in the fix commit once diagnosed.
-function ScrollDiag() {
-  const [lines, setLines] = useState([])
-  useEffect(() => {
-    let raf1, raf2, timer
-    const measure = () => {
-      let el = document.querySelector('table td')
-      if (!el) { setLines([{ t: 'no <td> found yet — is the list rendered?', k: 'err' }]); return }
-      const out = []
-      let depth = 0
-      while (el && el.tagName !== 'BODY' && depth < 16) {
-        const s = getComputedStyle(el)
-        const tag = el.tagName.toLowerCase()
-        const collapses = el.scrollHeight > el.clientHeight + 2 &&
-          (s.overflowY === 'hidden' || s.overflowY === 'visible')
-        out.push({
-          t: `${tag} h=${el.clientHeight} sh=${el.scrollHeight} of=${s.overflowY} mh=${s.minHeight} fg=${s.flexGrow}`,
-          k: collapses ? 'bad' : (s.overflowY === 'auto' || s.overflowY === 'scroll') ? 'scroll' : 'ok',
-        })
-        el = el.parentElement
-        depth++
-      }
-      setLines(out)
-    }
-    // measure after two paints so flex layout has settled
-    raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(measure) })
-    timer = setTimeout(measure, 600)
-    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); clearTimeout(timer) }
-  }, [])
-  return (
-    <div style={{
-      position: 'fixed', right: 8, bottom: 8, zIndex: 99999,
-      maxWidth: 340, maxHeight: '60vh', overflow: 'auto',
-      background: '#07111f', color: '#cfe', border: '2px solid #3ecf8e',
-      borderRadius: 8, padding: '8px 10px', fontSize: 10.5,
-      fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.5,
-      boxShadow: '0 6px 24px rgba(0,0,0,0.4)',
-    }}>
-      <div style={{ fontWeight: 700, marginBottom: 4, color: '#3ecf8e' }}>SCROLL DIAG (td → up)</div>
-      {lines.length === 0 && <div>measuring…</div>}
-      {lines.map((l, i) => (
-        <div key={i} style={{
-          color: l.k === 'bad' ? '#ff8a8a' : l.k === 'scroll' ? '#7eb3e8' : l.k === 'err' ? '#e8a949' : '#cfe',
-          fontWeight: l.k === 'bad' || l.k === 'scroll' ? 700 : 400,
-        }}>{l.k === 'bad' ? '⚠ ' : l.k === 'scroll' ? '↕ ' : '  '}{l.t}</div>
-      ))}
-      <div style={{ marginTop: 6, color: '#8fa0b8', fontSize: 9.5 }}>
-        ↕ = scroll container · ⚠ = overflow trapped (the bug). Read the ⚠ line aloud.
-      </div>
-    </div>
-  )
-}
-
 const CODE_SECTIONS = [
   { id: 'home',       label: 'Home'         },
   { id: 'opps',       label: 'Opportunities' },
@@ -401,33 +344,22 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
   // transient refresh error must never hide records the user already had.
   const hasData = Array.isArray(data) && data.length > 0
   if (error && !hasData) return <ErrorState error={error} onRetry={onRetry} />
-  // Normal case: render ListView directly with NO wrapper, exactly like the
-  // other modules (e.g. FieldModule). ListView's root is flex:1/minHeight:0
-  // and must be a *direct* child of the section row for its scroll viewport
-  // to inherit a bounded height. An intervening wrapper div breaks that and
-  // kills scrolling — which is exactly what went wrong on Outreach.
-  if (!(error && hasData)) {
-    return <ListView data={data} {...rest} />
-  }
-  // Only when a non-blocking refresh-error banner must show do we wrap. The
-  // wrapper is a bounded flex column and ListView gets flex:1 to fill below
-  // the banner, preserving the scroll chain.
   return (
-    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 12, padding: '8px 12px', margin: '0 0 10px', borderRadius: 6, flexShrink: 0,
-        background: '#fdf3e7', border: '1px solid #e8a949', color: '#7a5b1e', fontSize: 12.5 }}>
-        <span>Couldn’t refresh just now — showing the last loaded data.</span>
-        {onRetry && (
-          <button onClick={onRetry} style={{ background: 'transparent', border: '1px solid #e8a949',
-            color: '#7a5b1e', borderRadius: 5, padding: '3px 10px', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
-            Retry
-          </button>
-        )}
-      </div>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <ListView data={data} {...rest} />
-      </div>
+    <div>
+      {error && hasData && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 12, padding: '8px 12px', margin: '0 0 10px', borderRadius: 6,
+          background: '#fdf3e7', border: '1px solid #e8a949', color: '#7a5b1e', fontSize: 12.5 }}>
+          <span>Couldn’t refresh just now — showing the last loaded data.</span>
+          {onRetry && (
+            <button onClick={onRetry} style={{ background: 'transparent', border: '1px solid #e8a949',
+              color: '#7a5b1e', borderRadius: 5, padding: '3px 10px', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+      <ListView data={data} {...rest} />
     </div>
   )
 }
@@ -594,7 +526,6 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
       <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
-        {!selectedRecord && sec === 'properties' && <ScrollDiag />}
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
