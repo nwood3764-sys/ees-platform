@@ -33,7 +33,7 @@ const groupCount = (arr, key) => {
   for (const r of arr) m.set(r[key] || '—', (m.get(r[key] || '—') || 0) + 1)
   return Array.from(m, ([name, value]) => ({ name, value }))
 }
-const shortStatus = s => (s || '—').replace(/^Work Order /, '').replace(/^Project /, '')
+const shortStatus = s => (s == null || s === '' ? '—' : String(s)).replace(/^Work Order /, '').replace(/^Project /, '')
 
 function Widget({ title, subtitle, children, footer, onFooter }) {
   return (
