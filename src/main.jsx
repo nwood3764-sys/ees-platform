@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import SigningPortalRoot from './pages/SigningPortal.jsx'
+import ProjectPortalRoot from './pages/ProjectPortalRoot.jsx'
 import ServiceAppointmentRoot from './serviceAppointments/ServiceAppointmentRoot.jsx'
 import FieldMobileRoot from './fieldMobile/FieldMobileRoot.jsx'
 import { installGlobalErrorHandlers } from './lib/clientErrorLogger'
@@ -41,12 +42,14 @@ installGlobalErrorHandlers()
 
 const pathname                  = window.location.pathname
 const isSigningRoute            = pathname.startsWith('/sign/')
+const isProjectPortalRoute      = pathname === '/project-portal' || pathname.startsWith('/project-portal/')
 const isServiceAppointmentRoute = pathname === '/sa' || pathname.startsWith('/sa/')
 const isFieldRoute              = pathname === '/field' || pathname.startsWith('/field/')
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     {isSigningRoute ? <SigningPortalRoot />
+     : isProjectPortalRoute ? <ProjectPortalRoot />
      : isServiceAppointmentRoute ? <ServiceAppointmentRoot />
      : isFieldRoute ? <FieldMobileRoot />
      : <App />}
