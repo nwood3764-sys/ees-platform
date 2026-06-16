@@ -4,9 +4,9 @@
 // 3-step modal for creating an envelope from a parent record:
 //   1. Pick an Active document_templates row whose related_object matches
 //      the parent (or is NULL = compatible with anything)
-//   2. Edit recipients — at minimum one signer; each row needs name + email,
-//      role and order are optional. The order field defaults to row index
-//      and is editable
+//   2. Edit recipients — at minimum one signer; each row needs name + email.
+//      Every recipient's role is fixed to "Authorized Signer" (not editable).
+//      The order field defaults to row index and is editable
 //   3. Set subject + message, then submit
 //
 // On submit, calls the send-envelope edge function. The function:
@@ -65,7 +65,7 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
   const [loadError, setLoadError] = useState(null)
 
   const [chosenTemplateId, setChosenTemplateId] = useState('')
-  const [recipients, setRecipients] = useState([{ name: '', email: '', role: 'Signer', order: 1 }])
+  const [recipients, setRecipients] = useState([{ name: '', email: '', role: 'Authorized Signer', order: 1 }])
   const [subject, setSubject] = useState('')
   const [message, setMessage] = useState('')
   const [sendResult, setSendResult] = useState(null)
@@ -78,7 +78,7 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
     setTemplates(null)
     setLoadError(null)
     setChosenTemplateId('')
-    setRecipients([{ name: '', email: '', role: 'Signer', order: 1 }])
+    setRecipients([{ name: '', email: '', role: 'Authorized Signer', order: 1 }])
     setSubject('')
     setMessage('')
     setSendResult(null)
@@ -124,7 +124,7 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
   }, [chosenTemplateId, templates, subject])
 
   // ── Recipient editing ───────────────────────────────────────────────
-  const addRecipient = () => setRecipients(rs => [...rs, { name: '', email: '', role: 'Signer', order: rs.length + 1 }])
+  const addRecipient = () => setRecipients(rs => [...rs, { name: '', email: '', role: 'Authorized Signer', order: rs.length + 1 }])
   const removeRecipient = (i) => setRecipients(rs => {
     if (rs.length === 1) return rs
     const next = rs.filter((_, idx) => idx !== i)
@@ -396,7 +396,7 @@ function RecipientsStep({ recipients, onAdd, onRemove, onChange }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {recipients.map((r, i) => (
           <div key={i} style={{
-            display: 'grid', gap: 8, gridTemplateColumns: '40px 1fr 1fr 130px 36px',
+            display: 'grid', gap: 8, gridTemplateColumns: '40px 1fr 1fr 36px',
             padding: 10, border: `1px solid ${C.border}`, borderRadius: 6, background: '#fafbfd',
             alignItems: 'center',
           }}>
@@ -404,7 +404,6 @@ function RecipientsStep({ recipients, onAdd, onRemove, onChange }) {
               style={inputStyle} title="Sign order"/>
             <input type="text" placeholder="Name" value={r.name} onChange={e => onChange(i, 'name', e.target.value)} style={inputStyle}/>
             <input type="email" placeholder="Email" value={r.email} onChange={e => onChange(i, 'email', e.target.value)} style={inputStyle}/>
-            <input type="text" placeholder="Role" value={r.role || ''} onChange={e => onChange(i, 'role', e.target.value)} style={inputStyle}/>
             <button
               onClick={() => onRemove(i)}
               disabled={recipients.length === 1}
