@@ -1164,6 +1164,20 @@ export async function fetchDependentLookupOptions(field, record) {
         label: r.contact_name || r.id.slice(0, 8),
       }))
     }
+    case 'signer_contacts_for_opportunity': {
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_signer_contacts_for_opportunity', {
+        p_opportunity_id: dependencyValues[0],
+        p_include_contact_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.contact_name || r.id.slice(0, 8),
+      }))
+    }
     case 'contacts_for_opportunity': {
       if (dependencyValues.length === 0) {
         return []

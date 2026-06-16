@@ -85,7 +85,37 @@ export default function SendForSignatureModal({ open, parentObject, parentRecord
     setSubmitting(false)
   }, [open])
 
-  // ── Load templates ──────────────────────────────────────────────────
+  // ── Prefill recipient from the opportunity's Authorized Signer ───────
+  // When sending from an opportunity, default recipient #1 to the contact
+  // named in opportunity_authorized_signer_id (name + email pulled from the
+  // contact). The user can still edit or add recipients.
+  useEffect(() => {
+    if (!open || parentObject !== 'opportunities' || !parentRecordId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data: opp, error: oppErr } = await supabase
+          .from('opportunities')
+          .select('opportunity_authorized_signer_id')
+          .eq('id', parentRecordId)
+          .maybeSingle()
+        if (oppErr || cancelled || !opp?.opportunity_authorized_signer_id) return
+        const { data: contact, error: cErr } = await supabase
+          .from('contacts')
+          .select('contact_name, contact_email')
+          .eq('id', opp.opportunity_authorized_signer_id)
+          .maybeSingle()
+        if (cErr || cancelled || !contact) return
+        setRecipients([{
+          name: contact.contact_name || '',
+          email: contact.contact_email || '',
+          role: 'Authorized Signer',
+          order: 1,
+        }])
+      } catch { /* prefill is best-effort; leave the blank recipient on failure */ }
+    })()
+    return () => { cancelled = true }
+  }, [open, parentObject, parentRecordId])
   useEffect(() => {
     if (!open) return
     let cancelled = false
