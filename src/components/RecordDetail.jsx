@@ -2874,6 +2874,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
           opportunities: ['opportunity_name'],
           buildings: ['building_name'],
           units: ['unit_name'],
+          projects: ['project_name'],
         }
         const isDerivedField = (DERIVED_READONLY[tableName] || []).includes(f.name)
         const isEditable = editing
@@ -2940,8 +2941,13 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
           }}>
             <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
               {f.label}
-              {editing && isRequiredField && (
+              {editing && isRequiredField && !isDerivedField && (
                 <span style={{ color: '#c0392b', marginLeft: 3 }}>*</span>
+              )}
+              {editing && isDerivedField && (
+                <span style={{ color: C.textMuted, marginLeft: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>
+                  auto-generated on save
+                </span>
               )}
             </span>
             {isEditable ? (
@@ -3402,6 +3408,17 @@ function RelatedListWidget({
     // contact so the field starts blank.
     if (childTable === 'opportunity_contact_roles') {
       delete prefillObj.contact_id
+    }
+
+    // Projects derive their name (trg_project_name) as
+    // "<opportunity_name> - <record_type_label>". Seed the opportunity-name
+    // base into the prefill so the create form can show the composed name the
+    // moment it opens, rather than a blank box that only fills on save. The
+    // record-type label is appended in the draft-seed effect (and recomposed
+    // if the user changes record type). __derivedNameBase is a transient hint
+    // consumed by that effect and stripped before insert.
+    if (childTable === 'projects' && parentTable === 'opportunities' && parentRecord?.opportunity_name) {
+      prefillObj.__derivedNameBase = parentRecord.opportunity_name
     }
 
     onNavigateToRecord({ table: childTable, id: null, mode: 'create', prefill: prefillObj })
@@ -4440,6 +4457,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // the field-group renderer. Populated once at mount via fetchTableMetadata
   // (which is cached so subsequent calls in handleSave are free).
   const [requiredFields, setRequiredFields] = useState(new Set())
+  // Holds the derived-name base (e.g. a project's source opportunity name)
+  // captured from the create prefill, so the name can be recomposed when the
+  // user changes record type before saving. Stored in a ref so it persists
+  // without being inserted into the row.
+  const derivedNameBaseRef = useRef(null)
   // Project report generator (only used when tableName === 'projects'). The
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
@@ -4614,6 +4636,32 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       // Seed value for the form's record-type column when we have a pick
       const seededRT = rtId ? { [rtCol]: rtId } : {}
 
+      // Compose a derived display name when the prefill carried a name base
+      // (e.g. projects: opportunity name + record-type label, mirroring
+      // trg_project_name). This makes the read-only Name field show its value
+      // as soon as the form opens instead of staying blank until save. The
+      // base is a transient prefill hint; strip it from what we seed.
+      const composeDerivedName = (base, rtObj) => {
+        const rtLabel = rtObj ? (rtObj.label || rtObj.picklist_label || '') : ''
+        const composed = [String(base || '').trim(), String(rtLabel || '').trim()]
+          .filter(Boolean).join(' - ')
+        return composed.replace(/^[\s-]+|[\s-]+$/g, '') || null
+      }
+      const seedDraft = (pf) => {
+        const d = pf ? { ...seededRT, ...pf } : { ...seededRT }
+        derivedNameBaseRef.current = null
+        if (d.__derivedNameBase) {
+          derivedNameBaseRef.current = d.__derivedNameBase
+          const nameCol = TABLE_META[tableName]?.nameColumn
+          if (nameCol) {
+            const composed = composeDerivedName(d.__derivedNameBase, pickedRecordType)
+            if (composed) d[nameCol] = composed
+          }
+          delete d.__derivedNameBase
+        }
+        return d
+      }
+
       // Create mode: fetch layout + picklists only, no record.
       // Layout selection uses the picked RT (if any) so the right
       // record-type-specific layout loads.
@@ -4629,13 +4677,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             lookups: new Map(),
             actionOverrides: layoutData?.actionOverrides || [],
           })
-          setDraft(prefill ? { ...seededRT, ...prefill } : { ...seededRT })
+          setDraft(seedDraft(prefill))
           setEditing(true)
           // Pre-load picklist + lookup options. Pass the seeded draft so
           // any dependent-lookup fields can resolve their dependencies on
           // the very first render rather than waiting for a draft change.
           if (layoutData?.sections) {
-            const initialDraft = prefill ? { ...seededRT, ...prefill } : { ...seededRT }
+            const initialDraft = seedDraft(prefill)
             loadAllEditOpts(layoutData.sections, initialDraft)
           }
         })
@@ -4742,6 +4790,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       const city   = (name === 'property_city'   ? value : next.property_city)   || ''
       const derived = [street, city].filter(s => String(s || '').trim()).join(' - ')
       next.property_name = derived || ''
+    }
+    // Projects: recompose the derived name when record type changes during
+    // create, mirroring trg_project_name (opportunity name + RT label). Only
+    // applies while a derived base is held (i.e. created from an opportunity).
+    if (tableName === 'projects' && name === getRecordTypeColumn('projects') && derivedNameBaseRef.current) {
+      const opts = allPicklistOpts?.[name] || []
+      const rtLabel = (opts.find(o => o.value === value)?.label) || ''
+      const composed = [String(derivedNameBaseRef.current || '').trim(), String(rtLabel || '').trim()]
+        .filter(Boolean).join(' - ').replace(/^[\s-]+|[\s-]+$/g, '')
+      next.project_name = composed || ''
     }
     return next
   })
