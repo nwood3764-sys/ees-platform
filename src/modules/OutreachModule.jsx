@@ -345,7 +345,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
   const hasData = Array.isArray(data) && data.length > 0
   if (error && !hasData) return <ErrorState error={error} onRetry={onRetry} />
   return (
-    <div>
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {error && hasData && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           gap: 12, padding: '8px 12px', margin: '0 0 10px', borderRadius: 6,
