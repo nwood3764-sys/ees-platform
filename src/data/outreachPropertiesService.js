@@ -2,27 +2,27 @@ import { supabase, fetchAllPaged, fetchAllPagedParallel } from '../lib/supabase'
 import { loadPicklists } from './outreachService'
 
 /**
- * Prospecting service
+ * Outreach service
  *
- * Reads from the prospecting_properties_v database view, which joins
+ * Reads from the outreach_properties_v database view, which joins
  * properties → accounts → property_source_data → property_disaster_exposure
  * and computes has_active_opportunity. The view is the spine of the
- * Prospecting module — list view, map view, and CSV export all read from it.
+ * Outreach module — list view, map view, and CSV export all read from it.
  */
 
 /**
  * Returns properties without an active opportunity, shaped for the
- * Prospecting list view. Picklist values resolved to labels.
+ * Outreach list view. Picklist values resolved to labels.
  *
  * @param {Object} options
  * @param {boolean} options.includeEngaged - when true, returns ALL properties
  *   (including those with active opportunities). Defaults to false — the
- *   Prospecting view filters them out.
+ *   Outreach view filters them out.
  */
-export async function fetchProspectingProperties({ includeEngaged = false } = {}) {
+export async function fetchOutreachProperties({ includeEngaged = false } = {}) {
   const picklists = await loadPicklists()
 
-  // Paginated full-table read: prospecting today is ~6,800 rows; will
+  // Paginated full-table read: outreach today is ~6,800 rows; will
   // grow into the tens of thousands as the remaining program states
   // ingest. PostgREST caps every single response at 1000 rows, so the
   // only correct path is .range(from,to) in a loop via fetchAllPaged.
@@ -65,7 +65,7 @@ export async function fetchProspectingProperties({ includeEngaged = false } = {}
 
   // Paginated full-table read via fetchAllPagedParallel: a single HEAD
   // count first, then all page requests fire concurrently. For 6,785
-  // prospects this drops the wall time from ~40s (7 sequential 1000-row
+  // properties this drops the wall time from ~40s (7 sequential 1000-row
   // round trips) to ~3s (8 concurrent page requests, bounded by the
   // slowest single page). countQuery applies the SAME has_active_opportunity
   // filter as the page builder when includeEngaged is false — without
@@ -74,7 +74,7 @@ export async function fetchProspectingProperties({ includeEngaged = false } = {}
   const data = await fetchAllPagedParallel(
     (from, to) => {
       let q = supabase
-        .from('prospecting_properties_v')
+        .from('outreach_properties_v')
         .select(SELECT_COLS)
         .order('property_name', { ascending: true })
         .order('id',            { ascending: true })   // tie-breaker for stable pagination
@@ -84,7 +84,7 @@ export async function fetchProspectingProperties({ includeEngaged = false } = {}
     },
     () => {
       let q = supabase
-        .from('prospecting_properties_v')
+        .from('outreach_properties_v')
         .select('id', { count: 'exact', head: true })
       if (!includeEngaged) q = q.eq('has_active_opportunity', false)
       return q
@@ -138,17 +138,17 @@ export async function fetchProspectingProperties({ includeEngaged = false } = {}
 }
 
 /**
- * Returns lightweight counts for the Prospecting Home dashboard.
+ * Returns lightweight counts for the Outreach Home dashboard.
  */
-export async function fetchProspectingCounts() {
+export async function fetchOutreachCounts() {
   const { count: withoutCount, error: e1 } = await supabase
-    .from('prospecting_properties_v')
+    .from('outreach_properties_v')
     .select('id', { count: 'exact', head: true })
     .eq('has_active_opportunity', false)
   if (e1) throw e1
 
   const { count: withCount, error: e2 } = await supabase
-    .from('prospecting_properties_v')
+    .from('outreach_properties_v')
     .select('id', { count: 'exact', head: true })
     .eq('has_active_opportunity', true)
   if (e2) throw e2
@@ -168,12 +168,12 @@ export async function fetchProspectingCounts() {
 
 /**
  * Serialises an array of property rows to CSV and triggers a browser
- * download. Used by the Prospecting list view's Export CSV button.
+ * download. Used by the Outreach list view's Export CSV button.
  *
- * @param {Array<Object>} rows  Shaped rows from fetchProspectingProperties
- * @param {string} filename     Defaults to "prospecting-properties.csv"
+ * @param {Array<Object>} rows  Shaped rows from fetchOutreachProperties
+ * @param {string} filename     Defaults to "outreach-properties.csv"
  */
-export function exportProspectingPropertiesCsv(rows, filename = 'prospecting-properties.csv') {
+export function exportOutreachPropertiesCsv(rows, filename = 'outreach-properties.csv') {
   const columns = [
     ['id',                       'Record #'],
     ['name',                     'Property'],
@@ -281,7 +281,7 @@ export async function fetchImportBatches() {
 }
 
 /**
- * Submits a batch of records to the import-prospecting-properties edge
+ * Submits a batch of records to the import-outreach-properties edge
  * function. Returns the function's response payload.
  *
  * @param {string} sourceDataset  e.g. 'HUD_ACTIVE_PORTFOLIO', 'HUD_LIHTC',
@@ -290,7 +290,7 @@ export async function fetchImportBatches() {
  * @param {Array<Object>} records Array of records (see RPC docstring)
  */
 export async function submitPropertyImport(sourceDataset, records) {
-  const { data, error } = await supabase.functions.invoke('import-prospecting-properties', {
+  const { data, error } = await supabase.functions.invoke('import-outreach-properties', {
     body: { source_dataset: sourceDataset, records },
   })
   if (error) throw error

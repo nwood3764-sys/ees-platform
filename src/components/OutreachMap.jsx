@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { C } from '../data/constants'
 
 // =====================================================================
-// ProspectingMap
+// OutreachMap
 //
-// Leaflet-backed pin map for the Prospecting Map view. Loads Leaflet
+// Leaflet-backed pin map for the Outreach Map view. Loads Leaflet
 // and its markercluster plugin on demand from a public CDN — no
 // build-time dependency added (per the Vite hazard memory about
 // circular vendor chunks when introducing new shared deps).
@@ -121,7 +121,7 @@ function escapeHtml(s) {
   })[ch])
 }
 
-export function ProspectingMap({ properties, onOpenProperty, onBoundsChange }) {
+export function OutreachMap({ properties, onOpenProperty, onBoundsChange }) {
   const containerRef = useRef(null)
   const mapRef       = useRef(null)
   const clusterRef   = useRef(null)

@@ -63,7 +63,7 @@ export function picklistOptions(picklists, object, field) {
 // ---------------------------------------------------------------------------
 
 // Outreach is the *pipeline* view: a property/account belongs here only once
-// it is connected to an opportunity. Unassigned properties live in Prospecting
+// it is connected to an opportunity. Unassigned properties live in Outreach
 // until advanced. This resolves the id sets reachable from a live opportunity:
 //   - properties: opportunities.property_id
 //   - accounts:  opportunities.opportunity_account_id /

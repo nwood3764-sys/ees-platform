@@ -48,7 +48,7 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
-const MODEL = "claude-sonnet-4-20250514"
+const MODEL = "claude-sonnet-4-6"
 const PRICE_INPUT_PER_MTOK  = 3.00
 const PRICE_OUTPUT_PER_MTOK = 15.00
 const MAX_TURNS = 8   // tool-use loop ceiling per request

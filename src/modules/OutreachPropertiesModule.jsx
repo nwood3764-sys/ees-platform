@@ -5,25 +5,25 @@ import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import HelpIcon from '../components/help/HelpIcon'
-import { ProspectingMap } from '../components/ProspectingMap'
-import ProspectingFilterPanel, {
+import { OutreachMap } from '../components/OutreachMap'
+import OutreachFilterPanel, {
   EMPTY_FILTERS,
   applyFilters,
-} from '../components/ProspectingFilterPanel'
+} from '../components/OutreachFilterPanel'
 import {
-  fetchProspectingProperties,
-  fetchProspectingCounts,
+  fetchOutreachProperties,
+  fetchOutreachCounts,
   fetchImportBatches,
   submitPropertyImport,
-  exportProspectingPropertiesCsv,
-} from '../data/prospectingService'
+  exportOutreachPropertiesCsv,
+} from '../data/outreachPropertiesService'
 import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
 
 /**
- * Prospecting Module
+ * Outreach Module
  *
  * Top-of-funnel surface for properties not yet under active engagement.
- * One unified public.properties table — Prospecting is a filtered lens
+ * One unified public.properties table — Outreach is a filtered lens
  * over properties with no active opportunity. HUD/LIHTC/DOE LEAD source
  * fields in property_source_data; FEMA disaster exposure in
  * property_disaster_exposure (conditionally surfaced via hide_when_empty
@@ -37,7 +37,7 @@ const CODE_SECTIONS = [
   { id: 'imports',    label: 'Imports'    },
 ]
 
-// Display columns for the Prospecting Properties list.
+// Display columns for the Outreach Properties list.
 // `columnName` indicates the DB column on the `properties` table that
 // the EditableListView should write to when the cell is edited. Cells
 // where `columnName` is omitted (or points to a column on a joined
@@ -64,7 +64,7 @@ const PROP_COLS = [
 ]
 
 const PROP_VIEWS = [
-  { id:'PV-01', name:'All Prospects',           filters:[], sortField:'name', sortDir:'asc' },
+  { id:'PV-01', name:'All Properties',          filters:[], sortField:'name', sortDir:'asc' },
   { id:'PV-02', name:'NC — With Disaster Data', filters:[
       { field:'state',               label:'State',             op:'equals', value:'NC'  },
       { field:'hasDisasterExposure', label:'Disaster Exposure', op:'equals', value:'Yes' },
@@ -112,7 +112,7 @@ function StatCard({ label, value }) {
   )
 }
 
-function ProspectingHome({ counts, loading }) {
+function OutreachHome({ counts, loading }) {
   const fmt = (n) => loading ? '—' : (n != null ? n.toLocaleString() : '—')
   return (
     <div style={{ flex:1, overflow:'auto', padding:'20px 20px 24px' }}>
@@ -149,8 +149,8 @@ function PropertiesListSection({ loading, error, properties, onRefresh, onRetry,
   if (error)   return <ErrorState error={error} onRetry={onRetry} />
 
   const handleExport = () => {
-    const filename = `prospecting-properties-${new Date().toISOString().slice(0,10)}.csv`
-    exportProspectingPropertiesCsv(properties, filename)
+    const filename = `outreach-properties-${new Date().toISOString().slice(0,10)}.csv`
+    exportOutreachPropertiesCsv(properties, filename)
   }
 
   return (
@@ -261,7 +261,7 @@ function MapSection({ loading, error, properties, onRetry, onOpenProperty }) {
               </button>
             </div>
           )}
-          <ProspectingFilterPanel
+          <OutreachFilterPanel
             allProperties={properties || []}
             filters={filters}
             updateFilter={updateFilter}
@@ -298,7 +298,7 @@ function MapSection({ loading, error, properties, onRetry, onOpenProperty }) {
           </button>
         )}
         <div style={{ flex:'1 1 60%', minHeight:240, display:'flex', flexDirection:'column' }}>
-          <ProspectingMap
+          <OutreachMap
             properties={filteredByCriteria}
             onOpenProperty={onOpenProperty}
             onBoundsChange={setBounds}
@@ -559,7 +559,7 @@ function ImportsSection({ batches, loading, error, onRefresh, onRetry, onOpenImp
   )
 }
 
-export default function ProspectingModule({
+export default function OutreachPropertiesModule({
   selectedRecord: navSelectedRecord,
   sectionFromUrl,
   onNavigateToRecord,
@@ -568,7 +568,7 @@ export default function ProspectingModule({
   onReplaceRecord,
 } = {}) {
   const urlDriven = !!onNavigateToRecord
-  const SECTIONS = useModuleSections('prospecting', CODE_SECTIONS)
+  const SECTIONS = useModuleSections('outreach_properties', CODE_SECTIONS)
   const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
   const sec = sectionFromUrl || secLocal
   const setSec = (s) => {
@@ -594,16 +594,16 @@ export default function ProspectingModule({
 
   // ─── Data layer ────────────────────────────────────────────────────────
   // Same lazy-cached pattern Outreach uses. Each query is keyed by an
-  // 'prospecting:' prefix so writes can invalidate the whole module's
-  // cache atomically. Cache survives unmounts, so leaving Prospecting
+  // 'outreach_properties:' prefix so writes can invalidate the whole module's
+  // cache atomically. Cache survives unmounts, so leaving Outreach
   // and coming back is instant.
   //
   // Counts and batches are eager (small, fast, used by Home + tab
   // badges). Properties is lazy — the slow one — only fetched when
   // the user opens Properties or Map.
-  const countsQ = useCachedFetch('prospecting:counts', fetchProspectingCounts)
-  const batchesQ = useCachedFetch('prospecting:batches', fetchImportBatches)
-  const propertiesQ = useCachedFetch('prospecting:properties', fetchProspectingProperties, {
+  const countsQ = useCachedFetch('outreach_properties:counts', fetchOutreachCounts)
+  const batchesQ = useCachedFetch('outreach_properties:batches', fetchImportBatches)
+  const propertiesQ = useCachedFetch('outreach_properties:properties', fetchOutreachProperties, {
     enabled: sec === 'properties' || sec === 'map',
   })
 
@@ -628,10 +628,10 @@ export default function ProspectingModule({
   const [showImportModal, setShowImportModal] = useState(false)
 
   // Pull-to-refresh / explicit retry. Invalidates the whole
-  // prospecting cache so the next render of any visible section
+  // outreach cache so the next render of any visible section
   // refetches from network.
   const loadAll = () => {
-    invalidatePrefix('prospecting:')
+    invalidatePrefix('outreach_properties:')
   }
 
   const openProperty = (row) => {
@@ -668,9 +668,9 @@ export default function ProspectingModule({
              on home. */}
           <HelpIcon
             anchors={[
-              { type:'route', route:`/m/prospecting/${sec}` },
-              { type:'route', route:'/m/prospecting' },
-              { type:'concept', concept:'prospecting' },
+              { type:'route', route:`/m/outreach_properties/${sec}` },
+              { type:'route', route:'/m/outreach_properties' },
+              { type:'concept', concept:'outreach_properties' },
             ]}
             title={`Outreach — ${SECTIONS.find(s => s.id===sec)?.label || ''}`}
           />
@@ -692,7 +692,7 @@ export default function ProspectingModule({
           />
         ) : (
           <>
-            {sec === 'home'       && <ProspectingHome counts={counts} loading={loadingCounts} />}
+            {sec === 'home'       && <OutreachHome counts={counts} loading={loadingCounts} />}
             {sec === 'properties' && <PropertiesListSection loading={loadingProperties} error={error} properties={properties} onRefresh={loadAll} onRetry={loadAll} onOpenRecord={openProperty} />}
             {sec === 'map'        && <MapSection loading={loadingProperties} error={error} properties={properties} onRetry={loadAll} onOpenProperty={openPropertyById} />}
             {sec === 'imports'    && <ImportsSection batches={batches} loading={loadingBatches} error={error} onRefresh={loadAll} onRetry={loadAll} onOpenImport={openImport} onOpenImportModal={() => setShowImportModal(true)} />}

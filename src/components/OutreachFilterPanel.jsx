@@ -3,9 +3,9 @@ import { C } from '../data/constants'
 import { Icon } from './UI'
 
 // =====================================================================
-// ProspectingFilterPanel
+// OutreachFilterPanel
 //
-// Left-rail filter panel for the Prospecting Map view. Mirrors the
+// Left-rail filter panel for the Outreach Map view. Mirrors the
 // Manus NC Property Outreach Priority Dashboard filter surface — open
 // search across multiple text fields plus state / county / account /
 // subsidy / units / disaster / contract expiration / energy burden
@@ -124,7 +124,7 @@ const inputStyle = {
 const sectionStyle = { marginBottom: 16 }
 
 // ---------- component ----------
-export default function ProspectingFilterPanel({
+export default function OutreachFilterPanel({
   allProperties,         // unfiltered rows — used to derive dropdown options
   filters,
   updateFilter,

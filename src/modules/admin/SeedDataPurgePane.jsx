@@ -82,7 +82,7 @@ export default function SeedDataPurgePane() {
       </div>
       <p style={{ marginTop: 0, fontSize: 13, color: C.textSecondary, maxWidth: 720, lineHeight: 1.55 }}>
         Removes every record that was inserted as initial training/seed data.
-        This action is permanent. Real production data (the 6,781 prospecting properties,
+        This action is permanent. Real production data (the 6,781 outreach properties,
         the 2,030 imported accounts, anything created by users in the normal
         course of using LEAP) is <b>not</b> touched — only records explicitly
         marked in the seed_data_records audit table will be deleted.

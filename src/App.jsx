@@ -33,7 +33,7 @@ import { useUrlNavigation, getTableForSection } from './lib/urlNav'
 const HomeModule          = lazy(() => import('./modules/HomeModule'))
 const TasksModule         = lazy(() => import('./modules/TasksModule'))
 const OutreachModule      = lazy(() => import('./modules/OutreachModule'))
-const ProspectingModule   = lazy(() => import('./modules/ProspectingModule'))
+const OutreachPropertiesModule = lazy(() => import('./modules/OutreachPropertiesModule'))
 const QualificationModule = lazy(() => import('./modules/QualificationModule'))
 const FieldModule         = lazy(() => import('./modules/FieldModule'))
 const ProjectPlanningModule       = lazy(() => import('./modules/ProjectPlanningModule'))
@@ -348,7 +348,7 @@ function AuthedApp({ session }) {
       case 'home':          return <HomeModule onNavigate={navigateToModule} onOpenSetup={navigateToSetup} onOpenRecord={navigateToRecord} />
       case 'tasks':         return <TasksModule {...navProps} />
       case 'outreach':      return <OutreachModule {...navProps} />
-      case 'prospecting':   return <ProspectingModule {...navProps} />
+      case 'outreach_properties': return <OutreachPropertiesModule {...navProps} />
       case 'qualification': return <QualificationModule {...navProps} />
       case 'field':         return <FieldModule {...navProps} />
       case 'planning':      return <ProjectPlanningModule {...navProps} />

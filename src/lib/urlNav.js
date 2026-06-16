@@ -179,7 +179,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // user lands on /search?q=... (typically from the search modal's "View
 // all results" footer button or a shared link).
 const KNOWN_MODULES = new Set([
-  'home', 'tasks', 'outreach', 'prospecting', 'qualification', 'field', 'planning', 'implementation', 'dispatch', 'incentives',
+  'home', 'tasks', 'outreach', 'outreach_properties', 'qualification', 'field', 'planning', 'implementation', 'dispatch', 'incentives',
   'stock', 'fleet', 'reports', 'admin', 'portal', 'search', 'help',
 ])
 
@@ -252,7 +252,10 @@ export function parsePath(pathname, search = '') {
   // only Admin's Object Manager (which needs the specific table the user is
   // viewing) so that browser-back lands on the manager list rather than home.
   if (parts[0] === 'm') {
-    const mod = parts[1]
+    // Legacy slug alias: the module formerly at /m/prospecting is now
+    // /m/outreach_properties. Remap so old bookmarks and saved URLs resolve
+    // instead of dropping to home.
+    const mod = parts[1] === 'prospecting' ? 'outreach_properties' : parts[1]
     if (KNOWN_MODULES.has(mod) && mod !== 'search' && mod !== 'help') {
       // ?tab=<id> carries an admin-module sub-tab hint (used by ObjectDetail's
       // initialSubTab). ?layout=<uuid> carries a layout-id hint so the

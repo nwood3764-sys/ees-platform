@@ -16,7 +16,7 @@ const MODULE_LABELS = {
   outreach: 'Outreach', qualification: 'Qualification', field: 'Field',
   incentives: 'Incentives', stock: 'Stock', fleet: 'Fleet',
   planning: 'Project Planning', implementation: 'Project Implementation',
-  tasks: 'Tasks', portal: 'Portal', reports: 'Reports', prospecting: 'Prospecting',
+  tasks: 'Tasks', portal: 'Portal', reports: 'Reports', outreach_properties: 'Outreach',
 }
 
 export default function ModuleSectionsPane() {
