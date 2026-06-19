@@ -1150,7 +1150,7 @@ function getPreviewKind(doc) {
   return 'fallback'
 }
 
-function DocumentPreviewModal({ doc, onClose }) {
+export function DocumentPreviewModal({ doc, onClose }) {
   const isMobile = useIsMobile()
   const kind = getPreviewKind(doc)
   const url = doc._url
@@ -1591,16 +1591,26 @@ function WordPreview({ doc }) {
         return
       }
       try {
-        const [mammothMod, resp] = await Promise.all([
+        const [mammothMod, purifyMod, resp] = await Promise.all([
           import('mammoth'),
+          import('dompurify'),
           fetch(url),
         ])
         if (!resp.ok) throw new Error(`Fetch failed (${resp.status})`)
         const mammoth = mammothMod.default || mammothMod
+        const DOMPurify = purifyMod.default || purifyMod
         const arrayBuffer = await resp.arrayBuffer()
         const result = await mammoth.convertToHtml({ arrayBuffer })
+        // Sanitize mammoth's HTML before injection. The .docx is user-supplied,
+        // so even though mammoth emits a constrained tag set we strip any
+        // scriptable content as defense-in-depth — required before this path
+        // is ever reachable by external/portal users.
+        const clean = DOMPurify.sanitize(result?.value || '', {
+          USE_PROFILES: { html: true },
+          ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'colspan', 'rowspan', 'class'],
+        })
         if (!cancelled) {
-          setState({ status: 'ready', html: result?.value || '', error: null })
+          setState({ status: 'ready', html: clean, error: null })
         }
       } catch (e) {
         if (!cancelled) setState({ status: 'error', html: null, error: e?.message || String(e) })

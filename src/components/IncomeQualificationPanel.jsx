@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
+import { DocumentPreviewModal } from './FileGallery'
 import {
   classifyEnrollment,
   runIncomeQualification,
@@ -52,6 +53,7 @@ export default function IncomeQualificationPanel({ enrollmentId }) {
   const [error, setError] = useState(null)
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [previewDoc, setPreviewDoc] = useState(null)
 
   const refresh = useCallback(async () => {
     if (!enrollmentId) return
@@ -166,18 +168,25 @@ export default function IncomeQualificationPanel({ enrollmentId }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {docs.map(d => (
-            <a key={d.id} href={d._url || '#'} target="_blank" rel="noreferrer"
+            <div key={d.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setPreviewDoc(d)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPreviewDoc(d) } }}
               style={{
-                display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none',
+                display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
                 background: '#f7f9fc', border: `1px solid ${C.border}`, borderRadius: 6,
                 padding: '10px 12px', color: C.textPrimary, fontSize: 13,
               }}>
               <Icon path={d.document_type === 'income_qualification_application' ? 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6 M8 13h8 M8 17h8' : 'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18'} size={16} color={C.textSecondary} />
               <span style={{ flex: 1 }}>{d.name}</span>
-              <span style={{ ...labelStyle, color: C.sky }}>Download</span>
-            </a>
+              <span style={{ ...labelStyle, color: C.sky }}>Preview</span>
+            </div>
           ))}
         </div>
+      )}
+      {previewDoc && (
+        <DocumentPreviewModal doc={previewDoc} onClose={() => setPreviewDoc(null)} />
       )}
     </div>
   )
