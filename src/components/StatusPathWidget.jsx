@@ -144,7 +144,12 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
   if (picklistValues === null) return null
   if (picklistValues.length === 0) return null
 
-  const currentLabel = currentIdx >= 0 ? picklistValues[currentIdx].picklist_label : null
+  const currentStage = currentIdx >= 0 ? picklistValues[currentIdx] : null
+  const currentLabel = currentStage ? currentStage.picklist_label : null
+  const currentDescription = currentStage ? currentStage.picklist_description : null
+  const stagePosition = currentIdx >= 0
+    ? `Stage ${currentIdx + 1} of ${picklistValues.length}`
+    : null
   const nextTransitionDescription = (() => {
     if (!currentStatusId || !transitions) return null
     const t = transitions.find(t => t.st_from_status_id === currentStatusId && t.st_description)
@@ -159,7 +164,7 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
       border: `1px solid ${C.border}`,
       borderRadius: 8,
     }}>
-      {showCounter && currentLabel && (
+      {showCounter && stagePosition && (
         <div style={{
           fontSize: 11,
           fontWeight: 600,
@@ -168,7 +173,7 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
           textTransform: 'uppercase',
           marginBottom: 8,
         }}>
-          Status: <span style={{ color: C.textPrimary }}>{currentLabel}</span>
+          {stagePosition}
         </div>
       )}
 
@@ -191,6 +196,28 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
           )
         })}
       </div>
+
+      {currentLabel && (
+        <div style={{
+          marginTop: 12,
+          fontSize: 15,
+          fontWeight: 700,
+          color: C.textPrimary,
+        }}>
+          {currentLabel}
+        </div>
+      )}
+
+      {currentDescription && (
+        <div style={{
+          marginTop: 6,
+          fontSize: 13,
+          color: C.textSecondary,
+          lineHeight: 1.5,
+        }}>
+          {currentDescription}
+        </div>
+      )}
 
       {showGuidance && nextTransitionDescription && (
         <div style={{
