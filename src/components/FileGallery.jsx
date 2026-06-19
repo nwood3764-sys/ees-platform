@@ -1139,6 +1139,14 @@ function getPreviewKind(doc) {
     mime === 'text/tab-separated-values' ||
     ['xlsx','xls','csv','tsv'].includes(ext)
   ) return 'spreadsheet'
+  // DOCX renders client-side via mammoth (docx → semantic HTML). Same in-
+  // boundary security property as the spreadsheet path — bytes are converted
+  // in the authenticated session, nothing transits a third-party viewer.
+  // Legacy binary .doc is NOT supported by mammoth and falls through.
+  if (
+    mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    ext === 'docx'
+  ) return 'word'
   return 'fallback'
 }
 
@@ -1290,6 +1298,8 @@ function DocumentPreviewModal({ doc, onClose }) {
             />
           ) : kind === 'spreadsheet' ? (
             <SpreadsheetPreview doc={doc} />
+          ) : kind === 'word' ? (
+            <WordPreview doc={doc} />
           ) : (
             <FallbackPreview doc={doc} />
           )}
@@ -1549,6 +1559,116 @@ function SpreadsheetPreview({ doc }) {
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// WordPreview — client-side DOCX preview via mammoth (docx → semantic HTML).
+//
+// Same in-boundary model as SpreadsheetPreview: the file is fetched from its
+// signed URL and converted in the browser, so PII never transits a third-
+// party viewer. mammoth is lazy-loaded so its chunk only downloads when a
+// Word document is opened. Output is readable semantic HTML (headings, lists,
+// tables, bold/italic) — not pixel-perfect Word layout, embedded drawings,
+// or exact pagination. For those, "Open in new tab" hands off to the app.
+//
+// mammoth's HTML is rendered into a styled, scrollable "page" surface. The
+// HTML comes from the user's own uploaded file and is converted by mammoth
+// (which emits a constrained tag set), but we still scope all styling locally
+// rather than trusting arbitrary inline markup.
+// ---------------------------------------------------------------------------
+
+function WordPreview({ doc }) {
+  const [state, setState] = useState({ status: 'loading', html: null, error: null })
+  const url = doc._previewUrl || doc._url
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      if (!url) {
+        setState({ status: 'error', html: null, error: 'No signed URL available.' })
+        return
+      }
+      try {
+        const [mammothMod, resp] = await Promise.all([
+          import('mammoth'),
+          fetch(url),
+        ])
+        if (!resp.ok) throw new Error(`Fetch failed (${resp.status})`)
+        const mammoth = mammothMod.default || mammothMod
+        const arrayBuffer = await resp.arrayBuffer()
+        const result = await mammoth.convertToHtml({ arrayBuffer })
+        if (!cancelled) {
+          setState({ status: 'ready', html: result?.value || '', error: null })
+        }
+      } catch (e) {
+        if (!cancelled) setState({ status: 'error', html: null, error: e?.message || String(e) })
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [url])
+
+  if (state.status === 'loading') {
+    return (
+      <div style={{ color: C.textMuted, fontSize: 13, padding: 32 }}>
+        Rendering document…
+      </div>
+    )
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div style={{ maxWidth: 420, textAlign: 'center', padding: '32px 28px' }}>
+        <div style={{
+          background: 'rgba(126,179,232,0.12)', border: `1px solid ${C.sky}`,
+          color: C.textPrimary, borderRadius: 8, padding: '14px 16px',
+          fontSize: 13, lineHeight: 1.55, marginBottom: 16,
+        }}>
+          Could not render this document inline. Open it in a new tab to view
+          it in your word processor.
+        </div>
+        {url && (
+          <a
+            href={doc._url || url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              background: C.emerald, color: '#fff', border: 'none',
+              borderRadius: 6, padding: '9px 18px', fontSize: 13, fontWeight: 500,
+              textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <Icon path="M14 3h7v7 M21 3l-9 9 M21 14v6a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1h6"
+              size={12} color="#fff" />
+            Open in new tab
+          </a>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{
+      width: '100%', height: '100%', overflow: 'auto',
+      display: 'flex', justifyContent: 'center',
+      alignItems: 'flex-start', padding: '24px 16px',
+    }}>
+      <div
+        className="anura-docx-preview"
+        style={{
+          background: C.card,
+          border: `1px solid ${C.border}`,
+          borderRadius: 8,
+          boxShadow: '0 2px 10px rgba(13,26,46,0.06)',
+          width: 'min(820px, 100%)',
+          padding: '48px 56px',
+          fontFamily: 'Inter, sans-serif',
+          fontSize: 14, lineHeight: 1.6, color: C.textPrimary,
+        }}
+        dangerouslySetInnerHTML={{ __html: state.html || '<p style="color:#8fa0b8">Empty document.</p>' }}
+      />
     </div>
   )
 }

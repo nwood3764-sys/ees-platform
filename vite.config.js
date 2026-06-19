@@ -68,6 +68,9 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return
+          // mammoth (DOCX preview) → its own chunk, loaded only when a Word
+          // document is previewed via the dynamic import in FileGallery.
+          if (id.includes('mammoth')) return 'vendor-mammoth'
           // Recharts + d3 → its own chunk. Must be tested FIRST so that any
           // node_module that recharts pulls in (d3-*, victory-vendor, etc.)
           // lands here too, not in vendor-react.
