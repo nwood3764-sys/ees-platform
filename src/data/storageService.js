@@ -481,9 +481,13 @@ const DEFAULT_SIGNED_URL_TTL_SECONDS = 60 * 60 // 1 hour
  * because a missing or unreadable file should degrade the gallery, not
  * crash the page.
  */
-export async function signedUrl(bucket, path, ttl = DEFAULT_SIGNED_URL_TTL_SECONDS) {
+export async function signedUrl(bucket, path, ttl = DEFAULT_SIGNED_URL_TTL_SECONDS, download = null) {
   if (!bucket || !path) return null
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, ttl)
+  // When `download` is provided, Supabase sets Content-Disposition: attachment
+  // with this filename, so the browser's save-as uses the clean display name
+  // instead of the collision-prefixed storage key (the `{docId}__` segment).
+  const opts = download ? { download } : undefined
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, ttl, opts)
   if (error) {
     // eslint-disable-next-line no-console
     console.warn(`signedUrl(${bucket}/${path}) failed:`, error.message)
@@ -558,26 +562,21 @@ export async function hydratePhotoUrls(photos) {
 /**
  * Like hydratePhotoUrls but for documents. Adds `_url` (a signed URL good
  * for either inline preview or download).
+ *
+ * Each URL is signed individually (rather than via the batch createSignedUrls)
+ * so the document's display `name` can be threaded into the `download` option.
+ * That sets Content-Disposition: attachment with the clean filename, so a
+ * "save as" uses e.g. `7400_West_Center_Street_..._Tenant_Data_Sheet.xlsx`
+ * instead of the storage key's `{docId}__`-prefixed segment. Document lists
+ * are short, so per-file signing is negligible.
  */
 export async function hydrateDocumentUrls(documents) {
   if (!documents || documents.length === 0) return []
-  const byBucket = new Map()
-  for (const d of documents) {
-    if (!d.storage_bucket || !d.storage_path) continue
-    if (!byBucket.has(d.storage_bucket)) byBucket.set(d.storage_bucket, new Set())
-    byBucket.get(d.storage_bucket).add(d.storage_path)
-  }
-  const urlMap = new Map()
-  await Promise.all(Array.from(byBucket.entries()).map(async ([bucket, set]) => {
-    const paths = Array.from(set)
-    const urls = await signedUrls(bucket, paths)
-    paths.forEach((p, i) => urlMap.set(`${bucket}::${p}`, urls[i]))
-  }))
-  return documents.map(d => ({
-    ...d,
-    _url: d.storage_bucket && d.storage_path
-      ? urlMap.get(`${d.storage_bucket}::${d.storage_path}`) || null
-      : null,
+  return Promise.all(documents.map(async d => {
+    const url = (d.storage_bucket && d.storage_path)
+      ? await signedUrl(d.storage_bucket, d.storage_path, DEFAULT_SIGNED_URL_TTL_SECONDS, d.name || undefined)
+      : null
+    return { ...d, _url: url }
   }))
 }
 
