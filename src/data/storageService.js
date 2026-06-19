@@ -560,23 +560,32 @@ export async function hydratePhotoUrls(photos) {
 }
 
 /**
- * Like hydratePhotoUrls but for documents. Adds `_url` (a signed URL good
- * for either inline preview or download).
+ * Like hydratePhotoUrls but for documents. Adds TWO signed URLs per row:
  *
- * Each URL is signed individually (rather than via the batch createSignedUrls)
- * so the document's display `name` can be threaded into the `download` option.
- * That sets Content-Disposition: attachment with the clean filename, so a
- * "save as" uses e.g. `7400_West_Center_Street_..._Tenant_Data_Sheet.xlsx`
- * instead of the storage key's `{docId}__`-prefixed segment. Document lists
- * are short, so per-file signing is negligible.
+ *   _url        — carries the `download` option, so Content-Disposition is
+ *                 `attachment; filename="<clean name>"`. Use for download /
+ *                 save-as actions; the browser uses the clean display name
+ *                 instead of the storage key's `{docId}__`-prefixed segment.
+ *   _previewUrl — no download option, so Content-Disposition is `inline`.
+ *                 Use for the iframe PDF preview. An `attachment` URL makes
+ *                 the browser download rather than render, leaving the iframe
+ *                 blank — that's why preview and download need separate URLs.
+ *
+ * Signed individually (not via batch createSignedUrls) because only the
+ * per-call form accepts the download option. Document lists are short, so
+ * two calls per row is negligible.
  */
 export async function hydrateDocumentUrls(documents) {
   if (!documents || documents.length === 0) return []
   return Promise.all(documents.map(async d => {
-    const url = (d.storage_bucket && d.storage_path)
-      ? await signedUrl(d.storage_bucket, d.storage_path, DEFAULT_SIGNED_URL_TTL_SECONDS, d.name || undefined)
-      : null
-    return { ...d, _url: url }
+    const hasFile = !!(d.storage_bucket && d.storage_path)
+    const [url, previewUrl] = hasFile
+      ? await Promise.all([
+          signedUrl(d.storage_bucket, d.storage_path, DEFAULT_SIGNED_URL_TTL_SECONDS, d.name || undefined),
+          signedUrl(d.storage_bucket, d.storage_path, DEFAULT_SIGNED_URL_TTL_SECONDS),
+        ])
+      : [null, null]
+    return { ...d, _url: url, _previewUrl: previewUrl }
   }))
 }
 

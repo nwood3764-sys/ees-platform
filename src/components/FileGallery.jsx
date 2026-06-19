@@ -1127,9 +1127,18 @@ function getPreviewKind(doc) {
   const mime = (doc.mime_type || '').toLowerCase()
   if (mime === 'application/pdf' || ext === 'pdf') return 'pdf'
   if (mime.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext)) return 'image'
-  // Plain text could be inlined too, but the dominant uploaded text
-  // formats (CSV, TSV) are better browsed in a spreadsheet — fall through
-  // to the open-in-new-tab fallback so the browser can dispatch.
+  // Spreadsheets render client-side via SheetJS (workbook → HTML table). The
+  // file bytes are read in the browser the user already authenticated to —
+  // nothing transits a third-party viewer, which matters for PII-bearing
+  // sheets (e.g. tenant income data). CSV/TSV included since SheetJS parses
+  // them into the same grid.
+  if (
+    mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    mime === 'application/vnd.ms-excel' ||
+    mime === 'text/csv' ||
+    mime === 'text/tab-separated-values' ||
+    ['xlsx','xls','csv','tsv'].includes(ext)
+  ) return 'spreadsheet'
   return 'fallback'
 }
 
@@ -1263,7 +1272,7 @@ function DocumentPreviewModal({ doc, onClose }) {
             </div>
           ) : kind === 'pdf' ? (
             <iframe
-              src={url}
+              src={doc._previewUrl || url}
               title={doc.name || 'Document preview'}
               style={{
                 width: '100%', height: '100%',
@@ -1279,6 +1288,8 @@ function DocumentPreviewModal({ doc, onClose }) {
                 objectFit: 'contain', display: 'block',
               }}
             />
+          ) : kind === 'spreadsheet' ? (
+            <SpreadsheetPreview doc={doc} />
           ) : (
             <FallbackPreview doc={doc} />
           )}
@@ -1361,6 +1372,183 @@ function FallbackPreview({ doc }) {
           Open in new tab
         </a>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SpreadsheetPreview — client-side XLSX/XLS/CSV/TSV preview via SheetJS.
+//
+// The file is fetched from its signed _previewUrl and parsed in-browser; the
+// bytes never leave the authenticated session, so PII-bearing sheets (tenant
+// income data) are never handed to a third-party viewer. SheetJS is lazy-
+// loaded so the heavy xlsx chunk only downloads when a spreadsheet is opened.
+//
+// Each sheet renders as an HTML table. With more than one sheet, a tab bar
+// switches between them. This shows cell VALUES and structure — not Excel
+// formatting, charts, or live formulas. For a flat data grid that's the
+// whole content; for richly formatted workbooks, "Open in new tab" hands off
+// to the desktop app.
+// ---------------------------------------------------------------------------
+
+function SpreadsheetPreview({ doc }) {
+  const [state, setState] = useState({ status: 'loading', sheets: null, error: null })
+  const [activeSheet, setActiveSheet] = useState(0)
+  const url = doc._previewUrl || doc._url
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      if (!url) {
+        setState({ status: 'error', sheets: null, error: 'No signed URL available.' })
+        return
+      }
+      try {
+        const [XLSX, resp] = await Promise.all([
+          import('xlsx'),
+          fetch(url),
+        ])
+        if (!resp.ok) throw new Error(`Fetch failed (${resp.status})`)
+        const buf = await resp.arrayBuffer()
+        const wb = XLSX.read(buf, { type: 'array' })
+        const sheets = wb.SheetNames.map(name => {
+          const ws = wb.Sheets[name]
+          // header:1 → array-of-arrays so we render exactly what's in the grid,
+          // including blank leading rows. defval:'' keeps column alignment.
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: true })
+          return { name, rows }
+        })
+        if (!cancelled) {
+          setState({ status: 'ready', sheets, error: null })
+          setActiveSheet(0)
+        }
+      } catch (e) {
+        if (!cancelled) setState({ status: 'error', sheets: null, error: e?.message || String(e) })
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [url])
+
+  if (state.status === 'loading') {
+    return (
+      <div style={{ color: C.textMuted, fontSize: 13, padding: 32 }}>
+        Rendering spreadsheet…
+      </div>
+    )
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div style={{
+        maxWidth: 420, textAlign: 'center', padding: '32px 28px',
+      }}>
+        <div style={{
+          background: 'rgba(126,179,232,0.12)', border: `1px solid ${C.sky}`,
+          color: C.textPrimary, borderRadius: 8, padding: '14px 16px',
+          fontSize: 13, lineHeight: 1.55, marginBottom: 16,
+        }}>
+          Could not render this spreadsheet inline. Open it in a new tab to view
+          it in your spreadsheet app.
+        </div>
+        {url && (
+          <a
+            href={doc._url || url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              background: C.emerald, color: '#fff', border: 'none',
+              borderRadius: 6, padding: '9px 18px', fontSize: 13, fontWeight: 500,
+              textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <Icon path="M14 3h7v7 M21 3l-9 9 M21 14v6a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1h6"
+              size={12} color="#fff" />
+            Open in new tab
+          </a>
+        )}
+      </div>
+    )
+  }
+
+  const sheets = state.sheets || []
+  const current = sheets[activeSheet] || { rows: [] }
+  const rows = current.rows || []
+  // Normalize ragged rows to a uniform column count so the table stays square.
+  const colCount = rows.reduce((m, r) => Math.max(m, r.length), 0)
+
+  return (
+    <div style={{
+      width: '100%', height: '100%',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'stretch', justifyContent: 'flex-start',
+      background: C.card,
+    }}>
+      {sheets.length > 1 && (
+        <div style={{
+          display: 'flex', gap: 2, padding: '8px 10px 0',
+          borderBottom: `1px solid ${C.border}`,
+          background: '#fafbfd', flexShrink: 0,
+          overflowX: 'auto',
+        }}>
+          {sheets.map((s, i) => (
+            <button
+              key={s.name + i}
+              onClick={() => setActiveSheet(i)}
+              style={{
+                background: i === activeSheet ? C.card : 'transparent',
+                color: i === activeSheet ? C.textPrimary : C.textSecondary,
+                border: `1px solid ${i === activeSheet ? C.border : 'transparent'}`,
+                borderBottom: i === activeSheet ? `1px solid ${C.card}` : '1px solid transparent',
+                borderRadius: '6px 6px 0 0',
+                padding: '7px 14px', fontSize: 12.5,
+                fontWeight: i === activeSheet ? 600 : 500,
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                marginBottom: -1,
+              }}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 0 }}>
+        <table style={{
+          borderCollapse: 'collapse', fontSize: 12.5,
+          fontFamily: 'Inter, sans-serif', color: C.textPrimary,
+          width: 'max-content', minWidth: '100%',
+        }}>
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr key={ri}>
+                <td style={{
+                  position: 'sticky', left: 0,
+                  background: '#f1f4f9', color: C.textMuted,
+                  border: `1px solid ${C.border}`,
+                  padding: '4px 8px', fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: 11, textAlign: 'right', userSelect: 'none',
+                  minWidth: 32,
+                }}>
+                  {ri + 1}
+                </td>
+                {Array.from({ length: colCount }).map((_, ci) => (
+                  <td key={ci} style={{
+                    border: `1px solid ${C.border}`,
+                    padding: '4px 10px',
+                    whiteSpace: 'nowrap',
+                    maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {row[ci] != null ? String(row[ci]) : ''}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td style={{ padding: 16, color: C.textMuted }}>Empty sheet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
