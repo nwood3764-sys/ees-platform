@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { useRecharts } from '../lib/RechartsLazy'
 import { C, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import ConfiguredHome from '../components/ConfiguredHome'
 import { fetchAssessments, fetchIncentiveApplications, fetchEfrReports } from '../data/qualificationService'
 import { fetchOpportunities } from '../data/outreachService'
 
@@ -80,149 +80,6 @@ const OPP_COLS = [
   { field:'state',     label:'State',       type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
 ]
 const OPP_VIEWS = [{ id:'QOP-01', name:'All Opportunities', filters:[], sortField:'closeDate', sortDir:'asc' }]
-
-function QualHome({ setSec, assessments, applications, efrReports }) {
-  const R = useRecharts()
-  const toReview = assessments.filter(a => a.status === 'Assessment Completed — To Be Reviewed')
-  const verified = assessments.filter(a => a.status === 'Assessment Verified')
-  const corrections = applications.filter(a => a.status === 'Incentive Application Corrections Needed')
-  const toPrepare = applications.filter(a => a.status === 'Incentive Application To Be Prepared' || a.status === 'Incentive Application To Be Verified' || a.status === 'Incentive Application To Be Submitted')
-  const approvedPipeline = applications.filter(a => a.status === 'Incentive Application Approved' || a.status === 'Incentive Application Pre-Approved').reduce((s,r) => s + (r.amount||0), 0)
-
-  const asmtByStatus = [
-    { name: 'To Be Scheduled', value: assessments.filter(a => a.status === 'Assessment To Be Scheduled').length },
-    { name: 'Scheduled',       value: assessments.filter(a => a.status === 'Assessment Scheduled').length },
-    { name: 'To Be Reviewed',  value: toReview.length },
-    { name: 'Verified',        value: verified.length },
-  ]
-
-  return (
-    <div style={{ flex:1, overflow:'auto', display:'flex' }}>
-      <div style={{ flex:1, overflow:'auto', padding:'20px 20px 24px' }}>
-        <div style={{ marginBottom:20 }}>
-          <div style={{ fontSize:11, color:C.textMuted, marginBottom:2 }}>Qualification / Home</div>
-          <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Qualification Dashboard</h1>
-          <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>Nicholas Wood · Sunday, April 12, 2026</div>
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
-          {[
-            { label:'Assessments to Review',  value:toReview.length,   color:C.amber,  action:() => setSec('assessments')  },
-            { label:'Corrections Needed',     value:corrections.length,color:C.danger, urgent:corrections.length>0, action:() => setSec('applications') },
-            { label:'Applications to Prepare',value:toPrepare.length,  color:C.sky,    action:() => setSec('applications') },
-            { label:'Approved Pipeline',      value:fmt(approvedPipeline), color:C.emerald, action:() => setSec('applications') },
-          ].map(s => (
-            <div key={s.label} onClick={s.action}
-              style={{ background:C.card, border:`2px solid ${s.urgent?C.danger:C.border}`, borderTop:`3px solid ${s.color}`, borderRadius:8, padding:'14px 16px', cursor:'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
-              <div style={{ fontSize:11, color:C.textMuted, fontWeight:500, textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:8 }}>{s.label}</div>
-              <div style={{ fontSize:s.label==='Approved Pipeline'?18:26, fontWeight:700, color:s.urgent?C.danger:s.color, fontFamily:'JetBrains Mono, monospace', marginBottom:4 }}>{s.value}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))', gap:14, marginBottom:14 }}>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
-            <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Assessments by Status</div></div>
-            <div style={{ padding:'10px 14px' }}>
-              <R.ResponsiveContainer width="100%" height={120}>
-                <R.BarChart data={asmtByStatus} margin={{ left:0, right:10, top:8, bottom:0 }}>
-                  <R.XAxis dataKey="name" tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                  <R.YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                  <R.Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
-                  <R.Bar dataKey="value" radius={[4,4,0,0]} fill={C.sky} />
-                </R.BarChart>
-              </R.ResponsiveContainer>
-            </div>
-            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('assessments')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Assessments →</span></div>
-          </div>
-
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
-            <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Incentive Applications by Status</div></div>
-            <div style={{ padding:'10px 14px' }}>
-              <R.ResponsiveContainer width="100%" height={120}>
-                <R.BarChart data={[
-                  { name:'To Prepare', value: applications.filter(a => a.status.includes('To Be')).length },
-                  { name:'Submitted',  value: applications.filter(a => a.status.includes('Submitted')).length },
-                  { name:'Pre-Approved',value:applications.filter(a => a.status === 'Incentive Application Pre-Approved').length },
-                  { name:'Approved',   value: applications.filter(a => a.status === 'Incentive Application Approved').length },
-                  { name:'Corrections',value: corrections.length },
-                ]} margin={{ left:0, right:10, top:8, bottom:0 }}>
-                  <R.XAxis dataKey="name" tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                  <R.YAxis tick={{ fontSize:10, fill:C.textMuted }} tickLine={false} axisLine={false} />
-                  <R.Tooltip contentStyle={{ fontSize:11, border:`1px solid ${C.border}`, borderRadius:5 }} />
-                  <R.Bar dataKey="value" radius={[4,4,0,0]} fill={C.emerald} />
-                </R.BarChart>
-              </R.ResponsiveContainer>
-            </div>
-            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('applications')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Applications →</span></div>
-          </div>
-        </div>
-
-        {/* Assessments to review */}
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
-          <div style={{ padding:'12px 16px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-            <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Assessments — To Be Reviewed</div>
-            <span style={{ background:toReview.length>0?C.amber:'#e8f8f2', color:toReview.length>0?'#1e466b':'#1a7a4e', fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:10 }}>{toReview.length}</span>
-          </div>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-            <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>{['Record #','Assessment','Property','Assessor','Completed','Buildings','Units','Action'].map(h => <th key={h} style={{ padding:'9px 12px', textAlign:'left', color:C.textMuted, fontWeight:500, fontSize:11, textTransform:'uppercase', letterSpacing:'0.04em' }}>{h}</th>)}</tr></thead>
-            <tbody>
-              {toReview.map(a => (
-                <TableRow key={a.id}>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textMuted, fontFamily:'JetBrains Mono, monospace', fontSize:10 }}>{a.id}</td>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textPrimary, fontWeight:500 }}>{a.name}</td>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{a.property}</td>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{a.assessor}</td>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{a.completedDate || '—'}</td>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{a.buildings}</td>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{a.units}</td>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}` }}><button style={{ background:'#e8f1fb', color:'#1e466b', border:`1px solid #f0d8a0`, borderRadius:5, padding:'3px 8px', fontSize:11, fontWeight:600, cursor:'pointer' }}>Review</button></td>
-                </TableRow>
-              ))}
-              {toReview.length === 0 && <tr><td colSpan={8} style={{ padding:'24px', textAlign:'center', color:C.textMuted, fontSize:12 }}>No assessments pending review.</td></tr>}
-            </tbody>
-          </table>
-          <div style={{ padding:'9px 16px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('assessments')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View All Assessments →</span></div>
-        </div>
-      </div>
-
-      {/* Right sidebar */}
-      <div style={{ width:280, flexShrink:0, background:C.page, borderLeft:`1px solid ${C.border}`, padding:'20px 14px', overflowY:'auto' }}>
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden', marginBottom:12 }}>
-          <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-            <span style={{ fontWeight:600, fontSize:13, color:C.textPrimary }}>Corrections Needed</span>
-            <span style={{ background:corrections.length>0?C.danger:'#e8f8f2', color:corrections.length>0?'#fff':'#1a7a4e', fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:10 }}>{corrections.length}</span>
-          </div>
-          {corrections.map((a,i) => (
-            <div key={a.id} style={{ padding:'10px 14px', borderBottom:i<corrections.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background='#eef5fc'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-              <div style={{ color:C.danger, fontSize:12, fontWeight:500, marginBottom:2 }}>{a.id}</div>
-              <div style={{ color:C.textSecondary, fontSize:11, marginBottom:1 }}>{a.property}</div>
-              <ProgramTag value={a.program} />
-            </div>
-          ))}
-          {corrections.length === 0 && <div style={{ padding:'16px', textAlign:'center', color:C.textMuted, fontSize:12 }}>All clear.</div>}
-          <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('applications')} style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</span></div>
-        </div>
-
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
-          <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><span style={{ fontWeight:600, fontSize:13, color:C.textPrimary }}>Recent Applications</span></div>
-          {applications.slice(0,5).map((a,i) => (
-            <div key={a.id} style={{ padding:'9px 14px', borderBottom:i<4?`1px solid ${C.border}`:'none', cursor:'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background='#f7f9fc'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-              <div style={{ color:'#1a5a8a', fontSize:11, fontWeight:500, marginBottom:2 }}>{a.id}</div>
-              <div style={{ color:C.textMuted, fontSize:10, marginBottom:3 }}>{a.property}</div>
-              <Badge s={a.status} />
-            </div>
-          ))}
-          <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('applications')} style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</span></div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function LiveListView({ loading, error, data, onRetry, ...rest }) {
   if (loading) return <LoadingState />
@@ -315,7 +172,7 @@ export default function QualificationModule({ selectedRecord: navSelectedRecord,
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {sec==='home'         && <QualHome setSec={setSec} assessments={assessments} applications={applications} efrReports={efrReports} />}
+        {sec==='home'         && <ConfiguredHome crumb="Qualification" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
         {sec==='assessments'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={assessments} listObject="assessments" listModule="qualification" columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => setSelectedRecord({ table: 'assessments', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='applications' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={applications} listObject="incentive_applications" listModule="qualification" columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => setSelectedRecord({ table: 'incentive_applications', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='efr'          && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={efrReports}  listObject="efr_reports" listModule="qualification" columns={EFR_COLS}  systemViews={EFR_VIEWS}  defaultViewId="EV-01" newLabel="EFR Report"  onNew={() => setSelectedRecord({ table: 'efr_reports', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}

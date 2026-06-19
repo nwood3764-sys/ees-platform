@@ -461,13 +461,16 @@ export function useUrlNavigation() {
   //   options.initialSubTab — appended to the URL as ?tab=<id>. Consumed
   //                  by ObjectDetail to pre-select a sub-tab (e.g.
   //                  'recordtypes' for the Edit Record Types deep-link).
+  //   options.initialModule — appended to the URL as ?tab=<module-id>. Consumed
+  //                  by ModuleSectionsPane to pre-select a module (the Edit
+  //                  Module deep-link from the topbar gear).
   const navigateToSetup = useCallback((nodeId, subsectionId = null, options = {}) => {
     const next = {
       activeModule: 'admin',
       selectedRecord: null,
       section: nodeId || null,
       subsection: subsectionId || null,
-      adminTab: options.initialSubTab || null,
+      adminTab: options.initialSubTab || options.initialModule || null,
       adminLayoutId: options.initialLayoutId || null,
       searchQuery: null,
       searchType: null,

@@ -220,7 +220,7 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
             onNavigateToRecord={r => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })}
           />
         ) : tab === 'setup' ? (
-          <SetupHome onOpenObjectManager={openObjectManager} onOpenRecord={openRecord} initialNodeId={sectionFromUrl} />
+          <SetupHome onOpenObjectManager={openObjectManager} onOpenRecord={openRecord} initialNodeId={sectionFromUrl} initialModuleId={adminTabFromUrl} />
         ) : selectedObject ? (
           <ObjectDetail
             obj={selectedObject}

@@ -46,7 +46,7 @@ import HomePageBuilder from './HomePageBuilder'
 // carry a `nodeId` that maps to a renderer in NODE_RENDERERS below.
 // ---------------------------------------------------------------------------
 
-export default function SetupHome({ onOpenObjectManager, onOpenRecord, initialNodeId }) {
+export default function SetupHome({ onOpenObjectManager, onOpenRecord, initialNodeId, initialModuleId }) {
   const [selectedId, setSelectedId] = useState(initialNodeId || null)    // e.g. 'users', 'automation_rules'
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(() =>
@@ -138,6 +138,7 @@ export default function SetupHome({ onOpenObjectManager, onOpenRecord, initialNo
               nodeId={selectedId}
               onOpenRecord={onOpenRecord}
               onOpenObjectManager={onOpenObjectManager}
+              initialModuleId={initialModuleId}
             />
           </div>
         </div>
@@ -184,7 +185,7 @@ export default function SetupHome({ onOpenObjectManager, onOpenRecord, initialNo
       {/* ─── Right content pane ────────────────────────────────────── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {selectedId
-          ? <NodeContent nodeId={selectedId} onOpenRecord={onOpenRecord} onOpenObjectManager={onOpenObjectManager} />
+          ? <NodeContent nodeId={selectedId} onOpenRecord={onOpenRecord} onOpenObjectManager={onOpenObjectManager} initialModuleId={initialModuleId} />
           : <WelcomePane onOpenObjectManager={onOpenObjectManager} onNavigate={handleSelect} />}
       </div>
     </div>
@@ -449,7 +450,7 @@ function WelcomePane({ onOpenObjectManager, onNavigate }) {
 
 // ─── Node content — renders whichever setup item is selected ───────────
 
-function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
+function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager, initialModuleId }) {
   // Each node is rendered by a dedicated component that loads its own data.
   switch (nodeId) {
     case 'users':             return <UsersPane onOpenRecord={onOpenRecord} />
@@ -458,7 +459,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager }) {
     case 'help_articles':     return <HelpArticlesPane />
     case 'client_errors':     return <ClientErrorsPane />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
-    case 'module_sections':   return <ModuleSectionsPane />
+    case 'module_sections':   return <ModuleSectionsPane initialModuleId={initialModuleId} />
     case 'home_pages':        return <HomePageBuilder />
     case 'flow_builder':  return <FlowBuilderPane />
     case 'automation_run_log': return <AutomationRunLogPane />

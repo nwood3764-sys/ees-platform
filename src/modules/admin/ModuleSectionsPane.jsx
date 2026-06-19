@@ -19,7 +19,7 @@ const MODULE_LABELS = {
   tasks: 'Tasks', portal: 'Portal', reports: 'Reports', outreach_properties: 'Outreach',
 }
 
-export default function ModuleSectionsPane() {
+export default function ModuleSectionsPane({ initialModuleId } = {}) {
   const toast = useToast()
   const [allSections, setAllSections] = useState([])
   const [loading, setLoading] = useState(true)
@@ -36,7 +36,10 @@ export default function ModuleSectionsPane() {
       .then(rows => {
         if (cancelled) return
         setAllSections(rows)
-        const firstMod = rows[0]?.moduleId || null
+        // Pre-select the module the gear deep-linked to (initialModuleId) when
+        // it exists in the loaded set; otherwise fall back to the first module.
+        const hasInitial = initialModuleId && rows.some(r => r.moduleId === initialModuleId)
+        const firstMod = hasInitial ? initialModuleId : (rows[0]?.moduleId || null)
         setActiveModule(firstMod)
         setLoading(false)
       })

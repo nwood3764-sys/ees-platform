@@ -436,6 +436,8 @@ function AuthedApp({ session }) {
                 <TopbarSetupGear
                   selectedRecord={selectedRecord}
                   listTable={getTableForSection(activeModule, sectionFromUrl)}
+                  activeModule={activeModule}
+                  section={sectionFromUrl}
                   onOpenSetup={navigateToSetup}
                 />
                 <TopbarUserMenu

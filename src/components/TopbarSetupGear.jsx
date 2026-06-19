@@ -15,7 +15,9 @@ import { getRecordTypeColumn, getCurrentUserProfile } from '../data/layoutServic
  *       Edit Object         — opens Object Manager → this object's detail
  *       Edit Record Types   — opens Object Manager → record types sub-tab
  *   - On a non-record page:
- *       Open Setup          — single jump to /m/admin
+ *       On a module home/dashboard: Edit Module (nav/tabs) + Edit Page
+ *         (the Home Page builder), then Open Setup.
+ *       Otherwise: Open Setup — single jump to /m/admin
  *
  * The record_type lookup happens lazily when the menu opens, not on every
  * navigation, so there is no per-page query overhead. Cached for the
@@ -25,6 +27,8 @@ import { getRecordTypeColumn, getCurrentUserProfile } from '../data/layoutServic
 export default function TopbarSetupGear({
   selectedRecord,
   listTable,
+  activeModule,
+  section,
   onOpenSetup,
 }) {
   const [open, setOpen] = useState(false)
@@ -164,9 +168,30 @@ export default function TopbarSetupGear({
     if (onOpenSetup) onOpenSetup(null)  // /m/admin, no section
   }, [onOpenSetup])
 
+  // Edit Module — opens the Module Sections builder (which tabs/objects appear
+  // in a module's navigation, their order, labels, and visibility). The active
+  // module is carried so the builder can pre-select it.
+  const handleEditModule = useCallback(() => {
+    setOpen(false)
+    if (!onOpenSetup) return
+    onOpenSetup('module_sections', null, { initialModule: activeModule || null })
+  }, [onOpenSetup, activeModule])
+
+  // Edit Page — opens the Home Page builder (App-Builder-style editor for the
+  // landing/dashboard page). Salesforce parity: edit the page you're looking at.
+  const handleEditPage = useCallback(() => {
+    setOpen(false)
+    if (!onOpenSetup) return
+    onOpenSetup('home_pages')
+  }, [onOpenSetup])
+
   if (!isAdmin) return null
 
   const onRecordPage = !!(selectedRecord?.table && selectedRecord?.id)
+  // A module home/dashboard: no record open and no object list in view. This is
+  // where Edit Module (nav/tabs) and Edit Page (the dashboard) apply, mirroring
+  // Salesforce's gear on an app's Home page.
+  const onModuleHome = !effectiveTable && (!section || section === 'home')
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
@@ -223,6 +248,12 @@ export default function TopbarSetupGear({
               <MenuItem label="Edit Page Layout"  hint={onRecordPage ? 'For this object + record type' : 'Default layout for this object'} onClick={handleEditPageLayout} disabled={busy} />
               <MenuItem label="Edit Object"        hint="Columns, validations, record types" onClick={handleEditObject} />
               <MenuItem label="Edit Record Types"  hint="Activate, rename, reorder" onClick={handleEditRecordTypes} />
+              <div style={{ borderTop: `1px solid ${C.border}`, margin: '4px 0' }} />
+            </>
+          ) : onModuleHome ? (
+            <>
+              <MenuItem label="Edit Module" hint="Tabs, order, visibility for this module" onClick={handleEditModule} />
+              <MenuItem label="Edit Page"   hint="Build this home/dashboard page" onClick={handleEditPage} />
               <div style={{ borderTop: `1px solid ${C.border}`, margin: '4px 0' }} />
             </>
           ) : null}
