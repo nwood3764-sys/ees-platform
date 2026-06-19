@@ -10,6 +10,8 @@ import {
   addFieldValue,
   updateFieldValue,
   reorderFieldValues,
+  reorderFieldValuesForRecordType,
+  fetchRecordTypeValueOrder,
 } from '../../data/adminService'
 
 // ---------------------------------------------------------------------------
@@ -42,9 +44,16 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
   const [newValue, setNewValue] = useState('')
   const [editingValueId, setEditingValueId] = useState(null)
   const [editLabel, setEditLabel] = useState('')
+  const [editingDescId, setEditingDescId] = useState(null)
+  const [editDesc, setEditDesc] = useState('')
   const [valDragId, setValDragId] = useState(null)
   const [valDragOverId, setValDragOverId] = useState(null)
   const [valBusy, setValBusy] = useState(false)
+  // Per-record-type stage ordering (right panel, when a record type is scoped).
+  const [rtOrderDragId, setRtOrderDragId] = useState(null)
+  const [rtOrderDragOverId, setRtOrderDragOverId] = useState(null)
+  const [rtOrder, setRtOrder] = useState([])       // ordered value ids for active RT
+  const [rtOrderBusy, setRtOrderBusy] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -105,6 +114,18 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
     } finally { setValBusy(false) }
   }
 
+  async function commitDescription(id) {
+    setValBusy(true)
+    try {
+      await updateFieldValue(id, { description: editDesc.trim() })
+      await reloadValues()
+      setEditingDescId(null)
+      toast.success('Description saved')
+    } catch (e) {
+      toast.error(`Save failed: ${e.message || e}`)
+    } finally { setValBusy(false) }
+  }
+
   async function toggleValueActive(v) {
     setValBusy(true)
     try {
@@ -135,11 +156,52 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
     } finally { setValBusy(false) }
   }
 
+  // Per-record-type stage order drop.
+  async function onRtOrderDrop(targetId) {
+    if (!rtOrderDragId || rtOrderDragId === targetId) {
+      setRtOrderDragId(null); setRtOrderDragOverId(null); return
+    }
+    const arr = [...rtOrder]
+    const from = arr.indexOf(rtOrderDragId)
+    const to = arr.indexOf(targetId)
+    if (from < 0 || to < 0) { setRtOrderDragId(null); setRtOrderDragOverId(null); return }
+    const [moved] = arr.splice(from, 1)
+    arr.splice(to, 0, moved)
+    setRtOrder(arr) // optimistic
+    setRtOrderDragId(null); setRtOrderDragOverId(null)
+    setRtOrderBusy(true)
+    try {
+      await reorderFieldValuesForRecordType(activeRtId, arr)
+      toast.success('Stage order saved')
+    } catch (e) {
+      toast.error(`Stage order failed: ${e.message || e}`)
+      await loadRtOrder(activeRtId, draft)
+    } finally { setRtOrderBusy(false) }
+  }
+
   function selectRt(rt) {
     setActiveRtId(rt._id)
     setSavedNote('')
     const set = assignments[rt._id]
     setDraft(set ? new Set(set) : null)
+    // Seed the stage-order list for this record type.
+    loadRtOrder(rt._id, set)
+  }
+
+  async function loadRtOrder(rtId, scopedSet) {
+    if (!scopedSet || scopedSet.size === 0) { setRtOrder([]); return }
+    try {
+      const savedOrder = await fetchRecordTypeValueOrder(rtId)
+      // savedOrder is every scoped id in saved order; keep only currently
+      // scoped ids, then append any scoped ids missing from savedOrder
+      // (newly scoped, not yet positioned) in global value order.
+      const inSaved = savedOrder.filter(id => scopedSet.has(id))
+      const missing = values.map(v => v._id).filter(id => scopedSet.has(id) && !inSaved.includes(id))
+      setRtOrder([...inSaved, ...missing])
+    } catch {
+      // Fall back to global order of scoped values.
+      setRtOrder(values.map(v => v._id).filter(id => scopedSet.has(id)))
+    }
   }
 
   // A record type with draft===null is universal (all values). Toggling a value
@@ -188,6 +250,8 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
         return next
       })
       setSavedNote(draft == null ? 'Saved — all values available (universal).' : `Saved — ${ids.length} value${ids.length === 1 ? '' : 's'} available.`)
+      // Refresh the stage-order list to match the new scoped set.
+      await loadRtOrder(activeRtId, draft == null ? null : new Set(ids))
     } catch (e) {
       setSavedNote('Save failed: ' + (e.message || e))
     } finally {
@@ -266,13 +330,14 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
             <div></div><div>Label</div><div>Stored Value</div><div style={{ textAlign: 'center' }}>Status</div><div style={{ textAlign: 'right' }}>Actions</div>
           </div>
           {values.map(v => (
-            <div key={v._id}
-              draggable={editingValueId !== v._id}
+            <div key={v._id}>
+            <div
+              draggable={editingValueId !== v._id && editingDescId !== v._id}
               onDragStart={() => setValDragId(v._id)}
               onDragOver={e => { e.preventDefault(); setValDragOverId(v._id) }}
               onDrop={() => onValueDrop(v._id)}
               onDragEnd={() => { setValDragId(null); setValDragOverId(null) }}
-              style={{ display: 'grid', gridTemplateColumns: '32px 1fr 1fr 110px 100px', gap: 8, alignItems: 'center', padding: '8px 14px', borderBottom: `1px solid ${C.border}`,
+              style={{ display: 'grid', gridTemplateColumns: '32px 1fr 1fr 110px 168px', gap: 8, alignItems: 'center', padding: '8px 14px', borderBottom: `1px solid ${C.border}`,
                 background: valDragOverId === v._id && valDragId !== v._id ? '#f0faf5' : (v.active ? 'transparent' : '#fafbfd'),
                 opacity: valDragId === v._id ? 0.5 : (v.active ? 1 : 0.6) }}>
               <div style={{ cursor: 'grab', color: C.textMuted, textAlign: 'center', fontSize: 14 }} title="Drag to reorder">⋮⋮</div>
@@ -297,11 +362,42 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
                   <button onClick={() => { setEditingValueId(v._id); setEditLabel(v.label) }}
                     style={{ padding: '4px 9px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.page, color: C.textSecondary, fontSize: 11, cursor: 'pointer' }}>Rename</button>
                 )}
+                <button onClick={() => { setEditingDescId(editingDescId === v._id ? null : v._id); setEditDesc(v.description || '') }} disabled={valBusy}
+                  style={{ padding: '4px 9px', borderRadius: 5, border: `1px solid ${C.border}`, background: editingDescId === v._id ? '#eef6ff' : C.page, color: C.textSecondary, fontSize: 11, cursor: 'pointer' }}
+                  title="Edit the guidance description shown under the status path for this stage">
+                  Describe{v.description ? ' •' : ''}
+                </button>
                 <button onClick={() => toggleValueActive(v)} disabled={valBusy}
                   style={{ padding: '4px 9px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.page, color: v.active ? '#b3541e' : '#1a7a4e', fontSize: 11, cursor: 'pointer' }}>
                   {v.active ? 'Deactivate' : 'Activate'}
                 </button>
               </div>
+            </div>
+            {editingDescId === v._id && (
+              <div style={{ padding: '10px 14px 12px 46px', borderBottom: `1px solid ${C.border}`, background: '#fafcff' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Stage description — shown under the status path when this is the current stage
+                </div>
+                <textarea
+                  autoFocus
+                  value={editDesc}
+                  onChange={e => setEditDesc(e.target.value)}
+                  placeholder="What this stage means and what has to happen to advance."
+                  rows={2}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12.5, background: C.card, color: C.textPrimary, outline: 'none', resize: 'vertical', lineHeight: 1.5 }}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <button onClick={() => commitDescription(v._id)} disabled={valBusy}
+                    style={{ padding: '6px 14px', borderRadius: 5, border: 'none', background: C.emerald, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                    {valBusy ? 'Saving…' : 'Save Description'}
+                  </button>
+                  <button onClick={() => setEditingDescId(null)} disabled={valBusy}
+                    style={{ padding: '6px 12px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.page, color: C.textSecondary, fontSize: 12, cursor: 'pointer' }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
             </div>
           ))}
           {values.length === 0 && (
@@ -397,6 +493,40 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
                     <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>This field has no values.</div>
                   )}
                 </div>
+
+                {!isUniversal && rtOrder.length > 1 && (
+                  <div style={{ borderTop: `1px solid ${C.border}`, background: '#fafcff' }}>
+                    <div style={{ padding: '10px 14px 6px', fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Stage order for {activeRt.label}
+                    </div>
+                    <div style={{ padding: '0 14px 6px', fontSize: 11.5, color: C.textSecondary, lineHeight: 1.5 }}>
+                      Drag to set the order these stages appear in the status path for this record type.
+                    </div>
+                    <div style={{ maxHeight: 300, overflow: 'auto', padding: '4px 0 8px' }}>
+                      {rtOrder.map((vid, i) => {
+                        const v = values.find(x => x._id === vid)
+                        if (!v) return null
+                        return (
+                          <div key={vid}
+                            draggable
+                            onDragStart={() => setRtOrderDragId(vid)}
+                            onDragOver={e => { e.preventDefault(); setRtOrderDragOverId(vid) }}
+                            onDrop={() => onRtOrderDrop(vid)}
+                            onDragEnd={() => { setRtOrderDragId(null); setRtOrderDragOverId(null) }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', margin: '0 8px', borderRadius: 5,
+                              background: rtOrderDragOverId === vid && rtOrderDragId !== vid ? '#e6f4ff' : 'transparent',
+                              opacity: rtOrderDragId === vid ? 0.5 : 1, cursor: 'grab' }}>
+                            <span style={{ color: C.textMuted, fontSize: 14 }} title="Drag to reorder">⋮⋮</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', minWidth: 20 }}>{i + 1}</span>
+                            <span style={{ flex: 1, fontSize: 12.5, color: C.textPrimary }}>{v.label}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {rtOrderBusy && <div style={{ padding: '0 14px 8px', fontSize: 11, color: C.textMuted }}>Saving order…</div>}
+                  </div>
+                )}
+
                 <div style={{ padding: '10px 14px', borderTop: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <button
                     onClick={save}

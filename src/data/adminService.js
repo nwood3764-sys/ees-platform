@@ -887,7 +887,7 @@ export async function fetchPicklistFieldsFor(tableName) {
 export async function fetchFieldValues(tableName, field) {
   const { data, error } = await supabase
     .from('picklist_values')
-    .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
+    .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active, picklist_description')
     .eq('picklist_object', tableName)
     .eq('picklist_field', field)
     .order('picklist_sort_order', { ascending: true })
@@ -899,6 +899,7 @@ export async function fetchFieldValues(tableName, field) {
     label: r.picklist_label || r.picklist_value,
     sortOrder: r.picklist_sort_order ?? 0,
     active: r.picklist_is_active !== false,
+    description: r.picklist_description || '',
   }))
 }
 
@@ -1030,12 +1031,13 @@ export async function addFieldValue(object, field, value, label, sortOrder) {
 }
 
 export async function updateFieldValue(id, patch) {
-  // patch: { label?, value?, sortOrder?, isActive? }
+  // patch: { label?, value?, sortOrder?, isActive?, description? }
   const upd = {}
   if (patch.label !== undefined) upd.picklist_label = patch.label
   if (patch.value !== undefined) upd.picklist_value = patch.value
   if (patch.sortOrder !== undefined) upd.picklist_sort_order = patch.sortOrder
   if (patch.isActive !== undefined) upd.picklist_is_active = patch.isActive
+  if (patch.description !== undefined) upd.picklist_description = patch.description || null
   const { error } = await supabase.from('picklist_values').update(upd).eq('id', id)
   if (error) throw error
 }
@@ -1050,6 +1052,42 @@ export async function reorderFieldValues(ids) {
       .eq('id', ids[i])
     if (error) throw error
   }
+}
+
+// Per-record-type stage order: writes pvrta_sort_order on the scope rows for
+// one record type. valueIds is the desired order of value ids (only the
+// values scoped to this record type). Positions are 0-based.
+export async function reorderFieldValuesForRecordType(recordTypeId, valueIds) {
+  for (let i = 0; i < valueIds.length; i++) {
+    const { error } = await supabase
+      .from('picklist_value_record_type_assignments')
+      .update({ pvrta_sort_order: i })
+      .eq('pvrta_record_type_id', recordTypeId)
+      .eq('pvrta_picklist_value_id', valueIds[i])
+      .eq('pvrta_is_deleted', false)
+    if (error) throw error
+  }
+}
+
+// Scoped value ids for one record type, in saved per-record-type order
+// (pvrta_sort_order, NULLs last). Used to seed the stage-order reorder UI.
+export async function fetchRecordTypeValueOrder(recordTypeId) {
+  const { data, error } = await supabase
+    .from('picklist_value_record_type_assignments')
+    .select('pvrta_picklist_value_id, pvrta_sort_order')
+    .eq('pvrta_record_type_id', recordTypeId)
+    .eq('pvrta_is_deleted', false)
+  if (error) throw error
+  return (data || [])
+    .slice()
+    .sort((a, b) => {
+      const av = a.pvrta_sort_order, bv = b.pvrta_sort_order
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      return av - bv
+    })
+    .map(r => r.pvrta_picklist_value_id)
 }
 
 // ── Field metadata + DDL field creation ──────────────────────────────────
@@ -2167,6 +2205,7 @@ export async function fetchStatusTransitionsFor(object, statusField) {
     .select(`
       id, st_record_number, st_from_status_id, st_to_status_id,
       st_transition_label, st_description, st_sort_order, st_is_active,
+      st_trigger_type, st_trigger_field, st_trigger_value,
       st_created_at, st_updated_at
     `)
     .eq('st_object',       object)
@@ -2193,6 +2232,9 @@ export async function fetchStatusTransitionsFor(object, statusField) {
       description:  t.st_description,
       sortOrder:    t.st_sort_order || 0,
       isActive:     t.st_is_active,
+      triggerType:  t.st_trigger_type || 'manual',
+      triggerField: t.st_trigger_field,
+      triggerValue: t.st_trigger_value,
       createdAt:    t.st_created_at,
       updatedAt:    t.st_updated_at,
     })),
@@ -2201,6 +2243,7 @@ export async function fetchStatusTransitionsFor(object, statusField) {
 
 export async function createStatusTransition({
   object, statusField, fromStatusId, toStatusId, label, description, sortOrder, isActive,
+  triggerType, triggerField, triggerValue,
 }) {
   const ownerId = await getCurrentUserId()
   if (!ownerId) throw new Error('Not authenticated — cannot author a transition without a user_id.')
@@ -2215,6 +2258,9 @@ export async function createStatusTransition({
     st_description:      description || null,
     st_sort_order:       sortOrder ?? 0,
     st_is_active:        isActive !== false,
+    st_trigger_type:     triggerType || 'manual',
+    st_trigger_field:    triggerField || null,
+    st_trigger_value:    triggerValue || null,
     st_owner:            ownerId,
     st_created_by:       ownerId,
   }
@@ -2238,6 +2284,9 @@ export async function updateStatusTransition(transitionId, patch) {
   if ('isActive'     in patch) mapped.st_is_active        = patch.isActive
   if ('fromStatusId' in patch) mapped.st_from_status_id   = patch.fromStatusId || null
   if ('toStatusId'   in patch) mapped.st_to_status_id     = patch.toStatusId
+  if ('triggerType'  in patch) mapped.st_trigger_type     = patch.triggerType || 'manual'
+  if ('triggerField' in patch) mapped.st_trigger_field    = patch.triggerField || null
+  if ('triggerValue' in patch) mapped.st_trigger_value    = patch.triggerValue || null
   mapped.st_updated_by = userId
   mapped.st_updated_at = new Date().toISOString()
 

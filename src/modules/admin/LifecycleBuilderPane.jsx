@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { C } from '../../data/constants'
+import { supabase } from '../../lib/supabase'
 import { LoadingState, ErrorState } from '../../components/UI'
 import { ListView } from '../../components/ListView'
 import HelpIcon from '../../components/help/HelpIcon'
@@ -511,6 +512,23 @@ function TransitionFormModal({ mode, object, statusField, statuses, existing, in
   const [description,  setDescription]  = useState(initial?.description  || '')
   const [sortOrder,    setSortOrder]    = useState(initial?.sortOrder    ?? 0)
   const [isActive,     setIsActive]     = useState(initial?.isActive     !== false)
+  const [triggerType,  setTriggerType]  = useState(initial?.triggerType  || 'manual')
+  const [triggerField, setTriggerField] = useState(initial?.triggerField || '')
+  const [triggerValue, setTriggerValue] = useState(initial?.triggerValue || '')
+
+  // Columns on the object, for the trigger-field picker. Loaded once per modal.
+  const [objectFields, setObjectFields] = useState([])
+  useEffect(() => {
+    let alive = true
+    supabase.rpc('lifecycle_object_columns', { p_object: object })
+      .then(({ data, error }) => {
+        if (!alive || error || !data) return
+        setObjectFields(data.map(r => r.column_name))
+      })
+    return () => { alive = false }
+  }, [object])
+
+  const isFieldTrigger = triggerType === 'field_populated' || triggerType === 'field_equals' || triggerType === 'date_reached'
 
   // Validate before submit — server enforces the same rules but bouncing
   // them client-side keeps the modal responsive and the errors specific.
@@ -527,8 +545,10 @@ function TransitionFormModal({ mode, object, statusField, statuses, existing, in
       return tFrom === fromIdNormalized && t.toStatusId === toStatusId
     })
     if (collision) return `A transition from this status to this destination already exists (${collision.recordNumber}).`
+    if (isFieldTrigger && !triggerField) return 'Pick the field that fires this transition.'
+    if (triggerType === 'field_equals' && !triggerValue.trim()) return 'Enter the value the field must equal to fire this transition.'
     return null
-  }, [fromIdNormalized, toStatusId, label, existing, isEdit, initial])
+  }, [fromIdNormalized, toStatusId, label, existing, isEdit, initial, isFieldTrigger, triggerField, triggerType, triggerValue])
 
   const submit = () => {
     if (validationError) return
@@ -539,6 +559,9 @@ function TransitionFormModal({ mode, object, statusField, statuses, existing, in
       description: description.trim() || null,
       sortOrder:   Number(sortOrder) || 0,
       isActive,
+      triggerType,
+      triggerField: isFieldTrigger ? triggerField : null,
+      triggerValue: triggerType === 'field_equals' ? triggerValue.trim() : null,
     })
   }
 
@@ -618,6 +641,67 @@ function TransitionFormModal({ mode, object, statusField, statuses, existing, in
               rows={3}
             />
           </FormField>
+
+          {/* What fires this transition — the advancement logic. */}
+          <div style={{
+            marginTop: 6, marginBottom: 4, paddingTop: 14,
+            borderTop: `1px solid ${C.border}`,
+          }}>
+            <div style={{
+              fontSize: 12, fontWeight: 700, color: C.textPrimary,
+              letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 4,
+            }}>
+              What fires this transition?
+            </div>
+            <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 12, lineHeight: 1.5 }}>
+              Manual transitions advance when a person takes an action (e.g. an internal approval).
+              Field transitions advance automatically the moment a field is populated or set to a value.
+            </div>
+
+            <FormField label="Trigger Type" required>
+              <select
+                value={triggerType}
+                onChange={(e) => setTriggerType(e.target.value)}
+                disabled={busy}
+                style={inputStyle}
+              >
+                <option value="manual">Manual — advanced by a person (internal approval, action)</option>
+                <option value="field_populated">When a field is populated</option>
+                <option value="field_equals">When a field equals a specific value</option>
+                <option value="date_reached">When a date field is reached</option>
+              </select>
+            </FormField>
+
+            {isFieldTrigger && (
+              <FormField label="Trigger Field" required>
+                <select
+                  value={triggerField}
+                  onChange={(e) => setTriggerField(e.target.value)}
+                  disabled={busy}
+                  style={inputStyle}
+                >
+                  <option value="">— Select field —</option>
+                  {objectFields.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </FormField>
+            )}
+
+            {triggerType === 'field_equals' && (
+              <FormField label="Equals Value" required>
+                <input
+                  type="text"
+                  value={triggerValue}
+                  onChange={(e) => setTriggerValue(e.target.value)}
+                  placeholder="The value the field must equal to fire"
+                  disabled={busy}
+                  style={inputStyle}
+                  maxLength={200}
+                />
+              </FormField>
+            )}
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <FormField label="Sort Order">
