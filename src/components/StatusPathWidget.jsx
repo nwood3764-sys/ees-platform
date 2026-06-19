@@ -37,15 +37,17 @@
 //   show_completed_count bool  — show "Status: <label>" label above the strip
 // =============================================================================
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
-import { useToast } from './Toast'
 import { getRecordTypeValue } from '../data/layoutService'
 
+// Display-only chevron. The strip is a visual status indicator, not a
+// control — chevrons are never clickable. Stage advancement is driven by
+// field-triggered lifecycle transitions, never by a user clicking a stage.
 function ChevronSegment({
   label, state /* 'complete' | 'current' | 'future' */,
-  isFirst, isLast, onClick, disabled,
+  isFirst, isLast,
 }) {
   const palette = {
     complete: { bg: '#2aab72', text: '#fff',          border: '#2aab72' },
@@ -63,48 +65,40 @@ function ChevronSegment({
   })()
 
   return (
-    <button
-      type="button"
-      onClick={disabled ? undefined : onClick}
-      disabled={disabled}
+    <div
       style={{
         flex: 1,
         minWidth: 0,
         height: 36,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         padding: `0 ${isLast ? 14 : 18}px 0 ${isFirst ? 14 : 22}px`,
         background: palette.bg,
         color: palette.text,
-        border: 'none',
         clipPath: clip,
         fontSize: 12,
         fontWeight: state === 'current' ? 700 : 500,
-        fontFamily: 'inherit',
-        cursor: disabled ? 'wait' : 'pointer',
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         marginLeft: isFirst ? 0 : -2,
-        transition: 'filter 150ms ease',
         textAlign: 'center',
+        userSelect: 'none',
       }}
-      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.filter = 'brightness(1.08)' }}
-      onMouseLeave={(e) => { if (!disabled) e.currentTarget.style.filter = 'none' }}
-      title={state === 'current' ? `Current status: ${label}` : `Change status to: ${label}`}
     >
       {label}
-    </button>
+    </div>
   )
 }
 
 export default function StatusPathWidget({ widget, parentRecordId, tableName, record, onStatusChanged }) {
-  const toast = useToast()
   const statusField  = widget?.widget_config?.status_field
   const showGuidance = widget?.widget_config?.show_guidance !== false
   const showCounter  = widget?.widget_config?.show_completed_count !== false
 
   const [picklistValues, setPicklistValues] = useState(null)
   const [transitions, setTransitions]       = useState(null)
-  const [submitting, setSubmitting]         = useState(false)
 
   // Record type for the current record. Used to filter the chevron strip via
   // the picklist_values_for_record_type RPC, which applies the universal-
@@ -146,27 +140,6 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
     () => (picklistValues || []).findIndex(p => p.id === currentStatusId),
     [picklistValues, currentStatusId]
   )
-
-  const handleChevronClick = useCallback(async (targetStatusId, targetLabel) => {
-    if (submitting) return
-    if (targetStatusId === currentStatusId) return  // no-op clicking current
-    setSubmitting(true)
-    try {
-      const { error } = await supabase.rpc('change_record_status', {
-        p_object:        tableName,
-        p_record_id:     parentRecordId,
-        p_status_field:  statusField,
-        p_to_status_id:  targetStatusId,
-      })
-      if (error) throw error
-      toast.success(`Status changed to "${targetLabel}"`)
-      onStatusChanged?.()
-    } catch (e) {
-      toast.error(`Cannot change status to "${targetLabel}": ${e.message || e}`)
-    } finally {
-      setSubmitting(false)
-    }
-  }, [submitting, currentStatusId, tableName, parentRecordId, statusField, onStatusChanged, toast])
 
   if (picklistValues === null) return null
   if (picklistValues.length === 0) return null
@@ -214,8 +187,6 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
               state={state}
               isFirst={idx === 0}
               isLast={idx === picklistValues.length - 1}
-              onClick={() => handleChevronClick(stage.id, stage.picklist_label)}
-              disabled={submitting}
             />
           )
         })}
