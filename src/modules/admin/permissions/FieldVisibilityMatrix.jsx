@@ -282,7 +282,7 @@ export default function FieldVisibilityMatrix({
                       const eff = getEffective(f.name)
                       const dirty = !!pending[f.name]
                       return (
-                        <tr key={f.name} style={{ background: dirty ? '#fff8e6' : 'transparent' }}>
+                        <tr key={f.name} style={{ background: dirty ? '#eef5fc' : 'transparent' }}>
                           <td style={{ ...tdStyle, textAlign: 'left' }}>
                             <div style={{ fontWeight: 500, color: C.textPrimary }}>{f.label}</div>
                             <div style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>

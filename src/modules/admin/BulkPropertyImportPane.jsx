@@ -526,8 +526,8 @@ function Step2Upload({ fileInputRef, parsing, parseError, onPick, onFile }) {
       {parseError && (
         <div style={{
           marginTop: 14, padding: 12,
-          background: '#fce8e8', border: '1px solid #f3b4b4', borderRadius: 5,
-          color: '#8a1a1a', fontSize: 12.5,
+          background: '#e8f1fb', border: '1px solid #f3b4b4', borderRadius: 5,
+          color: '#1e466b', fontSize: 12.5,
         }}>
           {parseError}
         </div>
@@ -555,8 +555,8 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
         display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16,
       }}>
         <SummaryCard color="#1a7a4e" bg="#e8f8f2" label="Clean" value={counts.clean} />
-        <SummaryCard color="#8a5a1a" bg="#fff4e0" label="Warnings" value={counts.warnings} />
-        <SummaryCard color="#8a1a1a" bg="#fce8e8" label="Errors" value={counts.errors} />
+        <SummaryCard color="#1e466b" bg="#e8f1fb" label="Warnings" value={counts.warnings} />
+        <SummaryCard color="#1e466b" bg="#e8f1fb" label="Errors" value={counts.errors} />
         <SummaryCard color={C.textSecondary} bg="#f0f3f8" label="Skipped" value={counts.skipped} />
       </div>
 
@@ -593,7 +593,7 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
           onClick={onCommit}
           disabled={blockedByErrors || committing}
           style={{
-            background: blockedByErrors ? '#f0f3f8' : '#e85c5c',
+            background: blockedByErrors ? '#f0f3f8' : '#7eb3e8',
             color: blockedByErrors ? C.textMuted : '#fff',
             border: 'none', borderRadius: 5,
             padding: '7px 16px', fontSize: 13, fontWeight: 700,
@@ -635,11 +635,11 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
 
                 let statusColor, statusBg, statusLabel
                 if (hasHardError || (buildingDupeOnServer && action !== 'skip')) {
-                  statusColor = '#8a1a1a'; statusBg = '#fce8e8'; statusLabel = 'Error'
+                  statusColor = '#1e466b'; statusBg = '#e8f1fb'; statusLabel = 'Error'
                 } else if (action === 'skip') {
                   statusColor = C.textSecondary; statusBg = '#f0f3f8'; statusLabel = 'Skip'
                 } else if (a.warnings.length > 0 || sp.existing_property) {
-                  statusColor = '#8a5a1a'; statusBg = '#fff4e0'; statusLabel = 'Warning'
+                  statusColor = '#1e466b'; statusBg = '#e8f1fb'; statusLabel = 'Warning'
                 } else {
                   statusColor = '#1a7a4e'; statusBg = '#e8f8f2'; statusLabel = 'OK'
                 }
@@ -690,12 +690,12 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
                     <td style={TD_MONO}>{r.building_unit_count || ''}</td>
                     <td style={TD}>
                       {a.errors.length > 0 && (
-                        <div style={{ color: '#8a1a1a', fontSize: 11 }}>
+                        <div style={{ color: '#1e466b', fontSize: 11 }}>
                           {a.errors.map((e, k) => <div key={`e${k}`}>• {e}</div>)}
                         </div>
                       )}
                       {a.warnings.length > 0 && (
-                        <div style={{ color: '#8a5a1a', fontSize: 11 }}>
+                        <div style={{ color: '#1e466b', fontSize: 11 }}>
                           {a.warnings.map((w, k) => <div key={`w${k}`}>• {w}</div>)}
                         </div>
                       )}
@@ -705,7 +705,7 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
                         </div>
                       )}
                       {buildingDupeOnServer && (
-                        <div style={{ color: '#8a1a1a', fontSize: 11 }}>
+                        <div style={{ color: '#1e466b', fontSize: 11 }}>
                           • Building <strong>{sp.existing_building?.name}</strong> already exists at this property ({sp.existing_building?.record_number}) — block or skip
                         </div>
                       )}

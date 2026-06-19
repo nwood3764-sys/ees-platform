@@ -164,7 +164,7 @@ function QualHome({ setSec, assessments, applications, efrReports }) {
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
           <div style={{ padding:'12px 16px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
             <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary }}>Assessments — To Be Reviewed</div>
-            <span style={{ background:toReview.length>0?C.amber:'#e8f8f2', color:toReview.length>0?'#8a5a0a':'#1a7a4e', fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:10 }}>{toReview.length}</span>
+            <span style={{ background:toReview.length>0?C.amber:'#e8f8f2', color:toReview.length>0?'#1e466b':'#1a7a4e', fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:10 }}>{toReview.length}</span>
           </div>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
             <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>{['Record #','Assessment','Property','Assessor','Completed','Buildings','Units','Action'].map(h => <th key={h} style={{ padding:'9px 12px', textAlign:'left', color:C.textMuted, fontWeight:500, fontSize:11, textTransform:'uppercase', letterSpacing:'0.04em' }}>{h}</th>)}</tr></thead>
@@ -178,7 +178,7 @@ function QualHome({ setSec, assessments, applications, efrReports }) {
                   <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{a.completedDate || '—'}</td>
                   <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{a.buildings}</td>
                   <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{a.units}</td>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}` }}><button style={{ background:'#fef3e2', color:'#8a5a0a', border:`1px solid #f0d8a0`, borderRadius:5, padding:'3px 8px', fontSize:11, fontWeight:600, cursor:'pointer' }}>Review</button></td>
+                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}` }}><button style={{ background:'#e8f1fb', color:'#1e466b', border:`1px solid #f0d8a0`, borderRadius:5, padding:'3px 8px', fontSize:11, fontWeight:600, cursor:'pointer' }}>Review</button></td>
                 </TableRow>
               ))}
               {toReview.length === 0 && <tr><td colSpan={8} style={{ padding:'24px', textAlign:'center', color:C.textMuted, fontSize:12 }}>No assessments pending review.</td></tr>}
@@ -197,7 +197,7 @@ function QualHome({ setSec, assessments, applications, efrReports }) {
           </div>
           {corrections.map((a,i) => (
             <div key={a.id} style={{ padding:'10px 14px', borderBottom:i<corrections.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background='#fff8f8'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+              onMouseEnter={e => e.currentTarget.style.background='#eef5fc'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
               <div style={{ color:C.danger, fontSize:12, fontWeight:500, marginBottom:2 }}>{a.id}</div>
               <div style={{ color:C.textSecondary, fontSize:11, marginBottom:1 }}>{a.property}</div>
               <ProgramTag value={a.program} />

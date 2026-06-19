@@ -312,7 +312,7 @@ function ErrorList({ rows, selectedId, onSelect }) {
 function ErrorRow({ row, selected, onClick }) {
   // The severity color hint at the left edge of the row. Helps the
   // admin scan a list of mixed-severity errors at a glance.
-  const sevColor = row.ce_severity === 'fatal'   ? '#c0392b'
+  const sevColor = row.ce_severity === 'fatal'   ? '#2c5f8a'
                 : row.ce_severity === 'warning' ? '#f39c12'
                 :                                  '#7f8c8d'
 
@@ -432,7 +432,7 @@ function ErrorDetail({ row, onMarkResolved, onMarkUnresolved }) {
                 row.ce_severity === 'fatal' ? '#fae0dc' :
                 row.ce_severity === 'warning' ? '#fdebd0' : '#e8eef4',
               color:
-                row.ce_severity === 'fatal' ? '#c0392b' :
+                row.ce_severity === 'fatal' ? '#2c5f8a' :
                 row.ce_severity === 'warning' ? '#9c640c' : '#34495e',
               textTransform: 'uppercase', letterSpacing: 0.5,
             }}>

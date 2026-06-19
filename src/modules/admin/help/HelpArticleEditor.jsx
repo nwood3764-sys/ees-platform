@@ -93,7 +93,7 @@ export default function HelpArticleEditor({ articleId, onBack, onChanged, onDele
               <span style={{ margin: '0 8px' }}>·</span>
               {article.ha_is_published
                 ? <span style={{ color: '#1a7a4e' }}>● Published</span>
-                : <span style={{ color: '#8a5a0a' }}>○ Draft</span>}
+                : <span style={{ color: '#1e466b' }}>○ Draft</span>}
             </div>
           </div>
         </div>

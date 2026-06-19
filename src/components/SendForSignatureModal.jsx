@@ -371,7 +371,7 @@ function PickStep({ templates, loadError, chosenTemplateId, onPick, parentObject
   if (templates === null) return <div style={{ color: C.textMuted, fontSize: 13 }}>Loading templates…</div>
   if (templates.length === 0) {
     return (
-      <div style={{ padding: 18, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, fontSize: 13, color: '#92400e' }}>
+      <div style={{ padding: 18, background: '#eef5fc', border: '1px solid #fde68a', borderRadius: 6, fontSize: 13, color: '#1e466b' }}>
         No Active document templates are available for <b>{parentObject}</b>. An admin needs to publish a template in Setup → Document Templates that targets this object (or has no related-object filter).
       </div>
     )
@@ -492,7 +492,7 @@ function AnchorMismatchBanner({ mismatch, recipientCount, onBackToRecipients }) 
     lineHeight: 1.55,
   }
   const icon = (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#b45309" strokeWidth="2"
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1e466b" strokeWidth="2"
          strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
       <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
       <line x1="12" y1="9"  x2="12" y2="13"/>
@@ -524,7 +524,7 @@ function AnchorMismatchBanner({ mismatch, recipientCount, onBackToRecipients }) 
               ))}
             </ul>
             <button onClick={onBackToRecipients} style={{
-              marginTop: 4, background: '#fff', color: '#92400e',
+              marginTop: 4, background: '#fff', color: '#1e466b',
               border: '1px solid #fde68a', borderRadius: 5,
               padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
             }}>
@@ -626,7 +626,7 @@ function SentStep({ result }) {
         </div>
       )}
       {firstResult && firstResult.status === 'not_connected' && (
-        <div style={{ padding: 10, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#92400e' }}>
+        <div style={{ padding: 10, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#1e466b' }}>
           <b>Outlook isn't connected.</b> Copy the signing link below and send it manually. Connect Outlook from the user menu (Integrations) so future signing requests email out automatically.
         </div>
       )}
@@ -637,7 +637,7 @@ function SentStep({ result }) {
       )}
 
       {result.dropped_anchors?.length > 0 && (
-        <div style={{ padding: 10, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#92400e' }}>
+        <div style={{ padding: 10, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#1e466b' }}>
           <b>Note:</b> {result.dropped_anchors.length} anchor{result.dropped_anchors.length === 1 ? ' was' : 's were'} skipped because no recipient matched their order: {result.dropped_anchors.join(', ')}
         </div>
       )}

@@ -275,7 +275,7 @@ export default function WorkOrderScheduleModal({
                   <div style={readStyle}>
                     {duration > 0
                       ? `${duration} min`
-                      : <span style={{ color: '#b45309' }}>not set</span>}
+                      : <span style={{ color: '#1e466b' }}>not set</span>}
                     {durationSource && duration > 0 && (
                       <span style={{ fontSize: 10.5, color: C.textMuted, marginLeft: 6 }}>
                         ({durationSource === 'work_order_override' ? 'WO override' : 'work-type default'})
@@ -288,7 +288,7 @@ export default function WorkOrderScheduleModal({
               {/* Status guard — must be 'To Be Scheduled' */}
               {!statusOk && (
                 <div style={{
-                  padding: '8px 10px', background: '#fffbeb', color: '#92400e',
+                  padding: '8px 10px', background: '#eef5fc', color: '#1e466b',
                   border: '1px solid #fde68a', borderRadius: 5, fontSize: 12.5, marginBottom: 12,
                 }}>
                   Only work orders in <strong>To Be Scheduled</strong> status can be scheduled here.
@@ -299,7 +299,7 @@ export default function WorkOrderScheduleModal({
               {/* Duration guard */}
               {statusOk && (!duration || duration <= 0) && (
                 <div style={{
-                  padding: '8px 10px', background: '#fffbeb', color: '#92400e',
+                  padding: '8px 10px', background: '#eef5fc', color: '#1e466b',
                   border: '1px solid #fde68a', borderRadius: 5, fontSize: 12.5, marginBottom: 12,
                 }}>
                   No duration is set on this work order's work type. Set <strong>work_type_duration_minutes</strong>
@@ -412,7 +412,7 @@ const inputStyle = {
 }
 const errorBox = {
   padding: '8px 10px', background: '#fef2f2', color: '#991b1b',
-  border: '1px solid #fecaca', borderRadius: 5, fontSize: 12.5, marginBottom: 10,
+  border: '1px solid #bcd9f2', borderRadius: 5, fontSize: 12.5, marginBottom: 10,
 }
 const btnSecondary = {
   padding: '7px 14px', fontSize: 12.5, fontWeight: 500,

@@ -331,7 +331,7 @@ export default function ConversationPanelWidget({
           </span>
           {totalUnread > 0 && (
             <span style={{
-              background: '#fce8e8', color: '#8a1a1a',
+              background: '#e8f1fb', color: '#1e466b',
               fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
               padding: '2px 8px', borderRadius: 10,
               textTransform: 'uppercase',
@@ -420,8 +420,8 @@ export default function ConversationPanelWidget({
                 )}
                 {threadsError && (
                   <div style={{
-                    padding: 12, fontSize: 12, color: '#8a1a1a',
-                    background: '#fce8e8', borderBottom: `1px solid ${C.border}`,
+                    padding: 12, fontSize: 12, color: '#1e466b',
+                    background: '#e8f1fb', borderBottom: `1px solid ${C.border}`,
                   }}>
                     {threadsError}
                   </div>
@@ -492,8 +492,8 @@ export default function ConversationPanelWidget({
                     )}
                     {messagesError && (
                       <div style={{
-                        padding: 10, fontSize: 12, color: '#8a1a1a',
-                        background: '#fce8e8', border: '1px solid #f3b4b4',
+                        padding: 10, fontSize: 12, color: '#1e466b',
+                        background: '#e8f1fb', border: '1px solid #f3b4b4',
                         borderRadius: 6, marginBottom: 10,
                       }}>
                         {messagesError}
@@ -589,7 +589,7 @@ function ThreadListItem({ thread, selected, onSelect }) {
         </span>
         {unread > 0 && (
           <span style={{
-            background: '#e85c5c', color: '#fff',
+            background: '#7eb3e8', color: '#fff',
             fontSize: 10, fontWeight: 700,
             padding: '1px 6px', borderRadius: 9,
             minWidth: 18, textAlign: 'center',
@@ -735,12 +735,12 @@ function MessageBubble({ message, attachments = [] }) {
     }}>
       <div style={{
         maxWidth: '78%',
-        background: isFailed ? '#fce8e8' : dir.bg,
+        background: isFailed ? '#e8f1fb' : dir.bg,
         border: `1px solid ${isFailed ? '#f3b4b4' : dir.border}`,
         borderRadius: 10,
         padding: '8px 12px',
         fontSize: 13, lineHeight: 1.45,
-        color: isFailed ? '#8a1a1a' : dir.color,
+        color: isFailed ? '#1e466b' : dir.color,
         whiteSpace: 'pre-wrap', wordBreak: 'break-word',
       }}>
         {message.msg_body || '—'}
@@ -767,11 +767,11 @@ function MessageBubble({ message, attachments = [] }) {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '6px 10px',
-                  background: isFailed ? '#fce8e8' : (blocked ? '#fce8e8' : '#ffffff'),
+                  background: isFailed ? '#e8f1fb' : (blocked ? '#e8f1fb' : '#ffffff'),
                   border: `1px solid ${isFailed ? '#f3b4b4' : (blocked ? '#f3b4b4' : dir.border)}`,
                   borderRadius: 6,
                   fontSize: 12,
-                  color: blocked ? '#8a1a1a' : dir.color,
+                  color: blocked ? '#1e466b' : dir.color,
                   cursor: blocked ? 'not-allowed' : 'pointer',
                   textAlign: 'left', width: '100%',
                   fontFamily: 'inherit',
@@ -794,7 +794,7 @@ function MessageBubble({ message, attachments = [] }) {
                 </div>
                 {isPending && (
                   <span style={{
-                    background: '#fff4e0', color: '#8a5a1a',
+                    background: '#e8f1fb', color: '#1e466b',
                     fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
                     padding: '1px 6px', borderRadius: 8, textTransform: 'uppercase',
                   }} title="Virus scan pending — ClamAV hook ships in a follow-up slice">
@@ -803,7 +803,7 @@ function MessageBubble({ message, attachments = [] }) {
                 )}
                 {isInfected && (
                   <span style={{
-                    background: '#fce8e8', color: '#8a1a1a',
+                    background: '#e8f1fb', color: '#1e466b',
                     fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
                     padding: '1px 6px', borderRadius: 8, textTransform: 'uppercase',
                   }}>
@@ -838,7 +838,7 @@ function MessageBubble({ message, attachments = [] }) {
           <span style={{ color: C.textMuted, fontStyle: 'italic' }}>• queued</span>
         )}
         {isFailed && (
-          <span style={{ color: '#8a1a1a', fontWeight: 600 }}>
+          <span style={{ color: '#1e466b', fontWeight: 600 }}>
             • failed{message.msg_provider_error_code ? ` (${message.msg_provider_error_code})` : ''}
           </span>
         )}
@@ -851,11 +851,11 @@ function MessageBubble({ message, attachments = [] }) {
         <div style={{
           maxWidth: '78%', marginTop: 4,
           padding: '6px 9px',
-          background: '#fff5f5',
+          background: '#eef5fc',
           border: '1px solid #f3b4b4',
           borderRadius: 6,
           fontSize: 11, lineHeight: 1.4,
-          color: '#8a1a1a',
+          color: '#1e466b',
           fontFamily: 'JetBrains Mono, monospace',
           whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}>
@@ -912,7 +912,7 @@ function Composer({
           padding: '8px 10px',
           fontSize: 13,
           fontFamily: 'Inter, sans-serif',
-          border: `1px solid ${tooLong ? '#e85c5c' : C.border}`,
+          border: `1px solid ${tooLong ? '#7eb3e8' : C.border}`,
           borderRadius: 6,
           resize: 'vertical',
           outline: 'none',
@@ -929,7 +929,7 @@ function Composer({
         marginTop: 6,
         fontSize: 11, color: C.textMuted,
       }}>
-        <span style={{ color: tooLong ? '#e85c5c' : C.textMuted }}>
+        <span style={{ color: tooLong ? '#7eb3e8' : C.textMuted }}>
           {tooLong ? `${Math.abs(remaining)} over limit` : `${remaining} characters left`}
           {!isMobile && (
             <span style={{ marginLeft: 10, fontStyle: 'italic' }}>

@@ -229,7 +229,7 @@ function IncentivesHome({ setSec, requests, receipts }) {
           {overdue.length===0?<div style={{ padding:'16px', textAlign:'center', color:C.textMuted, fontSize:12 }}>All clear.</div>
           :overdue.map((r,i)=>(
             <div key={r.id} style={{ padding:'10px 14px', borderBottom:i<overdue.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
-              onMouseEnter={e=>e.currentTarget.style.background='#fff8f8'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              onMouseEnter={e=>e.currentTarget.style.background='#eef5fc'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
               <div style={{ color:C.danger, fontSize:12, fontWeight:500, marginBottom:2 }}>{r.id} — {fmt(r.amount)}</div>
               <div style={{ color:C.textMuted, fontSize:11 }}>{r.property} · {r.daysOpen}d open</div>
             </div>

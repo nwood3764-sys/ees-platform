@@ -267,7 +267,7 @@ export default function NotificationBell({ onNavigateToRecord }) {
               <div style={{ padding: 16, fontSize: 12.5, color: C.textMuted }}>Loading…</div>
             )}
             {!loading && error && (
-              <div style={{ padding: 16, fontSize: 12.5, color: '#b91c1c' }}>{error}</div>
+              <div style={{ padding: 16, fontSize: 12.5, color: '#2c5f8a' }}>{error}</div>
             )}
             {!loading && !error && items.length === 0 && (
               <div style={{ padding: 16, fontSize: 12.5, color: C.textMuted }}>
@@ -341,7 +341,7 @@ function NotificationRow({ n, onClick, busy }) {
         <span>{formatRelative(n.created_at)}</span>
         {n.is_automated && (
           <span style={{
-            background: '#fef3c7', color: '#92400e',
+            background: '#fef3c7', color: '#1e466b',
             padding: '1px 5px', borderRadius: 3,
             fontSize: 9, fontWeight: 700, letterSpacing: 0.3,
           }}>

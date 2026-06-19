@@ -102,7 +102,7 @@ export const hintBoxStyle = {
 }
 
 export const warningBoxStyle = {
-  background: '#fff8e6',
+  background: '#eef5fc',
   border: '1px solid #f0d48a',
   borderRadius: 6,
   padding: '9px 12px',

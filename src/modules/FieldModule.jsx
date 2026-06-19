@@ -189,7 +189,7 @@ function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, on
       </div>
 
       {error && (
-        <div style={{ background:'#fce8e8', border:`1px solid ${C.danger}`, borderRadius:8, padding:'10px 14px', marginBottom:12, color:'#8a1a1a', fontSize:12 }}>
+        <div style={{ background:'#e8f1fb', border:`1px solid ${C.danger}`, borderRadius:8, padding:'10px 14px', marginBottom:12, color:'#1e466b', fontSize:12 }}>
           Could not load schedule: {String(error.message || error)}
         </div>
       )}
@@ -428,7 +428,7 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
                   <TableRow key={p.id}>
                     <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}`, color:C.textPrimary, fontWeight:500, maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</td>
                     <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{p.workOrders}</td>
-                    <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}` }}><button style={{ background:'#fef3e2', color:'#8a5a0a', border:`1px solid #f0d8a0`, borderRadius:4, padding:'2px 7px', fontSize:10, fontWeight:600, cursor:'pointer' }}>Schedule</button></td>
+                    <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}` }}><button style={{ background:'#e8f1fb', color:'#1e466b', border:`1px solid #f0d8a0`, borderRadius:4, padding:'2px 7px', fontSize:10, fontWeight:600, cursor:'pointer' }}>Schedule</button></td>
                   </TableRow>
                 ))}
               </tbody>

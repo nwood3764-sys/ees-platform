@@ -604,11 +604,11 @@ function VoidEnvelopeModal({ envelopeRecordNumber, onConfirm, onCancel, busy }) 
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
           <div style={{
             width: 32, height: 32, borderRadius: '50%',
-            background: '#fffbeb', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: '#eef5fc', display: 'flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
             <Icon path="M18.36 5.64a9 9 0 1 1-12.72 0M5.64 5.64l12.72 12.72"
-              size={15} color="#b45309" />
+              size={15} color="#1e466b" />
           </div>
           <div>
             <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>
@@ -647,7 +647,7 @@ function VoidEnvelopeModal({ envelopeRecordNumber, onConfirm, onCancel, busy }) 
             disabled={!canSubmit}
             style={{
               flex: 1,
-              background: canSubmit ? '#b45309' : '#d4a574',
+              background: canSubmit ? '#1e466b' : '#bcd9f2',
               color: '#fff', border: 'none', borderRadius: 6,
               padding: '9px 0', fontSize: 13, fontWeight: 600,
               cursor: canSubmit ? 'pointer' : (busy ? 'wait' : 'not-allowed'),
@@ -731,7 +731,7 @@ function DocumentTemplatePreviewModal({
         ) : options.length === 0 ? (
           <div style={{
             padding: '10px 12px', border: `1px solid ${C.border}`, borderRadius: 6,
-            background: '#fffbeb', fontSize: 13, color: '#92400e',
+            background: '#eef5fc', fontSize: 13, color: '#1e466b',
           }}>
             No {relatedObject.replace(/_/g, ' ')} records found. Create one first.
           </div>
@@ -903,7 +903,7 @@ function EmailTemplatePreviewModal({
             ) : options.length === 0 ? (
               <div style={{
                 padding: '10px 12px', border: `1px solid ${C.border}`, borderRadius: 6,
-                background: '#fffbeb', fontSize: 13, color: '#92400e',
+                background: '#eef5fc', fontSize: 13, color: '#1e466b',
               }}>
                 No {relatedObject.replace(/_/g, ' ')} records found. Create one first.
               </div>
@@ -1162,7 +1162,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
             <div key={f.name} style={{ marginBottom: 14 }}>
               <label style={{ display: 'block', fontSize: 11.5, fontWeight: 500, color: C.textSecondary,
                 marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                {f.label}{f.required && !derivedReadonly && <span style={{ color: '#c0392b', marginLeft: 3 }}>*</span>}
+                {f.label}{f.required && !derivedReadonly && <span style={{ color: '#2c5f8a', marginLeft: 3 }}>*</span>}
                 {derivedReadonly && <span style={{ color: C.textMuted, marginLeft: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>auto-generated</span>}
               </label>
               {derivedReadonly ? (
@@ -2961,7 +2961,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
               {f.label}
               {editing && isRequiredField && !isDerivedField && (
-                <span style={{ color: '#c0392b', marginLeft: 3 }}>*</span>
+                <span style={{ color: '#2c5f8a', marginLeft: 3 }}>*</span>
               )}
               {editing && isDerivedField && (
                 <span style={{ color: C.textMuted, marginLeft: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>
@@ -4331,7 +4331,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
                     textTransform: 'uppercase', letterSpacing: '0.03em',
                   }}>
                     {f.label || f.name}
-                    {f.required && <span style={{ color: '#c0392b', marginLeft: 3 }}>*</span>}
+                    {f.required && <span style={{ color: '#2c5f8a', marginLeft: 3 }}>*</span>}
                   </label>
                   <EditField
                     field={f}
@@ -5936,10 +5936,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             right path forward. */}
         {lifecycleIsLocked && (
           <div style={{
-            background: lifecycleStatusValue === 'Archived' ? '#f3f4f6' : '#fffbeb',
+            background: lifecycleStatusValue === 'Archived' ? '#f3f4f6' : '#eef5fc',
             border: `1px solid ${lifecycleStatusValue === 'Archived' ? '#d1d5db' : '#fde68a'}`,
             borderLeftWidth: 4,
-            borderLeftColor: lifecycleStatusValue === 'Archived' ? '#6b7280' : '#d97706',
+            borderLeftColor: lifecycleStatusValue === 'Archived' ? '#6b7280' : '#1e466b',
             borderRadius: 8, padding: '12px 16px', marginBottom: 14,
             display: 'flex', alignItems: 'flex-start', gap: 10,
           }}>
@@ -5948,7 +5948,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 ? 'M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4'
                 : 'M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3l-6.93-12a2 2 0 00-3.48 0L3.34 16a2 2 0 001.73 3z'}
               size={16}
-              color={lifecycleStatusValue === 'Archived' ? '#4b5563' : '#b45309'}
+              color={lifecycleStatusValue === 'Archived' ? '#4b5563' : '#1e466b'}
             />
             <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5, color: lifecycleStatusValue === 'Archived' ? '#374151' : '#78350f' }}>
               {lifecycleStatusValue === 'Active' ? (

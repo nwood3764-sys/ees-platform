@@ -124,7 +124,7 @@ const ENR_VIEWS  = [{ id:'EV-01', name:'All Enrollments', filters:[], sortField:
 function StatusDot({ value }) {
   const green = ['Executed', 'Complete', 'Verified', 'Received']
   const amber = ['Pending', 'In Progress', 'In Review']
-  const color = green.includes(value) ? '#2aab72' : amber.includes(value) ? '#e8a949' : '#8fa0b8'
+  const color = green.includes(value) ? '#2aab72' : amber.includes(value) ? '#7eb3e8' : '#8fa0b8'
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
@@ -264,7 +264,7 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Enrollment — Needs Action</div>
-            <span style={{ background: needsAction.length > 0 ? C.amber : '#e8f8f2', color: needsAction.length > 0 ? '#8a5a0a' : '#1a7a4e', fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 10 }}>{needsAction.length}</span>
+            <span style={{ background: needsAction.length > 0 ? C.amber : '#e8f8f2', color: needsAction.length > 0 ? '#1e466b' : '#1a7a4e', fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 10 }}>{needsAction.length}</span>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>{['Record #','Enrollment','Property','Record Type','Status','Income Qual','Action'].map(h => <th key={h} style={{ padding: '9px 12px', textAlign: 'left', color: C.textMuted, fontWeight: 500, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>)}</tr></thead>
@@ -349,10 +349,10 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
       {error && hasData && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           gap: 12, padding: '8px 12px', margin: '0 0 10px', borderRadius: 6,
-          background: '#fdf3e7', border: '1px solid #e8a949', color: '#7a5b1e', fontSize: 12.5 }}>
+          background: '#fdf3e7', border: '1px solid #7eb3e8', color: '#7a5b1e', fontSize: 12.5 }}>
           <span>Couldn’t refresh just now — showing the last loaded data.</span>
           {onRetry && (
-            <button onClick={onRetry} style={{ background: 'transparent', border: '1px solid #e8a949',
+            <button onClick={onRetry} style={{ background: 'transparent', border: '1px solid #7eb3e8',
               color: '#7a5b1e', borderRadius: 5, padding: '3px 10px', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
               Retry
             </button>

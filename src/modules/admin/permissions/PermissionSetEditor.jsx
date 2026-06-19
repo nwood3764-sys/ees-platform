@@ -134,7 +134,7 @@ export default function PermissionSetEditor({ psId, onBack, onChanged, onCloned 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
             width: 36, height: 36, borderRadius: 8,
-            background: '#fef3e2', color: '#8a5a0a',
+            background: '#e8f1fb', color: '#1e466b',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontWeight: 700, fontSize: 14, flexShrink: 0,
           }}>

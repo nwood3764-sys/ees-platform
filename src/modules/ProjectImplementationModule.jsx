@@ -64,7 +64,7 @@ function Dashboard({ workOrders, projects, opportunities, onGo }) {
   const kpis = [
     { label: 'Work Orders In Progress', value: woInProgress,  sub: 'Active in the field now', color: C.purple || '#8b5cf6', go: 'workorders' },
     { label: 'Awaiting Verification',   value: woToVerify,    sub: 'Submitted, pending review', color: C.amber, go: 'workorders' },
-    { label: 'Corrections Needed',      value: woCorrections, sub: 'Kicked back to crews',     color: C.danger || '#d6455d', go: 'workorders' },
+    { label: 'Corrections Needed',      value: woCorrections, sub: 'Kicked back to crews',     color: C.danger, go: 'workorders' },
     { label: 'Active Projects',         value: projActive,    sub: `${projects.length} total projects`, color: C.emerald, go: 'projects' },
   ]
 

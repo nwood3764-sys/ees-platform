@@ -17,9 +17,9 @@ export const C = {
   textSecondary:  '#4a5e7a',
   textMuted:      '#8fa0b8',
   sky:            '#7eb3e8',
-  amber:          '#e8a949',
-  danger:         '#e85c5c',
-  dangerBg:       '#fce8e8',
+  amber:          '#7eb3e8',
+  danger:         '#7eb3e8',
+  dangerBg:       '#e8f1fb',
   emeraldBg:      '#e8f8f2',
 }
 
@@ -92,7 +92,7 @@ export const buttonSecondaryHover = { background: C.cardSecondary }
 export const errorBanner = {
   padding:      '12px 16px',
   fontSize:     14,
-  color:        '#8a1a1a',
+  color:        '#1e466b',
   background:   C.dangerBg,
   border:       `1px solid ${C.danger}`,
   borderRadius: RADIUS,

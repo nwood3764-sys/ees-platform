@@ -44,8 +44,8 @@ function fmtTimestamp(iso) {
 function OutcomeChip({ outcome }) {
   const colors = {
     success: { bg: '#dcfce7', fg: '#166534', border: '#bbf7d0' },
-    error:   { bg: '#fee2e2', fg: '#991b1b', border: '#fecaca' },
-    skipped: { bg: '#fef3c7', fg: '#92400e', border: '#fde68a' },
+    error:   { bg: '#fee2e2', fg: '#991b1b', border: '#bcd9f2' },
+    skipped: { bg: '#fef3c7', fg: '#1e466b', border: '#fde68a' },
   }
   const c = colors[outcome] || { bg: '#e5e7eb', fg: '#374151', border: '#d1d5db' }
   return (
@@ -120,8 +120,8 @@ export default function AutomationRunLogPane() {
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 8 }}>
           <SummaryChip label="Success" count={summary.success} color="#16a34a" />
-          <SummaryChip label="Skipped" count={summary.skipped} color="#d97706" />
-          <SummaryChip label="Error"   count={summary.error}   color="#dc2626" />
+          <SummaryChip label="Skipped" count={summary.skipped} color="#1e466b" />
+          <SummaryChip label="Error"   count={summary.error}   color="#2c5f8a" />
         </div>
       </div>
       <div style={{ padding: 18 }}>

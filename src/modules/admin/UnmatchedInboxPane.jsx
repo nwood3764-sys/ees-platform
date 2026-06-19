@@ -56,7 +56,7 @@ function relativeTime(iso) {
 
 // ── Status pill styling ──────────────────────────────────────────────────
 const STATUS_STYLES = {
-  awaiting_triage: { bg: '#fff4e0', color: '#8a5a1a', label: 'Awaiting triage' },
+  awaiting_triage: { bg: '#e8f1fb', color: '#1e466b', label: 'Awaiting triage' },
   linked:          { bg: '#e8f8f2', color: '#1a7a4e', label: 'Linked' },
   dismissed:       { bg: '#f0f3f8', color: '#4a5e7a', label: 'Dismissed' },
 }
@@ -527,7 +527,7 @@ function LinkPanel({ row, toast, onCancel, onLinked }) {
       />
 
       {loadErr && (
-        <div style={{ padding: 8, fontSize: 12, color: '#8a1a1a', background: '#fce8e8', borderRadius: 5 }}>
+        <div style={{ padding: 8, fontSize: 12, color: '#1e466b', background: '#e8f1fb', borderRadius: 5 }}>
           Failed to load conversations: {loadErr}
         </div>
       )}
@@ -674,7 +674,7 @@ function DismissPanel({ row, toast, onCancel, onDismissed }) {
           onClick={handleDismiss}
           disabled={submitting || !reason.trim()}
           style={{
-            background: '#e85c5c', color: '#fff',
+            background: '#7eb3e8', color: '#fff',
             border: 'none', borderRadius: 5,
             padding: '7px 14px', fontSize: 12.5, fontWeight: 600,
             cursor: (submitting || !reason.trim()) ? 'wait' : 'pointer',

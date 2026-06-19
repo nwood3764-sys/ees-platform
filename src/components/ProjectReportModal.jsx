@@ -204,7 +204,7 @@ export default function ProjectReportModal({ projectId, project, onClose, onComp
                   ))}
                 </select>
                 {templates.length === 0 && (
-                  <div style={{ ...hintStyle, color: '#b45309' }}>
+                  <div style={{ ...hintStyle, color: '#1e466b' }}>
                     No Active templates yet. Open a template in Setup → Project Report Templates and click <strong>Publish</strong> to make it available for generation.
                   </div>
                 )}

@@ -273,7 +273,7 @@ function ModuleRows({ moduleName, objs, getEffective, onToggle, onRowAll, onModu
         const dirty = !!pending[obj.table]
         return (
           <tr key={obj.table}
-            style={{ background: dirty ? '#fff8e6' : 'transparent' }}
+            style={{ background: dirty ? '#eef5fc' : 'transparent' }}
           >
             <td style={{ ...tdStyle, textAlign: 'left' }}>
               <div style={{ fontWeight: 500, color: C.textPrimary }}>{obj.label}</div>

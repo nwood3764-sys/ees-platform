@@ -522,7 +522,7 @@ function LockoutNotice({ message }) {
       borderRadius: 6,
       background: '#fef3c7',
       border: '1px solid #fcd34d',
-      color: '#92400e',
+      color: '#1e466b',
       fontSize: 12.5, lineHeight: 1.55,
     }}>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>This widget is misconfigured.</div>

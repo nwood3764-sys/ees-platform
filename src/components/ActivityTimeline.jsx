@@ -47,24 +47,24 @@ function fullTimestamp(iso) {
 const KIND_STYLES = {
   create:       { label: 'Created',      bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
   update:       { label: 'Updated',      bg: '#e8f3fb', color: '#1a5a8a', dot: C.sky },
-  soft_delete:  { label: 'Deleted',      bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
+  soft_delete:  { label: 'Deleted',      bg: '#e8f1fb', color: '#1e466b', dot: C.danger },
   restore:      { label: 'Restored',     bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
-  hard_delete:  { label: 'Hard Deleted', bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
+  hard_delete:  { label: 'Hard Deleted', bg: '#e8f1fb', color: '#1e466b', dot: C.danger },
   email:        { label: 'Email Sent',   bg: '#eef4fc', color: '#2557a7', dot: '#2557a7' },
-  email_failed: { label: 'Email Failed', bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
+  email_failed: { label: 'Email Failed', bg: '#e8f1fb', color: '#1e466b', dot: C.danger },
   // Envelope lifecycle entries — populated by list_envelope_events_for_record().
   // Created/Sent are envelope-scoped (no recipient); Opened/Viewed/ConsentGranted/
   // Signed/Declined are recipient-scoped; Completed/Voided are envelope-scoped
   // again. Color coding: emerald for forward progress, amber for soft-warn
   // (Viewed/Opened/ConsentGranted), red for terminal-bad (Declined/Voided).
   envelope_sent:      { label: 'Envelope Sent',      bg: '#eef4fc', color: '#2557a7', dot: '#2557a7' },
-  envelope_opened:    { label: 'Envelope Opened',    bg: '#fef3c7', color: '#92400e', dot: C.amber },
-  envelope_viewed:    { label: 'Envelope Viewed',    bg: '#fef3c7', color: '#92400e', dot: C.amber },
-  envelope_consent:   { label: 'Consent Granted',    bg: '#fef3c7', color: '#92400e', dot: C.amber },
+  envelope_opened:    { label: 'Envelope Opened',    bg: '#fef3c7', color: '#1e466b', dot: C.amber },
+  envelope_viewed:    { label: 'Envelope Viewed',    bg: '#fef3c7', color: '#1e466b', dot: C.amber },
+  envelope_consent:   { label: 'Consent Granted',    bg: '#fef3c7', color: '#1e466b', dot: C.amber },
   envelope_signed:    { label: 'Signed',             bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
   envelope_completed: { label: 'Envelope Completed', bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
-  envelope_declined:  { label: 'Envelope Declined',  bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
-  envelope_voided:    { label: 'Envelope Voided',    bg: '#fce8e8', color: '#8a1a1a', dot: C.danger },
+  envelope_declined:  { label: 'Envelope Declined',  bg: '#e8f1fb', color: '#1e466b', dot: C.danger },
+  envelope_voided:    { label: 'Envelope Voided',    bg: '#e8f1fb', color: '#1e466b', dot: C.danger },
 }
 
 // Convert a row from list_email_sends_for_record() RPC into a TimelineEntry
@@ -136,7 +136,7 @@ function initials(name) {
 
 // Deterministic avatar color from a name string (just hashes the char codes)
 function avatarColor(name) {
-  const palette = [C.emeraldMid, C.sky, '#a78bfa', C.amber, '#5eead4', '#fb923c']
+  const palette = [C.emeraldMid, C.sky, '#a78bfa', C.amber, '#5eead4', '#7eb3e8']
   let h = 0
   for (let i = 0; i < (name || '').length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff
   return palette[h % palette.length]

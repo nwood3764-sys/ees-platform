@@ -137,7 +137,7 @@ export const SCHEDULE_CREWS = [
     jobs:[
       { name:'Drive to Site',            property:'North Willow Apartments', workType:'Travel',              start:7.0,  duration:1.0, status:'In Progress',        color:'#8fa0b8' },
       { name:'HP Install — Unit 103',    property:'North Willow Apartments', workType:'HP Install',          start:8.0,  duration:4.0, status:'In Progress',        color:'#7eb3e8' },
-      { name:'Blower Door Test — Bldg A',property:'North Willow Apartments', workType:'Blower Door',         start:13.0, duration:2.0, status:'Corrections Needed', color:'#e85c5c' },
+      { name:'Blower Door Test — Bldg A',property:'North Willow Apartments', workType:'Blower Door',         start:13.0, duration:2.0, status:'Corrections Needed', color:'#7eb3e8' },
     ]
   },
   {
@@ -147,7 +147,7 @@ export const SCHEDULE_CREWS = [
     jobs:[
       { name:'Drive to Site',            property:'Aspen Court Residences',  workType:'Travel',              start:7.0,  duration:1.0, status:'In Progress',  color:'#8fa0b8' },
       { name:'PTAC Install — Unit 101',  property:'Aspen Court Residences',  workType:'PTAC Install',        start:8.0,  duration:3.0, status:'In Progress',  color:'#7eb3e8' },
-      { name:'PTAC Install — Unit 102',  property:'Aspen Court Residences',  workType:'PTAC Install',        start:11.5, duration:3.0, status:'Scheduled',    color:'#e8a949' },
+      { name:'PTAC Install — Unit 102',  property:'Aspen Court Residences',  workType:'PTAC Install',        start:11.5, duration:3.0, status:'Scheduled',    color:'#7eb3e8' },
     ]
   },
   {

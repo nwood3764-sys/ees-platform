@@ -418,7 +418,7 @@ const inputStyle = {
 }
 const errorBox = {
   padding: '8px 10px', background: '#fef2f2', color: '#991b1b',
-  border: '1px solid #fecaca', borderRadius: 5, fontSize: 12.5, marginBottom: 10,
+  border: '1px solid #bcd9f2', borderRadius: 5, fontSize: 12.5, marginBottom: 10,
 }
 const noteBox = {
   padding: '8px 10px', background: '#f0f7ff', color: '#1e3a5f',

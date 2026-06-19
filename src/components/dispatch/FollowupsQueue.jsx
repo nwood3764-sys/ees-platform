@@ -397,8 +397,8 @@ function KpiTile({ label, value, sub, tone }) {
 const KPI_TONE = {
   neutral: { fg: '#0d1a2e', accent: '#cbd5e1' },
   good:    { fg: '#1e7d4f', accent: '#3ecf8e' },
-  warn:    { fg: '#8a5a04', accent: '#e8a949' },
-  bad:     { fg: '#a01616', accent: '#e85c5c' },
+  warn:    { fg: '#8a5a04', accent: '#7eb3e8' },
+  bad:     { fg: '#a01616', accent: '#7eb3e8' },
 }
 
 function RowActions({ row, busy, onFlip, onSchedule, stretched = false }) {

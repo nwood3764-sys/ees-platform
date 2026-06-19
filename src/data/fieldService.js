@@ -13,7 +13,7 @@ const workOrderStatusLabel = raw => {
 
 // Palette of fixed crew colors. Index by order of appearance so Alpha crew
 // is always emerald, Bravo always sky, etc. Matches CHART_COLORS.
-const CREW_COLORS = ['#3ecf8e', '#7eb3e8', '#e8a949', '#a78bfa', '#e85c5c', '#5eead4', '#fb923c']
+const CREW_COLORS = ['#3ecf8e', '#7eb3e8', '#7eb3e8', '#a78bfa', '#7eb3e8', '#5eead4', '#7eb3e8']
 
 // Parse a "Team Lead — Alpha Crew" title into just "Alpha Crew".
 // Falls back to null if the title doesn't match that shape.

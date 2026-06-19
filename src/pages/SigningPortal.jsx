@@ -292,7 +292,7 @@ function PortalLayout({ data, tabValues, activeTabId, consent, submitting, onTab
       </header>
 
       {cantSignReason && (
-        <div style={{ background: '#fffbeb', borderBottom: `1px solid #fde68a`, padding: '10px 20px', fontSize: 13, color: '#92400e' }}>
+        <div style={{ background: '#eef5fc', borderBottom: `1px solid #fde68a`, padding: '10px 20px', fontSize: 13, color: '#1e466b' }}>
           {cantSignReason} You can review the document below.
         </div>
       )}
@@ -498,12 +498,12 @@ function TabOverlays({ containerRef, pages, tabs, tabValues, canFill, activeTabI
               style={{
                 position: 'absolute', left, top, width: w, height: h,
                 background: filled ? 'rgba(62, 207, 142, 0.15)' : 'rgba(247, 207, 70, 0.30)',
-                border: `2px solid ${active ? C.emerald : (filled ? C.emerald : '#e8a949')}`,
+                border: `2px solid ${active ? C.emerald : (filled ? C.emerald : '#7eb3e8')}`,
                 borderRadius: 4,
                 cursor: canFill ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: Math.max(10, Math.min(14, h * 0.4)),
-                color: filled ? C.textPrimary : '#92400e',
+                color: filled ? C.textPrimary : '#1e466b',
                 fontWeight: 600,
                 overflow: 'hidden',
                 userSelect: 'none',

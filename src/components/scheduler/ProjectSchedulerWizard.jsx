@@ -810,7 +810,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                 )
                 return (
                   <tr key={w.id} style={{ borderTop: `1px solid ${C.border}`,
-                                          background: missing ? '#fffbeb' : 'transparent' }}>
+                                          background: missing ? '#eef5fc' : 'transparent' }}>
                     <td style={{ padding: '8px 10px' }}>
                       <input type="checkbox" checked={checked} onChange={() => toggleOne(w.id)} disabled={missing} />
                     </td>
@@ -830,7 +830,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                       {w.building_name}{w.unit_name ? ` / ${w.unit_name}` : ''}
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right',
-                                 color: missing ? '#b45309' : C.textPrimary, fontWeight: missing ? 600 : 400 }}>
+                                 color: missing ? '#1e466b' : C.textPrimary, fontWeight: missing ? 600 : 400 }}>
                       {missing ? 'not set' : `${w.duration_minutes} min`}
                     </td>
                   </tr>
@@ -846,7 +846,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           <div style={{ color: C.textSecondary }}>
             <strong style={{ color: C.textPrimary }}>{selectedIds.size}</strong> selected
             {summary.missingCount > 0 && (
-              <span style={{ color: '#b45309', marginLeft: 10 }}>
+              <span style={{ color: '#1e466b', marginLeft: 10 }}>
                 ({summary.missingCount} missing duration)
               </span>
             )}
@@ -860,7 +860,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
         {step1Err && (
           <div style={{ marginTop: 10, padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d',
-                        borderRadius: 6, fontSize: 12.5, color: '#92400e' }}>
+                        borderRadius: 6, fontSize: 12.5, color: '#1e466b' }}>
             {step1Err}
           </div>
         )}
@@ -945,7 +945,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
         {step2Err && (
           <div style={{ marginTop: 10, padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d',
-                        borderRadius: 6, fontSize: 12.5, color: '#92400e' }}>
+                        borderRadius: 6, fontSize: 12.5, color: '#1e466b' }}>
             {step2Err}
           </div>
         )}
@@ -983,7 +983,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
           }}>
             <SummaryCard label="Total"    value={previewSummary.total} color={C.textPrimary} />
             <SummaryCard label="Placed"   value={previewSummary.placed} color="#15803d" />
-            <SummaryCard label="Unplaced" value={previewSummary.unplaced} color={previewSummary.unplaced > 0 ? '#b45309' : C.textMuted} />
+            <SummaryCard label="Unplaced" value={previewSummary.unplaced} color={previewSummary.unplaced > 0 ? '#1e466b' : C.textMuted} />
           </div>
         )}
 
@@ -1066,7 +1066,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         {unplaced && unplaced.rows.length > 0 && (
           <div style={{ border: '1px solid #fcd34d', borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
             <div style={{
-              background: '#fef3c7', padding: '8px 12px', fontSize: 12, fontWeight: 600, color: '#92400e',
+              background: '#fef3c7', padding: '8px 12px', fontSize: 12, fontWeight: 600, color: '#1e466b',
             }}>
               Won't fit in this window ({unplaced.rows.length})
             </div>
@@ -1082,7 +1082,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
                         ({r.building_name}{r.unit_name ? ` / ${r.unit_name}` : ''})
                       </span>
                     </td>
-                    <td style={{ padding: '7px 12px', textAlign: 'right', color: '#b45309', fontSize: 11.5 }}>
+                    <td style={{ padding: '7px 12px', textAlign: 'right', color: '#1e466b', fontSize: 11.5 }}>
                       {describePlacementError(r.placement_error)}
                     </td>
                   </tr>
@@ -1095,7 +1095,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         {previewSummary?.unplaced > 0 && (
           <div style={{ padding: '10px 12px', background: '#fef3c7',
                         border: '1px solid #fcd34d', borderRadius: 6, fontSize: 12.5,
-                        color: '#92400e', lineHeight: 1.5 }}>
+                        color: '#1e466b', lineHeight: 1.5 }}>
             Confirm to schedule the {previewSummary.placed} placeable work order{previewSummary.placed === 1 ? '' : 's'} and leave the rest unscheduled, or go back and extend the date range.
           </div>
         )}

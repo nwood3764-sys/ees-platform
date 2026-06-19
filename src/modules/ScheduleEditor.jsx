@@ -246,7 +246,7 @@ export default function ScheduleEditor({ scheduleId, onClose, onSaved }) {
           background: testResult.error
             ? '#fee'
             : (testResult.runs?.[0]?.warnings?.length || testResult.runs?.[0]?.status === 'success_with_warnings')
-              ? '#fff4e0'
+              ? '#e8f1fb'
               : '#e8f5ec',
           border: `1px solid ${
             testResult.error
@@ -265,7 +265,7 @@ export default function ScheduleEditor({ scheduleId, onClose, onSaved }) {
               {' '}{testResult.runs[0].recipient_count ?? 0} recipients
               {testResult.runs[0].error ? ` — error: ${testResult.runs[0].error}` : ''}
               {testResult.runs[0].warnings?.length ? (
-                <div style={{ marginTop: 4, fontSize: 11, color: '#92400e' }}>
+                <div style={{ marginTop: 4, fontSize: 11, color: '#1e466b' }}>
                   {testResult.runs[0].warnings.map((w, i) => <div key={i}>• {w}</div>)}
                 </div>
               ) : null}
@@ -511,7 +511,7 @@ function HistoryTab({ history, loading }) {
               const notes = r.srr_error_message
                 ? { text: r.srr_error_message, color: '#c33' }
                 : (r.srr_warnings?.length
-                    ? { text: r.srr_warnings.join(' / '), color: '#92400e' }
+                    ? { text: r.srr_warnings.join(' / '), color: '#1e466b' }
                     : { text: '—', color: C.textMuted })
               return (
                 <tr key={r.id} style={{ borderTop:`1px solid ${C.border}` }}>
@@ -537,8 +537,8 @@ function HistoryTab({ history, loading }) {
 function StatusBadge({ status }) {
   const colors = {
     success:               { bg:'#e8f5ec', fg:'#2a8048' },
-    success_with_warnings: { bg:'#fff4e0', fg:'#92400e' },
-    success_dry_run:       { bg:'#fff7e6', fg:'#a26500' },
+    success_with_warnings: { bg:'#e8f1fb', fg:'#1e466b' },
+    success_dry_run:       { bg:'#eef5fc', fg:'#1e466b' },
     no_recipients:         { bg:'#f0f3f8', fg:'#4a5e7a' },
     no_rows:               { bg:'#f0f3f8', fg:'#4a5e7a' },
     report_error:          { bg:'#fee', fg:'#c33' },

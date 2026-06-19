@@ -484,8 +484,8 @@ export default function ComposeEmailModal({
             <label style={FIELD_LABEL}>From</label>
             {resolvedMailboxError && (
               <div style={{
-                padding: 8, fontSize: 12, color: '#8a1a1a',
-                background: '#fce8e8', border: `1px solid #f3c8c8`,
+                padding: 8, fontSize: 12, color: '#1e466b',
+                background: '#e8f1fb', border: `1px solid #f3c8c8`,
                 borderRadius: 5,
               }}>
                 {resolvedMailboxError}
@@ -556,8 +556,8 @@ export default function ComposeEmailModal({
             <label style={FIELD_LABEL}>Template</label>
             {templatesError && (
               <div style={{
-                padding: 8, fontSize: 12, color: '#8a1a1a',
-                background: '#fce8e8', border: `1px solid #f3c8c8`,
+                padding: 8, fontSize: 12, color: '#1e466b',
+                background: '#e8f1fb', border: `1px solid #f3c8c8`,
                 borderRadius: 5,
               }}>
                 Failed to load templates: {templatesError}
@@ -591,7 +591,7 @@ export default function ComposeEmailModal({
                 {activeTemplate.template_ai_assist_allowed === false && (
                   <span style={{
                     padding: '1px 6px', borderRadius: 3,
-                    background: '#fff4e0', color: '#8a5a1a',
+                    background: '#e8f1fb', color: '#1e466b',
                     fontWeight: 600, fontSize: 10, letterSpacing: 0.3,
                   }}>
                     AI assist disabled
@@ -720,7 +720,7 @@ export default function ComposeEmailModal({
           {lastResult && (
             <div style={{
               padding: 10, fontSize: 12,
-              background: lastResult.mode === 'mock' ? '#fff4e0' : '#e8f8f2',
+              background: lastResult.mode === 'mock' ? '#e8f1fb' : '#e8f8f2',
               border: `1px solid ${lastResult.mode === 'mock' ? '#f0d7a0' : '#bfe7d3'}`,
               borderRadius: 5,
               color: C.textPrimary,

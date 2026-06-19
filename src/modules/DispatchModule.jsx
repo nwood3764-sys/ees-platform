@@ -656,7 +656,7 @@ function BoardGrid({
               <div style={{ fontSize: 11, color: C.textSecondary, marginTop: 2 }}>{lane.crew_label}</div>
             )}
             {lane.isUnassigned && (
-              <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: '#1e466b', marginTop: 4 }}>
                 Has unassigned appointments
               </div>
             )}

@@ -511,8 +511,8 @@ export function actionColors(C, color) {
       }
     case ACTION_COLORS.AMBER:
       return {
-        fg: '#b45309', bg: C.page,
-        border: '#fcd34d', hoverBg: '#fffbeb', hoverBorder: '#fcd34d',
+        fg: '#1e466b', bg: C.page,
+        border: '#fcd34d', hoverBg: '#eef5fc', hoverBorder: '#fcd34d',
       }
     case ACTION_COLORS.RED:
       return {

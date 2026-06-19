@@ -1487,7 +1487,7 @@ function ActionRow({ row, onSetTier, onSetSort, onReset, disabled }) {
       gap: 12, padding: '8px 12px',
       borderBottom: `1px solid ${C.border}`,
       alignItems: 'center',
-      background: isOverridden ? '#fffbeb' : 'transparent',
+      background: isOverridden ? '#eef5fc' : 'transparent',
     }}>
       {/* icon */}
       <div style={{
@@ -1506,7 +1506,7 @@ function ActionRow({ row, onSetTier, onSetSort, onReset, disabled }) {
             <span style={{
               fontSize: 9, fontWeight: 700,
               padding: '1px 5px', borderRadius: 3,
-              background: '#fef3c7', color: '#92400e',
+              background: '#fef3c7', color: '#1e466b',
               letterSpacing: 0.4, textTransform: 'uppercase',
             }}>
               Override

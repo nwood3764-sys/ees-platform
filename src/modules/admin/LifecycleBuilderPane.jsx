@@ -454,7 +454,7 @@ function TransitionRow({ transition, fromStatus, toStatus, onEdit, onDelete, dis
             opacity: disabled ? 0.5 : 1,
           }}>Edit</button>
           <button disabled={disabled} onClick={onDelete} style={{
-            background: 'transparent', border: `1px solid #fecaca`, color: '#b91c1c',
+            background: 'transparent', border: `1px solid #bcd9f2`, color: '#2c5f8a',
             padding: '4px 10px', fontSize: 11.5, borderRadius: 5,
             cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
           }}>Remove</button>
@@ -483,7 +483,7 @@ function StatusPill({ status, isInitial }) {
         padding: '3px 8px', borderRadius: 4,
         fontSize: 11, fontStyle: 'italic',
         background: '#fef2f2', color: '#991b1b',
-        border: '1px solid #fecaca',
+        border: '1px solid #bcd9f2',
       }}>(missing status)</span>
     )
   }
@@ -647,7 +647,7 @@ function TransitionFormModal({ mode, object, statusField, statuses, existing, in
           {validationError && (
             <div style={{
               padding: 10, background: '#fef3c7', border: '1px solid #fde68a',
-              borderRadius: 6, fontSize: 12, color: '#92400e', marginTop: 6,
+              borderRadius: 6, fontSize: 12, color: '#1e466b', marginTop: 6,
             }}>
               {validationError}
             </div>
