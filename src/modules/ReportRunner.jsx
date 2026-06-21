@@ -163,7 +163,9 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate })
           <button onClick={() => exportCsv(result)}   style={btnSecondary()}>CSV</button>
           <button onClick={() => exportExcel(result)} style={btnSecondary()}>Excel</button>
           <button onClick={() => exportPdf(result)}   style={btnSecondary()}>PDF</button>
-          <button onClick={onEdit}  style={btnSecondary()}>Edit</button>
+          {onEdit && (
+            <button onClick={onEdit}  style={btnSecondary()}>Edit</button>
+          )}
           {/* Duplicate — Save As / Clone. Hidden when no parent is wired
               up to handle the new id (defensive for embedded usage). */}
           {onDuplicate && (

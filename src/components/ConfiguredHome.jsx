@@ -3,6 +3,7 @@ import { C } from '../data/constants'
 import { resolveHomePageForModule } from '../data/adminService'
 import { getTemplate } from '../modules/admin/homePageTemplates'
 import HomeComponentRenderer from '../modules/admin/HomeComponentRenderer'
+import ReportRunner from '../modules/ReportRunner'
 
 // ConfiguredHome renders a landing/dashboard screen entirely from a configured
 // Home Page (home_pages + home_page_components), resolved for the current user
@@ -28,6 +29,10 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
   // undefined = loading, null = none resolved, object = configured page
   const [page, setPage] = useState(undefined)
   const [error, setError] = useState(null)
+  // Report drill is handled here, not delegated up to the host's RecordDetail:
+  // a saved report opens in ReportRunner, never in the generic record viewer.
+  // null = no report open, otherwise the report id to run full-screen.
+  const [openReportId, setOpenReportId] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -70,6 +75,16 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
     )
   }
 
+  // A widget's "View Records →" drilled into a report — run it full-screen
+  // over the home. Close returns to the configured home, no host routing.
+  if (openReportId) {
+    return (
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <ReportRunner reportId={openReportId} onClose={() => setOpenReportId(null)} />
+      </div>
+    )
+  }
+
   const tmpl = getTemplate(page.template)
   const comps = page.components || []
   return (
@@ -92,7 +107,7 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
                   key={c.id}
                   component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }}
                   onNavigate={(table, id) => onOpenRecord && onOpenRecord({ table, id, mode: 'view' })}
-                  onOpenReport={(reportId) => onOpenRecord && onOpenRecord({ table: 'reports', id: reportId, mode: 'view' })}
+                  onOpenReport={(reportId) => setOpenReportId(reportId)}
                 />
               ))}
               {regionComps.length === 0 && <div style={{ color: C.textMuted, fontSize: 12, padding: 12 }}>&nbsp;</div>}
