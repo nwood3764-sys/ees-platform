@@ -1193,6 +1193,13 @@ export async function saveHomePage(page, components) {
   return data
 }
 
+// Resolve the home page for a specific module. moduleId null = global Home.
+export async function resolveHomePageForModule(moduleId = null) {
+  const { data, error } = await supabase.rpc('resolve_home_page_for_module', { p_module: moduleId })
+  if (error) throw error
+  return data
+}
+
 export async function resolveHomePage() {
   const { data, error } = await supabase.rpc('resolve_home_page_for_current_user')
   if (error) throw error

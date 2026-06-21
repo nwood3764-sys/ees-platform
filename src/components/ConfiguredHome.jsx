@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
-import { resolveHomePage } from '../data/adminService'
+import { resolveHomePageForModule } from '../data/adminService'
 import { getTemplate } from '../modules/admin/homePageTemplates'
 import HomeComponentRenderer from '../modules/admin/HomeComponentRenderer'
 
@@ -20,7 +20,7 @@ import HomeComponentRenderer from '../modules/admin/HomeComponentRenderer'
 //   onOpenSetup — opens Setup; receives a node id. Used for the Edit Page
 //                 button and the empty-state CTA.
 //   onOpenRecord— ({ table, id, mode }) record opener for embedded components.
-export default function ConfiguredHome({ crumb = 'Home', onOpenSetup, onOpenRecord }) {
+export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpenSetup, onOpenRecord }) {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
@@ -31,11 +31,12 @@ export default function ConfiguredHome({ crumb = 'Home', onOpenSetup, onOpenReco
 
   useEffect(() => {
     let cancelled = false
-    resolveHomePage()
+    setPage(undefined)
+    resolveHomePageForModule(moduleId)
       .then(p => { if (!cancelled) setPage(p || null) })
       .catch(err => { if (!cancelled) { setError(err); setPage(null) } })
     return () => { cancelled = true }
-  }, [])
+  }, [moduleId])
 
   if (page === undefined) {
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading…</div>
