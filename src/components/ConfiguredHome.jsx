@@ -87,7 +87,6 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
         <ReportRunner
           reportId={openReport.reportId}
           extraFilters={openReport.extraFilters}
-          forceTabular
           onClose={() => setOpenReport(null)} />
       </div>
     )
