@@ -315,6 +315,7 @@ export default function ReportsModule({
               <ReportRunner
                 reportId={selectedRecord.id}
                 extraFilters={selectedRecord.extraFilters || null}
+                forceTabular={!!selectedRecord.extraFilters}
                 onClose={closeRecord}
                 onEdit={() => replaceSelectedRecord({ table:'reports', id:selectedRecord.id, mode:'edit' })}
                 onDuplicate={(newId) => {

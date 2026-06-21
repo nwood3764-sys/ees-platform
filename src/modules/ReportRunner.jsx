@@ -14,7 +14,7 @@ import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } f
 // the table render. "Run Again" reruns the same query (useful when the
 // underlying data has changed).
 
-export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, extraFilters = null }) {
+export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, extraFilters = null, forceTabular = false }) {
   const [result, setResult]     = useState(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(null)
@@ -200,11 +200,19 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
         </div>
       )}
 
-      {/* Body */}
+      {/* Body. When drilled into from a widget (forceTabular), always show the
+          flat filtered record list — a summary/matrix report has no meaningful
+          drill view, the user wants the records behind the segment. */}
       <div style={{ flex:1, overflow:'auto', padding:'16px 24px' }}>
-        {result.format === 'tabular' && <TabularLayout result={result} />}
-        {result.format === 'summary' && <SummaryLayout result={result} />}
-        {result.format === 'matrix'  && <MatrixLayout  result={result} />}
+        {forceTabular ? (
+          <TabularLayout result={result} />
+        ) : (
+          <>
+            {result.format === 'tabular' && <TabularLayout result={result} />}
+            {result.format === 'summary' && <SummaryLayout result={result} />}
+            {result.format === 'matrix'  && <MatrixLayout  result={result} />}
+          </>
+        )}
       </div>
     </div>
   )
