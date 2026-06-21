@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
 import { useToast } from '../../components/Toast'
-import { fetchAllModuleSections, saveModuleSections } from '../../data/adminService'
+import { fetchAllModuleSections, saveModuleSections, addModuleObjectSection } from '../../data/adminService'
+import { OBJECT_CATALOG } from './objectCatalog'
 
 // ---------------------------------------------------------------------------
 // Module Sections editor — admin configures each module's tab strip:
@@ -29,6 +30,26 @@ export default function ModuleSectionsPane({ initialModuleId } = {}) {
   const [saving, setSaving] = useState(false)
   const [dragId, setDragId] = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
+  const [addObject, setAddObject] = useState('')
+  const [adding, setAdding] = useState(false)
+
+  // Add an object as a new tab on the active module, then reload so it appears.
+  const handleAddObject = async () => {
+    if (!addObject || !activeModule) return
+    setAdding(true)
+    try {
+      const obj = OBJECT_CATALOG.find(o => o.table === addObject)
+      await addModuleObjectSection(activeModule, addObject, obj?.pluralLabel || obj?.label || null)
+      const rows = await fetchAllModuleSections()
+      setAllSections(rows)
+      setAddObject('')
+      toast?.success?.('Object tab added')
+    } catch (e) {
+      toast?.error?.(e.message || 'Could not add object tab')
+    } finally {
+      setAdding(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -142,13 +163,32 @@ export default function ModuleSectionsPane({ initialModuleId } = {}) {
             <div style={{ fontSize: 13.5, fontWeight: 600, color: C.textPrimary }}>
               {MODULE_LABELS[activeModule] || activeModule} — {draft.length} tab{draft.length === 1 ? '' : 's'}
             </div>
-            <button
-              onClick={save}
-              disabled={saving}
-              style={{ padding: '7px 16px', borderRadius: 6, border: 'none', fontSize: 12.5, fontWeight: 600, cursor: saving ? 'default' : 'pointer', background: saving ? '#cfe9da' : C.emerald, color: '#fff' }}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <select
+                value={addObject}
+                onChange={e => setAddObject(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${C.border}`, fontSize: 12.5, color: C.textSecondary, background: C.card, maxWidth: 220 }}
+              >
+                <option value="">+ Add object tab…</option>
+                {[...OBJECT_CATALOG].sort((a,b)=>a.label.localeCompare(b.label)).map(o => (
+                  <option key={o.table} value={o.table}>{o.pluralLabel || o.label}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleAddObject}
+                disabled={!addObject || adding}
+                style={{ padding: '7px 14px', borderRadius: 6, border: `1px solid ${C.border}`, fontSize: 12.5, fontWeight: 600, cursor: (!addObject || adding) ? 'default' : 'pointer', background: C.card, color: C.textSecondary }}
+              >
+                {adding ? 'Adding…' : 'Add'}
+              </button>
+              <button
+                onClick={save}
+                disabled={saving}
+                style={{ padding: '7px 16px', borderRadius: 6, border: 'none', fontSize: 12.5, fontWeight: 600, cursor: saving ? 'default' : 'pointer', background: saving ? '#cfe9da' : C.emerald, color: '#fff' }}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
           </div>
 
           <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', background: C.card }}>

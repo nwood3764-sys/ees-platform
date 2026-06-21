@@ -1009,6 +1009,18 @@ export async function saveModuleSections(moduleId, sections) {
   return data
 }
 
+// Add an object as a new tab on a module (object-backed section). Rendered
+// generically by ObjectListSection — no code section needed.
+export async function addModuleObjectSection(moduleId, objectTable, label) {
+  const { data, error } = await supabase.rpc('add_module_object_section', {
+    p_module_id: moduleId,
+    p_object_table: objectTable,
+    p_label: label || null,
+  })
+  if (error) throw error
+  return data
+}
+
 // ── Picklist VALUE management (add / rename / activate / reorder) ─────────
 // Values live in picklist_values, scoped by (object, field). Deactivation is
 // is_active=false (there is no is_deleted column on this table). Writes are

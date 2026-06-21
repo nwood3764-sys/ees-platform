@@ -5,6 +5,7 @@ import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import ObjectListSection from '../components/ObjectListSection'
 import {
   fetchProducts,
   fetchProductItems,
@@ -331,6 +332,9 @@ export default function StockModule({ selectedRecord: navSelectedRecord, section
         {sec==='products'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={products}  listObject="products" listModule="stock" columns={PROD_COLS} systemViews={PROD_VIEWS} defaultViewId="PRV-01" newLabel="Product"          onNew={() => setSelectedRecord({ table: 'products', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='requests'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={requests}  listObject="materials_requests" listModule="stock" columns={REQ_COLS}  systemViews={REQ_VIEWS}  defaultViewId="RV-01"  newLabel="Materials Request" onNew={() => setSelectedRecord({ table: 'materials_requests', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='equipment' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={equipment} listObject="equipment" listModule="stock" columns={EQ_COLS}   systemViews={EQ_VIEWS}   defaultViewId="EQV-01" newLabel="Equipment"        onNew={() => setSelectedRecord({ table: 'equipment', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
+        {!['home','inventory','products','requests','equipment'].includes(sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
+          <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="stock" />
+        )}
         </>)}
       </div>
     </div>
