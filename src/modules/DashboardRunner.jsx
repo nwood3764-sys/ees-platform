@@ -262,18 +262,33 @@ function WidgetBody({ widget, result }) {
 
 function MetricWidget({ result, widget }) {
   // Configurable single number. With no measure config, defaults to row count.
-  // widget_config: { measure_type, measure_field, label }
+  // widget_config:
+  //   { measure_type, measure_field, label, group_by, filter_value }
+  // When group_by + filter_value are set, the metric is scoped to the rows
+  // whose group_by field equals filter_value (e.g. count of records in one
+  // status), rather than the whole report. Without them it spans all rows.
   const cfg          = widget.dw_widget_config || {}
   const measureType  = cfg.measure_type  || 'count'
   const measureField = cfg.measure_field || null
+  const groupBy      = cfg.group_by || null
+  const filterValue  = (cfg.filter_value !== undefined && cfg.filter_value !== null && cfg.filter_value !== '')
+    ? String(cfg.filter_value) : null
+
+  // Scope rows by group_by = filter_value when both are present.
+  const scopedRows = (groupBy && filterValue)
+    ? (result.rows || []).filter(row => {
+        const v = getRowValue(row, { name: groupBy }, result)
+        return v != null && String(v) === filterValue
+      })
+    : (result.rows || [])
 
   let value, displayLabel
   if (measureType === 'count' || !measureField) {
-    value = result.rows.length
+    value = scopedRows.length
     displayLabel = cfg.label || 'rows'
   } else {
     const nums = []
-    for (const row of result.rows) {
+    for (const row of scopedRows) {
       const v = getRowValue(row, { name: measureField }, result)
       if (v == null || v === '') continue
       const n = typeof v === 'number' ? v : parseFloat(v)
