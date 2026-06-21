@@ -1085,7 +1085,7 @@ function applySimpleFilter(query, fieldName, operator, value) {
  *                                      dashboard filter that only some
  *                                      reports support degrades.
  */
-export async function runReport(reportId, promptValues = null, extraFilters = null) {
+export async function runReport(reportId, promptValues = null, extraFilters = null, augmentColumns = false) {
   const loaded = await loadReport(reportId)
   if (!loaded) throw new Error('Report not found')
   const r = loaded.report
@@ -1122,6 +1122,52 @@ export async function runReport(reportId, promptValues = null, extraFilters = nu
         rfilt_is_runtime_prompt: false,
       }))
       loaded.filters = [...(loaded.filters || []), ...synthesized]
+    }
+  }
+
+  // Drill augmentation: when a widget drills into records, the saved report may
+  // select very few fields (e.g. only the status used for the chart), which
+  // makes the record list unidentifiable. Prepend the object's identifying
+  // columns (record number, name) when they exist on the primary object and
+  // aren't already selected — sourced from the live schema, nothing hardcoded.
+  if (augmentColumns) {
+    const primaryCols = await describeColumns(r.rpt_primary_object)
+    const primaryColNames = new Set(primaryCols.map(c => c.column_name))
+    const selected = r.rpt_selected_fields || []
+    const already = new Set(selected.filter(f => !f.via_path || f.via_path.length === 0).map(f => f.name))
+    // Candidate identifying columns: the object's canonical record-number and
+    // name, by the platform convention {object_singular}_record_number /
+    // _name, plus a bare 'name' fallback. Kept narrow so the drill shows a
+    // clean record number + name rather than every *_name column.
+    const canonical = new Set()
+    for (const c of primaryCols) {
+      const n = c.column_name
+      if (/_record_number$/.test(n)) canonical.add(n)
+    }
+    // Pick the shortest *_name column as the primary name (e.g. enrollment_name
+    // over enrollment_property_name / enrollment_contact_name), or bare 'name'.
+    const nameCols = primaryCols
+      .map(c => c.column_name)
+      .filter(n => /_name$/.test(n) || n === 'name')
+      .sort((a, b) => a.length - b.length)
+    if (nameCols.length > 0) canonical.add(nameCols[0])
+    const candidates = Array.from(canonical)
+    const toPrepend = []
+    for (const name of candidates) {
+      if (primaryColNames.has(name) && !already.has(name)) {
+        const col = primaryCols.find(c => c.column_name === name)
+        toPrepend.push({
+          name,
+          type: col?.data_type || 'text',
+          label: name.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase()),
+          table: r.rpt_primary_object,
+          via_path: null,
+        })
+        already.add(name)
+      }
+    }
+    if (toPrepend.length > 0) {
+      r.rpt_selected_fields = [...toPrepend, ...selected]
     }
   }
 

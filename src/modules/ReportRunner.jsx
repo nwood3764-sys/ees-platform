@@ -26,7 +26,7 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
   const run = async (overrides = null) => {
     setLoading(true); setError(null)
     try {
-      const r = await runReport(reportId, overrides, extraFilters)
+      const r = await runReport(reportId, overrides, extraFilters, forceTabular)
       setResult(r)
     } catch (err) {
       setError(err)
