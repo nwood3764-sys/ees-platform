@@ -31,8 +31,8 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
   const [error, setError] = useState(null)
   // Report drill is handled here, not delegated up to the host's RecordDetail:
   // a saved report opens in ReportRunner, never in the generic record viewer.
-  // null = no report open, otherwise the report id to run full-screen.
-  const [openReportId, setOpenReportId] = useState(null)
+  // null = no report open; otherwise { reportId, extraFilters }.
+  const [openReport, setOpenReport] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -75,12 +75,16 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
     )
   }
 
-  // A widget's "View Records →" drilled into a report — run it full-screen
-  // over the home. Close returns to the configured home, no host routing.
-  if (openReportId) {
+  // A widget drilled into a report — run it full-screen over the home, scoped
+  // by any extraFilters from a clicked chart segment / metric. Close returns to
+  // the configured home, no host routing.
+  if (openReport) {
     return (
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <ReportRunner reportId={openReportId} onClose={() => setOpenReportId(null)} />
+        <ReportRunner
+          reportId={openReport.reportId}
+          extraFilters={openReport.extraFilters}
+          onClose={() => setOpenReport(null)} />
       </div>
     )
   }
@@ -107,7 +111,7 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
                   key={c.id}
                   component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }}
                   onNavigate={(table, id) => onOpenRecord && onOpenRecord({ table, id, mode: 'view' })}
-                  onOpenReport={(reportId) => setOpenReportId(reportId)}
+                  onOpenReport={(reportId, extraFilters = null) => setOpenReport({ reportId, extraFilters })}
                 />
               ))}
               {regionComps.length === 0 && <div style={{ color: C.textMuted, fontSize: 12, padding: 12 }}>&nbsp;</div>}

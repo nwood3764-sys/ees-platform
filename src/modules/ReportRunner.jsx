@@ -14,7 +14,7 @@ import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } f
 // the table render. "Run Again" reruns the same query (useful when the
 // underlying data has changed).
 
-export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate }) {
+export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, extraFilters = null }) {
   const [result, setResult]     = useState(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(null)
@@ -26,7 +26,7 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate })
   const run = async (overrides = null) => {
     setLoading(true); setError(null)
     try {
-      const r = await runReport(reportId, overrides)
+      const r = await runReport(reportId, overrides, extraFilters)
       setResult(r)
     } catch (err) {
       setError(err)

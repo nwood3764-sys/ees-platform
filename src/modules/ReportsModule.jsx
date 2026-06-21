@@ -314,6 +314,7 @@ export default function ReportsModule({
             ) : (
               <ReportRunner
                 reportId={selectedRecord.id}
+                extraFilters={selectedRecord.extraFilters || null}
                 onClose={closeRecord}
                 onEdit={() => replaceSelectedRecord({ table:'reports', id:selectedRecord.id, mode:'edit' })}
                 onDuplicate={(newId) => {
@@ -344,7 +345,7 @@ export default function ReportsModule({
                 dashboardId={selectedRecord.id}
                 onClose={closeRecord}
                 onEdit={() => replaceSelectedRecord({ table:'dashboards', id:selectedRecord.id, mode:'edit' })}
-                onOpenReport={(reportId) => setSelectedRecord({ table:'reports', id:reportId, mode:'view' })}
+                onOpenReport={(reportId, extraFilters = null) => setSelectedRecord({ table:'reports', id:reportId, mode:'view', extraFilters })}
               />
             )
           ) : selectedRecord.table === 'scheduled_reports' ? (

@@ -186,11 +186,25 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
 
 function DashboardWidgetTile({ widget, result, onOpenReport, onNavigate }) {
   const span = widget.dw_width || 1
-  // Drill: open the report behind the widget (its records, each drillable to
-  // the record). Available both in the full Reports view and when embedded in a
-  // home (onOpenReport threaded through). onNavigate is reserved for row-level
-  // record opens inside report/list embeds.
+  // Drill: open the report behind the widget. The header link opens the whole
+  // report; clicking a chart segment / metric drills to just those filtered
+  // records (Salesforce-style) by passing extraFilters to onOpenReport.
   const canDrill = !!onOpenReport
+  const cfg = widget.dw_widget_config || {}
+
+  // Build the extraFilters for a clicked segment: filter the group_by column to
+  // the segment's raw stored value (what the report engine matches on).
+  const drillTo = (rawValue) => {
+    if (!canDrill) return
+    const groupCol = cfg.group_by || null
+    if (groupCol && rawValue !== undefined && rawValue !== null && rawValue !== '') {
+      onOpenReport(widget.dw_report_id, [{ field_name: groupCol, operator: 'equals', value: rawValue }])
+    } else {
+      onOpenReport(widget.dw_report_id)        // fall back to whole report
+    }
+  }
+  const drillWhole = () => { if (canDrill) onOpenReport(widget.dw_report_id) }
+
   return (
     <div style={{
       gridColumn: `span ${span}`,
@@ -207,7 +221,7 @@ function DashboardWidgetTile({ widget, result, onOpenReport, onNavigate }) {
           {widget.dw_title || result?.name || 'Widget'}
         </div>
         <button
-          onClick={() => onOpenReport?.(widget.dw_report_id)}
+          onClick={drillWhole}
           disabled={!canDrill}
           style={{
             background:'transparent', border:'none', color: canDrill ? C.emerald : C.textMuted,
@@ -221,14 +235,15 @@ function DashboardWidgetTile({ widget, result, onOpenReport, onNavigate }) {
         ) : result.error ? (
           <div style={{ fontSize:12, color:C.danger }}>Failed: {result.error.message}</div>
         ) : (
-          <WidgetBody widget={widget} result={result} />
+          <WidgetBody widget={widget} result={result}
+            canDrill={canDrill} drillTo={drillTo} drillWhole={drillWhole} />
         )}
       </div>
     </div>
   )
 }
 
-function WidgetBody({ widget, result }) {
+function WidgetBody({ widget, result, canDrill, drillTo, drillWhole }) {
   const type = widget.dw_widget_type || 'table'
   const rows = result?.rows || []
   const cols = result?.columns || []
@@ -239,28 +254,28 @@ function WidgetBody({ widget, result }) {
 
   switch (type) {
     case 'metric':
-      return <MetricWidget result={result} widget={widget} />
+      return <MetricWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} drillWhole={drillWhole} />
     case 'bar':
-      return <BarWidget result={result} widget={widget} />
+      return <BarWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
     case 'line':
-      return <LineWidget result={result} widget={widget} />
+      return <LineWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
     case 'pie':
-      return <PieWidget result={result} widget={widget} />
+      return <PieWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
     case 'donut':
-      return <PieWidget result={result} widget={widget} donut />
+      return <PieWidget result={result} widget={widget} donut canDrill={canDrill} drillTo={drillTo} />
     case 'funnel':
-      return <FunnelWidget result={result} widget={widget} />
+      return <FunnelWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
     case 'gauge':
-      return <GaugeWidget result={result} widget={widget} />
+      return <GaugeWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
     case 'table':
     default:
-      return <TableWidget result={result} widget={widget} />
+      return <TableWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
   }
 }
 
 // ─── Widget renderers ─────────────────────────────────────────────────────
 
-function MetricWidget({ result, widget }) {
+function MetricWidget({ result, widget, canDrill, drillTo, drillWhole }) {
   // Configurable single number. With no measure config, defaults to row count.
   // widget_config:
   //   { measure_type, measure_field, label, group_by, filter_value }
@@ -323,8 +338,17 @@ function MetricWidget({ result, widget }) {
     ? value.toLocaleString()
     : value.toLocaleString(undefined, { maximumFractionDigits: 1 })
 
+  // Click drills: if the metric is scoped to a group/filter value, drill to
+  // those filtered records; otherwise open the whole report.
+  const onMetricClick = !canDrill ? undefined : () => {
+    if (groupBy && filterValue) drillTo?.(filterValue)
+    else drillWhole?.()
+  }
+
   return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%' }}>
+    <div
+      onClick={onMetricClick}
+      style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', cursor: canDrill ? 'pointer' : 'default' }}>
       <div style={{ fontSize:48, fontWeight:700, color:C.textPrimary, lineHeight:1 }}>
         {display}
       </div>
@@ -335,10 +359,12 @@ function MetricWidget({ result, widget }) {
   )
 }
 
-function TableWidget({ result }) {
+function TableWidget({ result, canDrill, drillWhole }) {
   const { rows, columns } = result
   return (
-    <div style={{ overflow:'auto', maxHeight:240 }}>
+    <div
+      onClick={canDrill ? () => drillWhole?.() : undefined}
+      style={{ overflow:'auto', maxHeight:240, cursor: canDrill ? 'pointer' : 'default' }}>
       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
         <thead style={{ background:C.cardSecondary, position:'sticky', top:0 }}>
           <tr>
@@ -399,12 +425,19 @@ function buildChartData(result, widget) {
     : null
 
   // Group rows by the resolved value of groupCol (FK labels and picklist
-  // labels already substituted by getRowValue).
+  // labels already substituted by getRowValue). Keep the raw stored value of
+  // the group column for the first row in each bucket so a segment click can
+  // drill to filtered records using the value the report engine matches on
+  // (e.g. the status UUID), not the human label.
   const buckets = new Map()
+  const rawByKey = new Map()
   for (const row of result.rows) {
     const k = getRowValue(row, groupField, result) ?? '—'
     const key = String(k)
-    if (!buckets.has(key)) buckets.set(key, [])
+    if (!buckets.has(key)) {
+      buckets.set(key, [])
+      rawByKey.set(key, row[groupField.name] ?? null)
+    }
     buckets.get(key).push(row)
   }
 
@@ -432,7 +465,7 @@ function buildChartData(result, widget) {
         default:    value = nums.length
       }
     }
-    aggregated.push({ name, value })
+    aggregated.push({ name, value, rawValue: rawByKey.get(name), groupCol })
   }
 
   // Sort + limit
@@ -446,48 +479,56 @@ function buildChartData(result, widget) {
   return aggregated.slice(0, limit)
 }
 
-function BarWidget({ result, widget }) {
+function BarWidget({ result, widget, canDrill, drillTo }) {
   const R = useRecharts()
   const data = buildChartData(result, widget)
   if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
+  const onBarClick = canDrill ? (d) => drillTo?.(d?.rawValue) : undefined
   return (
     <R.ResponsiveContainer width="100%" height={240}>
       <R.BarChart data={data}>
         <R.XAxis dataKey="name" tick={{ fontSize:10 }} />
         <R.YAxis tick={{ fontSize:10 }} />
         <R.Tooltip />
-        <R.Bar dataKey="value" fill={C.emerald} />
+        <R.Bar dataKey="value" fill={C.emerald}
+          cursor={canDrill ? 'pointer' : undefined}
+          onClick={onBarClick} />
       </R.BarChart>
     </R.ResponsiveContainer>
   )
 }
 
-function LineWidget({ result, widget }) {
+function LineWidget({ result, widget, canDrill, drillTo }) {
   const R = useRecharts()
   const data = buildChartData(result, widget)
   if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
+  const onPointClick = canDrill ? (d) => drillTo?.(d?.payload?.rawValue ?? d?.rawValue) : undefined
   return (
     <R.ResponsiveContainer width="100%" height={240}>
       <R.LineChart data={data}>
         <R.XAxis dataKey="name" tick={{ fontSize:10 }} />
         <R.YAxis tick={{ fontSize:10 }} />
         <R.Tooltip />
-        <R.Line type="monotone" dataKey="value" stroke={C.emerald} strokeWidth={2} />
+        <R.Line type="monotone" dataKey="value" stroke={C.emerald} strokeWidth={2}
+          activeDot={{ cursor: canDrill ? 'pointer' : undefined, onClick: onPointClick }} />
       </R.LineChart>
     </R.ResponsiveContainer>
   )
 }
 
-function PieWidget({ result, widget, donut }) {
+function PieWidget({ result, widget, donut, canDrill, drillTo }) {
   const R = useRecharts()
   const data = buildChartData(result, widget)
   if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
+  const onSliceClick = canDrill ? (d) => drillTo?.(d?.payload?.rawValue ?? d?.rawValue) : undefined
   return (
     <R.ResponsiveContainer width="100%" height={240}>
       <R.PieChart>
         <R.Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%"
           outerRadius={80} innerRadius={donut ? 40 : 0}
-          label={(e) => e.name}>
+          label={(e) => e.name}
+          cursor={canDrill ? 'pointer' : undefined}
+          onClick={onSliceClick}>
           {data.map((_, i) => (
             <R.Cell key={i} fill={(CHART_COLORS && CHART_COLORS[i % CHART_COLORS.length]) || C.emerald} />
           ))}
@@ -498,15 +539,18 @@ function PieWidget({ result, widget, donut }) {
   )
 }
 
-function FunnelWidget({ result, widget }) {
+function FunnelWidget({ result, widget, canDrill, drillTo }) {
   const R = useRecharts()
   const data = buildChartData(result, widget).sort((a, b) => b.value - a.value)
   if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
+  const onSegClick = canDrill ? (d) => drillTo?.(d?.payload?.rawValue ?? d?.rawValue) : undefined
   return (
     <R.ResponsiveContainer width="100%" height={240}>
       <R.FunnelChart>
         <R.Tooltip />
-        <R.Funnel data={data} dataKey="value" nameKey="name" isAnimationActive={false}>
+        <R.Funnel data={data} dataKey="value" nameKey="name" isAnimationActive={false}
+          cursor={canDrill ? 'pointer' : undefined}
+          onClick={onSegClick}>
           {data.map((_, i) => (
             <R.Cell key={i} fill={(CHART_COLORS && CHART_COLORS[i % CHART_COLORS.length]) || C.emerald} />
           ))}
@@ -516,7 +560,7 @@ function FunnelWidget({ result, widget }) {
   )
 }
 
-function GaugeWidget({ result, widget }) {
+function GaugeWidget({ result, widget, canDrill, drillWhole }) {
   // Progress toward target. widget_config.target is the denominator;
   // numerator is the configured measure (defaults to row count).
   const cfg          = widget.dw_widget_config || {}
@@ -550,7 +594,9 @@ function GaugeWidget({ result, widget }) {
   const fmt = (n) => isInt ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 1 })
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%' }}>
+    <div
+      onClick={canDrill ? () => drillWhole?.() : undefined}
+      style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', cursor: canDrill ? 'pointer' : 'default' }}>
       <div style={{ fontSize:32, fontWeight:700, color:C.textPrimary, lineHeight:1 }}>
         {fmt(value)} / {fmt(target)}
       </div>
