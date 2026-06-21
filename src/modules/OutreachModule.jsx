@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
-import { useRecharts } from '../lib/RechartsLazy'
+import ConfiguredHome from '../components/ConfiguredHome'
 import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
@@ -153,187 +153,6 @@ function contactCell(col, r) {
     )
   }
   return undefined
-}
-
-function OutreachHome({ setSec, properties, opportunities, enrollments, contacts }) {
-  const R = useRecharts()
-  const enrolled = properties.filter(p => p.status === 'Enrolled')
-  const iqNotRun = enrollments.filter(e => e.qualifyingMode === 'Not Run')
-  const toBeVerified = enrollments.filter(e => e.status === 'Enrollment To Be Verified')
-  const needsAction = enrollments.filter(e => e.status !== 'Enrollment Approved' && e.status !== 'Enrollment Verified' && e.status !== 'Enrollment Withdrawn' && e.status !== 'Enrollment Denied')
-  const pipeline = opportunities.reduce((s, r) => s + (r._amountRaw || 0), 0)
-
-  // Group by count for charts
-  const groupCount = (arr, key) => {
-    const m = new Map()
-    for (const r of arr) m.set(r[key] || '—', (m.get(r[key] || '—') || 0) + 1)
-    return Array.from(m, ([name, value]) => ({ name, value }))
-  }
-  const propByStatus = groupCount(properties, 'status')
-  const oppByStage = groupCount(opportunities, 'stage').map(d => ({
-    ...d,
-    name: d.name.replace(/^Opportunity\s*[—-]?\s*/, '').slice(0, 24)
-  }))
-  // Pipeline by state from live opportunity amounts (thousands)
-  const pipelineByStateMap = new Map()
-  for (const o of opportunities) {
-    if (!o.state) continue
-    pipelineByStateMap.set(o.state, (pipelineByStateMap.get(o.state) || 0) + (o._amountRaw || 0))
-  }
-  const pipelineByState = Array.from(pipelineByStateMap, ([name, v]) => ({ name, value: Math.round(v / 1000) }))
-    .sort((a, b) => b.value - a.value)
-
-  return (
-    <div style={{ flex: 1, overflow: 'auto', display: 'flex' }}>
-      <div style={{ flex: 1, overflow: 'auto', padding: '20px 20px 24px' }}>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Enrollment / Home</div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, margin: 0 }}>Enrollment Dashboard</h1>
-          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>Nicholas Wood · Program Manager · Sunday, April 12, 2026</div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
-          {[
-            { label: 'Active Pipeline',        value: fmt(pipeline),      sub: `${opportunities.length} opportunities`, color: C.emerald, action: () => setSec('opps')       },
-            { label: 'Properties Enrolled',    value: enrolled.length,    sub: `${enrolled.reduce((s,r)=>s+(Number(r.units)||0),0)} units`, color: C.sky, action: () => setSec('properties') },
-            { label: 'Enrollments Need Action',value: needsAction.length, sub: 'In progress',          color: C.amber,  action: () => setSec('enrollment')  },
-            { label: 'Income Qual Not Run',    value: iqNotRun.length,    sub: 'Run qualification',   color: C.sky,    urgent: iqNotRun.length > 0, action: () => setSec('enrollment') },
-          ].map(s => (
-            <div key={s.label} onClick={s.action}
-              style={{ background: C.card, border: `2px solid ${s.urgent ? C.danger : C.border}`, borderTop: `3px solid ${s.color}`, borderRadius: 8, padding: '14px 16px', cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
-              <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>{s.label}</div>
-              <div style={{ fontSize: s.label === 'Active Pipeline' ? 18 : 26, fontWeight: 700, color: s.urgent ? C.danger : s.color, fontFamily: 'JetBrains Mono, monospace', marginBottom: 4 }}>{s.value}</div>
-              <div style={{ fontSize: 11, color: C.textMuted }}>{s.sub}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 14 }}>
-          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
-            <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}><div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Opportunities by Stage</div></div>
-            <div style={{ padding: '10px 14px' }}>
-              <R.ResponsiveContainer width="100%" height={145}>
-                <R.BarChart data={oppByStage} layout="vertical" margin={{ left: 0, right: 14, top: 0, bottom: 0 }}>
-                  <R.XAxis type="number" hide />
-                  <R.YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: C.textMuted }} tickLine={false} axisLine={false} width={120} />
-                  <R.Tooltip contentStyle={{ fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 5 }} />
-                  <R.Bar dataKey="value" radius={[0, 4, 4, 0]} fill={C.emerald} />
-                </R.BarChart>
-              </R.ResponsiveContainer>
-            </div>
-            <div style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}` }}><span onClick={() => setSec('opps')} style={{ color: '#1a5a8a', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>View Opportunities →</span></div>
-          </div>
-
-          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
-            <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}><div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Properties by Status</div></div>
-            <div style={{ padding: '12px 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
-              <R.ResponsiveContainer width={90} height={90}>
-                <R.PieChart><R.Pie data={propByStatus} cx="50%" cy="50%" innerRadius={20} outerRadius={40} dataKey="value" strokeWidth={0}>{propByStatus.map((_, i) => <R.Cell key={i} fill={CHART_COLORS[i]} />)}</R.Pie></R.PieChart>
-              </R.ResponsiveContainer>
-              <div style={{ flex: 1 }}>
-                {propByStatus.map((d, i) => (
-                  <div key={d.name} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: 2, background: CHART_COLORS[i], flexShrink: 0 }} /><span style={{ fontSize: 11, color: C.textSecondary }}>{d.name}</span></div>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{d.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}` }}><span onClick={() => setSec('properties')} style={{ color: '#1a5a8a', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>View Properties →</span></div>
-          </div>
-
-          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
-            <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}><div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Pipeline by State ($K)</div></div>
-            <div style={{ padding: '10px 14px' }}>
-              <R.ResponsiveContainer width="100%" height={120}>
-                <R.BarChart data={pipelineByState} margin={{ left: 0, right: 10, top: 8, bottom: 0 }}>
-                  <R.XAxis dataKey="name" tick={{ fontSize: 11, fill: C.textSecondary }} tickLine={false} axisLine={false} />
-                  <R.YAxis tick={{ fontSize: 10, fill: C.textMuted }} tickLine={false} axisLine={false} />
-                  <R.Tooltip formatter={v => [`$${v}K`, 'Pipeline']} contentStyle={{ fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 5 }} />
-                  <R.Bar dataKey="value" radius={[4, 4, 0, 0]} fill={C.purple} />
-                </R.BarChart>
-              </R.ResponsiveContainer>
-            </div>
-            <div style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}` }}><span style={{ color: '#1a5a8a', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>View Report →</span></div>
-          </div>
-        </div>
-
-        {/* Enrollment action table */}
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
-          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Enrollment — Needs Action</div>
-            <span style={{ background: needsAction.length > 0 ? C.amber : '#e8f8f2', color: needsAction.length > 0 ? '#1e466b' : '#1a7a4e', fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 10 }}>{needsAction.length}</span>
-          </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>{['Record #','Enrollment','Property','Record Type','Status','Income Qual','Action'].map(h => <th key={h} style={{ padding: '9px 12px', textAlign: 'left', color: C.textMuted, fontWeight: 500, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>)}</tr></thead>
-            <tbody>
-              {needsAction.map(e => (
-                <TableRow key={e.id}>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}`, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 }}>{e.id}</td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}`, color: C.textSecondary }}>{e.property}</td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}><ProgramTag value={e.recordType} /></td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}><Badge s={e.status} /></td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}><StatusDot value={e.qualifyingMode} /></td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}>
-                    {e.qualifyingMode === 'Not Run' && <button onClick={() => openRecord(e)} style={{ background: '#e8f3fb', color: '#1a5a8a', border: `1px solid #b8d8f0`, borderRadius: 5, padding: '3px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Run Income Qual</button>}
-                  </td>
-                </TableRow>
-              ))}
-            </tbody>
-          </table>
-          <div style={{ padding: '9px 16px', borderTop: `1px solid ${C.border}` }}><span onClick={() => setSec('enrollment')} style={{ color: '#1a5a8a', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>View All Enrollments →</span></div>
-        </div>
-      </div>
-
-      {/* Right sidebar */}
-      <div style={{ width: 280, flexShrink: 0, background: C.page, borderLeft: `1px solid ${C.border}`, padding: '20px 14px', overflowY: 'auto' }}>
-        {[
-          { title: 'Income Qual Not Run', items: iqNotRun,    badge: iqNotRun.length,    color: '#1a5a8a', btnLabel: null },
-          { title: 'To Be Verified', items: toBeVerified, badge: toBeVerified.length, color: C.amber, btnLabel: null },
-        ].map(sec => (
-          <div key={sec.title} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
-            <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontWeight: 600, fontSize: 13, color: C.textPrimary }}>{sec.title}</span>
-              <span style={{ background: sec.badge > 0 ? C.danger : '#e8f8f2', color: sec.badge > 0 ? '#fff' : '#1a7a4e', fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 10 }}>{sec.badge}</span>
-            </div>
-            {sec.items.length === 0
-              ? <div style={{ padding: '16px 14px', textAlign: 'center', color: C.textMuted, fontSize: 12 }}>All clear.</div>
-              : sec.items.map((e, i) => (
-                <div key={e.id} style={{ padding: '10px 14px', borderBottom: i < sec.items.length - 1 ? `1px solid ${C.border}` : 'none', cursor: 'pointer' }}
-                  onMouseEnter={ev => ev.currentTarget.style.background = '#f7f9fc'}
-                  onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
-                  <div style={{ color: sec.color, fontSize: 12, fontWeight: 500, marginBottom: 2 }}>{e.property}</div>
-                  <div style={{ color: C.textMuted, fontSize: 11 }}>{e.recordType} · {e.units} units</div>
-                </div>
-              ))}
-            <div style={{ padding: '9px 14px', borderTop: `1px solid ${C.border}` }}><span onClick={() => setSec('enrollment')} style={{ color: '#1a5a8a', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>View All</span></div>
-          </div>
-        ))}
-
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
-          <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}><span style={{ fontWeight: 600, fontSize: 13, color: C.textPrimary }}>Recent Contacts</span></div>
-          {contacts.slice(0, 5).map((c, i) => {
-            const initials = c.name.split(' ').map(n => n[0]).join('').slice(0, 2)
-            return (
-              <div key={c.id} style={{ padding: '9px 14px', borderBottom: i < 4 ? `1px solid ${C.border}` : 'none', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
-                onMouseEnter={e => e.currentTarget.style.background = '#f7f9fc'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#e8f3fb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: '#1a5a8a', flexShrink: 0 }}>{initials}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: '#1a5a8a', fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
-                  <div style={{ color: C.textMuted, fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.role} · {c.org}</div>
-                </div>
-              </div>
-            )
-          })}
-          <div style={{ padding: '9px 14px', borderTop: `1px solid ${C.border}` }}><span onClick={() => setSec('contacts')} style={{ color: '#1a5a8a', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>View All</span></div>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 function LiveListView({ loading, error, data, onRetry, ...rest }) {
@@ -543,7 +362,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {sec === 'home'       && <OutreachHome setSec={setSec} properties={properties} opportunities={opportunities} enrollments={enrollments} contacts={contacts} />}
+        {sec === 'home'       && <ConfiguredHome crumb="Enrollment" moduleId="enrollment" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
         {sec === 'opps'       && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} listObject="opportunities" listModule="enrollment" columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec === 'accounts'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={accounts}      listObject="accounts" listModule="enrollment" columns={ACCOUNT_COLS} systemViews={ACC_VIEWS}  defaultViewId="AV-01" newLabel="Account"     onNew={() => setSelectedRecord({ table: 'accounts',      id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec === 'properties' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={properties}   listObject="properties" listModule="enrollment" columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}

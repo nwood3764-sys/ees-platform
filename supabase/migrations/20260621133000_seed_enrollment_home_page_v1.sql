@@ -1,0 +1,4 @@
+-- Configured Enrollment home page (HP-00005), replacing hardcoded OutreachHome.
+-- 4 reports -> Enrollment Overview dashboard (5 widgets) -> 2 list views ->
+-- home page for module 'enrollment', set as that module's default, active.
+-- Applied via MCP 2026-06-21. No red/amber colors. See app for full body.
