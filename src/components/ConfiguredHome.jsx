@@ -80,7 +80,10 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
   // the configured home, no host routing.
   if (openReport) {
     return (
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 600,
+        background: C.page, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
         <ReportRunner
           reportId={openReport.reportId}
           extraFilters={openReport.extraFilters}
