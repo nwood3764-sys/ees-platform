@@ -35,15 +35,16 @@ import { useState, useEffect, useCallback } from 'react'
 // the URL layer. RecordDetail.TABLE_META has the same info but is keyed
 // for display purposes — keep them aligned when adding new objects.
 const TABLE_MODULE_MAP = {
-  // Outreach
-  accounts: 'outreach',
-  contacts: 'outreach',
-  account_contact_relations: 'outreach',
-  properties: 'outreach',
-  buildings: 'outreach',
-  units: 'outreach',
-  opportunities: 'outreach',
-  property_programs: 'outreach',
+  // Enrollment
+  accounts: 'enrollment',
+  contacts: 'enrollment',
+  account_contact_relations: 'enrollment',
+  properties: 'enrollment',
+  buildings: 'enrollment',
+  units: 'enrollment',
+  opportunities: 'enrollment',
+  property_programs: 'enrollment',
+  enrollments: 'enrollment',
   // Field
   projects: 'field',
   work_orders: 'field',
@@ -179,7 +180,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // user lands on /search?q=... (typically from the search modal's "View
 // all results" footer button or a shared link).
 const KNOWN_MODULES = new Set([
-  'home', 'tasks', 'outreach', 'outreach_properties', 'qualification', 'field', 'planning', 'implementation', 'dispatch', 'incentives',
+  'home', 'tasks', 'outreach', 'enrollment', 'qualification', 'field', 'planning', 'implementation', 'dispatch', 'incentives',
   'stock', 'fleet', 'reports', 'admin', 'portal', 'search', 'help',
 ])
 
@@ -252,10 +253,13 @@ export function parsePath(pathname, search = '') {
   // only Admin's Object Manager (which needs the specific table the user is
   // viewing) so that browser-back lands on the manager list rather than home.
   if (parts[0] === 'm') {
-    // Legacy slug alias: the module formerly at /m/prospecting is now
-    // /m/outreach_properties. Remap so old bookmarks and saved URLs resolve
-    // instead of dropping to home.
-    const mod = parts[1] === 'prospecting' ? 'outreach_properties' : parts[1]
+    // Legacy slug aliases so old bookmarks resolve. /m/prospecting and the
+    // retired /m/outreach_properties both now map to the Outreach app at
+    // /m/outreach. (The Enrollment app, formerly at the 'outreach' id, now
+    // lives at /m/enrollment; bare /m/outreach now correctly resolves to the
+    // Outreach app.)
+    let mod = parts[1]
+    if (mod === 'prospecting' || mod === 'outreach_properties') mod = 'outreach'
     if (KNOWN_MODULES.has(mod) && mod !== 'search' && mod !== 'help') {
       // ?tab=<id> carries an admin-module sub-tab hint (used by ObjectDetail's
       // initialSubTab). ?layout=<uuid> carries a layout-id hint so the

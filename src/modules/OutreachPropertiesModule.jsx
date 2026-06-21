@@ -568,7 +568,7 @@ export default function OutreachPropertiesModule({
   onReplaceRecord,
 } = {}) {
   const urlDriven = !!onNavigateToRecord
-  const SECTIONS = useModuleSections('outreach_properties', CODE_SECTIONS)
+  const SECTIONS = useModuleSections('outreach', CODE_SECTIONS)
   const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
   const sec = sectionFromUrl || secLocal
   const setSec = (s) => {
@@ -594,16 +594,16 @@ export default function OutreachPropertiesModule({
 
   // ─── Data layer ────────────────────────────────────────────────────────
   // Same lazy-cached pattern Outreach uses. Each query is keyed by an
-  // 'outreach_properties:' prefix so writes can invalidate the whole module's
+  // 'outreach:' prefix so writes can invalidate the whole module's
   // cache atomically. Cache survives unmounts, so leaving Outreach
   // and coming back is instant.
   //
   // Counts and batches are eager (small, fast, used by Home + tab
   // badges). Properties is lazy — the slow one — only fetched when
   // the user opens Properties or Map.
-  const countsQ = useCachedFetch('outreach_properties:counts', fetchOutreachCounts)
-  const batchesQ = useCachedFetch('outreach_properties:batches', fetchImportBatches)
-  const propertiesQ = useCachedFetch('outreach_properties:properties', fetchOutreachProperties, {
+  const countsQ = useCachedFetch('outreach:counts', fetchOutreachCounts)
+  const batchesQ = useCachedFetch('outreach:batches', fetchImportBatches)
+  const propertiesQ = useCachedFetch('outreach:properties', fetchOutreachProperties, {
     enabled: sec === 'properties' || sec === 'map',
   })
 
@@ -631,7 +631,7 @@ export default function OutreachPropertiesModule({
   // outreach cache so the next render of any visible section
   // refetches from network.
   const loadAll = () => {
-    invalidatePrefix('outreach_properties:')
+    invalidatePrefix('outreach:')
   }
 
   const openProperty = (row) => {
@@ -668,9 +668,9 @@ export default function OutreachPropertiesModule({
              on home. */}
           <HelpIcon
             anchors={[
-              { type:'route', route:`/m/outreach_properties/${sec}` },
-              { type:'route', route:'/m/outreach_properties' },
-              { type:'concept', concept:'outreach_properties' },
+              { type:'route', route:`/m/outreach/${sec}` },
+              { type:'route', route:'/m/outreach' },
+              { type:'concept', concept:'outreach' },
             ]}
             title={`Outreach — ${SECTIONS.find(s => s.id===sec)?.label || ''}`}
           />

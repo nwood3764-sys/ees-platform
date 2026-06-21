@@ -13,10 +13,10 @@ import { fetchAllModuleSections, saveModuleSections } from '../../data/adminServ
 // ---------------------------------------------------------------------------
 
 const MODULE_LABELS = {
-  outreach: 'Outreach', qualification: 'Qualification', field: 'Field',
+  outreach: 'Outreach', enrollment: 'Enrollment', qualification: 'Qualification', field: 'Field',
   incentives: 'Incentives', stock: 'Stock', fleet: 'Fleet',
   planning: 'Project Planning', implementation: 'Project Implementation',
-  tasks: 'Tasks', portal: 'Portal', reports: 'Reports', outreach_properties: 'Outreach',
+  tasks: 'Tasks', portal: 'Portal', reports: 'Reports',
 }
 
 export default function ModuleSectionsPane({ initialModuleId } = {}) {

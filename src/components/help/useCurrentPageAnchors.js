@@ -26,6 +26,7 @@ import { useMemo } from 'react'
 const MODULE_ROUTES = {
   home:          '/',
   outreach:      '/m/outreach',
+  enrollment:    '/m/enrollment',
   qualification: '/m/qualification',
   field:         '/m/field',
   incentives:    '/m/incentives',

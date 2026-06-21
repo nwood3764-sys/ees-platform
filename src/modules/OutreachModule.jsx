@@ -369,7 +369,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
   // shipping app). The local-state fallback path remains so this module can
   // still mount in isolation (tests, future embeds).
   const urlDriven = !!onNavigateToRecord
-  const SECTIONS = useModuleSections('outreach', CODE_SECTIONS)
+  const SECTIONS = useModuleSections('enrollment', CODE_SECTIONS)
   const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
   const sec = sectionFromUrl || secLocal
   const setSec = (s) => {
@@ -434,20 +434,20 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
 
   // Eager (Home reads from these): opportunities, enrollments, contacts.
   // Buildings/units are small and used by Home counts too — keep eager.
-  const opportunitiesQ = useCachedFetch('outreach:opportunities', fetchOpportunities)
-  const enrollmentsQ   = useCachedFetch('outreach:enrollments',   fetchEnrollments)
-  const contactsQ      = useCachedFetch('outreach:contacts',      fetchContacts)
-  const buildingsQ     = useCachedFetch('outreach:buildings',     fetchBuildings)
-  const unitsQ         = useCachedFetch('outreach:units',         fetchUnits)
+  const opportunitiesQ = useCachedFetch('enrollment:opportunities', fetchOpportunities)
+  const enrollmentsQ   = useCachedFetch('enrollment:enrollments',   fetchEnrollments)
+  const contactsQ      = useCachedFetch('enrollment:contacts',      fetchContacts)
+  const buildingsQ     = useCachedFetch('enrollment:buildings',     fetchBuildings)
+  const unitsQ         = useCachedFetch('enrollment:units',         fetchUnits)
 
   // Lazy (big tables). Fetched only when the user opens that section.
   // Home shows a count card from these too; once warmed by a visit
   // the count appears on Home from cache. Until first visit the
   // count card shows '—'. Acceptable trade — we save 6s on first load.
-  const propertiesQ = useCachedFetch('outreach:properties', fetchProperties, {
+  const propertiesQ = useCachedFetch('enrollment:properties', fetchProperties, {
     enabled: sec === 'properties' || sec === 'home',
   })
-  const accountsQ = useCachedFetch('outreach:accounts', fetchAccounts, {
+  const accountsQ = useCachedFetch('enrollment:accounts', fetchAccounts, {
     enabled: sec === 'accounts' || sec === 'home',
   })
 
@@ -492,7 +492,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
   // user expects when they hit refresh — the whole module starts fresh,
   // not just the current section.
   const loadAll = () => {
-    invalidatePrefix('outreach:')
+    invalidatePrefix('enrollment:')
   }
 
   const hafUrgent = enrollments.filter(e => e.qualifyingMode === 'Not Run').length
@@ -539,18 +539,18 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
             mode={selectedRecord.mode || 'view'}
-            onRecordCreated={(r) => { invalidatePrefix('outreach:'); replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' }) }}
+            onRecordCreated={(r) => { invalidatePrefix('enrollment:'); replaceSelectedRecord({ table: r.table, id: r.id, mode: 'view' }) }}
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
         {sec === 'home'       && <OutreachHome setSec={setSec} properties={properties} opportunities={opportunities} enrollments={enrollments} contacts={contacts} />}
-        {sec === 'opps'       && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} listObject="opportunities" listModule="outreach" columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'accounts'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={accounts}      listObject="accounts" listModule="outreach" columns={ACCOUNT_COLS} systemViews={ACC_VIEWS}  defaultViewId="AV-01" newLabel="Account"     onNew={() => setSelectedRecord({ table: 'accounts',      id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'properties' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={properties}   listObject="properties" listModule="outreach" columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'buildings'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={buildings}    listObject="buildings" listModule="outreach" columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'units'      && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={units}        listObject="units" listModule="outreach" columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'contacts'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={contacts}     listObject="contacts" listModule="outreach" columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => setSelectedRecord({ table: 'contacts', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={contactCell} />}
-        {sec === 'enrollment' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={enrollments}  listObject="enrollments" listModule="outreach" columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'enrollments', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
+        {sec === 'opps'       && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} listObject="opportunities" listModule="enrollment" columns={OPP_COLS}    systemViews={OPP_VIEWS}  defaultViewId="OV-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'accounts'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={accounts}      listObject="accounts" listModule="enrollment" columns={ACCOUNT_COLS} systemViews={ACC_VIEWS}  defaultViewId="AV-01" newLabel="Account"     onNew={() => setSelectedRecord({ table: 'accounts',      id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'properties' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={properties}   listObject="properties" listModule="enrollment" columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'buildings'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={buildings}    listObject="buildings" listModule="enrollment" columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'units'      && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={units}        listObject="units" listModule="enrollment" columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
+        {sec === 'contacts'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={contacts}     listObject="contacts" listModule="enrollment" columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => setSelectedRecord({ table: 'contacts', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={contactCell} />}
+        {sec === 'enrollment' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={enrollments}  listObject="enrollments" listModule="enrollment" columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'enrollments', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
         </>)}
       </div>
     </div>

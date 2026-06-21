@@ -35,7 +35,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 // Key choice matters:
 //   The key string is the cache identity. Two different fetchers that
 //   produce the same shape but different data must use different keys
-//   (e.g. 'outreach:properties' vs 'outreach_properties:properties'). Same
+//   (e.g. 'enrollment:properties' vs 'outreach:properties'). Same
 //   data fetched from two call sites SHOULD use the same key — that's
 //   how dedup wins.
 // ─────────────────────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ export function invalidate(key) {
 /**
  * Drop every cache entry whose key starts with the given prefix.
  * Useful after a destructive batch op (e.g. import → invalidate
- * everything under 'outreach_properties:').
+ * everything under 'outreach:').
  */
 export function invalidatePrefix(prefix) {
   for (const k of cache.keys()) {

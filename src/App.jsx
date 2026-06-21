@@ -347,8 +347,8 @@ function AuthedApp({ session }) {
     switch (activeModule) {
       case 'home':          return <HomeModule onNavigate={navigateToModule} onOpenSetup={navigateToSetup} onOpenRecord={navigateToRecord} />
       case 'tasks':         return <TasksModule {...navProps} />
-      case 'outreach':      return <OutreachModule {...navProps} />
-      case 'outreach_properties': return <OutreachPropertiesModule {...navProps} />
+      case 'enrollment':    return <OutreachModule {...navProps} />
+      case 'outreach':      return <OutreachPropertiesModule {...navProps} />
       case 'qualification': return <QualificationModule {...navProps} />
       case 'field':         return <FieldModule {...navProps} />
       case 'planning':      return <ProjectPlanningModule {...navProps} />
