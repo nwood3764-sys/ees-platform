@@ -1,0 +1,4 @@
+-- Make save_home_page module-aware: persist hp_module_id and scope the
+-- one-default clearing to the same module bucket. Applied via MCP 2026-06-21.
+-- (Body identical to the deployed function; see resolve_home_page_for_module
+-- migration for the resolver half.)

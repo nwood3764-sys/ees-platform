@@ -92,6 +92,7 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
                   key={c.id}
                   component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }}
                   onNavigate={(table, id) => onOpenRecord && onOpenRecord({ table, id, mode: 'view' })}
+                  onOpenReport={(reportId) => onOpenRecord && onOpenRecord({ table: 'reports', id: reportId, mode: 'view' })}
                 />
               ))}
               {regionComps.length === 0 && <div style={{ color: C.textMuted, fontSize: 12, padding: 12 }}>&nbsp;</div>}

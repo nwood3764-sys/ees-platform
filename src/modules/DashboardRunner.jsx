@@ -10,7 +10,7 @@ import { runReport, loadDashboard, getRowValue } from '../data/reportsService'
 // and renders the widgets in a grid. Each widget chooses its own viz
 // (table / metric / bar / line / pie / donut / funnel / gauge).
 
-export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenReport }) {
+export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenReport, onNavigate }) {
   const [data, setData]                 = useState(null)        // { dashboard, widgets, filters }
   const [results, setResults]           = useState({})          // widget.id → run result
   const [loading, setLoading]           = useState(true)
@@ -172,6 +172,7 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
                 widget={w}
                 result={results[w.id]}
                 onOpenReport={onOpenReport}
+                onNavigate={onNavigate}
               />
             ))}
           </div>
@@ -183,8 +184,13 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
 
 // ─── Widget tile ──────────────────────────────────────────────────────────
 
-function DashboardWidgetTile({ widget, result, onOpenReport }) {
+function DashboardWidgetTile({ widget, result, onOpenReport, onNavigate }) {
   const span = widget.dw_width || 1
+  // Drill: open the report behind the widget (its records, each drillable to
+  // the record). Available both in the full Reports view and when embedded in a
+  // home (onOpenReport threaded through). onNavigate is reserved for row-level
+  // record opens inside report/list embeds.
+  const canDrill = !!onOpenReport
   return (
     <div style={{
       gridColumn: `span ${span}`,
@@ -202,11 +208,12 @@ function DashboardWidgetTile({ widget, result, onOpenReport }) {
         </div>
         <button
           onClick={() => onOpenReport?.(widget.dw_report_id)}
+          disabled={!canDrill}
           style={{
-            background:'transparent', border:'none', color:C.emerald,
-            fontSize:11, fontWeight:500, cursor:'pointer', padding:0,
+            background:'transparent', border:'none', color: canDrill ? C.emerald : C.textMuted,
+            fontSize:11, fontWeight:500, cursor: canDrill ? 'pointer' : 'default', padding:0,
           }}
-        >Open Report →</button>
+        >View Records →</button>
       </div>
       <div style={{ flex:1, padding:12, overflow:'hidden' }}>
         {!result ? (

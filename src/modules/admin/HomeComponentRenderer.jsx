@@ -8,7 +8,7 @@ import { Icon } from '../../components/UI'
 //
 // To avoid heavy imports at module load, the dashboard/report/list embeds are
 // loaded lazily only when needed on the live screen.
-export default function HomeComponentRenderer({ component, preview = false, sources = {}, onNavigate }) {
+export default function HomeComponentRenderer({ component, preview = false, sources = {}, onNavigate, onOpenReport }) {
   const { type, sourceId, title, config = {} } = component
 
   const label = title || defaultTitle(type, sourceId, sources)
@@ -29,7 +29,7 @@ export default function HomeComponentRenderer({ component, preview = false, sour
     case 'gauge':           return <GaugeCard title={label} config={config} />
     case 'rich_text':       return <RichTextCard title={label} config={config} />
     case 'task_list':       return <TaskListCard title={label} onNavigate={onNavigate} />
-    case 'dashboard':       return <EmbeddedDashboard title={label} sourceId={sourceId} />
+    case 'dashboard':       return <EmbeddedDashboard title={label} sourceId={sourceId} onNavigate={onNavigate} onOpenReport={onOpenReport} />
     case 'report_chart':    return <EmbeddedReport title={label} sourceId={sourceId} />
     case 'list_view':       return <EmbeddedListView title={label} sourceId={sourceId} sources={sources} onNavigate={onNavigate} />
     default:                return <CardShell title={label}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>Unknown component</div></CardShell>
@@ -161,14 +161,14 @@ function TaskListCard({ title, onNavigate }) {
 }
 
 // ── Lazy embeds for dashboard / report / list view ────────────────────────
-function EmbeddedDashboard({ title, sourceId }) {
+function EmbeddedDashboard({ title, sourceId, onNavigate, onOpenReport }) {
   const [Comp, setComp] = useState(null)
   useEffect(() => { import('../DashboardRunner').then(m => setComp(() => m.default)).catch(() => setComp(null)) }, [])
   if (!sourceId) return <CardShell title={title}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>No dashboard selected.</div></CardShell>
   if (!Comp) return <CardShell title={title}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>Loading dashboard…</div></CardShell>
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
-      <Comp dashboardId={sourceId} embedded />
+      <Comp dashboardId={sourceId} embedded onNavigate={onNavigate} onOpenReport={onOpenReport} />
     </div>
   )
 }

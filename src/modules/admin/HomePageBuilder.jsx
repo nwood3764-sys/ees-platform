@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { C } from '../../data/constants'
+import { C, NAV_MODULES } from '../../data/constants'
 import { Icon } from '../../components/UI'
 import { useToast } from '../../components/Toast'
 import {
@@ -62,7 +62,7 @@ export default function HomePageBuilder() {
   function newPage() {
     setEditing({
       id: null, name: 'New Home Page', template: 'two_thirds_one_third',
-      roleId: null, isActive: false, isDefault: false, components: [],
+      roleId: null, moduleId: null, isActive: false, isDefault: false, components: [],
     })
   }
 
@@ -98,7 +98,8 @@ export default function HomePageBuilder() {
               <div>Name</div><div>Assignment</div><div>Template</div><div style={{ textAlign: 'center' }}>Status</div><div></div>
             </div>
             {pages.map(p => {
-              const roleName = p.roleId ? (sources.roles.find(r => r.id === p.roleId)?.name || 'Role') : (p.isDefault ? 'Org default' : 'Unassigned')
+              const modName = p.moduleId ? (NAV_MODULES.find(m => m.id === p.moduleId)?.label || p.moduleId) : 'Global Home'
+              const roleName = (p.roleId ? (sources.roles.find(r => r.id === p.roleId)?.name || 'Role') : (p.isDefault ? 'Module default' : 'Unassigned')) + ' · ' + modName
               return (
                 <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.4fr 1fr 100px 90px', gap: 8, alignItems: 'center', padding: '10px 14px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
                   <div style={{ color: C.textPrimary, fontWeight: 500 }}>{p.name}</div>
@@ -124,6 +125,7 @@ function PageEditor({ page, sources, toast, onClose, onSaved }) {
   const [name, setName] = useState(page.name)
   const [template, setTemplate] = useState(page.template)
   const [roleId, setRoleId] = useState(page.roleId || '')
+  const [moduleId, setModuleId] = useState(page.moduleId || '')
   const [isActive, setIsActive] = useState(page.isActive)
   const [isDefault, setIsDefault] = useState(page.isDefault)
   const [components, setComponents] = useState(page.components)
@@ -165,7 +167,7 @@ function PageEditor({ page, sources, toast, onClose, onSaved }) {
     setSaving(true)
     try {
       await saveHomePage(
-        { id: page.id, name, template, roleId: roleId || null, isActive, isDefault },
+        { id: page.id, name, template, roleId: roleId || null, moduleId: moduleId || null, isActive, isDefault },
         components,
       )
       toast.success('Home page saved')
@@ -189,8 +191,12 @@ function PageEditor({ page, sources, toast, onClose, onSaved }) {
           <select value={template} onChange={e => changeTemplate(e.target.value)} style={inputStyle}>
             {HOME_TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
+          <select value={moduleId} onChange={e => setModuleId(e.target.value)} style={inputStyle} title="Which module's home this page is">
+            <option value="">Global Home</option>
+            {NAV_MODULES.filter(m => m.id !== 'admin' && m.id !== 'home').map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
           <select value={roleId} onChange={e => setRoleId(e.target.value)} style={inputStyle}>
-            <option value="">Org default (all roles)</option>
+            <option value="">All roles in module</option>
             {sources.roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.textPrimary, cursor: 'pointer' }}>
