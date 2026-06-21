@@ -154,7 +154,10 @@ export async function fetchObjectRecords(table) {
 
   const rows = await fetchAllPaged((from, to) => {
     let q = supabase.from(table).select('*')
-    if (softDel) q = q.or(`${softDel}.is.null,${softDel}.eq.false`)
+    // Match the proven per-object fetches: a plain eq(false) on the soft-delete
+    // column. (An .or(...is.null...) filter can error on some tables and the
+    // whole query returns nothing.) Every soft-deletable row carries a boolean.
+    if (softDel) q = q.eq(softDel, false)
     return q.range(from, to)
   })
 

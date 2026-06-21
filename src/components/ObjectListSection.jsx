@@ -88,6 +88,24 @@ export default function ObjectListSection({ objectTable, moduleId }) {
       onRefresh={load}
       onOpenRecord={(row) => { if (row?._id) setSelected({ id: row._id, mode: 'view' }) }}
       onNew={() => setSelected({ id: null, mode: 'create' })}
+      renderCell={(col, r) => {
+        // Make the Name a single-click link that opens the record, so the
+        // generic list behaves like a standard list view (the table otherwise
+        // opens on double-click).
+        if (col.field === 'name') {
+          return (
+            <td key="name" style={{ padding: '11px 12px', borderBottom: '1px solid #e4e9f2', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span
+                onClick={(e) => { e.stopPropagation(); if (r?._id) setSelected({ id: r._id, mode: 'view' }) }}
+                style={{ color: '#1a5a8a', fontWeight: 600, cursor: 'pointer' }}
+              >
+                {r.name || '(no name)'}
+              </span>
+            </td>
+          )
+        }
+        return null   // fall through to ListView's default cell for other columns
+      }}
     />
   )
 }
