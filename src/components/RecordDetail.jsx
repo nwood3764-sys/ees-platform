@@ -2963,11 +2963,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
               {editing && isRequiredField && !isDerivedField && (
                 <span style={{ color: '#2c5f8a', marginLeft: 3 }}>*</span>
               )}
-              {editing && isDerivedField && (
-                <span style={{ color: C.textMuted, marginLeft: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>
-                  auto-generated on save
-                </span>
-              )}
+
             </span>
             {isEditable ? (
               <EditField
