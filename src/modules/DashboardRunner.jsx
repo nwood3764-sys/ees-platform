@@ -274,11 +274,23 @@ function MetricWidget({ result, widget }) {
   const filterValue  = (cfg.filter_value !== undefined && cfg.filter_value !== null && cfg.filter_value !== '')
     ? String(cfg.filter_value) : null
 
-  // Scope rows by group_by = filter_value when both are present.
-  const scopedRows = (groupBy && filterValue)
+  // Resolve the real column definition from the report so picklist/FK group
+  // values resolve to labels and via_path columns read correctly — the same
+  // resolution the chart path uses. A bare { name } object skips _is_picklist /
+  // via_path metadata, so getRowValue would only return the raw stored UUID.
+  const groupField = (result.columns || []).find(c => c.name === groupBy)
+    || (groupBy ? { name: groupBy } : null)
+
+  // Scope rows by group_by = filter_value when both are present. Match against
+  // BOTH the resolved label (getRowValue) and the raw stored value (row[name]),
+  // so the scope works whether the builder stored filter_value as a status UUID
+  // or as the human-readable picklist label.
+  const scopedRows = (groupBy && filterValue && groupField)
     ? (result.rows || []).filter(row => {
-        const v = getRowValue(row, { name: groupBy }, result)
-        return v != null && String(v) === filterValue
+        const label = getRowValue(row, groupField, result)
+        const raw   = row[groupField.name]
+        return (label != null && String(label) === filterValue)
+            || (raw   != null && String(raw)   === filterValue)
       })
     : (result.rows || [])
 
