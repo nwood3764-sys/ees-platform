@@ -188,7 +188,7 @@ function OutreachHome({ setSec, properties, opportunities, enrollments, contacts
       <div style={{ flex: 1, overflow: 'auto', padding: '20px 20px 24px' }}>
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Enrollment / Home</div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, margin: 0 }}>Outreach & Enrollment Dashboard</h1>
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, margin: 0 }}>Enrollment Dashboard</h1>
           <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>Nicholas Wood · Program Manager · Sunday, April 12, 2026</div>
         </div>
 
@@ -512,9 +512,19 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
       {/* Topbar */}
       <div data-module-topbar="1" style={{ height: 54, background: C.card, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-          <span style={{ color: C.textMuted }}>Enrollment</span>
+          <span
+            onClick={() => { setSec('home'); closeRecord() }}
+            style={{ color: C.textMuted, cursor: 'pointer' }}
+            onMouseEnter={e => { e.currentTarget.style.color = C.textSecondary }}
+            onMouseLeave={e => { e.currentTarget.style.color = C.textMuted }}
+          >Enrollment</span>
           <span style={{ color: C.textMuted }}>/</span>
-          <span style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }} onClick={() => selectedRecord && closeRecord()}>{SECTIONS.find(s => s.id === sec)?.label}</span>
+          <span
+            onClick={() => { if (selectedRecord) closeRecord(); else if (sec !== 'home') setSec('home') }}
+            style={{ color: (selectedRecord || sec !== 'home') ? C.textMuted : C.textPrimary, fontWeight: (selectedRecord || sec !== 'home') ? 400 : 500, cursor: (selectedRecord || sec !== 'home') ? 'pointer' : 'default' }}
+            onMouseEnter={e => { if (selectedRecord || sec !== 'home') e.currentTarget.style.color = C.textSecondary }}
+            onMouseLeave={e => { if (selectedRecord || sec !== 'home') e.currentTarget.style.color = C.textMuted }}
+          >{SECTIONS.find(s => s.id === sec)?.label}</span>
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name}</span></>}
         </div>
         <button style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, color: C.textSecondary, cursor: 'pointer', fontWeight: 500 }}>
