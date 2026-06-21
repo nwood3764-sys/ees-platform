@@ -4,6 +4,7 @@ import { resolveHomePageForModule } from '../data/adminService'
 import { getTemplate } from '../modules/admin/homePageTemplates'
 import HomeComponentRenderer from '../modules/admin/HomeComponentRenderer'
 import ReportRunner from '../modules/ReportRunner'
+import ReportBuilder from '../modules/ReportBuilder'
 
 // ConfiguredHome renders a landing/dashboard screen entirely from a configured
 // Home Page (home_pages + home_page_components), resolved for the current user
@@ -33,6 +34,12 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
   // a saved report opens in ReportRunner, never in the generic record viewer.
   // null = no report open; otherwise { reportId, extraFilters }.
   const [openReport, setOpenReport] = useState(null)
+  // When the user clicks Edit on a drilled-in report, swap the runner for the
+  // full Report Builder for that report. Save/Close returns to the runner.
+  const [editingReport, setEditingReport] = useState(false)
+  // Bumped after a builder save so the runner remounts and re-runs, showing
+  // the edited fields/filters/groupings immediately.
+  const [reportEditNonce, setReportEditNonce] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -76,18 +83,29 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
   }
 
   // A widget drilled into a report — run it full-screen over the home, scoped
-  // by any extraFilters from a clicked chart segment / metric. Close returns to
-  // the configured home, no host routing.
+  // by any extraFilters from a clicked chart segment / metric. Clicking Edit
+  // swaps to the full Report Builder for that report; Close/Save returns here.
   if (openReport) {
     return (
       <div style={{
         position: 'fixed', inset: 0, zIndex: 600,
         background: C.page, display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
-        <ReportRunner
-          reportId={openReport.reportId}
-          extraFilters={openReport.extraFilters}
-          onClose={() => setOpenReport(null)} />
+        {editingReport ? (
+          <ReportBuilder
+            reportId={openReport.reportId}
+            onClose={() => setEditingReport(false)}
+            onSaved={() => { setReportEditNonce(n => n + 1); setEditingReport(false) }}
+          />
+        ) : (
+          <ReportRunner
+            key={`${openReport.reportId}:${reportEditNonce}`}
+            reportId={openReport.reportId}
+            extraFilters={openReport.extraFilters}
+            onEdit={() => setEditingReport(true)}
+            onClose={() => { setEditingReport(false); setOpenReport(null) }}
+          />
+        )}
       </div>
     )
   }
@@ -114,7 +132,7 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
                   key={c.id}
                   component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }}
                   onNavigate={(table, id) => onOpenRecord && onOpenRecord({ table, id, mode: 'view' })}
-                  onOpenReport={(reportId, extraFilters = null) => setOpenReport({ reportId, extraFilters })}
+                  onOpenReport={(reportId, extraFilters = null) => { setEditingReport(false); setOpenReport({ reportId, extraFilters }) }}
                 />
               ))}
               {regionComps.length === 0 && <div style={{ color: C.textMuted, fontSize: 12, padding: 12 }}>&nbsp;</div>}
