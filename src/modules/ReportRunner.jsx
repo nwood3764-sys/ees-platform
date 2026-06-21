@@ -214,7 +214,7 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
 
 // ─── Tabular layout ───────────────────────────────────────────────────────
 
-function TabularLayout({ result }) {
+export function TabularLayout({ result }) {
   const { rows, columns, calculatedFields } = result
   // Row-scope calculated fields appear as additional columns alongside the
   // selected fields. Summary-scope calculated fields show on the totals
@@ -282,7 +282,7 @@ function TabularLayout({ result }) {
 
 // ─── Summary layout (Phase 2c.2) ──────────────────────────────────────────
 
-function SummaryLayout({ result }) {
+export function SummaryLayout({ result }) {
   const { rows, columns, groupings, calculatedFields } = result
   if (groupings.length === 0) {
     return <EmptyState message="Summary reports require at least one grouping. Edit the report to add groupings." />
@@ -488,7 +488,7 @@ function buildResolvedRows(rows, columns, ctx) {
 
 // ─── Matrix layout (row × column pivot) ──────────────────────────────────
 
-function MatrixLayout({ result }) {
+export function MatrixLayout({ result }) {
   const { rows, groupings, primaryObject } = result
   // Column groupings live on the report's rpt_column_groupings jsonb;
   // result includes rpt_column_groupings on result.report.rpt_column_groupings,

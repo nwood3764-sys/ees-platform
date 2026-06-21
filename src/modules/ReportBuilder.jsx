@@ -8,7 +8,9 @@ import {
   listPrimaryObjectOptions,
   listObjectColumns,
   loadFilterValueOptions,
+  runReport,
 } from '../data/reportsService'
+import { TabularLayout, SummaryLayout, MatrixLayout } from './ReportRunner'
 import { supabase } from '../lib/supabase'
 
 // ─── Top-level Report Builder ─────────────────────────────────────────────
@@ -65,6 +67,43 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
 
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(null)
+
+  // ─── Live preview pane (right side, Salesforce-style) ──────────────────
+  // runReport reads persisted config, so the preview reflects the last SAVE.
+  // We auto-run on mount and after each save, plus a manual refresh button.
+  const [previewResult, setPreviewResult]   = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError]     = useState(null)
+  const [previewNonce, setPreviewNonce]     = useState(0)
+  const runPreview = async () => {
+    if (isNew) return  // nothing persisted yet to run
+    setPreviewLoading(true); setPreviewError(null)
+    try {
+      const r = await runReport(reportId)
+      setPreviewResult(r)
+    } catch (err) {
+      setPreviewError(err)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+  // Run preview on mount and whenever previewNonce bumps (after a save).
+  useEffect(() => {
+    if (isNew) return
+    let cancelled = false
+    ;(async () => {
+      setPreviewLoading(true); setPreviewError(null)
+      try {
+        const r = await runReport(reportId)
+        if (!cancelled) setPreviewResult(r)
+      } catch (err) {
+        if (!cancelled) setPreviewError(err)
+      } finally {
+        if (!cancelled) setPreviewLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [reportId, isNew, previewNonce])
 
   // ─── Initial load ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -220,6 +259,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
         id: reportId, report, filters, groupings, calculatedFields,
       })
       setSavedAt(new Date())
+      setPreviewNonce(n => n + 1)
       onSaved?.(newId)
     } catch (err) {
       setError(err)
@@ -296,71 +336,119 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{
-        background:C.card, borderBottom:`1px solid ${C.border}`,
-        display:'flex', padding:'0 24px',
-      }}>
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              padding:'12px 16px', background:'transparent', border:'none',
-              borderBottom: tab === t.id ? `2px solid ${C.emerald}` : '2px solid transparent',
-              fontSize:13, fontWeight: tab === t.id ? 600 : 500,
-              color: tab === t.id ? C.textPrimary : C.textSecondary,
-              cursor:'pointer',
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Body: Salesforce-style split — config rail left (40%), live results
+          preview right (60%). */}
+      <div style={{ flex:1, display:'flex', overflow:'hidden' }}>
 
-      {/* Tab content */}
-      <div style={{ flex:1, overflow:'auto', padding:'20px 24px' }}>
-        {tab === 'fields' && (
-          <FieldsTab
-            primaryOptions={primaryOptions}
-            report={report}
-            updateReport={updateReport}
-            fieldTree={fieldTree}
-            expandedRelated={expandedRelated}
-            onExpandRelated={handleExpandRelated}
-            addField={addField}
-            removeField={removeField}
-            moveField={moveField}
-          />
-        )}
-        {tab === 'filters' && (
-          <FiltersTab
-            report={report} updateReport={updateReport}
-            filters={filters} setFilters={setFilters}
-            primaryObject={report.rpt_primary_object}
-            fieldTree={fieldTree}
-            primaryOptions={primaryOptions}
-          />
-        )}
-        {tab === 'groupings' && (
-          <GroupingsTab
-            report={report} updateReport={updateReport}
-            groupings={groupings} setGroupings={setGroupings}
-            fieldTree={fieldTree}
-          />
-        )}
-        {tab === 'calc_fields' && (
-          <CalcFieldsTab
-            calculatedFields={calculatedFields}
-            setCalculatedFields={setCalculatedFields}
-          />
-        )}
-        {tab === 'settings' && (
-          <SettingsTab
-            report={report} updateReport={updateReport}
-            folders={folders}
-          />
-        )}
+        {/* Left: tabs + tab content */}
+        <div style={{
+          width:'40%', minWidth:380, display:'flex', flexDirection:'column',
+          borderRight:`1px solid ${C.border}`, background:C.page, overflow:'hidden',
+        }}>
+          {/* Tabs */}
+          <div style={{
+            background:C.card, borderBottom:`1px solid ${C.border}`,
+            display:'flex', padding:'0 16px', flexWrap:'wrap',
+          }}>
+            {TABS.map(t => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                style={{
+                  padding:'12px 14px', background:'transparent', border:'none',
+                  borderBottom: tab === t.id ? `2px solid ${C.emerald}` : '2px solid transparent',
+                  fontSize:13, fontWeight: tab === t.id ? 600 : 500,
+                  color: tab === t.id ? C.textPrimary : C.textSecondary,
+                  cursor:'pointer',
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          <div style={{ flex:1, overflow:'auto', padding:'18px 20px' }}>
+            {tab === 'fields' && (
+              <FieldsTab
+                primaryOptions={primaryOptions}
+                report={report}
+                updateReport={updateReport}
+                fieldTree={fieldTree}
+                expandedRelated={expandedRelated}
+                onExpandRelated={handleExpandRelated}
+                addField={addField}
+                removeField={removeField}
+                moveField={moveField}
+              />
+            )}
+            {tab === 'filters' && (
+              <FiltersTab
+                report={report} updateReport={updateReport}
+                filters={filters} setFilters={setFilters}
+                primaryObject={report.rpt_primary_object}
+                fieldTree={fieldTree}
+                primaryOptions={primaryOptions}
+              />
+            )}
+            {tab === 'groupings' && (
+              <GroupingsTab
+                report={report} updateReport={updateReport}
+                groupings={groupings} setGroupings={setGroupings}
+                fieldTree={fieldTree}
+              />
+            )}
+            {tab === 'calc_fields' && (
+              <CalcFieldsTab
+                calculatedFields={calculatedFields}
+                setCalculatedFields={setCalculatedFields}
+              />
+            )}
+            {tab === 'settings' && (
+              <SettingsTab
+                report={report} updateReport={updateReport}
+                folders={folders}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Right: live results preview */}
+        <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:C.page }}>
+          <div style={{
+            background:C.card, borderBottom:`1px solid ${C.border}`,
+            padding:'10px 20px', display:'flex', alignItems:'center', justifyContent:'space-between',
+          }}>
+            <div style={{ fontSize:12, fontWeight:600, color:C.textSecondary, textTransform:'uppercase', letterSpacing:'0.05em' }}>
+              Preview {previewResult ? `· ${previewResult.rows?.length ?? 0} rows` : ''}
+            </div>
+            <button onClick={runPreview} disabled={previewLoading || isNew} style={btnSecondary()}>
+              {previewLoading ? 'Running…' : 'Refresh'}
+            </button>
+          </div>
+          <div style={{ flex:1, overflow:'auto', padding:'16px 20px' }}>
+            {isNew ? (
+              <div style={{ fontSize:13, color:C.textMuted }}>Save the report to see a preview of its results.</div>
+            ) : previewLoading && !previewResult ? (
+              <div style={{ fontSize:13, color:C.textMuted }}>Running preview…</div>
+            ) : previewError ? (
+              <div style={{ fontSize:13, color:C.danger }}>Preview failed: {previewError.message}</div>
+            ) : previewResult ? (
+              <>
+                {previewResult.format === 'tabular' && <TabularLayout result={previewResult} />}
+                {previewResult.format === 'summary' && <SummaryLayout result={previewResult} />}
+                {previewResult.format === 'matrix'  && <MatrixLayout  result={previewResult} />}
+              </>
+            ) : (
+              <div style={{ fontSize:13, color:C.textMuted }}>Click Refresh to preview results.</div>
+            )}
+            {!isNew && (
+              <div style={{ fontSize:11, color:C.textMuted, marginTop:14 }}>
+                Preview reflects the last saved version. Save to update it with your latest edits.
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
