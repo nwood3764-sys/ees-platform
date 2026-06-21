@@ -219,7 +219,7 @@ function DashboardWidgetTile({ widget, result, onOpenReport, onNavigate }) {
         {!result ? (
           <div style={{ fontSize:12, color:C.textMuted }}>Loading…</div>
         ) : result.error ? (
-          <div style={{ fontSize:12, color:'#c33' }}>Failed: {result.error.message}</div>
+          <div style={{ fontSize:12, color:C.danger }}>Failed: {result.error.message}</div>
         ) : (
           <WidgetBody widget={widget} result={result} />
         )}

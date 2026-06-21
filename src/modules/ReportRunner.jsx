@@ -188,14 +188,14 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate })
           impossible to miss but doesn't block the report content. */}
       {duplicateError && (
         <div style={{
-          padding: '8px 24px', background: '#fee', color: '#c33',
-          borderBottom: `1px solid #f99`, fontSize: 12,
+          padding: '8px 24px', background: C.cardSecondary, color: C.danger,
+          borderBottom: `1px solid ${C.border}`, fontSize: 12,
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span>Duplicate failed: {duplicateError}</span>
           <button
             onClick={() => setDuplicateError(null)}
-            style={{ background:'transparent', border:'none', color:'#c33', cursor:'pointer', fontSize:12 }}
+            style={{ background:'transparent', border:'none', color:C.danger, cursor:'pointer', fontSize:12 }}
           >Dismiss</button>
         </div>
       )}
