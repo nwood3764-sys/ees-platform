@@ -4,6 +4,7 @@ import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import ObjectListSection from '../components/ObjectListSection'
 import ConfiguredHome from '../components/ConfiguredHome'
 import { fetchAssessments, fetchIncentiveApplications, fetchEfrReports } from '../data/qualificationService'
 import { fetchOpportunities } from '../data/outreachService'
@@ -172,6 +173,9 @@ export default function QualificationModule({ selectedRecord: navSelectedRecord,
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
+        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+          <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="qualification" />
+        )}
         {sec==='home'         && <ConfiguredHome crumb="Qualification" moduleId="qualification" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
         {sec==='assessments'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={assessments} listObject="assessments" listModule="qualification" columns={ASMT_COLS} systemViews={ASMT_VIEWS} defaultViewId="AV-01" newLabel="Assessment"  onNew={() => setSelectedRecord({ table: 'assessments', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='applications' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={applications} listObject="incentive_applications" listModule="qualification" columns={IA_COLS}   systemViews={IA_VIEWS}   defaultViewId="IV-01" newLabel="Application" onNew={() => setSelectedRecord({ table: 'incentive_applications', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}

@@ -5,6 +5,7 @@ import { C, CHART_COLORS } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import ObjectListSection from '../components/ObjectListSection'
 import { fetchPortalUsers, fetchPartnerOrganizations } from '../data/portalService'
 
 const CODE_SECTIONS = [
@@ -275,6 +276,9 @@ export default function PortalModule({ selectedRecord: navSelectedRecord, sectio
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
+        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+          <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="portal" />
+        )}
         {sec==='home'     && <PortalHome setSec={setSec} users={users} partners={partners} />}
         {sec==='users'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={users}    listObject="portal_users" listModule="portal" columns={USER_COLS}    systemViews={USER_VIEWS}    defaultViewId="PUV-01" newLabel="Portal User"           onNew={() => setSelectedRecord({ table: 'portal_users', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='partners' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={partners} listObject="accounts_partners" listModule="portal" columns={PARTNER_COLS} systemViews={PARTNER_VIEWS} defaultViewId="POV-01" newLabel="Partner Organization"  onNew={() => setSelectedRecord({ table: 'accounts', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}

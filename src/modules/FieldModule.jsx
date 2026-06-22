@@ -5,6 +5,7 @@ import { C, CHART_COLORS, fmt } from '../data/constants'
 import { Badge, Icon, TableRow, ProgramTag, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import ObjectListSection from '../components/ObjectListSection'
 import HelpIcon from '../components/help/HelpIcon'
 import { fetchProjects, fetchWorkOrders, fetchSchedule, fetchUpcomingServiceAppointments } from '../data/fieldService'
 import { fetchPaymentRequests } from '../data/incentivesService'
@@ -880,6 +881,9 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
+        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+          <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="field" />
+        )}
         {sec==='home'                 && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
         {sec==='service_appointments' && <ServiceAppointmentsInbox onOpenRecord={openRecord} />}
         {sec==='projects'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}   listObject="projects" listModule="field" columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}

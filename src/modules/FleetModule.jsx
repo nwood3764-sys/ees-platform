@@ -5,6 +5,7 @@ import { C, CHART_COLORS } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import ObjectListSection from '../components/ObjectListSection'
 import { fetchVehicles, fetchVehicleActivities, fetchEquipmentContainers } from '../data/fleetService'
 
 const CODE_SECTIONS = [
@@ -301,6 +302,9 @@ export default function FleetModule({ selectedRecord: navSelectedRecord, section
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
+        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+          <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="fleet" />
+        )}
         {sec==='home'       && <FleetHome setSec={setSec} vehicles={vehicles} activities={activities} kits={kits} />}
         {sec==='vehicles'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={vehicles}   listObject="vehicles" listModule="fleet" columns={VEH_COLS} systemViews={VEH_VIEWS} defaultViewId="VV-01" newLabel="Vehicle"  onNew={() => setSelectedRecord({ table: 'vehicles', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
         {sec==='activities' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={activities} listObject="vehicle_activities" listModule="fleet" columns={ACT_COLS} systemViews={ACT_VIEWS} defaultViewId="AV-01" newLabel="Activity" onNew={() => setSelectedRecord({ table: 'vehicle_activities', id: null, mode: 'create' })}  onOpenRecord={openRecord}/>}
