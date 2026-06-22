@@ -289,7 +289,7 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
     else setSelectedRecordLocal(rec)
   }
 
-  const SEC_TABLE = {'requests': 'project_payment_requests', 'receipts': 'payment_receipts'}
+  const SEC_TABLE = {'requests': 'project_payment_requests', 'received': 'payment_receipts'}
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
   const [requests, setRequests] = useState([])
@@ -345,12 +345,13 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
-          <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="incentives" />
+        {sec!=='home' && (SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec)?.objectTable) && (
+          <ObjectListSection
+            key={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
+            objectTable={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
+            moduleId="incentives" />
         )}
         {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} />}
-        {sec==='requests' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={requests} listObject="project_payment_requests" listModule="incentives" columns={PR_COLS}  systemViews={PR_VIEWS}  defaultViewId="PRV-01" newLabel="Project Payment Request" onNew={()=>{}} renderCell={prCell}  onOpenRecord={openRecord}/>}
-        {sec==='received' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={receipts} listObject="payment_receipts" listModule="incentives" columns={PMT_COLS} systemViews={PMT_VIEWS} defaultViewId="PTV-01" newLabel="Payment Receipt"         onNew={()=>{}} renderCell={pmtCell}  onOpenRecord={openRecord}/>}
         </>)}
       </div>
     </div>

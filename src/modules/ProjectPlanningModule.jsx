@@ -287,6 +287,7 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
     return <ListView data={data} {...rest} />
   }
 
+  const SEC_OBJ = {'projects':'projects', 'workorders':'work_orders', 'opportunities':'opportunities'}
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: '0 24px', flexShrink: 0 }}>
@@ -297,10 +298,7 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
           loading ? <LoadingState /> : error ? <ErrorState error={error} onRetry={loadAll} /> :
           <Dashboard workOrders={workOrders} projects={projects} opportunities={opportunities} technicians={technicians} partners={partners} onGo={changeSection} />
         )}
-        {sec === 'projects'      && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}      listObject="projects_planning"      listModule="planning" columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PPJ-01" newLabel="Project"     onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })}     onOpenRecord={openRecord} />}
-        {sec === 'workorders'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders}    listObject="work_orders_planning"   listModule="planning" columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="PWO-01" newLabel="Work Order"  onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })}  onOpenRecord={openRecord} />}
         {sec === 'workforce'     && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workforce}     listObject="workforce_planning"     listModule="planning" columns={WF_COLS}   systemViews={WF_VIEWS}   defaultViewId="PWF-01" onOpenRecord={openWorkforce} />}
-        {sec === 'opportunities' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} listObject="opportunities_planning" listModule="planning" columns={OPP_COLS}  systemViews={OPP_VIEWS}  defaultViewId="POP-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openOpp} />}
         {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
           <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="planning" />
         )}

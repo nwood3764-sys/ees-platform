@@ -881,13 +881,14 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
-          <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="field" />
+        {sec!=='home' && (SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec)?.objectTable) && (
+          <ObjectListSection
+            key={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
+            objectTable={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
+            moduleId="field" />
         )}
         {sec==='home'                 && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
         {sec==='service_appointments' && <ServiceAppointmentsInbox onOpenRecord={openRecord} />}
-        {sec==='projects'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}   listObject="projects" listModule="field" columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="PJV-01" newLabel="Project"    onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })} onOpenRecord={openRecord} renderDetail={renderProjectDetail} />}
-        {sec==='workorders' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders} listObject="work_orders" listModule="field" columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="WOV-01" newLabel="Work Order" onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         {sec==='schedule'   && <ScheduleView
           crews={schedule}
           loading={scheduleLoading}
@@ -896,10 +897,6 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
           setSelectedDate={setScheduleDate}
           onOpenWorkOrder={(id, name) => setSelectedRecord({ table: 'work_orders', id, name })}
         />}
-        {sec==='absences'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={absences}    listObject="resource_absences" listModule="field" columns={ABSENCE_COLS} systemViews={ABSENCE_VIEWS} defaultViewId="AV-01"  newLabel="Out of Office" onNew={() => setSelectedRecord({ table: 'resource_absences', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec==='technicians' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={technicians} listObject="contacts_technicians" listModule="field" columns={TECH_COLS} systemViews={TECH_VIEWS} defaultViewId="TV-01"  newLabel="Technician" onNew={() => setSelectedRecord({ table: 'contacts',       id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec==='credentials' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={credentials} listObject="contact_skills_credentials" listModule="field" columns={CRED_COLS} systemViews={CRED_VIEWS} defaultViewId="CDV-01" newLabel="Credential" onNew={() => setSelectedRecord({ table: 'contact_skills', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec==='timesheets'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={timesheets}  listObject="time_sheets" listModule="field" columns={TS_COLS}   systemViews={TS_VIEWS}   defaultViewId="TSV-01" newLabel="Time Sheet" onNew={() => setSelectedRecord({ table: 'time_sheets',    id: null, mode: 'create' })} onOpenRecord={openRecord} />}
         </>)}
       </div>
     </div>
