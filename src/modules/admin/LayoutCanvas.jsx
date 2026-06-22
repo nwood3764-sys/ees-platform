@@ -447,8 +447,8 @@ export default function LayoutCanvas({
           transition: 'border-color 150ms ease',
         }}
         onDragOver={e => {
-          const d = readDrag(e)
-          if (d?.kind === 'field') { e.preventDefault(); setPaletteHover(true) }
+          // getData() is empty during dragover; detect our drag via types.
+          if (e.dataTransfer.types.includes(DT_MIME)) { e.preventDefault(); setPaletteHover(true) }
         }}
         onDragLeave={() => setPaletteHover(false)}
         onDrop={onPaletteDrop}
@@ -787,8 +787,7 @@ function FieldGroupCanvas({ widget, onAddField, onRemoveField, onMoveField, onPa
 
       <div
         onDragOver={e => {
-          const d = readDrag(e)
-          if (d) e.preventDefault()
+          if (e.dataTransfer.types.includes(DT_MIME)) e.preventDefault()
         }}
         onDrop={handleContainerDrop}
         style={{
@@ -817,8 +816,7 @@ function FieldGroupCanvas({ widget, onAddField, onRemoveField, onMoveField, onPa
             onClosePopover={() => setActivePopover(null)}
             onDragStart={e => writeDrag(e, { kind: 'field', widgetId: widget.id, name: f.name })}
             onDragOverTile={e => {
-              const d = readDrag(e)
-              if (d) { e.preventDefault(); e.stopPropagation(); setDragOverIdx(idx) }
+              if (e.dataTransfer.types.includes(DT_MIME)) { e.preventDefault(); e.stopPropagation(); setDragOverIdx(idx) }
             }}
             onDragLeaveTile={() => setDragOverIdx(null)}
             onDropTile={e => handleTileDrop(e, idx)}
