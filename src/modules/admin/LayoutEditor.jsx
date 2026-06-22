@@ -29,6 +29,7 @@ import {
   buttonSmPrimaryStyle, buttonSmSecondaryStyle, buttonSmDangerStyle,
   hintBoxStyle, dangerBoxStyle,
 } from './adminStyles'
+import LayoutCanvas from './LayoutCanvas'
 import AddWidgetModal from './widgets/AddWidgetModal'
 import WidgetEditorFieldGroup from './widgets/WidgetEditorFieldGroup'
 import WidgetEditorRelatedList from './widgets/WidgetEditorRelatedList'
@@ -63,6 +64,7 @@ export default function LayoutEditor({
   const [roles, setRoles] = useState([])
   const [recordTypes, setRecordTypes] = useState([])
   const [busy, setBusy] = useState(false)
+  const [viewMode, setViewMode] = useState('canvas') // 'canvas' | 'list'
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -160,6 +162,39 @@ export default function LayoutEditor({
         {layout.roleName && <> · Role: <strong>{layout.roleName}</strong></>}
       </div>
 
+      {/* View toggle: WYSIWYG canvas vs. structured list */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 4 }}>
+        {[
+          { key: 'canvas', label: 'Canvas', icon: 'M4 5a1 1 0 011-1h14a1 1 0 011 1v4H4V5zM4 11h7v8H5a1 1 0 01-1-1v-7zM13 11h7v7a1 1 0 01-1 1h-6v-8z' },
+          { key: 'list', label: 'List', icon: 'M4 6h16M4 12h16M4 18h16' },
+        ].map((m, i) => {
+          const active = viewMode === m.key
+          return (
+            <button
+              key={m.key}
+              onClick={() => setViewMode(m.key)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                border: `1px solid ${active ? C.emerald : C.border}`,
+                background: active ? C.emerald : C.card,
+                color: active ? '#fff' : C.textSecondary,
+                borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0',
+                borderLeftWidth: i === 0 ? 1 : 0,
+              }}
+            >
+              <Icon path={m.icon} size={13} color="currentColor" />
+              {m.label}
+            </button>
+          )
+        })}
+        <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 12 }}>
+          {viewMode === 'canvas'
+            ? 'Drag fields from the palette onto sections. Every field is shown.'
+            : 'Structured editor — add other widget types and edit their contents.'}
+        </span>
+      </div>
+
       {/* Metadata card */}
       <MetadataCard
         layout={layout}
@@ -173,14 +208,24 @@ export default function LayoutEditor({
         disabled={busy}
       />
 
-      {/* Sections list */}
-      <SectionsList
-        sections={sections}
-        layoutId={layoutId}
-        objectName={layout.object}
-        onChanged={async () => { await refresh(); if (onLayoutsChanged) await onLayoutsChanged() }}
-        disabled={busy}
-      />
+      {/* Body: WYSIWYG canvas or structured list */}
+      {viewMode === 'canvas' ? (
+        <LayoutCanvas
+          layout={layout}
+          sections={sections}
+          objectName={layout.object}
+          onChanged={async () => { await refresh(); if (onLayoutsChanged) await onLayoutsChanged() }}
+          disabled={busy}
+        />
+      ) : (
+        <SectionsList
+          sections={sections}
+          layoutId={layoutId}
+          objectName={layout.object}
+          onChanged={async () => { await refresh(); if (onLayoutsChanged) await onLayoutsChanged() }}
+          disabled={busy}
+        />
+      )}
 
       {/* Actions — per-layout topbar action tier overrides */}
       <ActionsSection
