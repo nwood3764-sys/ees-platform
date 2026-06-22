@@ -362,17 +362,13 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
-          <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="enrollment" />
-        )}
         {sec === 'home'       && <ConfiguredHome crumb="Enrollment" moduleId="enrollment" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
-        {sec === 'opps'       && <ObjectListSection objectTable="opportunities" moduleId="enrollment" />}
-        {sec === 'accounts'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={accounts}      listObject="accounts" listModule="enrollment" columns={ACCOUNT_COLS} systemViews={ACC_VIEWS}  defaultViewId="AV-01" newLabel="Account"     onNew={() => setSelectedRecord({ table: 'accounts',      id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'properties' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={properties}   listObject="properties" listModule="enrollment" columns={PROP_COLS}   systemViews={PROP_VIEWS} defaultViewId="PV-01" newLabel="Property"    onNew={() => setSelectedRecord({ table: 'properties', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'buildings'  && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={buildings}    listObject="buildings" listModule="enrollment" columns={BLDG_COLS}   systemViews={BLDG_VIEWS} defaultViewId="BV-01" newLabel="Building"    onNew={() => setSelectedRecord({ table: 'buildings', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'units'      && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={units}        listObject="units" listModule="enrollment" columns={UNIT_COLS}   systemViews={UNIT_VIEWS} defaultViewId="UV-01" newLabel="Unit"        onNew={() => setSelectedRecord({ table: 'units', id: null, mode: 'create' })} onOpenRecord={openRecord} />}
-        {sec === 'contacts'   && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={contacts}     listObject="contacts" listModule="enrollment" columns={CONTACT_COLS} systemViews={CONT_VIEWS} defaultViewId="CV-01" newLabel="Contact"    onNew={() => setSelectedRecord({ table: 'contacts', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={contactCell} />}
-        {sec === 'enrollment' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={enrollments}  listObject="enrollments" listModule="enrollment" columns={ENR_COLS}    systemViews={ENR_VIEWS}  defaultViewId="EV-01" newLabel="Enrollment"  onNew={() => setSelectedRecord({ table: 'enrollments', id: null, mode: 'create' })} onOpenRecord={openRecord} renderCell={enrollmentCell} />}
+        {sec !== 'home' && (SEC_TABLE_MAP[sec] || SECTIONS.find(s=>s.id===sec)?.objectTable) && (
+          <ObjectListSection
+            key={SEC_TABLE_MAP[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
+            objectTable={SEC_TABLE_MAP[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
+            moduleId="enrollment" />
+        )}
         </>)}
       </div>
     </div>
