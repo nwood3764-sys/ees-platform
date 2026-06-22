@@ -881,7 +881,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+        {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
           <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="field" />
         )}
         {sec==='home'                 && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}

@@ -302,7 +302,7 @@ export default function FleetModule({ selectedRecord: navSelectedRecord, section
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+        {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
           <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="fleet" />
         )}
         {sec==='home'       && <FleetHome setSec={setSec} vehicles={vehicles} activities={activities} kits={kits} />}

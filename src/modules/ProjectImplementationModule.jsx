@@ -250,7 +250,7 @@ export default function ProjectImplementationModule({ selectedRecord: navSelecte
         {sec === 'workorders'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders}    listObject="work_orders_implementation" listModule="implementation" columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="IWO-01" newLabel="Work Order"  onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })}  onOpenRecord={openRecord} />}
         {sec === 'projects'      && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={projects}      listObject="projects_implementation"    listModule="implementation" columns={PROJ_COLS} systemViews={PROJ_VIEWS} defaultViewId="IPJ-01" newLabel="Project"     onNew={() => setSelectedRecord({ table: 'projects', id: null, mode: 'create' })}     onOpenRecord={openRecord} />}
         {sec === 'opportunities' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} listObject="opportunities_implementation" listModule="implementation" columns={OPP_COLS}  systemViews={OPP_VIEWS}  defaultViewId="IOP-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openOpp} />}
-        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+        {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
           <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="implementation" />
         )}
       </div>

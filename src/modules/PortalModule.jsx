@@ -276,7 +276,7 @@ export default function PortalModule({ selectedRecord: navSelectedRecord, sectio
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+        {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
           <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="portal" />
         )}
         {sec==='home'     && <PortalHome setSec={setSec} users={users} partners={partners} />}

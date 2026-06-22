@@ -301,7 +301,7 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
         {sec === 'workorders'    && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workOrders}    listObject="work_orders_planning"   listModule="planning" columns={WO_COLS}   systemViews={WO_VIEWS}   defaultViewId="PWO-01" newLabel="Work Order"  onNew={() => setSelectedRecord({ table: 'work_orders', id: null, mode: 'create' })}  onOpenRecord={openRecord} />}
         {sec === 'workforce'     && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workforce}     listObject="workforce_planning"     listModule="planning" columns={WF_COLS}   systemViews={WF_VIEWS}   defaultViewId="PWF-01" onOpenRecord={openWorkforce} />}
         {sec === 'opportunities' && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={opportunities} listObject="opportunities_planning" listModule="planning" columns={OPP_COLS}  systemViews={OPP_VIEWS}  defaultViewId="POP-01" newLabel="Opportunity" onNew={() => setSelectedRecord({ table: 'opportunities', id: null, mode: 'create' })} onOpenRecord={openOpp} />}
-        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+        {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
           <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="planning" />
         )}
       </div>

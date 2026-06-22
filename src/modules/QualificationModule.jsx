@@ -173,7 +173,7 @@ export default function QualificationModule({ selectedRecord: navSelectedRecord,
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {SECTIONS.find(s=>s.id===sec)?.objectTable && (
+        {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
           <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="qualification" />
         )}
         {sec==='home'         && <ConfiguredHome crumb="Qualification" moduleId="qualification" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
