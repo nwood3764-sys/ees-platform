@@ -32,9 +32,9 @@ import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
  */
 
 const CODE_SECTIONS = [
+  { id: 'map',        label: 'Map'        },
   { id: 'home',       label: 'Home'       },
   { id: 'properties', label: 'Properties' },
-  { id: 'map',        label: 'Map'        },
   { id: 'imports',    label: 'Imports'    },
 ]
 
@@ -570,7 +570,7 @@ export default function OutreachPropertiesModule({
 } = {}) {
   const urlDriven = !!onNavigateToRecord
   const SECTIONS = useModuleSections('outreach', CODE_SECTIONS)
-  const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
+  const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'map')
   const sec = sectionFromUrl || secLocal
   const setSec = (s) => {
     if (urlDriven && onSectionChange) onSectionChange(s)
@@ -602,6 +602,31 @@ export default function OutreachPropertiesModule({
     if (!accountId) return
     setCardPropertyId(null)
     setSelectedRecord({ table: 'accounts', id: accountId, name: '' })
+  }
+  // From the card: open the full property record (where Advance + all
+  // record actions live), or advance straight to an opportunity create
+  // form prefilled from the property (record-type picker runs there,
+  // mirroring RecordDetail.handleAdvanceToOpportunity).
+  const openRecordFromCard = (id) => {
+    if (!id) return
+    setCardPropertyId(null)
+    setSelectedRecord({ table: 'properties', id, name: '' })
+  }
+  const advanceFromCard = (detail) => {
+    if (!detail?.id) return
+    const prefill = {
+      property_id:                      detail.id,
+      opportunity_account_id:           detail.accountId || null,
+      opportunity_property_aka:         detail.akaName || null,
+      opportunity_state:                detail.state || null,
+      opportunity_name:                 detail.name ? `${detail.name} — Opportunity` : null,
+      opportunity_number_of_buildings:  detail.totalBuildings ?? null,
+      opportunity_total_units:          detail.totalUnits ?? null,
+      opportunity_year_built:           detail.yearBuilt ?? null,
+    }
+    for (const k of Object.keys(prefill)) if (prefill[k] == null) delete prefill[k]
+    setCardPropertyId(null)
+    setSelectedRecord({ table: 'opportunities', id: null, mode: 'create', prefill })
   }
 
   // ─── Data layer ────────────────────────────────────────────────────────
@@ -717,6 +742,8 @@ export default function OutreachPropertiesModule({
           propertyId={cardPropertyId}
           onClose={() => setCardPropertyId(null)}
           onOpenAccount={openAccountFromCard}
+          onOpenRecord={openRecordFromCard}
+          onAdvance={advanceFromCard}
         />
       )}
 

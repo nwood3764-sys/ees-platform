@@ -408,6 +408,8 @@ export async function fetchPropertyDetail(propertyId) {
       scatteredSite:   !!row.property_ph_scattered_site,
       authorityPhone:  row.property_ph_authority_phone || '',
       authorityEmail:  row.property_ph_authority_email || '',
+      avgUtilityAllowance: row.property_ph_avg_utility_allowance ?? null,
+      earliestConstructionYear: row.property_ph_earliest_construction_year ?? null,
     } : null,
     // Energy burden (DOE LEAD) — may be null
     energyBurden:      row.psd_doe_lead_energy_burden_score ?? null,

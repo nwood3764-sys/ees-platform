@@ -105,7 +105,7 @@ function ProgramBadge({ label, tone = 'emerald' }) {
   )
 }
 
-export default function OutreachPropertyCard({ propertyId, onClose, onOpenAccount }) {
+export default function OutreachPropertyCard({ propertyId, onClose, onOpenAccount, onOpenRecord, onAdvance }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -269,6 +269,8 @@ export default function OutreachPropertyCard({ propertyId, onClose, onOpenAccoun
                   <Row label="Total Units">{fmtNum(data.publicHousing.totalUnits)}</Row>
                   <Row label="Occupied">{data.publicHousing.pctOccupied != null ? `${fmtNum(data.publicHousing.totalOccupied)} (${Math.round(data.publicHousing.pctOccupied)}%)` : fmtNum(data.publicHousing.totalOccupied)}</Row>
                   <FlagItem on={data.publicHousing.scatteredSite} label="Scattered Site" />
+                  {data.publicHousing.earliestConstructionYear && <Row label="Earliest Built">{data.publicHousing.earliestConstructionYear}</Row>}
+                  {data.publicHousing.avgUtilityAllowance != null && <Row label="Avg Utility Allowance">{fmtMoney(data.publicHousing.avgUtilityAllowance)}/mo</Row>}
                   {data.publicHousing.authorityPhone && <Row label="Authority Phone">{data.publicHousing.authorityPhone}</Row>}
                 </Section>
               )}
@@ -331,6 +333,20 @@ export default function OutreachPropertyCard({ propertyId, onClose, onOpenAccoun
             </>
           )}
         </div>
+
+        {/* sticky action footer — preserves advance/open-record from the card */}
+        {data && !loading && (
+          <div style={{ borderTop: `1px solid ${C.border}`, padding: '12px 16px', display: 'flex', gap: 10, background: C.card }}>
+            <button onClick={() => onOpenRecord?.(data.id)} style={{
+              flex: 1, padding: '9px 12px', background: C.card, border: `1px solid ${C.borderDark}`, borderRadius: 7,
+              color: C.textPrimary, fontWeight: 600, fontSize: 12.5, cursor: 'pointer',
+            }}>Open Property Record</button>
+            <button onClick={() => onAdvance?.(data)} style={{
+              flex: 1, padding: '9px 12px', background: C.emerald, border: 'none', borderRadius: 7,
+              color: '#fff', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
+            }}>Advance to Opportunity →</button>
+          </div>
+        )}
       </div>
     </>
   )
