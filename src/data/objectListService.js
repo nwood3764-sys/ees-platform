@@ -116,6 +116,68 @@ export async function buildObjectColumns(table) {
 }
 
 // ---------------------------------------------------------------------------
+// deriveColumnOptions: given auto-generated columns and the loaded rows,
+// compute distinct values per column and promote eligible columns to a
+// multi-select filter ('select' type with an `options` array). Excel-style
+// column filtering needs an explicit value set per column; for an
+// auto-generated list there's no picklist metadata to lean on, so the value
+// set is the distinct values actually present in the data.
+//
+// Promotion rule: a 'text' column becomes 'select' when its distinct
+// non-blank value count is within OPTION_CARDINALITY_CAP. High-cardinality
+// columns (free-text names, addresses, IDs) stay 'text' and keep the
+// contains-search filter. 'date' and 'number' columns are left as-is — they
+// have their own range filters.
+//
+// The blank sentinel is NOT added to options here; the FilterDropdown renders
+// a "(Blanks)" row itself when any row in the column is empty, signalled via
+// `hasBlanks`. Options are returned sorted for stable display.
+// ---------------------------------------------------------------------------
+const OPTION_CARDINALITY_CAP = 200
+
+export function deriveColumnOptions(columns, rows) {
+  if (!Array.isArray(columns) || !Array.isArray(rows) || rows.length === 0) {
+    return columns
+  }
+  return columns.map(col => {
+    // Only consider text columns (incl. resolved FK __label columns) for
+    // promotion. Date/number keep their range filters; existing selects pass
+    // through untouched.
+    if (col.type !== 'text') return col
+
+    const distinct = new Set()
+    let hasBlanks = false
+    for (const r of rows) {
+      const raw = r[col.field]
+      if (raw === null || raw === undefined || String(raw).trim() === '') {
+        hasBlanks = true
+        continue
+      }
+      distinct.add(String(raw))
+      if (distinct.size > OPTION_CARDINALITY_CAP) break
+    }
+
+    // Too many distinct values — leave as free-text contains filter, but still
+    // record hasBlanks so a "(Blanks)" affordance could be offered later.
+    if (distinct.size > OPTION_CARDINALITY_CAP) {
+      return { ...col, hasBlanks }
+    }
+
+    // Identity columns (record #, primary name) are inherently high-signal
+    // unique values; never collapse them into a checklist even if a small
+    // dataset makes them look low-cardinality.
+    if (col.field === 'id' || col.field === 'name') {
+      return { ...col, hasBlanks }
+    }
+
+    const options = Array.from(distinct).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+    )
+    return { ...col, type: 'select', options, hasBlanks }
+  })
+}
+
+// ---------------------------------------------------------------------------
 // fetchObjectRecords: all non-deleted rows for the object, shaped for ListView.
 // Each row: { id: <record number or uuid>, _id: <uuid>, name: <primary name>,
 //             <business cols>, <fk>__label: <resolved label> }.

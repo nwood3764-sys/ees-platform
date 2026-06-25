@@ -155,12 +155,19 @@ function useColumnWidths({ enabled, storageKey, columns }) {
 }
 
 // ── Filter Dropdown ──────────────────────────────────────────────────────────
+// Sentinel value representing "blank/empty" in a multi-select column filter.
+// Persisted into saved views like any other selected value; the filter
+// predicate maps it to the empty-string test. Chosen to never collide with a
+// real picklist/text value.
+const BLANK_FILTER_VALUE = '__BLANK__';
+
 function FilterDropdown({ col, activeFilters, onApply, onClose }) {
   const colF = activeFilters.filter(f => f.field === col.field);
-  const [sel, setSel] = useState(colF.map(f => f.value));
-  const [txt, setTxt] = useState(colF[0]?.value || '');
+  const [sel, setSel] = useState(colF.filter(f => f.op === 'equals').map(f => f.value));
+  const [txt, setTxt] = useState(colF.find(f => f.op === 'contains')?.value || '');
   const [dateFrom, setDateFrom] = useState(colF.find(f => f.op === 'from')?.value || '');
   const [dateTo, setDateTo] = useState(colF.find(f => f.op === 'to')?.value || '');
+  const [search, setSearch] = useState('');
   const ref = useRef();
 
   useEffect(() => {
@@ -170,6 +177,18 @@ function FilterDropdown({ col, activeFilters, onApply, onClose }) {
   }, []);
 
   const toggle = v => setSel(p => p.includes(v) ? p.filter(x => x !== v) : [...p, v]);
+
+  // Full value list incl. the blank sentinel (only when the column has blanks).
+  const allValues = [
+    ...(col.options || []),
+    ...(col.hasBlanks ? [BLANK_FILTER_VALUE] : []),
+  ];
+  const labelFor = v => (v === BLANK_FILTER_VALUE ? '(Blanks)' : v);
+  // Search filters the value checklist (matches Excel's column filter search).
+  const q = search.trim().toLowerCase();
+  const visibleValues = q
+    ? allValues.filter(v => labelFor(v).toLowerCase().includes(q))
+    : allValues;
 
   const apply = () => {
     const nf = activeFilters.filter(f => f.field !== col.field);
@@ -196,28 +215,39 @@ function FilterDropdown({ col, activeFilters, onApply, onClose }) {
       </div>
 
       {col.type === 'select' && (
-        <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span onClick={() => setSel(col.options)} style={{ fontSize: 11, color: '#1a5a8a', cursor: 'pointer' }}>Select all</span>
-            <span onClick={() => setSel([])} style={{ fontSize: 11, color: C.textMuted, cursor: 'pointer' }}>Clear</span>
-          </div>
-          {col.options.map(o => (
-            <div key={o} onClick={() => toggle(o)}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 4px', cursor: 'pointer', borderRadius: 4 }}
-              onMouseEnter={e => e.currentTarget.style.background = C.page}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <div style={{
-                width: 14, height: 14, borderRadius: 3,
-                border: `1.5px solid ${sel.includes(o) ? C.emerald : C.borderDark}`,
-                background: sel.includes(o) ? C.emerald : 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-              }}>
-                {sel.includes(o) && <svg width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-              </div>
-              <span style={{ fontSize: 12, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 185 }}>{o}</span>
+        <>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search values…"
+            style={{ width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 5, padding: '6px 9px', fontSize: 12, color: C.textPrimary, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }}
+          />
+          <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span onClick={() => setSel(prev => Array.from(new Set([...prev, ...visibleValues])))} style={{ fontSize: 11, color: '#1a5a8a', cursor: 'pointer' }}>Select all</span>
+              <span onClick={() => setSel(prev => prev.filter(v => !visibleValues.includes(v)))} style={{ fontSize: 11, color: C.textMuted, cursor: 'pointer' }}>Clear</span>
             </div>
-          ))}
-        </div>
+            {visibleValues.length === 0 && (
+              <div style={{ fontSize: 12, color: C.textMuted, padding: '6px 4px' }}>No matching values</div>
+            )}
+            {visibleValues.map(o => (
+              <div key={o} onClick={() => toggle(o)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 4px', cursor: 'pointer', borderRadius: 4 }}
+                onMouseEnter={e => e.currentTarget.style.background = C.page}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <div style={{
+                  width: 14, height: 14, borderRadius: 3,
+                  border: `1.5px solid ${sel.includes(o) ? C.emerald : C.borderDark}`,
+                  background: sel.includes(o) ? C.emerald : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                }}>
+                  {sel.includes(o) && <svg width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                </div>
+                <span style={{ fontSize: 12, color: o === BLANK_FILTER_VALUE ? C.textMuted : C.textPrimary, fontStyle: o === BLANK_FILTER_VALUE ? 'italic' : 'normal', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 185 }}>{labelFor(o)}</span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {col.type === 'text' && (
@@ -493,11 +523,17 @@ function MobileFilterSheet({
 
                 {isOpen && (
                   <div style={{ padding: '0 16px 14px' }}>
-                    {col.type === 'select' && (
+                    {col.type === 'select' && (() => {
+                      const mobileOptions = [
+                        ...(col.options || []),
+                        ...(col.hasBlanks ? [BLANK_FILTER_VALUE] : []),
+                      ];
+                      const mLabel = v => (v === BLANK_FILTER_VALUE ? '(Blanks)' : v);
+                      return (
                       <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                           <button
-                            onClick={() => setSelValues(col, col.options)}
+                            onClick={() => setSelValues(col, mobileOptions)}
                             style={{ background: 'none', border: 'none', fontSize: 13, color: '#1a5a8a', cursor: 'pointer', padding: '4px 0' }}
                           >
                             Select all
@@ -510,7 +546,7 @@ function MobileFilterSheet({
                           </button>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          {col.options.map(o => {
+                          {mobileOptions.map(o => {
                             const selected = getSelValues(col).includes(o);
                             return (
                               <div
@@ -535,13 +571,14 @@ function MobileFilterSheet({
                                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" /></svg>
                                   )}
                                 </div>
-                                <span style={{ color: C.textPrimary, flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{o}</span>
+                                <span style={{ color: o === BLANK_FILTER_VALUE ? C.textMuted : C.textPrimary, fontStyle: o === BLANK_FILTER_VALUE ? 'italic' : 'normal', flex: 1, minWidth: 0, wordBreak: 'break-word' }}>{mLabel(o)}</span>
                               </div>
                             );
                           })}
                         </div>
                       </div>
-                    )}
+                      );
+                    })()}
 
                     {col.type === 'text' && (
                       <input
@@ -1043,7 +1080,22 @@ export function ListView({
   // The call site still needs to be fixed to show real data, but the
   // user sees an empty table, not a broken module.
   const data        = Array.isArray(dataProp) ? dataProp : []
-  const columns     = Array.isArray(columnsProp) ? columnsProp : []
+  // Normalize column descriptors so auto-generated object lists (which only
+  // carry field/label/type/options) get the same header affordances the
+  // hand-written module lists set explicitly. A caller may still pin
+  // sortable/filterable to false per column; only undefined is defaulted.
+  // Filterable applies to the supported filter types (select/text/date);
+  // number columns have no header filter UI, matching the mobile sheet.
+  const columns = useMemo(() => {
+    const raw = Array.isArray(columnsProp) ? columnsProp : []
+    return raw.map(c => ({
+      ...c,
+      sortable: c.sortable !== undefined ? c.sortable : true,
+      filterable: c.filterable !== undefined
+        ? c.filterable
+        : (c.type === 'select' || c.type === 'text' || c.type === 'date'),
+    }))
+  }, [columnsProp])
   // Columns that can never be hidden: the primary 'name' (the row's click
   // target / label) and 'id' (record number, the leading identity column).
   const ALWAYS_ON_COLS = ['id', 'name'];
@@ -1378,16 +1430,41 @@ export function ListView({
       const q = globalSearch.toLowerCase();
       d = d.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q)));
     }
-    activeFilters.forEach(f => {
+    // Group active filters by field. Within a field, predicates are OR'd
+    // (a multi-select column matches any selected value); across fields they
+    // are AND'd (Excel column-filter semantics). Date range (from/to) and
+    // text contains live under the same grouping and AND within their own
+    // field naturally via the per-field evaluation below.
+    const byField = new Map();
+    for (const f of activeFilters) {
+      if (!byField.has(f.field)) byField.set(f.field, []);
+      byField.get(f.field).push(f);
+    }
+    for (const [field, fs] of byField) {
+      const equalsVals = fs.filter(f => f.op === 'equals').map(f => f.value);
+      const containsVals = fs.filter(f => f.op === 'contains').map(f => f.value);
+      const fromVal = fs.find(f => f.op === 'from')?.value;
+      const toVal = fs.find(f => f.op === 'to')?.value;
       d = d.filter(r => {
-        const v = String(r[f.field] || '');
-        if (f.op === 'equals') return v === f.value;
-        if (f.op === 'contains') return v.toLowerCase().includes(f.value.toLowerCase());
-        if (f.op === 'from') return v >= f.value;
-        if (f.op === 'to') return v <= f.value;
+        const raw = r[field];
+        const v = (raw === null || raw === undefined) ? '' : String(raw);
+        // equals (multi-select): OR across selected values; blank sentinel
+        // matches empty cells.
+        if (equalsVals.length) {
+          const hit = equalsVals.some(val =>
+            val === BLANK_FILTER_VALUE ? v.trim() === '' : v === val
+          );
+          if (!hit) return false;
+        }
+        // contains: AND across any contains terms on this field.
+        for (const c of containsVals) {
+          if (!v.toLowerCase().includes(String(c).toLowerCase())) return false;
+        }
+        if (fromVal && !(v >= fromVal)) return false;
+        if (toVal && !(v <= toVal)) return false;
         return true;
       });
-    });
+    }
     if (sortField) {
       d.sort((a, b) => {
         const av = String(a[sortField] || ''), bv = String(b[sortField] || '');
@@ -1560,7 +1637,7 @@ export function ListView({
               {activeFilters.map((f, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#e8f3fb', border: `1px solid #b8d8f0`, borderRadius: 5, padding: '4px 8px', fontSize: 12 }}>
                   <span style={{ color: '#1a5a8a', fontWeight: 500 }}>{f.label}:</span>
-                  <span style={{ color: '#1a5a8a' }}>{f.value}</span>
+                  <span style={{ color: '#1a5a8a' }}>{f.value === BLANK_FILTER_VALUE ? '(Blanks)' : f.value}</span>
                   <button onClick={() => removeFilter(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#7eb3e8', lineHeight: 1, marginLeft: 2 }}>
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M18 6 6 18M6 6l12 12" /></svg>
                   </button>

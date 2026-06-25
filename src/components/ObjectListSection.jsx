@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { ListView } from './ListView'
 import { LoadingState, ErrorState } from './UI'
 import RecordDetail from './RecordDetail'
-import { fetchObjectRecords, buildObjectColumns } from '../data/objectListService'
+import { fetchObjectRecords, buildObjectColumns, deriveColumnOptions } from '../data/objectListService'
 import { fetchSavedViewsForObject } from '../data/listViewsService'
 
 // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ export default function ObjectListSection({ objectTable, moduleId }) {
         fetchObjectRecords(objectTable),
         fetchSavedViewsForObject(objectTable).catch(() => []),
       ])
-      setColumns(cols)
+      setColumns(deriveColumnOptions(cols, rows))
       setData(rows)
       setViews(savedViews)
     } catch (err) {
@@ -52,7 +52,7 @@ export default function ObjectListSection({ objectTable, moduleId }) {
           fetchSavedViewsForObject(objectTable).catch(() => []),
         ])
         if (cancelled) return
-        setColumns(cols); setData(rows); setViews(savedViews)
+        setColumns(deriveColumnOptions(cols, rows)); setData(rows); setViews(savedViews)
       } catch (err) {
         if (!cancelled) setError(err)
       } finally {
