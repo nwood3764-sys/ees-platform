@@ -161,7 +161,7 @@ function useColumnWidths({ enabled, storageKey, columns }) {
 // real picklist/text value.
 const BLANK_FILTER_VALUE = '__BLANK__';
 
-function FilterDropdown({ col, activeFilters, onApply, onClose }) {
+function FilterDropdown({ col, activeFilters, onApply, onClose, triggerRect }) {
   const colF = activeFilters.filter(f => f.field === col.field);
   const [sel, setSel] = useState(colF.filter(f => f.op === 'equals').map(f => f.value));
   const [txt, setTxt] = useState(colF.find(f => f.op === 'contains')?.value || '');
@@ -173,7 +173,9 @@ function FilterDropdown({ col, activeFilters, onApply, onClose }) {
   useEffect(() => {
     const h = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    const esc = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', esc); };
   }, []);
 
   const toggle = v => setSel(p => p.includes(v) ? p.filter(x => x !== v) : [...p, v]);
@@ -204,11 +206,25 @@ function FilterDropdown({ col, activeFilters, onApply, onClose }) {
 
   const clear = () => { onApply(activeFilters.filter(f => f.field !== col.field)); onClose(); };
 
-  return (
+  // Anchor to the funnel trigger via a fixed-position body portal so the panel
+  // escapes the table card's overflow:hidden (which previously clipped it out
+  // of view — the panel opened but was invisible). Flip left when the trigger
+  // is near the right viewport edge so the panel stays on-screen.
+  const PANEL_W = 244;
+  const rect = triggerRect;
+  const top = rect ? Math.min(rect.bottom + 4, window.innerHeight - 80) : 80;
+  let left = rect ? rect.left : 0;
+  if (rect && left + PANEL_W > window.innerWidth - 8) {
+    left = Math.max(8, rect.right - PANEL_W);
+  }
+  const maxH = rect ? Math.max(220, window.innerHeight - top - 16) : 420;
+
+  const panel = (
     <div ref={ref} style={{
-      position: 'absolute', top: '100%', left: 0, zIndex: 300,
+      position: 'fixed', top, left, zIndex: 4000,
+      width: PANEL_W, maxHeight: maxH, display: 'flex', flexDirection: 'column',
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-      boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: 14, minWidth: 230, marginTop: 2
+      boxShadow: '0 8px 28px rgba(7,17,31,0.22)', padding: 14, boxSizing: 'border-box'
     }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
         Filter: {col.label}
@@ -217,12 +233,13 @@ function FilterDropdown({ col, activeFilters, onApply, onClose }) {
       {col.type === 'select' && (
         <>
           <input
+            autoFocus
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search values…"
             style={{ width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 5, padding: '6px 9px', fontSize: 12, color: C.textPrimary, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }}
           />
-          <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
               <span onClick={() => setSel(prev => Array.from(new Set([...prev, ...visibleValues])))} style={{ fontSize: 11, color: '#1a5a8a', cursor: 'pointer' }}>Select all</span>
               <span onClick={() => setSel(prev => prev.filter(v => !visibleValues.includes(v)))} style={{ fontSize: 11, color: C.textMuted, cursor: 'pointer' }}>Clear</span>
@@ -251,7 +268,7 @@ function FilterDropdown({ col, activeFilters, onApply, onClose }) {
       )}
 
       {col.type === 'text' && (
-        <input value={txt} onChange={e => setTxt(e.target.value)} placeholder={`Search ${col.label.toLowerCase()}...`}
+        <input autoFocus value={txt} onChange={e => setTxt(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') apply(); }} placeholder={`Search ${col.label.toLowerCase()}...`}
           style={{ width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 5, padding: '6px 9px', fontSize: 12.5, color: C.textPrimary, outline: 'none', boxSizing: 'border-box' }} />
       )}
 
@@ -276,6 +293,7 @@ function FilterDropdown({ col, activeFilters, onApply, onClose }) {
       </div>
     </div>
   );
+  return createPortal(panel, document.body);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -673,12 +691,19 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
   const isSorted = sortField === col.field;
   const isOpen = openFilterCol === col.field;
   const [gripHover, setGripHover] = useState(false);
+  const [filterRect, setFilterRect] = useState(null);
 
   const handleSort = () => {
     if (!col.sortable) return;
     if (sortField !== col.field) { onSort(col.field, 'asc'); return; }
     if (sortDir === 'asc') { onSort(col.field, 'desc'); return; }
     onSort(null, null);
+  };
+
+  const onFunnelClick = (e) => {
+    const r = (e.currentTarget.closest('div') || e.currentTarget).getBoundingClientRect();
+    setFilterRect(r);
+    setOpenFilterCol(isOpen ? null : col.field);
   };
 
   return (
@@ -699,7 +724,7 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
           )}
         </div>
         {col.filterable && (
-          <div onClick={() => setOpenFilterCol(isOpen ? null : col.field)}
+          <div onClick={onFunnelClick}
             style={{ padding: '10px 9px 10px 3px', cursor: 'pointer', position: 'relative' }}
             onMouseEnter={e => e.currentTarget.style.background = C.page}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -713,7 +738,7 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
         )}
       </div>
       {isOpen && col.filterable && (
-        <FilterDropdown col={col} activeFilters={activeFilters} onApply={onFilterApply} onClose={() => setOpenFilterCol(null)} />
+        <FilterDropdown col={col} activeFilters={activeFilters} onApply={onFilterApply} onClose={() => setOpenFilterCol(null)} triggerRect={filterRect} />
       )}
       {onResizeStart && (
         // Resize grip — sits on the column's right border. Drag to size,
