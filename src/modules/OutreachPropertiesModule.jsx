@@ -6,6 +6,7 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import HelpIcon from '../components/help/HelpIcon'
 import { OutreachMap } from '../components/OutreachMap'
+import OutreachPropertyCard from '../components/OutreachPropertyCard'
 import OutreachFilterPanel, {
   EMPTY_FILTERS,
   applyFilters,
@@ -592,6 +593,17 @@ export default function OutreachPropertiesModule({
   }
   const closeRecord = () => setSelectedRecord(null)
 
+  // Map detail card: clicking a marker opens the slide-in card (not the
+  // full record). Owner-account click inside the card navigates to the
+  // account record via setSelectedRecord.
+  const [cardPropertyId, setCardPropertyId] = useState(null)
+  const openPropertyCard = (id) => { if (id) setCardPropertyId(id) }
+  const openAccountFromCard = (accountId) => {
+    if (!accountId) return
+    setCardPropertyId(null)
+    setSelectedRecord({ table: 'accounts', id: accountId, name: '' })
+  }
+
   // ─── Data layer ────────────────────────────────────────────────────────
   // Same lazy-cached pattern Outreach uses. Each query is keyed by an
   // 'outreach:' prefix so writes can invalidate the whole module's
@@ -694,11 +706,19 @@ export default function OutreachPropertiesModule({
           <>
             {sec === 'home'       && <OutreachHome counts={counts} loading={loadingCounts} />}
             {sec === 'properties' && <PropertiesListSection loading={loadingProperties} error={error} properties={properties} onRefresh={loadAll} onRetry={loadAll} onOpenRecord={openProperty} />}
-            {sec === 'map'        && <MapSection loading={loadingProperties} error={error} properties={properties} onRetry={loadAll} onOpenProperty={openPropertyById} />}
+            {sec === 'map'        && <MapSection loading={loadingProperties} error={error} properties={properties} onRetry={loadAll} onOpenProperty={openPropertyCard} />}
             {sec === 'imports'    && <ImportsSection batches={batches} loading={loadingBatches} error={error} onRefresh={loadAll} onRetry={loadAll} onOpenImport={openImport} onOpenImportModal={() => setShowImportModal(true)} />}
           </>
         )}
       </div>
+
+      {cardPropertyId && (
+        <OutreachPropertyCard
+          propertyId={cardPropertyId}
+          onClose={() => setCardPropertyId(null)}
+          onOpenAccount={openAccountFromCard}
+        />
+      )}
 
       {showImportModal && (
         <ImportModal

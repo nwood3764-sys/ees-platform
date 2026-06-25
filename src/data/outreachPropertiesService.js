@@ -299,3 +299,127 @@ export async function submitPropertyImport(sourceDataset, records) {
   }
   return data
 }
+
+/**
+ * Fetches the full HUD program detail for a single property, for the
+ * map detail card. Reads the extended outreach view (all program blocks,
+ * NC disaster exposure, DOE energy burden) plus the one-to-many HUD
+ * contract lines from property_hud_contract_lines.
+ *
+ * Returns a shaped object the OutreachPropertyCard renders directly, or
+ * null if the property isn't found. Program blocks that don't apply
+ * (e.g. LIHTC fields on a Section 8-only property) come back as nulls and
+ * the card hides their section.
+ *
+ * @param {string} propertyId  properties.id (uuid)
+ */
+export async function fetchPropertyDetail(propertyId) {
+  if (!propertyId) return null
+
+  const [{ data: row, error: rowErr }, { data: contracts, error: cErr }] = await Promise.all([
+    supabase.from('outreach_properties_v').select('*').eq('id', propertyId).maybeSingle(),
+    supabase
+      .from('property_hud_contract_lines')
+      .select('phcl_contract_number, phcl_program_type, phcl_assisted_units, phcl_expiration_date, phcl_contract_sequence')
+      .eq('phcl_property_id', propertyId)
+      .eq('phcl_is_deleted', false)
+      .order('phcl_contract_sequence', { ascending: true }),
+  ])
+  if (rowErr) throw rowErr
+  if (cErr) throw cErr
+  if (!row) return null
+
+  const isNC = (row.property_state || '').toUpperCase() === 'NC'
+
+  return {
+    id:           row.id,
+    recordNumber: row.property_record_number || '',
+    name:         row.property_name || 'Unnamed property',
+    akaName:      row.property_aka_name || '',
+    // Property Details
+    street:   row.property_street || '',
+    city:     row.property_city || '',
+    county:   row.property_county || '',
+    state:    row.property_state || '',
+    zip:      row.property_zip || '',
+    latitude:  row.property_latitude,
+    longitude: row.property_longitude,
+    category: row.property_category || row.property_mf_property_category || '',
+    hudPropertyId:  row.property_hud_property_id || '',
+    lihtcProjectId: row.property_lihtc_project_id || '',
+    // Building Info
+    buildingType: row.property_type || row.property_mf_property_category || '',
+    totalUnits:   row.property_total_units ?? null,
+    assistedUnits:row.property_assisted_units ?? null,
+    totalBuildings: row.property_total_buildings ?? null,
+    yearBuilt:    row.property_year_built ?? null,
+    // Program presence flags
+    inMfAssisted:    !!row.property_in_program_mf_assisted,
+    inLihtc:         !!row.property_in_program_lihtc,
+    inPublicHousing: !!row.property_in_program_public_housing,
+    epcEligible:     row.property_epc_traditional_pathway_eligible, // true/false/null
+    // Program flag detail (for the flag column)
+    isSec8:       !!row.property_mf_is_sec8,
+    is202811:     !!row.property_is_202_811,
+    isPac:        !!row.property_mf_is_pac,
+    isPrac:       !!row.property_mf_is_prac,
+    isRadConverted: !!row.property_mf_is_rad_conversion,
+    isSubsidized: !!row.property_mf_is_subsidized,
+    // Owner / management
+    accountId:        row.property_account_id || null,
+    accountName:      row.property_account_name || '',
+    managementOrg:    row.property_hud_management_org || '',
+    managementPhone:  row.property_hud_management_phone || '',
+    managementEmail:  row.property_hud_management_email || '',
+    // MF detail
+    reacScore: row.property_mf_reac_last_score || '',
+    reacDate:  row.property_mf_reac_last_date || null,
+    contractCount: row.property_mf_contract_count ?? (contracts ? contracts.length : 0),
+    // Contracts (one-to-many)
+    contracts: (contracts || []).map(c => ({
+      number:     c.phcl_contract_number || '',
+      programType:c.phcl_program_type || '',
+      units:      c.phcl_assisted_units ?? null,
+      expiration: c.phcl_expiration_date || null,
+      sequence:   c.phcl_contract_sequence ?? null,
+    })),
+    // LIHTC block
+    lihtc: row.property_in_program_lihtc ? {
+      projectName:  row.property_lihtc_project_name || '',
+      allocation:   row.property_lihtc_allocation_amount ?? null,
+      totalUnits:   row.property_lihtc_total_units ?? null,
+      lowIncomeUnits: row.property_lihtc_low_income_units ?? null,
+      yearPlacedInService: row.property_lihtc_year_placed_in_service ?? null,
+      creditType:   row.property_lihtc_credit_type || '',
+      constructionType: row.property_lihtc_construction_type || '',
+      targetElderly:  !!row.property_lihtc_target_elderly,
+      targetDisabled: !!row.property_lihtc_target_disabled,
+      targetHomeless: !!row.property_lihtc_target_homeless,
+    } : null,
+    // Public Housing block
+    publicHousing: row.property_in_program_public_housing ? {
+      participantCode: row.property_ph_participant_code || '',
+      authorityName:   row.property_ph_authority_name || '',
+      developmentCode: row.property_ph_development_code || '',
+      projectName:     row.property_ph_project_name || '',
+      totalUnits:      row.property_ph_total_units ?? null,
+      totalOccupied:   row.property_ph_total_occupied ?? null,
+      pctOccupied:     row.property_ph_pct_occupied ?? null,
+      scatteredSite:   !!row.property_ph_scattered_site,
+      authorityPhone:  row.property_ph_authority_phone || '',
+      authorityEmail:  row.property_ph_authority_email || '',
+    } : null,
+    // Energy burden (DOE LEAD) — may be null
+    energyBurden:      row.psd_doe_lead_energy_burden_score ?? null,
+    avgEnergyCost:     row.psd_doe_lead_average_energy_cost ?? null,
+    lowIncomePct:      row.psd_doe_lead_low_income_percentage ?? null,
+    // Disaster exposure (NC only)
+    disaster: (isNC && row.has_disaster_exposure) ? {
+      declarationCount:  row.pde_fema_declaration_count ?? 0,
+      hurricaneCount:    row.pde_fema_hurricane_declaration_count ?? 0,
+      mostRecent:        row.pde_fema_most_recent_declaration_date || null,
+      declaredDisasters: row.pde_fema_declared_disasters || null,
+    } : null,
+    isNC,
+  }
+}
