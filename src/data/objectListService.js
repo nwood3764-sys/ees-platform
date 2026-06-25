@@ -32,10 +32,28 @@ const HIDDEN_EXACT    = new Set([
 // How many business columns (beyond record number + name) to show by default.
 const MAX_BUSINESS_COLS = 8
 
-// FK references we resolve to a human label. Other FKs (property_id,
-// account_id, price_book_id, …) are opaque in a list and excluded from the
-// auto-generated columns — they'd show a UUID or an unhelpful join.
+// Delimiter encoding a related (one-hop) column in a column field name:
+//   <fk_column>__rel__<parent_column>
+// e.g. property_id__rel__property_city. Chosen to never collide with a real
+// column name and to survive React keys, storage keys, and saved-view JSON.
+export const REL_DELIM = '__rel__'
+
+export function isRelatedField(field) {
+  return typeof field === 'string' && field.includes(REL_DELIM)
+}
+export function parseRelatedField(field) {
+  if (!isRelatedField(field)) return null
+  const [fkColumn, parentColumn] = field.split(REL_DELIM)
+  return { fkColumn, parentColumn }
+}
+
+// FK references we resolve to a human label inline (no separate parent row
+// fetch needed): picklist values and users have cheap label maps already.
 const LABELED_FK_TABLES = new Set(['picklist_values', 'users'])
+
+// Parent tables we never expand into related columns (audit/identity plumbing).
+// user/picklist parents are surfaced as the FK's own __label column instead.
+const NON_EXPANDABLE_PARENTS = new Set(['users', 'picklist_values'])
 
 // Whether a schema column belongs in an auto-generated list view.
 function isListableColumn(c, { recordNumber, nameCol }) {
@@ -47,6 +65,70 @@ function isListableColumn(c, { recordNumber, nameCol }) {
   // Keep non-FKs and label-resolvable FKs; drop opaque table FKs.
   if (c.is_foreign_key && !LABELED_FK_TABLES.has(c.references_table)) return false
   return true
+}
+
+// Whether a schema column may appear in the column CATALOG (the searchable
+// picker), which is broader than the default-visible set: it excludes only
+// audit/system plumbing and the identity columns (surfaced as id/name). Table
+// FKs are excluded as direct columns — they're surfaced as their *__label and,
+// when expandable, as a related group — but everything else on the object is
+// selectable, with no MAX cap.
+function isSelectableColumn(c, { recordNumber, nameCol }) {
+  const n = c.column_name
+  if (n === 'id' || n === recordNumber || n === nameCol) return false
+  if (c.is_primary_key) return false
+  if (HIDDEN_EXACT.has(n)) return false
+  if (HIDDEN_SUFFIXES.some(suf => n.endsWith(suf))) return false
+  return true
+}
+
+// Column data-type → ListView filter/render type.
+function columnType(c) {
+  return /date/.test(c.data_type) ? 'date'
+    : /(numeric|integer|double|real|bigint)/.test(c.data_type) ? 'number'
+    : 'text'
+}
+
+// Build a ListView column descriptor for one own-object schema column.
+// FK columns (picklist/user) resolve to a *__label field; others map straight.
+function ownColumnDescriptor(c, group) {
+  if (c.is_foreign_key && LABELED_FK_TABLES.has(c.references_table)) {
+    return { field: `${c.column_name}__label`, label: titleize(c.column_name), type: 'text', group }
+  }
+  return { field: c.column_name, label: titleize(c.column_name), type: columnType(c), group }
+}
+
+// Strip a leading object prefix from a parent column for display under its
+// relationship group: properties' "property_city" shows as "City" under the
+// "Property" group, avoiding "Property › Property City".
+function stripParentPrefix(parentColumn, parentTable) {
+  const singular = parentTable.replace(/ies$/, 'y').replace(/s$/, '')
+  const pfx = `${singular}_`
+  return parentColumn.startsWith(pfx) ? parentColumn.slice(pfx.length) : parentColumn
+}
+
+// Friendly relationship group label from an FK column name:
+//   property_id              -> Property
+//   opportunity_account_id   -> Account            (canonical single parent link)
+//   opportunity_managing_account_id -> Managing Account
+//   building_id              -> Building
+// The label is the FK stem (minus a leading object prefix and trailing _id),
+// titleized. Distinct FKs to the same parent keep distinct labels so two
+// account relationships don't collapse into one ambiguous "Account" group.
+function relationshipLabel(fkColumn, parentTable) {
+  const parentSingular = parentTable.replace(/ies$/, 'y').replace(/s$/, '')
+  let stem = fkColumn.replace(/_id$/, '')
+  // Drop a leading object prefix that carries no relationship meaning, but only
+  // when what's left still references the parent singular — so a meaningful
+  // qualifier like "managing" is preserved.
+  const m = stem.match(/^([a-z]+)_(.+)$/)
+  if (m) {
+    const rest = m[2]
+    if (rest === parentSingular || rest.endsWith(`_${parentSingular}`) || rest.endsWith(parentSingular)) {
+      stem = rest
+    }
+  }
+  return titleize(stem)
 }
 
 function titleize(name) {
@@ -78,41 +160,140 @@ function identityColumns(table, cols) {
 }
 
 // ---------------------------------------------------------------------------
-// buildObjectColumns: auto-generate ListView column descriptors for a table.
-// Returns [{ field, label, type }], with 'id' (record number) and 'name'
-// (primary name) first so rows are identifiable and clickable.
+// buildObjectColumns: the DEFAULT-VISIBLE ListView column set for a table.
+// Returns [{ field, label, type, group }], with 'id' (record number) and
+// 'name' (primary name) first. Capped at MAX_BUSINESS_COLS so the initial
+// render is sensible; the full selectable set comes from
+// buildObjectColumnCatalog and is exposed through the column picker.
 // ---------------------------------------------------------------------------
 export async function buildObjectColumns(table) {
   const cols = await describeObject(table)
-  const colNames = new Set(cols.map(c => c.column_name))
   const { recordNumber, nameCol } = identityColumns(table, cols)
+  const objectGroup = titleize(table.replace(/ies$/, 'y').replace(/s$/, ''))
 
   const out = []
-  // Record number -> 'id' (ListView treats 'id' as the leading identity col).
-  if (recordNumber) out.push({ field: 'id', label: 'Record #', type: 'text' })
-  // Primary name -> 'name' (ListView treats 'name' as the row click label).
-  if (nameCol) out.push({ field: 'name', label: 'Name', type: 'text' })
+  if (recordNumber) out.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup })
+  if (nameCol) out.push({ field: 'name', label: 'Name', type: 'text', group: objectGroup })
 
   let businessCount = 0
   for (const c of cols) {
-    const n = c.column_name
     if (!isListableColumn(c, { recordNumber, nameCol })) continue
     if (businessCount >= MAX_BUSINESS_COLS) break
-
-    // FK columns (picklist/user) are resolved to a label at fetch time and
-    // exposed under a derived field name (n + '__label'); the column points
-    // at that. Non-FK columns map straight through.
-    if (c.is_foreign_key) {
-      out.push({ field: `${n}__label`, label: titleize(n), type: 'text' })
-    } else {
-      const type = /date/.test(c.data_type) ? 'date'
-        : /(numeric|integer|double|real|bigint)/.test(c.data_type) ? 'number'
-        : 'text'
-      out.push({ field: n, label: titleize(n), type })
-    }
+    out.push(ownColumnDescriptor(c, objectGroup))
     businessCount++
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// buildObjectColumnCatalog: the FULL set of columns a user may add to the list
+// view for a table, for the searchable column picker. Returns:
+//   {
+//     defaultColumns: [...],   // same as buildObjectColumns (initial visible)
+//     catalog:        [...],   // every selectable column: own + related
+//     groups:         [...],   // ordered group labels (object first)
+//   }
+// Each catalog entry: { field, label, type, group, related?: { fkColumn,
+// parentTable, parentColumn } }.
+//
+// Related columns are one hop out: for each table-FK on the object (excluding
+// user/picklist parents, which are surfaced as the FK's own __label), every
+// selectable column on the parent table is offered under a relationship group
+// (e.g. "Property", "Account"). Selecting one triggers a parent-row join at
+// fetch time (see fetchObjectRecords).
+// ---------------------------------------------------------------------------
+export async function buildObjectColumnCatalog(table) {
+  const cols = await describeObject(table)
+  const { recordNumber, nameCol } = identityColumns(table, cols)
+  const objectGroup = titleize(table.replace(/ies$/, 'y').replace(/s$/, ''))
+
+  const catalog = []
+  const groups = [objectGroup]
+
+  // Identity columns first (always available, always shown — the picker marks
+  // them locked, but they belong in the catalog so search finds them).
+  if (recordNumber) catalog.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup, locked: true })
+  if (nameCol) catalog.push({ field: 'name', label: 'Name', type: 'text', group: objectGroup, locked: true })
+
+  // All own selectable columns (no cap).
+  for (const c of cols) {
+    if (!isSelectableColumn(c, { recordNumber, nameCol })) continue
+    // Table FKs are not added as a direct column; they become a related group
+    // below (and their __label is offered if picklist/user).
+    if (c.is_foreign_key && !LABELED_FK_TABLES.has(c.references_table)) continue
+    catalog.push(ownColumnDescriptor(c, objectGroup))
+  }
+
+  // Related (one-hop) columns. Follow each expandable table FK to its parent.
+  const tableFks = cols.filter(c =>
+    c.is_foreign_key &&
+    c.references_table &&
+    !NON_EXPANDABLE_PARENTS.has(c.references_table)
+  )
+  // De-dupe parent describes (two FKs to the same table are rare but possible).
+  const parentSchemas = new Map()
+  await Promise.all(
+    Array.from(new Set(tableFks.map(c => c.references_table))).map(async (pt) => {
+      try { parentSchemas.set(pt, await describeObject(pt)) }
+      catch { parentSchemas.set(pt, []) }
+    })
+  )
+
+  for (const fk of tableFks) {
+    const parentTable = fk.references_table
+    const pCols = parentSchemas.get(parentTable) || []
+    if (pCols.length === 0) continue
+    const groupLabel = relationshipLabel(fk.column_name, parentTable)
+    if (!groups.includes(groupLabel)) groups.push(groupLabel)
+    const pIdentity = identityColumns(parentTable, pCols)
+
+    for (const pc of pCols) {
+      if (!isSelectableColumn(pc, { recordNumber: pIdentity.recordNumber, nameCol: pIdentity.nameCol })) continue
+      // Skip parent FK columns that point at further tables — we only expand one
+      // hop. Picklist/user parent FKs are surfaced via their __label.
+      const isParentTableFk = pc.is_foreign_key && !LABELED_FK_TABLES.has(pc.references_table)
+      if (isParentTableFk) continue
+
+      const baseField = pc.is_foreign_key && LABELED_FK_TABLES.has(pc.references_table)
+        ? `${pc.column_name}__label`
+        : pc.column_name
+      const type = pc.is_foreign_key && LABELED_FK_TABLES.has(pc.references_table)
+        ? 'text' : columnType(pc)
+
+      catalog.push({
+        field: `${fk.column_name}${REL_DELIM}${baseField}`,
+        label: titleize(stripParentPrefix(pc.column_name, parentTable)),
+        type,
+        group: groupLabel,
+        related: {
+          fkColumn: fk.column_name,
+          parentTable,
+          parentColumn: pc.column_name,
+          parentIsLabeledFk: pc.is_foreign_key && LABELED_FK_TABLES.has(pc.references_table),
+          parentRefTable: pc.references_table || null,
+        },
+      })
+    }
+    // Also expose the parent's record number/name explicitly at the top of the
+    // group (handy and often what users want first).
+    if (pIdentity.nameCol) {
+      catalog.push({
+        field: `${fk.column_name}${REL_DELIM}${pIdentity.nameCol}`,
+        label: 'Name',
+        type: 'text',
+        group: groupLabel,
+        related: { fkColumn: fk.column_name, parentTable, parentColumn: pIdentity.nameCol },
+      })
+    }
+  }
+
+  // De-dupe by field (identity name columns added twice above), preserving
+  // first occurrence order.
+  const seen = new Set()
+  const deduped = catalog.filter(e => (seen.has(e.field) ? false : (seen.add(e.field), true)))
+
+  const defaultColumns = await buildObjectColumns(table)
+  return { defaultColumns, catalog: deduped, groups }
 }
 
 // ---------------------------------------------------------------------------
@@ -181,8 +362,15 @@ export function deriveColumnOptions(columns, rows) {
 // fetchObjectRecords: all non-deleted rows for the object, shaped for ListView.
 // Each row: { id: <record number or uuid>, _id: <uuid>, name: <primary name>,
 //             <business cols>, <fk>__label: <resolved label> }.
+//
+// activeFields (optional): the set/array of column fields currently visible in
+// the list view (from the saved view or column picker). Used to decide which
+// RELATED (one-hop) relationships to resolve via a parent-row join. Own
+// columns are always emitted in full (the underlying fetch is select *), so a
+// newly-shown own column always has data without re-fetching. When
+// activeFields is omitted, no related columns are resolved (default render).
 // ---------------------------------------------------------------------------
-export async function fetchObjectRecords(table) {
+export async function fetchObjectRecords(table, { activeFields = null } = {}) {
   const [cols, picklists] = await Promise.all([
     describeObject(table),
     loadPicklists().catch(() => ({ byId: new Map() })),
@@ -223,17 +411,80 @@ export async function fetchObjectRecords(table) {
     return q.range(from, to)
   })
 
+  // ── Resolve active related (one-hop) columns ────────────────────────────
+  // Determine which relationships are needed from activeFields, then batch-load
+  // the distinct parent rows referenced by the list and build a per-relationship
+  // resolver: fkValue -> { parentColumn -> rendered value }.
+  const activeSet = activeFields
+    ? (activeFields instanceof Set ? activeFields : new Set(activeFields))
+    : null
+  // Map<fkColumn, { parentTable, parentColumns:Set, parentIsLabeledFk per col }>
+  const relNeeds = new Map()
+  if (activeSet) {
+    for (const field of activeSet) {
+      const parsed = parseRelatedField(field)
+      if (!parsed) continue
+      const { fkColumn, parentColumn } = parsed
+      // Validate the fkColumn really is a table FK on this object.
+      const fkMeta = cols.find(c => c.column_name === fkColumn && c.is_foreign_key)
+      if (!fkMeta || NON_EXPANDABLE_PARENTS.has(fkMeta.references_table)) continue
+      if (!relNeeds.has(fkColumn)) {
+        relNeeds.set(fkColumn, { parentTable: fkMeta.references_table, parentColumns: new Set() })
+      }
+      // parentColumn may carry a trailing __label (parent FK to user/picklist);
+      // strip it to the real column for the SELECT, remember it needs labeling.
+      const isLabel = parentColumn.endsWith('__label')
+      const realCol = isLabel ? parentColumn.slice(0, -('__label'.length)) : parentColumn
+      relNeeds.get(fkColumn).parentColumns.add(JSON.stringify({ realCol, isLabel, field }))
+    }
+  }
+
+  // For each needed relationship, fetch the distinct parent rows and build a
+  // value map keyed by parent id.
+  const relResolvers = new Map() // fkColumn -> Map<parentId, Map<field, value>>
+  await Promise.all(Array.from(relNeeds.entries()).map(async ([fkColumn, need]) => {
+    const ids = Array.from(new Set(rows.map(r => r[fkColumn]).filter(Boolean)))
+    if (ids.length === 0) { relResolvers.set(fkColumn, new Map()); return }
+    const wanted = Array.from(need.parentColumns).map(s => JSON.parse(s))
+    const selectCols = Array.from(new Set(['id', ...wanted.map(w => w.realCol)])).join(', ')
+    // Batch the id IN-list to stay under URL limits.
+    const parentRows = []
+    const CHUNK = 300
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK)
+      const { data } = await supabase.from(need.parentTable).select(selectCols).in('id', slice)
+      if (data) parentRows.push(...data)
+    }
+    const byId = new Map()
+    for (const pr of parentRows) {
+      const vm = new Map()
+      for (const w of wanted) {
+        let val = pr[w.realCol]
+        if (w.isLabel && val != null) {
+          // Parent column is itself a user/picklist FK — label it.
+          val = picklists.byId.get(val) || userLabels.get(val) || String(val)
+        }
+        vm.set(w.field, val == null ? '' : val)
+      }
+      byId.set(pr.id, vm)
+    }
+    relResolvers.set(fkColumn, byId)
+  }))
+
   return rows.map(r => {
     const out = {
       id:   recordNumber ? (r[recordNumber] || r.id) : r.id,
       _id:  r.id,
       name: nameCol ? (r[nameCol] || '') : (r.id || ''),
     }
-    // Copy business columns through; resolve FK columns to *__label. Uses the
-    // same listable predicate as buildObjectColumns so data and columns align.
+    // Emit ALL selectable own columns (not just the capped default set) so any
+    // column the user adds via the picker has data. FK columns resolve to a
+    // *__label; table FKs pass their raw uuid through under *__label too (so a
+    // bare table-FK column, if ever shown, isn't blank — though the picker
+    // surfaces those as related groups instead).
     for (const c of cols) {
+      if (!isSelectableColumn(c, { recordNumber, nameCol })) continue
       const n = c.column_name
-      if (!isListableColumn(c, { recordNumber, nameCol })) continue
       if (c.is_foreign_key) {
         const raw = r[n]
         let label = '—'
@@ -246,6 +497,12 @@ export async function fetchObjectRecords(table) {
       } else {
         out[n] = r[n]
       }
+    }
+    // Flatten active related columns onto the row under their __rel__ field.
+    for (const [fkColumn, byId] of relResolvers) {
+      const pid = r[fkColumn]
+      const vm = pid ? byId.get(pid) : null
+      if (vm) for (const [field, val] of vm) out[field] = val
     }
     return out
   })

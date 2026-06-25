@@ -743,76 +743,138 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
 }
 
 // ── Column Picker ────────────────────────────────────────────────────────────
-// Portaled checklist for choosing which columns show in the current view.
-// Always-on columns (id/name) are shown checked and disabled. Toggling updates
-// the parent's visibleColumns and marks the view dirty so it can be saved.
-function ColumnPicker({ columns, alwaysOn, visibleColumns, onChange, onClose, triggerRect }) {
+// Searchable, grouped combo box for choosing which columns show in the current
+// view. Driven by the FULL column catalog (every own column + one-hop related
+// columns through the object's lookups), grouped by relationship. A search box
+// filters across all groups by label. Always-on columns (id/name) are shown
+// checked and locked. Selection is an explicit ordered array (newly checked
+// columns append to the end); clearing back to the default set is offered via
+// "Reset to default".
+//
+// catalog:        [{ field, label, type, group, related?, locked? }]
+// groups:         ordered group labels (object group first)
+// defaultFields:  the field list of the default-visible set (for Reset)
+// visibleColumns: current explicit selection (array) or null (= default set)
+function ColumnPicker({
+  catalog, groups, alwaysOn, visibleColumns, defaultFields, onChange, onClose, triggerRect,
+}) {
   const ref = useRef();
+  const [search, setSearch] = useState('');
   useEffect(() => {
     const h = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  // Current visible set: null means all columns visible.
-  const isVisible = (field) =>
-    !Array.isArray(visibleColumns) || visibleColumns.includes(field) || alwaysOn.includes(field);
+  // The current explicit selection. null means "default set" — materialize it
+  // to the default fields so toggling produces a concrete ordered array.
+  const currentOrdered = Array.isArray(visibleColumns)
+    ? visibleColumns
+    : (defaultFields || []);
+  const selectedSet = new Set([...currentOrdered, ...alwaysOn]);
+
+  const isVisible = (field) => selectedSet.has(field);
 
   const toggle = (field) => {
     if (alwaysOn.includes(field)) return;
-    // Materialize the current set (from null = all) then flip this field.
-    const base = Array.isArray(visibleColumns)
-      ? new Set(visibleColumns)
-      : new Set(columns.map(c => c.field));
-    if (base.has(field)) base.delete(field); else base.add(field);
-    // Keep result in catalog order; if it equals the full catalog, collapse
-    // back to null (= "all", the default) so we don't persist a redundant set.
-    const ordered = columns.map(c => c.field).filter(f => base.has(f) || alwaysOn.includes(f));
-    const isAll = ordered.length === columns.length;
-    onChange(isAll ? null : ordered);
+    let next;
+    if (selectedSet.has(field)) {
+      next = currentOrdered.filter(f => f !== field && !alwaysOn.includes(f));
+    } else {
+      // Append so the user's most-recently-added column shows at the right.
+      next = [...currentOrdered.filter(f => !alwaysOn.includes(f)), field];
+    }
+    onChange(next);
   };
+
+  // Group the catalog for display, applying the search filter. Locked identity
+  // columns always show in their group regardless of search so the user sees
+  // them pinned.
+  const q = search.trim().toLowerCase();
+  const grouped = useMemo(() => {
+    const byGroup = new Map();
+    for (const g of (groups || [])) byGroup.set(g, []);
+    for (const c of (catalog || [])) {
+      if (q && !c.label.toLowerCase().includes(q) && !(c.group || '').toLowerCase().includes(q)) continue;
+      const g = c.group || 'Other';
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g).push(c);
+    }
+    // Drop empty groups (after search).
+    return Array.from(byGroup.entries()).filter(([, arr]) => arr.length > 0);
+  }, [catalog, groups, q]);
 
   const rect = triggerRect;
   const top = rect ? rect.bottom + 4 : 0;
   const left = rect ? rect.left : 0;
-  const maxH = rect ? Math.max(200, window.innerHeight - rect.bottom - 16) : 400;
+  const maxH = rect ? Math.max(240, window.innerHeight - rect.bottom - 16) : 460;
+  const selectedCount = currentOrdered.filter(f => !alwaysOn.includes(f)).length;
 
   const menu = (
     <div ref={ref} style={{
       position: 'fixed', top, left, zIndex: 4000,
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-      boxShadow: '0 8px 28px rgba(7,17,31,0.22)', minWidth: 240,
-      maxHeight: maxH, overflowY: 'auto', overflowX: 'hidden',
+      boxShadow: '0 8px 28px rgba(7,17,31,0.22)', width: 320,
+      maxHeight: maxH, display: 'flex', flexDirection: 'column', overflow: 'hidden',
     }}>
-      <div style={{ padding: '8px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>Columns</span>
-        {Array.isArray(visibleColumns) && (
-          <span onClick={() => onChange(null)} style={{ cursor: 'pointer', color: C.emerald, fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>Show all</span>
-        )}
+      <div style={{ padding: '10px 14px 8px', borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Add columns{selectedCount > 0 && <span style={{ color: C.textSecondary }}> · {selectedCount} shown</span>}
+          </span>
+          <span onClick={() => onChange(null)} style={{ cursor: 'pointer', color: C.emerald, fontWeight: 600, fontSize: 11 }}>Reset to default</span>
+        </div>
+        <div style={{ position: 'relative' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}
+            style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)' }}>
+            <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            autoFocus
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search columns and related fields…"
+            style={{ width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 9px 7px 28px', fontSize: 12.5, color: C.textPrimary, outline: 'none', boxSizing: 'border-box' }}
+          />
+        </div>
       </div>
-      <div style={{ padding: '2px 0 8px' }}>
-        {columns.map(col => {
-          const on = isVisible(col.field);
-          const locked = alwaysOn.includes(col.field);
-          return (
-            <div key={col.field}
-              onClick={() => toggle(col.field)}
-              style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 14px',
-                       cursor: locked ? 'default' : 'pointer', opacity: locked ? 0.55 : 1 }}
-              onMouseEnter={e => { if (!locked) e.currentTarget.style.background = C.page; }}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <span style={{
-                width: 15, height: 15, borderRadius: 4, flexShrink: 0,
-                border: `1.5px solid ${on ? C.emerald : C.borderDark}`,
-                background: on ? C.emerald : 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                {on && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={3}><polyline points="20 6 9 17 4 12" /></svg>}
-              </span>
-              <span style={{ fontSize: 13, color: C.textPrimary }}>{col.label}{locked && <span style={{ color: C.textMuted, fontSize: 11 }}> (always shown)</span>}</span>
+
+      <div style={{ overflowY: 'auto', padding: '4px 0 8px' }}>
+        {grouped.length === 0 && (
+          <div style={{ padding: '14px', fontSize: 12.5, color: C.textMuted }}>No columns match “{search}”.</div>
+        )}
+        {grouped.map(([group, cols]) => (
+          <div key={group}>
+            <div style={{ padding: '8px 14px 4px', fontSize: 10, fontWeight: 700, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em', position: 'sticky', top: 0, background: C.card }}>
+              {group}
             </div>
-          );
-        })}
+            {cols.map(col => {
+              const on = isVisible(col.field);
+              const locked = alwaysOn.includes(col.field) || col.locked;
+              return (
+                <div key={col.field}
+                  onClick={() => toggle(col.field)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 14px',
+                           cursor: locked ? 'default' : 'pointer', opacity: locked ? 0.55 : 1 }}
+                  onMouseEnter={e => { if (!locked) e.currentTarget.style.background = C.page; }}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <span style={{
+                    width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+                    border: `1.5px solid ${on ? C.emerald : C.borderDark}`,
+                    background: on ? C.emerald : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {on && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={3}><polyline points="20 6 9 17 4 12" /></svg>}
+                  </span>
+                  <span style={{ fontSize: 13, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {col.label}
+                    {locked && <span style={{ color: C.textMuted, fontSize: 11 }}> (always shown)</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1057,6 +1119,9 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClos
 export function ListView({
   data: dataProp,
   columns: columnsProp,
+  columnCatalog: columnCatalogProp,
+  columnGroups: columnGroupsProp,
+  onActiveRelatedFieldsChange,
   systemViews: systemViewsProp,
   defaultViewId, newLabel,
   renderCell, renderDetail, onNew, onOpenRecord, onRefresh,
@@ -1096,6 +1161,34 @@ export function ListView({
         : (c.type === 'select' || c.type === 'text' || c.type === 'date'),
     }))
   }, [columnsProp])
+
+  // Full searchable catalog (own + one-hop related columns). Normalized the
+  // same way as the default columns. When absent (hand-written module lists),
+  // the catalog falls back to the default columns so the picker still works.
+  const columnCatalog = useMemo(() => {
+    const raw = Array.isArray(columnCatalogProp) && columnCatalogProp.length > 0
+      ? columnCatalogProp
+      : (Array.isArray(columnsProp) ? columnsProp : [])
+    return raw.map(c => ({
+      ...c,
+      sortable: c.sortable !== undefined ? c.sortable : true,
+      filterable: c.filterable !== undefined
+        ? c.filterable
+        : (c.type === 'select' || c.type === 'text' || c.type === 'date'),
+    }))
+  }, [columnCatalogProp, columnsProp])
+
+  const columnGroups = Array.isArray(columnGroupsProp) ? columnGroupsProp : []
+
+  // Resolver over every column the user could show: default columns first
+  // (they may carry filter `options` derived from loaded rows), then any
+  // catalog column not already present. Keyed by field for O(1) lookup.
+  const columnByField = useMemo(() => {
+    const m = new Map()
+    for (const c of columns) m.set(c.field, c)
+    for (const c of columnCatalog) if (!m.has(c.field)) m.set(c.field, c)
+    return m
+  }, [columns, columnCatalog])
   // Columns that can never be hidden: the primary 'name' (the row's click
   // target / label) and 'id' (record number, the leading identity column).
   const ALWAYS_ON_COLS = ['id', 'name'];
@@ -1148,10 +1241,40 @@ export function ListView({
   // card all map over effectiveColumns so a hidden column disappears
   // everywhere consistently.
   const effectiveColumns = useMemo(() => {
+    // Default view (no explicit selection): show the default column set.
     if (!Array.isArray(visibleColumns)) return columns;
-    const show = new Set([...visibleColumns, ...ALWAYS_ON_COLS]);
-    return columns.filter(c => show.has(c.field));
-  }, [columns, visibleColumns]);
+    // Explicit selection: render in the user's chosen order. Identity columns
+    // (id, name) are always forced to the front so a row stays clickable. Each
+    // field resolves through the merged catalog so related/extra columns the
+    // user added render even though they're not in the default set.
+    const ordered = [];
+    const seen = new Set();
+    for (const f of ALWAYS_ON_COLS) {
+      const c = columnByField.get(f);
+      if (c && !seen.has(f)) { ordered.push(c); seen.add(f); }
+    }
+    for (const f of visibleColumns) {
+      if (seen.has(f)) continue;
+      const c = columnByField.get(f);
+      if (c) { ordered.push(c); seen.add(f); }
+    }
+    return ordered;
+  }, [columns, columnByField, visibleColumns]);
+
+  // Report active related (one-hop) fields to the parent so it can refetch with
+  // the necessary parent joins. Own-column changes don't trigger this (their
+  // data is already present). Fires only when the set actually changes.
+  const lastRelatedKeyRef = useRef('');
+  useEffect(() => {
+    if (typeof onActiveRelatedFieldsChange !== 'function') return;
+    const related = Array.isArray(visibleColumns)
+      ? visibleColumns.filter(f => typeof f === 'string' && f.includes('__rel__'))
+      : [];
+    const key = [...related].sort().join('|');
+    if (key === lastRelatedKeyRef.current) return;
+    lastRelatedKeyRef.current = key;
+    onActiveRelatedFieldsChange(related);
+  }, [visibleColumns, onActiveRelatedFieldsChange]);
   const [openFilterCol, setOpenFilterCol] = useState(null);
   const [activeViewId, setActiveViewId] = useState(defaultViewId);
   const [showViewSel, setShowViewSel] = useState(false);
@@ -1645,7 +1768,7 @@ export function ListView({
               ))}
               {sortField && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#f0eeff', border: `1px solid #d0c8f8`, borderRadius: 5, padding: '4px 8px', fontSize: 12 }}>
-                  <span style={{ color: '#6d5ae0', fontWeight: 500 }}>Sort: {columns.find(c => c.field === sortField)?.label} {sortDir === 'asc' ? '↑' : '↓'}</span>
+                  <span style={{ color: '#6d5ae0', fontWeight: 500 }}>Sort: {(columnByField.get(sortField)?.label || sortField)} {sortDir === 'asc' ? '↑' : '↓'}</span>
                   <button onClick={() => { setSortField(null); setSortDir('asc'); setIsDirty(true); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#a78bfa' }}>
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M18 6 6 18M6 6l12 12" /></svg>
                   </button>
@@ -1803,7 +1926,7 @@ export function ListView({
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
         </button>
 
-        {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
+        {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={effectiveColumns} onSave={handleSave} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
         {showFilterSheet && (
           <MobileFilterSheet
             columns={columns}
@@ -1846,9 +1969,9 @@ export function ListView({
             style={{ display: 'flex', alignItems: 'center', gap: 7, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 13, color: C.textPrimary, cursor: 'pointer', fontWeight: 500 }}>
             <Icon path="M3 3h7v18H3zM14 3h7v7h-7zM14 14h7v7h-7z" size={13} color={C.textSecondary} />
             Columns
-            {Array.isArray(visibleColumns) && <span style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{effectiveColumns.length}/{columns.length}</span>}
+            {Array.isArray(visibleColumns) && <span style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{effectiveColumns.length}</span>}
           </button>
-          {showColPicker && <ColumnPicker columns={columns} alwaysOn={ALWAYS_ON_COLS} visibleColumns={visibleColumns} onChange={(next) => { setVisibleColumns(next); setIsDirty(true); }} onClose={() => setShowColPicker(false)} triggerRect={colPickerRect} />}
+          {showColPicker && <ColumnPicker catalog={columnCatalog} groups={columnGroups} alwaysOn={ALWAYS_ON_COLS} visibleColumns={visibleColumns} defaultFields={columns.map(c => c.field)} onChange={(next) => { setVisibleColumns(next); setIsDirty(true); }} onClose={() => setShowColPicker(false)} triggerRect={colPickerRect} />}
         </div>
 
         {persistEnabled && <HelpIcon anchors={[{ type: 'concept', concept: 'list-views' }, { type: 'concept', concept: 'column-visibility' }]} title="List views & columns" />}
@@ -1867,7 +1990,7 @@ export function ListView({
         {/* Sort chip */}
         {sortField && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#f0eeff', border: `1px solid #d0c8f8`, borderRadius: 5, padding: '4px 8px', fontSize: 12 }}>
-            <span style={{ color: '#6d5ae0', fontWeight: 500 }}>Sort: {columns.find(c => c.field === sortField)?.label} {sortDir === 'asc' ? '↑' : '↓'}</span>
+            <span style={{ color: '#6d5ae0', fontWeight: 500 }}>Sort: {(columnByField.get(sortField)?.label || sortField)} {sortDir === 'asc' ? '↑' : '↓'}</span>
             <button onClick={() => { setSortField(null); setSortDir('asc'); setIsDirty(true); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#a78bfa' }}>
               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M18 6 6 18M6 6l12 12" /></svg>
             </button>
@@ -2118,7 +2241,7 @@ export function ListView({
         )}
       </div>
 
-      {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={columns} onSave={handleSave} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
+      {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={effectiveColumns} onSave={handleSave} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
       {editMode && bulkPanelOpen && (
         <BulkEditModal
           tableName={tableName}
