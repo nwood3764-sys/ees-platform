@@ -203,29 +203,42 @@ export function getRecordTypeColumn(tableName) {
  * differentiation and the Create flow should skip the record-type picker.
  */
 export async function fetchAvailableRecordTypes(objectName, { state = null } = {}) {
-  let query = supabase
-    .from('picklist_values')
-    .select('id, picklist_value, picklist_label, picklist_state')
-    .eq('picklist_object', objectName)
-    .eq('picklist_field', 'record_type')
-    .eq('picklist_is_active', true)
-  // When a state is supplied, show only record types scoped to that state plus
-  // any nationwide types (picklist_state IS NULL). When no state is supplied,
-  // show everything active (the picker falls back to the full set).
-  if (state) {
-    query = query.or(`picklist_state.eq.${state},picklist_state.is.null`)
+  const runQuery = async (applyState) => {
+    let query = supabase
+      .from('picklist_values')
+      .select('id, picklist_value, picklist_label, picklist_state')
+      .eq('picklist_object', objectName)
+      .eq('picklist_field', 'record_type')
+      .eq('picklist_is_active', true)
+    // When a state is supplied, show only record types scoped to that state plus
+    // any nationwide types (picklist_state IS NULL).
+    if (applyState && state) {
+      query = query.or(`picklist_state.eq.${state},picklist_state.is.null`)
+    }
+    // Always alphabetical ascending by label — never storage/sort_order, which
+    // produces an illogical sequence for the user.
+    query = query.order('picklist_label', { ascending: true })
+    const { data, error } = await query
+    if (error) throw error
+    return (data || []).map(r => ({
+      id:    r.id,
+      value: r.picklist_value,
+      label: r.picklist_label || r.picklist_value,
+      state: r.picklist_state || null,
+    }))
   }
-  // Always alphabetical ascending by label — never storage/sort_order, which
-  // produces an illogical sequence for the user.
-  query = query.order('picklist_label', { ascending: true })
-  const { data, error } = await query
-  if (error) throw error
-  return (data || []).map(r => ({
-    id:    r.id,
-    value: r.picklist_value,
-    label: r.picklist_label || r.picklist_value,
-    state: r.picklist_state || null,
-  }))
+
+  const scoped = await runQuery(true)
+  // Fallback: a state was supplied but no record type is scoped to it (and no
+  // nationwide type exists). Rather than return empty — which makes the picker
+  // auto-dismiss and silently skip the record-type prompt — surface the full
+  // active set so the user is still required to choose. This keeps the
+  // "advancing must prompt for record type" guarantee even for states whose
+  // scoped types have not been configured yet.
+  if (state && scoped.length === 0) {
+    return runQuery(false)
+  }
+  return scoped
 }
 
 /**

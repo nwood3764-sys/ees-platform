@@ -4607,7 +4607,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       return
     }
 
-    fetchAvailableRecordTypes(tableName)
+    // Gate on the SAME state-filtered set the rendered picker will show, so
+    // the show/skip decision and the picker contents never diverge. (Passing
+    // no state here while the picker passed state caused the picker to render
+    // then immediately auto-dismiss via onPick(null) whenever a state had no
+    // scoped record types — silently skipping the prompt.)
+    fetchAvailableRecordTypes(tableName, { state: prefillState })
       .then(rts => {
         if (cancelled) return
         if (rts.length === 0) {
@@ -4625,7 +4630,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         setPickerEvaluated(true)
       })
     return () => { cancelled = true }
-  }, [isCreate, tableName, prefillRecordTypeValue])
+  }, [isCreate, tableName, prefillRecordTypeValue, prefillState])
 
   // ── Load required-field set ────────────────────────────────────────────
   // Fetch the table's NOT NULL columns once per mount; render the red
