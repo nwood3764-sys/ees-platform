@@ -21,7 +21,7 @@ export default function ObjectListSection({ objectTable, moduleId }) {
   const [views, setViews]     = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
-  const [selected, setSelected] = useState(null)   // { id, mode } | null
+  const [selected, setSelected] = useState(null)   // { id, mode, table?, prefill? } | null
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -63,14 +63,22 @@ export default function ObjectListSection({ objectTable, moduleId }) {
   }, [objectTable])
 
   if (selected) {
+    // selected.table lets a lookup hyperlink, breadcrumb, or advance-to action
+    // open a record on a DIFFERENT object than this list's own. Without it,
+    // RecordDetail would query the target id against objectTable and fail with
+    // "Cannot coerce the result to a single JSON object" (zero rows). Defaults
+    // to this list's object for ordinary row opens.
+    const detailTable = selected.table || objectTable
     return (
       <RecordDetail
-        tableName={objectTable}
+        key={`${detailTable}:${selected.id || 'new'}`}
+        tableName={detailTable}
         recordId={selected.id}
         mode={selected.mode || 'view'}
+        prefill={selected.prefill || null}
         onBack={() => setSelected(null)}
-        onRecordCreated={(r) => setSelected({ id: r.id, mode: 'view' })}
-        onNavigateToRecord={(r) => setSelected({ id: r.id, mode: r.mode })}
+        onRecordCreated={(r) => setSelected({ id: r.id, mode: 'view', table: detailTable })}
+        onNavigateToRecord={(r) => setSelected({ id: r.id, mode: r.mode || 'view', table: r.table || detailTable, prefill: r.prefill || null })}
       />
     )
   }
