@@ -1611,6 +1611,89 @@ export async function loadDashboard(dashboardId) {
   }
 }
 
+/**
+ * Server-side aggregation fast path for dashboard widgets.
+ *
+ * Calls the report_aggregate RPC, which does a real SQL GROUP BY and
+ * returns ~N grouped rows ({label, value, raw_value}) instead of
+ * paginating thousands of detail rows into the browser. Used by
+ * DashboardRunner for group-by widget types (bar/pie/donut/funnel/
+ * ranked_list). Returns the grouped data plus the report's primary
+ * object; the widget renders it directly via the result.aggregated
+ * branch in buildChartData.
+ *
+ * Resolves the widget's backing report to get the primary object and
+ * its saved filters (including the state runtime prompt's default),
+ * merges any dashboard-level extraFilters whose column exists on the
+ * primary object, and translates them into the RPC's {col, op, val}
+ * filter shape. On any failure the caller falls back to runReport.
+ */
+export async function runWidgetAggregate(widget, extraFilters = null) {
+  const cfg = widget.dw_widget_config || {}
+  const groupCol = cfg.group_by
+  if (!groupCol) throw new Error('Widget has no group_by; cannot aggregate')
+
+  const loaded = await loadReport(widget.dw_report_id)
+  if (!loaded) throw new Error('Report not found')
+  const primaryObject = loaded.report.rpt_primary_object
+
+  // Real columns on the primary object — used to drop filters that don't apply.
+  const primaryCols = await describeColumns(primaryObject)
+  const colNames = new Set(primaryCols.map(c => c.column_name))
+
+  // Translate a report_filter / extraFilter operator into the RPC's op set.
+  const opMap = {
+    equals: 'equals', not_equals: 'not_equals',
+    greater_than: 'gt', less_than: 'lt',
+    greater_or_equal: 'gte', less_or_equal: 'lte',
+    is_null: 'is_null', is_not_null: 'is_not_null',
+    in: 'in',
+  }
+
+  const filters = []
+
+  // Report's own saved filters (e.g. the state runtime prompt default).
+  for (const f of (loaded.report ? (loaded.filters || []) : [])) {
+    if (f.rfilt_is_cross_filter) continue
+    if (!colNames.has(f.rfilt_field_name)) continue
+    const op = opMap[f.rfilt_operator]
+    if (!op) continue
+    // rfilt_value is jsonb; unwrap to a plain value.
+    let val = f.rfilt_value
+    if (val && typeof val === 'object' && 'value' in val) val = val.value
+    filters.push({ col: f.rfilt_field_name, op, val })
+  }
+
+  // Dashboard-level filters, applied only where the column exists.
+  for (const ef of (extraFilters || [])) {
+    if (!colNames.has(ef.field_name)) continue
+    const op = opMap[ef.operator || 'equals'] || 'equals'
+    filters.push({ col: ef.field_name, op, val: ef.value })
+  }
+
+  const { data, error } = await supabase.rpc('report_aggregate', {
+    p_primary_object: primaryObject,
+    p_group_col:      groupCol,
+    p_measure_type:   cfg.measure_type || 'count',
+    p_measure_field:  cfg.measure_field || null,
+    p_filters:        filters,
+    p_sort:           cfg.sort_by || 'value_desc',
+    p_limit:          cfg.limit || 100,
+  })
+  if (error) throw error
+
+  // Shape into the {name, value, rawValue, groupCol} rows buildChartData
+  // emits, attached as result.aggregated so the widget short-circuits.
+  const aggregated = (data || []).map(row => ({
+    name:     row.label,
+    value:    Number(row.value) || 0,
+    rawValue: row.raw_value,
+    groupCol,
+  }))
+
+  return { aggregated, primaryObject, name: loaded.report.rpt_name }
+}
+
 export async function saveDashboard({ id, dashboard, widgets, filters }) {
   const isNew = !id || id === 'new'
   const userId = await getCurrentUserId()

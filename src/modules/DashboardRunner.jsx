@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
-import { runReport, loadDashboard, getRowValue } from '../data/reportsService'
+import { runReport, loadDashboard, getRowValue, runWidgetAggregate } from '../data/reportsService'
 
 // ─── Dashboard Runner ─────────────────────────────────────────────────────
 //
@@ -35,8 +35,28 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
 
   const runWidgets = async (dashboardData, currentFilterValues) => {
     const extra = buildExtraFilters(dashboardData.filters, currentFilterValues)
+    // Widget types that are pure group-by aggregations use the server-side
+    // report_aggregate fast path (one GROUP BY, ~N rows) instead of pulling
+    // all detail rows into the browser. metric/table still use runReport.
+    const AGG_TYPES = new Set(['bar', 'line', 'pie', 'donut', 'funnel', 'ranked_list'])
     const widgetResults = await Promise.all(
       (dashboardData.widgets || []).map(async w => {
+        const cfg = w.dw_widget_config || {}
+        if (AGG_TYPES.has(w.dw_widget_type) && cfg.group_by) {
+          try {
+            const agg = await runWidgetAggregate(w, extra)
+            return [w.id, agg]
+          } catch (err) {
+            // Fall back to the full row-fetch path so a fast-path failure
+            // degrades to the (slower) correct result, never a blank widget.
+            try {
+              const r = await runReport(w.dw_report_id, null, extra)
+              return [w.id, r]
+            } catch (err2) {
+              return [w.id, { error: err2 }]
+            }
+          }
+        }
         try {
           const r = await runReport(w.dw_report_id, null, extra)
           return [w.id, r]
@@ -408,6 +428,13 @@ function TableWidget({ result, canDrill, drillWhole }) {
 //   sort_by:       'value_desc' (default) | 'value_asc' | 'name'
 //   limit:         max categories to show (default 20 — keeps charts legible)
 function buildChartData(result, widget) {
+  // Fast path: when the runner used the server-side report_aggregate RPC,
+  // the grouped rows are already in result.aggregated in final shape.
+  // The RPC applied group-by, measure, label resolution, sort, and limit,
+  // so return them directly.
+  if (result && Array.isArray(result.aggregated)) {
+    return result.aggregated
+  }
   const cfg          = widget.dw_widget_config || {}
   const groupCol     = cfg.group_by      || (result.columns?.[0]?.name) || null
   const measureType  = cfg.measure_type  || 'count'
