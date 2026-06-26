@@ -105,7 +105,7 @@ function ownColumnDescriptor(c, group, ownerTable) {
   }
   if (c.is_foreign_key && c.references_table === 'users') {
     return {
-      field: `${c.column_name}__label`, label: titleize(c.column_name), type: 'text', group,
+      field: `${c.column_name}__label`, label: userFkLabel(c.column_name), type: 'text', group,
       valueSource: { kind: 'lookup', table: 'users' },
     }
   }
@@ -157,6 +157,16 @@ function titleize(name) {
   return name
     .replace(/_/g, ' ')
     .replace(/\b\w/g, m => m.toUpperCase())
+}
+
+// Display label for a user-FK column. By platform convention a user FK named
+// `<object>_owner` is the record-ownership field (assigned internal staff), not
+// anything about the real-world entity. Titleizing it ("Property Owner",
+// "Account Owner") collides with the legal/physical owner of the property or
+// account, so record-ownership FKs always render as "Record Owner". Other user
+// FKs (e.g. a "verified_by" lookup) keep their titleized name.
+function userFkLabel(columnName) {
+  return /_owner$/.test(columnName) ? 'Record Owner' : titleize(columnName)
 }
 
 function softDeleteColumn(table, colNames) {
@@ -292,7 +302,9 @@ export async function buildObjectColumnCatalog(table) {
 
       catalog.push({
         field: `${fk.column_name}${REL_DELIM}${baseField}`,
-        label: titleize(stripParentPrefix(pc.column_name, parentTable)),
+        label: pc.references_table === 'users' && /_owner$/.test(pc.column_name)
+          ? 'Record Owner'
+          : titleize(stripParentPrefix(pc.column_name, parentTable)),
         type,
         group: groupLabel,
         valueSource,
