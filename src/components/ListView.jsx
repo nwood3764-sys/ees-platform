@@ -1298,17 +1298,23 @@ function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
   const hydrate = () => {
     const rows = [];
     const equalsByField = new Map();
+    const colType = (col) => {
+      const vs = col?.valueSource;
+      if (vs && (vs.kind === 'lookup' || (vs.kind === 'picklist' && !vs.maybe))) return 'select';
+      return col?.type || 'text';
+    };
     for (const f of (activeFilters || [])) {
       const col = colByField.get(f.field) || { field: f.field, label: f.label || f.field, type: 'text' };
+      const extra = { valueSource: col.valueSource, options: col.options, hasBlanks: col.hasBlanks };
       if (f.op === 'equals' && !Array.isArray(f.value)) {
         if (!equalsByField.has(f.field)) {
-          const row = { id: `r${rows.length}_${f.field}`, field: f.field, label: col.label, type: col.type || 'text', op: 'equals', value: [f.value] };
+          const row = { id: `r${rows.length}_${f.field}`, field: f.field, label: col.label, type: colType(col), op: 'equals', value: [f.value], ...extra };
           equalsByField.set(f.field, row); rows.push(row);
         } else {
           equalsByField.get(f.field).value.push(f.value);
         }
       } else {
-        rows.push({ id: `r${rows.length}_${f.field}`, field: f.field, label: col.label, type: col.type || 'text', op: f.op, value: f.value });
+        rows.push({ id: `r${rows.length}_${f.field}`, field: f.field, label: col.label, type: colType(col), op: f.op, value: f.value, ...extra });
       }
     }
     return rows;
@@ -1324,13 +1330,24 @@ function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
     return () => document.removeEventListener('keydown', esc);
   }, []);
 
+  // A field whose values come from a picklist or lookup behaves like a
+  // 'select' for operator purposes (is any of / is none of / blank), even
+  // though its column type is text. Free-text picklists ('maybe') still get
+  // the full text operator set so contains/starts-with remain available.
+  const effectiveType = (col) => {
+    const vs = col?.valueSource;
+    if (vs && (vs.kind === 'lookup' || (vs.kind === 'picklist' && !vs.maybe))) return 'select';
+    return col?.type || 'text';
+  };
+
   const addRowForField = (col) => {
-    const type = col.type || 'text';
+    const type = effectiveType(col);
     const op = defaultOperatorForType(type);
     const opMeta = operatorsForType(type).find(o => o.op === op);
     setRows(prev => [...prev, {
       id: `r${Date.now()}_${col.field}`, field: col.field, label: col.label,
       type, op, value: opMeta?.multi ? [] : '',
+      valueSource: col.valueSource, options: col.options, hasBlanks: col.hasBlanks,
     }]);
     setPicking(false); setSearch('');
   };
@@ -1480,46 +1497,138 @@ function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
   return createPortal(panel, document.body);
 }
 
-// Value editor for one sidebar filter row, by operator/type.
+// Value editor for one sidebar filter row, by operator/type/value-source.
+// A picklist or lookup field gets a searchable typeahead of its real options
+// (picklist definition / referenced records); free-text/number/date and
+// literal operators (contains, >, between …) get manual entry. The stored
+// filter value is always the displayed text (rows carry resolved labels), so
+// lookups emit the label string, not the id.
 function FilterValueEditor({ row, onChange }) {
-  if (VALUELESS_OPS.has(row.op)) return null;
   const opMeta = operatorsForType(row.type).find(o => o.op === row.op);
-  const inputType = row.type === 'date' ? 'date' : (row.type === 'number' ? 'number' : 'text');
+  const isMulti = !!opMeta?.multi;
+  const isRange = RANGE_OPS.has(row.op);
+  const vs = row.valueSource;
+
+  // Operators that compare literally (substring/affix/inequalities) always use
+  // a manual input even on a picklist field — you might want "contains 'WI'".
+  const literalOp = ['contains', 'not_contains', 'starts_with', 'ends_with', 'gt', 'gte', 'lt', 'lte'].includes(row.op);
+  const wantsTypeahead = !!vs && !literalOp && !isRange && !VALUELESS_OPS.has(row.op);
+
   const baseStyle = { width: '100%', background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, padding: '6px 8px', fontSize: 12.5, color: C.textPrimary, outline: 'none', boxSizing: 'border-box' };
 
-  // Multi-select (equals/not_equals on a select column with known options).
-  if (opMeta?.multi) {
-    const options = [
-      ...(row.options || []),
-      ...((row.hasBlanks) ? [BLANK_FILTER_VALUE] : []),
-    ];
-    const selected = Array.isArray(row.value) ? row.value : [];
-    const toggle = (v) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
-    // When options aren't known (e.g. related field), fall back to a free text
-    // value the user types (comma-separates into multiple).
-    if (options.length === 0) {
-      return <input value={selected.join(', ')} onChange={e => onChange(e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-        placeholder="Type values, comma-separated" style={baseStyle} />;
-    }
+  // ── Typeahead state (declared unconditionally to respect hook ordering) ──
+  const [query, setQuery] = useState('');
+  const [opts, setOpts] = useState(null);   // resolved options [{label}] | 'TEXT'
+  const [open, setOpen] = useState(false);
+  const [loadingOpts, setLoadingOpts] = useState(false);
+  const fellBackToText = opts === 'TEXT';
+
+  useEffect(() => {
+    if (!wantsTypeahead) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingOpts(true);
+      try {
+        if (vs.kind === 'picklist') {
+          const list = await getPicklistOptions(vs.object, vs.field);
+          if (cancelled) return;
+          if ((!list || list.length === 0) && vs.maybe) setOpts('TEXT');
+          else setOpts((list || []).map(o => ({ label: o.label })));
+        } else if (vs.kind === 'lookup') {
+          const list = await searchLookupOptions(vs.table, '').catch(() => []);
+          if (cancelled) return;
+          setOpts((list || []).map(o => ({ label: o.label })));
+        }
+      } catch {
+        if (!cancelled) setOpts(vs?.maybe ? 'TEXT' : []);
+      } finally {
+        if (!cancelled) setLoadingOpts(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vs?.kind, vs?.object, vs?.field, vs?.table, wantsTypeahead]);
+
+  // Live lookup search as the user types (lookups can have many records).
+  useEffect(() => {
+    if (!wantsTypeahead || vs?.kind !== 'lookup') return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const list = await searchLookupOptions(vs.table, query).catch(() => []);
+      if (!cancelled) setOpts((list || []).map(o => ({ label: o.label })));
+    }, 180);
+    return () => { cancelled = true; clearTimeout(t); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  if (VALUELESS_OPS.has(row.op)) return null;
+
+  if (wantsTypeahead && !fellBackToText) {
+    const optionList = Array.isArray(opts) ? opts : [];
+    const q = query.trim().toLowerCase();
+    // Picklist filters client-side; lookup is already server-filtered.
+    const shown = (vs.kind === 'picklist' && q)
+      ? optionList.filter(o => o.label.toLowerCase().includes(q))
+      : optionList;
+    const selected = isMulti ? (Array.isArray(row.value) ? row.value : []) : row.value;
+
+    const pickSingle = (label) => { onChange(label); setOpen(false); setQuery(''); };
+    const toggleMulti = (label) => {
+      const cur = Array.isArray(row.value) ? row.value : [];
+      onChange(cur.includes(label) ? cur.filter(v => v !== label) : [...cur, label]);
+    };
+
     return (
-      <div style={{ maxHeight: 150, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 5, padding: 6 }}>
-        {options.map(o => {
-          const on = selected.includes(o);
-          return (
-            <div key={o} onClick={() => toggle(o)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 3px', cursor: 'pointer' }}>
-              <span style={{ width: 13, height: 13, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${on ? C.emerald : C.borderDark}`, background: on ? C.emerald : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {on && <svg width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+      <div style={{ position: 'relative' }}>
+        {/* Selected chips for multi */}
+        {isMulti && Array.isArray(selected) && selected.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+            {selected.map(s => (
+              <span key={s} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#e8f3fb', color: '#1a5a8a', fontSize: 11, padding: '2px 6px', borderRadius: 4 }}>
+                {s}
+                <svg onClick={() => toggleMulti(s)} width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} style={{ cursor: 'pointer' }}><path d="M18 6 6 18M6 6l12 12" /></svg>
               </span>
-              <span style={{ fontSize: 12, color: o === BLANK_FILTER_VALUE ? C.textMuted : C.textPrimary, fontStyle: o === BLANK_FILTER_VALUE ? 'italic' : 'normal' }}>{o === BLANK_FILTER_VALUE ? '(Blanks)' : o}</span>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        )}
+        <input
+          value={isMulti ? query : (open ? query : (row.value || ''))}
+          onChange={e => { setQuery(e.target.value); onChange(isMulti ? row.value : e.target.value); if (!open) setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder={loadingOpts ? 'Loading…' : (isMulti ? 'Search and select…' : 'Search…')}
+          style={baseStyle}
+        />
+        {open && (
+          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, marginTop: 2, background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, boxShadow: '0 6px 20px rgba(7,17,31,0.16)', maxHeight: 200, overflowY: 'auto' }}>
+            {shown.length === 0 && <div style={{ fontSize: 12, color: C.textMuted, padding: '8px 10px' }}>{loadingOpts ? 'Loading…' : 'No matches'}</div>}
+            {shown.map(o => {
+              const on = isMulti && Array.isArray(selected) && selected.includes(o.label);
+              return (
+                <div key={o.label}
+                  onClick={() => { isMulti ? toggleMulti(o.label) : pickSingle(o.label); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 12.5, color: C.textPrimary }}
+                  onMouseEnter={e => e.currentTarget.style.background = C.page}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  {isMulti && (
+                    <span style={{ width: 13, height: 13, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${on ? C.emerald : C.borderDark}`, background: on ? C.emerald : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {on && <svg width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                    </span>
+                  )}
+                  {o.label}
+                </div>
+              );
+            })}
+            <div onClick={() => setOpen(false)} style={{ fontSize: 11, color: C.textMuted, padding: '6px 10px', borderTop: `1px solid ${C.border}`, cursor: 'pointer', textAlign: 'center' }}>Close</div>
+          </div>
+        )}
       </div>
     );
   }
 
-  // Range (between): two inputs.
-  if (RANGE_OPS.has(row.op)) {
+  // ── Manual inputs ───────────────────────────────────────────────────────
+  const inputType = row.type === 'date' ? 'date' : (row.type === 'number' ? 'number' : 'text');
+
+  if (isRange) {
     const [lo, hi] = Array.isArray(row.value) ? row.value : ['', ''];
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1530,7 +1639,6 @@ function FilterValueEditor({ row, onChange }) {
     );
   }
 
-  // Single value.
   return <input type={inputType} value={Array.isArray(row.value) ? (row.value[0] || '') : (row.value || '')}
     onChange={e => onChange(e.target.value)} placeholder="Value" style={baseStyle} />;
 }

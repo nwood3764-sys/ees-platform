@@ -91,11 +91,31 @@ function columnType(c) {
 
 // Build a ListView column descriptor for one own-object schema column.
 // FK columns (picklist/user) resolve to a *__label field; others map straight.
-function ownColumnDescriptor(c, group) {
-  if (c.is_foreign_key && LABELED_FK_TABLES.has(c.references_table)) {
-    return { field: `${c.column_name}__label`, label: titleize(c.column_name), type: 'text', group }
+// `valueSource` tells the filter sidebar where the value typeahead's options
+// come from:
+//   { kind: 'picklist', object, field }  — managed picklist_values definition
+//   { kind: 'lookup',   table }          — search records in a referenced table
+//   undefined                            — free text/number/date (manual entry)
+function ownColumnDescriptor(c, group, ownerTable) {
+  if (c.is_foreign_key && c.references_table === 'picklist_values') {
+    return {
+      field: `${c.column_name}__label`, label: titleize(c.column_name), type: 'text', group,
+      valueSource: { kind: 'picklist', object: ownerTable, field: c.column_name },
+    }
   }
-  return { field: c.column_name, label: titleize(c.column_name), type: columnType(c), group }
+  if (c.is_foreign_key && c.references_table === 'users') {
+    return {
+      field: `${c.column_name}__label`, label: titleize(c.column_name), type: 'text', group,
+      valueSource: { kind: 'lookup', table: 'users' },
+    }
+  }
+  // Non-FK text column may still have a managed picklist definition keyed by
+  // (object, column_name); the sidebar resolves this lazily and falls back to
+  // free text when no definition exists.
+  const type = columnType(c)
+  const base = { field: c.column_name, label: titleize(c.column_name), type, group }
+  if (type === 'text') base.valueSource = { kind: 'picklist', object: ownerTable, field: c.column_name, maybe: true }
+  return base
 }
 
 // Strip a leading object prefix from a parent column for display under its
@@ -179,7 +199,7 @@ export async function buildObjectColumns(table) {
   for (const c of cols) {
     if (!isListableColumn(c, { recordNumber, nameCol })) continue
     if (businessCount >= MAX_BUSINESS_COLS) break
-    out.push(ownColumnDescriptor(c, objectGroup))
+    out.push(ownColumnDescriptor(c, objectGroup, table))
     businessCount++
   }
   return out
@@ -221,7 +241,7 @@ export async function buildObjectColumnCatalog(table) {
     // Table FKs are not added as a direct column; they become a related group
     // below (and their __label is offered if picklist/user).
     if (c.is_foreign_key && !LABELED_FK_TABLES.has(c.references_table)) continue
-    catalog.push(ownColumnDescriptor(c, objectGroup))
+    catalog.push(ownColumnDescriptor(c, objectGroup, table))
   }
 
   // Related (one-hop) columns. Follow each expandable table FK to its parent.
@@ -260,11 +280,22 @@ export async function buildObjectColumnCatalog(table) {
       const type = pc.is_foreign_key && LABELED_FK_TABLES.has(pc.references_table)
         ? 'text' : columnType(pc)
 
+      // Value source for the filter typeahead on a related column.
+      let valueSource
+      if (pc.is_foreign_key && pc.references_table === 'picklist_values') {
+        valueSource = { kind: 'picklist', object: parentTable, field: pc.column_name }
+      } else if (pc.is_foreign_key && pc.references_table === 'users') {
+        valueSource = { kind: 'lookup', table: 'users' }
+      } else if (type === 'text') {
+        valueSource = { kind: 'picklist', object: parentTable, field: pc.column_name, maybe: true }
+      }
+
       catalog.push({
         field: `${fk.column_name}${REL_DELIM}${baseField}`,
         label: titleize(stripParentPrefix(pc.column_name, parentTable)),
         type,
         group: groupLabel,
+        valueSource,
         related: {
           fkColumn: fk.column_name,
           parentTable,
