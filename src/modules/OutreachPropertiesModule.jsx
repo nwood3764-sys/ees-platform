@@ -4,6 +4,7 @@ import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import ConfiguredHome from '../components/ConfiguredHome'
 import HelpIcon from '../components/help/HelpIcon'
 import { OutreachMap } from '../components/OutreachMap'
 import OutreachPropertyCard from '../components/OutreachPropertyCard'
@@ -567,6 +568,7 @@ export default function OutreachPropertiesModule({
   onCloseRecord,
   onSectionChange,
   onReplaceRecord,
+  onOpenSetup,
 } = {}) {
   const urlDriven = !!onNavigateToRecord
   const SECTIONS = useModuleSections('outreach', CODE_SECTIONS)
@@ -729,7 +731,7 @@ export default function OutreachPropertiesModule({
           />
         ) : (
           <>
-            {sec === 'home'       && <OutreachHome counts={counts} loading={loadingCounts} />}
+            {sec === 'home'       && <ConfiguredHome crumb="Outreach" moduleId="outreach" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
             {sec === 'properties' && <PropertiesListSection loading={loadingProperties} error={error} properties={properties} onRefresh={loadAll} onRetry={loadAll} onOpenRecord={openProperty} />}
             {sec === 'map'        && <MapSection loading={loadingProperties} error={error} properties={properties} onRetry={loadAll} onOpenProperty={openPropertyCard} />}
             {sec === 'imports'    && <ImportsSection batches={batches} loading={loadingBatches} error={error} onRefresh={loadAll} onRetry={loadAll} onOpenImport={openImport} onOpenImportModal={() => setShowImportModal(true)} />}

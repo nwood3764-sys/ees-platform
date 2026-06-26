@@ -362,7 +362,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
             prefill={selectedRecord.prefill}
             onNavigateToRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: r.mode, prefill: r.prefill })} />
         ) : (<>
-        {sec === 'home'       && <ConfiguredHome crumb="Outreach" moduleId="outreach" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
+        {sec === 'home'       && <ConfiguredHome crumb="Enrollment" moduleId="enrollment" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
         {sec !== 'home' && (SEC_TABLE_MAP[sec] || SECTIONS.find(s=>s.id===sec)?.objectTable) && (
           <ObjectListSection
             key={SEC_TABLE_MAP[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
