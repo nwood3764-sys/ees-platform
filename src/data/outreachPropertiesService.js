@@ -415,6 +415,13 @@ export async function fetchPropertyDetail(propertyId) {
     energyBurden:      row.psd_doe_lead_energy_burden_score ?? null,
     avgEnergyCost:     row.psd_doe_lead_average_energy_cost ?? null,
     lowIncomePct:      row.psd_doe_lead_low_income_percentage ?? null,
+    // Utilities & Heating (EIA electric, gas service, heating heuristic)
+    electricUtility:     row.property_electric_utility || '',
+    electricUtilityType: row.property_electric_utility_type || '',
+    electricRate:        row.property_electric_rate_per_kwh ?? null,
+    gasUtility:          row.property_gas_utility || '',
+    hasGasService:       row.property_has_gas_service,
+    heatingEstimate:     row.property_heating_system_estimate || '',
     // Disaster exposure (NC only)
     disaster: (isNC && row.has_disaster_exposure) ? {
       declarationCount:  row.pde_fema_declaration_count ?? 0,

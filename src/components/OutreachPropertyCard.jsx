@@ -321,13 +321,28 @@ export default function OutreachPropertyCard({ propertyId, onClose, onOpenAccoun
                 </div>
               </Section>
 
+              {/* Utilities & Heating (EIA + gas territory + heating heuristic) */}
+              {(data.electricUtility || data.gasUtility || data.heatingEstimate || data.hasGasService != null) && (
+                <Section icon={ICONS.bolt} title="Utilities & Heating">
+                  {data.electricUtility && <Row label="Electric Utility">{data.electricUtility}</Row>}
+                  {data.electricRate != null && data.electricRate > 0 && <Row label="Electric Rate">{(data.electricRate * 100).toFixed(2)}¢/kWh</Row>}
+                  {data.electricUtilityType && <Row label="Utility Type">{data.electricUtilityType}</Row>}
+                  <Row label="Gas Service">{data.hasGasService === false ? 'Not available' : data.hasGasService === true ? 'Available' : '—'}</Row>
+                  {data.gasUtility && <Row label="Gas Utility">{data.gasUtility}</Row>}
+                  {data.heatingEstimate && <Row label="Heating (Est.)">{data.heatingEstimate}</Row>}
+                  <div style={{ fontSize: 10, color: C.textMuted, marginTop: 4, fontStyle: 'italic' }}>
+                    Electric/rate from EIA 861; gas by county territory; heating estimated from age, type &amp; fuel.
+                  </div>
+                </Section>
+              )}
+
               {/* Reserved (not yet in LEAP) */}
               <div style={{ marginTop: 4, padding: '10px 12px', background: C.page, borderRadius: 7, border: `1px dashed ${C.borderDark}` }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: C.textMuted, marginBottom: 3 }}>
-                  Utilities &amp; Heating · Score Breakdown
+                  Score Breakdown
                 </div>
                 <div style={{ fontSize: 11.5, color: C.textMuted, lineHeight: 1.4 }}>
-                  Utility provider/rate, heating equipment, and computed priority scores are not yet loaded in LEAP. Reserved for a future data source.
+                  Computed priority scores (age, disaster, weatherization) are not yet implemented in LEAP. Reserved for a future build.
                 </div>
               </div>
             </>
