@@ -33,9 +33,9 @@ import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
  */
 
 const CODE_SECTIONS = [
-  { id: 'map',        label: 'Map'        },
   { id: 'home',       label: 'Home'       },
   { id: 'properties', label: 'Properties' },
+  { id: 'map',        label: 'Map'        },
   { id: 'imports',    label: 'Imports'    },
 ]
 
@@ -572,7 +572,7 @@ export default function OutreachPropertiesModule({
 } = {}) {
   const urlDriven = !!onNavigateToRecord
   const SECTIONS = useModuleSections('outreach', CODE_SECTIONS)
-  const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'map')
+  const [secLocal, setSecLocal] = useState(() => sectionFromUrl || 'home')
   const sec = sectionFromUrl || secLocal
   const setSec = (s) => {
     if (urlDriven && onSectionChange) onSectionChange(s)

@@ -484,6 +484,30 @@ function BarWidget({ result, widget, canDrill, drillTo }) {
   const data = buildChartData(result, widget)
   if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
   const onBarClick = canDrill ? (d) => drillTo?.(d?.rawValue) : undefined
+  const cfg = widget.dw_widget_config || {}
+  // Horizontal layout: categories listed top-to-bottom on the Y axis,
+  // counts growing left-to-right on the X axis (ranked-bar style). Default
+  // for category-count widgets; matches the standard outreach dashboards.
+  const horizontal = cfg.orientation !== 'vertical'
+  // Height scales with the number of bars so 20 categories aren't crushed.
+  const chartHeight = horizontal ? Math.max(240, data.length * 26 + 40) : 240
+
+  if (horizontal) {
+    return (
+      <R.ResponsiveContainer width="100%" height={chartHeight}>
+        <R.BarChart data={data} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+          <R.XAxis type="number" tick={{ fontSize:10 }} />
+          <R.YAxis type="category" dataKey="name" width={150}
+            tick={{ fontSize:10 }} interval={0} />
+          <R.Tooltip />
+          <R.Bar dataKey="value" fill={C.emerald}
+            cursor={canDrill ? 'pointer' : undefined}
+            onClick={onBarClick} />
+        </R.BarChart>
+      </R.ResponsiveContainer>
+    )
+  }
+
   return (
     <R.ResponsiveContainer width="100%" height={240}>
       <R.BarChart data={data}>
