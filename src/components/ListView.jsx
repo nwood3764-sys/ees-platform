@@ -707,17 +707,17 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
   };
 
   return (
-    <th style={{ padding: 0, position: 'relative', userSelect: 'none', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
-      <div style={{ display: 'flex', alignItems: 'center' }}>
+    <th style={{ padding: 0, position: 'relative', userSelect: 'none', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
         <div onClick={handleSort}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '10px 6px 10px 12px', cursor: col.sortable ? 'pointer' : 'default', flex: 1 }}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '10px 4px 10px 12px', cursor: col.sortable ? 'pointer' : 'default', flex: '1 1 auto', minWidth: 0 }}
           onMouseEnter={e => { if (col.sortable) e.currentTarget.style.background = C.page; }}
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: isSorted ? C.textPrimary : C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: isSorted ? C.textPrimary : C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, maxWidth: 168 }} title={col.label}>
             {col.label}
           </span>
           {col.sortable && (
-            <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
               <svg width="6" height="4" viewBox="0 0 6 4" fill={isSorted && sortDir === 'asc' ? C.emerald : C.borderDark}><path d="M3 0L6 4H0L3 0Z" /></svg>
               <svg width="6" height="4" viewBox="0 0 6 4" fill={isSorted && sortDir === 'desc' ? C.emerald : C.borderDark}><path d="M3 4L0 0H6L3 4Z" /></svg>
             </span>
@@ -725,10 +725,11 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
         </div>
         {col.filterable && (
           <div onClick={onFunnelClick}
-            style={{ padding: '10px 9px 10px 3px', cursor: 'pointer', position: 'relative' }}
-            onMouseEnter={e => e.currentTarget.style.background = C.page}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <svg width="11" height="11" viewBox="0 0 24 24"
+            style={{ padding: '10px 10px 10px 4px', cursor: 'pointer', position: 'relative', flexShrink: 0, background: isFiltered ? 'rgba(62,207,142,0.10)' : 'transparent' }}
+            title={`Filter ${col.label}`}
+            onMouseEnter={e => e.currentTarget.style.background = isFiltered ? 'rgba(62,207,142,0.18)' : C.page}
+            onMouseLeave={e => e.currentTarget.style.background = isFiltered ? 'rgba(62,207,142,0.10)' : 'transparent'}>
+            <svg width="12" height="12" viewBox="0 0 24 24"
               fill={isFiltered ? C.emerald : 'none'} stroke={isFiltered ? C.emerald : C.textMuted}
               strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
