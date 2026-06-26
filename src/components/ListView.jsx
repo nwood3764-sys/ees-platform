@@ -161,6 +161,136 @@ function useColumnWidths({ enabled, storageKey, columns }) {
 // real picklist/text value.
 const BLANK_FILTER_VALUE = '__BLANK__';
 
+// ── Filter operators ─────────────────────────────────────────────────────────
+// Salesforce-style operator set, scoped by column type. Each filter row is
+// { field, label, op, value(s) }. Legacy ops ('equals' multi-select, 'contains',
+// 'from'/'to' date range) remain valid so previously-saved views keep working;
+// the sidebar authors the richer ops below.
+//
+// op semantics (evaluated in matchFilter):
+//   equals / not_equals        — exact (multi-select equals OR's its values)
+//   contains / not_contains    — substring, case-insensitive
+//   starts_with / ends_with     — affix, case-insensitive
+//   gt / gte / lt / lte         — numeric if both sides parse as numbers, else string compare
+//   from / to                   — legacy date range bounds (inclusive)
+//   between                     — value = [lo, hi] inclusive (number or date)
+//   is_blank / is_not_blank     — empty-cell test
+const OPERATORS = {
+  text: [
+    { op: 'contains', label: 'contains' },
+    { op: 'not_contains', label: 'does not contain' },
+    { op: 'equals', label: 'equals' },
+    { op: 'not_equals', label: 'does not equal' },
+    { op: 'starts_with', label: 'starts with' },
+    { op: 'ends_with', label: 'ends with' },
+    { op: 'is_blank', label: 'is blank' },
+    { op: 'is_not_blank', label: 'is not blank' },
+  ],
+  select: [
+    { op: 'equals', label: 'is any of', multi: true },
+    { op: 'not_equals', label: 'is none of', multi: true },
+    { op: 'is_blank', label: 'is blank' },
+    { op: 'is_not_blank', label: 'is not blank' },
+  ],
+  number: [
+    { op: 'equals', label: '=' },
+    { op: 'not_equals', label: '≠' },
+    { op: 'gt', label: '>' },
+    { op: 'gte', label: '≥' },
+    { op: 'lt', label: '<' },
+    { op: 'lte', label: '≤' },
+    { op: 'between', label: 'between' },
+    { op: 'is_blank', label: 'is blank' },
+    { op: 'is_not_blank', label: 'is not blank' },
+  ],
+  date: [
+    { op: 'equals', label: 'on' },
+    { op: 'from', label: 'on or after' },
+    { op: 'to', label: 'on or before' },
+    { op: 'between', label: 'between' },
+    { op: 'is_blank', label: 'is blank' },
+    { op: 'is_not_blank', label: 'is not blank' },
+  ],
+};
+// Operators that need no value input.
+const VALUELESS_OPS = new Set(['is_blank', 'is_not_blank']);
+// Operators whose value is a 2-tuple.
+const RANGE_OPS = new Set(['between']);
+
+function operatorsForType(type) {
+  return OPERATORS[type] || OPERATORS.text;
+}
+function defaultOperatorForType(type) {
+  return operatorsForType(type)[0].op;
+}
+
+// Evaluate one filter row against one record's raw cell value.
+function matchFilter(rawValue, filter) {
+  const v = (rawValue === null || rawValue === undefined) ? '' : String(rawValue);
+  const blank = v.trim() === '';
+  const { op } = filter;
+
+  if (op === 'is_blank') return blank;
+  if (op === 'is_not_blank') return !blank;
+
+  // Multi-select equals/not_equals: value is an array (or single legacy value).
+  if (op === 'equals' || op === 'not_equals') {
+    const vals = Array.isArray(filter.value) ? filter.value : [filter.value];
+    const hit = vals.some(val =>
+      val === BLANK_FILTER_VALUE ? blank : v === String(val)
+    );
+    return op === 'equals' ? hit : !hit;
+  }
+
+  const needle = String(filter.value ?? '').toLowerCase();
+  const hay = v.toLowerCase();
+  if (op === 'contains') return hay.includes(needle);
+  if (op === 'not_contains') return !hay.includes(needle);
+  if (op === 'starts_with') return hay.startsWith(needle);
+  if (op === 'ends_with') return hay.endsWith(needle);
+
+  // Numeric/date comparisons. Prefer numeric when both parse as numbers,
+  // otherwise lexical (ISO dates compare correctly as strings).
+  const cmp = (a, b) => {
+    const na = Number(a), nb = Number(b);
+    if (a !== '' && b !== '' && !Number.isNaN(na) && !Number.isNaN(nb)) {
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    }
+    return a < b ? -1 : a > b ? 1 : 0;
+  };
+  if (op === 'gt')  return !blank && cmp(v, filter.value) > 0;
+  if (op === 'gte') return !blank && cmp(v, filter.value) >= 0;
+  if (op === 'lt')  return !blank && cmp(v, filter.value) < 0;
+  if (op === 'lte') return !blank && cmp(v, filter.value) <= 0;
+  if (op === 'from') return !blank && cmp(v, filter.value) >= 0;
+  if (op === 'to')   return !blank && cmp(v, filter.value) <= 0;
+  if (op === 'between') {
+    const [lo, hi] = Array.isArray(filter.value) ? filter.value : [filter.value, filter.value];
+    if (blank) return false;
+    if (lo !== '' && lo != null && cmp(v, lo) < 0) return false;
+    if (hi !== '' && hi != null && cmp(v, hi) > 0) return false;
+    return true;
+  }
+  return true;
+}
+
+// A short human description of a filter row for chips/sidebar.
+function describeFilter(filter, colLabel) {
+  const opMeta = Object.values(OPERATORS).flat().find(o => o.op === filter.op);
+  const opLabel = opMeta?.label || filter.op;
+  if (VALUELESS_OPS.has(filter.op)) return `${colLabel} ${opLabel}`;
+  if (filter.op === 'equals' && Array.isArray(filter.value)) {
+    const shown = filter.value.map(v => v === BLANK_FILTER_VALUE ? '(Blanks)' : v);
+    return `${colLabel}: ${shown.join(', ')}`;
+  }
+  if (RANGE_OPS.has(filter.op)) {
+    const [lo, hi] = Array.isArray(filter.value) ? filter.value : ['', ''];
+    return `${colLabel} ${opLabel} ${lo || '…'}–${hi || '…'}`;
+  }
+  const val = filter.value === BLANK_FILTER_VALUE ? '(Blanks)' : filter.value;
+  return `${colLabel} ${opLabel} ${val}`;
+}
+
 function FilterDropdown({ col, activeFilters, onApply, onClose, triggerRect }) {
   const colF = activeFilters.filter(f => f.field === col.field);
   const [sel, setSel] = useState(colF.filter(f => f.op === 'equals').map(f => f.value));
@@ -1029,12 +1159,14 @@ function ViewSelector({
 // Handles both "save current as new view" and editing an existing saved view.
 // scope: 'personal' | 'role' | 'shared'. When persistence is off (no
 // listObject), only the name is meaningful and onSave falls back to local.
-function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClose, editing, persistEnabled, hasRole }) {
+function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onSaveAsNew, onClose, editing, persistEnabled, hasRole }) {
   const [name, setName] = useState(editing?.name || '');
   const [scope, setScope] = useState(editing?.scope || 'personal');
   const [isDefault, setIsDefault] = useState(editing?.isDefault || false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
+  // When editing, "Save as new" flips this so commit creates a fresh view.
+  const [forceNew, setForceNew] = useState(false);
 
   const scopeOpts = [
     { id: 'personal', label: 'Only me' },
@@ -1042,11 +1174,14 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClos
     { id: 'shared', label: 'Everyone' },
   ];
 
-  const commit = async () => {
-    if (!name.trim() || saving) return;
+  const commit = async (asNew = false) => {
+    const effectiveName = asNew && name.trim() === (editing?.name || '')
+      ? `${name.trim()} (copy)` : name.trim();
+    if (!effectiveName || saving) return;
     setSaving(true); setErr(null);
     try {
-      await onSave({ name: name.trim(), scope, isDefault });
+      if (asNew && typeof onSaveAsNew === 'function') onSaveAsNew();
+      await onSave({ name: effectiveName, scope, isDefault, asNew });
     } catch (e) {
       setErr(e.message || String(e));
       setSaving(false);
@@ -1116,18 +1251,288 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onClos
 
         {err && <div style={{ background: '#fde8e8', color: '#a32626', fontSize: 12, padding: '8px 10px', borderRadius: 6, marginBottom: 14 }}>{err}</div>}
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={commit} disabled={!name.trim() || saving}
-            style={{ flex: 1, background: (name.trim() && !saving) ? C.emerald : C.borderDark, color: '#fff', border: 'none', borderRadius: 6, padding: 10, fontSize: 13, fontWeight: 600, cursor: (name.trim() && !saving) ? 'pointer' : 'default' }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button onClick={() => commit(false)} disabled={!name.trim() || saving}
+            style={{ flex: 1, minWidth: 120, background: (name.trim() && !saving) ? C.emerald : C.borderDark, color: '#fff', border: 'none', borderRadius: 6, padding: 10, fontSize: 13, fontWeight: 600, cursor: (name.trim() && !saving) ? 'pointer' : 'default' }}>
             {saving ? 'Saving…' : (editing ? 'Save Changes' : 'Save View')}
           </button>
-          <button onClick={onClose} style={{ flex: 1, background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: 10, fontSize: 13, cursor: 'pointer' }}>
+          {editing && (
+            <button onClick={() => commit(true)} disabled={!name.trim() || saving}
+              title="Keep the original view and save these settings as a separate new view"
+              style={{ flex: 1, minWidth: 120, background: C.page, color: C.emerald, border: `1px solid ${C.emerald}`, borderRadius: 6, padding: 10, fontSize: 13, fontWeight: 600, cursor: (name.trim() && !saving) ? 'pointer' : 'default' }}>
+              Save as new
+            </button>
+          )}
+          <button onClick={onClose} style={{ flex: editing ? '1 1 100%' : 1, background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: 10, fontSize: 13, cursor: 'pointer' }}>
             Cancel
           </button>
         </div>
       </div>
     </div>
   );
+}
+
+// ── Filter Sidebar ───────────────────────────────────────────────────────────
+// Right-docked panel (Salesforce-style) listing every active filter as an
+// editable row and an "Add Filter" affordance. The field picker draws from the
+// full column catalog (own + one-hop related), so a filter can target a field
+// that isn't currently shown as a column. Operators are scoped by field type.
+//
+// Internally the sidebar represents filters as normalized rows
+// { id, field, label, type, op, value }. On Apply it serializes to the
+// activeFilters shape the list engine consumes (array-valued equals for
+// multi-select; scalar value otherwise), and pushes via onApply.
+function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
+  const ref = useRef();
+
+  // Resolve a catalog column by field.
+  const colByField = useMemo(() => {
+    const m = new Map();
+    for (const c of (catalog || [])) m.set(c.field, c);
+    return m;
+  }, [catalog]);
+
+  // Hydrate working rows from activeFilters. Collapse multiple scalar 'equals'
+  // on the same field back into one multi-value row (mirrors how the header
+  // dropdown emits them) so the sidebar shows one editable row per field/op.
+  const hydrate = () => {
+    const rows = [];
+    const equalsByField = new Map();
+    for (const f of (activeFilters || [])) {
+      const col = colByField.get(f.field) || { field: f.field, label: f.label || f.field, type: 'text' };
+      if (f.op === 'equals' && !Array.isArray(f.value)) {
+        if (!equalsByField.has(f.field)) {
+          const row = { id: `r${rows.length}_${f.field}`, field: f.field, label: col.label, type: col.type || 'text', op: 'equals', value: [f.value] };
+          equalsByField.set(f.field, row); rows.push(row);
+        } else {
+          equalsByField.get(f.field).value.push(f.value);
+        }
+      } else {
+        rows.push({ id: `r${rows.length}_${f.field}`, field: f.field, label: col.label, type: col.type || 'text', op: f.op, value: f.value });
+      }
+    }
+    return rows;
+  };
+
+  const [rows, setRows] = useState(hydrate);
+  const [picking, setPicking] = useState(false); // field-picker open for a new row
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    const esc = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, []);
+
+  const addRowForField = (col) => {
+    const type = col.type || 'text';
+    const op = defaultOperatorForType(type);
+    const opMeta = operatorsForType(type).find(o => o.op === op);
+    setRows(prev => [...prev, {
+      id: `r${Date.now()}_${col.field}`, field: col.field, label: col.label,
+      type, op, value: opMeta?.multi ? [] : '',
+    }]);
+    setPicking(false); setSearch('');
+  };
+
+  const updateRow = (id, patch) => setRows(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  const removeRow = (id) => setRows(prev => prev.filter(r => r.id !== id));
+
+  const changeOp = (id, op) => {
+    const row = rows.find(r => r.id === id);
+    const opMeta = operatorsForType(row.type).find(o => o.op === op);
+    let value = row.value;
+    if (VALUELESS_OPS.has(op)) value = '';
+    else if (opMeta?.multi) value = Array.isArray(value) ? value : (value ? [value] : []);
+    else if (RANGE_OPS.has(op)) value = Array.isArray(value) ? value : ['', ''];
+    else value = Array.isArray(value) ? (value[0] || '') : value;
+    updateRow(id, { op, value });
+  };
+
+  // Serialize rows → activeFilters shape and apply.
+  const apply = () => {
+    const out = [];
+    for (const r of rows) {
+      if (VALUELESS_OPS.has(r.op)) { out.push({ field: r.field, label: r.label, op: r.op }); continue; }
+      const opMeta = operatorsForType(r.type).find(o => o.op === r.op);
+      if (opMeta?.multi) {
+        const vals = Array.isArray(r.value) ? r.value.filter(v => v !== '' && v != null) : [];
+        if (vals.length === 0) continue;
+        // Emit one scalar equals row per value for 'equals' (keeps header
+        // dropdown + chips consistent); 'not_equals' stays a single array row.
+        if (r.op === 'equals') vals.forEach(v => out.push({ field: r.field, label: r.label, op: 'equals', value: v }));
+        else out.push({ field: r.field, label: r.label, op: r.op, value: vals });
+        continue;
+      }
+      if (RANGE_OPS.has(r.op)) {
+        const [lo, hi] = Array.isArray(r.value) ? r.value : ['', ''];
+        if ((lo === '' || lo == null) && (hi === '' || hi == null)) continue;
+        out.push({ field: r.field, label: r.label, op: r.op, value: [lo, hi] });
+        continue;
+      }
+      if (r.value === '' || r.value == null) continue;
+      out.push({ field: r.field, label: r.label, op: r.op, value: r.value });
+    }
+    onApply(out);
+    onClose();
+  };
+
+  const clearAll = () => setRows([]);
+
+  // Grouped, searched catalog for the field picker.
+  const q = search.trim().toLowerCase();
+  const groupedCatalog = useMemo(() => {
+    const byGroup = new Map();
+    for (const g of (groups || [])) byGroup.set(g, []);
+    for (const c of (catalog || [])) {
+      if (c.locked) continue; // id/name are always shown; still filterable via headers
+      if (q && !c.label.toLowerCase().includes(q) && !(c.group || '').toLowerCase().includes(q)) continue;
+      const g = c.group || 'Other';
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g).push(c);
+    }
+    return Array.from(byGroup.entries()).filter(([, arr]) => arr.length > 0);
+  }, [catalog, groups, q]);
+
+  const panel = (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.18)', zIndex: 3500 }} />
+      <div ref={ref} style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 380, maxWidth: '92vw', zIndex: 3600,
+        background: C.card, borderLeft: `1px solid ${C.border}`, boxShadow: '-8px 0 28px rgba(7,17,31,0.16)',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        {/* Header */}
+        <div style={{ padding: '16px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>Filters</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {rows.length > 0 && <span onClick={clearAll} style={{ fontSize: 12, color: C.textMuted, cursor: 'pointer' }}>Remove all</span>}
+            <svg onClick={onClose} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2} style={{ cursor: 'pointer' }}><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </div>
+        </div>
+
+        {/* Filter rows */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px' }}>
+          {rows.length === 0 && !picking && (
+            <div style={{ fontSize: 13, color: C.textMuted, padding: '8px 0 16px' }}>
+              No filters applied. Add a filter to narrow this list.
+            </div>
+          )}
+
+          {rows.map(row => (
+            <div key={row.id} style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 10, background: C.cardSecondary || C.page }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.label}>{row.label}</span>
+                <svg onClick={() => removeRow(row.id)} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2} style={{ cursor: 'pointer', flexShrink: 0 }}><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </div>
+
+              {/* Operator */}
+              <select value={row.op} onChange={e => changeOp(row.id, e.target.value)}
+                style={{ width: '100%', background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, padding: '6px 8px', fontSize: 12.5, color: C.textPrimary, marginBottom: 8, cursor: 'pointer' }}>
+                {operatorsForType(row.type).map(o => <option key={o.op} value={o.op}>{o.label}</option>)}
+              </select>
+
+              {/* Value editor */}
+              <FilterValueEditor row={row} onChange={(value) => updateRow(row.id, { value })} />
+            </div>
+          ))}
+
+          {/* Add filter / field picker */}
+          {picking ? (
+            <div style={{ border: `1px solid ${C.emerald}`, borderRadius: 8, padding: 10, marginTop: 4 }}>
+              <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Search fields…"
+                style={{ width: '100%', background: C.page, border: `1px solid ${C.border}`, borderRadius: 5, padding: '7px 9px', fontSize: 12.5, color: C.textPrimary, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
+              <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+                {groupedCatalog.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted, padding: 8 }}>No fields match “{search}”.</div>}
+                {groupedCatalog.map(([group, cols]) => (
+                  <div key={group}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.06em', padding: '8px 4px 4px' }}>{group}</div>
+                    {cols.map(c => (
+                      <div key={c.field} onClick={() => addRowForField(c)}
+                        style={{ fontSize: 12.5, color: C.textPrimary, padding: '6px 8px', borderRadius: 5, cursor: 'pointer' }}
+                        onMouseEnter={e => e.currentTarget.style.background = C.page}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        {c.label}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <div onClick={() => { setPicking(false); setSearch(''); }} style={{ fontSize: 12, color: C.textMuted, cursor: 'pointer', padding: '8px 4px 2px' }}>Cancel</div>
+            </div>
+          ) : (
+            <div onClick={() => setPicking(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.emerald, fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: '10px 4px', marginTop: 4 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 5v14M5 12h14" /></svg>
+              Add Filter
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '14px 18px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 10 }}>
+          <button onClick={apply} style={{ flex: 1, background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '9px 0', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Apply</button>
+          <button onClick={onClose} style={{ flex: 1, background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '9px 0', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </div>
+    </>
+  );
+  return createPortal(panel, document.body);
+}
+
+// Value editor for one sidebar filter row, by operator/type.
+function FilterValueEditor({ row, onChange }) {
+  if (VALUELESS_OPS.has(row.op)) return null;
+  const opMeta = operatorsForType(row.type).find(o => o.op === row.op);
+  const inputType = row.type === 'date' ? 'date' : (row.type === 'number' ? 'number' : 'text');
+  const baseStyle = { width: '100%', background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, padding: '6px 8px', fontSize: 12.5, color: C.textPrimary, outline: 'none', boxSizing: 'border-box' };
+
+  // Multi-select (equals/not_equals on a select column with known options).
+  if (opMeta?.multi) {
+    const options = [
+      ...(row.options || []),
+      ...((row.hasBlanks) ? [BLANK_FILTER_VALUE] : []),
+    ];
+    const selected = Array.isArray(row.value) ? row.value : [];
+    const toggle = (v) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
+    // When options aren't known (e.g. related field), fall back to a free text
+    // value the user types (comma-separates into multiple).
+    if (options.length === 0) {
+      return <input value={selected.join(', ')} onChange={e => onChange(e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+        placeholder="Type values, comma-separated" style={baseStyle} />;
+    }
+    return (
+      <div style={{ maxHeight: 150, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 5, padding: 6 }}>
+        {options.map(o => {
+          const on = selected.includes(o);
+          return (
+            <div key={o} onClick={() => toggle(o)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 3px', cursor: 'pointer' }}>
+              <span style={{ width: 13, height: 13, borderRadius: 3, flexShrink: 0, border: `1.5px solid ${on ? C.emerald : C.borderDark}`, background: on ? C.emerald : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {on && <svg width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+              </span>
+              <span style={{ fontSize: 12, color: o === BLANK_FILTER_VALUE ? C.textMuted : C.textPrimary, fontStyle: o === BLANK_FILTER_VALUE ? 'italic' : 'normal' }}>{o === BLANK_FILTER_VALUE ? '(Blanks)' : o}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Range (between): two inputs.
+  if (RANGE_OPS.has(row.op)) {
+    const [lo, hi] = Array.isArray(row.value) ? row.value : ['', ''];
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input type={inputType} value={lo} onChange={e => onChange([e.target.value, hi])} placeholder="From" style={baseStyle} />
+        <span style={{ color: C.textMuted, fontSize: 12 }}>–</span>
+        <input type={inputType} value={hi} onChange={e => onChange([lo, e.target.value])} placeholder="To" style={baseStyle} />
+      </div>
+    );
+  }
+
+  // Single value.
+  return <input type={inputType} value={Array.isArray(row.value) ? (row.value[0] || '') : (row.value || '')}
+    onChange={e => onChange(e.target.value)} placeholder="Value" style={baseStyle} />;
 }
 
 // ── Main ListView ────────────────────────────────────────────────────────────
@@ -1215,6 +1620,18 @@ export function ListView({
     for (const c of columnCatalog) if (!m.has(c.field)) m.set(c.field, c)
     return m
   }, [columns, columnCatalog])
+
+  // Catalog enriched with filter metadata (options/hasBlanks derived from the
+  // loaded rows on the default columns) so the filter sidebar's multi-select
+  // value editors have value lists where available.
+  const filterCatalog = useMemo(() => {
+    return columnCatalog.map(c => {
+      const enriched = columnByField.get(c.field)
+      return enriched && (enriched.options || enriched.hasBlanks)
+        ? { ...c, type: enriched.type || c.type, options: enriched.options, hasBlanks: enriched.hasBlanks }
+        : c
+    })
+  }, [columnCatalog, columnByField])
   // Columns that can never be hidden: the primary 'name' (the row's click
   // target / label) and 'id' (record number, the leading identity column).
   const ALWAYS_ON_COLS = ['id', 'name'];
@@ -1260,6 +1677,7 @@ export function ListView({
   const [visibleColumns, setVisibleColumns] = useState(null);
   const [showColPicker, setShowColPicker] = useState(false);
   const [colPickerRect, setColPickerRect] = useState(null);
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
 
   // The columns actually rendered: full catalog when visibleColumns is null,
   // otherwise the catalog filtered to the visible set (preserving catalog
@@ -1438,6 +1856,23 @@ export function ListView({
     setShowViewSel(false);
   };
 
+  // Opening the Save modal from the dirty-state "Save View" button. If the
+  // user is sitting on an existing saved (persisted) view and has tweaked its
+  // filters/sort/columns, default to UPDATING that view ("Save Changes")
+  // rather than forcing a brand-new view. Falls back to create mode when the
+  // active view isn't a persisted personal/role/shared view (e.g. an in-code
+  // system view or the synthetic "All").
+  const openSaveForDirty = () => {
+    const active = [...personalViews, ...systemViews].find(v => v.id === activeViewId);
+    if (active && active._persisted) setEditingView(active);
+    else setEditingView(null);
+    setShowSave(true);
+  };
+
+  // "Save as new" from within the edit modal: drop the edit target so the
+  // commit creates a fresh view from the current state.
+  const handleSaveAsNew = () => { setEditingView(null); };
+
   const handleEditView = (v) => {
     // Load the view's settings into the working state, then open the modal in
     // edit mode so Save Changes re-persists with any tweaks.
@@ -1579,38 +2014,29 @@ export function ListView({
       const q = globalSearch.toLowerCase();
       d = d.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q)));
     }
-    // Group active filters by field. Within a field, predicates are OR'd
-    // (a multi-select column matches any selected value); across fields they
-    // are AND'd (Excel column-filter semantics). Date range (from/to) and
-    // text contains live under the same grouping and AND within their own
-    // field naturally via the per-field evaluation below.
+    // Group active filters by field. Across fields: AND. Within a field:
+    // multiple equals rows (the per-header multi-select emits one row per
+    // chosen value) are OR'd together; every other operator row is an
+    // additional AND constraint on that field.
     const byField = new Map();
     for (const f of activeFilters) {
       if (!byField.has(f.field)) byField.set(f.field, []);
       byField.get(f.field).push(f);
     }
     for (const [field, fs] of byField) {
-      const equalsVals = fs.filter(f => f.op === 'equals').map(f => f.value);
-      const containsVals = fs.filter(f => f.op === 'contains').map(f => f.value);
-      const fromVal = fs.find(f => f.op === 'from')?.value;
-      const toVal = fs.find(f => f.op === 'to')?.value;
+      // Collect scalar 'equals' values into one OR set (legacy header dropdown
+      // shape); array-valued equals from the sidebar are handled by matchFilter
+      // directly and stay as their own row.
+      const scalarEquals = fs.filter(f => f.op === 'equals' && !Array.isArray(f.value)).map(f => f.value);
+      const otherRows = fs.filter(f => !(f.op === 'equals' && !Array.isArray(f.value)));
       d = d.filter(r => {
         const raw = r[field];
-        const v = (raw === null || raw === undefined) ? '' : String(raw);
-        // equals (multi-select): OR across selected values; blank sentinel
-        // matches empty cells.
-        if (equalsVals.length) {
-          const hit = equalsVals.some(val =>
-            val === BLANK_FILTER_VALUE ? v.trim() === '' : v === val
-          );
-          if (!hit) return false;
+        if (scalarEquals.length) {
+          if (!matchFilter(raw, { op: 'equals', value: scalarEquals })) return false;
         }
-        // contains: AND across any contains terms on this field.
-        for (const c of containsVals) {
-          if (!v.toLowerCase().includes(String(c).toLowerCase())) return false;
+        for (const row of otherRows) {
+          if (!matchFilter(raw, row)) return false;
         }
-        if (fromVal && !(v >= fromVal)) return false;
-        if (toVal && !(v <= toVal)) return false;
         return true;
       });
     }
@@ -1743,7 +2169,7 @@ export function ListView({
             {/* Save-view indicator (only when filters dirty) */}
             {isDirty && (
               <button
-                onClick={() => setShowSave(true)}
+                onClick={openSaveForDirty}
                 aria-label="Save view"
                 style={{
                   background: C.page, border: `1px solid ${C.emerald}`, borderRadius: 6,
@@ -1952,7 +2378,7 @@ export function ListView({
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
         </button>
 
-        {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={effectiveColumns} onSave={handleSave} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
+        {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={effectiveColumns} onSave={handleSave} onSaveAsNew={handleSaveAsNew} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
         {showFilterSheet && (
           <MobileFilterSheet
             columns={columns}
@@ -1988,6 +2414,15 @@ export function ListView({
           {showViewSel && <ViewSelector activeViewId={activeViewId} systemViews={systemViews} personalViews={personalViews} onSelect={applyView} onClose={() => setShowViewSel(false)} persistEnabled={persistEnabled} onEditView={handleEditView} onDeleteView={handleDeleteView} onSetDefault={handleSetDefault} onNewView={handleNewView} triggerRect={viewSelRect} />}
         </div>
 
+        {/* Filter button — opens the right-docked filter sidebar */}
+        <button onClick={() => setShowFilterPanel(true)}
+          title="Filter this list"
+          style={{ display: 'flex', alignItems: 'center', gap: 7, background: activeFilters.length ? '#e8f8f2' : C.page, border: `1px solid ${activeFilters.length ? C.emerald : C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 13, color: activeFilters.length ? '#1a7a4e' : C.textPrimary, cursor: 'pointer', fontWeight: 500 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+          Filters
+          {activeFilters.length > 0 && <span style={{ fontSize: 11, color: '#1a7a4e', fontFamily: 'JetBrains Mono, monospace' }}>{activeFilters.length}</span>}
+        </button>
+
         {/* Column picker */}
         <div style={{ position: 'relative' }}>
           <button onClick={(e) => { setColPickerRect((e.currentTarget.closest('button') || e.currentTarget).getBoundingClientRect()); setShowColPicker(v => !v); }}
@@ -2005,8 +2440,7 @@ export function ListView({
         {/* Active filter chips */}
         {activeFilters.map((f, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#e8f3fb', border: `1px solid #b8d8f0`, borderRadius: 5, padding: '4px 8px', fontSize: 12 }}>
-            <span style={{ color: '#1a5a8a', fontWeight: 500 }}>{f.label}:</span>
-            <span style={{ color: '#1a5a8a' }}>{f.value}</span>
+            <span style={{ color: '#1a5a8a' }}>{describeFilter(f, columnByField.get(f.field)?.label || f.label || f.field)}</span>
             <button onClick={() => removeFilter(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#7eb3e8', lineHeight: 1, marginLeft: 2 }}>
               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M18 6 6 18M6 6l12 12" /></svg>
             </button>
@@ -2040,7 +2474,7 @@ export function ListView({
           )}
 
           {isDirty && (
-            <button onClick={() => setShowSave(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: C.page, border: `1px solid ${C.emerald}`, borderRadius: 6, padding: '5px 12px', fontSize: 12, color: C.emerald, cursor: 'pointer', fontWeight: 600 }}>
+            <button onClick={openSaveForDirty} style={{ display: 'flex', alignItems: 'center', gap: 5, background: C.page, border: `1px solid ${C.emerald}`, borderRadius: 6, padding: '5px 12px', fontSize: 12, color: C.emerald, cursor: 'pointer', fontWeight: 600 }}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
               Save View
             </button>
@@ -2267,7 +2701,16 @@ export function ListView({
         )}
       </div>
 
-      {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={effectiveColumns} onSave={handleSave} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
+      {showFilterPanel && (
+        <FilterSidebar
+          catalog={filterCatalog}
+          groups={columnGroups}
+          activeFilters={activeFilters}
+          onApply={(nf) => { setActiveFilters(nf); setIsDirty(true); }}
+          onClose={() => setShowFilterPanel(false)}
+        />
+      )}
+      {showSave && <SaveViewModal activeFilters={activeFilters} sortField={sortField} sortDir={sortDir} cols={effectiveColumns} onSave={handleSave} onSaveAsNew={handleSaveAsNew} onClose={() => { setShowSave(false); setEditingView(null); }} editing={editingView} persistEnabled={persistEnabled} hasRole={hasRole} />}
       {editMode && bulkPanelOpen && (
         <BulkEditModal
           tableName={tableName}
