@@ -265,6 +265,8 @@ function WidgetBody({ widget, result, canDrill, drillTo, drillWhole }) {
       return <PieWidget result={result} widget={widget} donut canDrill={canDrill} drillTo={drillTo} />
     case 'funnel':
       return <FunnelWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
+    case 'ranked_list':
+      return <RankedListWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
     case 'gauge':
       return <GaugeWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
     case 'table':
@@ -581,6 +583,44 @@ function FunnelWidget({ result, widget, canDrill, drillTo }) {
         </R.Funnel>
       </R.FunnelChart>
     </R.ResponsiveContainer>
+  )
+}
+
+// Ranked list — the readable form for a many-category breakdown (county,
+// organization, etc.). One row per item: name on the left, a thin
+// proportional bar, the count on the right. Full-size text, scrolls
+// vertically when there are more rows than fit. This is the Salesforce /
+// Manus "Progress by X" table pattern; a 20-bar chart can't show long
+// labels legibly, so category-count widgets use this instead.
+function RankedListWidget({ result, widget, canDrill, drillTo }) {
+  const data = buildChartData(result, widget)
+  if (!data.length) return <div style={{ fontSize:12, color:C.textMuted, padding:14 }}>No data.</div>
+  const max = Math.max(...data.map(d => d.value), 1)
+  return (
+    <div style={{ flex:1, overflowY:'auto', padding:'4px 12px 12px' }}>
+      {data.map((d, i) => {
+        const pct = Math.max(2, Math.round((d.value / max) * 100))
+        return (
+          <div key={i}
+            onClick={canDrill ? () => drillTo?.(d.rawValue) : undefined}
+            style={{
+              display:'grid', gridTemplateColumns:'minmax(120px, 40%) 1fr auto',
+              alignItems:'center', gap:10, padding:'7px 0',
+              borderBottom:`1px solid ${C.border}`,
+              cursor: canDrill ? 'pointer' : 'default',
+            }}>
+            <div style={{ fontSize:13, color:C.textPrimary, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
+              title={d.name}>{d.name}</div>
+            <div style={{ height:8, background:C.cardSecondary, borderRadius:4, overflow:'hidden' }}>
+              <div style={{ width:`${pct}%`, height:'100%', background:C.emerald, borderRadius:4 }} />
+            </div>
+            <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary, fontFamily:'JetBrains Mono, monospace', minWidth:48, textAlign:'right' }}>
+              {Number(d.value).toLocaleString()}
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
