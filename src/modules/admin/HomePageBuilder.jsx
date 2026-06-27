@@ -163,7 +163,35 @@ function PageEditor({ page, sources, toast, onClose, onSaved }) {
     setTemplate(id)
   }
 
+  // Translate raw database errors into something a non-technical user can act
+  // on. Postgres surfaces things like 'invalid input syntax for type uuid:
+  // "DSH-00010"' — meaningless to a user. We map known cases to plain language
+  // and fall back to a generic, non-cryptic message rather than leaking SQL.
+  function friendlySaveError(e) {
+    const raw = String(e?.message || e || '')
+    if (/invalid input syntax for type uuid/i.test(raw)) {
+      return 'One of your components needs a selection. Open each Dashboard, Report Chart, or List View component and pick an item from its dropdown in the properties panel on the right.'
+    }
+    if (/duplicate key|unique constraint/i.test(raw)) {
+      return 'A page with these settings already exists. Change the name, role, or module and try again.'
+    }
+    if (/null value in column|not-null constraint/i.test(raw)) {
+      return 'Something required is missing. Give the page a name and make sure each component has a selection, then save again.'
+    }
+    return 'Could not save this page. Check that every component has an item selected in the properties panel, then try again.'
+  }
+
   async function save() {
+    // Validate before hitting the database so the user gets a clear, component-
+    // specific message instead of a raw SQL type error.
+    const NEEDS_SOURCE = { dashboard: 'Dashboard', report_chart: 'Report Chart', list_view: 'List View' }
+    const unset = components.filter(c => NEEDS_SOURCE[c.type] && !c.sourceId)
+    if (!name.trim()) { toast.error('Give the page a name before saving.'); return }
+    if (unset.length > 0) {
+      const labels = [...new Set(unset.map(c => NEEDS_SOURCE[c.type]))].join(', ')
+      toast.error(`Pick a source for each ${labels} component — select one from the dropdown in the properties panel on the right.`)
+      return
+    }
     setSaving(true)
     try {
       await saveHomePage(
@@ -173,7 +201,7 @@ function PageEditor({ page, sources, toast, onClose, onSaved }) {
       toast.success('Home page saved')
       onSaved && onSaved()
     } catch (e) {
-      toast.error(`Save failed: ${e.message || e}`)
+      toast.error(`Save failed: ${friendlySaveError(e)}`)
     } finally { setSaving(false) }
   }
 

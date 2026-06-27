@@ -5,6 +5,7 @@ import { getTemplate } from '../modules/admin/homePageTemplates'
 import HomeComponentRenderer from '../modules/admin/HomeComponentRenderer'
 import ReportRunner from '../modules/ReportRunner'
 import ReportBuilder from '../modules/ReportBuilder'
+import DashboardEditor from '../modules/DashboardEditor'
 
 // ConfiguredHome renders a landing/dashboard screen entirely from a configured
 // Home Page (home_pages + home_page_components), resolved for the current user
@@ -40,6 +41,11 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
   // Bumped after a builder save so the runner remounts and re-runs, showing
   // the edited fields/filters/groupings immediately.
   const [reportEditNonce, setReportEditNonce] = useState(0)
+  // When the user clicks Edit on an embedded dashboard, open the full Dashboard
+  // builder (widgets, types, group-by/summarize, filters) — the Salesforce-style
+  // editor — full-screen over the home. null = none; otherwise a dashboard id.
+  const [editingDashboard, setEditingDashboard] = useState(null)
+  const [dashboardEditNonce, setDashboardEditNonce] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -78,6 +84,23 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
             Open Home Page Builder
           </button>
         )}
+      </div>
+    )
+  }
+
+  // Editing an embedded dashboard — open the full Dashboard builder over the
+  // home. Save/Close returns to the home and remounts the runner so edits show.
+  if (editingDashboard) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 600,
+        background: C.page, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        <DashboardEditor
+          dashboardId={editingDashboard}
+          onClose={() => setEditingDashboard(null)}
+          onSaved={() => { setDashboardEditNonce(n => n + 1); setEditingDashboard(null) }}
+        />
       </div>
     )
   }
@@ -129,10 +152,11 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
             <div key={region.key} style={{ flex: region.flex, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
               {regionComps.map(c => (
                 <HomeComponentRenderer
-                  key={c.id}
+                  key={`${c.id}:${dashboardEditNonce}`}
                   component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }}
                   onNavigate={(table, id) => onOpenRecord && onOpenRecord({ table, id, mode: 'view' })}
                   onOpenReport={(reportId, extraFilters = null) => { setEditingReport(false); setOpenReport({ reportId, extraFilters }) }}
+                  onOpenDashboard={(dashboardId) => setEditingDashboard(dashboardId)}
                 />
               ))}
               {regionComps.length === 0 && <div style={{ color: C.textMuted, fontSize: 12, padding: 12 }}>&nbsp;</div>}

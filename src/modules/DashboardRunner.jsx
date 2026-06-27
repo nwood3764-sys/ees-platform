@@ -140,8 +140,8 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
         </div>
         <div style={{ display:'flex', gap:8 }}>
           <button onClick={refresh} style={btnSecondary()}>Refresh</button>
-          <button onClick={onEdit}  style={btnSecondary()}>Edit</button>
-          <button onClick={onClose} style={btnSecondary()}>Close</button>
+          {onEdit  && <button onClick={onEdit}  style={btnSecondary()}>Edit</button>}
+          {onClose && <button onClick={onClose} style={btnSecondary()}>Close</button>}
         </div>
       </div>
 
