@@ -145,23 +145,23 @@ table[data-colfixed="1"] td {
 
 /* DOCX inline preview (mammoth output) — scoped so converted document HTML
    inherits sensible spacing/typography instead of raw browser defaults.
-   Colors follow the Anura design system; no red/orange. */
-.anura-docx-preview h1,
-.anura-docx-preview h2,
-.anura-docx-preview h3,
-.anura-docx-preview h4 { color: #0d1a2e; font-weight: 600; line-height: 1.3; margin: 1.2em 0 0.5em; }
-.anura-docx-preview h1 { font-size: 1.6em; }
-.anura-docx-preview h2 { font-size: 1.35em; }
-.anura-docx-preview h3 { font-size: 1.15em; }
-.anura-docx-preview h4 { font-size: 1.02em; }
-.anura-docx-preview p { margin: 0 0 0.75em; }
-.anura-docx-preview ul,
-.anura-docx-preview ol { margin: 0 0 0.75em 1.4em; padding: 0; }
-.anura-docx-preview li { margin: 0.2em 0; }
-.anura-docx-preview a { color: #2aab72; text-decoration: underline; }
-.anura-docx-preview img { max-width: 100%; height: auto; }
-.anura-docx-preview table { border-collapse: collapse; width: 100%; margin: 0.75em 0; font-size: 0.95em; }
-.anura-docx-preview th,
-.anura-docx-preview td { border: 1px solid #e4e9f2; padding: 6px 10px; text-align: left; vertical-align: top; }
-.anura-docx-preview th { background: #f7f9fc; font-weight: 600; }
-.anura-docx-preview strong { font-weight: 600; }
+   Colors follow the LEAP design system; no red/orange. */
+.leap-docx-preview h1,
+.leap-docx-preview h2,
+.leap-docx-preview h3,
+.leap-docx-preview h4 { color: #0d1a2e; font-weight: 600; line-height: 1.3; margin: 1.2em 0 0.5em; }
+.leap-docx-preview h1 { font-size: 1.6em; }
+.leap-docx-preview h2 { font-size: 1.35em; }
+.leap-docx-preview h3 { font-size: 1.15em; }
+.leap-docx-preview h4 { font-size: 1.02em; }
+.leap-docx-preview p { margin: 0 0 0.75em; }
+.leap-docx-preview ul,
+.leap-docx-preview ol { margin: 0 0 0.75em 1.4em; padding: 0; }
+.leap-docx-preview li { margin: 0.2em 0; }
+.leap-docx-preview a { color: #2aab72; text-decoration: underline; }
+.leap-docx-preview img { max-width: 100%; height: auto; }
+.leap-docx-preview table { border-collapse: collapse; width: 100%; margin: 0.75em 0; font-size: 0.95em; }
+.leap-docx-preview th,
+.leap-docx-preview td { border: 1px solid #e4e9f2; padding: 6px 10px; text-align: left; vertical-align: top; }
+.leap-docx-preview th { background: #f7f9fc; font-weight: 600; }
+.leap-docx-preview strong { font-weight: 600; }

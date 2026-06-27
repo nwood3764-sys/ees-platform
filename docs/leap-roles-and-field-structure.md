@@ -1,8 +1,8 @@
-# Anura — Roles, Field Operations & Asset Accountability
+# LEAP — Roles, Field Operations & Asset Accountability
 
 ## Roles and Permissions Architecture
 
-Roles, permissions, and field-level visibility are stored in the database and managed through Anura Admin. Never hardcoded.
+Roles, permissions, and field-level visibility are stored in the database and managed through LEAP Admin. Never hardcoded.
 
 **Core tables:**
 - roles — id, name, description
@@ -25,7 +25,7 @@ Roles, permissions, and field-level visibility are stored in the database and ma
 - Property Manager
 - Subcontractor / Partner
 
-**Field-level permissions** follow Salesforce field-level security conventions. A role can see a record without seeing all fields on that record. Example: Project Manager sees an Opportunity but not the Amount field. Managed in Anura Admin — change a permission once, it applies immediately to all users in that role.
+**Field-level permissions** follow Salesforce field-level security conventions. A role can see a record without seeing all fields on that record. Example: Project Manager sees an Opportunity but not the Amount field. Managed in LEAP Admin — change a permission once, it applies immediately to all users in that role.
 
 ---
 

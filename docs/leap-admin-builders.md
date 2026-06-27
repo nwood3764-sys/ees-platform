@@ -1,8 +1,8 @@
-# Anura — Admin Builders
+# LEAP — Admin Builders
 
-Anura Admin is the configuration and management module. Built early — before other modules — because all modules depend on the permission and configuration infrastructure it provides.
+LEAP Admin is the configuration and management module. Built early — before other modules — because all modules depend on the permission and configuration infrastructure it provides.
 
-Anura Admin is built around a set of **Builders** — purpose-built configuration tools that let authorized users define and modify how Anura behaves without touching code. Builders are the Anura equivalent of Salesforce's Process Builder, Flow Builder, Record Type setup, Page Layout editor, and Validation Rules — purpose-built for this business.
+LEAP Admin is built around a set of **Builders** — purpose-built configuration tools that let authorized users define and modify how LEAP behaves without touching code. Builders are the LEAP equivalent of Salesforce's Process Builder, Flow Builder, Record Type setup, Page Layout editor, and Validation Rules — purpose-built for this business.
 
 ---
 
@@ -28,7 +28,7 @@ Program Builder manages:
 
 ## Work Plan Builder
 
-Work types, work plans, and work steps are defined and modified continuously. Never static. The Work Plan Builder is one of the most frequently used tools in Anura Admin.
+Work types, work plans, and work steps are defined and modified continuously. Never static. The Work Plan Builder is one of the most frequently used tools in LEAP Admin.
 
 Work Plan Builder manages:
 
@@ -62,7 +62,7 @@ Work Plan Builder applies to all work types regardless of where or by whom they 
 
 ## Lifecycle Builder
 
-Defines status chains per record type per object. Every object in Anura has one or more status lifecycles depending on its record types.
+Defines status chains per record type per object. Every object in LEAP has one or more status lifecycles depending on its record types.
 
 Lifecycle Builder manages:
 - Status names — explicit, unambiguous, action-oriented per naming convention
@@ -77,7 +77,7 @@ Lifecycle Builder manages:
 
 ## Template Builder
 
-Manages all communications and document generation across Anura.
+Manages all communications and document generation across LEAP.
 
 Template Builder manages:
 - Email templates — organized by program, state, project type, record type
@@ -92,7 +92,7 @@ Template Builder manages:
 
 ## Permission Builder
 
-Manages all user access and field visibility across Anura.
+Manages all user access and field visibility across LEAP.
 
 Permission Builder manages:
 - Roles — create, clone, rename, deactivate
@@ -119,7 +119,7 @@ Automation Builder manages:
 
 ---
 
-## Additional Anura Admin Functions
+## Additional LEAP Admin Functions
 
 - User management — create users, assign roles, deactivate
 - Picklist values — all dropdown values across all objects, managed centrally

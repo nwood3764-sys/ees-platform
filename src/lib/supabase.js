@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 //   VITE_SUPABASE_URL       = https://flyjigrijjjtcsvpgzvk.supabase.co
 //   VITE_SUPABASE_ANON_KEY  = <publishable key from Supabase → Project Settings → API>
 //
-// For local development create a file at /home/claude/anura/.env.local with
+// For local development create a file at /home/claude/leap/.env.local with
 // the same two variables. No fallback is hardcoded on purpose — the key
 // should only live in environment variables, never in source.
 const url = import.meta.env.VITE_SUPABASE_URL
@@ -217,7 +217,7 @@ function wrapThenable(builder) {
 // or a write — both look like supabase.rpc('foo', args). The safest
 // default is to invalidate after every successful RPC. The cost is a
 // re-fetch on next navigation after harmless read RPCs (current_app_user_id,
-// anura_table_metadata, etc.); the benefit is no stale data after
+// ees_table_metadata, etc.); the benefit is no stale data after
 // mutation RPCs (publish_project_report_template, cancel_appointment, etc.).
 // On balance, the same trade-off as for .from() writes.
 export const supabase = new Proxy(baseClient, {

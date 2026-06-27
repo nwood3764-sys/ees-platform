@@ -1,4 +1,4 @@
-# Anura — Status Lifecycles per Object
+# LEAP — Status Lifecycles per Object
 
 All status names follow the explicit naming convention: [Object] [State]. Every status implies a next action.
 

@@ -123,7 +123,7 @@ Active workstream: **Outreach Dashboard (DSH-00010)**.
 - Activity tracking layer for DSH-00010 (emails/calls logged against opportunities) — additive, no rework.
 - Financial visibility tier gating (Tier 1/2/3) — hard blocker before external/portal users; `field_metadata` and `field_permissions` are currently empty.
 - Null record types on real records across multi-type objects (`work_steps` 52, `buildings` 7, `contacts` 6, `work_orders` 5, `opportunities` 4, `projects` 3, `incentive_applications` 2) — resolve via Salesforce import.
-- Docs cleanup: rename the 19 `anura-`-prefixed files in `/docs/`, scrub "Anura" from content (→ LEAP / EES), fix internal cross-references. Not yet executed — Claude Code can do this in one pass.
+- Docs cleanup: ✅ Done — the 19 `anura-`-prefixed files in `/docs/` were renamed to `leap-*`, "Anura" scrubbed from content (→ LEAP / EES), and internal cross-references fixed. The word now appears only in `leap-naming-standard.md` and one line of `leap-build-discipline.md`, where it is the deliberate definition of the forbidden-word rule.
 
 ---
 
@@ -131,24 +131,24 @@ Active workstream: **Outreach Dashboard (DSH-00010)**.
 
 | Topic | File |
 |---|---|
-| Master project instructions | `ANURA-PROJECT-INSTRUCTIONS.md` (legacy name; content is LEAP) |
-| Property hierarchy | `anura-property-hierarchy.md` |
-| Roles, field ops, asset accountability | `anura-roles-and-field-structure.md` |
-| Program portfolio (5 states) | `anura-programs.md` |
-| 12-stage project lifecycle | `anura-project-lifecycle.md` |
-| Status lifecycles per object | `anura-status-lifecycles.md` |
-| Work types, work plans, materials | `anura-work-types.md` |
-| Vehicles and fleet | `anura-fleet.md` |
-| Communications and templates | `anura-communications.md`, `leap-communications-module-1.md` |
-| Admin Builders | `anura-admin-builders.md` |
-| Portals (owner and partner) | `anura-portals.md` |
-| Field Mobile | `anura-field-mobile.md` |
-| Reports and dashboards | `anura-reports.md` |
-| Data standards, validation, retention | `anura-data-standards.md` |
-| AI assistant | `anura-ai-spec.md` |
-| Module list and build order | `anura-modules-and-build-order.md` |
-| Schema session instructions | `anura-schema-session.md` |
-| HUD data sources | `anura-hud-data-sources.md` |
-| Agent operating mode | `anura-agent-operating-mode.md` |
+| Master project instructions | `LEAP-PROJECT-INSTRUCTIONS.md` |
+| Property hierarchy | `leap-property-hierarchy.md` |
+| Roles, field ops, asset accountability | `leap-roles-and-field-structure.md` |
+| Program portfolio (5 states) | `leap-programs.md` |
+| 12-stage project lifecycle | `leap-project-lifecycle.md` |
+| Status lifecycles per object | `leap-status-lifecycles.md` |
+| Work types, work plans, materials | `leap-work-types.md` |
+| Vehicles and fleet | `leap-fleet.md` |
+| Communications and templates | `leap-communications.md`, `leap-communications-module-1.md` |
+| Admin Builders | `leap-admin-builders.md` |
+| Portals (owner and partner) | `leap-portals.md` |
+| Field Mobile | `leap-field-mobile.md` |
+| Reports and dashboards | `leap-reports.md` |
+| Data standards, validation, retention | `leap-data-standards.md` |
+| AI assistant | `leap-ai-spec.md` |
+| Module list and build order | `leap-modules-and-build-order.md` |
+| Schema session instructions | `leap-schema-session.md` |
+| HUD data sources | `leap-hud-data-sources.md` |
+| Agent operating mode | `leap-agent-operating-mode.md` |
 | Build discipline (folded into this file) | `leap-build-discipline.md` |
 | Naming standard (folded into this file) | `leap-naming-standard.md` |

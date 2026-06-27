@@ -703,7 +703,7 @@ function AuditLogPane() {
 
 // ─── RecycleBinPane — view + restore soft-deleted records ───────────────
 //
-// Phase 1 of the recycle bin spec from anura-data-standards.md. Lets admins
+// Phase 1 of the recycle bin spec from leap-data-standards.md. Lets admins
 // pick a table from a curated dropdown, see what's been soft-deleted with
 // who/when/why, and restore individual rows. Permanent purge is deferred
 // to a Phase 2 with cascade-delete + audit-snapshot work.
