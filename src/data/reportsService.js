@@ -1612,6 +1612,48 @@ export async function loadDashboard(dashboardId) {
 }
 
 /**
+ * Resolve the selectable options for a dashboard filter.
+ *
+ * dfilt_options may be:
+ *   - null/undefined        → no options (runner renders a free-text input)
+ *   - a plain array         → static option list, passed through as-is
+ *   - { source:'distinct',  → dynamic: distinct, non-deleted, non-blank values
+ *       object, field }       of object.field, ordered most-common-first, via the
+ *                             dashboard_filter_distinct_values RPC. Self-maintaining:
+ *                             the dropdown only ever shows values that actually
+ *                             exist in records, with no hardcoded list to update.
+ *
+ * Returns an array of { value, label } (label === value for distinct sources).
+ * On any RPC error returns [] so the runner degrades to a text input rather
+ * than blanking the filter bar.
+ */
+export async function fetchFilterOptions(filter) {
+  const opts = filter?.dfilt_options
+  if (!opts) return []
+
+  // Static array form: ["NC","WI",...] or [{value,label},...]
+  if (Array.isArray(opts)) {
+    return opts.map(o =>
+      (o && typeof o === 'object')
+        ? { value: o.value, label: o.label ?? o.value }
+        : { value: o, label: o }
+    )
+  }
+
+  if (opts.source === 'distinct' && opts.object && opts.field) {
+    const { data, error } = await supabase.rpc('dashboard_filter_distinct_values', {
+      p_object: opts.object,
+      p_field:  opts.field,
+      p_limit:  opts.limit ?? 200,
+    })
+    if (error) { console.warn('fetchFilterOptions distinct failed:', error.message); return [] }
+    return (data || []).map(r => ({ value: r.value, label: r.value }))
+  }
+
+  return []
+}
+
+/**
  * Server-side aggregation fast path for dashboard widgets.
  *
  * Calls the report_aggregate RPC, which does a real SQL GROUP BY and

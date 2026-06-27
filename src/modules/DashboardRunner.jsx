@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
-import { runReport, loadDashboard, getRowValue, runWidgetAggregate } from '../data/reportsService'
+import { runReport, loadDashboard, getRowValue, runWidgetAggregate, fetchFilterOptions } from '../data/reportsService'
 
 // ─── Dashboard Runner ─────────────────────────────────────────────────────
 //
@@ -16,6 +16,7 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
   const [loading, setLoading]           = useState(true)
   const [error, setError]               = useState(null)
   const [filterValues, setFilterValues] = useState({})          // dfilt id → current value
+  const [filterOptions, setFilterOptions] = useState({})        // dfilt id → [{value,label}]
 
   // Build the extraFilters array for runReport from the current filter
   // values. Empty values mean the filter is not applied this run.
@@ -86,6 +87,13 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
       }
       setFilterValues(initialValues)
 
+      // Resolve selectable options for each filter (dynamic distinct sources or
+      // static arrays). Runs in parallel; failures degrade to a text input.
+      const optionEntries = await Promise.all(
+        (d.filters || []).map(async f => [f.id, await fetchFilterOptions(f)])
+      )
+      setFilterOptions(Object.fromEntries(optionEntries))
+
       await runWidgets(d, initialValues)
     } catch (err) {
       setError(err)
@@ -153,14 +161,31 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
                   ({f.dfilt_field_name} {f.dfilt_operator})
                 </span>
               </label>
-              <input type="text"
-                value={filterValues[f.id] ?? ''}
-                onChange={e => setFilterValues(prev => ({ ...prev, [f.id]: e.target.value }))}
-                style={{
-                  padding:'6px 8px', fontSize:12,
-                  background:C.card, color:C.textPrimary,
-                  border:`1px solid ${C.border}`, borderRadius:4, font:'inherit',
-                }} />
+              {(filterOptions[f.id] && filterOptions[f.id].length > 0) ? (
+                <select
+                  value={filterValues[f.id] ?? ''}
+                  onChange={e => setFilterValues(prev => ({ ...prev, [f.id]: e.target.value }))}
+                  style={{
+                    padding:'6px 8px', fontSize:12,
+                    background:C.card, color:C.textPrimary,
+                    border:`1px solid ${C.border}`, borderRadius:4, font:'inherit',
+                    cursor:'pointer',
+                  }}>
+                  <option value="">All</option>
+                  {filterOptions[f.id].map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <input type="text"
+                  value={filterValues[f.id] ?? ''}
+                  onChange={e => setFilterValues(prev => ({ ...prev, [f.id]: e.target.value }))}
+                  style={{
+                    padding:'6px 8px', fontSize:12,
+                    background:C.card, color:C.textPrimary,
+                    border:`1px solid ${C.border}`, borderRadius:4, font:'inherit',
+                  }} />
+              )}
             </div>
           ))}
           <button
