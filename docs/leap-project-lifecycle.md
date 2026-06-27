@@ -1,4 +1,4 @@
-# Anura — Project Lifecycle
+# LEAP — Project Lifecycle
 
 Every project follows this lifecycle. Status names are explicit. Each status has a named owner and implies a next action.
 

@@ -1,6 +1,6 @@
-# Anura — Property Hierarchy
+# LEAP — Property Hierarchy
 
-The property hierarchy is the spine of the entire Anura database. Every work order, project, rebate, income qualification, technician assignment, and photo ultimately traces back to a Unit or a Building.
+The property hierarchy is the spine of the entire LEAP database. Every work order, project, rebate, income qualification, technician assignment, and photo ultimately traces back to a Unit or a Building.
 
 ```
 Property Owner

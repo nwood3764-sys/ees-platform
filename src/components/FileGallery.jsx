@@ -1666,7 +1666,7 @@ function WordPreview({ doc }) {
       alignItems: 'flex-start', padding: '24px 16px',
     }}>
       <div
-        className="anura-docx-preview"
+        className="leap-docx-preview"
         style={{
           background: C.card,
           border: `1px solid ${C.border}`,

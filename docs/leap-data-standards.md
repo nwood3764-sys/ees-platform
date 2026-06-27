@@ -1,12 +1,12 @@
-# Anura — Data Standards, Validation, Retention
+# LEAP — Data Standards, Validation, Retention
 
-These standards apply to every object and every field in Anura. They are defined during the schema session, not added later.
+These standards apply to every object and every field in LEAP. They are defined during the schema session, not added later.
 
 ---
 
 ## Field Standards
 
-Every field in Anura must have:
+Every field in LEAP must have:
 - **Field label** — the display name shown in the UI
 - **Field description** — what this field is for, when to use it, and any business rules that apply
 - **Help text** — shown inline in the UI as a tooltip or helper text. Written for the end user, not a developer. External portal users especially need clear guidance
@@ -52,7 +52,7 @@ Example: "Work Order cannot be submitted — 3 work steps are missing required p
 
 ## Audit Log
 
-In addition to field history tracking on key fields, Anura maintains a system-wide audit log for destructive and sensitive actions:
+In addition to field history tracking on key fields, LEAP maintains a system-wide audit log for destructive and sensitive actions:
 - Record deletion (soft delete) — who, when, which record
 - User deactivation — who deactivated, when, which user
 - Permission changes — who changed, what changed, when
@@ -66,13 +66,13 @@ Audit log is append-only, read-only, never editable. Accessible to Admin only.
 
 ## Testing Environment
 
-A separate Supabase project mirrors the production Anura database for development and QA. All schema changes, new features, and automation rules are tested in the dev environment before being applied to production. No changes are ever made directly to the production database without testing first.
+A separate Supabase project mirrors the production LEAP database for development and QA. All schema changes, new features, and automation rules are tested in the dev environment before being applied to production. No changes are ever made directly to the production database without testing first.
 
 ---
 
 ## User Onboarding
 
-Role-specific help content is built into Anura — not a separate PDF. Each module includes:
+Role-specific help content is built into LEAP — not a separate PDF. Each module includes:
 - Contextual help text on every field
 - Role-specific getting started guide accessible from the user menu
 - In-app guidance for first-time use of complex workflows
@@ -100,5 +100,5 @@ Stage 3 — Permanent purge. Only Admin can permanently purge a record from the 
 
 **List view behavior:**
 - Default list views never show deleted or recycle bin records
-- Recycle bin is a dedicated view in Anura Admin
+- Recycle bin is a dedicated view in LEAP Admin
 - Reports exclude recycle bin records unless explicitly filtered to include them

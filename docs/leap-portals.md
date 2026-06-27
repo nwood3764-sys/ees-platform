@@ -1,8 +1,8 @@
-# Anura — Portals
+# LEAP — Portals
 
-Portals are active working environments for external users — not read-only windows. Each portal is a separate deployed web application on its own subdomain, connected to the Anura database with role-appropriate row-level security. External users never see data belonging to other organizations or properties.
+Portals are active working environments for external users — not read-only windows. Each portal is a separate deployed web application on its own subdomain, connected to the LEAP database with role-appropriate row-level security. External users never see data belonging to other organizations or properties.
 
-Portal users have their own role and permission architecture configured in Anura Admin — same structure as internal users, scoped to their organization and their external access level.
+Portal users have their own role and permission architecture configured in LEAP Admin — same structure as internal users, scoped to their organization and their external access level.
 
 ---
 
@@ -23,7 +23,7 @@ Portal users have their own role and permission architecture configured in Anura
 - Open a ticket or data request — flag a question or issue on a specific record
 - Direct messaging — with their assigned Project Coordinator. Either built into the portal or routed to an integrated tool. Every message logged as an activity on the related record
 
-**Portal user roles (configurable in Anura Admin):**
+**Portal user roles (configurable in LEAP Admin):**
 - Property Owner — full portfolio visibility for their properties
 - Property Manager — may cover multiple properties across a portfolio
 - Regional Decision Maker — visibility across a regional portfolio
@@ -51,13 +51,13 @@ Portal users have their own role and permission architecture configured in Anura
 - Record-level comments — on specific work orders or work steps, visible to assigned internal coordinator
 - E-sign subcontractor agreements and any required program documents
 
-**Partner organization user roles (configurable in Anura Admin per partner organization):**
+**Partner organization user roles (configurable in LEAP Admin per partner organization):**
 - Partner Admin — full visibility including financials. Work orders, scheduling, payment history, invoice amounts, completed task values. Business owner equivalent
 - Partner Coordinator — work order and scheduling visibility. No financial fields. Manages field crew assignments and scheduling
 - Partner Technician — field user. Sees only their own assigned work orders for the day. Executes work steps, uploads photos, submits completion
 
 **Partner permission rules:**
-- Roles and field-level permissions configured in Anura Admin per partner organization
+- Roles and field-level permissions configured in LEAP Admin per partner organization
 - Financial tier visibility applies to partner roles same as internal roles
 - One partner organization never sees another organization's records — enforced at database level
 - Partner users can have permission sets applied on top of their base role for specific program or project access

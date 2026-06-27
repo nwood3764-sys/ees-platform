@@ -1,4 +1,4 @@
-# Anura — Schema Session Instructions & Seed Data
+# LEAP — Schema Session Instructions & Seed Data
 
 ## Schema Session Instructions
 
@@ -19,7 +19,7 @@ Do not build any frontend module before the schema session is complete.
 
 ## Seed Data Plan
 
-The following must be populated before Anura is usable on launch day:
+The following must be populated before LEAP is usable on launch day:
 - All picklist values across all objects
 - All record types per object
 - All roles and profiles

@@ -1,12 +1,12 @@
-# Anura — Reports & Dashboards
+# LEAP — Reports & Dashboards
 
-Reports and dashboards are a core module — not an afterthought. Every role in Anura has access to reports and dashboards relevant to their work, with field-level security enforced. Financial tier fields are only visible in reports to users who have the appropriate permission.
+Reports and dashboards are a core module — not an afterthought. Every role in LEAP has access to reports and dashboards relevant to their work, with field-level security enforced. Financial tier fields are only visible in reports to users who have the appropriate permission.
 
 ---
 
 ## Report Builder
 
-Lives in Anura Admin. End users build reports without writing SQL. Report Builder manages:
+Lives in LEAP Admin. End users build reports without writing SQL. Report Builder manages:
 
 - Object selection — choose the primary object and related objects to include
 - Field selection — drag fields from any related object into the report
@@ -33,7 +33,7 @@ Built from saved reports. Configurable per role. Dashboard Builder manages:
 - Widget types — bar chart, line chart, pie chart, donut chart, metric counter, funnel, table, gauge
 - Each widget is powered by a saved report
 - Dashboard layout — drag and drop widget arrangement
-- Role-specific dashboards — each role has a default dashboard configured in Anura Admin
+- Role-specific dashboards — each role has a default dashboard configured in LEAP Admin
 - User-customizable — users can add, remove, and rearrange widgets within their permissions
 - Refresh rate — configurable per dashboard
 
@@ -75,5 +75,5 @@ Scheduled report configuration:
 - Reports are owned by a named user
 - Reports can be shared with specific users or roles
 - Scheduled reports run automatically — no manual action required
-- All reports are built on the Anura database — no data leaves the system except via scheduled email delivery
-- Cross-object reports follow the same row-level security as the rest of Anura — users only see records they have access to
+- All reports are built on the LEAP database — no data leaves the system except via scheduled email delivery
+- Cross-object reports follow the same row-level security as the rest of LEAP — users only see records they have access to

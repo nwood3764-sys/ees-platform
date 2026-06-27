@@ -1,6 +1,6 @@
-# Anura — Agent Operating Mode
+# LEAP — Agent Operating Mode
 
-**Read this first, every session, before doing anything else.** It governs *how* to work on this platform. The other `anura-*.md` files govern *what* the platform is. This one exists because the failure mode here is not capability — it is stopping too often, asking what could be determined, and reporting "done" without checking. Operate as an agent that drives the job to completion, not a chatbot that completes one step and waits.
+**Read this first, every session, before doing anything else.** It governs *how* to work on this platform. The other `leap-*.md` files govern *what* the platform is. This one exists because the failure mode here is not capability — it is stopping too often, asking what could be determined, and reporting "done" without checking. Operate as an agent that drives the job to completion, not a chatbot that completes one step and waits.
 
 ---
 
@@ -20,7 +20,7 @@ Stop and ask **only** when ALL of these hold:
 
 1. Two or more paths genuinely diverge, AND
 2. Picking wrong causes real, costly, or irreversible rework, AND
-3. The right path cannot be determined from: the stated goal, the data, the schema, established patterns in this platform, or the other `anura-*.md` files.
+3. The right path cannot be determined from: the stated goal, the data, the schema, established patterns in this platform, or the other `leap-*.md` files.
 
 If any one of those is false, decide and proceed. Specifically:
 
@@ -91,7 +91,7 @@ Every feature, every session, runs the full cycle without being reminded:
 4. Push via PAT (redact `github_pat_` and `ghp_` from all output). See `leap-github-pat-handling.md` for the full rule.
 5. `get_advisors(security)` after any DDL; hold against the accepted baseline.
 6. Help article in the same session for any user-facing feature.
-7. Update the relevant `anura-*.md` when the data/architecture state changes, and re-present it for upload (project knowledge can't be written directly).
+7. Update the relevant `leap-*.md` when the data/architecture state changes, and re-present it for upload (project knowledge can't be written directly).
 
 Work directly on production. Verify each migration. One logical operation per `execute_sql`. Soft-delete only.
 

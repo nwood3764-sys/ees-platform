@@ -1,22 +1,22 @@
-# ANURA — PROJECT INSTRUCTIONS
+# LEAP — PROJECT INSTRUCTIONS
 
-## What Is Anura
+## What Is LEAP
 
-Anura is the internal name for our custom-built business operations platform. It replaces Salesforce Service Cloud, Salesforce Field Service Lightning, and Jobber. It is our company CRM, ERP, project management system, field service platform, inventory system, and customer portal — all in one relational database.
+LEAP is the internal name for our custom-built business operations platform. It replaces Salesforce Service Cloud, Salesforce Field Service Lightning, and Jobber. It is our company CRM, ERP, project management system, field service platform, inventory system, and customer portal — all in one relational database.
 
-The company operating Anura is **Energy Efficiency Services of Wisconsin (EES-WI)**, also branded as **Anura Energy**. We are a BPI-certified home performance and HVAC contracting business headquartered in Madison, WI (3218 Progress Rd, 53716). We operate across five states: Wisconsin, North Carolina, Colorado, Michigan, and Indiana.
+The company operating LEAP is **Energy Efficiency Services of Wisconsin (EES / EES-WI)**. We are a BPI-certified home performance and HVAC contracting business headquartered in Madison, WI (3218 Progress Rd, 53716). We operate across five states: Wisconsin, North Carolina, Colorado, Michigan, and Indiana.
 
-Anura is the platform. EES-WI / Anura Energy is the business that runs on it.
+LEAP is the platform. Energy Efficiency Services (EES / EES-WI) is the business that runs on it.
 
 ---
 
 ## Core Philosophy
 
-**Anura is an enterprise-grade system.** Every design decision defaults to enterprise standards — data integrity, audit trails, recycle bin, validation rules, field history, role-based security, cascading rules, and referential integrity are non-negotiable. No shortcuts, no basic implementations. If a feature exists in enterprise software like Salesforce, ServiceNow, or SAP, implement it to that standard.
+**LEAP is an enterprise-grade system.** Every design decision defaults to enterprise standards — data integrity, audit trails, recycle bin, validation rules, field history, role-based security, cascading rules, and referential integrity are non-negotiable. No shortcuts, no basic implementations. If a feature exists in enterprise software like Salesforce, ServiceNow, or SAP, implement it to that standard.
 
 If a concept exists in Salesforce, use the same terminology, the same structure, and the same mental model unless there is a clearly better approach. When in doubt, ask — do not assume.
 
-Salesforce equivalents in Anura:
+Salesforce equivalents in LEAP:
 - Object = Table
 - Record Type = Record Type
 - Page Layout = Page Layout
@@ -41,7 +41,7 @@ Salesforce equivalents in Anura:
 
 **Every status implies a next action.** The record is never static. Completion of one status automatically triggers the next. The only pauses are named external dependencies — waiting on a program administrator, a utility, a customer signature, or a calendar date — each with a follow-up task and reminder attached.
 
-**Nothing is hardcoded.** Work types, work plans, work steps, status lifecycles, picklist values, record types, field permissions, role permissions, template assignments — all stored in the database and manageable through Anura Admin without touching code. New objects, new tables, new modules are always additive and never break existing functionality.
+**Nothing is hardcoded.** Work types, work plans, work steps, status lifecycles, picklist values, record types, field permissions, role permissions, template assignments — all stored in the database and manageable through LEAP Admin without touching code. New objects, new tables, new modules are always additive and never break existing functionality.
 
 **Naming conventions are always explicit.** No abbreviations, no shortcuts, no ambiguous terms. When in doubt use the full descriptive name.
 
@@ -50,7 +50,7 @@ Salesforce equivalents in Anura:
 ## Technology Stack
 
 **Database:** Supabase (PostgreSQL)
-- One Supabase project named: anura
+- One Supabase project named: leap (project ref flyjigrijjjtcsvpgzvk)
 - Row-level security on all tables
 - Foreign keys enforced on all relationships
 - Timestamps on all records: created_at, updated_at
@@ -61,12 +61,12 @@ Salesforce equivalents in Anura:
 **Frontend:** Single-file HTML deployed to Netlify, or React with Tailwind + shadcn/ui for complex multi-view applications
 
 **Hosting:** Netlify
-- Subdomain convention: [module].anura.energy
-- Examples: ops.anura.energy, field.anura.energy, portal.anura.energy
+- Subdomain convention: [module].ees-wi.org
+- Examples: ops.ees-wi.org, field.ees-wi.org, portal.ees-wi.org
 
 **SMS:** Twilio — SMS magic link authentication for customer portal, appointment reminders, work order notifications
 
-**E-Signature:** Built into Anura — document templates with merge fields rendered as PDF, sent for signature, stored against the record, logged as a completed activity
+**E-Signature:** Built into LEAP — document templates with merge fields rendered as PDF, sent for signature, stored against the record, logged as a completed activity
 
 **Authentication:** Supabase Auth — phone/SMS magic link for external users, email for internal staff
 
@@ -74,7 +74,7 @@ Salesforce equivalents in Anura:
 
 ## Design System
 
-All Anura modules use a consistent design system. Never deviate from these standards without explicit instruction.
+All LEAP modules use a consistent design system. Never deviate from these standards without explicit instruction.
 
 **Color Palette:**
 - Sidebar background: #07111f (deep navy)
@@ -128,7 +128,7 @@ Contract values, rebate amounts, program incentive amounts, invoice totals, oppo
 **Tier 3 — Admin only**
 Gross margin, labor cost, overhead, net revenue, company P&L, all financial aggregates.
 
-Field-level permissions are stored in a field_permissions table in Anura Admin and applied dynamically — not hardcoded in application logic.
+Field-level permissions are stored in a field_permissions table in LEAP Admin and applied dynamically — not hardcoded in application logic.
 
 ---
 
@@ -156,21 +156,21 @@ Detailed specs for everything else are maintained as separate files in this proj
 
 | Topic | Knowledge file |
 |---|---|
-| Property hierarchy | anura-property-hierarchy.md |
-| Roles, field operations, asset accountability | anura-roles-and-field-structure.md |
-| Program portfolio (all five states) | anura-programs.md |
-| 12-stage project lifecycle | anura-project-lifecycle.md |
-| Status lifecycles per object | anura-status-lifecycles.md |
-| Work types, work plans, materials & equipment | anura-work-types.md |
-| Vehicles and fleet | anura-fleet.md |
-| Communications and templates | anura-communications.md |
-| Anura Admin Builders | anura-admin-builders.md |
-| Portals (property owner and partner) | anura-portals.md |
-| Anura Field Mobile | anura-field-mobile.md |
-| Reports and dashboards | anura-reports.md |
-| Data standards, validation, retention | anura-data-standards.md |
-| Anura AI assistant | anura-ai-spec.md |
-| Module list and build order | anura-modules-and-build-order.md |
-| Schema session instructions | anura-schema-session.md |
+| Property hierarchy | leap-property-hierarchy.md |
+| Roles, field operations, asset accountability | leap-roles-and-field-structure.md |
+| Program portfolio (all five states) | leap-programs.md |
+| 12-stage project lifecycle | leap-project-lifecycle.md |
+| Status lifecycles per object | leap-status-lifecycles.md |
+| Work types, work plans, materials & equipment | leap-work-types.md |
+| Vehicles and fleet | leap-fleet.md |
+| Communications and templates | leap-communications.md |
+| LEAP Admin Builders | leap-admin-builders.md |
+| Portals (property owner and partner) | leap-portals.md |
+| LEAP Field Mobile | leap-field-mobile.md |
+| Reports and dashboards | leap-reports.md |
+| Data standards, validation, retention | leap-data-standards.md |
+| LEAP AI assistant | leap-ai-spec.md |
+| Module list and build order | leap-modules-and-build-order.md |
+| Schema session instructions | leap-schema-session.md |
 
 If you're working on something and you think I'm missing context from one of these files, name the file or the topic and I'll pull it in.

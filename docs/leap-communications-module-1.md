@@ -1,6 +1,6 @@
 # LEAP — Communications Module
 
-**Status:** Architectural spec. Supersedes the older `anura-communications.md` reference file.
+**Status:** Architectural spec. Supersedes the older `leap-communications.md` reference file.
 **Owner:** Nicholas Wood
 **Last updated:** 2026-05-17
 
@@ -479,5 +479,5 @@ These came up during the architectural conversation but were deferred:
 - **Voice profile reset UX.** Should users be able to inspect their accumulated style signals, not just reset? Probably yes, but the UI hasn't been designed.
 - **Cross-program email visibility for users in multiple programs.** A user who is a Project Coordinator on WI HOMES and CO Denver simultaneously — does the visibility model handle this naturally via multiple opportunity contact role assignments, or is there a cross-program ACL we're missing? Suspect it handles fine via the existing model, but worth verifying with a concrete test case.
 - **Bulk send.** Not in scope for v1, but the architecture should not preclude it. Sending the same template to 50 property owners on a portfolio update should still respect locked regions and write 50 individual messages/conversations rows. Worth a design pass before building, but not blocking v1.
-- **E-signature integration.** Per `anura-portals.md`, e-signature workflows render templates with merge fields → PDF → portal signature. The Communications Module should integrate cleanly with this — outbound e-sign requests should be a special send type, threaded into conversations like everything else. Spec'd later; flag the integration point.
+- **E-signature integration.** Per `leap-portals.md`, e-signature workflows render templates with merge fields → PDF → portal signature. The Communications Module should integrate cleanly with this — outbound e-sign requests should be a special send type, threaded into conversations like everything else. Spec'd later; flag the integration point.
 - **Inbound from contacts whose email isn't in the system yet.** A new property manager replies from an unknown address. Match by domain to the parent account, prompt the Coordinator to confirm/create a contact record on triage. Logic exists in the Unmatched Inbox flow but UX needs design.

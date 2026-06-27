@@ -1,6 +1,6 @@
-# Anura — Communications & Templates
+# LEAP — Communications & Templates
 
-Templates are infrastructure — not a separate module. Managed centrally in Anura Admin. Used across all modules.
+Templates are infrastructure — not a separate module. Managed centrally in LEAP Admin. Used across all modules.
 
 **Template types:**
 - Email templates
