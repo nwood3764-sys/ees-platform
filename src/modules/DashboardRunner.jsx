@@ -268,7 +268,14 @@ function WidgetBody({ widget, result, canDrill, drillTo, drillWhole }) {
   const rows = result?.rows || []
   const cols = result?.columns || []
 
-  if (rows.length === 0) {
+  // The aggregate fast-path (runWidgetAggregate) returns grouped rows in
+  // result.aggregated and no result.rows. Treat an aggregated array as the
+  // row-presence signal for those widgets, otherwise the empty-rows guard
+  // below short-circuits every grouped widget to "No matching rows." before
+  // buildChartData ever reads result.aggregated.
+  const aggregated = Array.isArray(result?.aggregated) ? result.aggregated : null
+
+  if (aggregated ? aggregated.length === 0 : rows.length === 0) {
     return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>No matching rows.</div>
   }
 
