@@ -37,7 +37,7 @@ import {
 
 const STATUS_BADGE = {
   active:    { bg: '#e7f8f0', color: '#1d7a52', label: 'Active' },
-  inactive:  { bg: '#fef3c7', color: '#8a6d1f', label: 'Inactive' },
+  inactive:  { bg: '#e8f1fb', color: '#1e466b', label: 'Inactive' },
   archived:  { bg: '#f3f4f6', color: '#6b7280', label: 'Archived' },
 }
 

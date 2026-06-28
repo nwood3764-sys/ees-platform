@@ -224,15 +224,15 @@ export function ErrorState({ error, onRetry }) {
     }}>
       <div style={{
         width: 40, height: 40, borderRadius: '50%',
-        background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: '#e8f1fb', display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b03a2e" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1a5a8a" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="10" />
           <line x1="12" y1="8" x2="12" y2="12" />
           <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
       </div>
-      <div style={{ color: '#b03a2e', fontSize: 14, fontWeight: 600 }}>Could not load records</div>
+      <div style={{ color: '#1a5a8a', fontSize: 14, fontWeight: 600 }}>Could not load records</div>
       <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace', maxWidth: 560, wordBreak: 'break-word' }}>
         {message}
       </div>

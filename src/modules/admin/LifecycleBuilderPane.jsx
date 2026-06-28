@@ -483,7 +483,7 @@ function StatusPill({ status, isInitial }) {
         display: 'inline-flex', alignItems: 'center',
         padding: '3px 8px', borderRadius: 4,
         fontSize: 11, fontStyle: 'italic',
-        background: '#fef2f2', color: '#991b1b',
+        background: '#e8f1fb', color: '#1a5a8a',
         border: '1px solid #bcd9f2',
       }}>(missing status)</span>
     )
@@ -730,7 +730,7 @@ function TransitionFormModal({ mode, object, statusField, statuses, existing, in
 
           {validationError && (
             <div style={{
-              padding: 10, background: '#fef3c7', border: '1px solid #fde68a',
+              padding: 10, background: '#e8f1fb', border: '1px solid #bcd9f2',
               borderRadius: 6, fontSize: 12, color: '#1e466b', marginTop: 6,
             }}>
               {validationError}

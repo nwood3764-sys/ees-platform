@@ -532,11 +532,11 @@ function DeleteConfirmModal({ objectLabel, recordName, onConfirm, onCancel, busy
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
           <div style={{
             width: 32, height: 32, borderRadius: '50%',
-            background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: '#e8f1fb', display: 'flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
             <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"
-              size={15} color="#b03a2e" />
+              size={15} color="#1a5a8a" />
           </div>
           <div>
             <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>
@@ -555,7 +555,7 @@ function DeleteConfirmModal({ objectLabel, recordName, onConfirm, onCancel, busy
             disabled={busy}
             style={{
               flex: 1,
-              background: busy ? '#d0574a' : '#b03a2e',
+              background: busy ? '#7eb3e8' : '#1a5a8a',
               color: '#fff', border: 'none', borderRadius: 6,
               padding: '9px 0', fontSize: 13, fontWeight: 600,
               cursor: busy ? 'wait' : 'pointer',
@@ -790,7 +790,7 @@ function DocumentTemplatePreviewModal({
               {[
                 { label: 'sig',  fill: 'rgba(62,207,142,0.30)',  border: '#2aab72' },
                 { label: 'init', fill: 'rgba(126,179,232,0.30)', border: '#3a82c6' },
-                { label: 'date', fill: 'rgba(232,169,73,0.30)',  border: '#bf7f1f' },
+                { label: 'date', fill: 'rgba(126,179,232,0.30)',  border: '#1a5a8a' },
                 { label: 'text', fill: 'rgba(143,160,184,0.30)', border: '#61738d' },
               ].map(c => (
                 <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: C.textSecondary }}>
@@ -1437,7 +1437,7 @@ function AvatarUpload({ value, userId, onChange }) {
             )}
           </div>
         )}
-        {err && <div style={{ fontSize: 11.5, color: '#a32626' }}>{err}</div>}
+        {err && <div style={{ fontSize: 11.5, color: '#1a5a8a' }}>{err}</div>}
       </div>
     </div>
   )
@@ -1743,14 +1743,14 @@ function JsonField({ value, onChange }) {
         style={{
           ...inputBase, minHeight: 96, resize: 'vertical',
           fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5,
-          borderColor: parseErr ? '#fca5a5' : undefined,
+          borderColor: parseErr ? '#bcd9f2' : undefined,
         }}
         value={text}
         onChange={(e) => handleChange(e.target.value)}
         spellCheck={false}
       />
       {parseErr ? (
-        <div style={{ marginTop: 4, fontSize: 11, color: '#b03a2e' }}>
+        <div style={{ marginTop: 4, fontSize: 11, color: '#1a5a8a' }}>
           Invalid JSON: {parseErr}
         </div>
       ) : (
@@ -1874,7 +1874,7 @@ function DocxUploadField({ recordId, value, onRefreshRecord, disabled, disabledR
       )}
 
       {error && (
-        <div style={{ fontSize: 11.5, color: '#b03a2e' }}>{error}</div>
+        <div style={{ fontSize: 11.5, color: '#1a5a8a' }}>{error}</div>
       )}
     </div>
   )
@@ -2048,7 +2048,7 @@ function MergeFieldPickerBody({ mode, onPick }) {
             Loading fields…
           </div>
         ) : activeEntry.error ? (
-          <div style={{ padding: '14px 16px', fontSize: 12.5, color: '#b03a2e' }}>
+          <div style={{ padding: '14px 16px', fontSize: 12.5, color: '#1a5a8a' }}>
             {activeEntry.error}
           </div>
         ) : (activeEntry.items || []).length === 0 ? (
@@ -2772,7 +2772,7 @@ function PrtsnHistoryWidget({ widget, parentRecordId }) {
         )}
       </div>
       {error ? (
-        <div style={{ padding: 18, fontSize: 12.5, color: '#b03a2e' }}>
+        <div style={{ padding: 18, fontSize: 12.5, color: '#1a5a8a' }}>
           Failed to load versions: {error}
         </div>
       ) : rows === null ? (
@@ -3739,7 +3739,7 @@ function RelatedListWidget({
                             aria-label="Remove from list"
                             style={{
                               background: 'none', border: 'none',
-                              color: removingId === row.id ? C.textMuted : '#b03a2e',
+                              color: removingId === row.id ? C.textMuted : '#1a5a8a',
                               cursor: removingId === row.id ? 'wait' : 'pointer',
                               padding: 8, borderRadius: 6,
                               minWidth: 36, minHeight: 36,
@@ -3825,12 +3825,12 @@ function RelatedListWidget({
                                 title="Remove from list"
                                 style={{
                                   background: 'none', border: 'none',
-                                  color: removingId === row.id ? C.textMuted : '#b03a2e',
+                                  color: removingId === row.id ? C.textMuted : '#1a5a8a',
                                   cursor: removingId === row.id ? 'wait' : 'pointer',
                                   padding: '2px 4px', borderRadius: 4, display: 'inline-flex',
                                   alignItems: 'center', justifyContent: 'center',
                                 }}
-                                onMouseEnter={(e) => { if (removingId !== row.id) e.currentTarget.style.background = '#fef2f2' }}
+                                onMouseEnter={(e) => { if (removingId !== row.id) e.currentTarget.style.background = '#e8f1fb' }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                               >
                                 <Icon path="M6 18L18 6M6 6l12 12" size={13} color="currentColor" />
@@ -4226,7 +4226,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
                 </div>
               )}
               {error && !loading && (
-                <div style={{ padding: 20, textAlign: 'center', color: '#b03a2e', fontSize: 12.5 }}>
+                <div style={{ padding: 20, textAlign: 'center', color: '#1a5a8a', fontSize: 12.5 }}>
                   Could not load candidates — {String(error.message || error)}
                 </div>
               )}
@@ -5555,7 +5555,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   if (loading) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading record…</div>
   if (error) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, padding: 24 }}>
-      <div style={{ color: '#b03a2e', fontSize: 14, fontWeight: 600 }}>Error loading record</div>
+      <div style={{ color: '#1a5a8a', fontSize: 14, fontWeight: 600 }}>Error loading record</div>
       <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace', maxWidth: 560, textAlign: 'center' }}>{String(error.message || error)}</div>
       <button onClick={onBack} style={{ marginTop: 8, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 16px', fontSize: 12, color: C.textSecondary, cursor: 'pointer' }}>Back to List</button>
     </div>
@@ -5567,7 +5567,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // below throw and white-screen the whole app.
   if (!data) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, padding: 24 }}>
-      <div style={{ color: '#b03a2e', fontSize: 14, fontWeight: 600 }}>Record could not be loaded</div>
+      <div style={{ color: '#1a5a8a', fontSize: 14, fontWeight: 600 }}>Record could not be loaded</div>
       <div style={{ color: C.textMuted, fontSize: 12, maxWidth: 560, textAlign: 'center' }}>
         The layout for this object didn't load. Try refreshing the page, or contact an admin if the problem persists.
       </div>
@@ -5938,7 +5938,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         {lifecycleIsLocked && (
           <div style={{
             background: lifecycleStatusValue === 'Archived' ? '#f3f4f6' : '#eef5fc',
-            border: `1px solid ${lifecycleStatusValue === 'Archived' ? '#d1d5db' : '#fde68a'}`,
+            border: `1px solid ${lifecycleStatusValue === 'Archived' ? '#d1d5db' : '#bcd9f2'}`,
             borderLeftWidth: 4,
             borderLeftColor: lifecycleStatusValue === 'Archived' ? '#6b7280' : '#1e466b',
             borderRadius: 8, padding: '12px 16px', marginBottom: 14,
@@ -5951,7 +5951,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               size={16}
               color={lifecycleStatusValue === 'Archived' ? '#4b5563' : '#1e466b'}
             />
-            <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5, color: lifecycleStatusValue === 'Archived' ? '#374151' : '#78350f' }}>
+            <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5, color: lifecycleStatusValue === 'Archived' ? '#374151' : '#1e466b' }}>
               {lifecycleStatusValue === 'Active' ? (
                 <>
                   <strong>This template is published and locked.</strong> Header fields{lifecycle?.childrenLabel ? `, ${lifecycle.childrenLabel}` : ''}, body{lifecycle?.childrenLabel ? ' templates' : ''}, and configuration are read-only while a template is Active. To make changes: <em>Unpublish</em> back to Draft, or use <em>Clone Template</em> to start a new draft from this one. Re-publishing increments the version.

@@ -143,8 +143,8 @@ export default function OutlookCallback() {
               Could not connect Outlook
             </div>
             <div style={{
-              fontSize: 13, color: '#8a2c20', marginTop: 12,
-              background: '#fdecea', border: '1px solid #f3b9b3', borderRadius: 6,
+              fontSize: 13, color: '#1e466b', marginTop: 12,
+              background: '#e8f1fb', border: '1px solid #bcd9f2', borderRadius: 6,
               padding: '10px 12px', textAlign: 'left',
             }}>
               {message}
@@ -202,11 +202,11 @@ function ErrorGlyph() {
   return (
     <div style={{
       width: 48, height: 48, borderRadius: '50%',
-      background: '#fdecea', display: 'flex',
+      background: '#e8f1fb', display: 'flex',
       alignItems: 'center', justifyContent: 'center', margin: '0 auto',
     }}>
       <svg width={24} height={24} viewBox="0 0 24 24" fill="none"
-        stroke="#b03a2e" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+        stroke="#1a5a8a" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
         <line x1="18" y1="6"  x2="6"  y2="18" />
         <line x1="6"  y1="6"  x2="18" y2="18" />
       </svg>

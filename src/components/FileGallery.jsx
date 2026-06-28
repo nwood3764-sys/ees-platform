@@ -520,8 +520,8 @@ function LockoutNotice({ message }) {
     <div style={{
       padding: '20px 16px',
       borderRadius: 6,
-      background: '#fef3c7',
-      border: '1px solid #fcd34d',
+      background: '#e8f1fb',
+      border: '1px solid #7eb3e8',
       color: '#1e466b',
       fontSize: 12.5, lineHeight: 1.55,
     }}>
@@ -536,9 +536,9 @@ function ErrorNotice({ message, onRetry }) {
     <div style={{
       padding: '14px 16px',
       borderRadius: 6,
-      background: '#fef2f2',
-      border: '1px solid #fca5a5',
-      color: '#b03a2e',
+      background: '#e8f1fb',
+      border: '1px solid #bcd9f2',
+      color: '#1a5a8a',
       fontSize: 12.5,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
     }}>
@@ -546,8 +546,8 @@ function ErrorNotice({ message, onRetry }) {
       <button
         onClick={onRetry}
         style={{
-          background: '#fff', color: '#b03a2e',
-          border: '1px solid #fca5a5', borderRadius: 4,
+          background: '#fff', color: '#1a5a8a',
+          border: '1px solid #bcd9f2', borderRadius: 4,
           padding: '3px 9px', fontSize: 11.5, cursor: 'pointer', fontWeight: 500,
         }}
       >Retry</button>
@@ -1709,11 +1709,11 @@ function ConfirmDeleteModal({ name, target, onConfirm, onCancel }) {
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
           <div style={{
             width: 32, height: 32, borderRadius: '50%',
-            background: '#fef2f2',
+            background: '#e8f1fb',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}>
             <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"
-              size={15} color="#b03a2e" />
+              size={15} color="#1a5a8a" />
           </div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, marginBottom: 4 }}>
@@ -1739,7 +1739,7 @@ function ConfirmDeleteModal({ name, target, onConfirm, onCancel }) {
             onClick={handleConfirm}
             disabled={busy}
             style={{
-              background: '#b03a2e', color: '#fff',
+              background: '#1a5a8a', color: '#fff',
               border: 'none', borderRadius: 5,
               padding: '7px 14px', fontSize: 13, cursor: 'pointer', fontWeight: 500,
             }}

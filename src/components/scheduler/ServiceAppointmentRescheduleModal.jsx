@@ -373,7 +373,7 @@ const inputStyle = {
   border: `1px solid ${C.border}`, borderRadius: 5,
 }
 const errorBox = {
-  padding: '8px 10px', background: '#fef2f2', color: '#991b1b',
+  padding: '8px 10px', background: '#e8f1fb', color: '#1a5a8a',
   border: '1px solid #bcd9f2', borderRadius: 5, fontSize: 12.5, marginBottom: 10,
 }
 const btnSecondary = {

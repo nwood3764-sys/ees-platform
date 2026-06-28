@@ -260,7 +260,7 @@ export default function FieldVisibilityMatrix({
                     style={buttonSecondaryStyle}>Discard</button>
                 </>
               )}
-              {error && <span style={{ fontSize: 12, color: '#b03a2e' }}>Save failed — {error}</span>}
+              {error && <span style={{ fontSize: 12, color: '#1a5a8a' }}>Save failed — {error}</span>}
             </div>
 
             <div style={{ flex: 1, overflow: 'auto', padding: '0 24px 24px' }}>

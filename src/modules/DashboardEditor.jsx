@@ -528,8 +528,8 @@ function btnSecondary(disabled, size) { return {
 } }
 function miniBtn(danger, disabled) { return {
   width:24, height:24, fontSize:14, fontWeight:600,
-  background: danger ? '#fee' : C.card, color: danger ? '#c33' : C.textPrimary,
-  border:`1px solid ${danger ? '#fcc' : C.border}`, borderRadius:4,
+  background: danger ? '#e8f1fb' : C.card, color: danger ? '#7eb3e8' : C.textPrimary,
+  border:`1px solid ${danger ? '#e8f1fb' : C.border}`, borderRadius:4,
   cursor: disabled ? 'default' : 'pointer',
   opacity: disabled ? 0.4 : 1,
 } }

@@ -341,7 +341,7 @@ function NotificationRow({ n, onClick, busy }) {
         <span>{formatRelative(n.created_at)}</span>
         {n.is_automated && (
           <span style={{
-            background: '#fef3c7', color: '#1e466b',
+            background: '#e8f1fb', color: '#1e466b',
             padding: '1px 5px', borderRadius: 3,
             fontSize: 9, fontWeight: 700, letterSpacing: 0.3,
           }}>

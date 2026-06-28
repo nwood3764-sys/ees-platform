@@ -173,7 +173,7 @@ function NewPermissionSetModal({ onClose, onCreated }) {
               rows={3}
             />
           </FormField>
-          {error && <div style={{ fontSize: 12, color: '#b03a2e', marginBottom: 10 }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: '#1a5a8a', marginBottom: 10 }}>{error}</div>}
         </div>
         <div style={{ padding: '12px 18px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" onClick={onClose} disabled={busy} style={buttonSecondaryStyle}>Cancel</button>

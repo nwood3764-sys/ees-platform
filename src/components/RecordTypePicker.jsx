@@ -103,7 +103,7 @@ export default function RecordTypePicker({ tableName, objectLabel, state = null,
           )}
           {error && !loading && (
             <div style={{
-              padding: 14, background: '#e8f1fb', border: '1px solid #f3b4b4',
+              padding: 14, background: '#e8f1fb', border: '1px solid #bcd9f2',
               borderRadius: 6, color: '#1e466b', fontSize: 12.5,
             }}>
               {error}

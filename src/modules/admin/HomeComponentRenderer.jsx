@@ -152,7 +152,7 @@ function TaskListCard({ title, onNavigate }) {
             onMouseEnter={e => { if (onNavigate) e.currentTarget.style.background = '#f7faf9' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</span>
-            {t.isOverdue && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: '#b03a2e' }}>OVERDUE</span>}
+            {t.isOverdue && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: '#1a5a8a' }}>OVERDUE</span>}
           </div>
         ))}
       </div>
@@ -271,7 +271,7 @@ function EmbeddedListView({ title, sourceId, sources, onNavigate }) {
 
   if (status === 'loading') return <CardShell title={heading}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>Loading…</div></CardShell>
   if (status === 'empty')   return <CardShell title={heading}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>No list view selected.</div></CardShell>
-  if (status === 'error')   return <CardShell title={heading}><div style={{ padding: 14, color: '#b03a2e', fontSize: 12 }}>Could not load this list view.</div></CardShell>
+  if (status === 'error')   return <CardShell title={heading}><div style={{ padding: 14, color: '#1a5a8a', fontSize: 12 }}>Could not load this list view.</div></CardShell>
 
   const cols = pickColumns(def.visibleColumns, rows, def.object)
   const nameKey = cols[0]

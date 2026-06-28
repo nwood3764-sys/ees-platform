@@ -87,7 +87,7 @@ export function ReportWidget({ widget, parentTable, parentRecordId, onOpenRecord
         <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>Loading…</div>
       )}
       {error && (
-        <div style={{ padding: 12, fontSize: 12, color: '#c33' }}>
+        <div style={{ padding: 12, fontSize: 12, color: '#7eb3e8' }}>
           Failed to load: {error.message}
         </div>
       )}

@@ -335,14 +335,14 @@ function WelcomePane({ onOpenObjectManager, onNavigate }) {
 
   // Stat card styles
   const statCard = (highlight) => ({
-    background: highlight ? '#fef5f5' : C.card,
-    border: `1px solid ${highlight ? '#fcc' : C.border}`,
+    background: highlight ? '#e8f1fb' : C.card,
+    border: `1px solid ${highlight ? '#e8f1fb' : C.border}`,
     borderRadius: 8, padding: '12px 14px',
     minHeight: 68,
   })
   const statValue = (highlight) => ({
     fontSize: 22, fontWeight: 700,
-    color: highlight ? '#933' : C.textPrimary,
+    color: highlight ? '#1a5a8a' : C.textPrimary,
     lineHeight: 1, marginBottom: 4,
   })
   const statLabel = { fontSize: 11, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4 }
@@ -644,10 +644,10 @@ function AuditLogPane() {
               style={{
                 ...inputStyle, width: 280,
                 fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5,
-                borderColor: recordFilterValid ? C.border : '#e85a4f',
+                borderColor: recordFilterValid ? C.border : '#7eb3e8',
               }} />
             {!recordFilterValid && (
-              <span style={{ fontSize: 10.5, color: '#e85a4f' }}>Not a valid UUID</span>
+              <span style={{ fontSize: 10.5, color: '#7eb3e8' }}>Not a valid UUID</span>
             )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -921,9 +921,9 @@ function RecycleBinPane({ onOpenRecord }) {
           {restoreNotice && (
             <div style={{
               fontSize: 12, padding: '5px 10px', borderRadius: 4,
-              background: restoreNotice.type === 'ok' ? '#e8f5ec' : '#fee',
-              color: restoreNotice.type === 'ok' ? '#1a7a4e' : '#933',
-              border: `1px solid ${restoreNotice.type === 'ok' ? '#9c9' : '#f99'}`,
+              background: restoreNotice.type === 'ok' ? '#e8f5ec' : '#e8f1fb',
+              color: restoreNotice.type === 'ok' ? '#1a7a4e' : '#1a5a8a',
+              border: `1px solid ${restoreNotice.type === 'ok' ? '#9c9' : '#bcd9f2'}`,
               alignSelf: 'center',
             }}>
               {restoreNotice.message}
@@ -1002,8 +1002,8 @@ function RecycleBinPane({ onOpenRecord }) {
                   style={{
                     fontSize: 11.5, padding: '3px 10px',
                     background: 'transparent',
-                    color: '#933',
-                    border: `1px solid #f99`,
+                    color: '#1a5a8a',
+                    border: `1px solid #bcd9f2`,
                     borderRadius: 3,
                     cursor: (restoreBusy === row._id || purgeBusy) ? 'not-allowed' : 'pointer',
                     fontWeight: 500,
@@ -1037,7 +1037,7 @@ function RecycleBinPane({ onOpenRecord }) {
               boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
               border: `1px solid ${C.border}`,
             }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#933', marginBottom: 4 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#1a5a8a', marginBottom: 4 }}>
               Permanently purge {purgeRow.id}
             </div>
             <div style={{ fontSize: 12.5, color: C.textPrimary, marginBottom: 12 }}>
@@ -1045,7 +1045,7 @@ function RecycleBinPane({ onOpenRecord }) {
             </div>
             <div style={{
               fontSize: 12, color: C.textSecondary, marginBottom: 14, lineHeight: 1.45,
-              padding: 10, background: '#fef5f5', borderRadius: 4, border: '1px solid #fcc',
+              padding: 10, background: '#e8f1fb', borderRadius: 4, border: '1px solid #e8f1fb',
             }}>
               This action <strong>cannot be undone</strong>. The record will be physically
               deleted from the database. A HARD_DELETE row with the complete record
@@ -1090,7 +1090,7 @@ function RecycleBinPane({ onOpenRecord }) {
                 disabled={purgeBusy || purgeTyped.trim() !== purgeRow.id}
                 style={{
                   fontSize: 12.5, padding: '6px 14px',
-                  background: (purgeTyped.trim() === purgeRow.id && !purgeBusy) ? '#933' : C.cardSecondary,
+                  background: (purgeTyped.trim() === purgeRow.id && !purgeBusy) ? '#1a5a8a' : C.cardSecondary,
                   color: (purgeTyped.trim() === purgeRow.id && !purgeBusy) ? '#fff' : C.textMuted,
                   border: 'none', borderRadius: 4,
                   cursor: (purgeTyped.trim() === purgeRow.id && !purgeBusy) ? 'pointer' : 'not-allowed',
