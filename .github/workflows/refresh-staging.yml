@@ -43,8 +43,32 @@ jobs:
         run: |
           set -euo pipefail
           export PATH=/usr/lib/postgresql/17/bin:$PATH
-          echo "Resetting staging public schema..."
-          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"
+          echo "Dropping app objects in public (one statement per transaction to avoid lock exhaustion; extensions like PostGIS are left in place)..."
+          # A single DROP SCHEMA ... CASCADE locks every object (incl. PostGIS's ~1000)
+          # in one transaction and exceeds max_locks_per_transaction. Instead, emit one
+          # DROP per app (non-extension) object and run them in autocommit (each its own tx).
+          psql "$STAGING_DB_URL" -tAc "
+            SELECT 'DROP TABLE IF EXISTS public.'||quote_ident(c.relname)||' CASCADE;'
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relkind IN ('r','p')
+                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
+            UNION ALL
+            SELECT 'DROP VIEW IF EXISTS public.'||quote_ident(c.relname)||' CASCADE;'
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relkind='v'
+                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
+            UNION ALL
+            SELECT 'DROP SEQUENCE IF EXISTS public.'||quote_ident(c.relname)||' CASCADE;'
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relkind='S'
+                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
+            UNION ALL
+            SELECT 'DROP FUNCTION IF EXISTS public.'||quote_ident(p.proname)||'('||pg_get_function_identity_arguments(p.oid)||') CASCADE;'
+              FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+              WHERE n.nspname='public' AND p.prokind IN ('f','w')
+                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_proc'::regclass AND d.objid=p.oid AND d.deptype='e');
+          " | psql "$STAGING_DB_URL" --echo-errors
+          echo "Applying schema..."
           for f in $(ls supabase/migrations/*.sql | sort); do
             echo "Applying $(basename "$f")"
             psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q -f "$f"
