@@ -20,8 +20,9 @@
   publish  = "dist"
 
 [build.environment]
-  VITE_SUPABASE_URL      = "https://flyjigrijjjtcsvpgzvk.supabase.co"
-  VITE_SUPABASE_ANON_KEY = "sb_publishable_qkmVXJMofrUrSoVA3bhZ2g_XNsdE9lq"
+  # LEAP Staging database — this is the `staging` branch (production lives on `master`).
+  VITE_SUPABASE_URL      = "https://xlieenkfhypqhevmwxzi.supabase.co"
+  VITE_SUPABASE_ANON_KEY = "sb_publishable_VWDcdop6P3qQxYWsHhzSuA_TSIYKMr1"
   NODE_VERSION           = "20"
 
 # SPA routing — any unknown path should serve index.html so the React
