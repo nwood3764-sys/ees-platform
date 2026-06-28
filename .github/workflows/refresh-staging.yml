@@ -89,6 +89,22 @@ jobs:
               --exclude-table=public.spatial_ref_sys "$PROD_DB_URL"; } \
             | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction
 
+      - name: Copy login accounts (auth) into staging
+        env:
+          PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          set -euo pipefail
+          export PATH=/usr/lib/postgresql/17/bin:$PATH
+          echo "Copying auth users + identities (preserves IDs so app profiles stay linked)..."
+          # Replace staging's auth accounts with production's. session_replication_role=replica
+          # bypasses FK/triggers so the delete+load doesn't touch public.users or fire handle_new_user.
+          { echo "SET session_replication_role = replica;"; \
+            echo "DELETE FROM auth.identities; DELETE FROM auth.users;"; \
+            pg_dump --data-only --no-owner \
+              --table='auth.users' --table='auth.identities' "$PROD_DB_URL"; } \
+            | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction
+
       - name: Summary
         env:
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
