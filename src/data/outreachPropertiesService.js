@@ -46,10 +46,10 @@ export async function fetchOutreachProperties({ includeEngaged = false } = {}) {
       property_subsidy_type,
       property_status,
       property_account_id,
-      property_managing_account_id,
+      property_management_company_id,
       property_account_name,
       account_hud_participant_number,
-      property_managing_account_name,
+      property_management_company_name,
       psd_source_dataset,
       psd_hud_contract_number,
       psd_hud_contract_type,
@@ -116,7 +116,7 @@ export async function fetchOutreachProperties({ includeEngaged = false } = {}) {
     // chosen account back to property_account_id.
     property_account_id: r.property_account_id || null,
     accountHudParticipantNumber: r.account_hud_participant_number || '',
-    managingAccount:   r.property_managing_account_name || '',
+    managingAccount:   r.property_management_company_name || '',
     // Source data
     sourceDataset:     r.psd_source_dataset || '',
     hudContractNumber: r.psd_hud_contract_number || '',

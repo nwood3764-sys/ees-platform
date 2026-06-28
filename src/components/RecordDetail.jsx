@@ -4917,8 +4917,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       property_id:                          r.id,
       // Account / management company / site contact — the "who" of the property
       opportunity_account_id:               r.property_account_id || null,
-      opportunity_managing_account_id:      r.property_managing_account_id || null,
-      opportunity_property_management_company: r.property_managing_account_id || null,
+      opportunity_managing_account_id:      r.property_management_company_id || null,
+      opportunity_property_management_company: r.property_management_company_id || null,
       opportunity_property_site_contact:    r.property_primary_contact_id || null,
       // Names / identifiers
       opportunity_property_aka:             r.property_aka_name || null,
