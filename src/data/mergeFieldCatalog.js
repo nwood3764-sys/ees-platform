@@ -44,7 +44,7 @@ export const MERGE_FIELD_OBJECTS = [
   { key: 'project',              label: 'Project',              table: 'projects',                  kind: 'scalar' },
   { key: 'property',             label: 'Property',             table: 'properties',                kind: 'scalar' },
   { key: 'property_owner',       label: 'Property Owner',       table: 'accounts',                  kind: 'scalar', description: 'properties.property_account_id' },
-  { key: 'property_manager',     label: 'Property Manager',     table: 'accounts',                  kind: 'scalar', description: 'properties.property_managing_account_id' },
+  { key: 'property_manager',     label: 'Property Manager',     table: 'accounts',                  kind: 'scalar', description: 'properties.property_management_company_id' },
   { key: 'project_account',      label: 'Project Account',      table: 'accounts',                  kind: 'scalar', description: 'projects.project_account_id' },
   { key: 'opportunity',          label: 'Opportunity',          table: 'opportunities',             kind: 'scalar', description: 'projects.opportunity_id' },
   { key: 'opportunity_account',  label: 'Opportunity Account',  table: 'accounts',                  kind: 'scalar', description: 'opportunities.opportunity_account_id' },

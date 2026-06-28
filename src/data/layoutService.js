@@ -1130,7 +1130,7 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50, o
  *     "lookup_field": "contact_name", // fallback for the unscoped path
  *     "lookup_dependency": {
  *       "kind": "contacts_for_accounts",
- *       "depends_on": ["property_account_id", "property_managing_account_id"]
+ *       "depends_on": ["property_account_id", "property_management_company_id"]
  *     }
  *   }
  *
