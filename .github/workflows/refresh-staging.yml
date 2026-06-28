@@ -58,10 +58,12 @@ jobs:
           set -euo pipefail
           export PATH=/usr/lib/postgresql/17/bin:$PATH
           echo "Copying production data (public schema, excluding PostGIS reference table)..."
-          pg_dump --data-only --disable-triggers --no-owner --schema=public \
-            --exclude-table=public.spatial_ref_sys \
-            "$PROD_DB_URL" \
-            | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q
+          # session_replication_role=replica bypasses FK + user triggers during load
+          # without ALTER-ing system triggers (which Supabase's role can't touch).
+          { echo "SET session_replication_role = replica;"; \
+            pg_dump --data-only --no-owner --schema=public \
+              --exclude-table=public.spatial_ref_sys "$PROD_DB_URL"; } \
+            | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction
 
       - name: Summary
         env:
