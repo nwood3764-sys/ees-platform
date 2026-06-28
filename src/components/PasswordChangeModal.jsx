@@ -4,6 +4,7 @@ import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
+import PasswordInput from './PasswordInput'
 
 // ---------------------------------------------------------------------------
 // PasswordChangeModal — in-app password change for the currently signed-in
@@ -253,7 +254,7 @@ const Field = forwardRef(function Field(
       }}>
         {label}
       </label>
-      <input
+      <PasswordInput
         ref={ref}
         value={value}
         disabled={disabled}

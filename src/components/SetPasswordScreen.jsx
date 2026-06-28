@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
+import PasswordInput from './PasswordInput'
 
 /**
  * SetPasswordScreen — shown when a user lands on Energy Efficiency Services via a Supabase Auth
@@ -105,7 +106,7 @@ export default function SetPasswordScreen({ email, mode, onComplete }) {
             background: '#07111f', color: '#3ecf8e',
             fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em',
             marginBottom: 12,
-          }}>A</div>
+          }}>E</div>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: C.textPrimary, letterSpacing: '-0.01em' }}>
             {heading}
           </h1>
@@ -119,8 +120,7 @@ export default function SetPasswordScreen({ email, mode, onComplete }) {
 
         <form onSubmit={handleSubmit}>
           <FieldLabel>New Password</FieldLabel>
-          <input
-            type="password"
+          <PasswordInput
             autoComplete="new-password"
             required
             autoFocus
@@ -131,8 +131,7 @@ export default function SetPasswordScreen({ email, mode, onComplete }) {
           />
 
           <FieldLabel>Confirm Password</FieldLabel>
-          <input
-            type="password"
+          <PasswordInput
             autoComplete="new-password"
             required
             value={confirmPassword}
