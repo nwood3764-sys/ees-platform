@@ -103,9 +103,11 @@ Drive the work; don't check in constantly. Surface only genuine binary decisions
 
 ---
 
-## CURRENT BUILD STATE (as of 2026-06-27)
+## CURRENT BUILD STATE (as of 2026-06-28)
 
 Active workstream: **Outreach Dashboard (DSH-00010)**.
+
+**Migration baseline / dev workflow (2026-06-28):** the migration history was squashed into a single verified baseline so Supabase branching (isolated sandbox DBs) works. `supabase/migrations/` now contains only `20260412000000_leap_baseline_schema.sql` (generated from live prod, fingerprint-verified against production on a throwaway branch — every table/column/function/policy/constraint identical). The 190 prior files live in `supabase/migrations_archive_pre_baseline/` (reference only, never replayed). Production's 870-row migration registry was replaced with the single baseline row; the full history is backed up in `supabase_migrations.schema_migrations_backup_20260628`. Going forward, every schema change is a NEW migration file added after the baseline. Custom RLS roles (`internal_staff`, `external_partner`, `customer`) are created at the top of the baseline. See `docs/leap-dev-workflow.md`.
 
 **Done and shipped to master:**
 - Two purpose-built reports: **RPT-00036** Outreach Status Report (primary object `properties`, NC state runtime filter) and **RPT-00037** Outreach Pipeline by Stage Report (primary object `opportunities`, NC filter).
