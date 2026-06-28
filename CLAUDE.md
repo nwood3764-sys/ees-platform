@@ -151,6 +151,7 @@ Active workstream: **Outreach Dashboard (DSH-00010)**.
 | Module list and build order | `leap-modules-and-build-order.md` |
 | Schema session instructions | `leap-schema-session.md` |
 | Development workflow (sandbox → prod) | `leap-dev-workflow.md` |
+| Staging environment (full-data copy) | `leap-staging-environment.md` |
 | HUD data sources | `leap-hud-data-sources.md` |
 | Agent operating mode | `leap-agent-operating-mode.md` |
 | Build discipline (folded into this file) | `leap-build-discipline.md` |

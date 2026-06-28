@@ -1,0 +1,74 @@
+name: Refresh Staging Database
+
+# Rebuilds the LEAP Staging database to match production: applies the schema
+# (baseline + any later migrations), then copies all production data in.
+#
+# Run it from the GitHub "Actions" tab -> "Refresh Staging Database" -> "Run workflow"
+# whenever you want staging to reflect current production data.
+#
+# Requires two repository secrets (Settings -> Secrets and variables -> Actions):
+#   PROD_DB_URL     - production session-pooler connection string (read)
+#   STAGING_DB_URL  - LEAP Staging session-pooler connection string (write)
+# Use the "Session pooler" URI from each project's Supabase dashboard
+# (Project Settings -> Database -> Connection string), with the real password.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: refresh-staging
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL 17 client
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Rebuild staging schema (baseline + later migrations)
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          set -euo pipefail
+          export PATH=/usr/lib/postgresql/17/bin:$PATH
+          echo "Resetting staging public schema..."
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"
+          for f in $(ls supabase/migrations/*.sql | sort); do
+            echo "Applying $(basename "$f")"
+            psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: Copy production data into staging
+        env:
+          PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          set -euo pipefail
+          export PATH=/usr/lib/postgresql/17/bin:$PATH
+          echo "Copying production data (public schema, excluding PostGIS reference table)..."
+          pg_dump --data-only --disable-triggers --no-owner --schema=public \
+            --exclude-table=public.spatial_ref_sys \
+            "$PROD_DB_URL" \
+            | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q
+
+      - name: Summary
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          set -euo pipefail
+          export PATH=/usr/lib/postgresql/17/bin:$PATH
+          rows=$(psql "$STAGING_DB_URL" -tAc "SELECT coalesce(sum(n_live_tup),0) FROM pg_stat_user_tables WHERE schemaname='public';")
+          tables=$(psql "$STAGING_DB_URL" -tAc "SELECT count(*) FROM pg_tables WHERE schemaname='public';")
+          echo "✅ Staging refreshed: ${tables} tables, ~${rows} rows copied from production." >> "$GITHUB_STEP_SUMMARY"
