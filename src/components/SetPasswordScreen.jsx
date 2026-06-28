@@ -27,6 +27,7 @@ import { C } from '../data/constants'
 export default function SetPasswordScreen({ email, mode, onComplete }) {
   const [password, setPassword]               = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPw, setShowPw]                   = useState(false)
   const [submitting, setSubmitting]           = useState(false)
   const [error, setError]                     = useState(null)
 
@@ -105,7 +106,7 @@ export default function SetPasswordScreen({ email, mode, onComplete }) {
             background: '#07111f', color: '#3ecf8e',
             fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em',
             marginBottom: 12,
-          }}>A</div>
+          }}>E</div>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: C.textPrimary, letterSpacing: '-0.01em' }}>
             {heading}
           </h1>
@@ -119,25 +120,21 @@ export default function SetPasswordScreen({ email, mode, onComplete }) {
 
         <form onSubmit={handleSubmit}>
           <FieldLabel>New Password</FieldLabel>
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            autoFocus
+          <PasswordField
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="At least 8 characters"
-            style={inputStyle}
+            autoFocus
+            show={showPw}
+            onToggle={() => setShowPw((v) => !v)}
           />
 
           <FieldLabel>Confirm Password</FieldLabel>
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
+          <PasswordField
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            style={inputStyle}
+            show={showPw}
+            onToggle={() => setShowPw((v) => !v)}
           />
 
           {error && (
@@ -180,6 +177,70 @@ function FieldLabel({ children }) {
       display: 'block', fontSize: 11, fontWeight: 600, color: C.textSecondary,
       textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5,
     }}>{children}</label>
+  )
+}
+
+/**
+ * Password input with a show/hide eye toggle. Technicians setting up their
+ * account need to see what they type — fat-fingering an invisible password
+ * twice is the #1 self-service support call. The toggle flips type between
+ * 'password' and 'text'; `show`/`onToggle` are lifted to the parent so a
+ * single toggle reveals both the New and Confirm fields together.
+ */
+function PasswordField({ value, onChange, placeholder, autoFocus, show, onToggle }) {
+  return (
+    <div style={{ position: 'relative', marginBottom: 14 }}>
+      <input
+        type={show ? 'text' : 'password'}
+        autoComplete="new-password"
+        required
+        autoFocus={autoFocus}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        style={{ ...inputStyle, marginBottom: 0, paddingRight: 44 }}
+      />
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        title={show ? 'Hide password' : 'Show password'}
+        style={{
+          position: 'absolute', top: 0, right: 0, height: '100%', width: 40,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+          color: C.textMuted,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = C.textSecondary }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = C.textMuted }}
+      >
+        <EyeIcon off={show} />
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Eye / eye-off SVG. `off=true` draws the slashed eye (password is currently
+ * visible, so the action hides it). SVG only — no emoji in UI chrome.
+ */
+function EyeIcon({ off }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      {off ? (
+        <>
+          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+          <path d="M6.61 6.61A18.5 18.5 0 0 0 2 12s3 8 10 8a9.12 9.12 0 0 0 5.39-1.61" />
+          <line x1="2" y1="2" x2="22" y2="22" />
+        </>
+      ) : (
+        <>
+          <path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8-10-8-10-8z" />
+          <circle cx="12" cy="12" r="3" />
+        </>
+      )}
+    </svg>
   )
 }
 
