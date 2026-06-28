@@ -512,12 +512,12 @@ export function actionColors(C, color) {
     case ACTION_COLORS.AMBER:
       return {
         fg: '#1e466b', bg: C.page,
-        border: '#fcd34d', hoverBg: '#eef5fc', hoverBorder: '#fcd34d',
+        border: '#7eb3e8', hoverBg: '#eef5fc', hoverBorder: '#7eb3e8',
       }
     case ACTION_COLORS.RED:
       return {
-        fg: '#b03a2e', bg: C.page,
-        border: C.border, hoverBg: '#fef2f2', hoverBorder: '#fca5a5',
+        fg: '#1a5a8a', bg: C.page,
+        border: C.border, hoverBg: '#e8f1fb', hoverBorder: '#bcd9f2',
       }
     case ACTION_COLORS.NEUTRAL:
     default:

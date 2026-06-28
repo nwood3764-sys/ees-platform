@@ -332,7 +332,7 @@ export default function TechnicianSetupWizard({ onClose, onComplete }) {
 
         {error && (
           <div style={{
-            background: '#fdecea', border: '1px solid #f3b9b1', color: '#8a2d20',
+            background: '#e8f1fb', border: '1px solid #bcd9f2', color: '#1e466b',
             padding: '9px 12px', borderRadius: 6, fontSize: 12, marginTop: 14,
           }}>{error}</div>
         )}

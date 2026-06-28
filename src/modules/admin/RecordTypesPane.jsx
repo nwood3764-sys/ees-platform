@@ -147,7 +147,7 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
   if (error) {
     return (
       <div style={{ padding: 40, textAlign: 'center' }}>
-        <div style={{ color: '#b03a2e', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
+        <div style={{ color: '#1a5a8a', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
           Could not load record types
         </div>
         <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}>
@@ -668,7 +668,7 @@ function NewRecordTypeModal({
         {/* Error */}
         {error && (
           <div style={{
-            background: '#fdecea', border: '1px solid #f3b9b1', color: '#8a2d20',
+            background: '#e8f1fb', border: '1px solid #bcd9f2', color: '#1e466b',
             padding: '9px 12px', borderRadius: 6, fontSize: 12, marginBottom: 14,
           }}>
             {error}
@@ -831,9 +831,9 @@ const buttonSmSecondaryStyle = {
 const buttonSmDangerStyle = {
   padding: '4px 10px',
   fontSize: 11.5, fontWeight: 500,
-  color: '#b03a2e',
+  color: '#1a5a8a',
   background: C.card,
-  border: '1px solid #f3b9b1',
+  border: '1px solid #bcd9f2',
   borderRadius: 4,
   cursor: 'pointer',
 }
@@ -851,11 +851,11 @@ const hintBoxStyle = {
 
 const warningBoxStyle = {
   background: '#eef5fc',
-  border: '1px solid #f0d48a',
+  border: '1px solid #bcd9f2',
   borderRadius: 6,
   padding: '9px 12px',
   fontSize: 11.5,
-  color: '#7a5a1c',
+  color: '#1e466b',
   lineHeight: 1.5,
   marginBottom: 14,
 }

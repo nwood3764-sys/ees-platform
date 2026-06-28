@@ -429,7 +429,7 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
                   <TableRow key={p.id}>
                     <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}`, color:C.textPrimary, fontWeight:500, maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</td>
                     <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{p.workOrders}</td>
-                    <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}` }}><button style={{ background:'#e8f1fb', color:'#1e466b', border:`1px solid #f0d8a0`, borderRadius:4, padding:'2px 7px', fontSize:10, fontWeight:600, cursor:'pointer' }}>Schedule</button></td>
+                    <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}` }}><button style={{ background:'#e8f1fb', color:'#1e466b', border:`1px solid #bcd9f2`, borderRadius:4, padding:'2px 7px', fontSize:10, fontWeight:600, cursor:'pointer' }}>Schedule</button></td>
                   </TableRow>
                 ))}
               </tbody>

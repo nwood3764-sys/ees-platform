@@ -233,7 +233,7 @@ function SigningPortal() {
 
 function FullPageMessage({ title, message, variant }) {
   const color =
-    variant === 'error'   ? '#b03a2e' :
+    variant === 'error'   ? '#1a5a8a' :
     variant === 'success' ? C.emerald : C.textPrimary
   return (
     <div style={{
@@ -292,7 +292,7 @@ function PortalLayout({ data, tabValues, activeTabId, consent, submitting, onTab
       </header>
 
       {cantSignReason && (
-        <div style={{ background: '#eef5fc', borderBottom: `1px solid #fde68a`, padding: '10px 20px', fontSize: 13, color: '#1e466b' }}>
+        <div style={{ background: '#eef5fc', borderBottom: `1px solid #bcd9f2`, padding: '10px 20px', fontSize: 13, color: '#1e466b' }}>
           {cantSignReason} You can review the document below.
         </div>
       )}
@@ -450,7 +450,7 @@ function PdfViewer({ pdfUrl, tabs, tabValues, canFill, activeTabId, onTabClick, 
     })
   }, [pages])
 
-  if (error) return <div style={{ color: '#b03a2e', fontSize: 13 }}>Failed to load PDF: {error}</div>
+  if (error) return <div style={{ color: '#1a5a8a', fontSize: 13 }}>Failed to load PDF: {error}</div>
   if (!pdfUrl) return <div style={{ fontSize: 13, color: C.textMuted }}>No PDF available.</div>
 
   return (
@@ -497,7 +497,7 @@ function TabOverlays({ containerRef, pages, tabs, tabValues, canFill, activeTabI
               onClick={() => canFill && onTabClick(t.id)}
               style={{
                 position: 'absolute', left, top, width: w, height: h,
-                background: filled ? 'rgba(62, 207, 142, 0.15)' : 'rgba(247, 207, 70, 0.30)',
+                background: filled ? 'rgba(62, 207, 142, 0.15)' : 'rgba(126,179,232,0.30)',
                 border: `2px solid ${active ? C.emerald : (filled ? C.emerald : '#7eb3e8')}`,
                 borderRadius: 4,
                 cursor: canFill ? 'pointer' : 'not-allowed',
@@ -806,7 +806,7 @@ function DeclineConfirm({ open, recipientName, envelopeName, submitting, onCance
             onClick={() => onConfirm(reason)}
             disabled={submitting}
             style={{
-              background: '#b03a2e', border: 'none', color: '#fff',
+              background: '#1a5a8a', border: 'none', color: '#fff',
               padding: '9px 20px', fontSize: 13, fontWeight: 600, borderRadius: 5,
               cursor: submitting ? 'wait' : 'pointer', opacity: submitting ? 0.7 : 1,
             }}

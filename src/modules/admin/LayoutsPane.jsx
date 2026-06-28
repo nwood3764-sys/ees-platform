@@ -110,7 +110,7 @@ export default function LayoutsPane({
   if (error) {
     return (
       <div style={{ padding: 40, textAlign: 'center' }}>
-        <div style={{ color: '#b03a2e', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Could not load layouts</div>
+        <div style={{ color: '#1a5a8a', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Could not load layouts</div>
         <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}>{String(error.message || error)}</div>
       </div>
     )
@@ -580,7 +580,7 @@ function DeleteLayoutModal({ layout, onClose, onConfirm }) {
           <button
             onClick={confirm}
             disabled={busy || !reason.trim()}
-            style={{ ...buttonPrimaryStyle, background: '#b03a2e' }}
+            style={{ ...buttonPrimaryStyle, background: '#1a5a8a' }}
           >
             {busy ? 'Deleting…' : 'Delete Layout'}
           </button>

@@ -135,7 +135,7 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
         )}
         {error && !loading && (
           <div style={{ padding: 40, textAlign: 'center' }}>
-            <div style={{ color: '#b03a2e', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
+            <div style={{ color: '#1a5a8a', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
               Could not load {obj.table}
             </div>
             <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}>
@@ -363,7 +363,7 @@ function FieldsPane({ columns, picklistFields = new Set(), fieldMeta = {}, onOpe
             </div>
             <div style={{ textAlign: 'center' }}>
               {c.is_nullable === 'NO' ? (
-                <span style={{ background: '#fdecec', color: '#c04040', fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 3 }}>
+                <span style={{ background: '#e8f1fb', color: '#7eb3e8', fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 3 }}>
                   Required
                 </span>
               ) : (

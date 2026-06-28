@@ -481,7 +481,7 @@ export default function LayoutCanvas({
               Loading fields…
             </div>
           ) : colsError ? (
-            <div style={{ padding: 14, color: '#b03a2e', fontSize: 11.5 }}>
+            <div style={{ padding: 14, color: '#1a5a8a', fontSize: 11.5 }}>
               {String(colsError.message || colsError)}
             </div>
           ) : availableColumns.length === 0 ? (

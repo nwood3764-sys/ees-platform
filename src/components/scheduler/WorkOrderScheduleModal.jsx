@@ -289,7 +289,7 @@ export default function WorkOrderScheduleModal({
               {!statusOk && (
                 <div style={{
                   padding: '8px 10px', background: '#eef5fc', color: '#1e466b',
-                  border: '1px solid #fde68a', borderRadius: 5, fontSize: 12.5, marginBottom: 12,
+                  border: '1px solid #bcd9f2', borderRadius: 5, fontSize: 12.5, marginBottom: 12,
                 }}>
                   Only work orders in <strong>To Be Scheduled</strong> status can be scheduled here.
                   For already-scheduled work, open its Service Appointment and use Reschedule.
@@ -300,7 +300,7 @@ export default function WorkOrderScheduleModal({
               {statusOk && (!duration || duration <= 0) && (
                 <div style={{
                   padding: '8px 10px', background: '#eef5fc', color: '#1e466b',
-                  border: '1px solid #fde68a', borderRadius: 5, fontSize: 12.5, marginBottom: 12,
+                  border: '1px solid #bcd9f2', borderRadius: 5, fontSize: 12.5, marginBottom: 12,
                 }}>
                   No duration is set on this work order's work type. Set <strong>work_type_duration_minutes</strong>
                   on the Work Type, or override <strong>work_order_duration_minutes</strong> on this record, before scheduling.
@@ -411,7 +411,7 @@ const inputStyle = {
   border: `1px solid ${C.border}`, borderRadius: 5,
 }
 const errorBox = {
-  padding: '8px 10px', background: '#fef2f2', color: '#991b1b',
+  padding: '8px 10px', background: '#e8f1fb', color: '#1a5a8a',
   border: '1px solid #bcd9f2', borderRadius: 5, fontSize: 12.5, marginBottom: 10,
 }
 const btnSecondary = {

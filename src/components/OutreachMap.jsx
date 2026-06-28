@@ -74,8 +74,9 @@ async function loadLeaflet() {
   return _leafletPromise
 }
 
-// Custom cluster icon — emerald palette aligned with the LEAP design
-// system. Three size bands.
+// Custom cluster icon — LEAP design-system palette. Density reads as an
+// emerald-to-blue gradient (low → high count): emerald, emerald-mid, sky
+// blue, deep navy-blue. No red/orange. Four size bands.
 function makeClusterIcon(L) {
   return (cluster) => {
     const count = cluster.getChildCount()
@@ -108,8 +109,8 @@ function ensureClusterStyles() {
     }
     .leap-cluster.leap-cluster-sm      { background: rgba(62,207,142,0.85); font-size: 12px; }
     .leap-cluster.leap-cluster-sm-plus { background: rgba(42,171,114,0.92); font-size: 12.5px; }
-    .leap-cluster.leap-cluster-md      { background: rgba(232,169,73,0.95); }
-    .leap-cluster.leap-cluster-lg      { background: rgba(212,86,86,0.95); font-size: 14px; }
+    .leap-cluster.leap-cluster-md      { background: rgba(126,179,232,0.95); }
+    .leap-cluster.leap-cluster-lg      { background: rgba(30,70,107,0.95); font-size: 14px; }
     .leap-cluster:hover { transform: scale(1.06); transition: transform 120ms ease; }
   `
   document.head.appendChild(style)
@@ -278,7 +279,7 @@ export function OutreachMap({ properties, onOpenProperty, onBoundsChange }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
       {error && (
-        <div style={{ padding:'10px 16px', background:'#fde8e8', color:'#a32626', fontSize:12, borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ padding:'10px 16px', background:'#e8f1fb', color:'#1e466b', fontSize:12, borderBottom:`1px solid ${C.border}` }}>
           Map failed to load: {error.message}
         </div>
       )}

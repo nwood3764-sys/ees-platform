@@ -250,7 +250,7 @@ function ContentTab({ article, onSaved, onDeleted }) {
           </div>
         </FormField>
 
-        {error && <div style={{ marginTop: 8, fontSize: 12, color: '#b03a2e' }}>{error}</div>}
+        {error && <div style={{ marginTop: 8, fontSize: 12, color: '#1a5a8a' }}>{error}</div>}
 
         <div style={{ marginTop: 14, display: 'flex', gap: 8 }}>
           <button type="button" onClick={save} disabled={!dirty || saving}
@@ -385,7 +385,7 @@ function AnchorsTab({ articleId, anchors, onSaved }) {
           <button type="button" onClick={() => addAnchor('concept')} style={buttonSecondaryStyle}>+ Concept</button>
         </div>
 
-        {error && <div style={{ marginTop: 12, fontSize: 12, color: '#b03a2e' }}>{error}</div>}
+        {error && <div style={{ marginTop: 12, fontSize: 12, color: '#1a5a8a' }}>{error}</div>}
 
         <div style={{ marginTop: 18, display: 'flex', gap: 8 }}>
           <button type="button" onClick={save} disabled={!dirty || saving}
@@ -416,7 +416,7 @@ function AnchorRow({ anchor, onChange, onRemove }) {
         <button type="button" onClick={onRemove}
           style={{
             marginLeft: 'auto', background: 'none', border: 'none', padding: 0,
-            color: '#b03a2e', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            color: '#1a5a8a', fontSize: 12, fontWeight: 500, cursor: 'pointer',
           }}>Remove</button>
       </div>
 

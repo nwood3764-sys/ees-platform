@@ -485,7 +485,7 @@ export default function ComposeEmailModal({
             {resolvedMailboxError && (
               <div style={{
                 padding: 8, fontSize: 12, color: '#1e466b',
-                background: '#e8f1fb', border: `1px solid #f3c8c8`,
+                background: '#e8f1fb', border: `1px solid #bcd9f2`,
                 borderRadius: 5,
               }}>
                 {resolvedMailboxError}
@@ -557,7 +557,7 @@ export default function ComposeEmailModal({
             {templatesError && (
               <div style={{
                 padding: 8, fontSize: 12, color: '#1e466b',
-                background: '#e8f1fb', border: `1px solid #f3c8c8`,
+                background: '#e8f1fb', border: `1px solid #bcd9f2`,
                 borderRadius: 5,
               }}>
                 Failed to load templates: {templatesError}
@@ -721,7 +721,7 @@ export default function ComposeEmailModal({
             <div style={{
               padding: 10, fontSize: 12,
               background: lastResult.mode === 'mock' ? '#e8f1fb' : '#e8f8f2',
-              border: `1px solid ${lastResult.mode === 'mock' ? '#f0d7a0' : '#bfe7d3'}`,
+              border: `1px solid ${lastResult.mode === 'mock' ? '#bcd9f2' : '#bfe7d3'}`,
               borderRadius: 5,
               color: C.textPrimary,
             }}>

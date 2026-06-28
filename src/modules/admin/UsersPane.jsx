@@ -301,7 +301,7 @@ function ResetPasswordModal({ state, onConfirm, onClose }) {
 
         {phase === 'error' && (
           <>
-            <div style={{ ...modalBody, color: '#8a2d20' }}>
+            <div style={{ ...modalBody, color: '#1e466b' }}>
               {state.message || 'The reset email could not be sent.'}
             </div>
             <div style={modalActions}>
@@ -369,7 +369,7 @@ function DonePhase({ email, url, onClose }) {
           </span>
         )}
         {copyState === 'failed' && (
-          <span style={{ marginLeft: 6, color: '#8a2d20', fontSize: 12 }}>
+          <span style={{ marginLeft: 6, color: '#1e466b', fontSize: 12 }}>
             (auto-copy failed — use the Copy button below)
           </span>
         )}

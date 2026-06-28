@@ -1064,7 +1064,7 @@ function ViewSelector({
   const IconBtn = ({ title, onClick, children, danger }) => (
     <button title={title} onClick={(e) => { e.stopPropagation(); onClick(); }}
       style={{ background: 'transparent', border: 'none', padding: 3, cursor: 'pointer',
-               display: 'flex', alignItems: 'center', color: danger ? '#a32626' : C.textMuted, borderRadius: 4 }}
+               display: 'flex', alignItems: 'center', color: danger ? '#1a5a8a' : C.textMuted, borderRadius: 4 }}
       onMouseEnter={e => e.currentTarget.style.background = C.page}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
       {children}
@@ -1249,7 +1249,7 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onSave
           </>
         )}
 
-        {err && <div style={{ background: '#fde8e8', color: '#a32626', fontSize: 12, padding: '8px 10px', borderRadius: 6, marginBottom: 14 }}>{err}</div>}
+        {err && <div style={{ background: '#e8f1fb', color: '#1a5a8a', fontSize: 12, padding: '8px 10px', borderRadius: 6, marginBottom: 14 }}>{err}</div>}
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button onClick={() => commit(false)} disabled={!name.trim() || saving}
@@ -2618,7 +2618,7 @@ export function ListView({
             Clear selection
           </button>
           {fieldMetaErr && (
-            <div style={{ fontSize: 11.5, color: '#a32626', marginLeft: 'auto' }}>
+            <div style={{ fontSize: 11.5, color: '#1a5a8a', marginLeft: 'auto' }}>
               Field metadata failed to load: {fieldMetaErr.message}
             </div>
           )}
@@ -2893,7 +2893,7 @@ function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSav
       borderBottom: `1px solid ${C.border}`,
       cursor: 'cell',
       position: 'relative',
-      background: errorHere ? '#fde8e8' : (overlayVal !== undefined ? '#f0faf6' : undefined),
+      background: errorHere ? '#e8f1fb' : (overlayVal !== undefined ? '#f0faf6' : undefined),
     }}
         onDoubleClick={(e) => { e.stopPropagation(); if (!isSaving) onStartEdit(); }}
         title="Double-click to edit">
@@ -2911,7 +2911,7 @@ function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSav
       {errorHere && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, zIndex: 10,
-          background: '#a32626', color: '#fff', fontSize: 11,
+          background: '#1a5a8a', color: '#fff', fontSize: 11,
           padding: '4px 8px', borderRadius: '0 0 4px 4px', maxWidth: 280,
         }}>{errorHere}</div>
       )}
@@ -3111,14 +3111,14 @@ function BulkEditModal({ tableName, fieldMeta, columns, recordIds, onClose, onAp
             </div>
           )}
           {error && (
-            <div style={{ padding: '10px 12px', background: '#fde8e8', color: '#a32626', fontSize: 12, borderRadius: 6, marginBottom: 12 }}>
+            <div style={{ padding: '10px 12px', background: '#e8f1fb', color: '#1a5a8a', fontSize: 12, borderRadius: 6, marginBottom: 12 }}>
               {error}
             </div>
           )}
           {result && (
             <div style={{ padding: '12px 14px',
-                          background: result.records_errored > 0 ? '#fef3e7' : '#e8f8f2',
-                          color:      result.records_errored > 0 ? '#a35a18' : '#1a7a4e',
+                          background: result.records_errored > 0 ? '#e8f1fb' : '#e8f8f2',
+                          color:      result.records_errored > 0 ? '#1a5a8a' : '#1a7a4e',
                           fontSize: 12.5, borderRadius: 6, marginBottom: 12 }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>
                 {result.records_updated} updated, {result.records_errored} errored, of {result.records_total} total

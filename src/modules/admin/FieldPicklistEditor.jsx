@@ -298,7 +298,7 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
 
       {loading && <div style={{ padding: 30, color: C.textMuted, fontSize: 13 }}>Loading field…</div>}
       {error && !loading && (
-        <div style={{ padding: 20, color: '#b03a2e', fontSize: 12.5 }}>{String(error.message || error)}</div>
+        <div style={{ padding: 20, color: '#1a5a8a', fontSize: 12.5 }}>{String(error.message || error)}</div>
       )}
 
       {!loading && !error && (
@@ -368,7 +368,7 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
                   Describe{v.description ? ' •' : ''}
                 </button>
                 <button onClick={() => toggleValueActive(v)} disabled={valBusy}
-                  style={{ padding: '4px 9px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.page, color: v.active ? '#b3541e' : '#1a7a4e', fontSize: 11, cursor: 'pointer' }}>
+                  style={{ padding: '4px 9px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.page, color: v.active ? '#1a5a8a' : '#1a7a4e', fontSize: 11, cursor: 'pointer' }}>
                   {v.active ? 'Deactivate' : 'Activate'}
                 </button>
               </div>
@@ -539,7 +539,7 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
                   >
                     {saving ? 'Saving…' : 'Save'}
                   </button>
-                  {savedNote && <span style={{ fontSize: 11.5, color: savedNote.startsWith('Save failed') ? '#b03a2e' : '#1a7a4e' }}>{savedNote}</span>}
+                  {savedNote && <span style={{ fontSize: 11.5, color: savedNote.startsWith('Save failed') ? '#1a5a8a' : '#1a7a4e' }}>{savedNote}</span>}
                   {dirty && !savedNote && <span style={{ fontSize: 11.5, color: C.textMuted }}>Unsaved changes</span>}
                 </div>
               </>

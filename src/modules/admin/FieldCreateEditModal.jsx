@@ -137,7 +137,7 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
 
             {!isEdit && field('API / Column Name',
               <input value={colName} onChange={e => { setColName(e.target.value); setColTouched(true) }} placeholder="annual_income"
-                style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', borderColor: colName && !colValid ? '#b03a2e' : C.border }} />,
+                style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', borderColor: colName && !colValid ? '#1a5a8a' : C.border }} />,
               colName && !colValid ? 'Use lower snake_case: start with a letter, letters/digits/underscore, 2–58 chars.' : 'Database column name. Auto-filled from the label; edit if needed. Cannot be changed later.')}
 
             {!isEdit && field('Data Type',

@@ -202,7 +202,7 @@ export default function ObjectAccessMatrix({
           </>
         )}
         {error && (
-          <span style={{ fontSize: 12, color: '#b03a2e' }}>
+          <span style={{ fontSize: 12, color: '#1a5a8a' }}>
             Save failed — {error}
           </span>
         )}

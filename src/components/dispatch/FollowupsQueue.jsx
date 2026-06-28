@@ -397,8 +397,8 @@ function KpiTile({ label, value, sub, tone }) {
 const KPI_TONE = {
   neutral: { fg: '#0d1a2e', accent: '#cbd5e1' },
   good:    { fg: '#1e7d4f', accent: '#3ecf8e' },
-  warn:    { fg: '#8a5a04', accent: '#7eb3e8' },
-  bad:     { fg: '#a01616', accent: '#7eb3e8' },
+  warn:    { fg: '#1e466b', accent: '#7eb3e8' },
+  bad:     { fg: '#1a5a8a', accent: '#7eb3e8' },
 }
 
 function RowActions({ row, busy, onFlip, onSchedule, stretched = false }) {
@@ -462,15 +462,15 @@ function StatusChip({ status }) {
 }
 
 const REASON_TONE = {
-  out_of_territory:        { bg: '#fef3c7', fg: '#8a5a04' },
-  no_qualifying_resources: { bg: '#fde7e7', fg: '#a01616' },
+  out_of_territory:        { bg: '#e8f1fb', fg: '#1e466b' },
+  no_qualifying_resources: { bg: '#e8f1fb', fg: '#1a5a8a' },
   no_availability:         { bg: '#e0e8f5', fg: '#274780' },
   general_inquiry:         { bg: '#e7f8f0', fg: '#1e7d4f' },
   default:                 { bg: '#eef0f3', fg: '#4a5568' },
 }
 
 const STATUS_TONE = {
-  open:       { bg: '#fef3c7', fg: '#8a5a04' },
+  open:       { bg: '#e8f1fb', fg: '#1e466b' },
   inprogress: { bg: '#e0e8f5', fg: '#274780' },
 }
 

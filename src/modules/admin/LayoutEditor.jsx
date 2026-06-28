@@ -100,7 +100,7 @@ export default function LayoutEditor({
   if (error) {
     return (
       <div style={{ padding: 40, textAlign: 'center' }}>
-        <div style={{ color: '#b03a2e', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Could not load layout</div>
+        <div style={{ color: '#1a5a8a', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Could not load layout</div>
         <div style={{ color: C.textMuted, fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}>{String(error.message || error)}</div>
       </div>
     )
@@ -1185,7 +1185,7 @@ function DeleteSectionModal({ section, onClose, onConfirm, busy }) {
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button style={buttonSecondaryStyle} onClick={onClose} disabled={busy}>Cancel</button>
           <button
-            style={{ ...buttonPrimaryStyle, background: '#b03a2e' }}
+            style={{ ...buttonPrimaryStyle, background: '#1a5a8a' }}
             onClick={() => onConfirm(reason)}
             disabled={busy || !reason.trim()}
           >
@@ -1213,16 +1213,16 @@ function DangerZone({ layout, onDelete, busy }) {
   return (
     <div style={{
       marginTop: 24,
-      border: '1px solid #f3b9b1',
+      border: '1px solid #bcd9f2',
       borderRadius: 8,
-      background: '#fdf5f3',
+      background: '#e8f1fb',
       overflow: 'hidden',
     }}>
       <div style={{
         padding: '11px 14px',
-        fontSize: 12.5, fontWeight: 700, color: '#8a2d20',
-        borderBottom: '1px solid #f3b9b1',
-        background: '#fdecea',
+        fontSize: 12.5, fontWeight: 700, color: '#1e466b',
+        borderBottom: '1px solid #bcd9f2',
+        background: '#e8f1fb',
       }}>
         Danger Zone
       </div>
@@ -1254,7 +1254,7 @@ function DangerZone({ layout, onDelete, busy }) {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button style={buttonSecondaryStyle} onClick={() => setShowConfirm(false)} disabled={busy}>Cancel</button>
               <button
-                style={{ ...buttonPrimaryStyle, background: '#b03a2e' }}
+                style={{ ...buttonPrimaryStyle, background: '#1a5a8a' }}
                 onClick={() => onDelete(reason.trim())}
                 disabled={busy || !reason.trim()}
               >
@@ -1551,7 +1551,7 @@ function ActionRow({ row, onSetTier, onSetSort, onReset, disabled }) {
             <span style={{
               fontSize: 9, fontWeight: 700,
               padding: '1px 5px', borderRadius: 3,
-              background: '#fef3c7', color: '#1e466b',
+              background: '#e8f1fb', color: '#1e466b',
               letterSpacing: 0.4, textTransform: 'uppercase',
             }}>
               Override

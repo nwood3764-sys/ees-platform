@@ -90,7 +90,7 @@ export default function SeedDataPurgePane() {
 
       {loading && <LoadingState />}
       {error && (
-        <div style={{ padding: '12px 14px', background: '#fde8e8', color: '#a32626', fontSize: 13, borderRadius: 6, marginBottom: 16 }}>
+        <div style={{ padding: '12px 14px', background: '#e8f1fb', color: '#1a5a8a', fontSize: 13, borderRadius: 6, marginBottom: 16 }}>
           Failed to load seed-data counts: {error}
         </div>
       )}
@@ -140,10 +140,10 @@ export default function SeedDataPurgePane() {
             <button onClick={() => { setConfirmInput(''); setPurgeResult(null); setModalOpen(true) }}
               style={{
                 padding: '12px 22px', fontSize: 14, fontWeight: 600,
-                background: '#d44545', color: '#fff',
-                border: '1px solid #b03030', borderRadius: 6,
+                background: '#7eb3e8', color: '#fff',
+                border: '1px solid #1a5a8a', borderRadius: 6,
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-                boxShadow: '0 1px 3px rgba(176, 48, 48, 0.3)',
+                boxShadow: '0 1px 3px rgba(26,90,138,0.3)',
               }}>
               <Icon path="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" size={14} color="#fff" />
               Remove all training data
@@ -165,7 +165,7 @@ export default function SeedDataPurgePane() {
               </div>
               {Array.isArray(purgeResult.errors) && purgeResult.errors.length > 0 && (
                 <details style={{ marginTop: 8 }}>
-                  <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#a35a18' }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#1a5a8a' }}>
                     {purgeResult.errors.length} error{purgeResult.errors.length === 1 ? '' : 's'}
                   </summary>
                   <pre style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', marginTop: 6, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto' }}>
@@ -178,8 +178,8 @@ export default function SeedDataPurgePane() {
           {purgeResult?.error && (
             <div style={{
               marginTop: 18, padding: '14px 18px',
-              background: '#fde8e8', border: '1px solid #a32626', borderRadius: 8,
-              color: '#a32626', fontSize: 13,
+              background: '#e8f1fb', border: '1px solid #1a5a8a', borderRadius: 8,
+              color: '#1a5a8a', fontSize: 13,
             }}>
               <b>Purge failed:</b> {purgeResult.error}
             </div>
@@ -197,7 +197,7 @@ export default function SeedDataPurgePane() {
                      padding: '22px 24px',
                      boxShadow: '0 12px 40px rgba(7,17,31,0.4)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <Icon path="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 0 0-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" size={20} color="#d44545" />
+              <Icon path="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 0 0-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" size={20} color="#7eb3e8" />
               <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: C.textPrimary }}>
                 Confirm: remove all training data
               </h3>
@@ -208,7 +208,7 @@ export default function SeedDataPurgePane() {
               This action cannot be undone.
             </p>
             <p style={{ fontSize: 12.5, color: C.textSecondary, marginTop: 16, marginBottom: 6 }}>
-              Type <b style={{ fontFamily: 'JetBrains Mono, monospace', color: '#a32626' }}>PURGE</b> to confirm:
+              Type <b style={{ fontFamily: 'JetBrains Mono, monospace', color: '#1a5a8a' }}>PURGE</b> to confirm:
             </p>
             <input
               type="text"
@@ -237,7 +237,7 @@ export default function SeedDataPurgePane() {
                 disabled={confirmInput !== CONFIRM_PHRASE || purging}
                 style={{
                   padding: '9px 16px', fontSize: 13, fontWeight: 600,
-                  background: (confirmInput === CONFIRM_PHRASE && !purging) ? '#d44545' : C.border,
+                  background: (confirmInput === CONFIRM_PHRASE && !purging) ? '#7eb3e8' : C.border,
                   color: '#fff', border: 'none', borderRadius: 6,
                   cursor: (confirmInput === CONFIRM_PHRASE && !purging) ? 'pointer' : 'not-allowed',
                 }}>

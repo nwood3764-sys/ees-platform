@@ -244,15 +244,15 @@ export default function ScheduleEditor({ scheduleId, onClose, onSaved }) {
       {testResult && (
         <div style={{
           background: testResult.error
-            ? '#fee'
+            ? '#e8f1fb'
             : (testResult.runs?.[0]?.warnings?.length || testResult.runs?.[0]?.status === 'success_with_warnings')
               ? '#e8f1fb'
               : '#e8f5ec',
           border: `1px solid ${
             testResult.error
-              ? '#f99'
+              ? '#bcd9f2'
               : (testResult.runs?.[0]?.warnings?.length || testResult.runs?.[0]?.status === 'success_with_warnings')
-                ? '#f5c469'
+                ? '#7eb3e8'
                 : '#9c9'
           }`,
           padding: '8px 24px', fontSize: 12, color: C.textPrimary,
@@ -509,7 +509,7 @@ function HistoryTab({ history, loading }) {
               // user-facing column. Errors win when both are present (shouldn't
               // happen, but defensive). Warnings join with ' / ' and use amber.
               const notes = r.srr_error_message
-                ? { text: r.srr_error_message, color: '#c33' }
+                ? { text: r.srr_error_message, color: '#7eb3e8' }
                 : (r.srr_warnings?.length
                     ? { text: r.srr_warnings.join(' / '), color: '#1e466b' }
                     : { text: '—', color: C.textMuted })
@@ -541,8 +541,8 @@ function StatusBadge({ status }) {
     success_dry_run:       { bg:'#eef5fc', fg:'#1e466b' },
     no_recipients:         { bg:'#f0f3f8', fg:'#4a5e7a' },
     no_rows:               { bg:'#f0f3f8', fg:'#4a5e7a' },
-    report_error:          { bg:'#fee', fg:'#c33' },
-    send_error:            { bg:'#fee', fg:'#c33' },
+    report_error:          { bg:'#e8f1fb', fg:'#7eb3e8' },
+    send_error:            { bg:'#e8f1fb', fg:'#7eb3e8' },
     running:               { bg:'#e8f0ff', fg:'#2a5fa6' },
   }
   const { bg, fg } = colors[status] || { bg:C.cardSecondary, fg:C.textSecondary }
