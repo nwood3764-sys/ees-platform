@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase, hasSupabaseConfig } from '../lib/supabase'
 import { C } from '../data/constants'
+import PasswordInput from './PasswordInput'
 
 /**
  * LoginScreen — email + password auth against Supabase Auth.
@@ -232,8 +233,7 @@ export default function LoginScreen() {
               >
                 Password
               </label>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="current-password"
                 required
                 value={password}
