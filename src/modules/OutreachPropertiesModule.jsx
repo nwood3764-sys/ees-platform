@@ -493,7 +493,7 @@ function ImportModal({ onClose, onSubmitted }) {
           </div>
 
           {error && (
-            <div style={{ padding:'10px 12px', background:'#fde8e8', color:'#a32626', fontSize:12, borderRadius:6, marginBottom:12, whiteSpace:'pre-wrap' }}>
+            <div style={{ padding:'10px 12px', background:'#e8f1fb', color:'#1a5a8a', fontSize:12, borderRadius:6, marginBottom:12, whiteSpace:'pre-wrap' }}>
               {error}
             </div>
           )}

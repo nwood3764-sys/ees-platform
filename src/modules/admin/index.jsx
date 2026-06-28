@@ -110,18 +110,18 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
       {isMobile && !desktopNoticeDismissed && (
         <div style={{
           flexShrink: 0,
-          background: '#fef7e0',
-          borderBottom: '1px solid #f5d680',
+          background: '#e8f1fb',
+          borderBottom: '1px solid #bcd9f2',
           padding: '10px 14px',
           display: 'flex',
           alignItems: 'flex-start',
           gap: 10,
           fontSize: 13,
-          color: '#8b5a00',
+          color: '#1e466b',
           lineHeight: 1.35,
         }}>
           <div style={{ flexShrink: 0, marginTop: 1 }}>
-            <Icon path="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" size={16} color="#c97f0a" />
+            <Icon path="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" size={16} color="#1a5a8a" />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <strong style={{ fontWeight: 600 }}>Admin works best on desktop.</strong>{' '}
@@ -137,7 +137,7 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
               padding: 4,
               borderRadius: 4,
               cursor: 'pointer',
-              color: '#8b5a00',
+              color: '#1e466b',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

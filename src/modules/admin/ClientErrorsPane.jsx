@@ -313,7 +313,7 @@ function ErrorRow({ row, selected, onClick }) {
   // The severity color hint at the left edge of the row. Helps the
   // admin scan a list of mixed-severity errors at a glance.
   const sevColor = row.ce_severity === 'fatal'   ? '#2c5f8a'
-                : row.ce_severity === 'warning' ? '#f39c12'
+                : row.ce_severity === 'warning' ? '#7eb3e8'
                 :                                  '#7f8c8d'
 
   return (
@@ -429,11 +429,11 @@ function ErrorDetail({ row, onMarkResolved, onMarkUnresolved }) {
             <span style={{
               fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 3,
               background:
-                row.ce_severity === 'fatal' ? '#fae0dc' :
-                row.ce_severity === 'warning' ? '#fdebd0' : '#e8eef4',
+                row.ce_severity === 'fatal' ? '#e8f1fb' :
+                row.ce_severity === 'warning' ? '#e8f1fb' : '#e8eef4',
               color:
                 row.ce_severity === 'fatal' ? '#2c5f8a' :
-                row.ce_severity === 'warning' ? '#9c640c' : '#34495e',
+                row.ce_severity === 'warning' ? '#1e466b' : '#34495e',
               textTransform: 'uppercase', letterSpacing: 0.5,
             }}>
               {row.ce_severity}
@@ -532,7 +532,7 @@ function ErrorDetail({ row, onMarkResolved, onMarkUnresolved }) {
                 {saving ? 'Saving…' : 'Mark resolved'}
               </button>
               {saveErr && (
-                <div style={{ marginTop: 8, fontSize: 12, color: '#e85a4f' }}>
+                <div style={{ marginTop: 8, fontSize: 12, color: '#7eb3e8' }}>
                   Save failed: {saveErr.message}
                 </div>
               )}

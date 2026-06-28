@@ -246,9 +246,9 @@ export default function ProjectReportModal({ projectId, project, onClose, onComp
               {/* Error */}
               {error && (
                 <div style={{
-                  background: '#fef2f2', border: '1px solid #fca5a5',
+                  background: '#e8f1fb', border: '1px solid #bcd9f2',
                   borderRadius: 6, padding: '10px 12px', fontSize: 12.5,
-                  color: '#991b1b', marginTop: 6, lineHeight: 1.5,
+                  color: '#1a5a8a', marginTop: 6, lineHeight: 1.5,
                   whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                 }}>
                   {error}

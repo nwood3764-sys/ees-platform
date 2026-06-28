@@ -493,7 +493,7 @@ export default function ConversationPanelWidget({
                     {messagesError && (
                       <div style={{
                         padding: 10, fontSize: 12, color: '#1e466b',
-                        background: '#e8f1fb', border: '1px solid #f3b4b4',
+                        background: '#e8f1fb', border: '1px solid #bcd9f2',
                         borderRadius: 6, marginBottom: 10,
                       }}>
                         {messagesError}
@@ -736,7 +736,7 @@ function MessageBubble({ message, attachments = [] }) {
       <div style={{
         maxWidth: '78%',
         background: isFailed ? '#e8f1fb' : dir.bg,
-        border: `1px solid ${isFailed ? '#f3b4b4' : dir.border}`,
+        border: `1px solid ${isFailed ? '#bcd9f2' : dir.border}`,
         borderRadius: 10,
         padding: '8px 12px',
         fontSize: 13, lineHeight: 1.45,
@@ -768,7 +768,7 @@ function MessageBubble({ message, attachments = [] }) {
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '6px 10px',
                   background: isFailed ? '#e8f1fb' : (blocked ? '#e8f1fb' : '#ffffff'),
-                  border: `1px solid ${isFailed ? '#f3b4b4' : (blocked ? '#f3b4b4' : dir.border)}`,
+                  border: `1px solid ${isFailed ? '#bcd9f2' : (blocked ? '#bcd9f2' : dir.border)}`,
                   borderRadius: 6,
                   fontSize: 12,
                   color: blocked ? '#1e466b' : dir.color,
@@ -852,7 +852,7 @@ function MessageBubble({ message, attachments = [] }) {
           maxWidth: '78%', marginTop: 4,
           padding: '6px 9px',
           background: '#eef5fc',
-          border: '1px solid #f3b4b4',
+          border: '1px solid #bcd9f2',
           borderRadius: 6,
           fontSize: 11, lineHeight: 1.4,
           color: '#1e466b',

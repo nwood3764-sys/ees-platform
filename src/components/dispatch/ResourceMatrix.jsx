@@ -44,8 +44,8 @@ import {
 const STATE_STYLES = {
   active:        { bg: '#e7f8f0', fg: '#1e7d4f', symbol: '✓', label: 'Active' },
   assigned:      { bg: '#e7f8f0', fg: '#1e7d4f', symbol: '✓', label: 'Held' },
-  expiring_soon: { bg: '#fef3c7', fg: '#8a5a04', symbol: '⚠', label: 'Expiring soon' },
-  expired:       { bg: '#fde7e7', fg: '#a01616', symbol: '✕', label: 'Expired' },
+  expiring_soon: { bg: '#e8f1fb', fg: '#1e466b', symbol: '⚠', label: 'Expiring soon' },
+  expired:       { bg: '#e8f1fb', fg: '#1a5a8a', symbol: '✕', label: 'Expired' },
 }
 
 // Title patterns the multi-select filter exposes. Mirrors the data layer
@@ -250,10 +250,10 @@ export default function ResourceMatrix({ onNavigateToRecord }) {
           {' • '}
           {summary.heldCount} {tab === 'skills' ? 'skill' : 'certification'} held
           {tab === 'certifications' && summary.expiringCount > 0 && (
-            <span style={{ color: '#8a5a04', fontWeight: 600 }}>{' • '}{summary.expiringCount} expiring</span>
+            <span style={{ color: '#1e466b', fontWeight: 600 }}>{' • '}{summary.expiringCount} expiring</span>
           )}
           {tab === 'certifications' && summary.expiredCount > 0 && (
-            <span style={{ color: '#a01616', fontWeight: 600 }}>{' • '}{summary.expiredCount} expired</span>
+            <span style={{ color: '#1a5a8a', fontWeight: 600 }}>{' • '}{summary.expiredCount} expired</span>
           )}
         </div>
 

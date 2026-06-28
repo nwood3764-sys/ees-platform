@@ -367,11 +367,11 @@ function Stepper({ step }) {
 }
 
 function PickStep({ templates, loadError, chosenTemplateId, onPick, parentObject }) {
-  if (loadError) return <div style={{ color: '#b03a2e', fontSize: 13 }}>{loadError}</div>
+  if (loadError) return <div style={{ color: '#1a5a8a', fontSize: 13 }}>{loadError}</div>
   if (templates === null) return <div style={{ color: C.textMuted, fontSize: 13 }}>Loading templates…</div>
   if (templates.length === 0) {
     return (
-      <div style={{ padding: 18, background: '#eef5fc', border: '1px solid #fde68a', borderRadius: 6, fontSize: 13, color: '#1e466b' }}>
+      <div style={{ padding: 18, background: '#eef5fc', border: '1px solid #bcd9f2', borderRadius: 6, fontSize: 13, color: '#1e466b' }}>
         No Active document templates are available for <b>{parentObject}</b>. An admin needs to publish a template in Setup → Document Templates that targets this object (or has no related-object filter).
       </div>
     )
@@ -402,7 +402,7 @@ function PickStep({ templates, loadError, chosenTemplateId, onPick, parentObject
                 <span style={{
                   fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 3,
                   background: t.authoring?.picklist_value === 'docx' ? '#eff6ff' : '#fef9c3',
-                  color: t.authoring?.picklist_value === 'docx' ? '#1e40af' : '#854d0e',
+                  color: t.authoring?.picklist_value === 'docx' ? '#1e40af' : '#1e466b',
                   textTransform: 'uppercase', letterSpacing: '0.04em',
                 }}>
                   {t.authoring?.picklist_value || 'unknown'}
@@ -483,12 +483,12 @@ function AnchorMismatchBanner({ mismatch, recipientCount, onBackToRecipients }) 
   // pre-flight check, not a validation rule.
   const card = {
     padding: 12,
-    background: '#fef3c7',
-    border: '1px solid #fde68a',
+    background: '#e8f1fb',
+    border: '1px solid #bcd9f2',
     borderRadius: 6,
     marginBottom: 14,
     fontSize: 12.5,
-    color: '#78350f',
+    color: '#1e466b',
     lineHeight: 1.55,
   }
   const icon = (
@@ -516,7 +516,7 @@ function AnchorMismatchBanner({ mismatch, recipientCount, onBackToRecipients }) 
               {mismatch.orphans.map(o => (
                 <li key={o.ordinal} style={{ marginBottom: 2 }}>
                   Recipient #{o.ordinal} — {o.types.map(t => (
-                    <code key={t} style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #fde68a', fontSize: 11, marginRight: 4 }}>
+                    <code key={t} style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #bcd9f2', fontSize: 11, marginRight: 4 }}>
                       {`\\${t === 'signature' ? 'sig' : t}${o.ordinal}\\`}
                     </code>
                   ))}
@@ -525,7 +525,7 @@ function AnchorMismatchBanner({ mismatch, recipientCount, onBackToRecipients }) 
             </ul>
             <button onClick={onBackToRecipients} style={{
               marginTop: 4, background: '#fff', color: '#1e466b',
-              border: '1px solid #fde68a', borderRadius: 5,
+              border: '1px solid #bcd9f2', borderRadius: 5,
               padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
             }}>
               ← Add recipient{mismatch.maxOrdinal - recipientCount === 1 ? '' : 's'}
@@ -548,7 +548,7 @@ function AnchorMismatchBanner({ mismatch, recipientCount, onBackToRecipients }) 
                 : `Recipients #${mismatch.firstUnused}–${recipientCount} have no signing tabs assigned`}
             </div>
             <div>
-              The template's highest anchor ordinal is <b>{mismatch.firstUnused - 1}</b>. {mismatch.unusedCount === 1 ? 'This recipient' : 'These recipients'} will get the signing email but will have nothing to sign. Either remove the extra recipient{mismatch.unusedCount === 1 ? '' : 's'} or add anchors (<code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #fde68a', fontSize: 11 }}>{`\\sig${mismatch.firstUnused}\\`}</code>, etc.) to the template.
+              The template's highest anchor ordinal is <b>{mismatch.firstUnused - 1}</b>. {mismatch.unusedCount === 1 ? 'This recipient' : 'These recipients'} will get the signing email but will have nothing to sign. Either remove the extra recipient{mismatch.unusedCount === 1 ? '' : 's'} or add anchors (<code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #bcd9f2', fontSize: 11 }}>{`\\sig${mismatch.firstUnused}\\`}</code>, etc.) to the template.
             </div>
           </div>
         </div>
@@ -564,7 +564,7 @@ function AnchorMismatchBanner({ mismatch, recipientCount, onBackToRecipients }) 
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>No signing anchors found in this template.</div>
             <div>
-              The recipient{recipientCount === 1 ? '' : 's'} will receive the PDF but will have no signature, initial, date, or text fields to fill in. Add anchors like <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #fde68a', fontSize: 11 }}>{`\\sig1\\`}</code> to the template body, or use the <b>Insert Signature Tab</b> picker on the document template record.
+              The recipient{recipientCount === 1 ? '' : 's'} will receive the PDF but will have no signature, initial, date, or text fields to fill in. Add anchors like <code style={{ background: '#fff', padding: '0 4px', borderRadius: 3, border: '1px solid #bcd9f2', fontSize: 11 }}>{`\\sig1\\`}</code> to the template body, or use the <b>Insert Signature Tab</b> picker on the document template record.
             </div>
           </div>
         </div>
@@ -626,18 +626,18 @@ function SentStep({ result }) {
         </div>
       )}
       {firstResult && firstResult.status === 'not_connected' && (
-        <div style={{ padding: 10, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#1e466b' }}>
+        <div style={{ padding: 10, background: '#e8f1fb', border: '1px solid #bcd9f2', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#1e466b' }}>
           <b>Outlook isn't connected.</b> Copy the signing link below and send it manually. Connect Outlook from the user menu (Integrations) so future signing requests email out automatically.
         </div>
       )}
       {firstResult && firstResult.status === 'failed' && (
-        <div style={{ padding: 10, background: '#fdecea', border: '1px solid #f3b9b3', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#8a2c20' }}>
+        <div style={{ padding: 10, background: '#e8f1fb', border: '1px solid #bcd9f2', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#1e466b' }}>
           <b>Email send failed.</b> Copy the signing link below and send it manually. {firstResult.failure_reason && <span style={{ display: 'block', marginTop: 4, fontSize: 11.5, fontFamily: 'monospace' }}>{firstResult.failure_reason}</span>}
         </div>
       )}
 
       {result.dropped_anchors?.length > 0 && (
-        <div style={{ padding: 10, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#1e466b' }}>
+        <div style={{ padding: 10, background: '#e8f1fb', border: '1px solid #bcd9f2', borderRadius: 6, marginBottom: 14, fontSize: 12.5, color: '#1e466b' }}>
           <b>Note:</b> {result.dropped_anchors.length} anchor{result.dropped_anchors.length === 1 ? ' was' : 's were'} skipped because no recipient matched their order: {result.dropped_anchors.join(', ')}
         </div>
       )}

@@ -126,7 +126,7 @@ export default function ModuleSectionsPane({ initialModuleId } = {}) {
   }
 
   if (loading) return <div style={{ padding: 40, color: C.textMuted, fontSize: 13 }}>Loading module sections…</div>
-  if (error) return <div style={{ padding: 20, color: '#b03a2e', fontSize: 12.5 }}>{String(error.message || error)}</div>
+  if (error) return <div style={{ padding: 20, color: '#1a5a8a', fontSize: 12.5 }}>{String(error.message || error)}</div>
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

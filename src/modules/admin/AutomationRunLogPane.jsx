@@ -44,8 +44,8 @@ function fmtTimestamp(iso) {
 function OutcomeChip({ outcome }) {
   const colors = {
     success: { bg: '#dcfce7', fg: '#166534', border: '#bbf7d0' },
-    error:   { bg: '#fee2e2', fg: '#991b1b', border: '#bcd9f2' },
-    skipped: { bg: '#fef3c7', fg: '#1e466b', border: '#fde68a' },
+    error:   { bg: '#e8f1fb', fg: '#1a5a8a', border: '#bcd9f2' },
+    skipped: { bg: '#e8f1fb', fg: '#1e466b', border: '#bcd9f2' },
   }
   const c = colors[outcome] || { bg: '#e5e7eb', fg: '#374151', border: '#d1d5db' }
   return (

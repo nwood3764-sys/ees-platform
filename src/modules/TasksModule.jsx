@@ -43,8 +43,8 @@ const COLS = [
 
 function PriorityChip({ priority }) {
   const c = {
-    Critical: { bg: '#fee2e2', fg: '#991b1b' },
-    High:     { bg: '#fed7aa', fg: '#9a3412' },
+    Critical: { bg: '#e8f1fb', fg: '#1a5a8a' },
+    High:     { bg: '#bcd9f2', fg: '#1e466b' },
     Normal:   { bg: '#dbeafe', fg: '#1e40af' },
     Low:      { bg: '#e5e7eb', fg: '#4b5563' },
   }[priority] || { bg: '#e5e7eb', fg: '#4b5563' }

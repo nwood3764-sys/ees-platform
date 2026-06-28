@@ -167,12 +167,12 @@ export default class ErrorBoundary extends Component {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
             <div style={{
               width: 40, height: 40, borderRadius: 8,
-              background: '#fef2f2',
+              background: '#e8f1fb',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexShrink: 0,
             }}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-                   stroke="#b03a2e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                   stroke="#1a5a8a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
                 <line x1="12" y1="9"  x2="12" y2="13" />
                 <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -198,7 +198,7 @@ export default class ErrorBoundary extends Component {
             wordBreak: 'break-word',
             marginBottom: 16,
           }}>
-            <span style={{ color: '#b03a2e', fontWeight: 600 }}>{error?.name || 'Error'}:</span>{' '}
+            <span style={{ color: '#1a5a8a', fontWeight: 600 }}>{error?.name || 'Error'}:</span>{' '}
             {error?.message || String(error)}
           </div>
 
@@ -414,7 +414,7 @@ function StaleVersionScreen() {
             Reloading in <strong style={{ color: C.textPrimary }}>{seconds}</strong> second{seconds === 1 ? '' : 's'}…
           </div>
         ) : (
-          <div style={{ fontSize: 12, color: '#9a3412', marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: '#1e466b', marginBottom: 14 }}>
             Already tried reloading once. If this keeps happening, your network may be blocking a file.
           </div>
         )}

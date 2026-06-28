@@ -58,9 +58,9 @@ const KIND_STYLES = {
   // again. Color coding: emerald for forward progress, amber for soft-warn
   // (Viewed/Opened/ConsentGranted), red for terminal-bad (Declined/Voided).
   envelope_sent:      { label: 'Envelope Sent',      bg: '#eef4fc', color: '#2557a7', dot: '#2557a7' },
-  envelope_opened:    { label: 'Envelope Opened',    bg: '#fef3c7', color: '#1e466b', dot: C.amber },
-  envelope_viewed:    { label: 'Envelope Viewed',    bg: '#fef3c7', color: '#1e466b', dot: C.amber },
-  envelope_consent:   { label: 'Consent Granted',    bg: '#fef3c7', color: '#1e466b', dot: C.amber },
+  envelope_opened:    { label: 'Envelope Opened',    bg: '#e8f1fb', color: '#1e466b', dot: C.amber },
+  envelope_viewed:    { label: 'Envelope Viewed',    bg: '#e8f1fb', color: '#1e466b', dot: C.amber },
+  envelope_consent:   { label: 'Consent Granted',    bg: '#e8f1fb', color: '#1e466b', dot: C.amber },
   envelope_signed:    { label: 'Signed',             bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
   envelope_completed: { label: 'Envelope Completed', bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
   envelope_declined:  { label: 'Envelope Declined',  bg: '#e8f1fb', color: '#1e466b', dot: C.danger },
@@ -259,7 +259,7 @@ function EmailEntryBody({ email }) {
         {email.subject || '(no subject)'}
       </div>
       {email.status === 'Failed' && email.failure_reason && (
-        <div style={{ fontSize: 11, color: '#8a2c20', background: '#fdecea', border: '1px solid #f3b9b3', borderRadius: 4, padding: '4px 8px', marginBottom: 6, fontFamily: 'monospace' }}>
+        <div style={{ fontSize: 11, color: '#1e466b', background: '#e8f1fb', border: '1px solid #bcd9f2', borderRadius: 4, padding: '4px 8px', marginBottom: 6, fontFamily: 'monospace' }}>
           {email.failure_reason}
         </div>
       )}

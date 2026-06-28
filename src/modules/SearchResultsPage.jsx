@@ -507,7 +507,7 @@ export default function SearchResultsPage({
           {error && (
             <div style={{
               padding: '12px 16px', marginBottom: 16,
-              background: '#fdecec', border: `1px solid ${C.danger}`,
+              background: '#e8f1fb', border: `1px solid ${C.danger}`,
               borderRadius: 6, color: C.danger, fontSize: 13,
             }}>
               {error}

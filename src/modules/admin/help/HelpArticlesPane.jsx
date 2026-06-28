@@ -192,7 +192,7 @@ function NewHelpArticleModal({ existingSlugs, onClose, onCreated }) {
           <FormField label="Category" hint="Optional grouping — e.g. Permissions, Page Layouts, Work Plans.">
             <input type="text" value={category} onChange={e => setCategory(e.target.value)} style={inputStyle} />
           </FormField>
-          {error && <div style={{ fontSize: 12, color: '#b03a2e', marginBottom: 10 }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: '#1a5a8a', marginBottom: 10 }}>{error}</div>}
         </div>
         <div style={{ padding: '12px 18px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" onClick={onClose} disabled={busy} style={buttonSecondaryStyle}>Cancel</button>

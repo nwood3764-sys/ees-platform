@@ -225,7 +225,7 @@ export default function WidgetEditorFieldGroup({
               {loadingCols ? (
                 <div style={{ padding: 16, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>Loading columns…</div>
               ) : loadError ? (
-                <div style={{ padding: 16, color: '#b03a2e', fontSize: 12 }}>
+                <div style={{ padding: 16, color: '#1a5a8a', fontSize: 12 }}>
                   Could not load columns: {String(loadError.message || loadError)}
                 </div>
               ) : availableColumns.length === 0 ? (
@@ -334,7 +334,7 @@ function ColumnPickRow({ column, onAdd }) {
         </div>
         <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 1 }}>
           {column.data_type}
-          {column.is_nullable === 'NO' && <span style={{ color: '#c04040', marginLeft: 6 }}>required</span>}
+          {column.is_nullable === 'NO' && <span style={{ color: '#7eb3e8', marginLeft: 6 }}>required</span>}
           {column.references_table && <span style={{ marginLeft: 6 }}>→ {column.references_table}</span>}
         </div>
       </div>

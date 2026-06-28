@@ -168,11 +168,11 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
       {error && hasData && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           gap: 12, padding: '8px 12px', margin: '0 0 10px', borderRadius: 6,
-          background: '#fdf3e7', border: '1px solid #7eb3e8', color: '#7a5b1e', fontSize: 12.5 }}>
+          background: '#e8f1fb', border: '1px solid #7eb3e8', color: '#1e466b', fontSize: 12.5 }}>
           <span>Couldn’t refresh just now — showing the last loaded data.</span>
           {onRetry && (
             <button onClick={onRetry} style={{ background: 'transparent', border: '1px solid #7eb3e8',
-              color: '#7a5b1e', borderRadius: 5, padding: '3px 10px', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
+              color: '#1e466b', borderRadius: 5, padding: '3px 10px', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>
               Retry
             </button>
           )}

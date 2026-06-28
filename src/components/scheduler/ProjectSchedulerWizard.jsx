@@ -859,7 +859,7 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         </div>
 
         {step1Err && (
-          <div style={{ marginTop: 10, padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d',
+          <div style={{ marginTop: 10, padding: '8px 12px', background: '#e8f1fb', border: '1px solid #7eb3e8',
                         borderRadius: 6, fontSize: 12.5, color: '#1e466b' }}>
             {step1Err}
           </div>
@@ -944,14 +944,14 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         </div>
 
         {step2Err && (
-          <div style={{ marginTop: 10, padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d',
+          <div style={{ marginTop: 10, padding: '8px 12px', background: '#e8f1fb', border: '1px solid #7eb3e8',
                         borderRadius: 6, fontSize: 12.5, color: '#1e466b' }}>
             {step2Err}
           </div>
         )}
         {previewError && (
-          <div style={{ marginTop: 10, padding: '8px 12px', background: '#fef2f2', border: '1px solid #fca5a5',
-                        borderRadius: 6, fontSize: 12.5, color: '#991b1b' }}>
+          <div style={{ marginTop: 10, padding: '8px 12px', background: '#e8f1fb', border: '1px solid #bcd9f2',
+                        borderRadius: 6, fontSize: 12.5, color: '#1a5a8a' }}>
             {previewError}
           </div>
         )}
@@ -1064,9 +1064,9 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
 
         {/* Unplaced rows */}
         {unplaced && unplaced.rows.length > 0 && (
-          <div style={{ border: '1px solid #fcd34d', borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
+          <div style={{ border: '1px solid #7eb3e8', borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
             <div style={{
-              background: '#fef3c7', padding: '8px 12px', fontSize: 12, fontWeight: 600, color: '#1e466b',
+              background: '#e8f1fb', padding: '8px 12px', fontSize: 12, fontWeight: 600, color: '#1e466b',
             }}>
               Won't fit in this window ({unplaced.rows.length})
             </div>
@@ -1093,16 +1093,16 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
         )}
 
         {previewSummary?.unplaced > 0 && (
-          <div style={{ padding: '10px 12px', background: '#fef3c7',
-                        border: '1px solid #fcd34d', borderRadius: 6, fontSize: 12.5,
+          <div style={{ padding: '10px 12px', background: '#e8f1fb',
+                        border: '1px solid #7eb3e8', borderRadius: 6, fontSize: 12.5,
                         color: '#1e466b', lineHeight: 1.5 }}>
             Confirm to schedule the {previewSummary.placed} placeable work order{previewSummary.placed === 1 ? '' : 's'} and leave the rest unscheduled, or go back and extend the date range.
           </div>
         )}
 
         {commitError && (
-          <div style={{ marginTop: 10, padding: '8px 12px', background: '#fef2f2',
-                        border: '1px solid #fca5a5', borderRadius: 6, fontSize: 12.5, color: '#991b1b' }}>
+          <div style={{ marginTop: 10, padding: '8px 12px', background: '#e8f1fb',
+                        border: '1px solid #bcd9f2', borderRadius: 6, fontSize: 12.5, color: '#1a5a8a' }}>
             {commitError}
           </div>
         )}
@@ -1130,8 +1130,8 @@ export default function ProjectSchedulerWizard({ projectId, project, onClose, on
       <div style={overlay} onClick={onClose}>
         <div style={card} onClick={e => e.stopPropagation()}>
           <div style={bodyStyle}>
-            <div style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fca5a5',
-                          borderRadius: 6, fontSize: 13, color: '#991b1b' }}>
+            <div style={{ padding: '8px 12px', background: '#e8f1fb', border: '1px solid #bcd9f2',
+                          borderRadius: 6, fontSize: 13, color: '#1a5a8a' }}>
               {error}
             </div>
           </div>

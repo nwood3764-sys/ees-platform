@@ -170,8 +170,8 @@ export default function PermissionSetEditor({ psId, onBack, onChanged, onCloned 
         {cloneError && (
           <div style={{
             marginTop: 8, padding: '6px 10px',
-            background: '#fee', border: `1px solid #f99`,
-            borderRadius: 4, fontSize: 12, color: '#933',
+            background: '#e8f1fb', border: `1px solid #bcd9f2`,
+            borderRadius: 4, fontSize: 12, color: '#1a5a8a',
           }}>
             Clone failed: {cloneError}
           </div>
@@ -315,7 +315,7 @@ function DetailsTab({ ps, onUpdated, onDeleted }) {
         </FormField>
 
         {error && (
-          <div style={{ marginTop: 8, fontSize: 12, color: '#b03a2e' }}>{error}</div>
+          <div style={{ marginTop: 8, fontSize: 12, color: '#1a5a8a' }}>{error}</div>
         )}
 
         <div style={{ marginTop: 14, display: 'flex', gap: 8 }}>
@@ -454,7 +454,7 @@ function AssignedUsersTab({ psId, psName }) {
                     <button type="button" onClick={() => handleUnassign(u.id)}
                       style={{
                         background: 'none', border: 'none', padding: 0,
-                        color: '#b03a2e', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                        color: '#1a5a8a', fontSize: 12, fontWeight: 500, cursor: 'pointer',
                       }}>
                       Remove
                     </button>

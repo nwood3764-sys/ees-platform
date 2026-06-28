@@ -526,7 +526,7 @@ function Step2Upload({ fileInputRef, parsing, parseError, onPick, onFile }) {
       {parseError && (
         <div style={{
           marginTop: 14, padding: 12,
-          background: '#e8f1fb', border: '1px solid #f3b4b4', borderRadius: 5,
+          background: '#e8f1fb', border: '1px solid #bcd9f2', borderRadius: 5,
           color: '#1e466b', fontSize: 12.5,
         }}>
           {parseError}
@@ -683,10 +683,10 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
                         ))}
                       </select>
                     </td>
-                    <td style={TD}>{r.owner_name || <span style={{ color: '#c44' }}>(missing)</span>}</td>
-                    <td style={TD}>{r.property_name || <span style={{ color: '#c44' }}>(missing)</span>}</td>
-                    <td style={TD}>{[r.property_street, r.property_city, r.property_state].filter(Boolean).join(', ') || <span style={{ color: '#c44' }}>(missing)</span>}</td>
-                    <td style={TD}>{r.building_name || <span style={{ color: '#c44' }}>(missing)</span>}</td>
+                    <td style={TD}>{r.owner_name || <span style={{ color: '#7eb3e8' }}>(missing)</span>}</td>
+                    <td style={TD}>{r.property_name || <span style={{ color: '#7eb3e8' }}>(missing)</span>}</td>
+                    <td style={TD}>{[r.property_street, r.property_city, r.property_state].filter(Boolean).join(', ') || <span style={{ color: '#7eb3e8' }}>(missing)</span>}</td>
+                    <td style={TD}>{r.building_name || <span style={{ color: '#7eb3e8' }}>(missing)</span>}</td>
                     <td style={TD_MONO}>{r.building_unit_count || ''}</td>
                     <td style={TD}>
                       {a.errors.length > 0 && (

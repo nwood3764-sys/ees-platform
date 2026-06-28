@@ -136,8 +136,8 @@ export default function OutlookConnectionCard() {
       {error && (
         <div style={{
           marginTop: 12, padding: '10px 12px',
-          background: '#fdecea', border: '1px solid #f3b9b3', borderRadius: 5,
-          fontSize: 12, color: '#8a2c20',
+          background: '#e8f1fb', border: '1px solid #bcd9f2', borderRadius: 5,
+          fontSize: 12, color: '#1e466b',
         }}>
           {error}
         </div>
@@ -176,7 +176,7 @@ function ConnectedState({ status, busy, onDisconnect }) {
           onClick={onDisconnect}
           disabled={busy}
           style={{
-            background: '#fff', border: `1px solid ${C.borderDark}`, color: '#b03a2e',
+            background: '#fff', border: `1px solid ${C.borderDark}`, color: '#1a5a8a',
             padding: '8px 16px', fontSize: 13, fontWeight: 500, borderRadius: 5,
             cursor: busy ? 'wait' : 'pointer',
           }}
