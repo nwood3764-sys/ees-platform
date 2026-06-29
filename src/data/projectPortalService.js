@@ -37,13 +37,12 @@ export async function fetchPortalUserSelf() {
 }
 
 // ─── Program helpers ──────────────────────────────────────────────────────────
-// Program is derived from the opportunity's record type label (e.g.
-// "WI-IRA-MF-HOMES" / "WI-IRA-MF-HEAR"). No program names are hardcoded into the
-// stage logic — only the HOMES/HEAR tag used for the two-track display + accent.
-export function programTag(program) {
-  if (program && /HEAR/i.test(program)) return 'HEAR'
-  if (program && /HOMES/i.test(program)) return 'HOMES'
-  return program || 'Program'
+// A "program" is simply an opportunity's record type, surfaced by the RPC as
+// opp.program (the record type's picklist_label, e.g. "WI-IRA-MF-HOMES"). The
+// portal is NOT hardcoded to any particular program — it discovers the distinct
+// record types present in the data and renders one track per record type.
+export function programLabel(opp) {
+  return (opp && opp.program) || 'Program'
 }
 
 // ─── Project tracker tree ────────────────────────────────────────────────────
@@ -60,8 +59,7 @@ export async function fetchProjectTracker() {
     id: o.id,
     recordNumber: o.record_number || '',
     name: o.name || '',
-    program: o.program || '',
-    programTag: programTag(o.program),
+    program: o.program || '',            // the opportunity's record type label
     stageLabel: o.stage_label || 'Not Started',
     stageOrder: Number(o.stage_order) || 0,
     stages: (o.stages || []).map((s) => ({
@@ -79,18 +77,13 @@ export async function fetchProjectTracker() {
     totalUnits: p.total_units ?? null,
     totalBuildings: p.total_buildings ?? null,
     buildings: (p.buildings || []).map((b) => {
-      const units = (b.units || []).map((u) => {
-        const opportunities = (u.opportunities || []).map(mapOpp)
-        return {
-          id: u.id,
-          name: u.name || '',
-          unitNumber: u.unit_number || '',
-          recordNumber: u.record_number || '',
-          opportunities,
-          homes: opportunities.find((o) => o.programTag === 'HOMES') || null,
-          hear: opportunities.find((o) => o.programTag === 'HEAR') || null,
-        }
-      })
+      const units = (b.units || []).map((u) => ({
+        id: u.id,
+        name: u.name || '',
+        unitNumber: u.unit_number || '',
+        recordNumber: u.record_number || '',
+        opportunities: (u.opportunities || []).map(mapOpp),
+      }))
       return {
         id: b.id,
         name: b.name || 'Unnamed Building',
@@ -138,30 +131,46 @@ export function oppBucket(opportunity) {
   return 'inProgress'
 }
 
-// ─── Unit / building / property rollups (per program track) ──────────────────
+// ─── Program discovery (data-driven; no hardcoded program list) ──────────────
 export function unitOpps(unit) {
   return (unit?.opportunities) || []
 }
 
-// Average lifecycle % across a unit's opportunities for one program track
-// ('HOMES' | 'HEAR'); returns null if the unit has no opp for that program.
-export function unitProgramPct(unit, tag) {
-  const opp = tag === 'HEAR' ? unit.hear : unit.homes
+// The opportunity on a unit for a given program (record type label), or null.
+export function oppForProgram(unit, program) {
+  return unitOpps(unit).find((o) => o.program === program) || null
+}
+
+// Distinct programs (record type labels) present anywhere under a property,
+// in stable alphabetical order. This is what drives how many tracks render.
+export function propertyPrograms(property) {
+  const set = new Set()
+  for (const b of property.buildings || []) {
+    for (const u of b.units || []) for (const o of u.opportunities || []) if (o.program) set.add(o.program)
+    for (const o of b.opportunities || []) if (o.program) set.add(o.program)
+  }
+  return Array.from(set).sort()
+}
+
+// ─── Per-program rollups (keyed by record type label) ────────────────────────
+export function unitProgramPct(unit, program) {
+  const opp = oppForProgram(unit, program)
   return opp ? oppPct(opp) : null
 }
 
-export function buildingProgramPct(building, tag) {
+export function buildingProgramPct(building, program) {
   const vals = (building.units || [])
-    .map((u) => unitProgramPct(u, tag))
+    .map((u) => unitProgramPct(u, program))
     .filter((v) => v != null)
-  if (!vals.length) return 0
+  if (!vals.length) return null
   return Math.round(vals.reduce((a, v) => a + v, 0) / vals.length)
 }
 
-export function propertyProgramPct(property, tag) {
+export function propertyProgramPct(property, program) {
   const vals = (property.buildings || [])
-    .map((b) => buildingProgramPct(b, tag))
-  if (!vals.length) return 0
+    .map((b) => buildingProgramPct(b, program))
+    .filter((v) => v != null)
+  if (!vals.length) return null
   return Math.round(vals.reduce((a, v) => a + v, 0) / vals.length)
 }
 
