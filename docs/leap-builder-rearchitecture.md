@@ -1,7 +1,15 @@
 # LEAP Builder Rearchitecture — WYSIWYG Drag-and-Drop (Handoff)
 
-**Status:** Phases 0–2 built — in staging for review, not on master.
+**Status:** Phases 0–2 SHIPPED to production (PR #14). Phase 3 in progress.
 **Author of handoff:** prior session (2026-06-29). Read this top-to-bottom before starting.
+
+---
+
+## Phase 3 progress (Reports) — in flight
+
+- **Drag-and-drop field selection** ✅ — the report builder's Selected Fields list is now a dnd-kit `SortableList` (drag grip to reorder) instead of up/down buttons. Additive, prod-safe.
+- **Live preview from unsaved config** — pending. Needs `reportsService.runReport` refactored to run an in-memory definition (it currently loads from the DB); being built additively (`runReportDefinition`) so the existing `runReport` is unchanged. Staging-validated before prod.
+- **Full formula engine (§8)** — pending. CodeMirror 6 + mathjs + @formulajs/formulajs. Being built as an additive subsystem; because swapping the report runtime evaluator (`lib/reportFormulaEval`) touches a core feature, it gets a staging soak (real saved formulas re-validated) before the prod cutover.
 
 ---
 
