@@ -11,6 +11,7 @@ import { HelpProvider } from './components/help/HelpProvider'
 import HelpPanel from './components/help/HelpPanel'
 import HelpTopbarButton from './components/help/HelpTopbarButton'
 import TopbarSetupGear from './components/TopbarSetupGear'
+import { NavContext } from './lib/navContext'
 import TopbarUserMenu from './components/TopbarUserMenu'
 import AssistantPanel from './components/AssistantPanel'
 import NotificationBell from './components/NotificationBell'
@@ -374,6 +375,7 @@ function AuthedApp({ session }) {
   }
 
   return (
+    <NavContext.Provider value={{ selectedRecord, navigateToRecord, closeRecord, replaceRecord }}>
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, -apple-system, sans-serif', background: C.page, overflow: 'hidden' }}>
       <Sidebar
         activeModule={activeModule}
@@ -524,6 +526,7 @@ function AuthedApp({ session }) {
         onNavigateToRecord={navigateToRecord}
       />
     </div>
+    </NavContext.Provider>
   )
 }
 
