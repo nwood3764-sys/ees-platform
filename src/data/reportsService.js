@@ -1085,7 +1085,7 @@ function applySimpleFilter(query, fieldName, operator, value) {
  *                                      dashboard filter that only some
  *                                      reports support degrades.
  */
-export async function runReport(reportId, promptValues = null, extraFilters = null) {
+export async function runReport(reportId, promptValues = null, extraFilters = null, overrideFields = null) {
   const loaded = await loadReport(reportId)
   if (!loaded) throw new Error('Report not found')
   const r = loaded.report
@@ -1100,6 +1100,21 @@ export async function runReport(reportId, promptValues = null, extraFilters = nu
       }
       return f
     })
+  }
+
+  // Columns the caller (e.g. a dashboard filter bar) owns outright override
+  // the report's own saved filter on the same column: the caller's value —
+  // or its absence ("All" → no extra filter) — is authoritative, so strip
+  // the report's stored filter for those columns before appending extras.
+  // Without this, a report whose stored filter is `property_state = NC`
+  // stays pinned to NC even when the dashboard STATE control is set to
+  // "All", because the two filters get ANDed instead of replaced.
+  // Cross-filters (no plain field_name) are left untouched.
+  if (overrideFields && overrideFields.length > 0) {
+    const ov = new Set(overrideFields)
+    loaded.filters = (loaded.filters || []).filter(
+      f => f.rfilt_is_cross_filter || !ov.has(f.rfilt_field_name)
+    )
   }
 
   // Append any extraFilters whose field_name is a real column on the
@@ -1670,7 +1685,7 @@ export async function fetchFilterOptions(filter) {
  * primary object, and translates them into the RPC's {col, op, val}
  * filter shape. On any failure the caller falls back to runReport.
  */
-export async function runWidgetAggregate(widget, extraFilters = null) {
+export async function runWidgetAggregate(widget, extraFilters = null, overrideFields = null) {
   const cfg = widget.dw_widget_config || {}
   const groupCol = cfg.group_by
   if (!groupCol) throw new Error('Widget has no group_by; cannot aggregate')
@@ -1682,6 +1697,11 @@ export async function runWidgetAggregate(widget, extraFilters = null) {
   // Real columns on the primary object — used to drop filters that don't apply.
   const primaryCols = await describeColumns(primaryObject)
   const colNames = new Set(primaryCols.map(c => c.column_name))
+
+  // Columns the dashboard filter bar controls outright: its value (or
+  // "All" → nothing) replaces the report's own saved filter on that column,
+  // instead of being ANDed with it. See runReport for the full rationale.
+  const ov = new Set(overrideFields || [])
 
   // Translate a report_filter / extraFilter operator into the RPC's op set.
   const opMap = {
@@ -1697,6 +1717,7 @@ export async function runWidgetAggregate(widget, extraFilters = null) {
   // Report's own saved filters (e.g. the state runtime prompt default).
   for (const f of (loaded.report ? (loaded.filters || []) : [])) {
     if (f.rfilt_is_cross_filter) continue
+    if (ov.has(f.rfilt_field_name)) continue   // dashboard controls this column
     if (!colNames.has(f.rfilt_field_name)) continue
     const op = opMap[f.rfilt_operator]
     if (!op) continue
