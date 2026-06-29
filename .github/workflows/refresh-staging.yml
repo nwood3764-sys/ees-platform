@@ -73,7 +73,11 @@ jobs:
           # The repo migration files lag production (changes have gone straight to
           # prod), so production's live schema is the source of truth. Dump it
           # schema-only and load into the freshly-dropped staging public schema.
+          # pg_dump emits a bare "CREATE SCHEMA public;" (PG15+), but staging keeps
+          # its public schema (we only drop the objects inside it, to preserve
+          # PostGIS), so make that one statement idempotent.
           pg_dump --schema-only --no-owner --schema=public "$PROD_DB_URL" \
+            | sed 's/^CREATE SCHEMA public;/CREATE SCHEMA IF NOT EXISTS public;/' \
             | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction
           echo "Re-asserting schema-usage grants..."
           # A --schema=public dump may omit schema-level GRANTs; re-apply them so
