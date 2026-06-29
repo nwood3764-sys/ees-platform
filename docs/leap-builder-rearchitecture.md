@@ -1,7 +1,21 @@
 # LEAP Builder Rearchitecture — WYSIWYG Drag-and-Drop (Handoff)
 
-**Status:** Planning / next active workstream. Nothing built yet.
+**Status:** Phase 0 (Foundation) built — in staging for review, not on master.
 **Author of handoff:** prior session (2026-06-29). Read this top-to-bottom before starting.
+
+---
+
+## Phase 0 progress (branch `claude/builder-rearchitecture-phase-0-qt1949`, staging only)
+
+Foundation shipped to the **staging** site (NOT master — held for Nicholas to test):
+
+- **Libraries added safely** (decision #2): `react-grid-layout` (grid canvas + resize + palette drag-in) and `@dnd-kit/{core,sortable,utilities}` (sortable/nested lists). Isolated in `vite.config.js` as `vendor-grid` / `vendor-dndkit`. Verified the built import graph is a **DAG** — no `vendor-react`/`vendor-recharts` → grid/dndkit back-edge — so the TDZ white-screen hazard (§5) cannot occur. `build:safe` green; headless Chromium render confirmed 0 TDZ/init errors and a working canvas. (Formula-engine deps — CodeMirror/mathjs/formulajs, §8 — are deferred to their own focused increment so ~1 MB of unused vendor code isn't shipped before that subsystem exists.)
+- **Geometry model** (`src/builder/geometry.js`): explicit `{x,y,w,h}` grid units on a 12-col responsive grid, plus legacy `dw_position_row/col/width` ⇄ grid conversion so Phase 1 can read/write existing dashboards without breaking the runner.
+- **Component registry** (`src/builder/componentRegistry.jsx`): the single declarative source of truth. Seeded with the dashboard widget family (metric, gauge, bar, line, pie, donut, funnel, table, ranked_list) + content components (heading, rich_text, spacer). Each entry's `configSchema` auto-generates the inspector; `Preview` renders the canvas tile. Adding a widget = one entry.
+- **LEAP Canvas shell** (`src/builder/LeapCanvas.jsx` + `Palette.jsx`, `CanvasGrid.jsx`, `Inspector.jsx`, `SortableList.jsx`): the three-pane editor — palette (registry-driven, drag or click to add) / live RGL canvas (drag-move, resize, select) / schema-driven inspector (+ dnd-kit reorderable layer list). Surface-agnostic; configured by initial components/layout + an `onSave`.
+- **Surfaced** at **Setup → User Interface → "Builder Studio (Preview)"** (`src/modules/admin/BuilderStudio.jsx`), lazy-loaded, **in-memory sandbox only** — writes nothing. The legacy `DashboardEditor`/`DashboardRunner` and every shipped dashboard are **untouched** (the one "additive, never break" constraint from decision #5).
+
+**Next (Phase 1):** wire the canvas to the real `dashboards`/`dashboard_widgets`/`dashboard_filters` tables via a persistence adapter (reuse `loadDashboard`/`saveDashboard`), port the inspector previews to reuse `DashboardRunner`'s recharts renderers, then replace the `DashboardEditor` entry points. Help article for the builder is deferred to the Phase 1 **master** ship (per the ship cycle, help articles land with the production feature, not the staging preview).
 
 ---
 
