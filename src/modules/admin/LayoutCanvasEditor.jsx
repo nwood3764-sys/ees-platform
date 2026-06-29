@@ -2,22 +2,24 @@
 // src/modules/admin/LayoutCanvasEditor.jsx
 //
 // The new record page-layout builder. Three-pane (palette / canvas / inspector)
-// consistent with the dashboard/home/report builders, but on the SECTION model
-// the live record renderer already understands — Sections → field groups (with
-// drag-reorderable field tiles) + related lists / reports / etc. Persists
-// through the existing page-layout service (no renderer or schema change).
+// on the SECTION model the live record renderer understands — Sections →
+// COLUMNS → Fields (+ related lists / reports / etc.). A section's column count
+// is shown for real: fields live in specific columns (left / center / right)
+// and drag between/within them (dnd-kit multi-container). Each field carries a
+// `column` (1-based); RecordDetail's FieldGroupWidget honors it.
 //
-// v1 scope: full section + field-group editing (add/remove/reorder fields via
-// dnd-kit, section add/rename/delete/columns). Complex widgets (related_list,
-// report, file_gallery, conversation_panel, status_path) loaded from the layout
-// are preserved through save and titled here; their deep config editing is the
-// next increment.
+// Persists through the existing page-layout service (bulk soft-delete +
+// recreate). No schema change.
 // =============================================================================
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, memo } from 'react'
+import {
+  DndContext, closestCorners, PointerSensor, KeyboardSensor, useSensor, useSensors, useDroppable,
+} from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { C } from '../../data/constants'
 import { LoadingState, ErrorState } from '../../components/UI'
-import SortableList from '../../builder/SortableList'
 import { inputStyle } from '../../builder/inspectorControls'
 import { loadLayoutForCanvas, saveLayoutFromCanvas } from '../../builder/adapters/pageLayoutAdapter'
 
@@ -32,6 +34,23 @@ function humanize(col, object) {
   if (object && c.startsWith(object.replace(/s$/, '') + '_')) c = c.slice(object.replace(/s$/, '').length + 1)
   c = c.replace(/_id$/, '').replace(/_/g, ' ').trim()
   return c.replace(/\b\w/g, m => m.toUpperCase())
+}
+
+// Ensure every field in a field group has a valid `column` (1..cols). Fields
+// loaded without one are distributed round-robin so they don't pile into col 1.
+function normalizeColumns(sections) {
+  return sections.map(s => ({
+    ...s,
+    widgets: (s.widgets || []).map(w => {
+      if (w.type !== 'field_group') return w
+      const cols = s.columns || 2
+      const fields = (w.config?.fields || []).map((f, i) => ({
+        ...f,
+        column: f.column && f.column >= 1 && f.column <= cols ? f.column : (i % cols) + 1,
+      }))
+      return { ...w, config: { ...w.config, fields } }
+    }),
+  }))
 }
 
 export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
@@ -52,7 +71,8 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
       .then(data => {
         if (cancelled) return
         if (!data) { setError(new Error('Layout not found.')); setLoading(false); return }
-        setMeta(data.layout); setColumns(data.columns || []); setSections(data.sections)
+        setMeta(data.layout); setColumns(data.columns || [])
+        setSections(normalizeColumns(data.sections))
         setActiveSection(data.sections[0]?.key || null)
         setLoading(false)
       })
@@ -60,60 +80,65 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
     return () => { cancelled = true }
   }, [layoutId])
 
-  // ── Section ops ────────────────────────────────────────────────────────
-  const patchSection = (key, patch) => setSections(s => s.map(x => x.key === key ? { ...x, ...patch } : x))
+  // ── Stable section/field ops (so memoized SectionCards don't re-render all) ─
+  const patchSection = useCallback((key, patch) => {
+    setSections(s => s.map(x => {
+      if (x.key !== key) return x
+      const next = { ...x, ...patch }
+      // Re-clamp field columns if the column count shrank.
+      if (patch.columns) {
+        next.widgets = next.widgets.map(w => w.type !== 'field_group' ? w : {
+          ...w, config: { ...w.config, fields: (w.config?.fields || []).map(f => ({ ...f, column: Math.min(f.column || 1, patch.columns) })) },
+        })
+      }
+      return next
+    }))
+  }, [])
+  const removeSection = useCallback((key) => setSections(s => s.filter(x => x.key !== key)), [])
+  const setFieldGroupFields = useCallback((sectionKey, widgetKey, nextFields) => {
+    setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
+      ...sec, widgets: sec.widgets.map(w => w.key !== widgetKey ? w : { ...w, config: { ...w.config, fields: nextFields } }),
+    }))
+  }, [])
+  const activate = useCallback((key) => setActiveSection(key), [])
+
   const addSection = () => {
     const key = `sec-new-${Date.now()}`
-    setSections(s => [...s, { key, label: 'New Section', columns: 2, tab: 'Details', isCollapsible: false, isCollapsedByDefault: false, placement: 'main', widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [] } }] }])
+    setSections(s => [...s, { key, label: 'New Section', columns: 2, tab: 'Details', isCollapsible: false, isCollapsedByDefault: false, placement: 'main',
+      widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [] } }] }])
     setActiveSection(key)
   }
-  const removeSection = (key) => setSections(s => s.filter(x => x.key !== key))
 
-  // ── Field ops (within a section's first field_group) ─────────────────────
-  const fieldGroupOf = (section) => (section.widgets || []).find(w => w.type === 'field_group')
-  const placedFieldNames = new Set(
-    sections.flatMap(s => (s.widgets || []).filter(w => w.type === 'field_group').flatMap(w => (w.config?.fields || []).map(f => f.name)))
-  )
   const addField = (sectionKey, col) => {
     setSections(s => s.map(sec => {
       if (sec.key !== sectionKey) return sec
-      let widgets = sec.widgets || []
-      let fg = widgets.find(w => w.type === 'field_group')
-      const field = { name: col.name, label: humanize(col.name, meta.object) }
+      const widgets = sec.widgets || []
+      const fg = widgets.find(w => w.type === 'field_group')
+      const field = { name: col.name, label: humanize(col.name, meta.object), column: 1 }
       if (!fg) {
-        fg = { key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [field] } }
-        return { ...sec, widgets: [fg, ...widgets] }
+        return { ...sec, widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [field] } }, ...widgets] }
       }
       return { ...sec, widgets: widgets.map(w => w === fg ? { ...w, config: { ...w.config, fields: [...(w.config?.fields || []), field] } } : w) }
     }))
   }
-  const removeField = (sectionKey, widgetKey, name) => setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
-    ...sec, widgets: sec.widgets.map(w => w.key !== widgetKey ? w : { ...w, config: { ...w.config, fields: (w.config?.fields || []).filter(f => f.name !== name) } }),
-  }))
-  const reorderFields = (sectionKey, widgetKey, nextFields) => setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
-    ...sec, widgets: sec.widgets.map(w => w.key !== widgetKey ? w : { ...w, config: { ...w.config, fields: nextFields } }),
-  }))
 
   const handleSave = async () => {
     setSaving(true); setSaveError(null)
-    try {
-      await saveLayoutFromCanvas({ layoutId, sections })
-      setSavedAt(new Date())
-    } catch (err) {
-      setSaveError(err)
-    } finally {
-      setSaving(false)
-    }
+    try { await saveLayoutFromCanvas({ layoutId, sections }); setSavedAt(new Date()) }
+    catch (err) { setSaveError(err) }
+    finally { setSaving(false) }
   }
 
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} onRetry={onBack} />
 
+  const placedFieldNames = new Set(
+    sections.flatMap(s => (s.widgets || []).filter(w => w.type === 'field_group').flatMap(w => (w.config?.fields || []).map(f => f.name)))
+  )
   const available = columns.filter(c => !placedFieldNames.has(c.name))
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
-      {/* Header */}
       <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <div onClick={onBack} style={{ fontSize: 11, color: C.textMuted, cursor: 'pointer' }}>‹ {objectLabel} layouts</div>
@@ -129,42 +154,29 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
       </div>
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Palette: available fields */}
         <div style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${C.border}`, background: C.card, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}`, background: C.cardSecondary }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Fields</div>
-            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Click to add to the selected section.</div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Click to add to the selected section (column 1; drag to place).</div>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
-            {available.length === 0 ? (
-              <div style={{ fontSize: 12, color: C.textMuted, padding: 6 }}>All fields placed.</div>
-            ) : available.map(c => (
-              <button key={c.name} onClick={() => activeSection && addField(activeSection, c)}
-                disabled={!activeSection}
-                title={activeSection ? `Add ${c.name}` : 'Select a section first'}
-                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 9px', marginBottom: 5, fontSize: 12.5,
-                  background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
-                {humanize(c.name, meta.object)}
-                <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace' }}>{c.name}</span>
-              </button>
-            ))}
+            {available.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, padding: 6 }}>All fields placed.</div>
+              : available.map(c => (
+                <button key={c.name} onClick={() => activeSection && addField(activeSection, c)} disabled={!activeSection}
+                  title={activeSection ? `Add ${c.name}` : 'Select a section first'}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 9px', marginBottom: 5, fontSize: 12.5,
+                    background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
+                  {humanize(c.name, meta.object)}
+                  <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace' }}>{c.name}</span>
+                </button>
+              ))}
           </div>
         </div>
 
-        {/* Canvas: sections */}
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
           {sections.map(sec => (
-            <SectionCard
-              key={sec.key}
-              section={sec}
-              object={meta.object}
-              active={activeSection === sec.key}
-              onActivate={() => setActiveSection(sec.key)}
-              onPatch={(patch) => patchSection(sec.key, patch)}
-              onRemove={() => removeSection(sec.key)}
-              onRemoveField={(wKey, name) => removeField(sec.key, wKey, name)}
-              onReorderFields={(wKey, next) => reorderFields(sec.key, wKey, next)}
-            />
+            <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
+              onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields} />
           ))}
           <button onClick={addSection} style={{ width: '100%', padding: '10px', fontSize: 13, fontWeight: 500, background: C.card, color: C.emeraldMid, border: `1px dashed ${C.borderDark}`, borderRadius: 8, cursor: 'pointer' }}>
             + Add Section
@@ -175,51 +187,39 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   )
 }
 
-function SectionCard({ section, object, active, onActivate, onPatch, onRemove, onRemoveField, onReorderFields }) {
+// memo: only the edited section (or the two whose `active` flips) re-renders —
+// keeps the drag contexts from re-mounting on every keystroke (the sluggishness).
+const SectionCard = memo(function SectionCard({ section, object, active, onActivate, onPatch, onRemove, onSetFields }) {
   const fg = (section.widgets || []).find(w => w.type === 'field_group')
   const others = (section.widgets || []).filter(w => w.type !== 'field_group')
-  const fields = fg?.config?.fields || []
+  const cols = section.columns || 2
 
   return (
-    <div onMouseDown={onActivate} style={{
+    <div onMouseDown={() => onActivate(section.key)} style={{
       background: C.card, border: `1px solid ${active ? C.emerald : C.border}`, borderRadius: 8,
       marginBottom: 14, overflow: 'hidden', boxShadow: active ? `0 0 0 1px ${C.emerald}` : 'none',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${C.border}`, background: C.cardSecondary }}>
-        <input value={section.label} onChange={e => onPatch({ label: e.target.value })}
+        <input value={section.label} onChange={e => onPatch(section.key, { label: e.target.value })}
           style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.textPrimary, border: 'none', background: 'transparent', outline: 'none' }} />
         <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
           Columns
-          <select value={section.columns} onChange={e => onPatch({ columns: Number(e.target.value) })}
+          <select value={cols} onChange={e => onPatch(section.key, { columns: Number(e.target.value) })}
             style={{ ...inputStyle(), width: 'auto', padding: '3px 6px', fontSize: 12 }}>
             <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
           </select>
         </label>
-        <button onClick={onRemove} title="Remove section" style={miniBtn()}>×</button>
+        <button onClick={() => onRemove(section.key)} title="Remove section" style={miniBtn()}>×</button>
       </div>
       <div style={{ padding: 12 }}>
-        {fields.length === 0 ? (
-          <div style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic', padding: '8px 0' }}>
-            No fields. Click fields in the left palette to add them here.
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${section.columns || 2}, 1fr)`, gap: 8 }}>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <SortableList
-                items={fields.map(f => ({ id: `${fg.key}:${f.name}`, f }))}
-                onReorder={(next) => onReorderFields(fg.key, next.map(x => x.f))}
-                renderItem={(item, { setNodeRef, style, dragHandleProps }) => (
-                  <div ref={setNodeRef} style={{ ...style, display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', marginBottom: 6, background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6 }}>
-                    <span {...dragHandleProps} title="Drag to reorder" style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
-                    <span style={{ flex: 1, fontSize: 12.5, color: C.textPrimary }}>{item.f.label || humanize(item.f.name, object)}</span>
-                    <span style={{ fontSize: 10, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{item.f.name}</span>
-                    <button onClick={() => onRemoveField(fg.key, item.f.name)} style={miniBtn()}>×</button>
-                  </div>
-                )}
-              />
-            </div>
-          </div>
-        )}
+        {fg ? (
+          <MultiColumnFields
+            cols={cols}
+            fields={fg.config?.fields || []}
+            object={object}
+            onChange={(next) => onSetFields(section.key, fg.key, next)}
+          />
+        ) : null}
         {others.map(w => (
           <div key={w.key} style={{ marginTop: 8, padding: '10px 12px', background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12.5, color: C.textPrimary, fontWeight: 500 }}>{w.title || WIDGET_LABELS[w.type] || w.type}</span>
@@ -227,6 +227,89 @@ function SectionCard({ section, object, active, onActivate, onPatch, onRemove, o
           </div>
         ))}
       </div>
+    </div>
+  )
+})
+
+// ─── Multi-column field placement (dnd-kit multi-container) ──────────────────
+function MultiColumnFields({ cols, fields, object, onChange }) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const colFields = (c) => fields.filter(f => (f.column || 1) === c)
+  const removeField = (name) => onChange(fields.filter(f => f.name !== name))
+
+  function handleDragEnd({ active, over }) {
+    if (!over || active.id === over.id) return
+    const activeName = active.id
+    const moving = fields.find(f => f.name === activeName)
+    if (!moving) return
+
+    let targetCol, overName = null
+    if (typeof over.id === 'string' && over.id.startsWith('col:')) {
+      targetCol = Number(over.id.slice(4))
+    } else {
+      overName = over.id
+      const o = fields.find(f => f.name === overName)
+      targetCol = o ? (o.column || 1) : 1
+    }
+
+    const without = fields.filter(f => f.name !== activeName)
+    const moved = { ...moving, column: targetCol }
+    let insertAt
+    if (overName) {
+      insertAt = without.findIndex(f => f.name === overName)
+      if (insertAt < 0) insertAt = without.length
+    } else {
+      // Dropped on the column container → append to the end of that column.
+      let last = -1
+      without.forEach((f, i) => { if ((f.column || 1) === targetCol) last = i })
+      insertAt = last + 1
+    }
+    onChange([...without.slice(0, insertAt), moved, ...without.slice(insertAt)])
+  }
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 8 }}>
+        {Array.from({ length: cols }, (_, i) => i + 1).map(c => (
+          <ColumnZone key={c} col={c} fields={colFields(c)} object={object} onRemoveField={removeField} />
+        ))}
+      </div>
+    </DndContext>
+  )
+}
+
+function ColumnZone({ col, fields, object, onRemoveField }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `col:${col}` })
+  return (
+    <div ref={setNodeRef} style={{
+      minHeight: 56, padding: 6, borderRadius: 6,
+      border: `1px dashed ${isOver ? C.emerald : C.border}`, background: isOver ? '#f0faf5' : C.cardSecondary,
+    }}>
+      <div style={{ fontSize: 9.5, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5, paddingLeft: 2 }}>
+        {col === 1 ? 'Left' : col === 2 ? 'Center' : col === 3 ? 'Right' : `Col ${col}`}
+      </div>
+      <SortableContext items={fields.map(f => f.name)} strategy={verticalListSortingStrategy}>
+        {fields.length === 0 && <div style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic', padding: '6px 2px' }}>Drop fields here</div>}
+        {fields.map(f => <FieldTile key={f.name} field={f} object={object} onRemove={() => onRemoveField(f.name)} />)}
+      </SortableContext>
+    </div>
+  )
+}
+
+function FieldTile({ field, object, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.name })
+  return (
+    <div ref={setNodeRef} style={{
+      transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1,
+      display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', marginBottom: 5,
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
+    }}>
+      <span {...attributes} {...listeners} title="Drag" style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
+      <span style={{ flex: 1, fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field.label || humanize(field.name, object)}</span>
+      <button onClick={onRemove} style={miniBtn()}>×</button>
     </div>
   )
 }
@@ -238,5 +321,5 @@ function btnSecondary() {
   return { padding: '8px 14px', fontSize: 13, fontWeight: 500, background: C.card, color: C.textPrimary, border: `1px solid ${C.borderDark}`, borderRadius: 6, cursor: 'pointer' }
 }
 function miniBtn() {
-  return { width: 24, height: 24, fontSize: 14, fontWeight: 600, background: '#e8f1fb', color: C.sky, border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer', flexShrink: 0 }
+  return { width: 22, height: 22, fontSize: 13, fontWeight: 600, background: '#e8f1fb', color: C.sky, border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer', flexShrink: 0 }
 }

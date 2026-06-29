@@ -294,7 +294,6 @@ function WelcomePane({ onOpenObjectManager, onNavigate }) {
     { label: 'Users',             hint: 'Energy Efficiency Services user accounts',                        nodeId: 'users' },
     { label: 'Roles',             hint: 'Row-level and field-level security roles',   nodeId: 'roles' },
     { label: 'Permission Sets',   hint: 'Additive grants on top of role baseline',    nodeId: 'permission_sets' },
-    { label: 'Page Layouts',      hint: 'Record detail layouts',                      nodeId: 'page_layouts' },
     { label: 'Email Templates',   hint: 'Outbound email templates with merge fields', nodeId: 'email_templates' },
     { label: 'Audit Log',         hint: 'Append-only history of system changes',      nodeId: 'audit_log' },
     { label: 'Client Errors',     hint: 'Runtime exceptions captured from user sessions', nodeId: 'client_errors' },
