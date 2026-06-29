@@ -1,7 +1,49 @@
 # LEAP Builder Rearchitecture — WYSIWYG Drag-and-Drop (Handoff)
 
-**Status:** Planning / next active workstream. Nothing built yet.
+**Status:** Phases 0–2 built — in staging for review, not on master.
 **Author of handoff:** prior session (2026-06-29). Read this top-to-bottom before starting.
+
+---
+
+## Phase 2 progress (branch `claude/builder-rearchitecture-phase-0-qt1949`, staging only)
+
+Home pages now use the LEAP Canvas too. The key move was **generalizing the canvas into a per-surface engine** (the §4a intent): the shell (palette / grid / inspector / save / geometry) is surface-agnostic and consumes a **registry** object; a surface is now "a registry + an adapter."
+
+- **Registry abstraction** — `src/builder/registries/`: `registryHelpers.js` (makeHelpers/fieldVisible), `dashboardRegistry.jsx` (the widget entries + report-binding inspector + LiveWidgetPreview), `homeRegistry.jsx` (home components + source-picker inspector + HomeComponentRenderer-backed preview). Shared inspector controls in `src/builder/inspectorControls.jsx`. `LeapCanvas`/`Palette`/`CanvasGrid`/`Inspector` now take a `registry` (+ `sources`) prop — no surface specifics in the shell.
+- **selfChrome** — home components are self-contained cards (HomeComponentRenderer wraps each), so the home registry sets `selfChrome: true` and the canvas renders a bare selection wrapper + drag grip instead of its own header (no double card). Dashboard widgets keep the Title/Subtitle/Footer chrome.
+- **Home adapter** — `src/builder/adapters/homePageAdapter.js`: load/save via the existing `fetchHomePage`/`save_home_page` RPC; geometry rides in `hpc_config._geometry`; canvas pages save as the `single`/`main` template and are positioned purely by geometry. No schema change (`hpc_source_id` confirmed uuid; we store the source UUID, fixing the legacy builder's record-number bug).
+- **Editor** — `src/modules/admin/HomePageCanvasEditor.jsx`: list → New/Edit → canvas; page name in header; module/role/active/default in the inspector's page-settings view. Replaces `HomePageBuilder` at Setup → User Interface → Home Pages.
+- **Viewer honors geometry** — `ConfiguredHome` places components by `_geometry` on the 12-col grid when present (view == build); legacy template/region pages (HP-00005/6, no geometry) render exactly as before.
+
+`HomePageBuilder.jsx` is now unreferenced (kept as rollback alongside `DashboardEditor.jsx`; delete both once Phases 1–2 are confirmed). **Next:** Phase 3 (Reports — drag fields, live preview, formula engine).
+
+---
+
+## Phase 1 progress (branch `claude/builder-rearchitecture-phase-0-qt1949`, staging only)
+
+The headline win: the form-driven `DashboardEditor` ("weird list view") is **replaced** by the LEAP Canvas wired to the real dashboards tables. Built on Phase 0, additive, no schema change.
+
+- **Shared renderers** — extracted `DashboardRunner`'s widget renderers into `src/modules/DashboardWidgetView.jsx` (`WidgetBody` + `buildChartData`). The runner and the builder now render widgets through the *same* code (behavior-preserving for the runner).
+- **Live WYSIWYG previews** — `src/builder/LiveWidgetPreview.jsx`: report-bound canvas tiles fetch real report data (same `runReport`/`runWidgetAggregate` fast-path as the runner) and render the real widget, driven by the unsaved config. What you build is what ships.
+- **Persistence adapter** — `src/builder/adapters/dashboardAdapter.js`: loads a dashboard into the canvas and saves it back via the existing `saveDashboard`. Geometry (`{x,y,w,h}` on the 12-col grid) and the Salesforce Title/Subtitle/Footer chrome are stored in `dw_widget_config` under namespaced keys (`_geometry`/`_subtitle`/`_footer`) — they survive `saveDashboard`'s delete-and-reinsert, need no migration (verified: no trigger on `dashboard_widgets`, free jsonb), and the runner falls back cleanly when absent.
+- **Runner honors geometry** — `DashboardRunner` places widgets by `_geometry` on a 12-col CSS grid (view == build) and shows subtitle/footer, **only when present**. Existing dashboards (DSH-00009/10) have no `_geometry` (verified on staging) → they render exactly as before.
+- **The editor** — `src/modules/DashboardCanvasEditor.jsx`: three-pane canvas + dashboard settings (name in header; description/folder/filters in the inspector's no-selection view; filters reorder via dnd-kit). Repointed both entry points (`ReportsModule`, `ConfiguredHome`) from `DashboardEditor` to it. `DashboardEditor.jsx` is now unreferenced (kept temporarily as rollback; delete once Phase 1 is confirmed).
+
+**Next:** confirm on staging (build/save/view a dashboard round-trip), then Phase 2 (Home pages) reuses the same canvas + adapter pattern. Help article lands with the Phase 1 master ship.
+
+---
+
+## Phase 0 progress (branch `claude/builder-rearchitecture-phase-0-qt1949`, staging only)
+
+Foundation shipped to the **staging** site (NOT master — held for Nicholas to test):
+
+- **Libraries added safely** (decision #2): `react-grid-layout` (grid canvas + resize + palette drag-in) and `@dnd-kit/{core,sortable,utilities}` (sortable/nested lists). Isolated in `vite.config.js` as `vendor-grid` / `vendor-dndkit`. Verified the built import graph is a **DAG** — no `vendor-react`/`vendor-recharts` → grid/dndkit back-edge — so the TDZ white-screen hazard (§5) cannot occur. `build:safe` green; headless Chromium render confirmed 0 TDZ/init errors and a working canvas. (Formula-engine deps — CodeMirror/mathjs/formulajs, §8 — are deferred to their own focused increment so ~1 MB of unused vendor code isn't shipped before that subsystem exists.)
+- **Geometry model** (`src/builder/geometry.js`): explicit `{x,y,w,h}` grid units on a 12-col responsive grid, plus legacy `dw_position_row/col/width` ⇄ grid conversion so Phase 1 can read/write existing dashboards without breaking the runner.
+- **Component registry** (`src/builder/componentRegistry.jsx`): the single declarative source of truth. Seeded with the dashboard widget family (metric, gauge, bar, line, pie, donut, funnel, table, ranked_list) + content components (heading, rich_text, spacer). Each entry's `configSchema` auto-generates the inspector; `Preview` renders the canvas tile. Adding a widget = one entry.
+- **LEAP Canvas shell** (`src/builder/LeapCanvas.jsx` + `Palette.jsx`, `CanvasGrid.jsx`, `Inspector.jsx`, `SortableList.jsx`): the three-pane editor — palette (registry-driven, drag or click to add) / live RGL canvas (drag-move, resize, select) / schema-driven inspector (+ dnd-kit reorderable layer list). Surface-agnostic; configured by initial components/layout + an `onSave`.
+- **Surfaced** at **Setup → User Interface → "Builder Studio (Preview)"** (`src/modules/admin/BuilderStudio.jsx`), lazy-loaded, **in-memory sandbox only** — writes nothing. The legacy `DashboardEditor`/`DashboardRunner` and every shipped dashboard are **untouched** (the one "additive, never break" constraint from decision #5).
+
+**Next (Phase 1):** wire the canvas to the real `dashboards`/`dashboard_widgets`/`dashboard_filters` tables via a persistence adapter (reuse `loadDashboard`/`saveDashboard`), port the inspector previews to reuse `DashboardRunner`'s recharts renderers, then replace the `DashboardEditor` entry points. Help article for the builder is deferred to the Phase 1 **master** ship (per the ship cycle, help articles land with the production feature, not the staging preview).
 
 ---
 

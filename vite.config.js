@@ -71,6 +71,23 @@ export default defineConfig({
           // mammoth (DOCX preview) → its own chunk, loaded only when a Word
           // document is previewed via the dynamic import in FileGallery.
           if (id.includes('mammoth')) return 'vendor-mammoth'
+          // react-grid-layout (the WYSIWYG builder canvas: free positioning,
+          // resize handles, responsive breakpoints) + its drag/resize stack →
+          // its own chunk, downloaded only with the lazy-loaded builder. These
+          // import React (a forward edge to vendor-react) but nothing in the
+          // React/editor stack imports them back, so there is no cycle and no
+          // TDZ risk. Shared micro-utils (clsx, prop-types, fast-equals) are
+          // deliberately NOT claimed here: clsx and prop-types are also used by
+          // recharts, so pulling them into vendor-grid created a vendor-grid ↔
+          // vendor-recharts cycle (clsx in grid, prop-types in recharts → each
+          // imports the other → TDZ). Leaving them out keeps vendor-grid a pure
+          // leaf that nothing but the lazy builder imports — only forward edges
+          // to vendor-react / vendor-recharts, no cycle.
+          if (id.includes('react-grid-layout') || id.includes('react-resizable') ||
+              id.includes('react-draggable')   || id.includes('resize-observer-polyfill')) return 'vendor-grid'
+          // dnd-kit (sortable palettes / nested field & section lists) → own
+          // chunk, same forward-edge-only rationale as vendor-grid.
+          if (id.includes('@dnd-kit')) return 'vendor-dndkit'
           // Recharts + d3 → its own chunk. Must be tested FIRST so that any
           // node_module that recharts pulls in (d3-*, victory-vendor, etc.)
           // lands here too, not in vendor-react.
