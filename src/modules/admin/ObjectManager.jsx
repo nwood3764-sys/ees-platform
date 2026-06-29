@@ -11,22 +11,21 @@ import { OBJECT_CATALOG } from './objectCatalog'
 export default function ObjectManager({ onOpenObject }) {
   const [search, setSearch] = useState('')
 
-  // Filter by search term — matches label, plural, table name, or module
+  // Filter by search term — matches label, plural, or table name.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return OBJECT_CATALOG
     return OBJECT_CATALOG.filter(o =>
       o.label.toLowerCase().includes(q) ||
       o.pluralLabel.toLowerCase().includes(q) ||
-      o.table.toLowerCase().includes(q) ||
-      o.module.toLowerCase().includes(q)
+      o.table.toLowerCase().includes(q)
     )
   }, [search])
 
   // One flat alphabetical list. Modules are Salesforce-style apps over one
-  // shared database — every object is accessible from every app — so grouping
-  // the Object Manager by module is misleading. Sort by label, like SF's own
-  // Object Manager.
+  // shared database — every object is accessible from every app — so an object
+  // has no single owning module; the Object Manager doesn't show one. Sort by
+  // label, like SF's own Object Manager.
   const sorted = useMemo(
     () => [...filtered].sort((a, b) => a.label.localeCompare(b.label)),
     [filtered]
@@ -79,12 +78,11 @@ export default function ObjectManager({ onOpenObject }) {
       {/* Table header */}
       <div style={{
         padding: '9px 24px', background: '#fafbfd', borderBottom: `1px solid ${C.border}`,
-        display: 'grid', gridTemplateColumns: '1.6fr 1.6fr 1fr 1.2fr', gap: 16,
+        display: 'grid', gridTemplateColumns: '1.6fr 1.6fr 2fr', gap: 16,
         fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em',
       }}>
         <div>Label</div>
         <div>API Name (Table)</div>
-        <div>Module</div>
         <div>Description</div>
       </div>
 
@@ -118,7 +116,7 @@ function ObjectRow({ obj, onClick }) {
       style={{
         padding: '11px 24px',
         display: 'grid',
-        gridTemplateColumns: '1.6fr 1.6fr 1fr 1.2fr',
+        gridTemplateColumns: '1.6fr 1.6fr 2fr',
         gap: 16,
         alignItems: 'center',
         fontSize: 12.5,
@@ -132,7 +130,6 @@ function ObjectRow({ obj, onClick }) {
       <div style={{ color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }}>
         {obj.table}
       </div>
-      <div style={{ color: C.textSecondary }}>{obj.module}</div>
       <div style={{ color: C.textMuted, fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {obj.description}
       </div>
