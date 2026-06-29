@@ -12,6 +12,7 @@ import {
 } from '../data/reportsService'
 import { TabularLayout, SummaryLayout, MatrixLayout } from './ReportRunner'
 import { supabase } from '../lib/supabase'
+import SortableList from '../builder/SortableList'
 
 // ─── Top-level Report Builder ─────────────────────────────────────────────
 //
@@ -248,6 +249,11 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     ;[fields[idx], fields[target]] = [fields[target], fields[idx]]
     updateReport({ rpt_selected_fields: fields })
   }
+  // Drag reorder (dnd-kit) — replaces the up/down shuffle as the primary
+  // reordering gesture. Receives the already-reordered field array.
+  const reorderFields = (nextFields) => {
+    updateReport({ rpt_selected_fields: nextFields })
+  }
 
   // ─── Save ──────────────────────────────────────────────────────────────
   const handleSave = async () => {
@@ -380,6 +386,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
                 addField={addField}
                 removeField={removeField}
                 moveField={moveField}
+                reorderFields={reorderFields}
               />
             )}
             {tab === 'filters' && (
@@ -456,10 +463,14 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
 
 // ─── Fields tab ───────────────────────────────────────────────────────────
 
+function fieldKey(f) {
+  return `${f.table}|${f.name}|${(f.via_path || []).join('>')}`
+}
+
 function FieldsTab({
   primaryOptions, report, updateReport,
   fieldTree, expandedRelated, onExpandRelated,
-  addField, removeField, moveField,
+  addField, removeField, moveField, reorderFields,
 }) {
   return (
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start' }}>
@@ -521,22 +532,29 @@ function FieldsTab({
           {report.rpt_selected_fields.length === 0 ? (
             <div style={emptyState()}>No fields selected. Pick from the left.</div>
           ) : (
-            report.rpt_selected_fields.map((f, idx) => (
-              <div key={`${f.table}-${f.name}-${idx}`} style={{
-                display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
-                background:C.cardSecondary, borderRadius:6, marginBottom:6,
-              }}>
-                <div style={{ flex:1, fontSize:12 }}>
-                  <div style={{ fontWeight:500, color:C.textPrimary }}>{f.label}</div>
-                  <div style={{ color:C.textMuted, fontSize:11 }}>
-                    {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
+            <SortableList
+              items={report.rpt_selected_fields.map(f => ({ id: fieldKey(f), f }))}
+              onReorder={(next) => reorderFields(next.map(x => x.f))}
+              renderItem={(item, { setNodeRef, style, dragHandleProps }) => {
+                const f = item.f
+                const idx = report.rpt_selected_fields.findIndex(x => fieldKey(x) === item.id)
+                return (
+                  <div ref={setNodeRef} style={{
+                    ...style, display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
+                    background:C.cardSecondary, borderRadius:6, marginBottom:6,
+                  }}>
+                    <span {...dragHandleProps} title="Drag to reorder" style={{ cursor:'grab', color:C.textMuted, fontSize:14, lineHeight:1, touchAction:'none' }}>⠿</span>
+                    <div style={{ flex:1, fontSize:12, minWidth:0 }}>
+                      <div style={{ fontWeight:500, color:C.textPrimary }}>{f.label}</div>
+                      <div style={{ color:C.textMuted, fontSize:11 }}>
+                        {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
+                      </div>
+                    </div>
+                    <button onClick={() => removeField(idx)} style={miniBtn(true)}>×</button>
                   </div>
-                </div>
-                <button onClick={() => moveField(idx, -1)} style={miniBtn()}>↑</button>
-                <button onClick={() => moveField(idx, 1)} style={miniBtn()}>↓</button>
-                <button onClick={() => removeField(idx)} style={miniBtn(true)}>×</button>
-              </div>
-            ))
+                )
+              }}
+            />
           )}
         </div>
       </div>
