@@ -40,7 +40,6 @@ export const SETUP_TREE = [
     label: 'User Interface',
     icon: 'M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2',
     children: [
-      { id: 'builder_studio',    label: 'Builder Studio (Preview)' },
       { id: 'page_layouts',      label: 'Page Layouts' },
       { id: 'home_pages',        label: 'Home Pages' },
       { id: 'module_sections',   label: 'Module Tabs' },
