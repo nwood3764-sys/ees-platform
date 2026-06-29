@@ -2855,9 +2855,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
   const isSystemField = (name) =>
     /(_record_number|_created_by|_updated_by|_created_at|_updated_at|_owner)$/.test(name || '')
 
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0' }}>
-      {fields.map(f => {
+  const renderField = (f) => {
         // Hide system-set fields on the create form — they're auto-populated
         // at insert time by applyInsertDefaults and rendering them as inputs
         // just confuses the user (and produced an incorrect 'Required fields
@@ -3002,7 +3000,26 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             )}
           </div>
         )
-      })}
+  }
+
+  // Column-aware layout: when fields carry an explicit `column` (set in the new
+  // page-layout builder) render fixed columns (Left / Center / Right) and stack
+  // each column's fields in order. Layouts without `column` keep the responsive
+  // auto-fit flow — unchanged.
+  const useCols = fields.some(f => f.column)
+  const nCols = useCols ? Math.max(1, ...fields.map(f => f.column || 1)) : 1
+  if (useCols) {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${nCols}, minmax(0, 1fr))`, alignItems: 'start' }}>
+        {Array.from({ length: nCols }, (_, i) => i + 1).map(c => (
+          <div key={c}>{fields.filter(f => (f.column || 1) === c).map(renderField)}</div>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0' }}>
+      {fields.map(renderField)}
     </div>
   )
 }
