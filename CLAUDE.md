@@ -120,7 +120,19 @@ Then set the **CURRENT BUILD STATE → Active workstream** line to point at the 
 
 ## CURRENT BUILD STATE (as of 2026-06-29)
 
-Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop dashboards / home pages / reports / record page layouts (Salesforce parity).** Full handoff: `docs/leap-builder-rearchitecture.md`. Goal: a single three-pane canvas (component palette left, live WYSIWYG canvas center, inspector right) + a component registry, replacing the form-driven builders (esp. `DashboardEditor.jsx`, the "weird list view"). Recommended order: Dashboards → Home pages → Reports → Page layouts. Decisions to confirm with Nicholas are listed at the end of the handoff doc.
+Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (Salesforce parity).** Full handoff + per-phase status: `docs/leap-builder-rearchitecture.md`. Goal: one three-pane canvas (palette / live canvas / inspector) + a per-surface component registry, replacing the form-driven builders.
+
+**Shipped to production (master):**
+- **Phase 0 — Foundation:** `react-grid-layout` + `@dnd-kit/*` (isolated vendor chunks, verified no TDZ cycle); `src/builder/` — geometry model (`{x,y,w,h}` 12-col), per-surface component registries, three-pane `LeapCanvas`.
+- **Phase 1 — Dashboards:** `DashboardCanvasEditor` replaced the old `DashboardEditor` everywhere; live report-data previews; geometry + Title/Subtitle/Footer chrome persisted in `dw_widget_config`; `DashboardRunner` renders by geometry (view == build) with legacy fallback.
+- **Phase 2 — Home pages:** canvas generalized into a per-surface engine (registry object); `HomePageCanvasEditor` replaced `HomePageBuilder`; geometry in `hpc_config._geometry`; `ConfiguredHome` honors geometry with legacy fallback.
+- **Phase 3 (part 1) — Reports:** drag-and-drop field selection; formula engine extended (38 functions) + visual calc-field editor (insert field/function pickers + Check syntax). NOTE: deliberately extended `lib/reportFormulaEval` instead of swapping to mathjs/formulajs (would break existing formulas — see handoff doc).
+- Legacy `DashboardEditor.jsx` and `HomePageBuilder.jsx` deleted.
+
+**Remaining (build additively, verify, then ship):**
+- **Phase 3 (part 2):** live report preview from unsaved config (`runReportDefinition` refactor of `reportsService`), richer aggregations / derived groupings, field-level formatting in the runner.
+- **Phase 4 — Record page layouts:** fold `LayoutCanvas` into the unified engine; make all widget types canvas-configurable.
+- Both touch core features (report runtime / record detail), so they get a staging soak before the prod cutover.
 
 **Shipped 2026-06-29 (PR #11, live on master/prod):**
 - Dashboard filter columns now override a report's own saved filter on the same column (`reportsService.runReport`/`runWidgetAggregate` `overrideFields` param; `DashboardRunner` passes its filter columns). Fixed Outreach Dashboard STATE filter — "All" = all states (10,964), non-NC states filter correctly, NC stays the default.
