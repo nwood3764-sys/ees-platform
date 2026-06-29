@@ -96,16 +96,47 @@ export default function TopbarSetupGear({
     try {
       const tableName = effectiveTable
       if (!tableName) return
+
+      // Resolve THIS record's record_type_id inline (awaited) rather than
+      // trusting the lazily-prefetched `resolvedRecordTypeId` — the prefetch
+      // in handleOpen races the click, and if it hasn't landed we'd silently
+      // fall through to an arbitrary default layout (the exact bug where a
+      // Multifamily building opened the generic "Building Layout"). On a
+      // record page we always look it up fresh so Edit Page Layout opens the
+      // layout that actually renders for this record's record type.
+      let recordTypeId = null
+      if (selectedRecord?.table && selectedRecord?.id) {
+        const rtCol = getRecordTypeColumn(selectedRecord.table)
+        if (rtCol && rtCol !== 'record_type') {
+          try {
+            const { data } = await supabase
+              .from(selectedRecord.table)
+              .select(`id, ${rtCol}`)
+              .eq('id', selectedRecord.id)
+              .maybeSingle()
+            recordTypeId = data?.[rtCol] || null
+            setResolvedRecordTypeId(recordTypeId)
+          } catch {
+            /* fall back to the object default below */
+          }
+        }
+      } else {
+        // Not on a record page (e.g. from a list) — use whatever the prefetch
+        // resolved, if anything.
+        recordTypeId = resolvedRecordTypeId
+      }
+
       // Find the default page layout for (object, record_type). Falls back to
-      // the object's default layout if no record-type-specific one exists.
+      // the object's true default — the layout with NO record type
+      // (record_type_id IS NULL) — never an arbitrary record-type-specific one.
       let layoutId = null
-      if (resolvedRecordTypeId) {
+      if (recordTypeId) {
         const { data } = await supabase
           .from('page_layouts')
           .select('id')
           .eq('page_layout_object', tableName)
           .eq('page_layout_type', 'record_detail')
-          .eq('record_type_id', resolvedRecordTypeId)
+          .eq('record_type_id', recordTypeId)
           .eq('page_layout_is_default', true)
           .eq('is_deleted', false)
           .limit(1)
@@ -118,6 +149,7 @@ export default function TopbarSetupGear({
           .select('id')
           .eq('page_layout_object', tableName)
           .eq('page_layout_type', 'record_detail')
+          .is('record_type_id', null)
           .eq('page_layout_is_default', true)
           .eq('is_deleted', false)
           .limit(1)
@@ -142,7 +174,7 @@ export default function TopbarSetupGear({
     } finally {
       setBusy(false)
     }
-  }, [effectiveTable, resolvedRecordTypeId, onOpenSetup, busy])
+  }, [effectiveTable, selectedRecord, resolvedRecordTypeId, onOpenSetup, busy])
 
   const handleEditObject = useCallback(() => {
     setOpen(false)
