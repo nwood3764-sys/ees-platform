@@ -39,6 +39,7 @@ import BulkPropertyImportPane from './BulkPropertyImportPane'
 import ClientErrorsPane from './ClientErrorsPane'
 import ModuleSectionsPane from './ModuleSectionsPane'
 import HomePageCanvasEditor from './HomePageCanvasEditor'
+import LayoutCanvasEditor from './LayoutCanvasEditor'
 
 // ---------------------------------------------------------------------------
 // Setup Home — Salesforce-style left tree nav + right content pane.
@@ -465,7 +466,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager, initialModuleI
     case 'automation_run_log': return <AutomationRunLogPane />
     case 'lifecycle_builder': return <LifecycleBuilderPane />
     case 'validation_rules':  return <NodePage title="Validation Rules"        table="validation_rules"  fetcher={fetchValidationRules}   columns={VR_COLS}             newLabel="Validation Rule"  onOpenRecord={onOpenRecord} />
-    case 'page_layouts':      return <NodePage title="Page Layouts"            table="page_layouts"      fetcher={fetchAllPageLayouts}    columns={PAGELAYOUT_COLS}     newLabel="Page Layout"      onOpenRecord={onOpenRecord} />
+    case 'page_layouts':      return <PageLayoutsPane />
     case 'saved_list_views':  return <NodePage title="Saved List Views"        table="saved_list_views"  fetcher={fetchSavedListViews}    columns={LV_COLS}             newLabel="List View"        onOpenRecord={onOpenRecord} />
     case 'email_templates':   return <NodePage title="Email Templates"         table="email_templates"   fetcher={fetchEmailTemplates}    columns={ET_COLS}             newLabel="Email Template"   onOpenRecord={onOpenRecord} />
     case 'document_templates':return <NodePage title="Document Templates"      table="document_templates" fetcher={fetchDocumentTemplates} columns={DT_COLS}            newLabel="Document Template" onOpenRecord={onOpenRecord} />
@@ -1407,6 +1408,52 @@ const RA_COLS = [
   { field: 'allDay',      label: 'All Day',     type: 'select', sortable: true, filterable: true,  options: ['Yes','No'], columnName: 'ra_is_all_day' },
   { field: 'notes',       label: 'Notes',       type: 'text',   sortable: false, filterable: true, columnName: 'ra_notes' },
 ]
+
+// Page Layouts node — a global list of every record-detail layout, opening the
+// NEW layout builder (LayoutCanvasEditor) directly. This is the same builder
+// reachable via Object Manager → object → Layouts; this node is just a
+// convenient cross-object index into it.
+function PageLayoutsPane() {
+  const [layouts, setLayouts] = useState(null)
+  const [error, setError]     = useState(null)
+  const [selected, setSelected] = useState(null)   // { id, object }
+
+  useEffect(() => {
+    let cancelled = false
+    fetchAllPageLayouts().then(d => { if (!cancelled) setLayouts(d) }).catch(e => { if (!cancelled) setError(e) })
+    return () => { cancelled = true }
+  }, [])
+
+  if (selected) {
+    return <LayoutCanvasEditor layoutId={selected.id} objectLabel={selected.object} onBack={() => setSelected(null)} />
+  }
+  if (error)    return <ErrorState error={error} />
+  if (!layouts) return <LoadingState />
+
+  return (
+    <div style={{ padding: '24px 28px' }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary, marginBottom: 4 }}>Page Layouts</div>
+      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 16 }}>Record-detail layouts across all objects. Click one to open the layout builder.</div>
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', background: C.card }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.4fr 1fr 80px', gap: 8, padding: '10px 14px', background: '#fafbfd', borderBottom: `1px solid ${C.border}`, fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <div>Name</div><div>Object</div><div>Type</div><div style={{ textAlign: 'center' }}>Default</div>
+        </div>
+        {layouts.length === 0 && <div style={{ padding: 16, color: C.textMuted, fontSize: 13 }}>No layouts yet.</div>}
+        {layouts.map(l => (
+          <div key={l._id} onClick={() => setSelected({ id: l._id, object: l.object })}
+            style={{ display: 'grid', gridTemplateColumns: '2fr 1.4fr 1fr 80px', gap: 8, alignItems: 'center', padding: '10px 14px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5, cursor: 'pointer' }}
+            onMouseEnter={e => e.currentTarget.style.background = C.cardSecondary}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <div style={{ color: C.emerald, fontWeight: 500 }}>{l.name}</div>
+            <div style={{ color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }}>{l.object}</div>
+            <div style={{ color: C.textMuted }}>{l.type}</div>
+            <div style={{ textAlign: 'center', color: C.textSecondary }}>{l.isDefault}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 const PAGELAYOUT_COLS = [
   { field: 'id',        label: 'Record #',  type: 'text', sortable: true, filterable: false },
