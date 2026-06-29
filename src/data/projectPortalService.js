@@ -8,8 +8,11 @@
 // NO inherited authority or account-level hierarchy. The read layer is the
 // SECURITY DEFINER RPC get_portal_project_tracker(), which resolves the
 // authenticated portal user to their grants and returns the in-scope
-// property -> building -> opportunity tree with each opportunity's stage label
-// and ordinal (picklist_sort_order, 1..10) for the progress bar.
+// property -> building -> opportunity tree. Each opportunity carries its record
+// type's full ordered stage list (stages: [{ label, sortOrder }], sourced from
+// picklist_value_record_type_assignments) plus stage_order — the rank of its
+// current stage within that list. Nothing about the stage count is hardcoded;
+// the progress bar derives entirely from the per-record-type stage list.
 // =============================================================================
 
 import { supabase } from '../lib/supabase'
@@ -40,9 +43,11 @@ export async function fetchPortalUserSelf() {
 //   { portalUserId, properties: [ { id, name, recordNumber, city, state,
 //       totalUnits, totalBuildings, buildings: [ { id, name, recordNumber,
 //       address, totalUnits, opportunities: [ { id, recordNumber, name,
-//       program, stageLabel, stageOrder } ] } ] } ] }
-// stageOrder is the picklist_sort_order (1..10); the progress bar is
-// stageOrder / 10 * 100, matching the demo.
+//       program, stageLabel, stageOrder, stages: [{ label, sortOrder }] } ]
+//       } ] } ] }
+// stageOrder is the rank (1..N) of the opportunity's current stage within its
+// record type's ordered stage list; stages holds that full list. The progress
+// bar is stageOrder / stages.length — no fixed phase count.
 export async function fetchProjectTracker() {
   const { data, error } = await supabase.rpc('get_portal_project_tracker')
   if (error) throw error
@@ -75,6 +80,10 @@ export async function fetchProjectTracker() {
         program: o.program || '',
         stageLabel: o.stage_label || 'Not Started',
         stageOrder: Number(o.stage_order) || 0,
+        stages: (o.stages || []).map((s) => ({
+          label: s.label || '',
+          sortOrder: Number(s.sort_order) || 0,
+        })),
       })),
     })),
   }))
@@ -82,22 +91,29 @@ export async function fetchProjectTracker() {
   return { portalUserId: payload.portal_user_id, properties }
 }
 
-// ─── Rollup helpers (mirror the demo's stats/bldgPct logic) ──────────────────
-// A property's program completion is derived from its opportunities' stage
-// ordinals. Total phases is fixed at 10, matching the per-record-type stage
-// lifecycles authored for MF-HOMES and MF-HEAR.
-export const TOTAL_PHASES = 10
+// ─── Rollup helpers ──────────────────────────────────────────────────────────
+// An opportunity's completion is its current-stage rank over the number of
+// stages in its record type's lifecycle — no fixed phase count.
 
-export function opportunityPct(stageOrder) {
-  return Math.round((Number(stageOrder) || 0) / TOTAL_PHASES * 100)
+// Number of stages in an opportunity's record-type lifecycle.
+export function stageCountOf(opportunity) {
+  return (opportunity?.stages || []).length
 }
 
-// Aggregate an array of opportunities into the four demo buckets:
-// complete (ord 10), inProgress (1..9), notStarted (0).
+export function opportunityPct(stageOrder, stageCount) {
+  const total = Number(stageCount) || 0
+  if (total <= 0) return 0
+  return Math.round((Number(stageOrder) || 0) / total * 100)
+}
+
+// Aggregate an array of opportunities into three buckets, each opportunity
+// judged against its own stage count: complete (at the last stage),
+// inProgress (somewhere in between), notStarted (no stage yet).
 export function rollupOpportunities(opportunities) {
   let complete = 0, inProgress = 0, notStarted = 0
   for (const o of opportunities) {
-    if (o.stageOrder >= TOTAL_PHASES) complete++
+    const count = stageCountOf(o)
+    if (count > 0 && o.stageOrder >= count) complete++
     else if (o.stageOrder > 0) inProgress++
     else notStarted++
   }

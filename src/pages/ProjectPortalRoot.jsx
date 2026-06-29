@@ -11,7 +11,8 @@
 // Navigation mirrors the approved demo:
 //   1. Property dashboard — portfolio stats + per-building progress cards
 //   2. Building detail     — unit/opportunity stage cards + opportunity table
-//   3. Opportunity stage   — 10-phase stage bar (stageOrder / 10 * 100)
+//   3. Opportunity stage   — stage bar driven by the record type's stage list
+//                            (one dot per assigned stage, stageOrder / count)
 //
 // Program colors follow the platform palette (no red/orange anywhere):
 //   HOMES → emerald (#3ecf8e), HEAR → sky (#7eb3e8).
@@ -26,25 +27,18 @@ import {
   opportunityPct,
   rollupOpportunities,
   allOpportunities,
-  TOTAL_PHASES,
+  stageCountOf,
 } from '../data/projectPortalService'
 
-// Canonical 10-phase labels for the stage bar dots (index 1..10). These match
-// the per-record-type opportunity stage lifecycles authored for MF-HOMES and
-// MF-HEAR; the portal shows the short phase label under each dot.
-const PHASE_SHORT = [
-  '',                       // 0 — not started (no dot label)
-  'Income Qualification',
-  'Energy Assessment',
-  'Energy Modeling',
-  'Project Reservation',
-  'Project Planning',
-  'Implementation',
-  'Commissioning',
-  'Payment Request',
-  'Final Inspection',
-  'Payment Issued',
-]
+// Stage labels come straight from each record type's picklist (via the RPC).
+// They are stored long-form (e.g. "Opportunity — HOMES Income Qualification");
+// under a dot we strip the generic "Opportunity — <program> " lead-in so the
+// label reads cleanly. This is a presentation trim only — no stage names are
+// hardcoded; the full label stays available as the dot's tooltip.
+function shortStageLabel(label) {
+  if (!label) return ''
+  return label.replace(/^\s*Opportunity\s*[—–-]\s*(?:HOMES|HEAR)\s+/i, '').trim() || label
+}
 
 // HOMES vs HEAR accent. Program label contains 'HEAR' or 'HOMES'.
 function programAccent(program) {
@@ -67,9 +61,23 @@ const IconHome = <Icon d={<><path d="M3 10.5L12 3l9 7.5V21a1 1 0 01-1 1H5a1 1 0 
 const IconCheck = <Icon d={<><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-5" /></>} />
 const IconChevL = <Icon d={<polyline points="15 18 9 12 15 6" />} />
 
-// ─── Stage bar (10 dots; matches demo stage/10*100) ──────────────────────────
-function StageBar({ stageOrder, accent }) {
-  const pct = opportunityPct(stageOrder)
+// ─── Stage bar (one dot per assigned stage; fill = stageOrder / stageCount) ───
+// `stages` is the record type's ordered stage list ([{ label, sortOrder }]);
+// the bar renders exactly that many dots, so adding/removing a stage on the
+// record type in Admin changes the portal automatically.
+function StageBar({ stages, stageOrder, accent }) {
+  const stageList = stages || []
+  const count = stageList.length
+  const pct = opportunityPct(stageOrder, count)
+
+  if (count === 0) {
+    return (
+      <div style={{ margin: '6px 0 2px', fontSize: 12, color: C.textMuted }}>
+        No stage lifecycle is configured for this opportunity's record type yet.
+      </div>
+    )
+  }
+
   return (
     <div style={{ margin: '6px 0 2px' }}>
       <div style={{
@@ -85,13 +93,13 @@ function StageBar({ stageOrder, accent }) {
           position: 'absolute', top: -7, left: 0, right: 0,
           display: 'flex', justifyContent: 'space-between',
         }}>
-          {Array.from({ length: TOTAL_PHASES }, (_, i) => {
-            const phase = i + 1
+          {stageList.map((stage) => {
+            const phase = stage.sortOrder
             const done = stageOrder >= phase
             const current = stageOrder === phase
             return (
               <div key={phase} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 18 }}>
-                <div style={{
+                <div title={stage.label} style={{
                   width: 18, height: 18, borderRadius: '50%',
                   background: done ? accent : C.card,
                   border: `2px solid ${done ? accent : C.borderDark}`,
@@ -102,12 +110,12 @@ function StageBar({ stageOrder, accent }) {
                 }}>
                   {done ? '✓' : phase}
                 </div>
-                <div style={{
+                <div title={stage.label} style={{
                   fontSize: 8.5, color: current ? C.textPrimary : C.textMuted,
                   fontWeight: current ? 700 : 500, marginTop: 4, textAlign: 'center',
                   width: 56, lineHeight: 1.15,
                 }}>
-                  {PHASE_SHORT[phase]}
+                  {shortStageLabel(stage.label)}
                 </div>
               </div>
             )
@@ -229,7 +237,7 @@ function PropertyDashboard({ property, onOpenBuilding }) {
         {(property.buildings || []).map((b) => {
           const bo = b.opportunities || []
           const br = rollupOpportunities(bo)
-          const avgPct = bo.length ? Math.round(bo.reduce((s, o) => s + opportunityPct(o.stageOrder), 0) / bo.length) : 0
+          const avgPct = bo.length ? Math.round(bo.reduce((s, o) => s + opportunityPct(o.stageOrder, stageCountOf(o)), 0) / bo.length) : 0
           return (
             <div key={b.id} onClick={() => onOpenBuilding(b)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -279,7 +287,7 @@ function BuildingDetail({ building, onOpenOpportunity }) {
               </div>
               <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 8 }}>{o.stageLabel}</div>
               <div style={{ height: 4, background: C.border, borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${opportunityPct(o.stageOrder)}%`, background: accent }} />
+                <div style={{ height: '100%', width: `${opportunityPct(o.stageOrder, stageCountOf(o))}%`, background: accent }} />
               </div>
             </div>
           )
@@ -293,6 +301,7 @@ function BuildingDetail({ building, onOpenOpportunity }) {
 // ─── Opportunity stage view ──────────────────────────────────────────────────
 function OpportunityDetail({ opportunity }) {
   const accent = programAccent(opportunity.program)
+  const stageCount = stageCountOf(opportunity)
   return (
     <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
@@ -304,12 +313,12 @@ function OpportunityDetail({ opportunity }) {
 
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '26px 26px 18px' }}>
         <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textPrimary, marginBottom: 18 }}>Program Progress</div>
-        <StageBar stageOrder={opportunity.stageOrder} accent={accent} />
+        <StageBar stages={opportunity.stages} stageOrder={opportunity.stageOrder} accent={accent} />
         <div style={{ marginTop: 34, fontSize: 12, color: C.textSecondary }}>
-          {opportunity.stageOrder >= TOTAL_PHASES
+          {stageCount > 0 && opportunity.stageOrder >= stageCount
             ? 'All program phases are complete.'
             : opportunity.stageOrder > 0
-              ? `Phase ${opportunity.stageOrder} of ${TOTAL_PHASES} — ${opportunityPct(opportunity.stageOrder)}% through the program lifecycle.`
+              ? `Phase ${opportunity.stageOrder} of ${stageCount} — ${opportunityPct(opportunity.stageOrder, stageCount)}% through the program lifecycle.`
               : 'This opportunity has not started its program lifecycle yet.'}
         </div>
       </div>
