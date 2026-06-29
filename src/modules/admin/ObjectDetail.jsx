@@ -119,8 +119,6 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
           <div style={{ fontSize: 12, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>
             API Name: {obj.table}
           </div>
-          <div style={{ fontSize: 12, color: C.textMuted }}>·</div>
-          <div style={{ fontSize: 12, color: C.textMuted }}>{obj.module}</div>
         </div>
         <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 5 }}>{obj.description}</div>
       </div>
@@ -211,7 +209,6 @@ function DetailsPane({ obj, columns }) {
         <KV label="Label"         value={obj.label} />
         <KV label="Plural Label"  value={obj.pluralLabel} />
         <KV label="API Name"      value={obj.table} mono />
-        <KV label="Module"        value={obj.module} />
         <KV label="Description"   value={obj.description} />
       </Card>
       <Card title="Data Profile">
