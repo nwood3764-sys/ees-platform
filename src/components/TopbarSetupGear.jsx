@@ -158,7 +158,8 @@ export default function TopbarSetupGear({
       }
       // Deep-link into Object Manager's Page Layouts sub-tab with the
       // specific layout pre-selected. ObjectDetail reads initialLayoutId
-      // from the ?layout= URL param and renders LayoutEditor directly.
+      // from the ?layout= URL param and renders the LayoutCanvasEditor
+      // (the WYSIWYG three-pane builder) directly.
       // Previously this opened RecordDetail on the page_layouts row itself,
       // which just shows the metadata row, not the real editor with
       // sections/fields/drag-and-drop.
