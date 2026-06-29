@@ -5,9 +5,24 @@
 
 ---
 
-## Phase 4 decision (record page layouts) — re-platform DECLINED, 2026-06-29
+## Phase 4 plan (record page layouts) — NEW builder, section model (2026-06-29, supersedes the earlier "declined")
 
-Unlike the dashboard / home / report builders (which were form-driven and got replaced), the record **page-layout editor (`LayoutEditor` / `LayoutCanvas`) already IS a working WYSIWYG drag canvas** — the most advanced builder pre-rearchitecture. "Phase 4" would re-platform a *working* core feature (on every record-detail page) onto the shared engine for architectural consistency — high effort, high prod risk, low user-visible gain. **Decision: do not re-platform.** The WYSIWYG goal is already met across all four surfaces. If desired later, the unified fold is a deliberate, staging-soaked follow-up (page-layout registry + adapter, `selfChrome`-style tiles) — the engine is ready for it.
+Nicholas: build the new builder; existing is disposable; most-robust enterprise, no band-aids.
+
+**Critical constraint:** page layouts render through `src/components/RecordDetail.jsx` — a **6,421-line live renderer on every record page in every module**. The layout *data* is seed, but this renderer is core production code. And page layouts are genuinely **section-based** (Sections → Columns → Fields + related lists / reports / file galleries / conversation panels / status paths) — the correct Salesforce model, NOT the free-tile grid dashboards/home use.
+
+**Decision:** build the new three-pane page-layout builder on the **section/field model the live renderer already understands**, so RecordDetail is NOT rewritten (the free-tile route would force a rewrite of the app's most critical component — unacceptable risk). The "new builder" = consistent palette/canvas/inspector UX + dnd-kit (touch/keyboard) + **all** widget types editable on-canvas (today only `field_group` is; related_list/report/file_gallery/conversation_panel/status_path are modal-only).
+
+**Build outline (additive; replace `LayoutEditor` entry in `ObjectDetail` only when verified):**
+1. Page-layout component registry (field, field_group, related_list, report, file_gallery, conversation_panel, status_path) for a **section-aware** canvas.
+2. Section-based canvas (sections as containers with 1–2 columns; dnd-kit for field tiles + widget + section reorder) — reuse the sound patterns in the existing `LayoutCanvas` but on dnd-kit and with all widget types inline-editable.
+3. Inspector per widget type (field options, related-list columns/sort, report picker, etc.).
+4. Persist via the existing `pageLayoutBuilderService` (sections + widgets + `widget_config.fields`) — **no schema change, no renderer change**, so existing record pages are untouched.
+5. Swap the `ObjectDetail` → Page Layouts entry to the new editor once verified on staging.
+
+**v1 built — on STAGING (not prod):** `src/modules/admin/LayoutCanvasEditor.jsx` + `src/builder/adapters/pageLayoutAdapter.js`. Three-pane: field palette (object columns, click-to-add to the selected section) / section canvas (sections with editable label + column count; field tiles drag-reorder via dnd-kit; complex widgets — related_list/report/etc. — shown as cards and **preserved through save**) / save. Persists via the existing service (bulk soft-delete + recreate); no renderer/schema change. `ObjectDetail` now opens this instead of `LayoutEditor`. Headless-verified (sections, field tiles, palette add, complex-widget preservation, 0 crashes) with a mocked adapter — **the real save round-trip needs a staging test before prod** (bulk delete+recreate isn't transactional). `LayoutEditor.jsx`/`LayoutCanvas.jsx` now unreferenced (delete after prod cutover). **Next increment:** deep config editing for the non-field widget types + add-new-section-widget palette.
+
+Data model: `page_layouts` → `page_layout_sections` (section_order, section_columns, section_tab, collapsible) → `page_layout_widgets` (widget_type, widget_position, widget_size, widget_config{fields:[…]}). Service: `fetchLayoutForEdit` + granular create/update/reorder section/widget fns.
 
 **Help articles published (prod):** HA-00113 (Dashboard canvas), HA-00114 (Home Page canvas), HA-00115 (Report builder live preview + formulas) — satisfies the ship-cycle help-article requirement for the shipped builders.
 
