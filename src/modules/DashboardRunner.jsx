@@ -36,6 +36,14 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
 
   const runWidgets = async (dashboardData, currentFilterValues) => {
     const extra = buildExtraFilters(dashboardData.filters, currentFilterValues)
+    // Columns the dashboard filter bar controls. These override each widget
+    // report's own saved filter on the same column — so setting STATE to
+    // "All" clears the report's built-in `property_state = NC` filter rather
+    // than leaving the dashboard pinned to NC. Listed even when their current
+    // value is "All" (empty), which is precisely when the override matters.
+    const overrideFields = (dashboardData.filters || [])
+      .map(f => f.dfilt_field_name)
+      .filter(Boolean)
     // Widget types that are pure group-by aggregations use the server-side
     // report_aggregate fast path (one GROUP BY, ~N rows) instead of pulling
     // all detail rows into the browser. metric/table still use runReport.
@@ -45,13 +53,13 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
         const cfg = w.dw_widget_config || {}
         if (AGG_TYPES.has(w.dw_widget_type) && cfg.group_by) {
           try {
-            const agg = await runWidgetAggregate(w, extra)
+            const agg = await runWidgetAggregate(w, extra, overrideFields)
             return [w.id, agg]
           } catch (err) {
             // Fall back to the full row-fetch path so a fast-path failure
             // degrades to the (slower) correct result, never a blank widget.
             try {
-              const r = await runReport(w.dw_report_id, null, extra)
+              const r = await runReport(w.dw_report_id, null, extra, overrideFields)
               return [w.id, r]
             } catch (err2) {
               return [w.id, { error: err2 }]
@@ -59,7 +67,7 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
           }
         }
         try {
-          const r = await runReport(w.dw_report_id, null, extra)
+          const r = await runReport(w.dw_report_id, null, extra, overrideFields)
           return [w.id, r]
         } catch (err) {
           return [w.id, { error: err }]
