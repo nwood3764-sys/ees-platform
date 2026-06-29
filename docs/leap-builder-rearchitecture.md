@@ -195,14 +195,12 @@ If something useful isn't listed, it's still in scope — the registry makes add
 
 ## 9. Decisions
 
-**DECIDED (Nicholas, 2026-06-29):**
+**ALL DECIDED (Nicholas, 2026-06-29) — spec is complete; next session executes.**
+- **#1 Build order** — **Dashboards first** (creates the shared canvas + kills the worst Edit screen), then Home → Reports → Page Layouts.
+- **#2 Libraries — APPROVED:** `react-grid-layout` (grid canvas + resize + palette drag-in) + `dnd-kit` (sortable/nested) + CodeMirror 6 + mathjs + @formulajs/formulajs (formula engine). Add per §5/§8, observing the Vite-hazard caution (add in isolation, lazy-load, `build:safe`).
 - **#3 Calculated fields — FULL engine now** (Salesforce/Excel-grade, OSS editor). See §8.
 - **#4 Widgets — FULL catalog** (every widget; build them all). See §7.
 - **#5 Unified, greenfield** — one canvas engine + registry for all surfaces. The current builders are *unusable*, so **do not preserve them** — replace the builder UIs wholesale. (Preserve only the **data** + **runtime**: existing dashboards/reports/home pages — DSH-00009/10, RPT-00036/37, HP-00005/6 — must keep rendering via the reused runners; this is the one "additive, don't break" constraint that still applies.)
-
-**Still to confirm (recommendation first):**
-- **#1 Build order** — *Recommend: Dashboards first* (creates the shared canvas + kills the worst Edit screen), then Home → Reports → Page Layouts. Confirm or reorder.
-- **#2 Libraries** — *Recommend: `react-grid-layout` (grid canvas + resize + palette drag-in) + `dnd-kit` (sortable/nested) + CodeMirror 6 + mathjs + @formulajs/formulajs (formula engine).* OK to add these?
 
 ---
 
