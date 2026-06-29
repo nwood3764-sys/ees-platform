@@ -9,28 +9,30 @@
 // get_portal_project_tracker() RPC.
 //
 // Layout follows the approved Multi-Family Project Portal mockup, re-skinned
-// into the LEAP design system:
-//   • Left tree sidebar (navy #07111f): Property → Building → Unit, each with
-//     dual HOMES / HEAR mini progress bars.
+// into the LEAP design system (Inter, emerald/navy, no red/orange):
+//   • Left tree sidebar (navy #07111f): Property → Building → Unit.
 //   • Property page  — banner, unit-status stat cards, building cards,
 //                      per-program stage breakdown.
-//   • Building page  — stat cards, unit cards, work-order table.
-//   • Unit page      — a data-driven stage bar per program (HOMES + HEAR).
+//   • Building page  — stat cards + per-unit program cards.
+//   • Unit page      — a data-driven stage bar per program.
 //
-// Palette (LEAP, no red/orange anywhere): HOMES → emerald (#3ecf8e),
-// HEAR → sky (#7eb3e8); complete → emerald, submittal/in-progress → sky,
-// not-started → muted. Stage bars are fully data-driven per record type.
+// PROGRAMS ARE DATA-DRIVEN: a "program" is just an opportunity's record type.
+// The portal discovers the distinct record types present under a property and
+// renders one track per record type (1, 2, or N) — labeled by the record type
+// exactly as stored, colored from the LEAP palette by index. Nothing is
+// hardcoded to any specific program (no "HOMES"/"HEAR" in the code).
 // =============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase, hasSupabaseConfig } from '../lib/supabase'
-import { C } from '../data/constants'
+import { C, CHART_COLORS } from '../data/constants'
 import {
   fetchPortalUserSelf,
   fetchProjectTracker,
-  programTag,
   oppPct,
   oppBucket,
+  oppForProgram,
+  propertyPrograms,
   unitStatus,
   unitProgramPct,
   buildingProgramPct,
@@ -39,19 +41,22 @@ import {
   allUnits,
 } from '../data/projectPortalService'
 
-const HOMES = C.emerald
-const HEAR = C.sky
-
-function accentFor(tag) { return tag === 'HEAR' ? HEAR : HOMES }
+// Build a stable program → color map from the property's program list.
+function makeColorOf(programs) {
+  return (program) => {
+    const i = programs.indexOf(program)
+    return CHART_COLORS[(i < 0 ? 0 : i) % CHART_COLORS.length]
+  }
+}
 
 // Status bucket → label + colors (emerald / sky / muted only — no red/orange).
 function bucketMeta(bucket) {
   switch (bucket) {
-    case 'complete':   return { label: 'Complete',    color: C.emeraldMid, bg: '#e8f8f2', dot: C.emerald }
-    case 'submittal':  return { label: 'In Submittal', color: '#1a5a8a',   bg: '#e8f3fb', dot: C.sky }
-    case 'inProgress': return { label: 'In Progress',  color: '#1e466b',   bg: '#e8f1fb', dot: C.sky }
-    case 'notStarted': return { label: 'Not Started',  color: C.textSecondary, bg: C.page, dot: C.textMuted }
-    default:           return { label: '—',            color: C.textMuted, bg: C.page, dot: C.textMuted }
+    case 'complete':   return { label: 'Complete',     color: C.emeraldMid,    bg: '#e8f8f2', dot: C.emerald }
+    case 'submittal':  return { label: 'In Submittal', color: '#1a5a8a',       bg: '#e8f3fb', dot: C.sky }
+    case 'inProgress': return { label: 'In Progress',  color: '#1e466b',       bg: '#e8f1fb', dot: C.sky }
+    case 'notStarted': return { label: 'Not Started',  color: C.textSecondary, bg: C.page,    dot: C.textMuted }
+    default:           return { label: '—',            color: C.textMuted,     bg: C.page,    dot: C.textMuted }
   }
 }
 
@@ -65,9 +70,14 @@ const IconProp = <Ico d={<><rect x="3" y="3" width="18" height="18" rx="1" /><pa
 const IconBldg = <Ico d={<><path d="M3 10.5L12 3l9 7.5V21a1 1 0 01-1 1H5a1 1 0 01-1-1V10.5z" /><path d="M9 22V12h6v10" /></>} />
 const IconChevR = <Ico d={<polyline points="9 18 15 12 9 6" />} size={12} w={1.8} />
 const IconSearch = <Ico d={<><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></>} size={13} />
-const IconCheck = <Ico d={<><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-5" /></>} />
-const IconClock = <Ico d={<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></>} />
-const IconBars = <Ico d={<><rect x="3" y="12" width="4" height="8" rx="1" /><rect x="10" y="7" width="4" height="13" rx="1" /><rect x="17" y="4" width="4" height="16" rx="1" /></>} />
+
+// ─── Program-label display ───────────────────────────────────────────────────
+// Stage labels are stored long-form (e.g. "Opportunity — HEAR Income
+// Qualification"); strip the generic "Opportunity — " lead-in for the dots.
+function shortStageLabel(label) {
+  if (!label) return ''
+  return label.replace(/^\s*Opportunity\s*[—–-]\s*/i, '').trim() || label
+}
 
 // ─── Progress primitives ─────────────────────────────────────────────────────
 function Bar({ pct, color, h = 5 }) {
@@ -78,27 +88,26 @@ function Bar({ pct, color, h = 5 }) {
   )
 }
 
-function DualMini({ h, r }) {
+// One mini bar per program (record type) for a tree node.
+function MiniTracks({ programs, colorOf, pctOf }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 56, flexShrink: 0 }}>
-      {[['H', h, HOMES], ['R', r, HEAR]].map(([k, v, col]) => (
-        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <div style={{ flex: 1, height: 3, background: 'rgba(255,255,255,.12)', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${v ?? 0}%`, background: col, borderRadius: 10 }} />
+      {programs.map((pg) => {
+        const v = pctOf(pg)
+        return (
+          <div key={pg} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div style={{ flex: 1, height: 3, background: 'rgba(255,255,255,.12)', borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${v ?? 0}%`, background: colorOf(pg), borderRadius: 10 }} />
+            </div>
+            <span style={{ fontSize: 8.5, fontWeight: 600, color: C.navInactive, width: 20, textAlign: 'right' }}>{v == null ? '—' : `${v}%`}</span>
           </div>
-          <span style={{ fontSize: 8.5, fontWeight: 600, color: C.navInactive, width: 20, textAlign: 'right' }}>{v == null ? '—' : `${v}%`}</span>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
 
 // ─── Data-driven stage bar (one dot per assigned stage) ──────────────────────
-function shortStageLabel(label) {
-  if (!label) return ''
-  return label.replace(/^\s*Opportunity\s*[—–-]\s*(?:HOMES|HEAR)\s+/i, '').trim() || label
-}
-
 function StageBar({ opp, accent }) {
   const stages = opp?.stages || []
   const count = stages.length
@@ -172,7 +181,8 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
         {tree.map((p) => {
-          const hp = propertyProgramPct(p, 'HOMES'), rp = propertyProgramPct(p, 'HEAR')
+          const programs = propertyPrograms(p)
+          const colorOf = makeColorOf(programs)
           const pOpen = open.prop === p.id
           const pActive = sel.pid === p.id && !sel.bid
           return (
@@ -188,14 +198,13 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                   <div style={{ fontSize: 10, color: C.navInactive }}>{(p.buildings || []).length} bldgs · {allUnits(p).length} units</div>
                 </div>
-                <DualMini h={hp} r={rp} />
+                <MiniTracks programs={programs} colorOf={colorOf} pctOf={(pg) => propertyProgramPct(p, pg)} />
               </div>
 
               {pOpen && (p.buildings || []).map((b) => {
                 const bKey = `${p.id}:${b.id}`
                 const bOpen = open.bldg === bKey
                 const bActive = sel.bid === b.id && !sel.uid
-                const hp2 = buildingProgramPct(b, 'HOMES'), rp2 = buildingProgramPct(b, 'HEAR')
                 return (
                   <div key={b.id}>
                     <div onClick={() => onSelect({ pid: p.id, bid: b.id })}
@@ -208,7 +217,7 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,.88)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>
                       </div>
-                      <DualMini h={hp2} r={rp2} />
+                      <MiniTracks programs={programs} colorOf={colorOf} pctOf={(pg) => buildingProgramPct(b, pg)} />
                     </div>
 
                     {bOpen && (b.units || []).filter(matchUnit).map((u) => {
@@ -261,9 +270,9 @@ function Crumb({ items }) {
   )
 }
 
-function StatCard({ label, value, accent, sub, active, onClick }) {
+function StatCard({ label, value, accent, sub }) {
   return (
-    <div onClick={onClick} style={{ background: C.card, border: `1px solid ${active ? accent : C.border}`, borderTop: `3px solid ${accent}`, borderRadius: 10, padding: '14px 16px', cursor: onClick ? 'pointer' : 'default', boxShadow: active ? `0 0 0 2px ${accent}22` : 'none' }}>
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderTop: `3px solid ${accent}`, borderRadius: 10, padding: '14px 16px' }}>
       <div style={{ fontSize: 24, fontWeight: 700, color: accent, lineHeight: 1, letterSpacing: '-0.5px' }}>{value}</div>
       <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 4 }}>{label}</div>
       {sub && <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>{sub}</div>}
@@ -283,21 +292,35 @@ function SectionHeader({ title, desc, action }) {
   )
 }
 
-function ProgRow({ tag, pct }) {
-  const accent = accentFor(tag)
+// One labeled progress row for a program (record type).
+function ProgRow({ program, pct, color }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5 }}>
-      <span style={{ width: 44, fontWeight: 700, color: accent, fontSize: 9.5 }}>{tag}</span>
-      <Bar pct={pct ?? 0} color={accent} />
-      <span style={{ width: 30, fontSize: 11, fontWeight: 600, color: C.textSecondary, textAlign: 'right' }}>{pct == null ? '—' : `${pct}%`}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+      <span style={{ width: 132, fontWeight: 600, color, fontSize: 10, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={program}>{program}</span>
+      <Bar pct={pct ?? 0} color={color} />
+      <span style={{ width: 34, fontSize: 11, fontWeight: 600, color: C.textSecondary, textAlign: 'right' }}>{pct == null ? '—' : `${pct}%`}</span>
+    </div>
+  )
+}
+
+// Color legend mapping each track color → its program (record type) name.
+function ProgramLegend({ programs, colorOf }) {
+  if (programs.length === 0) return null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 14 }}>
+      {programs.map((pg) => (
+        <span key={pg} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: C.textSecondary }}>
+          <span style={{ width: 10, height: 10, borderRadius: 3, background: colorOf(pg) }} />
+          <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{pg}</span>
+        </span>
+      ))}
     </div>
   )
 }
 
 // ─── Property page ────────────────────────────────────────────────────────────
-function PropertyPage({ property, onOpenBuilding }) {
+function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
   const s = unitStats(property)
-  const hp = propertyProgramPct(property, 'HOMES'), rp = propertyProgramPct(property, 'HEAR')
   return (
     <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
       <div style={{ background: `linear-gradient(135deg, ${C.sidebar} 0%, #12243d 100%)`, borderRadius: 12, padding: '20px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -305,10 +328,18 @@ function PropertyPage({ property, onOpenBuilding }) {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>{property.name}</div>
           <div style={{ fontSize: 12.5, color: C.navInactive, marginTop: 3 }}>{[property.city, property.state].filter(Boolean).join(', ')}</div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            {[`HOMES ${hp}%`, `HEAR ${rp}%`, `${(property.buildings || []).length} Buildings`, `${s.total} Units`].map((t, i) => (
-              <span key={i} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: 'rgba(255,255,255,.82)', border: '1px solid rgba(255,255,255,.15)' }}>{t}</span>
-            ))}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+            {programs.map((pg) => {
+              const v = propertyProgramPct(property, pg)
+              return (
+                <span key={pg} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: 'rgba(255,255,255,.85)', border: '1px solid rgba(255,255,255,.15)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(pg) }} />
+                  {pg} {v == null ? '—' : `${v}%`}
+                </span>
+              )
+            })}
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: 'rgba(255,255,255,.85)', border: '1px solid rgba(255,255,255,.15)' }}>{(property.buildings || []).length} Buildings</span>
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: 'rgba(255,255,255,.85)', border: '1px solid rgba(255,255,255,.15)' }}>{s.total} Units</span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 22, flexShrink: 0 }}>
@@ -324,7 +355,7 @@ function PropertyPage({ property, onOpenBuilding }) {
       <div style={{ marginBottom: 30 }}>
         <SectionHeader title="Unit Status at a Glance" desc="Across all buildings in this property" />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
-          <StatCard label="Both Programs Complete" value={s.complete} accent={C.emerald} />
+          <StatCard label="All Programs Complete" value={s.complete} accent={C.emerald} />
           <StatCard label="Work In Progress" value={s.inProgress} accent={C.sky} />
           <StatCard label="In Submittal" value={s.submittal} accent={C.emeraldMid} />
           <StatCard label="Not Yet Started" value={s.notStarted} accent={C.textMuted} />
@@ -333,6 +364,7 @@ function PropertyPage({ property, onOpenBuilding }) {
 
       <div style={{ marginBottom: 30 }}>
         <SectionHeader title="Buildings" desc="Progress by building — click a building to see its units" action={`${(property.buildings || []).length} buildings`} />
+        <ProgramLegend programs={programs} colorOf={colorOf} />
         <div style={{ display: 'grid', gap: 12 }}>
           {(property.buildings || []).map((b) => {
             const dc = (b.units || []).filter((u) => unitStatus(u) === 'complete').length
@@ -342,9 +374,8 @@ function PropertyPage({ property, onOpenBuilding }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{b.name}</div>
                   <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 8 }}>{(b.units || []).length} units</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 360 }}>
-                    <ProgRow tag="HOMES" pct={buildingProgramPct(b, 'HOMES')} />
-                    <ProgRow tag="HEAR" pct={buildingProgramPct(b, 'HEAR')} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 460 }}>
+                    {programs.map((pg) => <ProgRow key={pg} program={pg} pct={buildingProgramPct(b, pg)} color={colorOf(pg)} />)}
                   </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
@@ -359,9 +390,9 @@ function PropertyPage({ property, onOpenBuilding }) {
 
       <div>
         <SectionHeader title="Work Order Stage Breakdown" desc="How many units sit at each stage, per program" />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <StageBreakdown property={property} tag="HOMES" />
-          <StageBreakdown property={property} tag="HEAR" />
+        <div style={{ display: 'grid', gridTemplateColumns: programs.length > 1 ? '1fr 1fr' : '1fr', gap: 12 }}>
+          {programs.map((pg) => <StageBreakdown key={pg} property={property} program={pg} color={colorOf(pg)} />)}
+          {programs.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No program work recorded on this property yet.</div>}
         </div>
       </div>
     </div>
@@ -370,29 +401,27 @@ function PropertyPage({ property, onOpenBuilding }) {
 
 // Per-program: count units by the rank their program opp currently sits at,
 // using that program's own (data-driven) stage list for labels.
-function StageBreakdown({ property, tag }) {
-  const accent = accentFor(tag)
+function StageBreakdown({ property, program, color }) {
   const units = allUnits(property)
-  // Reference stage list from the first unit that has this program.
-  const ref = units.map((u) => (tag === 'HEAR' ? u.hear : u.homes)).find(Boolean)
+  const ref = units.map((u) => oppForProgram(u, program)).find(Boolean)
   const stages = ref?.stages || []
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
       <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent }} />
-        <span style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary }}>{tag} Program</span>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{program}</span>
       </div>
-      {stages.length === 0 && <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>No {tag} work on this property.</div>}
+      {stages.length === 0 && <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>No work for this program on this property.</div>}
       {stages.map((st) => {
         const cnt = units.filter((u) => {
-          const o = tag === 'HEAR' ? u.hear : u.homes
+          const o = oppForProgram(u, program)
           return o && o.stageOrder === st.sortOrder
         }).length
         const pct = units.length ? Math.round(cnt / units.length * 100) : 0
         return (
           <div key={st.sortOrder} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
             <div style={{ flex: 1, color: C.textSecondary }}>{shortStageLabel(st.label)}</div>
-            <div style={{ width: 90 }}><Bar pct={Math.min(pct * 2, 100)} color={accent} /></div>
+            <div style={{ width: 90 }}><Bar pct={Math.min(pct * 2, 100)} color={color} /></div>
             <div style={{ width: 56, textAlign: 'right', fontWeight: 600, fontSize: 12, color: cnt ? C.textPrimary : C.textMuted }}>{cnt ? `${cnt} unit${cnt === 1 ? '' : 's'}` : '—'}</div>
           </div>
         )
@@ -402,7 +431,7 @@ function StageBreakdown({ property, tag }) {
 }
 
 // ─── Building page ────────────────────────────────────────────────────────────
-function BuildingPage({ property, building, onOpenUnit }) {
+function BuildingPage({ property, building, programs, colorOf, onOpenUnit }) {
   const units = building.units || []
   const bucket = (b) => units.filter((u) => unitStatus(u) === b).length
   return (
@@ -417,21 +446,23 @@ function BuildingPage({ property, building, onOpenUnit }) {
         <StatCard label="Not Started" value={bucket('notStarted')} accent={C.textMuted} />
       </div>
 
-      <SectionHeader title={`Units — ${building.name}`} desc="Click a unit for HOMES & HEAR work-order detail" />
+      <SectionHeader title={`Units — ${building.name}`} desc="Click a unit for its program work-order detail" />
+      <ProgramLegend programs={programs} colorOf={colorOf} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
         {units.map((u) => (
           <div key={u.id} onClick={() => onOpenUnit(u)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px', cursor: 'pointer' }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary, marginBottom: 8 }}>Unit {u.unitNumber}</div>
-            {[['HOMES', u.homes], ['HEAR', u.hear]].map(([tag, o]) => {
-              const accent = accentFor(tag)
+            {programs.map((pg) => {
+              const o = oppForProgram(u, pg)
+              const color = colorOf(pg)
               const meta = bucketMeta(oppBucket(o))
               return (
-                <div key={tag} style={{ marginBottom: 6 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, marginBottom: 3 }}>
-                    <span style={{ fontWeight: 700, color: accent }}>{tag}</span>
-                    <span style={{ fontSize: 9.5, fontWeight: 600, color: meta.color, background: meta.bg, padding: '1px 6px', borderRadius: 10 }}>{o ? meta.label : 'N/A'}</span>
+                <div key={pg} style={{ marginBottom: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9.5, marginBottom: 3 }}>
+                    <span style={{ fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 }} title={pg}>{pg}</span>
+                    <span style={{ fontSize: 9, fontWeight: 600, color: meta.color, background: meta.bg, padding: '1px 6px', borderRadius: 10, flexShrink: 0 }}>{o ? meta.label : 'N/A'}</span>
                   </div>
-                  <Bar pct={oppPct(o)} color={accent} h={4} />
+                  <Bar pct={oppPct(o)} color={color} h={4} />
                 </div>
               )
             })}
@@ -444,15 +475,14 @@ function BuildingPage({ property, building, onOpenUnit }) {
 }
 
 // ─── Unit page ────────────────────────────────────────────────────────────────
-function UnitProgramCard({ tag, opp }) {
-  const accent = accentFor(tag)
+function UnitProgramCard({ program, opp, color }) {
   const count = (opp?.stages || []).length
   const so = opp?.stageOrder || 0
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11, overflow: 'hidden', marginBottom: 16 }}>
-      <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 9, background: `${accent}14` }}>
-        <span style={{ width: 9, height: 9, borderRadius: '50%', background: accent }} />
-        <span style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary }}>{tag} Program</span>
+      <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 9, background: `${color}14` }}>
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: color }} />
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{program}</span>
         {opp && <span style={{ marginLeft: 'auto', fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{opp.recordNumber}</span>}
       </div>
       <div style={{ padding: '20px 22px 14px' }}>
@@ -461,7 +491,7 @@ function UnitProgramCard({ tag, opp }) {
             <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 16 }}>
               Current stage: <strong style={{ color: C.textPrimary }}>{shortStageLabel(opp.stageLabel)}</strong>
             </div>
-            <StageBar opp={opp} accent={accent} />
+            <StageBar opp={opp} accent={color} />
             <div style={{ marginTop: 8, fontSize: 12, color: C.textSecondary }}>
               {count > 0 && so >= count ? 'All program phases are complete.'
                 : so > 0 ? `Phase ${so} of ${count} — ${oppPct(opp)}% through the program lifecycle.`
@@ -469,20 +499,23 @@ function UnitProgramCard({ tag, opp }) {
             </div>
           </>
         ) : (
-          <div style={{ fontSize: 12.5, color: C.textMuted }}>No {tag} opportunity for this unit.</div>
+          <div style={{ fontSize: 12.5, color: C.textMuted }}>No opportunity for this program on this unit.</div>
         )}
       </div>
     </div>
   )
 }
 
-function UnitPage({ property, building, unit }) {
+function UnitPage({ property, building, unit, programs, colorOf }) {
+  // Render a card for each program this unit actually has, in property order.
+  const present = programs.filter((pg) => oppForProgram(unit, pg))
+  const list = present.length ? present : programs
   return (
     <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
       <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>Unit {unit.unitNumber}</div>
       <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{property.name} · {building.name}</div>
-      <UnitProgramCard tag="HOMES" opp={unit.homes} />
-      <UnitProgramCard tag="HEAR" opp={unit.hear} />
+      {list.map((pg) => <UnitProgramCard key={pg} program={pg} opp={oppForProgram(unit, pg)} color={colorOf(pg)} />)}
+      {list.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No opportunities recorded for this unit yet.</div>}
     </div>
   )
 }
@@ -582,6 +615,9 @@ export default function ProjectPortalRoot() {
     return { property, building, unit }
   }, [tree, sel])
 
+  const programs = useMemo(() => (property ? propertyPrograms(property) : []), [property])
+  const colorOf = useMemo(() => makeColorOf(programs), [programs])
+
   if (phase === 'loading') return <Centered>Loading your projects…</Centered>
   if (phase === 'login') return <LoginGate onSignedIn={load} />
   if (phase === 'notportal') return <Centered>{errMsg}<SignOutLink onClick={signOut} /></Centered>
@@ -595,15 +631,15 @@ export default function ProjectPortalRoot() {
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif', background: C.page }}>
       <TreeSidebar tree={tree} sel={sel} open={open} setOpen={setOpen} onSelect={onSelect}
         query={query} setQuery={setQuery} user={self} onSignOut={signOut} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
         <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, height: 54, display: 'flex', alignItems: 'center', padding: '0 24px', flexShrink: 0 }}>
           <Crumb items={crumb} />
         </div>
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ flex: 1, overflowY: 'auto', background: C.page }}>
           {!property && <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>}
-          {property && unit && building && <UnitPage property={property} building={building} unit={unit} />}
-          {property && building && !unit && <BuildingPage property={property} building={building} onOpenUnit={(u) => onSelect({ pid: property.id, bid: building.id, uid: u.id })} />}
-          {property && !building && <PropertyPage property={property} onOpenBuilding={(b) => onSelect({ pid: property.id, bid: b.id })} />}
+          {property && unit && building && <UnitPage property={property} building={building} unit={unit} programs={programs} colorOf={colorOf} />}
+          {property && building && !unit && <BuildingPage property={property} building={building} programs={programs} colorOf={colorOf} onOpenUnit={(u) => onSelect({ pid: property.id, bid: building.id, uid: u.id })} />}
+          {property && !building && <PropertyPage property={property} programs={programs} colorOf={colorOf} onOpenBuilding={(b) => onSelect({ pid: property.id, bid: b.id })} />}
         </div>
       </div>
     </div>
