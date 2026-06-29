@@ -21,20 +21,25 @@ import { getComponent, fieldVisible } from './componentRegistry'
 import SortableList from './SortableList'
 import { fetchReports, getReportSelectedFields } from '../data/reportsService'
 
-export default function Inspector({ components, selectedId, onChange, onSelect, onRemove }) {
+export default function Inspector({ components, selectedId, settingsPanel, onChange, onSelect, onRemove }) {
   const selected = components.find(c => c.id === selectedId) || null
   return (
     <div style={{
       width: 300, flexShrink: 0, borderLeft: `1px solid ${C.border}`,
       background: C.card, display: 'flex', flexDirection: 'column', overflow: 'hidden',
     }}>
-      <div style={paneHeader()}>{selected ? 'Inspector' : 'Canvas'}</div>
+      <div style={paneHeader()}>{selected ? 'Widget' : 'Dashboard'}</div>
       <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
         {selected
           ? <ComponentInspector key={selected.id} component={selected}
               onChange={(patch) => onChange(selected.id, patch)} onRemove={() => onRemove(selected.id)} />
-          : <LayersPanel components={components} onSelect={onSelect}
-              onReorder={(next) => onChange('__reorder__', next)} />}
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              {settingsPanel}
+              <LayersPanel components={components} onSelect={onSelect}
+                onReorder={(next) => onChange('__reorder__', next)} />
+            </div>
+          )}
       </div>
     </div>
   )

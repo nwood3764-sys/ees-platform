@@ -5,7 +5,7 @@ import { getTemplate } from '../modules/admin/homePageTemplates'
 import HomeComponentRenderer from '../modules/admin/HomeComponentRenderer'
 import ReportRunner from '../modules/ReportRunner'
 import ReportBuilder from '../modules/ReportBuilder'
-import DashboardEditor from '../modules/DashboardEditor'
+import DashboardCanvasEditor from '../modules/DashboardCanvasEditor'
 
 // ConfiguredHome renders a landing/dashboard screen entirely from a configured
 // Home Page (home_pages + home_page_components), resolved for the current user
@@ -96,7 +96,7 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
         position: 'fixed', inset: 0, zIndex: 600,
         background: C.page, display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
-        <DashboardEditor
+        <DashboardCanvasEditor
           dashboardId={editingDashboard}
           onClose={() => setEditingDashboard(null)}
           onSaved={() => { setDashboardEditNonce(n => n + 1); setEditingDashboard(null) }}

@@ -1,7 +1,21 @@
 # LEAP Builder Rearchitecture — WYSIWYG Drag-and-Drop (Handoff)
 
-**Status:** Phase 0 (Foundation) built — in staging for review, not on master.
+**Status:** Phases 0–1 built — in staging for review, not on master.
 **Author of handoff:** prior session (2026-06-29). Read this top-to-bottom before starting.
+
+---
+
+## Phase 1 progress (branch `claude/builder-rearchitecture-phase-0-qt1949`, staging only)
+
+The headline win: the form-driven `DashboardEditor` ("weird list view") is **replaced** by the LEAP Canvas wired to the real dashboards tables. Built on Phase 0, additive, no schema change.
+
+- **Shared renderers** — extracted `DashboardRunner`'s widget renderers into `src/modules/DashboardWidgetView.jsx` (`WidgetBody` + `buildChartData`). The runner and the builder now render widgets through the *same* code (behavior-preserving for the runner).
+- **Live WYSIWYG previews** — `src/builder/LiveWidgetPreview.jsx`: report-bound canvas tiles fetch real report data (same `runReport`/`runWidgetAggregate` fast-path as the runner) and render the real widget, driven by the unsaved config. What you build is what ships.
+- **Persistence adapter** — `src/builder/adapters/dashboardAdapter.js`: loads a dashboard into the canvas and saves it back via the existing `saveDashboard`. Geometry (`{x,y,w,h}` on the 12-col grid) and the Salesforce Title/Subtitle/Footer chrome are stored in `dw_widget_config` under namespaced keys (`_geometry`/`_subtitle`/`_footer`) — they survive `saveDashboard`'s delete-and-reinsert, need no migration (verified: no trigger on `dashboard_widgets`, free jsonb), and the runner falls back cleanly when absent.
+- **Runner honors geometry** — `DashboardRunner` places widgets by `_geometry` on a 12-col CSS grid (view == build) and shows subtitle/footer, **only when present**. Existing dashboards (DSH-00009/10) have no `_geometry` (verified on staging) → they render exactly as before.
+- **The editor** — `src/modules/DashboardCanvasEditor.jsx`: three-pane canvas + dashboard settings (name in header; description/folder/filters in the inspector's no-selection view; filters reorder via dnd-kit). Repointed both entry points (`ReportsModule`, `ConfiguredHome`) from `DashboardEditor` to it. `DashboardEditor.jsx` is now unreferenced (kept temporarily as rollback; delete once Phase 1 is confirmed).
+
+**Next:** confirm on staging (build/save/view a dashboard round-trip), then Phase 2 (Home pages) reuses the same canvas + adapter pattern. Help article lands with the Phase 1 master ship.
 
 ---
 

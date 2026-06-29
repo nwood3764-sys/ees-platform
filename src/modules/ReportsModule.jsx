@@ -11,7 +11,7 @@ import {
 import ReportBuilder from './ReportBuilder'
 import ReportRunner from './ReportRunner'
 import DashboardRunner from './DashboardRunner'
-import DashboardEditor from './DashboardEditor'
+import DashboardCanvasEditor from './DashboardCanvasEditor'
 import ScheduleEditor from './ScheduleEditor'
 
 // ─── Section definitions ──────────────────────────────────────────────────
@@ -332,7 +332,7 @@ export default function ReportsModule({
           ) : selectedRecord.table === 'dashboards' ? (
             // Same pattern for dashboards: new or edit → Editor, otherwise Runner
             (selectedRecord.id === null || selectedRecord.id === 'new' || selectedRecord.mode === 'edit' || selectedRecord.mode === 'create') ? (
-              <DashboardEditor
+              <DashboardCanvasEditor
                 dashboardId={selectedRecord.id || 'new'}
                 onClose={closeRecord}
                 onSaved={(newId) => {
