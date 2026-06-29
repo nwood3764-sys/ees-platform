@@ -1,7 +1,26 @@
 # LEAP Builder Rearchitecture — WYSIWYG Drag-and-Drop (Handoff)
 
-**Status:** Phases 0–2 SHIPPED to production (PR #14). Phase 3 in progress.
+**Status:** Phases 0–3 SHIPPED to production. Phase 4 decided (see below). Rearchitecture functionally complete.
 **Author of handoff:** prior session (2026-06-29). Read this top-to-bottom before starting.
+
+---
+
+## Phase 4 decision (record page layouts) — re-platform DECLINED, 2026-06-29
+
+Unlike the dashboard / home / report builders (which were form-driven and got replaced), the record **page-layout editor (`LayoutEditor` / `LayoutCanvas`) already IS a working WYSIWYG drag canvas** — the most advanced builder pre-rearchitecture. "Phase 4" would re-platform a *working* core feature (on every record-detail page) onto the shared engine for architectural consistency — high effort, high prod risk, low user-visible gain. **Decision: do not re-platform.** The WYSIWYG goal is already met across all four surfaces. If desired later, the unified fold is a deliberate, staging-soaked follow-up (page-layout registry + adapter, `selfChrome`-style tiles) — the engine is ready for it.
+
+**Help articles published (prod):** HA-00113 (Dashboard canvas), HA-00114 (Home Page canvas), HA-00115 (Report builder live preview + formulas) — satisfies the ship-cycle help-article requirement for the shipped builders.
+
+---
+
+## Formula engine — full mathjs/formulajs swap (2026-06-29, supersedes the earlier deviation)
+
+The earlier session extended the legacy evaluator to avoid breaking saved formulas. Nicholas confirmed Reports has **only seed data — no real reports or formulas** — so that constraint doesn't apply, and per "build the most robust enterprise functionality," the engine was swapped to the **full §8 stack**:
+- `src/lib/formula/engine.js` — a **sandboxed mathjs instance** (`import`/`createUnit`/`evaluate`/`parse`/… disabled inside expressions; programmatic parsing uses a captured reference) with the **entire @formulajs/formulajs library (371 Excel functions)** registered. Compile-cached; Excel blank-as-0 scope semantics; `evaluateFormula`/`validateFormula`/`FORMULA_FUNCTIONS`/`ALL_FUNCTION_NAMES`.
+- `lib/reportFormulaEval` is now a thin adapter over the engine (the custom mini-parser is gone), so reports evaluate via mathjs and the editor validates against the exact same evaluator.
+- Deps `vendor-formula` (mathjs+formulajs, ~233 KB gz) + `vendor-codemirror` are isolated leaf chunks (verified acyclic — no TDZ; `decimal.js` path-bound so it doesn't collide with recharts' `decimal.js-light`). `ConfiguredHome` lazy-loads ReportRunner/ReportBuilder so the engine stays **off the Home page load** — only loads when a report opens.
+- Unit-verified: arithmetic, IF/AND/OR, text (LEFT/CONCATENATE/UPPER), ROUND, blank-as-0, summary scope, and validation (syntax + unknown-field).
+- **Next:** CodeMirror 6 visual editor (syntax highlighting + inline autocomplete over fields/functions) to replace the textarea + insert-pickers.
 
 ---
 
