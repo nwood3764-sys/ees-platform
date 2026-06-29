@@ -131,35 +131,78 @@ Each phase ships independently and is additive (per CLAUDE.md: never break exist
 
 ---
 
-## 7. Widget / component library — seed wishlist
+## 7. Widget / component library — FULL CATALOG (decided: build all)
 
-To be expanded with Nicholas's input ("more than Salesforce"). Starting set:
-- **Existing:** metric/KPI, bar, line, pie, donut, funnel, gauge, table, ranked list.
-- **Salesforce-parity adds:** stacked/grouped bar, combo (bar+line), scatter, area, pivot/matrix table, scorecard with comparison (period-over-period, % change, sparkline/trend), donut with center metric, "lightning table" with inline conditional formatting.
-- **Beyond Salesforce:** map/geo widget (we already use Leaflet — see `OutreachMap.jsx`), cohort/retention grid, heatmap, timeline/Gantt, waterfall, big-number-with-target gauge, list-view embed with quick filters, rich-text/markdown, image/logo, iframe/embed, activity feed, record-detail mini-card.
-- Each becomes one **registry entry** (§4b).
+**Decision (Nicholas, 2026-06-29): ship the full widget library — every widget we can think of.** Robust, modern, first-class. Each is one **registry entry** (§4b); build them as the registry matures (Phase 1 covers the chart/metric/table core; richer ones follow but all are in scope). Organized as a build checklist:
+
+**Metrics & KPIs**
+- Single metric / big number; KPI with target & % attainment; scorecard with period-over-period comparison + delta + sparkline; multi-stat strip (several KPIs in one tile); ratio/conversion metric.
+
+**Charts**
+- Bar (vertical/horizontal), stacked bar, 100%-stacked bar, grouped/clustered bar; line, multi-series line, area, stacked area; combo (bar + line, dual-axis); pie, donut (with center metric); scatter, bubble; histogram; box-and-whisker; waterfall; radar/spider; funnel; pyramid; pareto; candlestick/range (where relevant); sparkline (inline).
+
+**Tables & lists**
+- Tabular table; pivot/matrix (multi-measure); "lightning table" with inline **conditional formatting** (color scales, data bars, icon sets); ranked list / leaderboard; list-view embed with quick filters; grouped/summary table with subtotals; editable grid (inline edit back to records).
+
+**Distribution & relationship**
+- Heatmap; correlation matrix; tree map; sunburst; sankey/flow; network/graph; chord.
+
+**Time & process**
+- Timeline; Gantt / project schedule; calendar / agenda; activity feed; cohort / retention grid; trend-over-time with forecast band.
+
+**Goal & progress**
+- Gauge (radial, with min/mid/max thresholds); linear progress / bullet chart; goal tracker; progress ring; status path / pipeline stages.
+
+**Geospatial**
+- Map with pins / clustering (reuse Leaflet — see `OutreachMap.jsx`); choropleth / region heat map; territory map.
+
+**Content & layout**
+- Rich text / markdown; heading/divider/spacer; image / logo; video; iframe / external embed; button / quick-action; link list; tabs / accordion container; section/column container (nested layout).
+
+**Record & operational (esp. home pages & record page layouts)**
+- Record detail mini-card; field group; related list; recent records; task list / my tasks; approvals queue; chatter/conversation panel; file gallery; notes; report chart embed; dashboard embed.
+
+**Advanced / analytical**
+- Pivot with drill-down; comparison (this period vs last, vs target, vs cohort); anomaly/outlier highlight; what-if / parameterized metric (driven by a dashboard control); custom-formula metric (powered by the §8 engine).
+
+If something useful isn't listed, it's still in scope — the registry makes adding one cheap. Treat this as the starting build checklist, not a ceiling.
 
 ---
 
-## 8. Calculated / formula fields
+## 8. Calculated / formula fields — FULL ENGINE (decided)
 
-Biggest scope lever. Current state: report-level text-formula calculated fields (row + summary), evaluated in `lib/reportFormulaEval`, limited functions, no UI builder.
+**Decision (Nicholas, 2026-06-29): build the full formula engine now.** Salesforce/Excel-grade, with an **open-source expression editor**. No phased "summary-formula first." This is a first-class subsystem, not a band-aid. Current state to replace: report-level text-formula fields evaluated in `lib/reportFormulaEval` with a limited function set and no editor UI.
 
-Two depths to choose between (**decision to confirm**):
-- **(A) Summary-formula tier** — sum/avg/ratio/% of existing columns + simple arithmetic and conditionals. Lower effort; covers most dashboard/report needs.
-- **(B) Full Salesforce-style formula engine** — function library (logical, math, text, date), cross-field references, nested conditionals, type system, with a visual builder (insert-field, insert-function, autocomplete, live validation). High effort, true parity.
+### Scope (true Salesforce + Excel parity)
+- Full **function library**: math, logical (`IF`/`CASE`/`AND`/`OR`/nested), text, date/time, statistical, lookup, conversion — Excel-function breadth plus Salesforce operators.
+- **Cross-field references** (incl. related-object fields via the existing `via_path` mechanism), **row scope** and **summary/group scope**, a **type system** (number, currency, percent, date, datetime, text, boolean) with type checking and field-level formatting actually applied in the runner (today `format_options` is stored but ignored — fix that).
+- **Visual editor UX** like Salesforce's formula editor: insert-field picker, categorized insert-function picker with descriptions/signatures, **autocomplete + syntax highlighting**, **live validation/type errors**, and a "Check syntax" affordance.
+- Calculated fields usable as **report columns/groupings AND as widget measures** (so a dashboard KPI can be a formula). This is why the engine is a **foundation piece** (build in Phase 0), not buried in the Reports phase.
 
-Recommendation: start with (A) + a visual expression builder UI, architected so the function library can grow toward (B) without a rewrite.
+### Recommended open-source libraries (all permissive — safe for a proprietary platform)
+- **Editor:** **CodeMirror 6** (MIT) — embeddable, custom language + autocomplete API, syntax highlighting. (Monaco/MIT is the heavier alternative; CM6 is the right weight for an in-app formula bar.)
+- **Engine / function library:** **mathjs** (Apache-2.0) for the parser + math/logic/units + custom-function registration, complemented by **@formulajs/formulajs** (MIT) for Excel-function parity (SUM, IF, VLOOKUP-style, TEXT, DATE families, etc.). A thin LEAP resolver maps field tokens → row/group values and enforces the type system.
+- **Parsing primitive (if we want our own AST):** **jsep** (MIT).
+- **⚠️ Avoid HyperFormula** for the engine — it's powerful and Excel-compatible but **GPLv3-or-commercial**; using it in a proprietary app means buying a commercial license. Default to mathjs + formulajs unless Nicholas wants to license HyperFormula.
+- Same Vite-hazard caution as §5: add deps in isolation, lazy-load, `build:safe` before relying on them.
+
+### Architecture notes
+- Persist formulas as text expressions (as today) but compile to an AST once and cache; evaluate row-scope per detail row and summary-scope per group + grand total (mirrors current `evaluateRowExpression` / `evaluateSummaryExpression` split).
+- Sandbox evaluation (no arbitrary JS — only the whitelisted function library) for safety.
+- Keep `report_calculated_fields` as the store; extend with whatever the type system needs.
 
 ---
 
-## 9. Decisions to confirm before building (put recommendations first)
+## 9. Decisions
 
-1. **Build order** — *Recommend: Dashboards first* (shared canvas + worst Edit screen), then Home → Reports → Page Layouts. Confirm or reorder.
-2. **DnD/grid libraries** — *Recommend: `react-grid-layout` (grid canvas) + `dnd-kit` (palette/sortable).* OK to add both?
-3. **Calculated-field depth** — *Recommend: (A) now, architected toward (B).* Confirm ceiling.
-4. **Widget wishlist** — Nicholas to expand §7 with his "more than Salesforce" list (or confirm the seed set as the Phase-1/2 scope).
-5. **Unify vs. keep parallel** — *Recommend: one canvas engine + registry powering all surfaces.* Confirm appetite for the refactor vs. per-surface rebuilds.
+**DECIDED (Nicholas, 2026-06-29):**
+- **#3 Calculated fields — FULL engine now** (Salesforce/Excel-grade, OSS editor). See §8.
+- **#4 Widgets — FULL catalog** (every widget; build them all). See §7.
+- **#5 Unified, greenfield** — one canvas engine + registry for all surfaces. The current builders are *unusable*, so **do not preserve them** — replace the builder UIs wholesale. (Preserve only the **data** + **runtime**: existing dashboards/reports/home pages — DSH-00009/10, RPT-00036/37, HP-00005/6 — must keep rendering via the reused runners; this is the one "additive, don't break" constraint that still applies.)
+
+**Still to confirm (recommendation first):**
+- **#1 Build order** — *Recommend: Dashboards first* (creates the shared canvas + kills the worst Edit screen), then Home → Reports → Page Layouts. Confirm or reorder.
+- **#2 Libraries** — *Recommend: `react-grid-layout` (grid canvas + resize + palette drag-in) + `dnd-kit` (sortable/nested) + CodeMirror 6 + mathjs + @formulajs/formulajs (formula engine).* OK to add these?
 
 ---
 
