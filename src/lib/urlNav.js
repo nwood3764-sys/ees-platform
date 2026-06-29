@@ -34,6 +34,14 @@ import { useState, useEffect, useCallback } from 'react'
 // NB: this is the SOURCE OF TRUTH for "which module owns which table" in
 // the URL layer. RecordDetail.TABLE_META has the same info but is keyed
 // for display purposes — keep them aligned when adding new objects.
+// True when a table can be addressed as a record URL root (`/<table>/<id>`).
+// Only these resolve back to a record on reload/share (see parsePath), so the
+// URL-routing path in ObjectListSection gates on this to avoid producing a
+// deep link that would break when opened fresh.
+export function isUrlAddressableTable(table) {
+  return !!TABLE_MODULE_MAP[table]
+}
+
 const TABLE_MODULE_MAP = {
   // Enrollment
   accounts: 'enrollment',

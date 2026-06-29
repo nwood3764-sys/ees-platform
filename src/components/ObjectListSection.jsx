@@ -4,6 +4,8 @@ import { LoadingState, ErrorState } from './UI'
 import RecordDetail from './RecordDetail'
 import { fetchObjectRecords, buildObjectColumnCatalog, deriveColumnOptions, isRelatedField } from '../data/objectListService'
 import { fetchSavedViewsForObject } from '../data/listViewsService'
+import { useNav } from '../lib/navContext'
+import { isUrlAddressableTable } from '../lib/urlNav'
 
 // ---------------------------------------------------------------------------
 // ObjectListSection — renders the universal list view for any object, on any
@@ -22,6 +24,14 @@ import { fetchSavedViewsForObject } from '../data/listViewsService'
 // ---------------------------------------------------------------------------
 
 export default function ObjectListSection({ objectTable, moduleId }) {
+  // When the app shell provides navigation (the default in the running app),
+  // open records by pushing a real record URL (`/<table>/<id>`) so every record
+  // is shareable, bookmarkable, and visible to the topbar gear (Salesforce
+  // parity). The parent module's URL-driven `selectedRecord ? <RecordDetail>`
+  // branch then renders the detail and this list unmounts — so the local
+  // `selected` state below is only used as a fallback for a standalone mount
+  // with no NavContext provider.
+  const nav = useNav()
   const [data, setData]       = useState([])
   const [columns, setColumns] = useState([])     // default-visible descriptors
   const [catalog, setCatalog] = useState([])     // full selectable catalog
@@ -122,6 +132,26 @@ export default function ObjectListSection({ objectTable, moduleId }) {
     })
   }, [fetchRows])
 
+  // Open a record. With NavContext present, push a record URL so the address
+  // bar carries the id and the open record is shareable; otherwise fall back to
+  // local detail state. rec: { id, mode?, table?, prefill? }.
+  const openRecord = (rec) => {
+    const targetTable = rec.table || objectTable
+    // Only route through the URL when the table is a real record root, so the
+    // resulting link resolves back to the record on reload/share. Unmapped
+    // tables (and standalone mounts with no NavContext) keep local detail state.
+    if (nav?.navigateToRecord && isUrlAddressableTable(targetTable)) {
+      // name is carried so the module breadcrumb has it in-session (the URL
+      // can't encode it; a fresh deep link resolves the name from the record).
+      nav.navigateToRecord({ table: targetTable, id: rec.id, mode: rec.mode || 'view', name: rec.name, prefill: rec.prefill })
+    } else {
+      setSelected({ id: rec.id, mode: rec.mode || 'view', table: rec.table, name: rec.name, prefill: rec.prefill })
+    }
+  }
+
+  // In the URL-driven path this branch never renders (the list unmounts the
+  // moment a record is selected — the parent module shows its own RecordDetail
+  // from the URL). It remains for standalone mounts with no NavContext.
   if (selected) {
     // selected.table lets a lookup hyperlink, breadcrumb, or advance-to action
     // open a record on a DIFFERENT object than this list's own. Without it,
@@ -157,8 +187,8 @@ export default function ObjectListSection({ objectTable, moduleId }) {
       listObject={objectTable}
       listModule={moduleId}
       onRefresh={load}
-      onOpenRecord={(row) => { if (row?._id) setSelected({ id: row._id, mode: 'view' }) }}
-      onNew={() => setSelected({ id: null, mode: 'create' })}
+      onOpenRecord={(row) => { if (row?._id) openRecord({ id: row._id, mode: 'view', name: row.name }) }}
+      onNew={() => openRecord({ id: null, mode: 'create' })}
       renderCell={(col, r) => {
         // Make the Name a single-click link that opens the record, so the
         // generic list behaves like a standard list view (the table otherwise
@@ -167,7 +197,7 @@ export default function ObjectListSection({ objectTable, moduleId }) {
           return (
             <td key="name" style={{ padding: '11px 12px', borderBottom: '1px solid #e4e9f2', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               <span
-                onClick={(e) => { e.stopPropagation(); if (r?._id) setSelected({ id: r._id, mode: 'view' }) }}
+                onClick={(e) => { e.stopPropagation(); if (r?._id) openRecord({ id: r._id, mode: 'view', name: r.name }) }}
                 style={{ color: '#1a5a8a', fontWeight: 600, cursor: 'pointer' }}
               >
                 {r.name || '(no name)'}
