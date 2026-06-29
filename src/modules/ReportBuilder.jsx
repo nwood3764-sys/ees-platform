@@ -12,6 +12,8 @@ import {
 } from '../data/reportsService'
 import { TabularLayout, SummaryLayout, MatrixLayout } from './ReportRunner'
 import { supabase } from '../lib/supabase'
+import SortableList from '../builder/SortableList'
+import { validateExpression, FORMULA_FUNCTIONS } from '../lib/reportFormulaEval'
 
 // ─── Top-level Report Builder ─────────────────────────────────────────────
 //
@@ -248,6 +250,11 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     ;[fields[idx], fields[target]] = [fields[target], fields[idx]]
     updateReport({ rpt_selected_fields: fields })
   }
+  // Drag reorder (dnd-kit) — replaces the up/down shuffle as the primary
+  // reordering gesture. Receives the already-reordered field array.
+  const reorderFields = (nextFields) => {
+    updateReport({ rpt_selected_fields: nextFields })
+  }
 
   // ─── Save ──────────────────────────────────────────────────────────────
   const handleSave = async () => {
@@ -380,6 +387,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
                 addField={addField}
                 removeField={removeField}
                 moveField={moveField}
+                reorderFields={reorderFields}
               />
             )}
             {tab === 'filters' && (
@@ -402,6 +410,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
               <CalcFieldsTab
                 calculatedFields={calculatedFields}
                 setCalculatedFields={setCalculatedFields}
+                report={report}
               />
             )}
             {tab === 'settings' && (
@@ -456,10 +465,14 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
 
 // ─── Fields tab ───────────────────────────────────────────────────────────
 
+function fieldKey(f) {
+  return `${f.table}|${f.name}|${(f.via_path || []).join('>')}`
+}
+
 function FieldsTab({
   primaryOptions, report, updateReport,
   fieldTree, expandedRelated, onExpandRelated,
-  addField, removeField, moveField,
+  addField, removeField, moveField, reorderFields,
 }) {
   return (
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start' }}>
@@ -521,22 +534,29 @@ function FieldsTab({
           {report.rpt_selected_fields.length === 0 ? (
             <div style={emptyState()}>No fields selected. Pick from the left.</div>
           ) : (
-            report.rpt_selected_fields.map((f, idx) => (
-              <div key={`${f.table}-${f.name}-${idx}`} style={{
-                display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
-                background:C.cardSecondary, borderRadius:6, marginBottom:6,
-              }}>
-                <div style={{ flex:1, fontSize:12 }}>
-                  <div style={{ fontWeight:500, color:C.textPrimary }}>{f.label}</div>
-                  <div style={{ color:C.textMuted, fontSize:11 }}>
-                    {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
+            <SortableList
+              items={report.rpt_selected_fields.map(f => ({ id: fieldKey(f), f }))}
+              onReorder={(next) => reorderFields(next.map(x => x.f))}
+              renderItem={(item, { setNodeRef, style, dragHandleProps }) => {
+                const f = item.f
+                const idx = report.rpt_selected_fields.findIndex(x => fieldKey(x) === item.id)
+                return (
+                  <div ref={setNodeRef} style={{
+                    ...style, display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
+                    background:C.cardSecondary, borderRadius:6, marginBottom:6,
+                  }}>
+                    <span {...dragHandleProps} title="Drag to reorder" style={{ cursor:'grab', color:C.textMuted, fontSize:14, lineHeight:1, touchAction:'none' }}>⠿</span>
+                    <div style={{ flex:1, fontSize:12, minWidth:0 }}>
+                      <div style={{ fontWeight:500, color:C.textPrimary }}>{f.label}</div>
+                      <div style={{ color:C.textMuted, fontSize:11 }}>
+                        {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
+                      </div>
+                    </div>
+                    <button onClick={() => removeField(idx)} style={miniBtn(true)}>×</button>
                   </div>
-                </div>
-                <button onClick={() => moveField(idx, -1)} style={miniBtn()}>↑</button>
-                <button onClick={() => moveField(idx, 1)} style={miniBtn()}>↓</button>
-                <button onClick={() => removeField(idx)} style={miniBtn(true)}>×</button>
-              </div>
-            ))
+                )
+              }}
+            />
           )}
         </div>
       </div>
@@ -1110,7 +1130,94 @@ function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree
 
 // ─── Calculated Fields tab ────────────────────────────────────────────────
 
-function CalcFieldsTab({ calculatedFields, setCalculatedFields }) {
+// ─── Formula editor ───────────────────────────────────────────────────────
+// Salesforce-style formula authoring for a calculated field: an expression
+// box plus insert-field and insert-function pickers (categorized, with
+// descriptions) and a live "Check syntax" indicator. Validation uses the same
+// parser the runtime uses (validateExpression), so a formula that reads as
+// valid here will parse when the report runs.
+function FormulaEditor({ value, scope, fieldNames, onChange }) {
+  const taRef = useState(() => ({ el: null }))[0]
+  const [status, setStatus] = useState(null)   // null | {ok} | {ok:false,error}
+
+  const insertAtCursor = (text) => {
+    const el = taRef.el
+    const cur = value || ''
+    if (!el) { onChange(cur + text); return }
+    const start = el.selectionStart ?? cur.length
+    const end = el.selectionEnd ?? cur.length
+    const next = cur.slice(0, start) + text + cur.slice(end)
+    onChange(next)
+    // Restore caret just after the inserted text on next tick.
+    requestAnimationFrame(() => { try { el.focus(); el.selectionStart = el.selectionEnd = start + text.length } catch { /* noop */ } })
+  }
+
+  const check = () => setStatus(validateExpression(value))
+
+  return (
+    <div>
+      <div style={{ display:'flex', gap:6, marginBottom:6, flexWrap:'wrap', alignItems:'center' }}>
+        {scope === 'row' && (
+          <InsertMenu label="Insert field" disabled={!fieldNames.length}
+            groups={[{ category: 'Fields', items: fieldNames.map(n => ({ name: n, template: n, desc: '' })) }]}
+            onPick={(it) => insertAtCursor(it.template)} />
+        )}
+        <InsertMenu label="Insert function" groups={FORMULA_FUNCTIONS} onPick={(it) => insertAtCursor(it.template)} />
+        <button onClick={check} style={btnSecondary(false, 'small')}>Check syntax</button>
+        {status && (
+          <span style={{ fontSize:11, fontWeight:600, color: status.ok ? C.emeraldMid : C.sky }}>
+            {status.ok ? '✓ Valid' : `✗ ${status.error}`}
+          </span>
+        )}
+      </div>
+      <textarea
+        ref={el => { taRef.el = el }}
+        value={value}
+        onChange={e => { onChange(e.target.value); if (status) setStatus(null) }}
+        placeholder={scope === 'row' ? "e.g. DAYS_BETWEEN(TODAY(), created_at)" : "e.g. SUM_amount / COUNT_id"}
+        rows={3}
+        style={{ ...inputStyle(), fontFamily:'JetBrains Mono, monospace', fontSize:12 }}
+      />
+    </div>
+  )
+}
+
+function InsertMenu({ label, groups, onPick, disabled }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span style={{ position:'relative' }}>
+      <button disabled={disabled} onClick={() => setOpen(o => !o)} style={btnSecondary(disabled, 'small')}>{label} ▾</button>
+      {open && !disabled && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position:'fixed', inset:0, zIndex:40 }} />
+          <div style={{
+            position:'absolute', top:'110%', left:0, zIndex:41, width:280, maxHeight:320, overflowY:'auto',
+            background:C.card, border:`1px solid ${C.border}`, borderRadius:8, boxShadow:'0 8px 24px rgba(13,26,46,0.16)', padding:6,
+          }}>
+            {groups.map(g => (
+              <div key={g.category}>
+                <div style={{ fontSize:10, fontWeight:700, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5, padding:'6px 8px 3px' }}>{g.category}</div>
+                {g.items.map(it => (
+                  <div key={it.name} onClick={() => { onPick(it); setOpen(false) }}
+                    title={it.desc || ''}
+                    style={{ padding:'6px 8px', borderRadius:5, cursor:'pointer', fontSize:12 }}
+                    onMouseEnter={e => e.currentTarget.style.background = C.cardSecondary}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <div style={{ fontFamily:'JetBrains Mono, monospace', color:C.textPrimary }}>{it.name}</div>
+                    {it.desc && <div style={{ fontSize:10.5, color:C.textMuted, marginTop:1 }}>{it.desc}</div>}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  )
+}
+
+function CalcFieldsTab({ calculatedFields, setCalculatedFields, report }) {
+  const fieldNames = (report?.rpt_selected_fields || []).map(f => f.name)
   const add = () => {
     setCalculatedFields([...calculatedFields, {
       label:'', scope:'row', expression:'', data_type:'number',
@@ -1161,12 +1268,11 @@ function CalcFieldsTab({ calculatedFields, setCalculatedFields }) {
                 </select>
                 <button onClick={() => remove(idx)} style={miniBtn(true)}>×</button>
               </div>
-              <textarea
+              <FormulaEditor
                 value={c.expression}
-                onChange={e => update(idx, { expression: e.target.value })}
-                placeholder={c.scope === 'row' ? "e.g. TODAY() - created_at" : "e.g. SUM(amount) / COUNT(id)"}
-                rows={2}
-                style={{ ...inputStyle(), fontFamily:'JetBrains Mono, monospace', fontSize:12 }}
+                scope={c.scope}
+                fieldNames={fieldNames}
+                onChange={(expr) => update(idx, { expression: expr })}
               />
             </div>
           ))
