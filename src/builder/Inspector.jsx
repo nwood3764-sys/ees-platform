@@ -77,9 +77,20 @@ function ComponentInspector({ component, onChange, onRemove }) {
         <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>{entry.label}</div>
       </div>
 
+      {/* Salesforce dashboard-component chrome: Title / Subtitle / Footer. */}
       <Field label="Title">
         <input type="text" value={component.title || ''} placeholder={entry.label}
           onChange={e => onChange({ title: e.target.value })} style={input()} />
+      </Field>
+
+      <Field label="Subtitle">
+        <input type="text" value={component.subtitle || ''} placeholder="Optional subtitle"
+          onChange={e => onChange({ subtitle: e.target.value })} style={input()} />
+      </Field>
+
+      <Field label="Footer">
+        <input type="text" value={component.footer || ''} placeholder="Optional footer"
+          onChange={e => onChange({ footer: e.target.value })} style={input()} />
       </Field>
 
       {needsReport && (
