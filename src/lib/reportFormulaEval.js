@@ -276,6 +276,43 @@ function callFunction(name, args, ctx) {
       if (!a || !b) return null
       return Math.floor((a.getTime() - b.getTime()) / 86400000)
     }
+    // ── Extended catalog (additive; existing behavior unchanged) ──────────
+    // Logical
+    case 'AND': return args.every(toBool)
+    case 'OR':  return args.some(toBool)
+    case 'NOT': return !toBool(args[0])
+    case 'CASE': {
+      // CASE(value, match1, result1, [match2, result2, ...], else)
+      const subject = args[0]
+      let i = 1
+      for (; i + 1 < args.length; i += 2) {
+        if (subject == args[i]) return args[i + 1]   // eslint-disable-line eqeqeq
+      }
+      return i < args.length ? args[i] : null         // trailing else
+    }
+    case 'ISBLANK': return args[0] == null || args[0] === ''
+    case 'BLANKVALUE': return (args[0] == null || args[0] === '') ? args[1] : args[0]
+    case 'ISNUMBER': return Number.isFinite(typeof args[0] === 'number' ? args[0] : parseFloat(args[0]))
+    // Math
+    case 'CEILING': return Math.ceil(toNumber(args[0]))
+    case 'FLOOR':   return Math.floor(toNumber(args[0]))
+    case 'MOD':     { const d = toNumber(args[1]); return d === 0 ? null : toNumber(args[0]) % d }
+    case 'POWER':   return Math.pow(toNumber(args[0]), toNumber(args[1]))
+    case 'SQRT':    return Math.sqrt(toNumber(args[0]))
+    case 'SUM':     return args.reduce((a, b) => a + toNumber(b), 0)
+    case 'AVERAGE': return args.length ? args.reduce((a, b) => a + toNumber(b), 0) / args.length : null
+    // Text
+    case 'LEFT':  return String(args[0] ?? '').slice(0, Math.max(0, toNumber(args[1])))
+    case 'RIGHT': { const s = String(args[0] ?? ''); const n = Math.max(0, toNumber(args[1])); return n === 0 ? '' : s.slice(-n) }
+    case 'MID':   { const s = String(args[0] ?? ''); const start = Math.max(0, toNumber(args[1]) - 1); return s.slice(start, start + Math.max(0, toNumber(args[2]))) }
+    case 'CONTAINS':    return String(args[0] ?? '').includes(String(args[1] ?? ''))
+    case 'BEGINS':      return String(args[0] ?? '').startsWith(String(args[1] ?? ''))
+    case 'ENDS':        return String(args[0] ?? '').endsWith(String(args[1] ?? ''))
+    case 'SUBSTITUTE':  return String(args[0] ?? '').split(String(args[1] ?? '')).join(String(args[2] ?? ''))
+    // Date
+    case 'ADDDAYS': { const d = toDate(args[0]); if (!d) return null; const r = new Date(d); r.setDate(r.getDate() + toNumber(args[1])); return r }
+    case 'WEEKDAY': { const d = toDate(args[0]); return d ? d.getDay() + 1 : null }   // 1=Sun … 7=Sat
+    case 'DATEVALUE': return toDate(args[0])
   }
   throw new Error(`Unknown function: ${name}`)
 }
@@ -347,6 +384,93 @@ export function evaluateSummaryExpression(expression, aggregates) {
     return null
   }
 }
+
+/**
+ * Validate an expression's SYNTAX (tokenize + parse) without evaluating it.
+ * Powers the formula editor's "Check syntax" + live error feedback, using the
+ * exact same parser the runtime uses — so a formula that validates here will
+ * parse at run time. Returns { ok: true } or { ok: false, error: string }.
+ */
+export function validateExpression(expression) {
+  if (!expression || !expression.trim()) return { ok: false, error: 'Empty formula' }
+  try {
+    const ast = new Parser(tokenize(expression)).parse()
+    checkFunctionsExist(ast)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
+// Walk the AST and reject calls to unknown functions at validate time (rather
+// than only at eval time), so the editor catches typos like SUMM(...).
+function checkFunctionsExist(node) {
+  if (!node || typeof node !== 'object') return
+  if (node.type === 'call' && !FUNCTION_NAMES.has(node.name)) {
+    throw new Error(`Unknown function: ${node.name}`)
+  }
+  for (const k of Object.keys(node)) {
+    const v = node[k]
+    if (Array.isArray(v)) v.forEach(checkFunctionsExist)
+    else if (v && typeof v === 'object') checkFunctionsExist(v)
+  }
+}
+
+/**
+ * Catalog of supported functions, grouped for the formula editor's insert
+ * picker (name, signature template, one-line description). The set mirrors the
+ * cases in callFunction above.
+ */
+export const FORMULA_FUNCTIONS = [
+  { category: 'Logical', items: [
+    { name: 'IF', template: 'IF(condition, value_if_true, value_if_false)', desc: 'Returns one value if a condition is true, another if false.' },
+    { name: 'CASE', template: 'CASE(expression, match1, result1, else_result)', desc: 'Compares an expression to matches and returns the matching result.' },
+    { name: 'ISBLANK', template: 'ISBLANK(value)', desc: 'TRUE if the value is null or empty.' },
+    { name: 'BLANKVALUE', template: 'BLANKVALUE(value, fallback)', desc: 'Returns fallback when value is blank.' },
+    { name: 'ISNUMBER', template: 'ISNUMBER(value)', desc: 'TRUE if the value is numeric.' },
+  ] },
+  { category: 'Math', items: [
+    { name: 'ABS', template: 'ABS(number)', desc: 'Absolute value.' },
+    { name: 'ROUND', template: 'ROUND(number, digits)', desc: 'Rounds to the given decimal places.' },
+    { name: 'CEILING', template: 'CEILING(number)', desc: 'Rounds up to the nearest integer.' },
+    { name: 'FLOOR', template: 'FLOOR(number)', desc: 'Rounds down to the nearest integer.' },
+    { name: 'MOD', template: 'MOD(number, divisor)', desc: 'Remainder after division.' },
+    { name: 'POWER', template: 'POWER(number, exponent)', desc: 'Raises a number to a power.' },
+    { name: 'SQRT', template: 'SQRT(number)', desc: 'Square root.' },
+    { name: 'MIN', template: 'MIN(a, b)', desc: 'Smallest of the arguments.' },
+    { name: 'MAX', template: 'MAX(a, b)', desc: 'Largest of the arguments.' },
+    { name: 'SUM', template: 'SUM(a, b)', desc: 'Adds the arguments.' },
+    { name: 'AVERAGE', template: 'AVERAGE(a, b)', desc: 'Mean of the arguments.' },
+  ] },
+  { category: 'Text', items: [
+    { name: 'CONCATENATE', template: 'CONCATENATE(text1, text2)', desc: 'Joins text values.' },
+    { name: 'TEXT', template: 'TEXT(value)', desc: 'Converts a value to text.' },
+    { name: 'LEN', template: 'LEN(text)', desc: 'Number of characters.' },
+    { name: 'LEFT', template: 'LEFT(text, count)', desc: 'Leftmost characters.' },
+    { name: 'RIGHT', template: 'RIGHT(text, count)', desc: 'Rightmost characters.' },
+    { name: 'MID', template: 'MID(text, start, count)', desc: 'Characters from the middle (1-based).' },
+    { name: 'UPPER', template: 'UPPER(text)', desc: 'Uppercase.' },
+    { name: 'LOWER', template: 'LOWER(text)', desc: 'Lowercase.' },
+    { name: 'TRIM', template: 'TRIM(text)', desc: 'Removes leading/trailing spaces.' },
+    { name: 'CONTAINS', template: 'CONTAINS(text, substring)', desc: 'TRUE if text contains the substring.' },
+    { name: 'BEGINS', template: 'BEGINS(text, prefix)', desc: 'TRUE if text starts with the prefix.' },
+    { name: 'ENDS', template: 'ENDS(text, suffix)', desc: 'TRUE if text ends with the suffix.' },
+    { name: 'SUBSTITUTE', template: 'SUBSTITUTE(text, old, new)', desc: 'Replaces occurrences of old with new.' },
+  ] },
+  { category: 'Date', items: [
+    { name: 'TODAY', template: 'TODAY()', desc: "Today's date." },
+    { name: 'NOW', template: 'NOW()', desc: 'Current date and time.' },
+    { name: 'YEAR', template: 'YEAR(date)', desc: 'Year component.' },
+    { name: 'MONTH', template: 'MONTH(date)', desc: 'Month (1–12).' },
+    { name: 'DAY', template: 'DAY(date)', desc: 'Day of month.' },
+    { name: 'WEEKDAY', template: 'WEEKDAY(date)', desc: 'Day of week (1=Sun … 7=Sat).' },
+    { name: 'DAYS_BETWEEN', template: 'DAYS_BETWEEN(date1, date2)', desc: 'Whole days between two dates.' },
+    { name: 'ADDDAYS', template: 'ADDDAYS(date, n)', desc: 'Adds n days to a date.' },
+    { name: 'DATEVALUE', template: 'DATEVALUE(text)', desc: 'Parses text into a date.' },
+  ] },
+]
+
+const FUNCTION_NAMES = new Set(FORMULA_FUNCTIONS.flatMap(g => g.items.map(i => i.name)))
 
 /**
  * Compute aggregates over a group of rows. Looks up each numeric column
