@@ -1,11 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { C } from '../data/constants'
 import { resolveHomePageForModule } from '../data/adminService'
 import { getTemplate } from '../modules/admin/homePageTemplates'
 import HomeComponentRenderer from '../modules/admin/HomeComponentRenderer'
-import ReportRunner from '../modules/ReportRunner'
-import ReportBuilder from '../modules/ReportBuilder'
-import DashboardCanvasEditor from '../modules/DashboardCanvasEditor'
+
+// Lazy-loaded: these full-screen overlays only mount when the user drills into
+// a report or edits a dashboard. Deferring them keeps their heavy deps — the
+// report/dashboard builders and the mathjs/formulajs formula engine pulled in
+// by ReportRunner — OFF the initial Home page load.
+const ReportRunner = lazy(() => import('../modules/ReportRunner'))
+const ReportBuilder = lazy(() => import('../modules/ReportBuilder'))
+const DashboardCanvasEditor = lazy(() => import('../modules/DashboardCanvasEditor'))
+
+function OverlayFallback() {
+  return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading…</div>
+}
 
 // ConfiguredHome renders a landing/dashboard screen entirely from a configured
 // Home Page (home_pages + home_page_components), resolved for the current user
@@ -96,11 +105,13 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
         position: 'fixed', inset: 0, zIndex: 600,
         background: C.page, display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
-        <DashboardCanvasEditor
-          dashboardId={editingDashboard}
-          onClose={() => setEditingDashboard(null)}
-          onSaved={() => { setDashboardEditNonce(n => n + 1); setEditingDashboard(null) }}
-        />
+        <Suspense fallback={<OverlayFallback />}>
+          <DashboardCanvasEditor
+            dashboardId={editingDashboard}
+            onClose={() => setEditingDashboard(null)}
+            onSaved={() => { setDashboardEditNonce(n => n + 1); setEditingDashboard(null) }}
+          />
+        </Suspense>
       </div>
     )
   }
@@ -114,21 +125,23 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
         position: 'fixed', inset: 0, zIndex: 600,
         background: C.page, display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
-        {editingReport ? (
-          <ReportBuilder
-            reportId={openReport.reportId}
-            onClose={() => setEditingReport(false)}
-            onSaved={() => { setReportEditNonce(n => n + 1); setEditingReport(false) }}
-          />
-        ) : (
-          <ReportRunner
-            key={`${openReport.reportId}:${reportEditNonce}`}
-            reportId={openReport.reportId}
-            extraFilters={openReport.extraFilters}
-            onEdit={() => setEditingReport(true)}
-            onClose={() => { setEditingReport(false); setOpenReport(null) }}
-          />
-        )}
+        <Suspense fallback={<OverlayFallback />}>
+          {editingReport ? (
+            <ReportBuilder
+              reportId={openReport.reportId}
+              onClose={() => setEditingReport(false)}
+              onSaved={() => { setReportEditNonce(n => n + 1); setEditingReport(false) }}
+            />
+          ) : (
+            <ReportRunner
+              key={`${openReport.reportId}:${reportEditNonce}`}
+              reportId={openReport.reportId}
+              extraFilters={openReport.extraFilters}
+              onEdit={() => setEditingReport(true)}
+              onClose={() => { setEditingReport(false); setOpenReport(null) }}
+            />
+          )}
+        </Suspense>
       </div>
     )
   }

@@ -88,6 +88,20 @@ export default defineConfig({
           // dnd-kit (sortable palettes / nested field & section lists) → own
           // chunk, same forward-edge-only rationale as vendor-grid.
           if (id.includes('@dnd-kit')) return 'vendor-dndkit'
+          // Formula engine (mathjs + formulajs + their math deps) → own leaf
+          // chunk, loaded only with the lazy formula editor. @babel/runtime is
+          // deliberately NOT claimed (shared with recharts' react-transition-
+          // group → would create a cross-chunk cycle).
+          // Path-bound decimal.js / complex.js / fraction.js so they don't also
+          // match recharts' decimal.js-light (substring collision → would pull
+          // recharts into vendor-formula and bloat the dashboard path).
+          if (id.includes('mathjs') || id.includes('@formulajs') ||
+              id.includes('/decimal.js/') || id.includes('/complex.js/') || id.includes('/fraction.js/') ||
+              id.includes('typed-function') || id.includes('javascript-natural-sort') ||
+              id.includes('seedrandom') || id.includes('escape-latex')) return 'vendor-formula'
+          // CodeMirror 6 (formula editor: syntax highlighting + autocomplete) →
+          // own leaf chunk, lazy-loaded with the editor.
+          if (id.includes('@codemirror') || id.includes('@lezer')) return 'vendor-codemirror'
           // Recharts + d3 → its own chunk. Must be tested FIRST so that any
           // node_module that recharts pulls in (d3-*, victory-vendor, etc.)
           // lands here too, not in vendor-react.
