@@ -73,11 +73,17 @@ jobs:
           # The repo migration files lag production (changes have gone straight to
           # prod), so production's live schema is the source of truth. Dump it
           # schema-only and load into the freshly-dropped staging public schema.
-          # pg_dump emits a bare "CREATE SCHEMA public;" (PG15+), but staging keeps
-          # its public schema (we only drop the objects inside it, to preserve
-          # PostGIS), so make that one statement idempotent.
+          # Two non-superuser fixups to the dump stream:
+          #  1) pg_dump emits a bare "CREATE SCHEMA public;" (PG15+), but staging
+          #     keeps its public schema (we only drop the objects inside it, to
+          #     preserve PostGIS) -> make that statement idempotent.
+          #  2) "ALTER DEFAULT PRIVILEGES FOR ROLE <x>" can't be applied by the
+          #     staging connection role (not a superuser / not a member of <x>),
+          #     and only affects FUTURE objects -> strip those statements. The
+          #     explicit per-object GRANTs the app needs are kept.
           pg_dump --schema-only --no-owner --schema=public "$PROD_DB_URL" \
-            | sed 's/^CREATE SCHEMA public;/CREATE SCHEMA IF NOT EXISTS public;/' \
+            | sed -e 's/^CREATE SCHEMA public;/CREATE SCHEMA IF NOT EXISTS public;/' \
+                  -e '/^ALTER DEFAULT PRIVILEGES/,/;/d' \
             | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction
           echo "Re-asserting schema-usage grants..."
           # A --schema=public dump may omit schema-level GRANTs; re-apply them so
