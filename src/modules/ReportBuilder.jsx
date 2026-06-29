@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { C } from '../data/constants'
 import { Icon, LoadingState, ErrorState } from '../components/UI'
 import SearchableCombo from '../components/SearchableCombo'
@@ -15,7 +15,9 @@ import {
 import { TabularLayout, SummaryLayout, MatrixLayout } from './ReportRunner'
 import { supabase } from '../lib/supabase'
 import SortableList from '../builder/SortableList'
-import { validateExpression, FORMULA_FUNCTIONS } from '../lib/reportFormulaEval'
+// CodeMirror formula editor — lazy so its (and mathjs's) weight only loads when
+// a calculated field is actually being edited.
+const FormulaEditor = lazy(() => import('../lib/formula/FormulaEditor'))
 
 // ─── Top-level Report Builder ─────────────────────────────────────────────
 //
@@ -1137,91 +1139,6 @@ function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree
 
 // ─── Calculated Fields tab ────────────────────────────────────────────────
 
-// ─── Formula editor ───────────────────────────────────────────────────────
-// Salesforce-style formula authoring for a calculated field: an expression
-// box plus insert-field and insert-function pickers (categorized, with
-// descriptions) and a live "Check syntax" indicator. Validation uses the same
-// parser the runtime uses (validateExpression), so a formula that reads as
-// valid here will parse when the report runs.
-function FormulaEditor({ value, scope, fieldNames, onChange }) {
-  const taRef = useState(() => ({ el: null }))[0]
-  const [status, setStatus] = useState(null)   // null | {ok} | {ok:false,error}
-
-  const insertAtCursor = (text) => {
-    const el = taRef.el
-    const cur = value || ''
-    if (!el) { onChange(cur + text); return }
-    const start = el.selectionStart ?? cur.length
-    const end = el.selectionEnd ?? cur.length
-    const next = cur.slice(0, start) + text + cur.slice(end)
-    onChange(next)
-    // Restore caret just after the inserted text on next tick.
-    requestAnimationFrame(() => { try { el.focus(); el.selectionStart = el.selectionEnd = start + text.length } catch { /* noop */ } })
-  }
-
-  const check = () => setStatus(validateExpression(value))
-
-  return (
-    <div>
-      <div style={{ display:'flex', gap:6, marginBottom:6, flexWrap:'wrap', alignItems:'center' }}>
-        {scope === 'row' && (
-          <InsertMenu label="Insert field" disabled={!fieldNames.length}
-            groups={[{ category: 'Fields', items: fieldNames.map(n => ({ name: n, template: n, desc: '' })) }]}
-            onPick={(it) => insertAtCursor(it.template)} />
-        )}
-        <InsertMenu label="Insert function" groups={FORMULA_FUNCTIONS} onPick={(it) => insertAtCursor(it.template)} />
-        <button onClick={check} style={btnSecondary(false, 'small')}>Check syntax</button>
-        {status && (
-          <span style={{ fontSize:11, fontWeight:600, color: status.ok ? C.emeraldMid : C.sky }}>
-            {status.ok ? '✓ Valid' : `✗ ${status.error}`}
-          </span>
-        )}
-      </div>
-      <textarea
-        ref={el => { taRef.el = el }}
-        value={value}
-        onChange={e => { onChange(e.target.value); if (status) setStatus(null) }}
-        placeholder={scope === 'row' ? "e.g. DAYS_BETWEEN(TODAY(), created_at)" : "e.g. SUM_amount / COUNT_id"}
-        rows={3}
-        style={{ ...inputStyle(), fontFamily:'JetBrains Mono, monospace', fontSize:12 }}
-      />
-    </div>
-  )
-}
-
-function InsertMenu({ label, groups, onPick, disabled }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <span style={{ position:'relative' }}>
-      <button disabled={disabled} onClick={() => setOpen(o => !o)} style={btnSecondary(disabled, 'small')}>{label} ▾</button>
-      {open && !disabled && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position:'fixed', inset:0, zIndex:40 }} />
-          <div style={{
-            position:'absolute', top:'110%', left:0, zIndex:41, width:280, maxHeight:320, overflowY:'auto',
-            background:C.card, border:`1px solid ${C.border}`, borderRadius:8, boxShadow:'0 8px 24px rgba(13,26,46,0.16)', padding:6,
-          }}>
-            {groups.map(g => (
-              <div key={g.category}>
-                <div style={{ fontSize:10, fontWeight:700, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5, padding:'6px 8px 3px' }}>{g.category}</div>
-                {g.items.map(it => (
-                  <div key={it.name} onClick={() => { onPick(it); setOpen(false) }}
-                    title={it.desc || ''}
-                    style={{ padding:'6px 8px', borderRadius:5, cursor:'pointer', fontSize:12 }}
-                    onMouseEnter={e => e.currentTarget.style.background = C.cardSecondary}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <div style={{ fontFamily:'JetBrains Mono, monospace', color:C.textPrimary }}>{it.name}</div>
-                    {it.desc && <div style={{ fontSize:10.5, color:C.textMuted, marginTop:1 }}>{it.desc}</div>}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </span>
-  )
-}
 
 function CalcFieldsTab({ calculatedFields, setCalculatedFields, report }) {
   const fieldNames = (report?.rpt_selected_fields || []).map(f => f.name)
@@ -1275,12 +1192,13 @@ function CalcFieldsTab({ calculatedFields, setCalculatedFields, report }) {
                 </select>
                 <button onClick={() => remove(idx)} style={miniBtn(true)}>×</button>
               </div>
-              <FormulaEditor
-                value={c.expression}
-                scope={c.scope}
-                fieldNames={fieldNames}
-                onChange={(expr) => update(idx, { expression: expr })}
-              />
+              <Suspense fallback={<div style={{ fontSize:12, color:C.textMuted, padding:'8px 0' }}>Loading editor…</div>}>
+                <FormulaEditor
+                  value={c.expression}
+                  fields={fieldNames}
+                  onChange={(expr) => update(idx, { expression: expr })}
+                />
+              </Suspense>
             </div>
           ))
         )}

@@ -20,7 +20,7 @@ The earlier session extended the legacy evaluator to avoid breaking saved formul
 - `lib/reportFormulaEval` is now a thin adapter over the engine (the custom mini-parser is gone), so reports evaluate via mathjs and the editor validates against the exact same evaluator.
 - Deps `vendor-formula` (mathjs+formulajs, ~233 KB gz) + `vendor-codemirror` are isolated leaf chunks (verified acyclic — no TDZ; `decimal.js` path-bound so it doesn't collide with recharts' `decimal.js-light`). `ConfiguredHome` lazy-loads ReportRunner/ReportBuilder so the engine stays **off the Home page load** — only loads when a report opens.
 - Unit-verified: arithmetic, IF/AND/OR, text (LEFT/CONCATENATE/UPPER), ROUND, blank-as-0, summary scope, and validation (syntax + unknown-field).
-- **Next:** CodeMirror 6 visual editor (syntax highlighting + inline autocomplete over fields/functions) to replace the textarea + insert-pickers.
+- **CodeMirror 6 visual editor** ✅ — `src/lib/formula/FormulaEditor.jsx`: syntax highlighting (functions / fields / strings / numbers / operators), inline **autocomplete** over field names + the curated functions + the full 371-function library, bracket-closing, and a live **Check syntax** indicator (validates against the engine). Lazy-loaded in `ReportBuilder` (replaces the textarea + insert-pickers). Headless-verified: mounts, highlights, valid/invalid detection, 0 crashes. **§8 formula engine is complete.**
 
 ---
 
