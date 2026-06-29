@@ -13,6 +13,17 @@ Unlike the dashboard / home / report builders (which were form-driven and got re
 
 ---
 
+## Formula engine — full mathjs/formulajs swap (2026-06-29, supersedes the earlier deviation)
+
+The earlier session extended the legacy evaluator to avoid breaking saved formulas. Nicholas confirmed Reports has **only seed data — no real reports or formulas** — so that constraint doesn't apply, and per "build the most robust enterprise functionality," the engine was swapped to the **full §8 stack**:
+- `src/lib/formula/engine.js` — a **sandboxed mathjs instance** (`import`/`createUnit`/`evaluate`/`parse`/… disabled inside expressions; programmatic parsing uses a captured reference) with the **entire @formulajs/formulajs library (371 Excel functions)** registered. Compile-cached; Excel blank-as-0 scope semantics; `evaluateFormula`/`validateFormula`/`FORMULA_FUNCTIONS`/`ALL_FUNCTION_NAMES`.
+- `lib/reportFormulaEval` is now a thin adapter over the engine (the custom mini-parser is gone), so reports evaluate via mathjs and the editor validates against the exact same evaluator.
+- Deps `vendor-formula` (mathjs+formulajs, ~233 KB gz) + `vendor-codemirror` are isolated leaf chunks (verified acyclic — no TDZ; `decimal.js` path-bound so it doesn't collide with recharts' `decimal.js-light`). `ConfiguredHome` lazy-loads ReportRunner/ReportBuilder so the engine stays **off the Home page load** — only loads when a report opens.
+- Unit-verified: arithmetic, IF/AND/OR, text (LEFT/CONCATENATE/UPPER), ROUND, blank-as-0, summary scope, and validation (syntax + unknown-field).
+- **Next:** CodeMirror 6 visual editor (syntax highlighting + inline autocomplete over fields/functions) to replace the textarea + insert-pickers.
+
+---
+
 ## Phase 3 progress (Reports) — in flight
 
 - **Drag-and-drop field selection** ✅ — the report builder's Selected Fields list is now a dnd-kit `SortableList` (drag grip to reorder) instead of up/down buttons. Additive, prod-safe.
