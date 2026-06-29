@@ -9,6 +9,8 @@ import {
   listObjectColumns,
   loadFilterValueOptions,
   runReport,
+  runReportDefinition,
+  buildReportDefinition,
 } from '../data/reportsService'
 import { TabularLayout, SummaryLayout, MatrixLayout } from './ReportRunner'
 import { supabase } from '../lib/supabase'
@@ -71,17 +73,20 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
   const [savedAt, setSavedAt] = useState(null)
 
   // ─── Live preview pane (right side, Salesforce-style) ──────────────────
-  // runReport reads persisted config, so the preview reflects the last SAVE.
-  // We auto-run on mount and after each save, plus a manual refresh button.
+  // The preview now runs the UNSAVED, in-editor config (via runReportDefinition
+  // + buildReportDefinition) — debounced — so it updates as you build, before
+  // any save, and works for brand-new reports too. No write-back on preview.
   const [previewResult, setPreviewResult]   = useState(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError]     = useState(null)
   const [previewNonce, setPreviewNonce]     = useState(0)
+  const previewable = !!report.rpt_primary_object && (report.rpt_selected_fields || []).length > 0
+
   const runPreview = async () => {
-    if (isNew) return  // nothing persisted yet to run
+    if (!previewable) { setPreviewResult(null); return }
     setPreviewLoading(true); setPreviewError(null)
     try {
-      const r = await runReport(reportId)
+      const r = await runReportDefinition(buildReportDefinition({ report, filters, groupings, calculatedFields }), { reportId: null })
       setPreviewResult(r)
     } catch (err) {
       setPreviewError(err)
@@ -89,23 +94,25 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
       setPreviewLoading(false)
     }
   }
-  // Run preview on mount and whenever previewNonce bumps (after a save).
+
+  // Debounced live preview: re-run whenever the editable config changes.
   useEffect(() => {
-    if (isNew) return
+    if (!previewable) { setPreviewResult(null); setPreviewLoading(false); return }
     let cancelled = false
-    ;(async () => {
-      setPreviewLoading(true); setPreviewError(null)
+    setPreviewLoading(true); setPreviewError(null)
+    const t = setTimeout(async () => {
       try {
-        const r = await runReport(reportId)
+        const r = await runReportDefinition(buildReportDefinition({ report, filters, groupings, calculatedFields }), { reportId: null })
         if (!cancelled) setPreviewResult(r)
       } catch (err) {
         if (!cancelled) setPreviewError(err)
       } finally {
         if (!cancelled) setPreviewLoading(false)
       }
-    })()
-    return () => { cancelled = true }
-  }, [reportId, isNew, previewNonce])
+    }, 500)
+    return () => { cancelled = true; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report, filters, groupings, calculatedFields, previewNonce])
 
   // ─── Initial load ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -431,13 +438,13 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
             <div style={{ fontSize:12, fontWeight:600, color:C.textSecondary, textTransform:'uppercase', letterSpacing:'0.05em' }}>
               Preview {previewResult ? `· ${previewResult.rows?.length ?? 0} rows` : ''}
             </div>
-            <button onClick={runPreview} disabled={previewLoading || isNew} style={btnSecondary()}>
+            <button onClick={runPreview} disabled={previewLoading} style={btnSecondary()}>
               {previewLoading ? 'Running…' : 'Refresh'}
             </button>
           </div>
           <div style={{ flex:1, overflow:'auto', padding:'16px 20px' }}>
-            {isNew ? (
-              <div style={{ fontSize:13, color:C.textMuted }}>Save the report to see a preview of its results.</div>
+            {!previewable ? (
+              <div style={{ fontSize:13, color:C.textMuted }}>Pick a primary object and at least one field to see a live preview.</div>
             ) : previewLoading && !previewResult ? (
               <div style={{ fontSize:13, color:C.textMuted }}>Running preview…</div>
             ) : previewError ? (
