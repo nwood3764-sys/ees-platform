@@ -29,10 +29,16 @@
 export const GRID_COLS = 12
 
 // Height of one grid row, in pixels. react-grid-layout multiplies h by this.
-export const ROW_HEIGHT = 80
+// Kept dense (Salesforce dashboards pack tightly) so the canvas doesn't waste
+// vertical room.
+export const ROW_HEIGHT = 56
 
-// Gutter between grid cells, in pixels [horizontal, vertical].
-export const GRID_MARGIN = [16, 16]
+// Gutter between grid cells, in pixels [horizontal, vertical]. Tight, like a
+// Salesforce dashboard grid — widgets sit close together, not spread out.
+export const GRID_MARGIN = [8, 8]
+
+// Padding between the grid and its container edge, in pixels [x, y].
+export const GRID_CONTAINER_PADDING = [10, 10]
 
 // Responsive breakpoints (px) and the column count active at each. The canvas
 // authors against `lg`; narrower breakpoints reflow. Kept here so every

@@ -24,9 +24,9 @@ const LeapCanvas = lazy(() => import('../../builder/LeapCanvas'))
 // heading, a metric, and a bar chart already placed. Geometry is in 12-col
 // grid units (see builder/geometry.js).
 const SEED_COMPONENTS = [
-  { id: 'c-seed-1', type: 'heading', title: '', dataSourceId: null, config: { text: 'Outreach Overview', align: 'left' } },
-  { id: 'c-seed-2', type: 'metric',  title: 'Total Properties', dataSourceId: null, config: { measure_type: 'count', label: 'properties' } },
-  { id: 'c-seed-3', type: 'bar',     title: 'By County', dataSourceId: null, config: { measure_type: 'count', orientation: 'horizontal', sort_by: 'value_desc', limit: 20 } },
+  { id: 'c-seed-1', type: 'heading', title: '', subtitle: '', footer: '', dataSourceId: null, config: { text: 'Outreach Overview', align: 'left' } },
+  { id: 'c-seed-2', type: 'metric',  title: 'Total Properties', subtitle: 'All enrolled states', footer: 'Updated daily', dataSourceId: null, config: { measure_type: 'count', label: 'properties' } },
+  { id: 'c-seed-3', type: 'bar',     title: 'Properties by County', subtitle: 'Top 20 counties', footer: 'Source: Outreach Status Report', dataSourceId: null, config: { measure_type: 'count', orientation: 'horizontal', sort_by: 'value_desc', limit: 20 } },
 ]
 const SEED_LAYOUT = [
   { i: 'c-seed-1', x: 0, y: 0, w: 12, h: 1 },

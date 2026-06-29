@@ -52,7 +52,7 @@ export default function LeapCanvas({
     const id = nextId()
     const item = newLayoutItem(id, entry, layout)
     if (at) { item.x = at.x; item.y = at.y }
-    setComponents(prev => [...prev, { id, type: typeId, title: '', dataSourceId: null, config: defaultConfigFor(typeId) }])
+    setComponents(prev => [...prev, { id, type: typeId, title: '', subtitle: '', footer: '', dataSourceId: null, config: defaultConfigFor(typeId) }])
     setLayout(prev => [...prev, item])
     setSelectedId(id)
   }
