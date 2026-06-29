@@ -25,10 +25,11 @@ import { C } from '../data/constants'
 import Palette from './Palette'
 import CanvasGrid from './CanvasGrid'
 import Inspector from './Inspector'
-import { getComponent, defaultConfigFor } from './componentRegistry'
 import { newLayoutItem } from './geometry'
 
 export default function LeapCanvas({
+  registry,           // surface registry: { getComponent, getPaletteCategories, defaultConfigFor, ComponentInspector, LivePreview }
+  sources = {},       // surface data sources passed to inspector/preview (e.g. dashboards/reports/listViews lists)
   title = 'LEAP Canvas',
   subtitle,
   initialComponents = [],
@@ -51,12 +52,12 @@ export default function LeapCanvas({
 
   // Add a component, optionally at an explicit grid position (from a drop).
   const addComponent = (typeId, at) => {
-    const entry = getComponent(typeId)
+    const entry = registry.getComponent(typeId)
     if (!entry) return
     const id = nextId()
     const item = newLayoutItem(id, entry, layout)
     if (at) { item.x = at.x; item.y = at.y }
-    setComponents(prev => [...prev, { id, type: typeId, title: '', subtitle: '', footer: '', dataSourceId: null, config: defaultConfigFor(typeId) }])
+    setComponents(prev => [...prev, { id, type: typeId, title: '', subtitle: '', footer: '', dataSourceId: null, config: registry.defaultConfigFor(typeId) }])
     setLayout(prev => [...prev, item])
     setSelectedId(id)
   }
@@ -88,7 +89,7 @@ export default function LeapCanvas({
     }
   }
 
-  const droppingSize = activeDrag ? (getComponent(activeDrag)?.defaultSize) : null
+  const droppingSize = activeDrag ? (registry.getComponent(activeDrag)?.defaultSize) : null
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
@@ -114,11 +115,14 @@ export default function LeapCanvas({
       {/* Three panes */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <Palette
+          registry={registry}
           onAdd={(id) => addComponent(id)}
           onDragStart={(id) => setActiveDrag(id)}
           onDragEnd={() => setActiveDrag(null)}
         />
         <CanvasGrid
+          registry={registry}
+          sources={sources}
           components={components}
           layout={layout}
           selectedId={selectedId}
@@ -128,6 +132,8 @@ export default function LeapCanvas({
           onDrop={(item) => { if (activeDrag) { addComponent(activeDrag, item); setActiveDrag(null) } }}
         />
         <Inspector
+          registry={registry}
+          sources={sources}
           components={components}
           selectedId={selectedId}
           settingsPanel={settingsPanel}

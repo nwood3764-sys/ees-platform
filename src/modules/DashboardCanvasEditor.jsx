@@ -18,6 +18,7 @@ import { LoadingState, ErrorState } from '../components/UI'
 import { supabase } from '../lib/supabase'
 import LeapCanvas from '../builder/LeapCanvas'
 import SortableList from '../builder/SortableList'
+import { dashboardRegistry } from '../builder/registries/dashboardRegistry'
 import { loadDashboardForCanvas, saveDashboardFromCanvas } from '../builder/adapters/dashboardAdapter'
 
 const FILTER_OPS = [
@@ -110,6 +111,7 @@ export default function DashboardCanvasEditor({ dashboardId, onClose, onSaved })
   return (
     <LeapCanvas
       key={dashboardId}
+      registry={dashboardRegistry}
       initialComponents={loaded.components}
       initialLayout={loaded.layout}
       headerExtra={headerExtra}

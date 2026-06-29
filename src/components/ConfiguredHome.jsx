@@ -135,6 +135,21 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
 
   const tmpl = getTemplate(page.template)
   const comps = page.components || []
+  // Pages built in the LEAP Canvas carry per-component _geometry — render them
+  // on the same 12-col grid the builder used (view == build). Pages built in the
+  // legacy fixed-template builder have no geometry → keep the region flow.
+  const useGeometry = comps.some(c => c.config && c.config._geometry)
+
+  const renderComp = (c) => (
+    <HomeComponentRenderer
+      key={`${c.id}:${dashboardEditNonce}`}
+      component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }}
+      onNavigate={(table, id) => onOpenRecord && onOpenRecord({ table, id, mode: 'view' })}
+      onOpenReport={(reportId, extraFilters = null) => { setEditingReport(false); setOpenReport({ reportId, extraFilters }) }}
+      onOpenDashboard={(dashboardId) => setEditingDashboard(dashboardId)}
+    />
+  )
+
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
       <div style={{ marginBottom: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -143,27 +158,36 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
           <div style={{ fontSize: 12, color: C.textMuted }}>{greeting} · {today}</div>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        {tmpl.regions.map(region => {
-          const regionComps = comps
-            .filter(c => c.region === region.key)
-            .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-          return (
-            <div key={region.key} style={{ flex: region.flex, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {regionComps.map(c => (
-                <HomeComponentRenderer
-                  key={`${c.id}:${dashboardEditNonce}`}
-                  component={{ type: c.type, sourceId: c.source_id, title: c.title, config: c.config }}
-                  onNavigate={(table, id) => onOpenRecord && onOpenRecord({ table, id, mode: 'view' })}
-                  onOpenReport={(reportId, extraFilters = null) => { setEditingReport(false); setOpenReport({ reportId, extraFilters }) }}
-                  onOpenDashboard={(dashboardId) => setEditingDashboard(dashboardId)}
-                />
-              ))}
-              {regionComps.length === 0 && <div style={{ color: C.textMuted, fontSize: 12, padding: 12 }}>&nbsp;</div>}
-            </div>
-          )
-        })}
-      </div>
+      {useGeometry ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gridAutoRows: '56px', gap: 8, alignItems: 'stretch' }}>
+          {comps.map(c => {
+            const g = c.config._geometry || { x: 0, y: 0, w: 6, h: 4 }
+            return (
+              <div key={`${c.id}:${dashboardEditNonce}`} style={{
+                gridColumn: `${(g.x | 0) + 1} / span ${Math.max(1, g.w | 0)}`,
+                gridRow: `${(g.y | 0) + 1} / span ${Math.max(1, g.h | 0)}`,
+                minWidth: 0, overflow: 'auto',
+              }}>
+                {renderComp(c)}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+          {tmpl.regions.map(region => {
+            const regionComps = comps
+              .filter(c => c.region === region.key)
+              .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+            return (
+              <div key={region.key} style={{ flex: region.flex, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {regionComps.map(renderComp)}
+                {regionComps.length === 0 && <div style={{ color: C.textMuted, fontSize: 12, padding: 12 }}>&nbsp;</div>}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
