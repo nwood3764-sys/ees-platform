@@ -1,7 +1,15 @@
 # LEAP Builder Rearchitecture — WYSIWYG Drag-and-Drop (Handoff)
 
-**Status:** Phases 0–2 SHIPPED to production (PR #14). Phase 3 in progress.
+**Status:** Phases 0–3 SHIPPED to production. Phase 4 decided (see below). Rearchitecture functionally complete.
 **Author of handoff:** prior session (2026-06-29). Read this top-to-bottom before starting.
+
+---
+
+## Phase 4 decision (record page layouts) — re-platform DECLINED, 2026-06-29
+
+Unlike the dashboard / home / report builders (which were form-driven and got replaced), the record **page-layout editor (`LayoutEditor` / `LayoutCanvas`) already IS a working WYSIWYG drag canvas** — the most advanced builder pre-rearchitecture. "Phase 4" would re-platform a *working* core feature (on every record-detail page) onto the shared engine for architectural consistency — high effort, high prod risk, low user-visible gain. **Decision: do not re-platform.** The WYSIWYG goal is already met across all four surfaces. If desired later, the unified fold is a deliberate, staging-soaked follow-up (page-layout registry + adapter, `selfChrome`-style tiles) — the engine is ready for it.
+
+**Help articles published (prod):** HA-00113 (Dashboard canvas), HA-00114 (Home Page canvas), HA-00115 (Report builder live preview + formulas) — satisfies the ship-cycle help-article requirement for the shipped builders.
 
 ---
 
