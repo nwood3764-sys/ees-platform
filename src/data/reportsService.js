@@ -638,6 +638,55 @@ export async function saveReport({ id, report, filters, groupings, calculatedFie
   return reportId
 }
 
+/**
+ * Build a runReportDefinition()-compatible "loaded" object from the report
+ * builder's in-editor state, WITHOUT persisting. Mirrors saveReport's mapping
+ * of the friendly builder shapes → the DB row shapes (rfilt_/rgr_/rcf_), minus
+ * the bookkeeping columns, so a draft preview runs exactly as the saved report
+ * would. This is what powers the builder's live (unsaved) preview.
+ */
+export function buildReportDefinition({ report, filters = [], groupings = [], calculatedFields = [] }) {
+  return {
+    report: { ...report },
+    filters: (filters || []).map((f, idx) => ({
+      rfilt_filter_index:      idx + 1,
+      rfilt_field_name:        f.field_name || null,
+      rfilt_field_table:       f.field_table || null,
+      rfilt_field_via_path:    f.field_via_path || null,
+      rfilt_operator:          f.operator,
+      rfilt_value:             f.value !== undefined ? f.value : null,
+      rfilt_is_cross_filter:   !!f.is_cross_filter,
+      rfilt_cross_object:      f.cross_object || null,
+      rfilt_cross_match:       f.cross_match || null,
+      rfilt_cross_subfilters:  f.cross_subfilters || [],
+      rfilt_is_runtime_prompt: !!f.is_runtime_prompt,
+      rfilt_runtime_label:     f.runtime_label || null,
+      rfilt_prompt_input_type: f.prompt_input_type || 'text',
+      rfilt_prompt_options:    f.prompt_options || [],
+    })),
+    groupings: (groupings || []).map((g, idx) => ({
+      rgr_grouping_level:    idx + 1,
+      rgr_field_name:        g.field_name,
+      rgr_field_table:       g.field_table || null,
+      rgr_field_via_path:    g.field_via_path || null,
+      rgr_field_label:       g.field_label || null,
+      rgr_sort_direction:    g.sort_direction || 'asc',
+      rgr_sort_by_aggregate: g.sort_by_aggregate || null,
+      rgr_show_subtotal:     g.show_subtotal !== false,
+      rgr_date_granularity:  g.date_granularity || null,
+    })),
+    calculatedFields: (calculatedFields || []).map((c, idx) => ({
+      rcf_label:          c.label,
+      rcf_scope:          c.scope || 'row',
+      rcf_expression:     c.expression,
+      rcf_data_type:      c.data_type || 'number',
+      rcf_format_options: c.format_options || {},
+      rcf_display_order:  idx,
+      rcf_grouping_level: c.grouping_level || null,
+    })),
+  }
+}
+
 // ─── Report runner — Phase 2c ─────────────────────────────────────────────
 // Executes a saved report's query against Postgres via PostgREST and
 // returns the result rows. Phase 2c.1: tabular reports with AND-only
@@ -1088,6 +1137,20 @@ function applySimpleFilter(query, fieldName, operator, value) {
 export async function runReport(reportId, promptValues = null, extraFilters = null, overrideFields = null) {
   const loaded = await loadReport(reportId)
   if (!loaded) throw new Error('Report not found')
+  return runReportDefinition(loaded, { promptValues, extraFilters, overrideFields, reportId })
+}
+
+/**
+ * Run a report from an already-loaded definition — the loadReport shape:
+ * { report, filters, groupings, calculatedFields }. runReport is now a thin
+ * wrapper that loads then calls this.
+ *
+ * Exposing it lets the report builder preview UNSAVED edits: build a
+ * loaded-shaped object from the in-editor config and run it without persisting.
+ * `reportId` is optional — when present the run is recorded as the report's
+ * Last Run; when absent (a draft preview) nothing is written back.
+ */
+export async function runReportDefinition(loaded, { promptValues = null, extraFilters = null, overrideFields = null, reportId = null } = {}) {
   const r = loaded.report
 
   // If this report has runtime prompts and the caller provided values,
@@ -1432,12 +1495,16 @@ export async function runReport(reportId, promptValues = null, extraFilters = nu
     )
   }
 
-  // Mark this report as run for "Last Run" display
-  const userId = await getCurrentUserId()
-  await supabase.from('reports').update({
-    rpt_last_run_at: new Date().toISOString(),
-    rpt_last_run_by: userId,
-  }).eq('id', reportId)
+  // Mark this report as run for "Last Run" display — only for a real saved
+  // report. Skipped for an unsaved draft preview (reportId null), which must
+  // not write anything back.
+  if (reportId) {
+    const userId = await getCurrentUserId()
+    await supabase.from('reports').update({
+      rpt_last_run_at: new Date().toISOString(),
+      rpt_last_run_by: userId,
+    }).eq('id', reportId)
+  }
 
   return {
     rows: data || [],
