@@ -1,5 +1,5 @@
 // =============================================================================
-// ProjectPortalRoot — customer-facing Project Portal
+// ProjectPortalRoot — customer-facing Multi-Family Project Portal
 //
 // Mounted at /project-portal (and /project-portal/*) via path-based routing in
 // main.jsx. Stands alone — no staff sidebar/topbar chrome. A property owner or
@@ -8,99 +8,118 @@
 // portal_user_property_grants determine what they see. The tree comes from the
 // get_portal_project_tracker() RPC.
 //
-// Navigation mirrors the approved demo:
-//   1. Property dashboard — portfolio stats + per-building progress cards
-//   2. Building detail     — unit/opportunity stage cards + opportunity table
-//   3. Opportunity stage   — stage bar driven by the record type's stage list
-//                            (one dot per assigned stage, stageOrder / count)
+// Layout follows the approved Multi-Family Project Portal mockup, re-skinned
+// into the LEAP design system:
+//   • Left tree sidebar (navy #07111f): Property → Building → Unit, each with
+//     dual HOMES / HEAR mini progress bars.
+//   • Property page  — banner, unit-status stat cards, building cards,
+//                      per-program stage breakdown.
+//   • Building page  — stat cards, unit cards, work-order table.
+//   • Unit page      — a data-driven stage bar per program (HOMES + HEAR).
 //
-// Program colors follow the platform palette (no red/orange anywhere):
-//   HOMES → emerald (#3ecf8e), HEAR → sky (#7eb3e8).
+// Palette (LEAP, no red/orange anywhere): HOMES → emerald (#3ecf8e),
+// HEAR → sky (#7eb3e8); complete → emerald, submittal/in-progress → sky,
+// not-started → muted. Stage bars are fully data-driven per record type.
 // =============================================================================
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase, hasSupabaseConfig } from '../lib/supabase'
 import { C } from '../data/constants'
 import {
   fetchPortalUserSelf,
   fetchProjectTracker,
-  opportunityPct,
-  rollupOpportunities,
-  allOpportunities,
-  stageCountOf,
+  programTag,
+  oppPct,
+  oppBucket,
+  unitStatus,
+  unitProgramPct,
+  buildingProgramPct,
+  propertyProgramPct,
+  unitStats,
+  allUnits,
 } from '../data/projectPortalService'
 
-// Stage labels come straight from each record type's picklist (via the RPC).
-// They are stored long-form (e.g. "Opportunity — HOMES Income Qualification");
-// under a dot we strip the generic "Opportunity — <program> " lead-in so the
-// label reads cleanly. This is a presentation trim only — no stage names are
-// hardcoded; the full label stays available as the dot's tooltip.
+const HOMES = C.emerald
+const HEAR = C.sky
+
+function accentFor(tag) { return tag === 'HEAR' ? HEAR : HOMES }
+
+// Status bucket → label + colors (emerald / sky / muted only — no red/orange).
+function bucketMeta(bucket) {
+  switch (bucket) {
+    case 'complete':   return { label: 'Complete',    color: C.emeraldMid, bg: '#e8f8f2', dot: C.emerald }
+    case 'submittal':  return { label: 'In Submittal', color: '#1a5a8a',   bg: '#e8f3fb', dot: C.sky }
+    case 'inProgress': return { label: 'In Progress',  color: '#1e466b',   bg: '#e8f1fb', dot: C.sky }
+    case 'notStarted': return { label: 'Not Started',  color: C.textSecondary, bg: C.page, dot: C.textMuted }
+    default:           return { label: '—',            color: C.textMuted, bg: C.page, dot: C.textMuted }
+  }
+}
+
+// ─── SVG icons (1.5px stroke, no fill, no emoji) ─────────────────────────────
+const Ico = ({ d, size = 18, w = 1.5 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth={w} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
+)
+const IconBolt = <Ico d={<path d="M13 2L4.5 13.5H12L11 22l8.5-11.5H12L13 2z" />} />
+const IconProp = <Ico d={<><rect x="3" y="3" width="18" height="18" rx="1" /><path d="M9 22V12h6v10M9 7h1m4 0h1M9 10h1m4 0h1" /></>} />
+const IconBldg = <Ico d={<><path d="M3 10.5L12 3l9 7.5V21a1 1 0 01-1 1H5a1 1 0 01-1-1V10.5z" /><path d="M9 22V12h6v10" /></>} />
+const IconChevR = <Ico d={<polyline points="9 18 15 12 9 6" />} size={12} w={1.8} />
+const IconSearch = <Ico d={<><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></>} size={13} />
+const IconCheck = <Ico d={<><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-5" /></>} />
+const IconClock = <Ico d={<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></>} />
+const IconBars = <Ico d={<><rect x="3" y="12" width="4" height="8" rx="1" /><rect x="10" y="7" width="4" height="13" rx="1" /><rect x="17" y="4" width="4" height="16" rx="1" /></>} />
+
+// ─── Progress primitives ─────────────────────────────────────────────────────
+function Bar({ pct, color, h = 5 }) {
+  return (
+    <div style={{ flex: 1, height: h, background: C.border, borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 10, transition: 'width .25s ease' }} />
+    </div>
+  )
+}
+
+function DualMini({ h, r }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 56, flexShrink: 0 }}>
+      {[['H', h, HOMES], ['R', r, HEAR]].map(([k, v, col]) => (
+        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ flex: 1, height: 3, background: 'rgba(255,255,255,.12)', borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${v ?? 0}%`, background: col, borderRadius: 10 }} />
+          </div>
+          <span style={{ fontSize: 8.5, fontWeight: 600, color: C.navInactive, width: 20, textAlign: 'right' }}>{v == null ? '—' : `${v}%`}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Data-driven stage bar (one dot per assigned stage) ──────────────────────
 function shortStageLabel(label) {
   if (!label) return ''
   return label.replace(/^\s*Opportunity\s*[—–-]\s*(?:HOMES|HEAR)\s+/i, '').trim() || label
 }
 
-// HOMES vs HEAR accent. Program label contains 'HEAR' or 'HOMES'.
-function programAccent(program) {
-  if (program && /HEAR/i.test(program)) return C.sky
-  return C.emerald
-}
-function programTag(program) {
-  if (program && /HEAR/i.test(program)) return 'HEAR'
-  if (program && /HOMES/i.test(program)) return 'HOMES'
-  return program || 'Program'
-}
-
-// ─── SVG icons (1.5px stroke, no fill) ───────────────────────────────────────
-const Icon = ({ d, size = 18, stroke = 'currentColor' }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke}
-       strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{d}</svg>
-)
-const IconBolt = <Icon d={<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />} />
-const IconHome = <Icon d={<><path d="M3 10.5L12 3l9 7.5V21a1 1 0 01-1 1H5a1 1 0 01-1-1V10.5z" /><path d="M9 22V12h6v10" /></>} />
-const IconCheck = <Icon d={<><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-5" /></>} />
-const IconChevL = <Icon d={<polyline points="15 18 9 12 15 6" />} />
-
-// ─── Stage bar (one dot per assigned stage; fill = stageOrder / stageCount) ───
-// `stages` is the record type's ordered stage list ([{ label, sortOrder }]);
-// the bar renders exactly that many dots, so adding/removing a stage on the
-// record type in Admin changes the portal automatically.
-function StageBar({ stages, stageOrder, accent }) {
-  const stageList = stages || []
-  const count = stageList.length
-  const pct = opportunityPct(stageOrder, count)
-
+function StageBar({ opp, accent }) {
+  const stages = opp?.stages || []
+  const count = stages.length
+  const stageOrder = opp?.stageOrder || 0
   if (count === 0) {
-    return (
-      <div style={{ margin: '6px 0 2px', fontSize: 12, color: C.textMuted }}>
-        No stage lifecycle is configured for this opportunity's record type yet.
-      </div>
-    )
+    return <div style={{ fontSize: 12, color: C.textMuted }}>No stage lifecycle is configured for this record type yet.</div>
   }
-
+  const pct = Math.round(stageOrder / count * 100)
   return (
     <div style={{ margin: '6px 0 2px' }}>
-      <div style={{
-        position: 'relative', height: 4, background: C.border,
-        borderRadius: 10, marginBottom: 18,
-      }}>
-        <div style={{
-          position: 'absolute', left: 0, top: 0, height: '100%',
-          width: `${pct}%`, background: accent, borderRadius: 10,
-          transition: 'width .25s ease',
-        }} />
-        <div style={{
-          position: 'absolute', top: -7, left: 0, right: 0,
-          display: 'flex', justifyContent: 'space-between',
-        }}>
-          {stageList.map((stage) => {
-            const phase = stage.sortOrder
+      <div style={{ position: 'relative', height: 4, background: C.border, borderRadius: 10, marginBottom: 30 }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, background: accent, borderRadius: 10, transition: 'width .25s ease' }} />
+        <div style={{ position: 'absolute', top: -8, left: 0, right: 0, display: 'flex', justifyContent: 'space-between' }}>
+          {stages.map((s) => {
+            const phase = s.sortOrder
             const done = stageOrder >= phase
             const current = stageOrder === phase
             return (
-              <div key={phase} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 18 }}>
-                <div title={stage.label} style={{
-                  width: 18, height: 18, borderRadius: '50%',
+              <div key={phase} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 20 }}>
+                <div title={s.label} style={{
+                  width: 20, height: 20, borderRadius: '50%',
                   background: done ? accent : C.card,
                   border: `2px solid ${done ? accent : C.borderDark}`,
                   color: done ? '#fff' : C.textMuted,
@@ -110,12 +129,12 @@ function StageBar({ stages, stageOrder, accent }) {
                 }}>
                   {done ? '✓' : phase}
                 </div>
-                <div title={stage.label} style={{
+                <div title={s.label} style={{
                   fontSize: 8.5, color: current ? C.textPrimary : C.textMuted,
                   fontWeight: current ? 700 : 500, marginTop: 4, textAlign: 'center',
-                  width: 56, lineHeight: 1.15,
+                  width: 60, lineHeight: 1.15,
                 }}>
-                  {shortStageLabel(stage.label)}
+                  {shortStageLabel(s.label)}
                 </div>
               </div>
             )
@@ -126,17 +145,349 @@ function StageBar({ stages, stageOrder, accent }) {
   )
 }
 
-// ─── Stat pill ───────────────────────────────────────────────────────────────
-function Stat({ label, value, color }) {
+// ─── Tree sidebar ─────────────────────────────────────────────────────────────
+function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user, onSignOut }) {
+  const q = (query || '').toLowerCase()
+  const matchUnit = (u) => !q || (u.unitNumber + ' ' + u.name).toLowerCase().includes(q)
+
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px' }}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: color || C.textPrimary }}>{value}</div>
-      <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 2 }}>{label}</div>
+    <nav style={{ width: 272, background: C.sidebar, display: 'flex', flexDirection: 'column', height: '100vh', flexShrink: 0 }}>
+      <div style={{ padding: '14px 14px 12px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <div style={{ width: 28, height: 28, background: C.emerald, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{IconBolt}</div>
+          <div style={{ lineHeight: 1.2 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Energy Efficiency Services</div>
+            <div style={{ fontSize: 10, color: C.navInactive, letterSpacing: '.5px', textTransform: 'uppercase' }}>Project Portal</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+        <div style={{ position: 'relative' }}>
+          <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: C.navInactive, display: 'flex' }}>{IconSearch}</span>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search units…"
+            style={{ width: '100%', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.09)', borderRadius: 6, padding: '7px 8px 7px 28px', color: '#fff', fontSize: 12, outline: 'none', fontFamily: 'inherit' }} />
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
+        {tree.map((p) => {
+          const hp = propertyProgramPct(p, 'HOMES'), rp = propertyProgramPct(p, 'HEAR')
+          const pOpen = open.prop === p.id
+          const pActive = sel.pid === p.id && !sel.bid
+          return (
+            <div key={p.id}>
+              <div onClick={() => onSelect({ pid: p.id })}
+                style={{ display: 'flex', alignItems: 'center', padding: '7px 10px 7px 8px', cursor: 'pointer',
+                  borderLeft: `3px solid ${pActive ? C.emerald : 'transparent'}`,
+                  background: pActive ? 'rgba(62,207,142,.16)' : 'transparent' }}>
+                <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, prop: o.prop === p.id ? null : p.id })) }}
+                  style={{ width: 18, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: pOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>{IconChevR}</span>
+                <span style={{ color: C.navInactive, marginRight: 6, display: 'flex' }}>{IconProp}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                  <div style={{ fontSize: 10, color: C.navInactive }}>{(p.buildings || []).length} bldgs · {allUnits(p).length} units</div>
+                </div>
+                <DualMini h={hp} r={rp} />
+              </div>
+
+              {pOpen && (p.buildings || []).map((b) => {
+                const bKey = `${p.id}:${b.id}`
+                const bOpen = open.bldg === bKey
+                const bActive = sel.bid === b.id && !sel.uid
+                const hp2 = buildingProgramPct(b, 'HOMES'), rp2 = buildingProgramPct(b, 'HEAR')
+                return (
+                  <div key={b.id}>
+                    <div onClick={() => onSelect({ pid: p.id, bid: b.id })}
+                      style={{ display: 'flex', alignItems: 'center', padding: '5px 10px 5px 26px', cursor: 'pointer',
+                        borderLeft: `3px solid ${bActive ? C.sky : 'transparent'}`,
+                        background: bActive ? 'rgba(126,179,232,.16)' : 'transparent' }}>
+                      <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, bldg: o.bldg === bKey ? null : bKey })) }}
+                        style={{ width: 16, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: bOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>{IconChevR}</span>
+                      <span style={{ color: 'rgba(255,255,255,.45)', marginRight: 5, display: 'flex' }}>{IconBldg}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,.88)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>
+                      </div>
+                      <DualMini h={hp2} r={rp2} />
+                    </div>
+
+                    {bOpen && (b.units || []).filter(matchUnit).map((u) => {
+                      const uActive = sel.uid === u.id
+                      const meta = bucketMeta(unitStatus(u))
+                      return (
+                        <div key={u.id} onClick={() => onSelect({ pid: p.id, bid: b.id, uid: u.id })}
+                          style={{ display: 'flex', alignItems: 'center', padding: '4px 10px 4px 46px', cursor: 'pointer',
+                            borderLeft: `3px solid ${uActive ? C.emerald : 'transparent'}`,
+                            background: uActive ? 'rgba(62,207,142,.14)' : 'transparent' }}>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.dot, marginRight: 8, flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontSize: 11.5, color: uActive ? '#fff' : 'rgba(255,255,255,.66)', fontWeight: uActive ? 700 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Unit {u.unitNumber}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+        {tree.length === 0 && <div style={{ padding: 16, textAlign: 'center', fontSize: 12, color: C.navInactive }}>No properties assigned</div>}
+      </div>
+
+      <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,.08)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 26, height: 26, borderRadius: '50%', background: C.emerald, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+          {(user?.full_name || '?').split(' ').map((s) => s[0]).slice(0, 2).join('')}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11.5, color: '#fff', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.full_name || ''}</div>
+          <div style={{ fontSize: 10, color: C.navInactive }}>{user?.portal_role || 'Portal User'}</div>
+        </div>
+        <button onClick={onSignOut} style={{ fontSize: 11, color: C.navInactive, background: 'transparent', border: '1px solid rgba(255,255,255,.14)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>Sign Out</button>
+      </div>
+    </nav>
+  )
+}
+
+// ─── Shared bits ──────────────────────────────────────────────────────────────
+function Crumb({ items }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: C.textSecondary }}>
+      {items.map((c, i) => (
+        <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {i > 0 && <span style={{ color: C.textMuted }}>/</span>}
+          <span onClick={c.onClick} style={{ cursor: c.onClick ? 'pointer' : 'default', color: c.onClick ? C.emeraldMid : C.textPrimary, fontWeight: c.onClick ? 500 : 700 }}>{c.label}</span>
+        </span>
+      ))}
     </div>
   )
 }
 
-// ─── Login gate (portal users authenticate with Supabase Auth) ───────────────
+function StatCard({ label, value, accent, sub, active, onClick }) {
+  return (
+    <div onClick={onClick} style={{ background: C.card, border: `1px solid ${active ? accent : C.border}`, borderTop: `3px solid ${accent}`, borderRadius: 10, padding: '14px 16px', cursor: onClick ? 'pointer' : 'default', boxShadow: active ? `0 0 0 2px ${accent}22` : 'none' }}>
+      <div style={{ fontSize: 24, fontWeight: 700, color: accent, lineHeight: 1, letterSpacing: '-0.5px' }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 4 }}>{label}</div>
+      {sub && <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>{sub}</div>}
+    </div>
+  )
+}
+
+function SectionHeader({ title, desc, action }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, paddingBottom: 10, borderBottom: `2px solid ${C.border}` }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{title}</div>
+        {desc && <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>{desc}</div>}
+      </div>
+      {action && <span style={{ fontSize: 12, color: C.textSecondary }}>{action}</span>}
+    </div>
+  )
+}
+
+function ProgRow({ tag, pct }) {
+  const accent = accentFor(tag)
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5 }}>
+      <span style={{ width: 44, fontWeight: 700, color: accent, fontSize: 9.5 }}>{tag}</span>
+      <Bar pct={pct ?? 0} color={accent} />
+      <span style={{ width: 30, fontSize: 11, fontWeight: 600, color: C.textSecondary, textAlign: 'right' }}>{pct == null ? '—' : `${pct}%`}</span>
+    </div>
+  )
+}
+
+// ─── Property page ────────────────────────────────────────────────────────────
+function PropertyPage({ property, onOpenBuilding }) {
+  const s = unitStats(property)
+  const hp = propertyProgramPct(property, 'HOMES'), rp = propertyProgramPct(property, 'HEAR')
+  return (
+    <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
+      <div style={{ background: `linear-gradient(135deg, ${C.sidebar} 0%, #12243d 100%)`, borderRadius: 12, padding: '20px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 20 }}>
+        <div style={{ width: 48, height: 48, background: 'rgba(62,207,142,.25)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0 }}>{IconProp}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>{property.name}</div>
+          <div style={{ fontSize: 12.5, color: C.navInactive, marginTop: 3 }}>{[property.city, property.state].filter(Boolean).join(', ')}</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            {[`HOMES ${hp}%`, `HEAR ${rp}%`, `${(property.buildings || []).length} Buildings`, `${s.total} Units`].map((t, i) => (
+              <span key={i} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: 'rgba(255,255,255,.82)', border: '1px solid rgba(255,255,255,.15)' }}>{t}</span>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 22, flexShrink: 0 }}>
+          {[['Complete', s.complete, C.emerald], ['In Progress', s.inProgress, C.sky], ['Not Started', s.notStarted, 'rgba(255,255,255,.5)']].map(([l, v, col]) => (
+            <div key={l} style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: col, lineHeight: 1 }}>{v}</div>
+              <div style={{ fontSize: 10, color: C.navInactive, marginTop: 3, textTransform: 'uppercase', letterSpacing: '.4px' }}>{l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 30 }}>
+        <SectionHeader title="Unit Status at a Glance" desc="Across all buildings in this property" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+          <StatCard label="Both Programs Complete" value={s.complete} accent={C.emerald} />
+          <StatCard label="Work In Progress" value={s.inProgress} accent={C.sky} />
+          <StatCard label="In Submittal" value={s.submittal} accent={C.emeraldMid} />
+          <StatCard label="Not Yet Started" value={s.notStarted} accent={C.textMuted} />
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 30 }}>
+        <SectionHeader title="Buildings" desc="Progress by building — click a building to see its units" action={`${(property.buildings || []).length} buildings`} />
+        <div style={{ display: 'grid', gap: 12 }}>
+          {(property.buildings || []).map((b) => {
+            const dc = (b.units || []).filter((u) => unitStatus(u) === 'complete').length
+            return (
+              <div key={b.id} onClick={() => onOpenBuilding(b)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '16px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ width: 40, height: 40, background: C.page, border: `1px solid ${C.border}`, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.emerald, flexShrink: 0 }}>{IconBldg}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{b.name}</div>
+                  <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 8 }}>{(b.units || []).length} units</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 360 }}>
+                    <ProgRow tag="HOMES" pct={buildingProgramPct(b, 'HOMES')} />
+                    <ProgRow tag="HEAR" pct={buildingProgramPct(b, 'HEAR')} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                  <span style={{ fontSize: 11, color: C.textMuted }}>{dc} of {(b.units || []).length} complete</span>
+                  <span style={{ fontSize: 11.5, color: C.emeraldMid, fontWeight: 600 }}>View units →</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div>
+        <SectionHeader title="Work Order Stage Breakdown" desc="How many units sit at each stage, per program" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <StageBreakdown property={property} tag="HOMES" />
+          <StageBreakdown property={property} tag="HEAR" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Per-program: count units by the rank their program opp currently sits at,
+// using that program's own (data-driven) stage list for labels.
+function StageBreakdown({ property, tag }) {
+  const accent = accentFor(tag)
+  const units = allUnits(property)
+  // Reference stage list from the first unit that has this program.
+  const ref = units.map((u) => (tag === 'HEAR' ? u.hear : u.homes)).find(Boolean)
+  const stages = ref?.stages || []
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent }} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary }}>{tag} Program</span>
+      </div>
+      {stages.length === 0 && <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>No {tag} work on this property.</div>}
+      {stages.map((st) => {
+        const cnt = units.filter((u) => {
+          const o = tag === 'HEAR' ? u.hear : u.homes
+          return o && o.stageOrder === st.sortOrder
+        }).length
+        const pct = units.length ? Math.round(cnt / units.length * 100) : 0
+        return (
+          <div key={st.sortOrder} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
+            <div style={{ flex: 1, color: C.textSecondary }}>{shortStageLabel(st.label)}</div>
+            <div style={{ width: 90 }}><Bar pct={Math.min(pct * 2, 100)} color={accent} /></div>
+            <div style={{ width: 56, textAlign: 'right', fontWeight: 600, fontSize: 12, color: cnt ? C.textPrimary : C.textMuted }}>{cnt ? `${cnt} unit${cnt === 1 ? '' : 's'}` : '—'}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Building page ────────────────────────────────────────────────────────────
+function BuildingPage({ property, building, onOpenUnit }) {
+  const units = building.units || []
+  const bucket = (b) => units.filter((u) => unitStatus(u) === b).length
+  return (
+    <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
+      <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>{building.name}</div>
+      <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 18 }}>{property.name} · {units.length} units</div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 22 }}>
+        <StatCard label="Complete" value={bucket('complete')} accent={C.emerald} sub={`of ${units.length} units`} />
+        <StatCard label="In Progress" value={bucket('inProgress')} accent={C.sky} />
+        <StatCard label="In Submittal" value={bucket('submittal')} accent={C.emeraldMid} />
+        <StatCard label="Not Started" value={bucket('notStarted')} accent={C.textMuted} />
+      </div>
+
+      <SectionHeader title={`Units — ${building.name}`} desc="Click a unit for HOMES & HEAR work-order detail" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
+        {units.map((u) => (
+          <div key={u.id} onClick={() => onOpenUnit(u)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px', cursor: 'pointer' }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary, marginBottom: 8 }}>Unit {u.unitNumber}</div>
+            {[['HOMES', u.homes], ['HEAR', u.hear]].map(([tag, o]) => {
+              const accent = accentFor(tag)
+              const meta = bucketMeta(oppBucket(o))
+              return (
+                <div key={tag} style={{ marginBottom: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, marginBottom: 3 }}>
+                    <span style={{ fontWeight: 700, color: accent }}>{tag}</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 600, color: meta.color, background: meta.bg, padding: '1px 6px', borderRadius: 10 }}>{o ? meta.label : 'N/A'}</span>
+                  </div>
+                  <Bar pct={oppPct(o)} color={accent} h={4} />
+                </div>
+              )
+            })}
+          </div>
+        ))}
+        {units.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No units recorded for this building yet.</div>}
+      </div>
+    </div>
+  )
+}
+
+// ─── Unit page ────────────────────────────────────────────────────────────────
+function UnitProgramCard({ tag, opp }) {
+  const accent = accentFor(tag)
+  const count = (opp?.stages || []).length
+  const so = opp?.stageOrder || 0
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11, overflow: 'hidden', marginBottom: 16 }}>
+      <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 9, background: `${accent}14` }}>
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: accent }} />
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary }}>{tag} Program</span>
+        {opp && <span style={{ marginLeft: 'auto', fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{opp.recordNumber}</span>}
+      </div>
+      <div style={{ padding: '20px 22px 14px' }}>
+        {opp ? (
+          <>
+            <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 16 }}>
+              Current stage: <strong style={{ color: C.textPrimary }}>{shortStageLabel(opp.stageLabel)}</strong>
+            </div>
+            <StageBar opp={opp} accent={accent} />
+            <div style={{ marginTop: 8, fontSize: 12, color: C.textSecondary }}>
+              {count > 0 && so >= count ? 'All program phases are complete.'
+                : so > 0 ? `Phase ${so} of ${count} — ${oppPct(opp)}% through the program lifecycle.`
+                : 'This program has not started yet.'}
+            </div>
+          </>
+        ) : (
+          <div style={{ fontSize: 12.5, color: C.textMuted }}>No {tag} opportunity for this unit.</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function UnitPage({ property, building, unit }) {
+  return (
+    <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
+      <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>Unit {unit.unitNumber}</div>
+      <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{property.name} · {building.name}</div>
+      <UnitProgramCard tag="HOMES" opp={unit.homes} />
+      <UnitProgramCard tag="HEAR" opp={unit.hear} />
+    </div>
+  )
+}
+
+// ─── Login gate ────────────────────────────────────────────────────────────────
 function LoginGate({ onSignedIn }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -152,7 +503,7 @@ function LoginGate({ onSignedIn }) {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: C.page, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div style={{ minHeight: '100vh', background: C.page, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, fontFamily: 'Inter, system-ui, sans-serif' }}>
       <div style={{ width: '100%', maxWidth: 380, background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 28, boxShadow: '0 1px 3px rgba(13,26,46,.06)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 18 }}>
           <div style={{ width: 30, height: 30, background: C.emerald, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{IconBolt}</div>
@@ -178,160 +529,14 @@ function LoginGate({ onSignedIn }) {
   )
 }
 
-// ─── Top bar ─────────────────────────────────────────────────────────────────
-function TopBar({ crumb, onCrumbClick, userName, onSignOut }) {
-  return (
-    <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, height: 54, display: 'flex', alignItems: 'center', padding: '0 20px', position: 'sticky', top: 0, zIndex: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-        <div style={{ width: 26, height: 26, background: C.emerald, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{IconBolt}</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>Project Portal</div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 18, fontSize: 12.5, color: C.textSecondary }}>
-        {crumb.map((c, i) => (
-          <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {i > 0 && <span style={{ color: C.textMuted }}>/</span>}
-            <span onClick={() => c.onClick && onCrumbClick(c)} style={{ cursor: c.onClick ? 'pointer' : 'default', color: c.onClick ? C.textSecondary : C.textPrimary, fontWeight: c.onClick ? 500 : 700 }}>{c.label}</span>
-          </span>
-        ))}
-      </div>
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14 }}>
-        <span style={{ fontSize: 12.5, color: C.textSecondary }}>{userName}</span>
-        <button onClick={onSignOut} style={{ fontSize: 12, color: C.textSecondary, background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer' }}>Sign Out</button>
-      </div>
-    </div>
-  )
-}
-
-// ─── Property dashboard ──────────────────────────────────────────────────────
-function PropertyDashboard({ property, onOpenBuilding }) {
-  const opps = allOpportunities(property)
-  const homes = opps.filter((o) => programTag(o.program) === 'HOMES')
-  const hear = opps.filter((o) => programTag(o.program) === 'HEAR')
-  const r = rollupOpportunities(opps)
-
-  return (
-    <div style={{ padding: 22, maxWidth: 1100, margin: '0 auto' }}>
-      <div style={{ background: C.sidebar, borderRadius: 12, padding: '20px 24px', color: '#fff', marginBottom: 18 }}>
-        <div style={{ fontSize: 19, fontWeight: 700 }}>{property.name}</div>
-        <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,.7)', marginTop: 3 }}>
-          {[property.city, property.state].filter(Boolean).join(', ')}
-          {property.totalUnits != null && ` · ${property.totalUnits} units`}
-          {property.totalBuildings != null && ` · ${property.totalBuildings} buildings`}
-        </div>
-        <div style={{ display: 'flex', gap: 28, marginTop: 16 }}>
-          <div><div style={{ fontSize: 22, fontWeight: 700, color: C.emerald }}>{r.complete}</div><div style={{ fontSize: 11, color: 'rgba(255,255,255,.62)' }}>Complete</div></div>
-          <div><div style={{ fontSize: 22, fontWeight: 700, color: C.sky }}>{r.inProgress}</div><div style={{ fontSize: 11, color: 'rgba(255,255,255,.62)' }}>In Progress</div></div>
-          <div><div style={{ fontSize: 22, fontWeight: 700, color: 'rgba(255,255,255,.55)' }}>{r.notStarted}</div><div style={{ fontSize: 11, color: 'rgba(255,255,255,.62)' }}>Not Started</div></div>
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, marginBottom: 22 }}>
-        <Stat label="Total Opportunities" value={r.total} />
-        <Stat label="HOMES Opportunities" value={homes.length} color={C.emerald} />
-        <Stat label="HEAR Opportunities" value={hear.length} color={C.sky} />
-        <Stat label="Buildings" value={(property.buildings || []).length} />
-      </div>
-
-      <div style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary, marginBottom: 10 }}>Buildings</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 12 }}>
-        {(property.buildings || []).map((b) => {
-          const bo = b.opportunities || []
-          const br = rollupOpportunities(bo)
-          const avgPct = bo.length ? Math.round(bo.reduce((s, o) => s + opportunityPct(o.stageOrder, stageCountOf(o)), 0) / bo.length) : 0
-          return (
-            <div key={b.id} onClick={() => onOpenBuilding(b)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', cursor: 'pointer' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ color: C.emerald }}>{IconHome}</span>
-                <div style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary }}>{b.name}</div>
-              </div>
-              {b.address && <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 8 }}>{b.address}{b.totalUnits != null ? ` · ${b.totalUnits} units` : ''}</div>}
-              <div style={{ height: 4, background: C.border, borderRadius: 10, overflow: 'hidden', marginBottom: 6 }}>
-                <div style={{ height: '100%', width: `${avgPct}%`, background: C.emerald }} />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.textSecondary }}>
-                <span>{bo.length} opportunit{bo.length === 1 ? 'y' : 'ies'}</span>
-                <span>{br.complete} complete</span>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ─── Building detail ─────────────────────────────────────────────────────────
-function BuildingDetail({ building, onOpenOpportunity }) {
-  const bo = building.opportunities || []
-  const r = rollupOpportunities(bo)
-  return (
-    <div style={{ padding: 22, maxWidth: 1100, margin: '0 auto' }}>
-      <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary }}>{building.name}</div>
-      <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 16 }}>{building.address}{building.totalUnits != null ? ` · ${building.totalUnits} units` : ''}</div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 12, marginBottom: 20 }}>
-        <Stat label="Opportunities" value={r.total} />
-        <Stat label="Complete" value={r.complete} color={C.emerald} />
-        <Stat label="In Progress" value={r.inProgress} color={C.sky} />
-        <Stat label="Not Started" value={r.notStarted} color={C.textMuted} />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 12 }}>
-        {bo.map((o) => {
-          const accent = programAccent(o.program)
-          return (
-            <div key={o.id} onClick={() => onOpenOpportunity(o)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', cursor: 'pointer' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: accent, background: `${accent}1a`, padding: '2px 8px', borderRadius: 5 }}>{programTag(o.program)}</span>
-                <span style={{ fontSize: 11, color: C.textMuted, fontFamily: 'monospace' }}>{o.recordNumber}</span>
-              </div>
-              <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 8 }}>{o.stageLabel}</div>
-              <div style={{ height: 4, background: C.border, borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${opportunityPct(o.stageOrder, stageCountOf(o))}%`, background: accent }} />
-              </div>
-            </div>
-          )
-        })}
-        {bo.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No opportunities for this building yet.</div>}
-      </div>
-    </div>
-  )
-}
-
-// ─── Opportunity stage view ──────────────────────────────────────────────────
-function OpportunityDetail({ opportunity }) {
-  const accent = programAccent(opportunity.program)
-  const stageCount = stageCountOf(opportunity)
-  return (
-    <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-        <span style={{ fontSize: 10.5, fontWeight: 700, color: accent, background: `${accent}1a`, padding: '3px 9px', borderRadius: 5 }}>{programTag(opportunity.program)}</span>
-        <span style={{ fontSize: 11.5, color: C.textMuted, fontFamily: 'monospace' }}>{opportunity.recordNumber}</span>
-      </div>
-      <div style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, marginBottom: 2 }}>{opportunity.name}</div>
-      <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 22 }}>Current stage: <strong>{opportunity.stageLabel}</strong></div>
-
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '26px 26px 18px' }}>
-        <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textPrimary, marginBottom: 18 }}>Program Progress</div>
-        <StageBar stages={opportunity.stages} stageOrder={opportunity.stageOrder} accent={accent} />
-        <div style={{ marginTop: 34, fontSize: 12, color: C.textSecondary }}>
-          {stageCount > 0 && opportunity.stageOrder >= stageCount
-            ? 'All program phases are complete.'
-            : opportunity.stageOrder > 0
-              ? `Phase ${opportunity.stageOrder} of ${stageCount} — ${opportunityPct(opportunity.stageOrder, stageCount)}% through the program lifecycle.`
-              : 'This opportunity has not started its program lifecycle yet.'}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ─── Root ────────────────────────────────────────────────────────────────────
 export default function ProjectPortalRoot() {
-  const [phase, setPhase] = useState('loading')      // loading | login | ready | error | notportal
+  const [phase, setPhase] = useState('loading')   // loading | login | ready | error | notportal
   const [self, setSelf] = useState(null)
   const [tree, setTree] = useState([])
-  const [view, setView] = useState({ screen: 'dashboard', propertyId: null, buildingId: null, opportunityId: null })
+  const [sel, setSel] = useState({ pid: null, bid: null, uid: null })
+  const [open, setOpen] = useState({ prop: null, bldg: null })
+  const [query, setQuery] = useState('')
   const [errMsg, setErrMsg] = useState(null)
 
   const load = useCallback(async () => {
@@ -343,10 +548,11 @@ export default function ProjectPortalRoot() {
       setSelf(me)
       const t = await fetchProjectTracker()
       if (t.error === 'no_portal_user') { setPhase('notportal'); setErrMsg('This account is not set up as a portal user.'); return }
-      setTree(t.properties || [])
-      // Land on the first property if there's exactly one (the common case).
-      const first = (t.properties || [])[0]
-      setView({ screen: 'dashboard', propertyId: first ? first.id : null, buildingId: null, opportunityId: null })
+      const props = t.properties || []
+      setTree(props)
+      const first = props[0]
+      setSel({ pid: first ? first.id : null, bid: null, uid: null })
+      setOpen({ prop: first ? first.id : null, bldg: null })
       setPhase('ready')
     } catch (e) {
       setErrMsg(e?.message || 'Failed to load the portal.')
@@ -361,53 +567,45 @@ export default function ProjectPortalRoot() {
 
   const signOut = async () => { await supabase.auth.signOut(); setSelf(null); setTree([]); setPhase('login') }
 
+  const onSelect = useCallback((next) => {
+    setSel({ pid: next.pid || null, bid: next.bid || null, uid: next.uid || null })
+    setOpen((o) => ({
+      prop: next.pid || o.prop,
+      bldg: next.bid ? `${next.pid}:${next.bid}` : (next.uid ? o.bldg : null),
+    }))
+  }, [])
+
+  const { property, building, unit } = useMemo(() => {
+    const property = tree.find((p) => p.id === sel.pid) || tree[0] || null
+    const building = property && sel.bid ? (property.buildings || []).find((b) => b.id === sel.bid) : null
+    const unit = building && sel.uid ? (building.units || []).find((u) => u.id === sel.uid) : null
+    return { property, building, unit }
+  }, [tree, sel])
+
   if (phase === 'loading') return <Centered>Loading your projects…</Centered>
   if (phase === 'login') return <LoginGate onSignedIn={load} />
   if (phase === 'notportal') return <Centered>{errMsg}<SignOutLink onClick={signOut} /></Centered>
   if (phase === 'error') return <Centered>{errMsg || 'Something went wrong.'}<SignOutLink onClick={signOut} /></Centered>
 
-  // Resolve current selections.
-  const property = tree.find((p) => p.id === view.propertyId) || tree[0] || null
-  const building = property && view.buildingId ? (property.buildings || []).find((b) => b.id === view.buildingId) : null
-  const opportunity = building && view.opportunityId ? (building.opportunities || []).find((o) => o.id === view.opportunityId) : null
-
-  // Breadcrumb
-  const crumb = [{ label: 'Properties', onClick: tree.length > 1 ? () => setView({ screen: 'properties' }) : null }]
-  if (property) crumb.push({ label: property.name, onClick: (building || opportunity) ? () => setView({ screen: 'dashboard', propertyId: property.id }) : null })
-  if (building) crumb.push({ label: building.name, onClick: opportunity ? () => setView({ screen: 'building', propertyId: property.id, buildingId: building.id }) : null })
-  if (opportunity) crumb.push({ label: programTag(opportunity.program), onClick: null })
+  const crumb = [{ label: property ? property.name : 'Properties', onClick: (building || unit) ? () => onSelect({ pid: property.id }) : null }]
+  if (building) crumb.push({ label: building.name, onClick: unit ? () => onSelect({ pid: property.id, bid: building.id }) : null })
+  if (unit) crumb.push({ label: `Unit ${unit.unitNumber}`, onClick: null })
 
   return (
-    <div style={{ minHeight: '100vh', background: C.page, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <TopBar crumb={crumb} onCrumbClick={(c) => c.onClick && c.onClick()} userName={self?.full_name || ''} onSignOut={signOut} />
-
-      {view.screen === 'properties' && tree.length > 1 && (
-        <div style={{ padding: 22, maxWidth: 1100, margin: '0 auto' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary, marginBottom: 12 }}>Your Properties</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 12 }}>
-            {tree.map((p) => (
-              <div key={p.id} onClick={() => setView({ screen: 'dashboard', propertyId: p.id })} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '16px', cursor: 'pointer' }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{p.name}</div>
-                <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 3 }}>{[p.city, p.state].filter(Boolean).join(', ')}</div>
-              </div>
-            ))}
-          </div>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif', background: C.page }}>
+      <TreeSidebar tree={tree} sel={sel} open={open} setOpen={setOpen} onSelect={onSelect}
+        query={query} setQuery={setQuery} user={self} onSignOut={signOut} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, height: 54, display: 'flex', alignItems: 'center', padding: '0 24px', flexShrink: 0 }}>
+          <Crumb items={crumb} />
         </div>
-      )}
-
-      {view.screen === 'dashboard' && property && (
-        <PropertyDashboard property={property} onOpenBuilding={(b) => setView({ screen: 'building', propertyId: property.id, buildingId: b.id })} />
-      )}
-      {view.screen === 'building' && building && (
-        <BuildingDetail building={building} onOpenOpportunity={(o) => setView({ screen: 'opportunity', propertyId: property.id, buildingId: building.id, opportunityId: o.id })} />
-      )}
-      {view.screen === 'opportunity' && opportunity && (
-        <OpportunityDetail opportunity={opportunity} />
-      )}
-
-      {view.screen === 'dashboard' && !property && (
-        <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>
-      )}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {!property && <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>}
+          {property && unit && building && <UnitPage property={property} building={building} unit={unit} />}
+          {property && building && !unit && <BuildingPage property={property} building={building} onOpenUnit={(u) => onSelect({ pid: property.id, bid: building.id, uid: u.id })} />}
+          {property && !building && <PropertyPage property={property} onOpenBuilding={(b) => onSelect({ pid: property.id, bid: b.id })} />}
+        </div>
+      </div>
     </div>
   )
 }
