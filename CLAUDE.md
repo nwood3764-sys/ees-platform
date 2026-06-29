@@ -138,6 +138,8 @@ Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (
 - Dashboard filter columns now override a report's own saved filter on the same column (`reportsService.runReport`/`runWidgetAggregate` `overrideFields` param; `DashboardRunner` passes its filter columns). Fixed Outreach Dashboard STATE filter — "All" = all states (10,964), non-NC states filter correctly, NC stays the default.
 - Enrollment module (`OutreachModule.jsx`, route `/m/enrollment`) home now resolves to HP-00005 Enrollment Home / DSH-00009 Enrollment Overview instead of the Outreach dashboard (was wrongly `moduleId="outreach"`).
 
+**Shipped 2026-06-29 (branch `claude/eesw-portal-stage-reconciliation-nmutd0`):** MF Project Portal **stage reconciliation** (Section 0 of the MF Portal handoff). Confirmed the portal stage bar is fully data-driven per record type (nothing hardcoded); DECIDED building-level opportunities and `*-IRA-MF-HOMES-AUDIT` as the HOMES opportunity object. Migration `20260629120000_mf_opportunity_stage_lifecycles.sql` gave `WI/NC/MI-IRA-MF-HOMES-AUDIT` (HOMES) and `NC/MI-IRA-MF-HEAR` (HEAR) each their own unique 10-phase `opportunity_stage` picklist + assignments, soft-deleted the stale `Property Identified` assignment, and re-pointed the 29 demo records to Phase 1. Full data map: `docs/leap-mf-portal-stage-reconciliation.md`. NOTE for the portal build: the never-stood-up `ProjectPortalRoot.jsx`/`projectPortalService.js` still hardcode `PHASE_SHORT`/`TOTAL_PHASES=10` and must be reworked to read the per-record-type stage list from `get_portal_project_tracker()`.
+
 **Migration baseline / dev workflow (2026-06-28):** the migration history was squashed into a single verified baseline so Supabase branching (isolated sandbox DBs) works. `supabase/migrations/` now contains only `20260412000000_leap_baseline_schema.sql` (generated from live prod, fingerprint-verified against production on a throwaway branch — every table/column/function/policy/constraint identical). The 190 prior files live in `supabase/migrations_archive_pre_baseline/` (reference only, never replayed). Production's 870-row migration registry was replaced with the single baseline row; the full history is backed up in `supabase_migrations.schema_migrations_backup_20260628`. Going forward, every schema change is a NEW migration file added after the baseline. Custom RLS roles (`internal_staff`, `external_partner`, `customer`) are created at the top of the baseline. See `docs/leap-dev-workflow.md`.
 
 **Done and shipped to master:**
@@ -176,6 +178,7 @@ Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (
 | Admin Builders | `leap-admin-builders.md` |
 | Builder rearchitecture (WYSIWYG) handoff | `leap-builder-rearchitecture.md` |
 | Portals (owner and partner) | `leap-portals.md` |
+| MF Project Portal stage reconciliation | `leap-mf-portal-stage-reconciliation.md` |
 | Field Mobile | `leap-field-mobile.md` |
 | Reports and dashboards | `leap-reports.md` |
 | Data standards, validation, retention | `leap-data-standards.md` |
