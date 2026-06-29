@@ -101,6 +101,21 @@ Security advisor baseline is ~179 known lints (mostly `auth_security_definer_fun
 
 Drive the work; don't check in constantly. Surface only genuine binary decisions — state a recommendation first, then ask once, yes/no. Don't list options. Don't defer builds. No tangential commentary or unsolicited analysis. Verify a push actually reached the live bundle before reporting success.
 
+## Handoff standard
+
+When closing out a workstream or teeing up the next one, write the handoff as a dedicated `docs/leap-*.md` file — not just chat. Use `docs/leap-builder-rearchitecture.md` as the model. Structure:
+
+1. **Vision / goal** — what we're building, in plain terms.
+2. **What just shipped** — context from the session that produced the handoff (PRs, what's live).
+3. **Current-state architecture map** — grounded in the *actual code*: file paths, DB tables, and a candid list of pain points. Use an Explore subagent to map it accurately rather than guessing.
+4. **Target architecture + design principles.**
+5. **Phased build plan** — each phase additive and independently shippable.
+6. **Technical recommendations** — libraries (with licenses), schema changes, known hazards (e.g. the Vite vendor-chunk trap).
+7. **Decisions** — recommendation first; mark each **DECIDED** with date + owner as it's confirmed, so the next session never relitigates.
+8. **File + DB-table index** — what the next session will touch most.
+
+Then set the **CURRENT BUILD STATE → Active workstream** line to point at the doc, add the doc to the `/docs/` reference table, and merge it to `master` (via PR) so a fresh session reads it on clone. The whole point: the next session starts from a complete, decided spec with zero ambiguity.
+
 ---
 
 ## CURRENT BUILD STATE (as of 2026-06-29)
