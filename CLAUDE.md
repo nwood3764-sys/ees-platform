@@ -103,9 +103,13 @@ Drive the work; don't check in constantly. Surface only genuine binary decisions
 
 ---
 
-## CURRENT BUILD STATE (as of 2026-06-28)
+## CURRENT BUILD STATE (as of 2026-06-29)
 
-Active workstream: **Outreach Dashboard (DSH-00010)**.
+Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop dashboards / home pages / reports / record page layouts (Salesforce parity).** Full handoff: `docs/leap-builder-rearchitecture.md`. Goal: a single three-pane canvas (component palette left, live WYSIWYG canvas center, inspector right) + a component registry, replacing the form-driven builders (esp. `DashboardEditor.jsx`, the "weird list view"). Recommended order: Dashboards → Home pages → Reports → Page layouts. Decisions to confirm with Nicholas are listed at the end of the handoff doc.
+
+**Shipped 2026-06-29 (PR #11, live on master/prod):**
+- Dashboard filter columns now override a report's own saved filter on the same column (`reportsService.runReport`/`runWidgetAggregate` `overrideFields` param; `DashboardRunner` passes its filter columns). Fixed Outreach Dashboard STATE filter — "All" = all states (10,964), non-NC states filter correctly, NC stays the default.
+- Enrollment module (`OutreachModule.jsx`, route `/m/enrollment`) home now resolves to HP-00005 Enrollment Home / DSH-00009 Enrollment Overview instead of the Outreach dashboard (was wrongly `moduleId="outreach"`).
 
 **Migration baseline / dev workflow (2026-06-28):** the migration history was squashed into a single verified baseline so Supabase branching (isolated sandbox DBs) works. `supabase/migrations/` now contains only `20260412000000_leap_baseline_schema.sql` (generated from live prod, fingerprint-verified against production on a throwaway branch — every table/column/function/policy/constraint identical). The 190 prior files live in `supabase/migrations_archive_pre_baseline/` (reference only, never replayed). Production's 870-row migration registry was replaced with the single baseline row; the full history is backed up in `supabase_migrations.schema_migrations_backup_20260628`. Going forward, every schema change is a NEW migration file added after the baseline. Custom RLS roles (`internal_staff`, `external_partner`, `customer`) are created at the top of the baseline. See `docs/leap-dev-workflow.md`.
 
@@ -143,6 +147,7 @@ Active workstream: **Outreach Dashboard (DSH-00010)**.
 | Vehicles and fleet | `leap-fleet.md` |
 | Communications and templates | `leap-communications.md`, `leap-communications-module-1.md` |
 | Admin Builders | `leap-admin-builders.md` |
+| Builder rearchitecture (WYSIWYG) handoff | `leap-builder-rearchitecture.md` |
 | Portals (owner and partner) | `leap-portals.md` |
 | Field Mobile | `leap-field-mobile.md` |
 | Reports and dashboards | `leap-reports.md` |
