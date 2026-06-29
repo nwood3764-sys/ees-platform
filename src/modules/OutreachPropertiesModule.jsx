@@ -52,8 +52,8 @@ const PROP_COLS = [
   { field:'lihtcProjectId',              label:'LIHTC Project ID',    type:'text',   sortable:true,  filterable:true,  columnName:'property_lihtc_project_id' },
   { field:'account',                     label:'Account',             type:'text',   sortable:true,  filterable:true,  columnName:'property_account_id'   },
   { field:'accountHudParticipantNumber', label:'HUD Participant #',   type:'text',   sortable:true,  filterable:true,  editable:false },  // lives on accounts, not properties
-  { field:'state',                       label:'State',               type:'select', sortable:true,  filterable:true,  columnName:'property_state',
-    options:['WI','NC','CO','MI','IN','TX','GA'] },
+  // State filter options are derived from the data at render time (see PropertiesListSection) — never hardcoded.
+  { field:'state',                       label:'State',               type:'select', sortable:true,  filterable:true,  columnName:'property_state' },
   { field:'units',                       label:'Units',               type:'number', sortable:true,  filterable:true,  columnName:'property_total_units' },
   { field:'buildings',                   label:'Buildings',           type:'number', sortable:true,  filterable:true,  columnName:'property_total_buildings' },
   { field:'yearBuilt',                   label:'Year Built',          type:'number', sortable:true,  filterable:true,  columnName:'property_year_built'  },
@@ -147,6 +147,12 @@ function OutreachHome({ counts, loading }) {
 }
 
 function PropertiesListSection({ loading, error, properties, onRefresh, onRetry, onOpenRecord }) {
+  // Derive the State filter options from the data actually present — data-driven, not a hardcoded list.
+  const cols = useMemo(() => {
+    const states = [...new Set((properties || []).map(p => p.state).filter(Boolean))].sort()
+    return PROP_COLS.map(c => c.field === 'state' ? { ...c, options: states } : c)
+  }, [properties])
+
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} onRetry={onRetry} />
 
@@ -178,7 +184,7 @@ function PropertiesListSection({ loading, error, properties, onRefresh, onRetry,
         <ListView
           tableName="properties"
           data={properties}
-          columns={PROP_COLS}
+          columns={cols}
           systemViews={PROP_VIEWS}
           defaultViewId="PV-01"
           newLabel={null}
