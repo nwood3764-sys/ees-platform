@@ -20,6 +20,7 @@
 import GridLayout, { WidthProvider } from 'react-grid-layout'
 import { C } from '../data/constants'
 import { getComponent } from './componentRegistry'
+import LiveWidgetPreview from './LiveWidgetPreview'
 import { GRID_COLS, ROW_HEIGHT, GRID_MARGIN, GRID_CONTAINER_PADDING } from './geometry'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -106,7 +107,9 @@ export default function CanvasGrid({
                 onMouseDown={() => onSelect?.(c.id)}
                 style={{ flex: 1, padding: 10, overflow: 'hidden', cursor: 'pointer', position: 'relative' }}
               >
-                {entry?.Preview ? <entry.Preview config={c.config || {}} /> : <span style={{ fontSize: 12, color: C.textMuted }}>{c.type}</span>}
+                {(entry?.dataSource === 'report' && c.dataSourceId)
+                  ? <LiveWidgetPreview component={c} />
+                  : entry?.Preview ? <entry.Preview config={c.config || {}} /> : <span style={{ fontSize: 12, color: C.textMuted }}>{c.type}</span>}
                 {unbound && (
                   <div style={{
                     position: 'absolute', left: 10, right: 10, bottom: 8,

@@ -33,6 +33,8 @@ export default function LeapCanvas({
   subtitle,
   initialComponents = [],
   initialLayout = [],
+  headerExtra,        // JSX for the header's left side (e.g. dashboard name input)
+  settingsPanel,      // JSX shown in the inspector when nothing is selected (surface settings)
   onSave,
   onClose,
 }) {
@@ -41,6 +43,8 @@ export default function LeapCanvas({
   const [selectedId, setSelectedId] = useState(null)
   const [activeDrag, setActiveDrag] = useState(null)   // registry id of chip being dragged
   const [savedAt, setSavedAt]       = useState(null)
+  const [saving, setSaving]         = useState(false)
+  const [saveError, setSaveError]   = useState(null)
   const idRef = useRef(initialComponents.length + 1)
 
   const nextId = () => `c-${idRef.current++}`
@@ -71,9 +75,17 @@ export default function LeapCanvas({
     setSelectedId(sel => sel === id ? null : sel)
   }
 
-  const handleSave = () => {
-    onSave?.({ components, layout })
-    setSavedAt(new Date())
+  const handleSave = async () => {
+    if (!onSave) return
+    setSaving(true); setSaveError(null)
+    try {
+      await onSave({ components, layout })
+      setSavedAt(new Date())
+    } catch (err) {
+      setSaveError(err)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const droppingSize = activeDrag ? (getComponent(activeDrag)?.defaultSize) : null
@@ -85,14 +97,17 @@ export default function LeapCanvas({
         background: C.card, borderBottom: `1px solid ${C.border}`,
         padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <div style={{ fontSize: 18, fontWeight: 600, color: C.textPrimary }}>{title}</div>
-          {subtitle && <div style={{ fontSize: 12, color: C.textMuted }}>{subtitle}</div>}
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {savedAt && <span style={{ fontSize: 11, color: C.textMuted }}>Saved {savedAt.toLocaleTimeString()}</span>}
+        {headerExtra || (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ fontSize: 18, fontWeight: 600, color: C.textPrimary }}>{title}</div>
+            {subtitle && <div style={{ fontSize: 12, color: C.textMuted }}>{subtitle}</div>}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+          {saveError && <span style={{ fontSize: 11, color: C.sky }}>{saveError.message || 'Save failed'}</span>}
+          {savedAt && !saveError && <span style={{ fontSize: 11, color: C.textMuted }}>Saved {savedAt.toLocaleTimeString()}</span>}
           {onClose && <button onClick={onClose} style={btnSecondary()}>Close</button>}
-          {onSave && <button onClick={handleSave} style={btnPrimary()}>Save</button>}
+          {onSave && <button onClick={handleSave} disabled={saving} style={btnPrimary(saving)}>{saving ? 'Saving…' : 'Save'}</button>}
         </div>
       </div>
 
@@ -115,6 +130,7 @@ export default function LeapCanvas({
         <Inspector
           components={components}
           selectedId={selectedId}
+          settingsPanel={settingsPanel}
           onChange={handleInspectorChange}
           onSelect={setSelectedId}
           onRemove={removeComponent}
@@ -124,10 +140,11 @@ export default function LeapCanvas({
   )
 }
 
-function btnPrimary() {
+function btnPrimary(disabled) {
   return {
     padding: '8px 16px', fontSize: 13, fontWeight: 500,
-    background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer',
+    background: disabled ? C.borderDark : C.emerald, color: '#fff', border: 'none', borderRadius: 6,
+    cursor: disabled ? 'default' : 'pointer',
   }
 }
 function btnSecondary() {
