@@ -37,8 +37,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-17
 
-      - name: Rebuild staging schema (baseline + later migrations)
+      - name: Rebuild staging schema (clone production's live schema)
         env:
+          PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
         run: |
           set -euo pipefail
@@ -68,11 +69,17 @@ jobs:
               WHERE n.nspname='public' AND p.prokind IN ('f','w')
                 AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_proc'::regclass AND d.objid=p.oid AND d.deptype='e');
           " | psql "$STAGING_DB_URL" --echo-errors
-          echo "Applying schema..."
-          for f in $(ls supabase/migrations/*.sql | sort); do
-            echo "Applying $(basename "$f")"
-            psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q -f "$f"
-          done
+          echo "Cloning production's live public schema..."
+          # The repo migration files lag production (changes have gone straight to
+          # prod), so production's live schema is the source of truth. Dump it
+          # schema-only and load into the freshly-dropped staging public schema.
+          pg_dump --schema-only --no-owner --schema=public "$PROD_DB_URL" \
+            | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction
+          echo "Re-asserting schema-usage grants..."
+          # A --schema=public dump may omit schema-level GRANTs; re-apply them so
+          # anon/authenticated/service_role can reach the schema after the rebuild.
+          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q \
+            -f supabase/migrations/20260628120000_grant_public_schema_usage.sql
 
       - name: Copy production data into staging
         env:
