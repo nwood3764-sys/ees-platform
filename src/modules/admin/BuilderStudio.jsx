@@ -17,6 +17,7 @@
 
 import { lazy, Suspense, useState } from 'react'
 import { C } from '../../data/constants'
+import { dashboardRegistry } from '../../builder/registries/dashboardRegistry'
 
 const LeapCanvas = lazy(() => import('../../builder/LeapCanvas'))
 
@@ -53,6 +54,7 @@ export default function BuilderStudio() {
       </div>
       <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading builder…</div>}>
         <LeapCanvas
+          registry={dashboardRegistry}
           title="Builder Studio"
           subtitle="Unified WYSIWYG canvas — dashboards (preview). Drag from the palette, drop, resize, configure."
           initialComponents={SEED_COMPONENTS}

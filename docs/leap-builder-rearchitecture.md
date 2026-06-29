@@ -1,7 +1,21 @@
 # LEAP Builder Rearchitecture — WYSIWYG Drag-and-Drop (Handoff)
 
-**Status:** Phases 0–1 built — in staging for review, not on master.
+**Status:** Phases 0–2 built — in staging for review, not on master.
 **Author of handoff:** prior session (2026-06-29). Read this top-to-bottom before starting.
+
+---
+
+## Phase 2 progress (branch `claude/builder-rearchitecture-phase-0-qt1949`, staging only)
+
+Home pages now use the LEAP Canvas too. The key move was **generalizing the canvas into a per-surface engine** (the §4a intent): the shell (palette / grid / inspector / save / geometry) is surface-agnostic and consumes a **registry** object; a surface is now "a registry + an adapter."
+
+- **Registry abstraction** — `src/builder/registries/`: `registryHelpers.js` (makeHelpers/fieldVisible), `dashboardRegistry.jsx` (the widget entries + report-binding inspector + LiveWidgetPreview), `homeRegistry.jsx` (home components + source-picker inspector + HomeComponentRenderer-backed preview). Shared inspector controls in `src/builder/inspectorControls.jsx`. `LeapCanvas`/`Palette`/`CanvasGrid`/`Inspector` now take a `registry` (+ `sources`) prop — no surface specifics in the shell.
+- **selfChrome** — home components are self-contained cards (HomeComponentRenderer wraps each), so the home registry sets `selfChrome: true` and the canvas renders a bare selection wrapper + drag grip instead of its own header (no double card). Dashboard widgets keep the Title/Subtitle/Footer chrome.
+- **Home adapter** — `src/builder/adapters/homePageAdapter.js`: load/save via the existing `fetchHomePage`/`save_home_page` RPC; geometry rides in `hpc_config._geometry`; canvas pages save as the `single`/`main` template and are positioned purely by geometry. No schema change (`hpc_source_id` confirmed uuid; we store the source UUID, fixing the legacy builder's record-number bug).
+- **Editor** — `src/modules/admin/HomePageCanvasEditor.jsx`: list → New/Edit → canvas; page name in header; module/role/active/default in the inspector's page-settings view. Replaces `HomePageBuilder` at Setup → User Interface → Home Pages.
+- **Viewer honors geometry** — `ConfiguredHome` places components by `_geometry` on the 12-col grid when present (view == build); legacy template/region pages (HP-00005/6, no geometry) render exactly as before.
+
+`HomePageBuilder.jsx` is now unreferenced (kept as rollback alongside `DashboardEditor.jsx`; delete both once Phases 1–2 are confirmed). **Next:** Phase 3 (Reports — drag fields, live preview, formula engine).
 
 ---
 

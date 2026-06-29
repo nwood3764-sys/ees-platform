@@ -19,8 +19,6 @@
 
 import GridLayout, { WidthProvider } from 'react-grid-layout'
 import { C } from '../data/constants'
-import { getComponent } from './componentRegistry'
-import LiveWidgetPreview from './LiveWidgetPreview'
 import { GRID_COLS, ROW_HEIGHT, GRID_MARGIN, GRID_CONTAINER_PADDING } from './geometry'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -33,7 +31,7 @@ import 'react-resizable/css/styles.css'
 const Grid = WidthProvider(GridLayout)
 
 export default function CanvasGrid({
-  components, layout, selectedId, droppingSize,
+  registry, sources, components, layout, selectedId, droppingSize,
   onLayoutChange, onSelect, onDrop,
 }) {
   return (
@@ -73,9 +71,31 @@ export default function CanvasGrid({
         }}
       >
         {components.map(c => {
-          const entry = getComponent(c.type)
+          const entry = registry.getComponent(c.type)
           const isSelected = c.id === selectedId
-          const unbound = entry?.dataSource === 'report' && !c.dataSourceId
+          const Live = registry.LivePreview
+          const body = Live ? <Live component={c} sources={sources} /> : <span style={{ fontSize: 12, color: C.textMuted }}>{c.type}</span>
+
+          // selfChrome surfaces (home pages) render their own card; the canvas
+          // tile is just a selection wrapper with a floating drag grip — no
+          // second header/border. Dashboard widgets are headerless bodies, so
+          // the tile supplies the Salesforce Title/Subtitle/Footer chrome.
+          if (registry.selfChrome) {
+            return (
+              <div key={c.id} onMouseDown={() => onSelect?.(c.id)} style={{
+                position: 'relative', height: '100%', borderRadius: 10, cursor: 'pointer',
+                outline: isSelected ? `2px solid ${C.emerald}` : 'none', outlineOffset: 1,
+              }}>
+                <div className="leap-drag-handle" title="Drag to move" style={{
+                  position: 'absolute', top: 6, right: 6, zIndex: 5, width: 22, height: 22, borderRadius: 5,
+                  background: C.card, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', cursor: 'move', color: C.textMuted, fontSize: 12,
+                }}>⠿</div>
+                <div style={{ height: '100%', overflow: 'auto' }}>{body}</div>
+              </div>
+            )
+          }
+
           return (
             <div key={c.id} style={{
               background: C.card,
@@ -107,16 +127,7 @@ export default function CanvasGrid({
                 onMouseDown={() => onSelect?.(c.id)}
                 style={{ flex: 1, padding: 10, overflow: 'hidden', cursor: 'pointer', position: 'relative' }}
               >
-                {(entry?.dataSource === 'report' && c.dataSourceId)
-                  ? <LiveWidgetPreview component={c} />
-                  : entry?.Preview ? <entry.Preview config={c.config || {}} /> : <span style={{ fontSize: 12, color: C.textMuted }}>{c.type}</span>}
-                {unbound && (
-                  <div style={{
-                    position: 'absolute', left: 10, right: 10, bottom: 8,
-                    fontSize: 11, color: C.sky, background: '#e8f1fb',
-                    border: `1px solid ${C.border}`, borderRadius: 5, padding: '4px 8px', textAlign: 'center',
-                  }}>Pick a report in the inspector →</div>
-                )}
+                {body}
               </div>
               {c.footer && (
                 <div style={{

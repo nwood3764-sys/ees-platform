@@ -15,10 +15,9 @@
 
 import { useState } from 'react'
 import { C } from '../data/constants'
-import { getPaletteCategories } from './componentRegistry'
 
-export default function Palette({ onDragStart, onDragEnd, onAdd }) {
-  const categories = getPaletteCategories()
+export default function Palette({ registry, onDragStart, onDragEnd, onAdd }) {
+  const categories = registry.getPaletteCategories()
   const [collapsed, setCollapsed] = useState({})
   const [query, setQuery] = useState('')
 

@@ -38,7 +38,7 @@ import SeedDataPurgePane from './SeedDataPurgePane'
 import BulkPropertyImportPane from './BulkPropertyImportPane'
 import ClientErrorsPane from './ClientErrorsPane'
 import ModuleSectionsPane from './ModuleSectionsPane'
-import HomePageBuilder from './HomePageBuilder'
+import HomePageCanvasEditor from './HomePageCanvasEditor'
 import BuilderStudio from './BuilderStudio'
 
 // ---------------------------------------------------------------------------
@@ -462,7 +462,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager, initialModuleI
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'module_sections':   return <ModuleSectionsPane initialModuleId={initialModuleId} />
     case 'builder_studio':    return <BuilderStudio />
-    case 'home_pages':        return <HomePageBuilder />
+    case 'home_pages':        return <HomePageCanvasEditor />
     case 'flow_builder':  return <FlowBuilderPane />
     case 'automation_run_log': return <AutomationRunLogPane />
     case 'lifecycle_builder': return <LifecycleBuilderPane />
