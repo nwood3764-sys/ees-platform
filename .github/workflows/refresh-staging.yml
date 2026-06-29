@@ -43,8 +43,32 @@ jobs:
         run: |
           set -euo pipefail
           export PATH=/usr/lib/postgresql/17/bin:$PATH
-          echo "Resetting staging public schema..."
-          psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"
+          echo "Dropping app objects in public (one statement per transaction to avoid lock exhaustion; extensions like PostGIS are left in place)..."
+          # A single DROP SCHEMA ... CASCADE locks every object (incl. PostGIS's ~1000)
+          # in one transaction and exceeds max_locks_per_transaction. Instead, emit one
+          # DROP per app (non-extension) object and run them in autocommit (each its own tx).
+          psql "$STAGING_DB_URL" -tAc "
+            SELECT 'DROP TABLE IF EXISTS public.'||quote_ident(c.relname)||' CASCADE;'
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relkind IN ('r','p')
+                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
+            UNION ALL
+            SELECT 'DROP VIEW IF EXISTS public.'||quote_ident(c.relname)||' CASCADE;'
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relkind='v'
+                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
+            UNION ALL
+            SELECT 'DROP SEQUENCE IF EXISTS public.'||quote_ident(c.relname)||' CASCADE;'
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relkind='S'
+                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
+            UNION ALL
+            SELECT 'DROP FUNCTION IF EXISTS public.'||quote_ident(p.proname)||'('||pg_get_function_identity_arguments(p.oid)||') CASCADE;'
+              FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+              WHERE n.nspname='public' AND p.prokind IN ('f','w')
+                AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_proc'::regclass AND d.objid=p.oid AND d.deptype='e');
+          " | psql "$STAGING_DB_URL" --echo-errors
+          echo "Applying schema..."
           for f in $(ls supabase/migrations/*.sql | sort); do
             echo "Applying $(basename "$f")"
             psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q -f "$f"
@@ -58,10 +82,28 @@ jobs:
           set -euo pipefail
           export PATH=/usr/lib/postgresql/17/bin:$PATH
           echo "Copying production data (public schema, excluding PostGIS reference table)..."
-          pg_dump --data-only --disable-triggers --no-owner --schema=public \
-            --exclude-table=public.spatial_ref_sys \
-            "$PROD_DB_URL" \
-            | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q
+          # session_replication_role=replica bypasses FK + user triggers during load
+          # without ALTER-ing system triggers (which Supabase's role can't touch).
+          { echo "SET session_replication_role = replica;"; \
+            pg_dump --data-only --no-owner --schema=public \
+              --exclude-table=public.spatial_ref_sys "$PROD_DB_URL"; } \
+            | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction
+
+      - name: Copy login accounts (auth) into staging
+        env:
+          PROD_DB_URL: ${{ secrets.PROD_DB_URL }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: |
+          set -euo pipefail
+          export PATH=/usr/lib/postgresql/17/bin:$PATH
+          echo "Copying auth users + identities (preserves IDs so app profiles stay linked)..."
+          # Replace staging's auth accounts with production's. session_replication_role=replica
+          # bypasses FK/triggers so the delete+load doesn't touch public.users or fire handle_new_user.
+          { echo "SET session_replication_role = replica;"; \
+            echo "DELETE FROM auth.identities; DELETE FROM auth.users;"; \
+            pg_dump --data-only --no-owner \
+              --table='auth.users' --table='auth.identities' "$PROD_DB_URL"; } \
+            | psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction
 
       - name: Summary
         env:
