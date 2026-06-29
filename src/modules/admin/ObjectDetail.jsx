@@ -10,7 +10,7 @@ import {
 } from '../../data/adminService'
 import RecordTypesPane from './RecordTypesPane'
 import LayoutsPane from './LayoutsPane'
-import LayoutEditor from './LayoutEditor'
+import LayoutCanvasEditor from './LayoutCanvasEditor'
 import FieldPicklistEditor from './FieldPicklistEditor'
 import FieldCreateEditModal from './FieldCreateEditModal'
 
@@ -165,7 +165,7 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
             )}
             {sub === 'layouts' && (
               selectedLayoutId
-                ? <LayoutEditor
+                ? <LayoutCanvasEditor
                     layoutId={selectedLayoutId}
                     objectLabel={obj.pluralLabel || obj.label}
                     onBack={() => setSelectedLayoutId(null)}
