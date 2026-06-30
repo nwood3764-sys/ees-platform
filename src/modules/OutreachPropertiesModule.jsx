@@ -700,8 +700,8 @@ export default function OutreachPropertiesModule({
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div data-module-topbar="1" style={{ height: 54, background:C.card, borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', flexShrink:0 }}>
         <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-          <span style={{ color:C.textMuted }}>Outreach</span><span style={{ color:C.textMuted }}>/</span>
-          <span style={{ color:C.textPrimary, fontWeight:500 }}>{SECTIONS.find(s => s.id===sec)?.label}</span>
+          <span onClick={() => { closeRecord(); setSec(SECTIONS[0]?.id) }} style={{ color:C.emeraldMid, cursor:'pointer', fontWeight:500 }}>Outreach</span><span style={{ color:C.textMuted }}>/</span>
+          <span onClick={() => selectedRecord && closeRecord()} style={{ color: selectedRecord ? C.emeraldMid : C.textPrimary, fontWeight: selectedRecord ? 500 : 600, cursor: selectedRecord ? 'pointer' : 'default' }}>{SECTIONS.find(s => s.id===sec)?.label}</span>
           {/* Per-section help: anchored to the route the current section
              lives at. Falls back to the module overview when the user is
              on home. */}
