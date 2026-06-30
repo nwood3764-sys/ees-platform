@@ -4408,7 +4408,11 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 
 function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes, onNavigateToRecord, requiredFields }) {
   const isMobile = useIsMobile()
-  const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
+  // Standing rule: every record-detail section opens EXPANDED. We intentionally
+  // ignore section_is_collapsed_by_default for the initial state (the user can
+  // still collapse any section via its header), so the rule holds globally and
+  // survives layouts/sections that were configured collapsed.
+  const [collapsed, setCollapsed] = useState(false)
   // Render any widgets that live inside a section card. Today: field_group,
   // section_config_editor, filter_config_editor, and merge_field_reference.
   // Related lists, file galleries, prtsn history, and the activity timeline

@@ -60,6 +60,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const [columns, setColumns] = useState([])
   const [sections, setSections] = useState([])
   const [activeSection, setActiveSection] = useState(null)
+  const [fieldSearch, setFieldSearch] = useState('')
   const [saving, setSaving]   = useState(false)
   const [savedAt, setSavedAt] = useState(null)
   const [saveError, setSaveError] = useState(null)
@@ -135,7 +136,16 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const placedFieldNames = new Set(
     sections.flatMap(s => (s.widgets || []).filter(w => w.type === 'field_group').flatMap(w => (w.config?.fields || []).map(f => f.name)))
   )
-  const available = columns.filter(c => !placedFieldNames.has(c.name))
+  const unplaced = columns.filter(c => !placedFieldNames.has(c.name))
+  // Filter the palette by the search box — match on both the humanized label
+  // and the raw API name so a user can find a field either way without
+  // scrolling the (often long) field list.
+  const fieldQuery = fieldSearch.trim().toLowerCase()
+  const available = fieldQuery
+    ? unplaced.filter(c =>
+        humanize(c.name, meta.object).toLowerCase().includes(fieldQuery) ||
+        c.name.toLowerCase().includes(fieldQuery))
+    : unplaced
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
