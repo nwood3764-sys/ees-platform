@@ -504,7 +504,14 @@ export function useUrlNavigation() {
     }
     setState((prev) => {
       const mod = TABLE_MODULE_MAP[rec.table] || prev.activeModule
-      const next = { activeModule: mod, selectedRecord: { ...rec }, section: null, subsection: null, searchQuery: null, searchType: null }
+      // Remember which section we came from so closing the record returns to
+      // that list's URL — but only when the record lives in the same module
+      // (a cross-module open can't keep the prior module's section).
+      const keepSection = mod === prev.activeModule
+      const next = { activeModule: mod, selectedRecord: { ...rec },
+        section: keepSection ? prev.section : null,
+        subsection: keepSection ? prev.subsection : null,
+        searchQuery: null, searchType: null }
       const path = buildPath(next)
       if (path !== currentFullPath()) window.history.pushState(null, '', path)
       return next
@@ -554,7 +561,11 @@ export function useUrlNavigation() {
     }
     setState((prev) => {
       const mod = TABLE_MODULE_MAP[rec?.table] || prev.activeModule
-      const next = { activeModule: mod, selectedRecord: rec ? { ...rec } : null, section: null, subsection: null, searchQuery: null, searchType: null }
+      const keepSection = mod === prev.activeModule
+      const next = { activeModule: mod, selectedRecord: rec ? { ...rec } : null,
+        section: keepSection ? prev.section : null,
+        subsection: keepSection ? prev.subsection : null,
+        searchQuery: null, searchType: null }
       const path = buildPath(next)
       if (path !== currentFullPath()) window.history.replaceState(null, '', path)
       return next
