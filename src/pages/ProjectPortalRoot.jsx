@@ -429,7 +429,35 @@ function BuildingPage({ property, building, colorOf, onOpenProject }) {
   )
 }
 
-// ─── Project page (work orders grouped by unit) ──────────────────────────────
+// ─── Project page (work orders grouped by unit; each WO expands to work steps) ─
+function WorkOrderRow({ wo }) {
+  const [open, setOpen] = useState(false)
+  const steps = wo.workSteps || []
+  return (
+    <div style={{ borderBottom: `1px solid ${C.border}` }}>
+      <div onClick={() => steps.length && setOpen((o) => !o)}
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px', fontSize: 12.5, cursor: steps.length ? 'pointer' : 'default' }}>
+        <span style={{ width: 14, display: 'flex', justifyContent: 'center', color: C.textMuted, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', opacity: steps.length ? 1 : 0 }}>{IconChevR}</span>
+        <span style={{ flex: 1, color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace' }}>{wo.recordType || wo.name}</span>
+        <span style={{ fontSize: 11, color: C.textMuted }}>{steps.length ? `${steps.length} steps` : ''}</span>
+        <StatusBadge status={wo.status} />
+      </div>
+      {open && steps.length > 0 && (
+        <div style={{ background: C.page, padding: '4px 16px 10px 30px' }}>
+          {steps.map((s) => (
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', fontSize: 12 }}>
+              <span style={{ width: 18, fontSize: 10, color: C.textMuted, fontWeight: 600 }}>{s.order}</span>
+              <span style={{ flex: 1, color: C.textSecondary }}>{s.name}</span>
+              {s.photoUrl && <span style={{ fontSize: 10, color: C.emeraldMid }}>photo</span>}
+              <StatusBadge status={s.status} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ProjectPage({ property, building, project, opportunity, color }) {
   const groups = workOrdersByUnit(project)
   return (
@@ -441,16 +469,11 @@ function ProjectPage({ property, building, project, opportunity, color }) {
       </div>
       <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{shortBuildingName(building.name, property.name)} · {opportunity.program}</div>
 
-      <SectionHeader title="Work Orders by Unit" desc="Each unit's work orders for this project and their current status" />
+      <SectionHeader title="Work Orders by Unit" desc="Open a work order to see its work steps and their status" />
       {groups.map((g) => (
         <div key={g.unitId || 'none'} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 12, overflow: 'hidden' }}>
           <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 13, fontWeight: 700, color: C.textPrimary }}>{g.unitNumber ? `Unit ${g.unitNumber}` : 'Building-level'}</div>
-          {g.workOrders.map((w) => (
-            <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
-              <span style={{ flex: 1, color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace' }}>{w.recordType || w.name}</span>
-              <StatusBadge status={w.status} />
-            </div>
-          ))}
+          {g.workOrders.map((w) => <WorkOrderRow key={w.id} wo={w} />)}
         </div>
       ))}
       {groups.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No work orders on this project yet.</div>}
