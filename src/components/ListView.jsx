@@ -1055,11 +1055,20 @@ function ViewSelector({
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  // A saved view created by overriding a system view carries systemBase = that
-  // system view's id. Hide the in-code system view when an override exists, so
-  // it shows once (in Saved Views) rather than duplicated in both sections.
+  // One unified, de-duplicated "List Views" list. The selector used to split
+  // views into "System Views" and "Saved Views", but ObjectListSection passes
+  // the saved views in as `systemViews` AND ListView loads them again as
+  // `personalViews`, so the same rows landed in both buckets and showed twice.
+  // Merge both sources, drop a system base that a saved override supersedes,
+  // and de-dupe by id so each view appears exactly once.
   const overriddenBaseIds = new Set(personalViews.map(v => v.systemBase).filter(Boolean));
-  const visibleSystemViews = systemViews.filter(v => !overriddenBaseIds.has(v.id));
+  const listViews = [];
+  const seenViewIds = new Set();
+  for (const v of [...systemViews, ...personalViews]) {
+    if (!v || overriddenBaseIds.has(v.id) || seenViewIds.has(v.id)) continue;
+    seenViewIds.add(v.id);
+    listViews.push(v);
+  }
 
   const IconBtn = ({ title, onClick, children, danger }) => (
     <button title={title} onClick={(e) => { e.stopPropagation(); onClick(); }}
@@ -1125,15 +1134,8 @@ function ViewSelector({
       maxHeight: maxH, overflowY: 'auto', overflowX: 'hidden',
     }}>
       <div style={{ padding: '8px 0' }}>
-        <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>System Views</div>
-        {visibleSystemViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
-        {personalViews.length > 0 && (
-          <>
-            <div style={{ height: 1, background: C.border, margin: '6px 0' }} />
-            <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Saved Views</div>
-            {personalViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
-          </>
-        )}
+        <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>List Views</div>
+        {listViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
         {persistEnabled && (
           <>
             <div style={{ height: 1, background: C.border, margin: '6px 0' }} />
