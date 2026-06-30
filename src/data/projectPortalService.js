@@ -52,6 +52,13 @@ export async function fetchProjectTracker() {
   const payload = data || {}
   if (payload.error) return { error: payload.error, properties: [] }
 
+  const mapWorkStep = (s) => ({
+    id: s.id,
+    name: s.name || '',
+    status: s.status || '',              // work_step_status label
+    order: Number(s.order) || 0,
+    photoUrl: s.photo_url || null,       // work_step_reference_photo_url (future photo exposure)
+  })
   const mapWorkOrder = (w) => ({
     id: w.id,
     name: w.name || '',
@@ -59,6 +66,7 @@ export async function fetchProjectTracker() {
     status: w.status || '',              // work_order_status label
     unitId: w.unit_id || null,
     unitNumber: w.unit_number || '',
+    workSteps: (w.work_steps || []).map(mapWorkStep),
   })
   const mapProject = (pr) => ({
     id: pr.id,
