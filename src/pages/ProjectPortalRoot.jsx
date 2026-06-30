@@ -1,5 +1,5 @@
 // =============================================================================
-// ProjectPortalRoot — customer-facing Multi-Family Project Portal
+// ProjectPortalRoot — customer-facing Project Portal
 //
 // Mounted at /project-portal (and /project-portal/*) via path-based routing in
 // main.jsx. Stands alone — no staff sidebar/topbar chrome. A property owner or
@@ -8,19 +8,15 @@
 // portal_user_property_grants determine what they see. The tree comes from the
 // get_portal_project_tracker() RPC.
 //
-// Layout follows the approved Multi-Family Project Portal mockup, re-skinned
-// into the LEAP design system (Inter, emerald/navy, no red/orange):
-//   • Left tree sidebar (navy #07111f): Property → Building → Unit.
-//   • Property page  — banner, unit-status stat cards, building cards,
-//                      per-program stage breakdown.
-//   • Building page  — stat cards + per-unit program cards.
-//   • Unit page      — a data-driven stage bar per program.
+// MODEL: everything is driven by OPPORTUNITY statuses, and opportunities are
+// BUILDING-level. Properties have statuses elsewhere in LEAP, but the portal
+// does not track them — a property is just a container you click into. Each
+// building has its own opportunities (one per record type), each with a
+// data-driven stage bar. Navigation: Property → Building.
 //
-// PROGRAMS ARE DATA-DRIVEN: a "program" is just an opportunity's record type.
-// The portal discovers the distinct record types present under a property and
-// renders one track per record type (1, 2, or N) — labeled by the record type
-// exactly as stored, colored from the LEAP palette by index. Nothing is
-// hardcoded to any specific program (no "HOMES"/"HEAR" in the code).
+// Re-skinned into the LEAP design system: navy sidebar (#07111f), light page,
+// Inter / JetBrains Mono, no red/orange. Program tracks are data-driven — one
+// per opportunity record type, labeled as stored, colored from the palette.
 // =============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -33,15 +29,13 @@ import {
   oppBucket,
   oppForProgram,
   propertyPrograms,
-  unitStatus,
-  unitProgramPct,
+  buildingStatus,
   buildingProgramPct,
   propertyProgramPct,
-  unitStats,
-  allUnits,
+  buildingStats,
+  allBuildings,
 } from '../data/projectPortalService'
 
-// Build a stable program → color map from the property's program list.
 function makeColorOf(programs) {
   return (program) => {
     const i = programs.indexOf(program)
@@ -60,6 +54,14 @@ function bucketMeta(bucket) {
   }
 }
 
+// Building names are stored with the property prefix ("<Property> - Building 1");
+// trim it for display when we already show the property in context.
+function shortBuildingName(name, propertyName) {
+  if (!name) return ''
+  if (propertyName && name.startsWith(propertyName + ' - ')) return name.slice(propertyName.length + 3)
+  return name
+}
+
 // ─── SVG icons (1.5px stroke, no fill, no emoji) ─────────────────────────────
 const Ico = ({ d, size = 18, w = 1.5 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -71,9 +73,8 @@ const IconBldg = <Ico d={<><path d="M3 10.5L12 3l9 7.5V21a1 1 0 01-1 1H5a1 1 0 0
 const IconChevR = <Ico d={<polyline points="9 18 15 12 9 6" />} size={12} w={1.8} />
 const IconSearch = <Ico d={<><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></>} size={13} />
 
-// ─── Program-label display ───────────────────────────────────────────────────
-// Stage labels are stored long-form (e.g. "Opportunity — HEAR Income
-// Qualification"); strip the generic "Opportunity — " lead-in for the dots.
+// Stage labels are stored long-form ("Opportunity — HEAR Income Qualification");
+// strip the generic "Opportunity — " lead-in for the dots.
 function shortStageLabel(label) {
   if (!label) return ''
   return label.replace(/^\s*Opportunity\s*[—–-]\s*/i, '').trim() || label
@@ -90,6 +91,7 @@ function Bar({ pct, color, h = 5 }) {
 
 // One mini bar per program (record type) for a tree node.
 function MiniTracks({ programs, colorOf, pctOf }) {
+  if (!programs.length) return <div style={{ width: 56, flexShrink: 0 }} />
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 56, flexShrink: 0 }}>
       {programs.map((pg) => {
@@ -154,10 +156,10 @@ function StageBar({ opp, accent }) {
   )
 }
 
-// ─── Tree sidebar ─────────────────────────────────────────────────────────────
+// ─── Tree sidebar (Property → Building) ──────────────────────────────────────
 function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user, onSignOut }) {
   const q = (query || '').toLowerCase()
-  const matchUnit = (u) => !q || (u.unitNumber + ' ' + u.name).toLowerCase().includes(q)
+  const matchBldg = (b, pName) => !q || (shortBuildingName(b.name, pName) + ' ' + b.name).toLowerCase().includes(q)
 
   return (
     <nav style={{ width: 272, background: C.sidebar, display: 'flex', flexDirection: 'column', height: '100vh', flexShrink: 0 }}>
@@ -174,7 +176,7 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
       <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
         <div style={{ position: 'relative' }}>
           <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: C.navInactive, display: 'flex' }}>{IconSearch}</span>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search units…"
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search buildings…"
             style={{ width: '100%', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.09)', borderRadius: 6, padding: '7px 8px 7px 28px', color: '#fff', fontSize: 12, outline: 'none', fontFamily: 'inherit' }} />
         </div>
       </div>
@@ -191,48 +193,28 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
                 style={{ display: 'flex', alignItems: 'center', padding: '7px 10px 7px 8px', cursor: 'pointer',
                   borderLeft: `3px solid ${pActive ? C.emerald : 'transparent'}`,
                   background: pActive ? 'rgba(62,207,142,.16)' : 'transparent' }}>
-                <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, prop: o.prop === p.id ? null : p.id })) }}
+                <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ prop: o.prop === p.id ? null : p.id })) }}
                   style={{ width: 18, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: pOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>{IconChevR}</span>
                 <span style={{ color: C.navInactive, marginRight: 6, display: 'flex' }}>{IconProp}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                  <div style={{ fontSize: 10, color: C.navInactive }}>{(p.buildings || []).length} bldgs · {allUnits(p).length} units</div>
+                  <div style={{ fontSize: 10, color: C.navInactive }}>{(p.buildings || []).length} buildings</div>
                 </div>
                 <MiniTracks programs={programs} colorOf={colorOf} pctOf={(pg) => propertyProgramPct(p, pg)} />
               </div>
 
-              {pOpen && (p.buildings || []).map((b) => {
-                const bKey = `${p.id}:${b.id}`
-                const bOpen = open.bldg === bKey
-                const bActive = sel.bid === b.id && !sel.uid
+              {pOpen && (p.buildings || []).filter((b) => matchBldg(b, p.name)).map((b) => {
+                const bActive = sel.bid === b.id
+                const meta = bucketMeta(buildingStatus(b))
                 return (
-                  <div key={b.id}>
-                    <div onClick={() => onSelect({ pid: p.id, bid: b.id })}
-                      style={{ display: 'flex', alignItems: 'center', padding: '5px 10px 5px 26px', cursor: 'pointer',
-                        borderLeft: `3px solid ${bActive ? C.sky : 'transparent'}`,
-                        background: bActive ? 'rgba(126,179,232,.16)' : 'transparent' }}>
-                      <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, bldg: o.bldg === bKey ? null : bKey })) }}
-                        style={{ width: 16, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: bOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>{IconChevR}</span>
-                      <span style={{ color: 'rgba(255,255,255,.45)', marginRight: 5, display: 'flex' }}>{IconBldg}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,.88)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>
-                      </div>
-                      <MiniTracks programs={programs} colorOf={colorOf} pctOf={(pg) => buildingProgramPct(b, pg)} />
-                    </div>
-
-                    {bOpen && (b.units || []).filter(matchUnit).map((u) => {
-                      const uActive = sel.uid === u.id
-                      const meta = bucketMeta(unitStatus(u))
-                      return (
-                        <div key={u.id} onClick={() => onSelect({ pid: p.id, bid: b.id, uid: u.id })}
-                          style={{ display: 'flex', alignItems: 'center', padding: '4px 10px 4px 46px', cursor: 'pointer',
-                            borderLeft: `3px solid ${uActive ? C.emerald : 'transparent'}`,
-                            background: uActive ? 'rgba(62,207,142,.14)' : 'transparent' }}>
-                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.dot, marginRight: 8, flexShrink: 0 }} />
-                          <span style={{ flex: 1, fontSize: 11.5, color: uActive ? '#fff' : 'rgba(255,255,255,.66)', fontWeight: uActive ? 700 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Unit {u.unitNumber}</span>
-                        </div>
-                      )
-                    })}
+                  <div key={b.id} onClick={() => onSelect({ pid: p.id, bid: b.id })}
+                    style={{ display: 'flex', alignItems: 'center', padding: '6px 10px 6px 30px', cursor: 'pointer',
+                      borderLeft: `3px solid ${bActive ? C.sky : 'transparent'}`,
+                      background: bActive ? 'rgba(126,179,232,.16)' : 'transparent' }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.dot, marginRight: 8, flexShrink: 0 }} />
+                    <span style={{ color: 'rgba(255,255,255,.45)', marginRight: 6, display: 'flex' }}>{IconBldg}</span>
+                    <span style={{ flex: 1, fontSize: 12, color: bActive ? '#fff' : 'rgba(255,255,255,.8)', fontWeight: bActive ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{shortBuildingName(b.name, p.name)}</span>
+                    <MiniTracks programs={programs} colorOf={colorOf} pctOf={(pg) => buildingProgramPct(b, pg)} />
                   </div>
                 )
               })}
@@ -292,7 +274,6 @@ function SectionHeader({ title, desc, action }) {
   )
 }
 
-// One labeled progress row for a program (record type).
 function ProgRow({ program, pct, color }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
@@ -303,7 +284,6 @@ function ProgRow({ program, pct, color }) {
   )
 }
 
-// Color legend mapping each track color → its program (record type) name.
 function ProgramLegend({ programs, colorOf }) {
   if (programs.length === 0) return null
   return (
@@ -318,9 +298,9 @@ function ProgramLegend({ programs, colorOf }) {
   )
 }
 
-// ─── Property page ────────────────────────────────────────────────────────────
+// ─── Property page (container: lists buildings + their statuses) ─────────────
 function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
-  const s = unitStats(property)
+  const s = buildingStats(property)
   return (
     <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
       <div style={{ background: `linear-gradient(135deg, ${C.sidebar} 0%, #12243d 100%)`, borderRadius: 12, padding: '20px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -328,19 +308,7 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>{property.name}</div>
           <div style={{ fontSize: 12.5, color: C.navInactive, marginTop: 3 }}>{[property.city, property.state].filter(Boolean).join(', ')}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-            {programs.map((pg) => {
-              const v = propertyProgramPct(property, pg)
-              return (
-                <span key={pg} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: 'rgba(255,255,255,.85)', border: '1px solid rgba(255,255,255,.15)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(pg) }} />
-                  {pg} {v == null ? '—' : `${v}%`}
-                </span>
-              )
-            })}
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: 'rgba(255,255,255,.85)', border: '1px solid rgba(255,255,255,.15)' }}>{(property.buildings || []).length} Buildings</span>
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: 'rgba(255,255,255,.85)', border: '1px solid rgba(255,255,255,.15)' }}>{s.total} Units</span>
-          </div>
+          <div style={{ fontSize: 11.5, color: C.navInactive, marginTop: 8 }}>{(property.buildings || []).length} buildings · status tracked per building below</div>
         </div>
         <div style={{ display: 'flex', gap: 22, flexShrink: 0 }}>
           {[['Complete', s.complete, C.emerald], ['In Progress', s.inProgress, C.sky], ['Not Started', s.notStarted, 'rgba(255,255,255,.5)']].map(([l, v, col]) => (
@@ -353,7 +321,7 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
       </div>
 
       <div style={{ marginBottom: 30 }}>
-        <SectionHeader title="Unit Status at a Glance" desc="Across all buildings in this property" />
+        <SectionHeader title="Building Status at a Glance" desc="Each building carries its own opportunity status" />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
           <StatCard label="All Programs Complete" value={s.complete} accent={C.emerald} />
           <StatCard label="Work In Progress" value={s.inProgress} accent={C.sky} />
@@ -362,120 +330,40 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
         </div>
       </div>
 
-      <div style={{ marginBottom: 30 }}>
-        <SectionHeader title="Buildings" desc="Progress by building — click a building to see its units" action={`${(property.buildings || []).length} buildings`} />
+      <div>
+        <SectionHeader title="Buildings" desc="Click a building to see its opportunity stage detail" action={`${(property.buildings || []).length} buildings`} />
         <ProgramLegend programs={programs} colorOf={colorOf} />
         <div style={{ display: 'grid', gap: 12 }}>
           {(property.buildings || []).map((b) => {
-            const dc = (b.units || []).filter((u) => unitStatus(u) === 'complete').length
+            const meta = bucketMeta(buildingStatus(b))
             return (
               <div key={b.id} onClick={() => onOpenBuilding(b)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '16px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16 }}>
                 <div style={{ width: 40, height: 40, background: C.page, border: `1px solid ${C.border}`, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.emerald, flexShrink: 0 }}>{IconBldg}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{b.name}</div>
-                  <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 8 }}>{(b.units || []).length} units</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{shortBuildingName(b.name, property.name)}</div>
+                  <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 8 }}>{(b.opportunities || []).length} opportunit{(b.opportunities || []).length === 1 ? 'y' : 'ies'}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 460 }}>
-                    {programs.map((pg) => <ProgRow key={pg} program={pg} pct={buildingProgramPct(b, pg)} color={colorOf(pg)} />)}
+                    {programs.map((pg) => {
+                      const has = oppForProgram(b, pg)
+                      return has ? <ProgRow key={pg} program={pg} pct={buildingProgramPct(b, pg)} color={colorOf(pg)} /> : null
+                    })}
                   </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
-                  <span style={{ fontSize: 11, color: C.textMuted }}>{dc} of {(b.units || []).length} complete</span>
-                  <span style={{ fontSize: 11.5, color: C.emeraldMid, fontWeight: 600 }}>View units →</span>
+                  <span style={{ fontSize: 10.5, fontWeight: 600, color: meta.color, background: meta.bg, padding: '2px 8px', borderRadius: 10 }}>{meta.label}</span>
+                  <span style={{ fontSize: 11.5, color: C.emeraldMid, fontWeight: 600 }}>View detail →</span>
                 </div>
               </div>
             )
           })}
         </div>
       </div>
-
-      <div>
-        <SectionHeader title="Work Order Stage Breakdown" desc="How many units sit at each stage, per program" />
-        <div style={{ display: 'grid', gridTemplateColumns: programs.length > 1 ? '1fr 1fr' : '1fr', gap: 12 }}>
-          {programs.map((pg) => <StageBreakdown key={pg} property={property} program={pg} color={colorOf(pg)} />)}
-          {programs.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No program work recorded on this property yet.</div>}
-        </div>
-      </div>
     </div>
   )
 }
 
-// Per-program: count units by the rank their program opp currently sits at,
-// using that program's own (data-driven) stage list for labels.
-function StageBreakdown({ property, program, color }) {
-  const units = allUnits(property)
-  const ref = units.map((u) => oppForProgram(u, program)).find(Boolean)
-  const stages = ref?.stages || []
-  return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
-      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-        <span style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{program}</span>
-      </div>
-      {stages.length === 0 && <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>No work for this program on this property.</div>}
-      {stages.map((st) => {
-        const cnt = units.filter((u) => {
-          const o = oppForProgram(u, program)
-          return o && o.stageOrder === st.sortOrder
-        }).length
-        const pct = units.length ? Math.round(cnt / units.length * 100) : 0
-        return (
-          <div key={st.sortOrder} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
-            <div style={{ flex: 1, color: C.textSecondary }}>{shortStageLabel(st.label)}</div>
-            <div style={{ width: 90 }}><Bar pct={Math.min(pct * 2, 100)} color={color} /></div>
-            <div style={{ width: 56, textAlign: 'right', fontWeight: 600, fontSize: 12, color: cnt ? C.textPrimary : C.textMuted }}>{cnt ? `${cnt} unit${cnt === 1 ? '' : 's'}` : '—'}</div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ─── Building page ────────────────────────────────────────────────────────────
-function BuildingPage({ property, building, programs, colorOf, onOpenUnit }) {
-  const units = building.units || []
-  const bucket = (b) => units.filter((u) => unitStatus(u) === b).length
-  return (
-    <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
-      <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>{building.name}</div>
-      <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 18 }}>{property.name} · {units.length} units</div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 22 }}>
-        <StatCard label="Complete" value={bucket('complete')} accent={C.emerald} sub={`of ${units.length} units`} />
-        <StatCard label="In Progress" value={bucket('inProgress')} accent={C.sky} />
-        <StatCard label="In Submittal" value={bucket('submittal')} accent={C.emeraldMid} />
-        <StatCard label="Not Started" value={bucket('notStarted')} accent={C.textMuted} />
-      </div>
-
-      <SectionHeader title={`Units — ${building.name}`} desc="Click a unit for its program work-order detail" />
-      <ProgramLegend programs={programs} colorOf={colorOf} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
-        {units.map((u) => (
-          <div key={u.id} onClick={() => onOpenUnit(u)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px', cursor: 'pointer' }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary, marginBottom: 8 }}>Unit {u.unitNumber}</div>
-            {programs.map((pg) => {
-              const o = oppForProgram(u, pg)
-              const color = colorOf(pg)
-              const meta = bucketMeta(oppBucket(o))
-              return (
-                <div key={pg} style={{ marginBottom: 6 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9.5, marginBottom: 3 }}>
-                    <span style={{ fontWeight: 700, color, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 }} title={pg}>{pg}</span>
-                    <span style={{ fontSize: 9, fontWeight: 600, color: meta.color, background: meta.bg, padding: '1px 6px', borderRadius: 10, flexShrink: 0 }}>{o ? meta.label : 'N/A'}</span>
-                  </div>
-                  <Bar pct={oppPct(o)} color={color} h={4} />
-                </div>
-              )
-            })}
-          </div>
-        ))}
-        {units.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No units recorded for this building yet.</div>}
-      </div>
-    </div>
-  )
-}
-
-// ─── Unit page ────────────────────────────────────────────────────────────────
-function UnitProgramCard({ program, opp, color }) {
+// ─── Building page (its opportunities, each a data-driven stage bar) ─────────
+function OpportunityCard({ program, opp, color }) {
   const count = (opp?.stages || []).length
   const so = opp?.stageOrder || 0
   return (
@@ -486,36 +374,28 @@ function UnitProgramCard({ program, opp, color }) {
         {opp && <span style={{ marginLeft: 'auto', fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{opp.recordNumber}</span>}
       </div>
       <div style={{ padding: '20px 22px 14px' }}>
-        {opp ? (
-          <>
-            <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 16 }}>
-              Current stage: <strong style={{ color: C.textPrimary }}>{shortStageLabel(opp.stageLabel)}</strong>
-            </div>
-            <StageBar opp={opp} accent={color} />
-            <div style={{ marginTop: 8, fontSize: 12, color: C.textSecondary }}>
-              {count > 0 && so >= count ? 'All program phases are complete.'
-                : so > 0 ? `Phase ${so} of ${count} — ${oppPct(opp)}% through the program lifecycle.`
-                : 'This program has not started yet.'}
-            </div>
-          </>
-        ) : (
-          <div style={{ fontSize: 12.5, color: C.textMuted }}>No opportunity for this program on this unit.</div>
-        )}
+        <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 16 }}>
+          Current stage: <strong style={{ color: C.textPrimary }}>{shortStageLabel(opp.stageLabel)}</strong>
+        </div>
+        <StageBar opp={opp} accent={color} />
+        <div style={{ marginTop: 8, fontSize: 12, color: C.textSecondary }}>
+          {count > 0 && so >= count ? 'All program phases are complete.'
+            : so > 0 ? `Phase ${so} of ${count} — ${oppPct(opp)}% through the program lifecycle.`
+            : 'This program has not started yet.'}
+        </div>
       </div>
     </div>
   )
 }
 
-function UnitPage({ property, building, unit, programs, colorOf }) {
-  // Render a card for each program this unit actually has, in property order.
-  const present = programs.filter((pg) => oppForProgram(unit, pg))
-  const list = present.length ? present : programs
+function BuildingPage({ property, building, colorOf }) {
+  const opps = building.opportunities || []
   return (
     <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
-      <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>Unit {unit.unitNumber}</div>
-      <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{property.name} · {building.name}</div>
-      {list.map((pg) => <UnitProgramCard key={pg} program={pg} opp={oppForProgram(unit, pg)} color={colorOf(pg)} />)}
-      {list.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No opportunities recorded for this unit yet.</div>}
+      <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>{shortBuildingName(building.name, property.name)}</div>
+      <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{property.name}{building.address ? ` · ${building.address}` : ''}</div>
+      {opps.map((o) => <OpportunityCard key={o.id} program={o.program} opp={o} color={colorOf(o.program)} />)}
+      {opps.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No opportunities recorded for this building yet.</div>}
     </div>
   )
 }
@@ -567,8 +447,8 @@ export default function ProjectPortalRoot() {
   const [phase, setPhase] = useState('loading')   // loading | login | ready | error | notportal
   const [self, setSelf] = useState(null)
   const [tree, setTree] = useState([])
-  const [sel, setSel] = useState({ pid: null, bid: null, uid: null })
-  const [open, setOpen] = useState({ prop: null, bldg: null })
+  const [sel, setSel] = useState({ pid: null, bid: null })
+  const [open, setOpen] = useState({ prop: null })
   const [query, setQuery] = useState('')
   const [errMsg, setErrMsg] = useState(null)
 
@@ -584,8 +464,8 @@ export default function ProjectPortalRoot() {
       const props = t.properties || []
       setTree(props)
       const first = props[0]
-      setSel({ pid: first ? first.id : null, bid: null, uid: null })
-      setOpen({ prop: first ? first.id : null, bldg: null })
+      setSel({ pid: first ? first.id : null, bid: null })
+      setOpen({ prop: first ? first.id : null })
       setPhase('ready')
     } catch (e) {
       setErrMsg(e?.message || 'Failed to load the portal.')
@@ -601,18 +481,14 @@ export default function ProjectPortalRoot() {
   const signOut = async () => { await supabase.auth.signOut(); setSelf(null); setTree([]); setPhase('login') }
 
   const onSelect = useCallback((next) => {
-    setSel({ pid: next.pid || null, bid: next.bid || null, uid: next.uid || null })
-    setOpen((o) => ({
-      prop: next.pid || o.prop,
-      bldg: next.bid ? `${next.pid}:${next.bid}` : (next.uid ? o.bldg : null),
-    }))
+    setSel({ pid: next.pid || null, bid: next.bid || null })
+    setOpen({ prop: next.pid || null })
   }, [])
 
-  const { property, building, unit } = useMemo(() => {
+  const { property, building } = useMemo(() => {
     const property = tree.find((p) => p.id === sel.pid) || tree[0] || null
     const building = property && sel.bid ? (property.buildings || []).find((b) => b.id === sel.bid) : null
-    const unit = building && sel.uid ? (building.units || []).find((u) => u.id === sel.uid) : null
-    return { property, building, unit }
+    return { property, building }
   }, [tree, sel])
 
   const programs = useMemo(() => (property ? propertyPrograms(property) : []), [property])
@@ -623,9 +499,8 @@ export default function ProjectPortalRoot() {
   if (phase === 'notportal') return <Centered>{errMsg}<SignOutLink onClick={signOut} /></Centered>
   if (phase === 'error') return <Centered>{errMsg || 'Something went wrong.'}<SignOutLink onClick={signOut} /></Centered>
 
-  const crumb = [{ label: property ? property.name : 'Properties', onClick: (building || unit) ? () => onSelect({ pid: property.id }) : null }]
-  if (building) crumb.push({ label: building.name, onClick: unit ? () => onSelect({ pid: property.id, bid: building.id }) : null })
-  if (unit) crumb.push({ label: `Unit ${unit.unitNumber}`, onClick: null })
+  const crumb = [{ label: property ? property.name : 'Properties', onClick: building ? () => onSelect({ pid: property.id }) : null }]
+  if (building) crumb.push({ label: shortBuildingName(building.name, property.name), onClick: null })
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif', background: C.page }}>
@@ -637,8 +512,7 @@ export default function ProjectPortalRoot() {
         </div>
         <div style={{ flex: 1, overflowY: 'auto', background: C.page }}>
           {!property && <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>}
-          {property && unit && building && <UnitPage property={property} building={building} unit={unit} programs={programs} colorOf={colorOf} />}
-          {property && building && !unit && <BuildingPage property={property} building={building} programs={programs} colorOf={colorOf} onOpenUnit={(u) => onSelect({ pid: property.id, bid: building.id, uid: u.id })} />}
+          {property && building && <BuildingPage property={property} building={building} colorOf={colorOf} />}
           {property && !building && <PropertyPage property={property} programs={programs} colorOf={colorOf} onOpenBuilding={(b) => onSelect({ pid: property.id, bid: b.id })} />}
         </div>
       </div>
