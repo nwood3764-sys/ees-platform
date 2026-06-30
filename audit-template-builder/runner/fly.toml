@@ -1,0 +1,36 @@
+# Fly.io config for the EnergyPlus runner.
+#
+# Scale-to-zero (min_machines_running = 0): the machine sleeps when idle and
+# wakes on the next /run-osm request, so you only pay while a simulation runs.
+# A cold start adds a few seconds before the ~16 s EnergyPlus run.
+#
+# First deploy:
+#   fly launch --no-deploy      # generates/adjusts this file + creates the app
+#   fly secrets set ALLOWED_ORIGIN="https://audit-template.ees-wi.org"
+#   fly deploy
+#
+# Rename "app" below to your chosen Fly app name before launching.
+
+app = "ees-audit-runner"
+primary_region = "ord"   # Chicago — closest Fly region to Wisconsin
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 2
+    hard_limit = 4
+
+# EnergyPlus is memory- and CPU-hungry; give the machine room for a sim.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 2
+  memory = "2gb"

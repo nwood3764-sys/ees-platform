@@ -1,0 +1,9 @@
+README.md
+weather/
+__pycache__/
+*.pyc
+rundir/
+*.osm
+*.idf
+*.sql
+*.htm

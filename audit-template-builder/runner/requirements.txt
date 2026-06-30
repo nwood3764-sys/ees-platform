@@ -1,0 +1,7 @@
+# Pinned per build spec section 2.1. The OpenStudio SDK version is load-bearing:
+# SDK 3.11.0 pairs with EnergyPlus 25.2.0 (installed in the Dockerfile). A
+# mismatched EnergyPlus engine fatally fails the SDK-translated IDF.
+openstudio==3.11.0
+flask==3.0.3
+flask-cors==5.0.0
+gunicorn==23.0.0
