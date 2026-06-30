@@ -32,8 +32,9 @@ import {
   buildingStatus,
   buildingProgramPct,
   propertyProgramPct,
-  buildingStats,
-  allBuildings,
+  propertyCounts,
+  workOrderStatusCounts,
+  projectStatusCounts,
   findProject,
   workOrdersByUnit,
 } from '../data/projectPortalService'
@@ -311,39 +312,87 @@ function ProgramLegend({ programs, colorOf }) {
 }
 
 // ─── Property page (container: lists buildings + their statuses) ─────────────
+function KpiCard({ label, value, accent }) {
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderTop: `3px solid ${accent || C.borderDark}`, borderRadius: 10, padding: '14px 16px' }}>
+      <div style={{ fontSize: 26, fontWeight: 700, color: C.textPrimary, lineHeight: 1, letterSpacing: '-0.5px' }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 5 }}>{label}</div>
+    </div>
+  )
+}
+
+function StatusBreakdown({ title, items }) {
+  const total = items.reduce((a, i) => a + i.count, 0)
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 13, fontWeight: 700, color: C.textPrimary }}>{title}</div>
+      {items.length === 0 && <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>None yet.</div>}
+      {items.map((i) => {
+        const cfg = STATUS_CFG[i.status] || { dot: C.textMuted }
+        const pct = total ? Math.round(i.count / total * 100) : 0
+        return (
+          <div key={i.status} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
+            <span style={{ flex: 1, color: C.textSecondary }}>{i.status}</span>
+            <div style={{ width: 90 }}><Bar pct={pct} color={cfg.dot || C.sky} /></div>
+            <span style={{ width: 28, textAlign: 'right', fontWeight: 700, color: C.textPrimary }}>{i.count}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
-  const s = buildingStats(property)
+  const counts = propertyCounts(property)
+  const woStatuses = workOrderStatusCounts(property)
+  const projStatuses = projectStatusCounts(property)
   return (
     <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
-      <div style={{ background: `linear-gradient(135deg, ${C.sidebar} 0%, #12243d 100%)`, borderRadius: 12, padding: '20px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 20 }}>
+      <div style={{ background: `linear-gradient(135deg, ${C.sidebar} 0%, #12243d 100%)`, borderRadius: 12, padding: '20px 24px', marginBottom: 22, display: 'flex', alignItems: 'center', gap: 20 }}>
         <div style={{ width: 48, height: 48, background: 'rgba(62,207,142,.25)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0 }}>{IconProp}</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>{property.name}</div>
           <div style={{ fontSize: 12.5, color: C.navInactive, marginTop: 3 }}>{[property.city, property.state].filter(Boolean).join(', ')}</div>
-          <div style={{ fontSize: 11.5, color: C.navInactive, marginTop: 8 }}>{(property.buildings || []).length} buildings · status tracked per building below</div>
-        </div>
-        <div style={{ display: 'flex', gap: 22, flexShrink: 0 }}>
-          {[['Complete', s.complete, C.emerald], ['In Progress', s.inProgress, C.sky], ['Not Started', s.notStarted, 'rgba(255,255,255,.5)']].map(([l, v, col]) => (
-            <div key={l} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color: col, lineHeight: 1 }}>{v}</div>
-              <div style={{ fontSize: 10, color: C.navInactive, marginTop: 3, textTransform: 'uppercase', letterSpacing: '.4px' }}>{l}</div>
-            </div>
-          ))}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+            {programs.map((pg) => {
+              const v = propertyProgramPct(property, pg)
+              return (
+                <span key={pg} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: 'rgba(255,255,255,.1)', color: 'rgba(255,255,255,.85)', border: '1px solid rgba(255,255,255,.15)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(pg) }} />{pg} {v == null ? '—' : `${v}%`}
+                </span>
+              )
+            })}
+          </div>
         </div>
       </div>
 
-      <div style={{ marginBottom: 30 }}>
-        <SectionHeader title="Building Status at a Glance" desc="Each building carries its own opportunity status" />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
-          <StatCard label="All Programs Complete" value={s.complete} accent={C.emerald} />
-          <StatCard label="Work In Progress" value={s.inProgress} accent={C.sky} />
-          <StatCard label="In Submittal" value={s.submittal} accent={C.emeraldMid} />
-          <StatCard label="Not Yet Started" value={s.notStarted} accent={C.textMuted} />
+      {/* KPI row — real counts down the whole chain */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 28 }}>
+        <KpiCard label="Buildings" value={counts.buildings} accent={C.emerald} />
+        <KpiCard label="Units" value={counts.units} accent={C.emerald} />
+        <KpiCard label="Opportunities" value={counts.opportunities} accent={C.sky} />
+        <KpiCard label="Projects" value={counts.projects} accent={C.sky} />
+        <KpiCard label="Work Orders" value={counts.workOrders} accent={C.emeraldMid} />
+      </div>
+
+      {/* Opportunity progress per program */}
+      <div style={{ marginBottom: 28 }}>
+        <SectionHeader title="Opportunity Progress" desc="Average progress through each program's lifecycle, across all buildings" />
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {programs.map((pg) => <ProgRow key={pg} program={pg} pct={propertyProgramPct(property, pg)} color={colorOf(pg)} />)}
+          {programs.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No opportunities on this property yet.</div>}
         </div>
+      </div>
+
+      {/* Work order + project status rollups */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 30 }}>
+        <StatusBreakdown title="Work Orders by Status" items={woStatuses} />
+        <StatusBreakdown title="Projects by Status" items={projStatuses} />
       </div>
 
       <div>
-        <SectionHeader title="Buildings" desc="Click a building to see its opportunity stage detail" action={`${(property.buildings || []).length} buildings`} />
+        <SectionHeader title="Buildings" desc="Click a building to see its opportunities, projects and work orders" action={`${(property.buildings || []).length} buildings`} />
         <ProgramLegend programs={programs} colorOf={colorOf} />
         <div style={{ display: 'grid', gap: 12 }}>
           {(property.buildings || []).map((b) => {
@@ -353,7 +402,7 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
                 <div style={{ width: 40, height: 40, background: C.page, border: `1px solid ${C.border}`, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.emerald, flexShrink: 0 }}>{IconBldg}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{shortBuildingName(b.name, property.name)}</div>
-                  <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 8 }}>{(b.opportunities || []).length} opportunit{(b.opportunities || []).length === 1 ? 'y' : 'ies'}</div>
+                  <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 8 }}>{b.unitCount} unit{b.unitCount === 1 ? '' : 's'} · {(b.opportunities || []).length} opportunit{(b.opportunities || []).length === 1 ? 'y' : 'ies'}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 460 }}>
                     {programs.map((pg) => {
                       const has = oppForProgram(b, pg)

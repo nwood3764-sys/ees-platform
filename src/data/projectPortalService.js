@@ -103,6 +103,7 @@ export async function fetchProjectTracker() {
       recordNumber: b.record_number || '',
       address: b.address || '',
       totalUnits: b.total_units ?? null,
+      unitCount: Number(b.unit_count) || 0,
       opportunities: (b.opportunities || []).map(mapOpp),
     })),
   }))
@@ -184,6 +185,51 @@ export function buildingStatus(building) {
 
 export function allBuildings(property) {
   return property.buildings || []
+}
+
+// ─── Property dashboard rollups ──────────────────────────────────────────────
+// Top-line counts across the property's whole tree.
+export function propertyCounts(property) {
+  let buildings = 0, units = 0, opportunities = 0, projects = 0, workOrders = 0
+  for (const b of property?.buildings || []) {
+    buildings++
+    units += b.unitCount || 0
+    for (const o of b.opportunities || []) {
+      opportunities++
+      for (const pr of o.projects || []) {
+        projects++
+        workOrders += (pr.workOrders || []).length
+      }
+    }
+  }
+  return { buildings, units, opportunities, projects, workOrders }
+}
+
+// Iterate every work order under a property.
+function eachWorkOrder(property, fn) {
+  for (const b of property?.buildings || [])
+    for (const o of b.opportunities || [])
+      for (const pr of o.projects || [])
+        for (const w of pr.workOrders || []) fn(w)
+}
+
+function eachProject(property, fn) {
+  for (const b of property?.buildings || [])
+    for (const o of b.opportunities || [])
+      for (const pr of o.projects || []) fn(pr)
+}
+
+// Count work orders by their status label → [{ status, count }] (most first).
+export function workOrderStatusCounts(property) {
+  const m = new Map()
+  eachWorkOrder(property, (w) => { const k = w.status || 'Unknown'; m.set(k, (m.get(k) || 0) + 1) })
+  return Array.from(m, ([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count)
+}
+
+export function projectStatusCounts(property) {
+  const m = new Map()
+  eachProject(property, (pr) => { const k = pr.status || 'Unknown'; m.set(k, (m.get(k) || 0) + 1) })
+  return Array.from(m, ([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count)
 }
 
 // ─── Projects / work orders ──────────────────────────────────────────────────
