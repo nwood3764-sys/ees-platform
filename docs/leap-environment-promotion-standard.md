@@ -59,17 +59,24 @@ differ (the `staging` branch carries a `netlify.toml` pointed at the staging DB)
 - After any DDL: re-issue REVOKE/GRANT, `NOTIFY pgrst, 'reload schema'`, and run
   `get_advisors(security)` (only NEW findings beyond the ~179 baseline matter).
 
-### 3. Configuration & records — **production is the source of truth**
+### 3. Configuration & records — **built once, in production**
 This covers work types, work plans, **work-order templates, work-step
 templates**, picklist values, record types, status lifecycles, *and* all real
 records (opportunities, projects, work orders, etc.).
-- These live as **rows in the database**, managed by admins through LEAP Admin in
-  **production**. Their permanent home is prod.
-- To test new configuration safely: **refresh staging first** (so it mirrors
-  prod), build/try the config in staging, confirm it behaves — then **re-create
-  it in production** via LEAP Admin or a small **idempotent upsert** migration.
-- **Never** copy staging's config/record tables over production. Config and
-  records do not "flow up" with a bulk copy — only code and additive schema do.
+- **The admin builds these directly in production, once, through LEAP Admin.**
+  That is their permanent home. Do **not** double-build them in staging.
+- This is safe by design — it is the everyday-admin layer, not schema surgery:
+  - **Additive** — a new work plan / template / picklist value sits *alongside*
+    the existing ones; it doesn't change or replace anything, and a new template
+    is inert until it's attached to a job.
+  - **Soft-delete everywhere** (`block_hard_delete`) — "delete" only hides the
+    row (recycle bin); nothing is truly lost.
+  - **Validation + required fields** block malformed saves; **field history /
+    audit trail** logs every change, so it's reversible.
+  - Same model as a Salesforce admin configuring picklists, page layouts, and
+    record types live in production every day.
+- Staging only ever holds a *copy* of this config — pulled **down** from
+  production by a Refresh. Never copy staging config/records **up** into prod.
 
 ---
 
@@ -109,10 +116,10 @@ become a migration or be built in production.
 4. Commit the migration; it travels to staging automatically on the next refresh.
 
 **Build new work-order / work-step templates (or other config)**
-1. Refresh staging so it mirrors prod.
-2. Build and test the templates in staging.
-3. Re-create them in **production** through LEAP Admin (or an idempotent upsert
-   migration). Do not bulk-copy staging config into prod.
+1. Build them in **production** through LEAP Admin — once. It's additive,
+   validated, and soft-delete protected, so it's safe (this is normal admin
+   work, like configuring Salesforce in production).
+2. No staging step, no re-creating, no double build.
 
 **Make staging current**
 - Run the Refresh Staging Database Action. (Wipes & reloads staging from prod.)
