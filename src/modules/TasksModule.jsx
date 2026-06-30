@@ -56,14 +56,21 @@ function PriorityChip({ priority }) {
   )
 }
 
-export default function TasksModule({ onNavigateToRecord, onReplaceRecord }) {
+export default function TasksModule({ selectedRecord, sectionFromUrl, onNavigateToRecord, onSectionChange, onCloseRecord, onReplaceRecord }) {
   const SECTIONS = useModuleSections('tasks', CODE_SECTIONS)
   const toast = useToast()
-  const [section, setSection] = useState('mine')
+  // URL-driven when the app shell passes nav handlers (the default). Section and
+  // open-record both live in the URL so a task is shareable/bookmarkable and the
+  // active tab is reflected in the address bar; local state is the standalone
+  // fallback.
+  const urlDriven = !!onNavigateToRecord
+  const [sectionLocal, setSectionLocal] = useState(sectionFromUrl || 'mine')
+  const section = sectionFromUrl || sectionLocal
+  const setSection = (s) => { if (urlDriven && onSectionChange) onSectionChange(s); setSectionLocal(s) }
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [openedTaskId, setOpenedTaskId] = useState(null)
+  const [openedTaskIdLocal, setOpenedTaskIdLocal] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -101,7 +108,8 @@ export default function TasksModule({ onNavigateToRecord, onReplaceRecord }) {
   }
 
   function openTask(rowId) {
-    setOpenedTaskId(rowId)
+    if (urlDriven) onNavigateToRecord({ table: 'tasks', id: rowId, mode: 'view' })
+    else setOpenedTaskIdLocal(rowId)
   }
 
   const shaped = useMemo(() => rows.map(r => ({
@@ -122,7 +130,7 @@ export default function TasksModule({ onNavigateToRecord, onReplaceRecord }) {
           style={{ color: C.accentLink || C.emerald, cursor: 'pointer', textDecoration: 'underline' }}
           onClick={(e) => {
             e.stopPropagation()
-            if (r.relatedId && onNavigateToRecord) onNavigateToRecord(r.relatedObject, r.relatedId)
+            if (r.relatedId && onNavigateToRecord) onNavigateToRecord({ table: r.relatedObject, id: r.relatedId, mode: 'view' })
           }}
         >
           {r.relatedObject}
@@ -148,15 +156,17 @@ export default function TasksModule({ onNavigateToRecord, onReplaceRecord }) {
     { id: 'AV', name: 'All', filters: [], sortField: 'dueDateDisplay', sortDir: 'asc' },
   ]), [])
 
-  if (openedTaskId) {
+  const openedRecord = urlDriven ? selectedRecord : (openedTaskIdLocal ? { table: 'tasks', id: openedTaskIdLocal } : null)
+  if (openedRecord) {
     return (
       <RecordDetail
-        tableName="tasks"
-        recordId={openedTaskId}
-        onBack={() => { setOpenedTaskId(null); load() }}
-        onNavigateToRecord={({ table, id }) => {
-          if (table === 'tasks') setOpenedTaskId(id)
-          else if (onNavigateToRecord) onNavigateToRecord(table, id)
+        tableName={openedRecord.table || 'tasks'}
+        recordId={openedRecord.id}
+        mode={openedRecord.mode || 'view'}
+        onBack={() => { if (urlDriven) onCloseRecord?.(); else setOpenedTaskIdLocal(null); load() }}
+        onNavigateToRecord={(r) => {
+          if (urlDriven) onNavigateToRecord(r)
+          else if (r.table === 'tasks') setOpenedTaskIdLocal(r.id)
         }}
       />
     )

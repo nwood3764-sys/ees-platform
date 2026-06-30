@@ -319,7 +319,7 @@ export default function DispatchModule({ onNavigateToRecord }) {
     setEndDate(toYMD(addDays(mon, 4)))
   }
   const openSA = useCallback((sa) => {
-    if (onNavigateToRecord) onNavigateToRecord('service_appointments', sa.id)
+    if (onNavigateToRecord) onNavigateToRecord({ table: 'service_appointments', id: sa.id, mode: 'view' })
   }, [onNavigateToRecord])
 
   // ─── Drop handlers ────────────────────────────────────────────────────
