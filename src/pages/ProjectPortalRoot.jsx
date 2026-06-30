@@ -689,22 +689,37 @@ function outlookCalUrl(a) {
     + `&location=${encodeURIComponent(apptLocation(a))}`
 }
 
-// "Add to Calendar" menu — deep-links into Google/Outlook, .ics fallback.
+// Email one or more visits to the signed-in portal user (Graph, via edge fn).
+async function emailVisits(ids) {
+  const { data, error } = await supabase.functions.invoke('portal-email-visit', { body: { appointment_ids: ids } })
+  if (error) return 'Could not send — please try again.'
+  if (data?.status === 'ok') return data.mode === 'real' ? `Emailed to ${data.emailed_to}` : 'Email queued (test mode)'
+  return 'Send failed.'
+}
+
+// "Add to Calendar" menu — email it, deep-link into Google/Outlook, .ics fallback.
 function AddToCalendar({ appt }) {
   const [open, setOpen] = useState(false)
+  const [msg, setMsg] = useState(null)
   const item = { display: 'block', width: '100%', textAlign: 'left', fontSize: 12, color: C.textSecondary, background: 'transparent', border: 'none', padding: '8px 12px', cursor: 'pointer', whiteSpace: 'nowrap' }
   const go = (fn) => (e) => { e.stopPropagation(); fn(); setOpen(false) }
+  const doEmail = async (e) => {
+    e.stopPropagation(); setOpen(false); setMsg('Sending…')
+    setMsg(await emailVisits([appt.id])); setTimeout(() => setMsg(null), 5000)
+  }
   return (
-    <div style={{ position: 'relative' }}>
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8 }}>
+      {msg && <span style={{ fontSize: 10.5, color: C.emeraldMid, whiteSpace: 'nowrap' }}>{msg}</span>}
       <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }}
         style={{ fontSize: 11, fontWeight: 600, color: C.emeraldMid, background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 9px', cursor: 'pointer', whiteSpace: 'nowrap' }}>+ Add to calendar ▾</button>
       {open && (
         <>
           <div onClick={go(() => {})} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
-          <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 51, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 4px 16px rgba(13,26,46,.14)', overflow: 'hidden', minWidth: 188 }}>
-            <button style={item} onClick={go(() => window.open(googleCalUrl(appt), '_blank', 'noopener'))}>Google Calendar</button>
+          <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 51, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 4px 16px rgba(13,26,46,.14)', overflow: 'hidden', minWidth: 196 }}>
+            <button style={{ ...item, fontWeight: 600, color: C.textPrimary }} onClick={doEmail}>✉ Email it to me</button>
+            <button style={{ ...item, borderTop: `1px solid ${C.border}` }} onClick={go(() => window.open(googleCalUrl(appt), '_blank', 'noopener'))}>Google Calendar</button>
             <button style={item} onClick={go(() => window.open(outlookCalUrl(appt), '_blank', 'noopener'))}>Outlook</button>
-            <button style={{ ...item, borderTop: `1px solid ${C.border}` }} onClick={go(() => downloadICS([appt], 'site-visit.ics'))}>Apple / download (.ics)</button>
+            <button style={item} onClick={go(() => downloadICS([appt], 'site-visit.ics'))}>Apple / download (.ics)</button>
           </div>
         </>
       )}
@@ -722,6 +737,7 @@ function CalendarView({ appointments, onOpenVisit }) {
   const [bldgId, setBldgId] = useState('all')
   const [statusId, setStatusId] = useState('all')
   const [selDay, setSelDay] = useState(null)
+  const [bulkMsg, setBulkMsg] = useState(null)
 
   // option lists
   const propMap = new Map()
@@ -832,8 +848,13 @@ function CalendarView({ appointments, onOpenVisit }) {
             <option value="type">Work-order type</option>
           </select>
         </label>
-        <button style={{ ...navBtn, marginLeft: 'auto' }} disabled={!upcoming.length}
-          onClick={() => downloadICS(upcoming, 'ees-upcoming-site-visits.ics')} title="Downloads all upcoming visits as one .ics file (imports into Google, Outlook, or Apple Calendar)">⤓ Download all (.ics)</button>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {bulkMsg && <span style={{ fontSize: 11, color: C.emeraldMid, whiteSpace: 'nowrap' }}>{bulkMsg}</span>}
+          <button style={navBtn} disabled={!upcoming.length}
+            onClick={async () => { setBulkMsg('Sending…'); setBulkMsg(await emailVisits(upcoming.map((a) => a.id))); setTimeout(() => setBulkMsg(null), 6000) }}>✉ Email upcoming to me</button>
+          <button style={navBtn} disabled={!upcoming.length}
+            onClick={() => downloadICS(upcoming, 'ees-upcoming-site-visits.ics')} title="Downloads all upcoming visits as one .ics file (imports into Google, Outlook, or Apple Calendar)">⤓ Download all (.ics)</button>
+        </div>
       </div>
 
       {/* Legend */}
