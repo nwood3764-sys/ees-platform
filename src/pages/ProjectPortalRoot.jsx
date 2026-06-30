@@ -36,7 +36,6 @@ import {
   propertyCounts,
   workOrderStatusCounts,
   projectStatusCounts,
-  opportunityStageCounts,
   findProject,
   workOrdersByUnit,
   buildingUnits,
@@ -64,6 +63,13 @@ function bucketMeta(bucket) {
 // Building names are stored with the property prefix ("<Property> - Building 1");
 // trim it for display when we already show the property in context.
 function shortBuildingName(name, propertyName) {
+  if (!name) return ''
+  if (propertyName && name.startsWith(propertyName + ' - ')) return name.slice(propertyName.length + 3)
+  return name
+}
+// Opportunity names are concatenated "<Property> - <Building> - <Record Type>";
+// on the property page strip the redundant property prefix.
+function shortOppName(name, propertyName) {
   if (!name) return ''
   if (propertyName && name.startsWith(propertyName + ' - ')) return name.slice(propertyName.length + 3)
   return name
@@ -422,7 +428,6 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
   const counts = propertyCounts(property)
   const woStatuses = workOrderStatusCounts(property)
   const projStatuses = projectStatusCounts(property)
-  const oppStages = opportunityStageCounts(property)
   return (
     <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
       <div style={{ background: `linear-gradient(135deg, ${C.sidebar} 0%, #12243d 100%)`, borderRadius: 12, padding: '20px 24px', marginBottom: 22, display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -453,10 +458,22 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
         <KpiCard label="Work Orders" value={counts.workOrders} accent={C.emeraldMid} />
       </div>
 
-      {/* Opportunities by stage — concrete counts, not an abstract average */}
+      {/* Opportunities — the actual building-specific opportunities + current stage */}
       <div style={{ marginBottom: 28 }}>
-        <SectionHeader title="Opportunities by Stage" desc="How many program opportunities sit at each stage across this property" />
-        <StatusBreakdown title="Opportunities" items={oppStages.map((i) => ({ status: shortStageLabel(i.status), count: i.count }))} />
+        <SectionHeader title="Opportunities" desc="Each building's program opportunities and their current stage" action={`${counts.opportunities} total`} />
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          {(property.buildings || []).flatMap((b) => (b.opportunities || []).map((o) => ({ b, o }))).map(({ b, o }) => (
+            <div key={o.id} onClick={() => onOpenBuilding(b)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: colorOf(o.program), flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={o.name}>{shortOppName(o.name, property.name)}</div>
+                {o.recordTypeDescription && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>{o.recordTypeDescription}</div>}
+              </div>
+              <span style={{ fontSize: 11.5, color: C.textSecondary, whiteSpace: 'nowrap' }}>{shortStageLabel(o.stageLabel)}</span>
+            </div>
+          ))}
+          {counts.opportunities === 0 && <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>No opportunities on this property yet.</div>}
+        </div>
       </div>
 
       {/* Work order + project status rollups */}

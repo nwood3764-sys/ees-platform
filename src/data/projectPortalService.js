@@ -87,6 +87,7 @@ export async function fetchProjectTracker() {
     recordNumber: o.record_number || '',
     name: o.name || '',
     program: o.program || '',            // the opportunity's record type label
+    recordTypeDescription: o.record_type_description || '',  // record type's picklist_description
     stageLabel: o.stage_label || 'Not Started',
     stageOrder: Number(o.stage_order) || 0,
     stages: (o.stages || []).map((s) => ({
