@@ -57,7 +57,14 @@ export async function fetchProjectTracker() {
     name: s.name || '',
     status: s.status || '',              // work_step_status label
     order: Number(s.order) || 0,
-    photoUrl: s.photo_url || null,       // work_step_reference_photo_url (future photo exposure)
+    photoUrl: s.photo_url || null,       // work_step_reference_photo_url
+    photos: (s.photos || []).map((p) => ({
+      id: p.id,
+      url: p.url || '',
+      thumb: p.thumb || p.url || '',
+      caption: p.caption || '',
+      type: p.type || '',
+    })),
   })
   const mapWorkOrder = (w) => ({
     id: w.id,
@@ -229,6 +236,17 @@ export function workOrderStatusCounts(property) {
 export function projectStatusCounts(property) {
   const m = new Map()
   eachProject(property, (pr) => { const k = pr.status || 'Unknown'; m.set(k, (m.get(k) || 0) + 1) })
+  return Array.from(m, ([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count)
+}
+
+// Count opportunities by their current stage label → [{ status, count }].
+export function opportunityStageCounts(property) {
+  const m = new Map()
+  for (const b of property?.buildings || [])
+    for (const o of b.opportunities || []) {
+      const k = o.stageLabel || 'Not Started'
+      m.set(k, (m.get(k) || 0) + 1)
+    }
   return Array.from(m, ([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count)
 }
 

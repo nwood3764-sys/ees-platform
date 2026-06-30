@@ -35,6 +35,7 @@ import {
   propertyCounts,
   workOrderStatusCounts,
   projectStatusCounts,
+  opportunityStageCounts,
   findProject,
   workOrdersByUnit,
 } from '../data/projectPortalService'
@@ -287,6 +288,36 @@ function StatusBadge({ status }) {
   )
 }
 
+// Work-step photo thumbnails with a click-to-open lightbox.
+function PhotoStrip({ photos }) {
+  const [idx, setIdx] = useState(null)
+  if (!photos || !photos.length) return null
+  const open = idx != null ? photos[idx] : null
+  const lbBtn = { color: '#fff', background: 'rgba(255,255,255,.12)', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 14, cursor: 'pointer' }
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '2px 0 6px 26px' }}>
+      {photos.map((p, i) => (
+        <div key={p.id} onClick={() => setIdx(i)} title={p.caption}
+          style={{ width: 66, height: 50, borderRadius: 6, overflow: 'hidden', cursor: 'pointer', border: `1px solid ${C.border}`, position: 'relative' }}>
+          <img src={p.thumb} alt={p.caption} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          {p.type && <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, fontSize: 8, fontWeight: 700, color: '#fff', background: 'rgba(13,26,46,.6)', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '.3px' }}>{p.type}</span>}
+        </div>
+      ))}
+      {open && (
+        <div onClick={() => setIdx(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,.92)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>
+          <img src={open.url} alt={open.caption} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '86vw', maxHeight: '76vh', borderRadius: 10, objectFit: 'contain' }} />
+          <div style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{open.caption}{open.type ? ` · ${open.type}` : ''}</div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button style={lbBtn} onClick={(e) => { e.stopPropagation(); setIdx((idx - 1 + photos.length) % photos.length) }}>‹ Prev</button>
+            <button style={lbBtn} onClick={(e) => { e.stopPropagation(); setIdx(null) }}>Close</button>
+            <button style={lbBtn} onClick={(e) => { e.stopPropagation(); setIdx((idx + 1) % photos.length) }}>Next ›</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ProgRow({ program, pct, color }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
@@ -347,11 +378,13 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
   const counts = propertyCounts(property)
   const woStatuses = workOrderStatusCounts(property)
   const projStatuses = projectStatusCounts(property)
+  const oppStages = opportunityStageCounts(property)
   return (
     <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
       <div style={{ background: `linear-gradient(135deg, ${C.sidebar} 0%, #12243d 100%)`, borderRadius: 12, padding: '20px 24px', marginBottom: 22, display: 'flex', alignItems: 'center', gap: 20 }}>
         <div style={{ width: 48, height: 48, background: 'rgba(62,207,142,.25)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0 }}>{IconProp}</div>
         <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 10, letterSpacing: '.6px', textTransform: 'uppercase', color: C.navInactive, marginBottom: 3 }}>Property Dashboard</div>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>{property.name}</div>
           <div style={{ fontSize: 12.5, color: C.navInactive, marginTop: 3 }}>{[property.city, property.state].filter(Boolean).join(', ')}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
@@ -367,22 +400,19 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
         </div>
       </div>
 
-      {/* KPI row — real counts down the whole chain */}
+      {/* KPI row — real counts, high level → low level */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 28 }}>
-        <KpiCard label="Buildings" value={counts.buildings} accent={C.emerald} />
-        <KpiCard label="Units" value={counts.units} accent={C.emerald} />
         <KpiCard label="Opportunities" value={counts.opportunities} accent={C.sky} />
+        <KpiCard label="Buildings" value={counts.buildings} accent={C.emerald} />
         <KpiCard label="Projects" value={counts.projects} accent={C.sky} />
+        <KpiCard label="Units" value={counts.units} accent={C.emerald} />
         <KpiCard label="Work Orders" value={counts.workOrders} accent={C.emeraldMid} />
       </div>
 
-      {/* Opportunity progress per program */}
+      {/* Opportunities by stage — concrete counts, not an abstract average */}
       <div style={{ marginBottom: 28 }}>
-        <SectionHeader title="Opportunity Progress" desc="Average progress through each program's lifecycle, across all buildings" />
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {programs.map((pg) => <ProgRow key={pg} program={pg} pct={propertyProgramPct(property, pg)} color={colorOf(pg)} />)}
-          {programs.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No opportunities on this property yet.</div>}
-        </div>
+        <SectionHeader title="Opportunities by Stage" desc="How many program opportunities sit at each stage across this property" />
+        <StatusBreakdown title="Opportunities" items={oppStages.map((i) => ({ status: shortStageLabel(i.status), count: i.count }))} />
       </div>
 
       {/* Work order + project status rollups */}
@@ -494,11 +524,14 @@ function WorkOrderRow({ wo }) {
       {open && steps.length > 0 && (
         <div style={{ background: C.page, padding: '4px 16px 10px 30px' }}>
           {steps.map((s) => (
-            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', fontSize: 12 }}>
-              <span style={{ width: 18, fontSize: 10, color: C.textMuted, fontWeight: 600 }}>{s.order}</span>
-              <span style={{ flex: 1, color: C.textSecondary }}>{s.name}</span>
-              {s.photoUrl && <span style={{ fontSize: 10, color: C.emeraldMid }}>photo</span>}
-              <StatusBadge status={s.status} />
+            <div key={s.id}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', fontSize: 12 }}>
+                <span style={{ width: 18, fontSize: 10, color: C.textMuted, fontWeight: 600 }}>{s.order}</span>
+                <span style={{ flex: 1, color: C.textSecondary }}>{s.name}</span>
+                {s.photos.length > 0 && <span style={{ fontSize: 10, color: C.emeraldMid }}>{s.photos.length} photo{s.photos.length === 1 ? '' : 's'}</span>}
+                <StatusBadge status={s.status} />
+              </div>
+              <PhotoStrip photos={s.photos} />
             </div>
           ))}
         </div>
