@@ -20,7 +20,7 @@ const USER_COLS = [
   { field:'email',         label:'Email',     type:'text',   sortable:true, filterable:true  },
   { field:'phone',         label:'Phone',     type:'text',   sortable:true, filterable:false },
   { field:'portalRole',    label:'Portal Role', type:'select', sortable:true, filterable:true,
-    options:['Property Owner','Property Manager','Regional Decision Maker','Partner Admin','Partner Coordinator','Partner Technician'] },
+    options:['Property Administrator','Property Viewer'] },
   { field:'userType',      label:'Portal',    type:'select', sortable:true, filterable:true, options:['Property Owner Portal','Partner Portal'] },
   { field:'organization',  label:'Organization', type:'text', sortable:true, filterable:true },
   { field:'lastLogin',     label:'Last Login',type:'text',   sortable:true, filterable:false },

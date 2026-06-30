@@ -20,6 +20,7 @@ const ProjectSchedulerWizard              = lazy(() => import('./scheduler/Proje
 const ServiceAppointmentRescheduleModal   = lazy(() => import('./scheduler/ServiceAppointmentRescheduleModal'))
 const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkOrderScheduleModal'))
 const SendForSignatureModal               = lazy(() => import('./SendForSignatureModal'))
+const AccountMergeModal                    = lazy(() => import('./AccountMergeModal'))
 
 import { useToast } from './Toast'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
@@ -4514,6 +4515,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
+  const [showMergeModal, setShowMergeModal] = useState(false)
   // Project Scheduler wizard (only used when tableName === 'projects').
   // Bulk-schedules unscheduled work orders for the project to a Team Lead.
   // After a successful commit, the tick is bumped so the related-records area
@@ -5705,6 +5707,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.UNPUBLISH]:              handleUnpublish,
     [ACTION_KEYS.ARCHIVE]:                handleArchive,
     [ACTION_KEYS.RESTORE]:                handleRestore,
+    [ACTION_KEYS.MERGE_ACCOUNT]:          () => setShowMergeModal(true),
   }
 
   // Per-action pending flag — drives the disabled+wait-cursor+ellipsis label
@@ -6437,6 +6440,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             parentRecordId={recordId}
             parentRecordLabel={record?.name || record?.project_record_number || record?.property_record_number || record?.opportunity_record_number || record?.work_order_record_number || null}
             onClose={() => setShowSendSignatureModal(false)}
+          />
+        )}
+
+        {/* Account merge — resolve duplicates (this record is the master) */}
+        {showMergeModal && tableName === 'accounts' && (
+          <AccountMergeModal
+            masterId={recordId}
+            master={record}
+            onClose={() => setShowMergeModal(false)}
+            onMerged={() => { setShowMergeModal(false); setReloadTick(t => t + 1) }}
           />
         )}
       </Suspense>
