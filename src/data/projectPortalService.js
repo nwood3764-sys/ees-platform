@@ -132,8 +132,10 @@ export async function fetchPortalCalendar() {
     end: a.end || null,
     propertyId: a.property_id || null,
     propertyName: a.property_name || '',
+    propertyAddress: a.property_address || '',
     buildingId: a.building_id || null,
     buildingName: a.building_name || '',
+    buildingAddress: a.building_address || '',
     unitNumber: a.unit_number || '',
     workOrderType: a.work_order_type || '',
   }))
