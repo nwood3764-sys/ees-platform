@@ -190,15 +190,26 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
         <div style={navItem(view === 'calendar')} onClick={() => setView('calendar')}>Calendar</div>
       </div>
 
-      <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,.08)', opacity: view === 'tree' ? 1 : 0.4, pointerEvents: view === 'tree' ? 'auto' : 'none' }}>
-        <div style={{ position: 'relative' }}>
-          <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: C.navInactive, display: 'flex' }}>{IconSearch}</span>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search buildings…"
-            style={{ width: '100%', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.09)', borderRadius: 6, padding: '7px 8px 7px 28px', color: '#fff', fontSize: 12, outline: 'none', fontFamily: 'inherit' }} />
+      {view === 'tree' && (
+        <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: C.navInactive, display: 'flex' }}>{IconSearch}</span>
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search buildings…"
+              style={{ width: '100%', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.09)', borderRadius: 6, padding: '7px 8px 7px 28px', color: '#fff', fontSize: 12, outline: 'none', fontFamily: 'inherit' }} />
+          </div>
         </div>
-      </div>
+      )}
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
+      {view !== 'tree' && (
+        <div style={{ flex: 1, padding: '22px 18px', textAlign: 'center' }}>
+          <div style={{ fontSize: 11.5, color: C.navInactive, lineHeight: 1.5 }}>
+            Calendar shows site visits across all your properties.<br />
+            Switch to <strong style={{ color: '#fff' }}>Projects</strong> to browse buildings and units.
+          </div>
+        </div>
+      )}
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0', display: view === 'tree' ? 'block' : 'none' }}>
         {tree.map((p) => {
           const programs = propertyPrograms(p)
           const colorOf = makeColorOf(programs)
