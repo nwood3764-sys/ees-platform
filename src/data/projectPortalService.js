@@ -52,6 +52,21 @@ export async function fetchProjectTracker() {
   const payload = data || {}
   if (payload.error) return { error: payload.error, properties: [] }
 
+  const mapWorkOrder = (w) => ({
+    id: w.id,
+    name: w.name || '',
+    recordType: w.record_type || '',     // work_order_record_type label
+    status: w.status || '',              // work_order_status label
+    unitId: w.unit_id || null,
+    unitNumber: w.unit_number || '',
+  })
+  const mapProject = (pr) => ({
+    id: pr.id,
+    name: pr.name || '',
+    recordType: pr.record_type || '',    // project_record_type label
+    status: pr.status || '',             // project_status label
+    workOrders: (pr.work_orders || []).map(mapWorkOrder),
+  })
   const mapOpp = (o) => ({
     id: o.id,
     recordNumber: o.record_number || '',
@@ -63,6 +78,7 @@ export async function fetchProjectTracker() {
       label: s.label || '',
       sortOrder: Number(s.sort_order) || 0,
     })),
+    projects: (o.projects || []).map(mapProject),
   })
 
   const properties = (payload.properties || []).map((p) => ({
@@ -160,6 +176,35 @@ export function buildingStatus(building) {
 
 export function allBuildings(property) {
   return property.buildings || []
+}
+
+// ─── Projects / work orders ──────────────────────────────────────────────────
+export function buildingProjects(building) {
+  const out = []
+  for (const o of building?.opportunities || []) {
+    for (const pr of o.projects || []) out.push({ ...pr, opportunity: o })
+  }
+  return out
+}
+
+export function findProject(building, projectId) {
+  for (const o of building?.opportunities || []) {
+    const pr = (o.projects || []).find((p) => p.id === projectId)
+    if (pr) return { project: pr, opportunity: o }
+  }
+  return null
+}
+
+// Group a project's work orders by unit (for the per-unit work-order view).
+export function workOrdersByUnit(project) {
+  const map = new Map()
+  for (const w of project?.workOrders || []) {
+    const k = w.unitId || 'none'
+    if (!map.has(k)) map.set(k, { unitId: w.unitId, unitNumber: w.unitNumber, workOrders: [] })
+    map.get(k).workOrders.push(w)
+  }
+  return Array.from(map.values()).sort((a, b) =>
+    String(a.unitNumber || '').localeCompare(String(b.unitNumber || ''), undefined, { numeric: true }))
 }
 
 // Property-level building counts by status bucket (drives the dashboard cards).
