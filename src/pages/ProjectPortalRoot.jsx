@@ -647,8 +647,12 @@ function CalendarView({ appointments }) {
   const [bldgId, setBldgId] = useState('all')
   const [selDay, setSelDay] = useState(null)
 
-  const propOptions = Array.from(new Map(appointments.map((a) => [a.propertyId, a.propertyName])).entries()).map(([id, name]) => ({ id, name }))
-  const bldgOptions = Array.from(new Map(appointments.filter((a) => propId === 'all' || a.propertyId === propId).map((a) => [a.buildingId, a.buildingName])).entries()).map(([id, name]) => ({ id, name }))
+  const propMap = new Map()
+  appointments.forEach((a) => { if (a.propertyId && !propMap.has(a.propertyId)) propMap.set(a.propertyId, { id: a.propertyId, name: a.propertyName, address: a.propertyAddress }) })
+  const propOptions = Array.from(propMap.values())
+  const bldgMap = new Map()
+  appointments.filter((a) => propId === 'all' || a.propertyId === propId).forEach((a) => { if (a.buildingId && !bldgMap.has(a.buildingId)) bldgMap.set(a.buildingId, { id: a.buildingId, name: lastSeg(a.buildingName), address: a.buildingAddress }) })
+  const bldgOptions = Array.from(bldgMap.values())
 
   const filtered = appointments.filter((a) =>
     (propId === 'all' || a.propertyId === propId) &&
@@ -679,15 +683,21 @@ function CalendarView({ appointments }) {
         <button style={navBtn} onClick={() => shiftMonth(-1)}>‹ Prev</button>
         <button style={navBtn} onClick={() => { setCur({ y: today.getFullYear(), m: today.getMonth() }); setSelDay(null) }}>Today</button>
         <button style={navBtn} onClick={() => shiftMonth(1)}>Next ›</button>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <select style={sel} value={propId} onChange={(e) => { setPropId(e.target.value); setBldgId('all') }}>
-            <option value="all">All properties</option>
-            {propOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
-          <select style={sel} value={bldgId} onChange={(e) => setBldgId(e.target.value)}>
-            <option value="all">All buildings</option>
-            {bldgOptions.map((o) => <option key={o.id} value={o.id}>{lastSeg(o.name)}</option>)}
-          </select>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 14 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: C.textMuted }}>Property</span>
+            <select style={sel} value={propId} onChange={(e) => { setPropId(e.target.value); setBldgId('all') }}>
+              <option value="all">All properties</option>
+              {propOptions.map((o) => <option key={o.id} value={o.id}>{o.address ? `${o.name} — ${o.address}` : o.name}</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: C.textMuted }}>Building</span>
+            <select style={sel} value={bldgId} onChange={(e) => setBldgId(e.target.value)}>
+              <option value="all">All buildings</option>
+              {bldgOptions.map((o) => <option key={o.id} value={o.id}>{o.address ? `${o.address} (${o.name})` : o.name}</option>)}
+            </select>
+          </label>
         </div>
       </div>
 
@@ -731,10 +741,12 @@ function CalendarView({ appointments }) {
               <span style={{ width: 9, height: 9, borderRadius: '50%', background: apptColor(a.status), flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{a.subject}</div>
-                <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
+                <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 2 }}>
                   {new Date(a.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                  {' · '}{lastSeg(a.buildingName)}{a.unitNumber ? ` · Unit ${a.unitNumber}` : ''}
-                  {a.propertyName ? ` · ${a.propertyName}` : ''}
+                  {' · '}{a.buildingAddress || lastSeg(a.buildingName)}{a.unitNumber ? ` · Unit ${a.unitNumber}` : ''}
+                </div>
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
+                  {a.propertyName}{a.propertyAddress ? ` · ${a.propertyAddress}` : ''}
                 </div>
               </div>
               <span style={{ fontSize: 10.5, fontWeight: 600, color: apptColor(a.status), background: `${apptColor(a.status)}1a`, padding: '2px 9px', borderRadius: 20 }}>{a.status || '—'}</span>
