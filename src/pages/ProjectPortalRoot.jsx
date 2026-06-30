@@ -21,7 +21,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase, hasSupabaseConfig } from '../lib/supabase'
-import { C, CHART_COLORS } from '../data/constants'
+import { C, CHART_COLORS, STATUS_CFG } from '../data/constants'
 import {
   fetchPortalUserSelf,
   fetchProjectTracker,
@@ -34,6 +34,8 @@ import {
   propertyProgramPct,
   buildingStats,
   allBuildings,
+  findProject,
+  workOrdersByUnit,
 } from '../data/projectPortalService'
 
 function makeColorOf(programs) {
@@ -274,6 +276,16 @@ function SectionHeader({ title, desc, action }) {
   )
 }
 
+// Status badge for projects / work orders (LEAP status palette; neutral fallback).
+function StatusBadge({ status }) {
+  const cfg = STATUS_CFG[status] || { bg: C.page, color: C.textSecondary, dot: C.textMuted }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 600, color: cfg.color, background: cfg.bg, padding: '2px 9px', borderRadius: 20, whiteSpace: 'nowrap' }}>
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: cfg.dot }} />{status || '—'}
+    </span>
+  )
+}
+
 function ProgRow({ program, pct, color }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
@@ -363,9 +375,10 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
 }
 
 // ─── Building page (its opportunities, each a data-driven stage bar) ─────────
-function OpportunityCard({ program, opp, color }) {
+function OpportunityCard({ program, opp, color, onOpenProject }) {
   const count = (opp?.stages || []).length
   const so = opp?.stageOrder || 0
+  const projects = opp?.projects || []
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11, overflow: 'hidden', marginBottom: 16 }}>
       <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 9, background: `${color}14` }}>
@@ -373,7 +386,7 @@ function OpportunityCard({ program, opp, color }) {
         <span style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{program}</span>
         {opp && <span style={{ marginLeft: 'auto', fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{opp.recordNumber}</span>}
       </div>
-      <div style={{ padding: '20px 22px 14px' }}>
+      <div style={{ padding: '20px 22px 16px' }}>
         <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 16 }}>
           Current stage: <strong style={{ color: C.textPrimary }}>{shortStageLabel(opp.stageLabel)}</strong>
         </div>
@@ -383,19 +396,64 @@ function OpportunityCard({ program, opp, color }) {
             : so > 0 ? `Phase ${so} of ${count} — ${oppPct(opp)}% through the program lifecycle.`
             : 'This program has not started yet.'}
         </div>
+
+        {projects.length > 0 && (
+          <div style={{ marginTop: 18, borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: C.textMuted, marginBottom: 8 }}>Projects</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {projects.map((pr) => (
+                <div key={pr.id} onClick={() => onOpenProject(pr)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', border: `1px solid ${C.border}`, borderRadius: 8, cursor: 'pointer', background: C.page }}>
+                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pr.recordType || pr.name}</span>
+                  <StatusBadge status={pr.status} />
+                  <span style={{ fontSize: 11, color: C.textMuted, width: 52, textAlign: 'right' }}>{pr.workOrders.length} WO</span>
+                  <span style={{ fontSize: 13, color: C.emeraldMid, fontWeight: 700 }}>→</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-function BuildingPage({ property, building, colorOf }) {
+function BuildingPage({ property, building, colorOf, onOpenProject }) {
   const opps = building.opportunities || []
   return (
     <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
       <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>{shortBuildingName(building.name, property.name)}</div>
       <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{property.name}{building.address ? ` · ${building.address}` : ''}</div>
-      {opps.map((o) => <OpportunityCard key={o.id} program={o.program} opp={o} color={colorOf(o.program)} />)}
+      {opps.map((o) => <OpportunityCard key={o.id} program={o.program} opp={o} color={colorOf(o.program)} onOpenProject={(pr) => onOpenProject(pr)} />)}
       {opps.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No opportunities recorded for this building yet.</div>}
+    </div>
+  )
+}
+
+// ─── Project page (work orders grouped by unit) ──────────────────────────────
+function ProjectPage({ property, building, project, opportunity, color }) {
+  const groups = workOrdersByUnit(project)
+  return (
+    <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+        <span style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
+        <span style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{project.recordType || project.name}</span>
+        <StatusBadge status={project.status} />
+      </div>
+      <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{shortBuildingName(building.name, property.name)} · {opportunity.program}</div>
+
+      <SectionHeader title="Work Orders by Unit" desc="Each unit's work orders for this project and their current status" />
+      {groups.map((g) => (
+        <div key={g.unitId || 'none'} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 12, overflow: 'hidden' }}>
+          <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 13, fontWeight: 700, color: C.textPrimary }}>{g.unitNumber ? `Unit ${g.unitNumber}` : 'Building-level'}</div>
+          {g.workOrders.map((w) => (
+            <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5 }}>
+              <span style={{ flex: 1, color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace' }}>{w.recordType || w.name}</span>
+              <StatusBadge status={w.status} />
+            </div>
+          ))}
+        </div>
+      ))}
+      {groups.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No work orders on this project yet.</div>}
     </div>
   )
 }
@@ -447,7 +505,7 @@ export default function ProjectPortalRoot() {
   const [phase, setPhase] = useState('loading')   // loading | login | ready | error | notportal
   const [self, setSelf] = useState(null)
   const [tree, setTree] = useState([])
-  const [sel, setSel] = useState({ pid: null, bid: null })
+  const [sel, setSel] = useState({ pid: null, bid: null, projId: null })
   const [open, setOpen] = useState({ prop: null })
   const [query, setQuery] = useState('')
   const [errMsg, setErrMsg] = useState(null)
@@ -464,7 +522,7 @@ export default function ProjectPortalRoot() {
       const props = t.properties || []
       setTree(props)
       const first = props[0]
-      setSel({ pid: first ? first.id : null, bid: null })
+      setSel({ pid: first ? first.id : null, bid: null, projId: null })
       setOpen({ prop: first ? first.id : null })
       setPhase('ready')
     } catch (e) {
@@ -481,14 +539,15 @@ export default function ProjectPortalRoot() {
   const signOut = async () => { await supabase.auth.signOut(); setSelf(null); setTree([]); setPhase('login') }
 
   const onSelect = useCallback((next) => {
-    setSel({ pid: next.pid || null, bid: next.bid || null })
+    setSel({ pid: next.pid || null, bid: next.bid || null, projId: next.projId || null })
     setOpen({ prop: next.pid || null })
   }, [])
 
-  const { property, building } = useMemo(() => {
+  const { property, building, project, projectOpp } = useMemo(() => {
     const property = tree.find((p) => p.id === sel.pid) || tree[0] || null
     const building = property && sel.bid ? (property.buildings || []).find((b) => b.id === sel.bid) : null
-    return { property, building }
+    const found = building && sel.projId ? findProject(building, sel.projId) : null
+    return { property, building, project: found?.project || null, projectOpp: found?.opportunity || null }
   }, [tree, sel])
 
   const programs = useMemo(() => (property ? propertyPrograms(property) : []), [property])
@@ -500,7 +559,8 @@ export default function ProjectPortalRoot() {
   if (phase === 'error') return <Centered>{errMsg || 'Something went wrong.'}<SignOutLink onClick={signOut} /></Centered>
 
   const crumb = [{ label: property ? property.name : 'Properties', onClick: building ? () => onSelect({ pid: property.id }) : null }]
-  if (building) crumb.push({ label: shortBuildingName(building.name, property.name), onClick: null })
+  if (building) crumb.push({ label: shortBuildingName(building.name, property.name), onClick: project ? () => onSelect({ pid: property.id, bid: building.id }) : null })
+  if (project) crumb.push({ label: project.recordType || project.name, onClick: null })
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif', background: C.page }}>
@@ -512,7 +572,8 @@ export default function ProjectPortalRoot() {
         </div>
         <div style={{ flex: 1, overflowY: 'auto', background: C.page }}>
           {!property && <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>}
-          {property && building && <BuildingPage property={property} building={building} colorOf={colorOf} />}
+          {property && building && project && <ProjectPage property={property} building={building} project={project} opportunity={projectOpp} color={colorOf(projectOpp?.program)} />}
+          {property && building && !project && <BuildingPage property={property} building={building} colorOf={colorOf} onOpenProject={(pr) => onSelect({ pid: property.id, bid: building.id, projId: pr.id })} />}
           {property && !building && <PropertyPage property={property} programs={programs} colorOf={colorOf} onOpenBuilding={(b) => onSelect({ pid: property.id, bid: b.id })} />}
         </div>
       </div>
