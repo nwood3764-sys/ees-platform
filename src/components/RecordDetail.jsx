@@ -1293,6 +1293,13 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
     setQuery('')
   }
 
+  // The dropdown is at least as wide as the trigger, but grows to a comfortable
+  // width so full record names are readable (capped to the viewport), and its
+  // left edge is clamped so a wide menu never runs off-screen.
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1280
+  const menuWidth = menuRect ? Math.min(Math.max(menuRect.width, 440), vw - 16) : 0
+  const menuLeft = menuRect ? Math.max(8, Math.min(menuRect.left, vw - menuWidth - 8)) : 0
+
   return (
     <div ref={rootRef} style={{ position: 'relative' }}>
       <button ref={triggerRef} type="button" onClick={() => setOpen(o => !o)}
@@ -1306,7 +1313,7 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
       </button>
       {open && menuRect && createPortal(
         <div ref={menuRef} style={{ position: 'fixed', zIndex: 1000,
-          top: menuRect.bottom + 4, left: menuRect.left, width: menuRect.width,
+          top: menuRect.bottom + 4, left: menuLeft, width: menuWidth,
           background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6,
           boxShadow: '0 6px 24px rgba(0,0,0,0.18)', maxHeight: 300, display: 'flex',
           flexDirection: 'column', overflow: 'hidden' }}>
@@ -1325,10 +1332,10 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
             ) : filtered.map(o => {
               const isSel = String(o.value) === String(value)
               return (
-                <div key={o.value} onClick={() => pick(o.value)}
+                <div key={o.value} onClick={() => pick(o.value)} title={o.label}
                   style={{ padding: '7px 10px', fontSize: 13, cursor: 'pointer',
                     background: isSel ? C.emerald : '#fff', color: isSel ? '#fff' : C.textPrimary,
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.3 }}
                   onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = '#f1f5f9' }}
                   onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = '#fff' }}>
                   {o.label}
