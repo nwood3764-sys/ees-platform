@@ -4492,6 +4492,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Which tab is active on the record detail page. Null until data loads,
   // then initialized to the first tab (Details) by the useEffect below.
   const [activeTab, setActiveTab] = useState(null)
+  // Parent-name lookups for the breadcrumb in CREATE mode. The loaded record is
+  // empty while creating, so prefilled parent FKs (e.g. property_id on a new
+  // Building, or opportunity_id on a new Contact Role) can't resolve to names —
+  // leaving the breadcrumb flat ("Module / Object") instead of hierarchical.
+  // The effect below resolves them from the prefill.
+  const [createCrumbLookups, setCreateCrumbLookups] = useState(() => new Map())
   // When non-null, we are cloning the current record: same table, insert path,
   // draft pre-populated from the source.
   const [cloneSource, setCloneSource] = useState(null)
@@ -4794,6 +4800,43 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   useEffect(() => {
     setActiveTab(null)
   }, [tableName, recordId])
+
+  // Resolve prefilled parent FK names so the breadcrumb is hierarchical while
+  // CREATING a child from a parent's related list — e.g. "New Building" under a
+  // property shows "Enrollment / Buildings / <Property>", and a new Contact Role
+  // shows its opportunity/contact parents. Keyed on the parent FK values so it
+  // runs once when the prefill arrives, not on every keystroke.
+  const createCrumbKey = (() => {
+    const meta = TABLE_META[tableName]
+    if (!isCreate || !meta || !prefill) return ''
+    return (meta.parents || []).map(fk => prefill[fk] || '').join('|')
+  })()
+  useEffect(() => {
+    if (!isCreate || !prefill) { setCreateCrumbLookups(new Map()); return }
+    const meta = TABLE_META[tableName]
+    if (!meta?.parents?.length) return
+    const targets = []
+    meta.parents.forEach((fk, i) => {
+      const parentTable = (meta.parentTables || [])[i]
+      const nameCol = parentTable ? TABLE_META[parentTable]?.nameColumn : null
+      const val = prefill[fk]
+      if (val && parentTable && nameCol) targets.push({ val, parentTable, nameCol })
+    })
+    if (targets.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      const map = new Map()
+      for (const { val, parentTable, nameCol } of targets) {
+        try {
+          const { data: row } = await supabase.from(parentTable).select(`id, ${nameCol}`).eq('id', val).maybeSingle()
+          if (row) map.set(val, { label: row[nameCol] || '(record)', table: parentTable })
+        } catch { /* best-effort: an unresolved parent just leaves that crumb out */ }
+      }
+      if (!cancelled) setCreateCrumbLookups(map)
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreate, tableName, createCrumbKey])
 
   // Select a tab AND push it onto browser history as ?tab=<name> (Salesforce
   // parity: the related-list/Activity view is its own history entry, so the
@@ -5661,6 +5704,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   )
 
   const { record, layout, sections, picklists, lookups } = data
+  // In create mode the breadcrumb reads the prefilled parent FKs (and their
+  // names resolved by createCrumbLookups) so it stays hierarchical; otherwise
+  // it uses the loaded record and its lookups.
+  const crumbRecord = isCreate ? { ...record, ...(prefill || {}) } : record
+  const crumbLookups = isCreate ? createCrumbLookups : lookups
 
   // Build the ordered tab list from the loaded sections. Details first,
   // Related second (if any section has related_list widgets), Activity third
@@ -5691,7 +5739,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       padding: isMobile ? '12px' : '20px 24px',
       paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom))' : '20px',
     }}>
-      {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
+      {!isMobile && <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
       {isMobile && (
         <button
           onClick={onBack}
@@ -5871,7 +5919,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         paddingBottom: isMobile && editing ? 'calc(80px + env(safe-area-inset-bottom))' : isMobile ? 'calc(24px + env(safe-area-inset-bottom))' : undefined,
       }}>
         {/* Desktop breadcrumbs (hidden on mobile — the sticky header handles back navigation) */}
-        {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
+        {!isMobile && <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
 
         {/* Desktop header card (mobile already shows this info in the sticky bar above — mobile shows a compact title + status chip instead) */}
         {!isMobile ? (
