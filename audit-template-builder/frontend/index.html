@@ -722,7 +722,11 @@ function buildSingleXML(which){
   const asB=data.asBase, asI=data.asImp;
   const as = which==='improved' ? (asI||asB) : asB;       // physics/identity for this building
   const os = which==='improved' ? data.osImp : data.osBase; // energy for this building
-  const year=2024;
+  // Metered-reading year: the year the 12-month window ends in (two full
+  // calendar months before the current month — same window as the utility xlsx),
+  // so the TimeSeries timestamps track today's date instead of being frozen.
+  let _em=new Date().getMonth()+1-2, year=new Date().getFullYear();
+  while(_em<1){_em+=12;year-=1;}
   const area=as.gfa||asB.gfa;
   const doc=document.implementation.createDocument(NS,'auc:BuildingSync',null);
   const root=doc.documentElement; root.setAttribute('version','2.6.0');
@@ -735,7 +739,7 @@ function buildSingleXML(which){
   el(doc,addr,'City',as.city||asB.city||''); el(doc,addr,'State',as.state||'WI'); el(doc,addr,'PostalCode',as.zip||asB.zip||'');
   el(doc,b,'BuildingClassification','Residential');
   el(doc,b,'OccupancyClassification','Multifamily');
-  el(doc,b,'FloorsAboveGrade',2);
+  el(doc,b,'FloorsAboveGrade', as.floorsAbove!=null ? as.floorsAbove : (asB.floorsAbove!=null ? asB.floorsAbove : 2));
   const fas=el(doc,b,'FloorAreas');
   let fa=el(doc,fas,'FloorArea'); el(doc,fa,'FloorAreaType','Gross'); el(doc,fa,'FloorAreaValue',area.toFixed(1));
   fa=el(doc,fas,'FloorArea'); el(doc,fa,'FloorAreaType','Conditioned'); el(doc,fa,'FloorAreaValue',area.toFixed(1));
