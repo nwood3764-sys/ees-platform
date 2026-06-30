@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ListView } from './ListView'
 import { LoadingState, ErrorState } from './UI'
 import RecordDetail from './RecordDetail'
+import RecordLink from './RecordLink'
 import { fetchObjectRecords, buildObjectColumnCatalog, deriveColumnOptions, isRelatedField } from '../data/objectListService'
 import { fetchSavedViewsForObject } from '../data/listViewsService'
 import { useNav } from '../lib/navContext'
@@ -194,14 +195,24 @@ export default function ObjectListSection({ objectTable, moduleId }) {
         // generic list behaves like a standard list view (the table otherwise
         // opens on double-click).
         if (col.field === 'name') {
+          // Render the name as a real anchor (RecordLink) so right-click →
+          // "Open in new tab", middle-click, and Ctrl/Cmd-click work like a
+          // standard Salesforce record link. Plain left-click still opens the
+          // record in-app (single-click list behavior). The link targets the
+          // row's own table when it differs from this list's object (lookup
+          // rows), falling back to the list object otherwise.
+          const targetTable = r.table || objectTable
           return (
             <td key="name" style={{ padding: '11px 12px', borderBottom: '1px solid #e4e9f2', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              <span
-                onClick={(e) => { e.stopPropagation(); if (r?._id) openRecord({ id: r._id, mode: 'view', name: r.name }) }}
-                style={{ color: '#1a5a8a', fontWeight: 600, cursor: 'pointer' }}
+              <RecordLink
+                table={targetTable}
+                id={r?._id}
+                title={r.name || ''}
+                onActivate={() => { if (r?._id) openRecord({ id: r._id, mode: 'view', name: r.name }) }}
+                style={{ color: '#1a5a8a', fontWeight: 600 }}
               >
                 {r.name || '(no name)'}
-              </span>
+              </RecordLink>
             </td>
           )
         }
