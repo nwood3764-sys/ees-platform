@@ -136,6 +136,7 @@ export async function fetchPortalCalendar() {
     buildingId: a.building_id || null,
     buildingName: a.building_name || '',
     buildingAddress: a.building_address || '',
+    unitId: a.unit_id || null,
     unitNumber: a.unit_number || '',
     workOrderType: a.work_order_type || '',
   }))

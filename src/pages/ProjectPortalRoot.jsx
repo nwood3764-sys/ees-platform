@@ -631,7 +631,7 @@ function UnitPage({ property, building, unit, colorOf }) {
 }
 
 // ─── Calendar (site visits) ──────────────────────────────────────────────────
-function apptColor(status) {
+function apptStatusColor(status) {
   if (/complete/i.test(status)) return C.emerald
   if (/cancel|no-?show|cannot/i.test(status)) return C.textMuted
   return C.sky
@@ -639,91 +639,179 @@ function apptColor(status) {
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 function dayKey(d) { return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` }
 function lastSeg(name) { const parts = String(name || '').split(' - '); return parts[parts.length - 1] }
+function fmtTime(s) { return new Date(s).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) }
 
-function CalendarView({ appointments }) {
+// .ics (iCalendar) export for "add to calendar"
+function icsStamp(s) { return new Date(s).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '') }
+function icsEsc(t) { return String(t || '').replace(/([,;\\])/g, '\\$1').replace(/\n/g, '\\n') }
+function downloadICS(appts, filename) {
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//EES//Project Portal//EN', 'CALSCALE:GREGORIAN']
+  for (const a of appts) {
+    if (!a.start) continue
+    const loc = [a.buildingAddress || lastSeg(a.buildingName), a.unitNumber ? `Unit ${a.unitNumber}` : '', a.propertyAddress].filter(Boolean).join(', ')
+    L.push('BEGIN:VEVENT', `UID:${a.id}@ees-portal`, `DTSTART:${icsStamp(a.start)}`, `DTEND:${icsStamp(a.end || a.start)}`,
+      `SUMMARY:${icsEsc(a.subject)}`, `LOCATION:${icsEsc(loc)}`, `DESCRIPTION:${icsEsc('Status: ' + (a.status || ''))}`, 'END:VEVENT')
+  }
+  L.push('END:VCALENDAR')
+  const blob = new Blob([L.join('\r\n')], { type: 'text/calendar' })
+  const url = URL.createObjectURL(blob)
+  const el = document.createElement('a'); el.href = url; el.download = filename
+  document.body.appendChild(el); el.click(); el.remove(); URL.revokeObjectURL(url)
+}
+
+function CalendarView({ appointments, onOpenVisit }) {
   const today = new Date()
-  const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() })
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const [anchor, setAnchor] = useState(startOfToday)
+  const [mode, setMode] = useState('month')       // month | week
+  const [colorBy, setColorBy] = useState('status') // status | type
   const [propId, setPropId] = useState('all')
   const [bldgId, setBldgId] = useState('all')
+  const [statusId, setStatusId] = useState('all')
   const [selDay, setSelDay] = useState(null)
 
+  // option lists
   const propMap = new Map()
   appointments.forEach((a) => { if (a.propertyId && !propMap.has(a.propertyId)) propMap.set(a.propertyId, { id: a.propertyId, name: a.propertyName, address: a.propertyAddress }) })
   const propOptions = Array.from(propMap.values())
   const bldgMap = new Map()
   appointments.filter((a) => propId === 'all' || a.propertyId === propId).forEach((a) => { if (a.buildingId && !bldgMap.has(a.buildingId)) bldgMap.set(a.buildingId, { id: a.buildingId, name: lastSeg(a.buildingName), address: a.buildingAddress }) })
   const bldgOptions = Array.from(bldgMap.values())
+  const statuses = Array.from(new Set(appointments.map((a) => a.status).filter(Boolean)))
+  const types = Array.from(new Set(appointments.map((a) => a.workOrderType).filter(Boolean))).sort()
+  const typeColor = (t) => CHART_COLORS[Math.max(0, types.indexOf(t)) % CHART_COLORS.length]
+  const colorFor = (a) => colorBy === 'type' ? typeColor(a.workOrderType) : apptStatusColor(a.status)
 
-  const filtered = appointments.filter((a) =>
+  const filtered = appointments.filter((a) => a.start &&
     (propId === 'all' || a.propertyId === propId) &&
-    (bldgId === 'all' || a.buildingId === bldgId) && a.start)
+    (bldgId === 'all' || a.buildingId === bldgId) &&
+    (statusId === 'all' || a.status === statusId))
 
   const byDay = {}
   for (const a of filtered) { const k = dayKey(new Date(a.start)); (byDay[k] = byDay[k] || []).push(a) }
 
-  const first = new Date(cur.y, cur.m, 1)
-  const startWd = first.getDay()
-  const dim = new Date(cur.y, cur.m + 1, 0).getDate()
-  const cells = []
-  for (let i = 0; i < startWd; i++) cells.push(null)
-  for (let d = 1; d <= dim; d++) cells.push(d)
-  while (cells.length % 7 !== 0) cells.push(null)
-  const monthName = first.toLocaleString('en-US', { month: 'long', year: 'numeric' })
-  const isToday = (d) => d && cur.y === today.getFullYear() && cur.m === today.getMonth() && d === today.getDate()
-  const shiftMonth = (delta) => { const d = new Date(cur.y, cur.m + delta, 1); setCur({ y: d.getFullYear(), m: d.getMonth() }); setSelDay(null) }
+  // this-week banner (Sun–Sat of today) + upcoming count
+  const weekStart = new Date(startOfToday); weekStart.setDate(startOfToday.getDate() - startOfToday.getDay())
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7)
+  const thisWeek = filtered.filter((a) => { const d = new Date(a.start); return d >= weekStart && d < weekEnd }).length
+  const upcoming = filtered.filter((a) => new Date(a.start) >= startOfToday).sort((a, b) => new Date(a.start) - new Date(b.start))
 
+  // grid days
+  let gridDays = []
+  if (mode === 'month') {
+    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
+    const dim = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate()
+    for (let i = 0; i < first.getDay(); i++) gridDays.push(null)
+    for (let d = 1; d <= dim; d++) gridDays.push(new Date(anchor.getFullYear(), anchor.getMonth(), d))
+    while (gridDays.length % 7 !== 0) gridDays.push(null)
+  } else {
+    const ws = new Date(anchor); ws.setDate(anchor.getDate() - anchor.getDay())
+    for (let i = 0; i < 7; i++) { const d = new Date(ws); d.setDate(ws.getDate() + i); gridDays.push(d) }
+  }
+  const title = mode === 'month'
+    ? anchor.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+    : (() => { const ws = gridDays[0], we = gridDays[6]; return `${ws.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${we.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` })()
+  const shift = (delta) => {
+    const d = new Date(anchor)
+    if (mode === 'month') d.setMonth(d.getMonth() + delta); else d.setDate(d.getDate() + delta * 7)
+    setAnchor(d); setSelDay(null)
+  }
+  const isSameDay = (d) => d && dayKey(d) === dayKey(today)
   const selAppts = selDay ? (byDay[selDay] || []) : []
   const navBtn = { fontSize: 12, color: C.textSecondary, background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer' }
-  const sel = { fontSize: 12.5, color: C.textPrimary, background: C.card, border: `1px solid ${C.borderDark}`, borderRadius: 6, padding: '6px 9px', outline: 'none' }
+  const selStyle = { fontSize: 12.5, color: C.textPrimary, background: C.card, border: `1px solid ${C.borderDark}`, borderRadius: 6, padding: '6px 9px', outline: 'none' }
+  const seg = (active) => ({ fontSize: 12, fontWeight: 600, padding: '5px 11px', cursor: 'pointer', color: active ? '#fff' : C.textSecondary, background: active ? C.emeraldMid : C.card, border: `1px solid ${active ? C.emeraldMid : C.border}` })
+  const legendItems = colorBy === 'status' ? statuses.map((s) => ({ label: s, color: apptStatusColor(s) })) : types.map((t) => ({ label: t, color: typeColor(t) }))
+
+  const Chip = ({ a }) => (
+    <div onClick={(e) => { e.stopPropagation(); onOpenVisit && onOpenVisit(a) }}
+      title={`${a.subject} · ${a.status}`}
+      style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: C.textSecondary, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: colorFor(a), flexShrink: 0 }} />
+      {a.unitNumber ? `U${a.unitNumber} ` : ''}{a.workOrderType || a.subject}
+    </div>
+  )
 
   return (
     <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, minWidth: 180 }}>{monthName}</div>
-        <button style={navBtn} onClick={() => shiftMonth(-1)}>‹ Prev</button>
-        <button style={navBtn} onClick={() => { setCur({ y: today.getFullYear(), m: today.getMonth() }); setSelDay(null) }}>Today</button>
-        <button style={navBtn} onClick={() => shiftMonth(1)}>Next ›</button>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 14 }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: C.textMuted }}>Property</span>
-            <select style={sel} value={propId} onChange={(e) => { setPropId(e.target.value); setBldgId('all') }}>
-              <option value="all">All properties</option>
-              {propOptions.map((o) => <option key={o.id} value={o.id}>{o.address ? `${o.name} — ${o.address}` : o.name}</option>)}
-            </select>
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: C.textMuted }}>Building</span>
-            <select style={sel} value={bldgId} onChange={(e) => setBldgId(e.target.value)}>
-              <option value="all">All buildings</option>
-              {bldgOptions.map((o) => <option key={o.id} value={o.id}>{o.address ? `${o.address} (${o.name})` : o.name}</option>)}
-            </select>
-          </label>
+      {/* Controls — row 1: title + nav + view toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, minWidth: 190 }}>{title}</div>
+        <button style={navBtn} onClick={() => shift(-1)}>‹ Prev</button>
+        <button style={navBtn} onClick={() => { setAnchor(startOfToday); setSelDay(null) }}>Today</button>
+        <button style={navBtn} onClick={() => shift(1)}>Next ›</button>
+        <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', marginLeft: 6 }}>
+          <div style={{ ...seg(mode === 'month'), borderRadius: '6px 0 0 6px' }} onClick={() => setMode('month')}>Month</div>
+          <div style={{ ...seg(mode === 'week'), borderRadius: '0 6px 6px 0', borderLeft: 'none' }} onClick={() => setMode('week')}>Week</div>
         </div>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: C.textSecondary }}>
+          <strong style={{ color: C.textPrimary }}>{thisWeek}</strong> this week · <strong style={{ color: C.textPrimary }}>{upcoming.length}</strong> upcoming
+        </span>
       </div>
 
+      {/* Controls — row 2: filters + color-by + export */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, marginBottom: 12, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: C.textMuted }}>Property</span>
+          <select style={selStyle} value={propId} onChange={(e) => { setPropId(e.target.value); setBldgId('all') }}>
+            <option value="all">All properties</option>
+            {propOptions.map((o) => <option key={o.id} value={o.id}>{o.address ? `${o.name} — ${o.address}` : o.name}</option>)}
+          </select>
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: C.textMuted }}>Building</span>
+          <select style={selStyle} value={bldgId} onChange={(e) => setBldgId(e.target.value)}>
+            <option value="all">All buildings</option>
+            {bldgOptions.map((o) => <option key={o.id} value={o.id}>{o.address ? `${o.address} (${o.name})` : o.name}</option>)}
+          </select>
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: C.textMuted }}>Status</span>
+          <select style={selStyle} value={statusId} onChange={(e) => setStatusId(e.target.value)}>
+            <option value="all">All statuses</option>
+            {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: C.textMuted }}>Color by</span>
+          <select style={selStyle} value={colorBy} onChange={(e) => setColorBy(e.target.value)}>
+            <option value="status">Status</option>
+            <option value="type">Work-order type</option>
+          </select>
+        </label>
+        <button style={{ ...navBtn, marginLeft: 'auto' }} disabled={!upcoming.length}
+          onClick={() => downloadICS(upcoming, 'ees-upcoming-site-visits.ics')}>⤓ Export upcoming (.ics)</button>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 12 }}>
+        {legendItems.map((it) => (
+          <span key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: C.textSecondary }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: it.color }} />{it.label}
+          </span>
+        ))}
+      </div>
+
+      {/* Grid */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', borderBottom: `1px solid ${C.border}` }}>
           {WEEKDAYS.map((w) => <div key={w} style={{ padding: '8px 10px', fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.4px' }}>{w}</div>)}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)' }}>
-          {cells.map((d, i) => {
-            const k = d ? `${cur.y}-${cur.m}-${d}` : null
+          {gridDays.map((d, i) => {
+            const k = d ? dayKey(d) : null
             const appts = k ? (byDay[k] || []) : []
             const active = selDay && selDay === k
+            const cap = mode === 'week' ? 99 : 3
             return (
               <div key={i} onClick={() => d && setSelDay(k)}
-                style={{ minHeight: 92, borderRight: (i % 7 !== 6) ? `1px solid ${C.border}` : 'none', borderBottom: `1px solid ${C.border}`,
+                style={{ minHeight: mode === 'week' ? 220 : 92, borderRight: (i % 7 !== 6) ? `1px solid ${C.border}` : 'none', borderBottom: `1px solid ${C.border}`,
                   padding: 6, cursor: d ? 'pointer' : 'default', background: active ? '#eef5ff' : (d ? C.card : C.page) }}>
                 {d && (
                   <>
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 22, height: 22, borderRadius: '50%', fontSize: 11.5, fontWeight: isToday(d) ? 700 : 500, color: isToday(d) ? '#fff' : C.textSecondary, background: isToday(d) ? C.emerald : 'transparent', marginBottom: 3 }}>{d}</div>
-                    {appts.slice(0, 3).map((a) => (
-                      <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: C.textSecondary, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: apptColor(a.status), flexShrink: 0 }} />
-                        {a.unitNumber ? `U${a.unitNumber} ` : ''}{a.workOrderType || a.subject}
-                      </div>
-                    ))}
-                    {appts.length > 3 && <div style={{ fontSize: 9, color: C.textMuted }}>+{appts.length - 3} more</div>}
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 22, height: 22, borderRadius: '50%', fontSize: 11.5, fontWeight: isSameDay(d) ? 700 : 500, color: isSameDay(d) ? '#fff' : C.textSecondary, background: isSameDay(d) ? C.emerald : 'transparent', marginBottom: 3 }}>{d.getDate()}</div>
+                    {appts.slice(0, cap).map((a) => <Chip key={a.id} a={a} />)}
+                    {appts.length > cap && <div style={{ fontSize: 9, color: C.textMuted }}>+{appts.length - cap} more</div>}
                   </>
                 )}
               </div>
@@ -732,28 +820,49 @@ function CalendarView({ appointments }) {
         </div>
       </div>
 
+      {/* Selected-day detail */}
       {selDay && (
         <div style={{ marginTop: 16 }}>
-          <SectionHeader title={`Visits — ${new Date(cur.y, cur.m, Number(selDay.split('-')[2])).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`} desc={`${selAppts.length} site visit${selAppts.length === 1 ? '' : 's'}`} />
-          {selAppts.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No site visits scheduled this day.</div>}
-          {selAppts.map((a) => (
-            <div key={a.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 16px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ width: 9, height: 9, borderRadius: '50%', background: apptColor(a.status), flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{a.subject}</div>
-                <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 2 }}>
-                  {new Date(a.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                  {' · '}{a.buildingAddress || lastSeg(a.buildingName)}{a.unitNumber ? ` · Unit ${a.unitNumber}` : ''}
-                </div>
-                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
-                  {a.propertyName}{a.propertyAddress ? ` · ${a.propertyAddress}` : ''}
-                </div>
-              </div>
-              <span style={{ fontSize: 10.5, fontWeight: 600, color: apptColor(a.status), background: `${apptColor(a.status)}1a`, padding: '2px 9px', borderRadius: 20 }}>{a.status || '—'}</span>
-            </div>
-          ))}
+          <SectionHeader title={`Visits — ${new Date(selAppts[0]?.start || today).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`} desc={`${selAppts.length} site visit${selAppts.length === 1 ? '' : 's'}`} />
+          {selAppts.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No site visits this day.</div>}
+          {selAppts.map((a) => <VisitRow key={a.id} a={a} onOpenVisit={onOpenVisit} />)}
         </div>
       )}
+
+      {/* Upcoming agenda */}
+      <div style={{ marginTop: 22 }}>
+        <SectionHeader title="Upcoming Visits" desc="Next scheduled site visits across your filters" action={`${upcoming.length} upcoming`} />
+        {upcoming.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No upcoming visits.</div>}
+        {upcoming.slice(0, 25).map((a) => (
+          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <div style={{ width: 70, flexShrink: 0, textAlign: 'center', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '6px 0' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: C.sky }}>{new Date(a.start).toLocaleDateString('en-US', { month: 'short' })}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, lineHeight: 1 }}>{new Date(a.start).getDate()}</div>
+            </div>
+            <div style={{ flex: 1 }}><VisitRow a={a} onOpenVisit={onOpenVisit} showAdd /></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function VisitRow({ a, onOpenVisit, showAdd }) {
+  const color = apptStatusColor(a.status)
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 16px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+      <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <div onClick={() => onOpenVisit && onOpenVisit(a)} style={{ flex: 1, minWidth: 0, cursor: onOpenVisit ? 'pointer' : 'default' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{a.subject}</div>
+        <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 2 }}>
+          {fmtTime(a.start)}{a.end ? `–${fmtTime(a.end)}` : ''}
+          {' · '}{a.buildingAddress || lastSeg(a.buildingName)}{a.unitNumber ? ` · Unit ${a.unitNumber}` : ''}
+        </div>
+        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>{a.propertyName}{a.propertyAddress ? ` · ${a.propertyAddress}` : ''}</div>
+      </div>
+      <span style={{ fontSize: 10.5, fontWeight: 600, color, background: `${color}1a`, padding: '2px 9px', borderRadius: 20, whiteSpace: 'nowrap' }}>{a.status || '—'}</span>
+      {showAdd && <button onClick={(e) => { e.stopPropagation(); downloadICS([a], 'site-visit.ics') }}
+        style={{ fontSize: 11, color: C.textSecondary, background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>+ Calendar</button>}
     </div>
   )
 }
@@ -885,7 +994,10 @@ export default function ProjectPortalRoot() {
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', background: C.page }}>
-          {view === 'calendar' && <CalendarView appointments={appointments} />}
+          {view === 'calendar' && <CalendarView appointments={appointments} onOpenVisit={(a) => {
+            if (a.propertyId && a.buildingId && a.unitId) { setView('tree'); onSelect({ pid: a.propertyId, bid: a.buildingId, uid: a.unitId }) }
+            else if (a.propertyId && a.buildingId) { setView('tree'); onSelect({ pid: a.propertyId, bid: a.buildingId }) }
+          }} />}
           {view === 'tree' && <>
             {!property && <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>}
             {property && building && unit && <UnitPage property={property} building={building} unit={unit} colorOf={colorOf} />}
