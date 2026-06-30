@@ -837,7 +837,7 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
   };
 
   return (
-    <th style={{ padding: 0, position: 'relative', userSelect: 'none', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+    <th style={{ padding: 0, position: 'sticky', top: 0, zIndex: 3, background: C.card, userSelect: 'none', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
         <div onClick={handleSort}
           style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '10px 4px 10px 12px', cursor: col.sortable ? 'pointer' : 'default', flex: '1 1 auto', minWidth: 0 }}
@@ -2627,8 +2627,11 @@ export function ListView({
 
       {/* Table + detail panel */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
-        <div style={{ flex: '1 1 0', minWidth: 0, width: 0, overflow: 'auto', padding: '14px 14px 24px' }}>
-          <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+        <div style={{ flex: '1 1 0', minWidth: 0, width: 0, padding: '14px 14px 24px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* The card itself is the scroll container so its rounded corners clip
+              AND the sticky <thead> has a proper scrollport to freeze against.
+              (A wrapping overflow:hidden here previously defeated position:sticky.) */}
+          <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'auto', flex: 1, minHeight: 0 }}>
             <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
               <colgroup>
                 {editMode && <col style={{ width: 36 }} />}
