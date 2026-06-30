@@ -20,6 +20,7 @@ export async function fetchPortalUsers() {
       email,
       phone,
       portal_role,
+      role:portal_role ( picklist_label ),
       status,
       last_login,
       notes,
@@ -54,7 +55,7 @@ export async function fetchPortalUsers() {
       name: r.full_name,
       email: r.email || '—',
       phone: r.phone || '—',
-      portalRole: r.portal_role,
+      portalRole: r.role?.picklist_label || '—',
       status: r.status,
       lastLogin: r.last_login
         ? new Date(r.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
