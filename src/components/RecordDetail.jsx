@@ -4755,14 +4755,34 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     return () => { cancelled = true }
   }, [tableName, recordId, isCreate, reloadTick, pickerEvaluated, pickedRecordType])
 
+  // True when THIS record is the one currently addressed in the browser URL
+  // (/<table>/<id>). Only then do we sync the active tab into the URL — this
+  // gates out standalone/local-detail mounts (ObjectListSection's fallback) and
+  // any non-URL-addressable host, so the URL is never corrupted there.
+  const recordIsUrlAddressed = () =>
+    !isCreate && !!recordId && window.location.pathname === `/${tableName}/${recordId}`
+
+  // The ordered tab list, computed from loaded data (mirrors the render-time
+  // `orderedTabs`). Used by the URL-sync helpers below, which run outside the
+  // render scope where `orderedTabs` is defined.
+  const tabsFromData = () =>
+    data?.sections ? buildOrderedTabs(data.sections, { includeActivity: !isInsertMode }) : []
+
   // When data first loads (or when the loaded record changes tables),
-  // pick the first tab as active. Only initializes — does not override
-  // user selection.
+  // pick the active tab. Honors a ?tab= deep link / restored history entry
+  // when this record is the URL-addressed one; otherwise the first tab.
+  // Only initializes — does not override an in-session selection.
   useEffect(() => {
     if (!data?.sections) return
     if (activeTab !== null) return
-    const tabs = buildOrderedTabs(data.sections)
-    if (tabs.length > 0) setActiveTab(tabs[0])
+    const tabs = buildOrderedTabs(data.sections, { includeActivity: !isInsertMode })
+    if (tabs.length === 0) return
+    let initial = tabs[0]
+    if (recordIsUrlAddressed()) {
+      const raw = new URLSearchParams(window.location.search).get('tab')
+      if (raw && tabs.includes(raw)) initial = raw
+    }
+    setActiveTab(initial)
   }, [data, activeTab])
 
   // Reset active tab when switching records so the new record opens on
@@ -4770,6 +4790,41 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   useEffect(() => {
     setActiveTab(null)
   }, [tableName, recordId])
+
+  // Select a tab AND push it onto browser history as ?tab=<name> (Salesforce
+  // parity: the related-list/Activity view is its own history entry, so the
+  // browser Back button steps exactly one level — Related → Details → list —
+  // instead of jumping past the record entirely). The default (first) tab uses
+  // the clean record URL with no query, so back from Related lands on Details.
+  const selectTab = useCallback((t) => {
+    setActiveTab(t)
+    if (isCreate || !recordId || window.location.pathname !== `/${tableName}/${recordId}`) return
+    const tabs = data?.sections ? buildOrderedTabs(data.sections, { includeActivity: !isInsertMode }) : []
+    const defaultTab = tabs[0] || null
+    const params = new URLSearchParams(window.location.search)
+    if (t && t !== defaultTab) params.set('tab', t)
+    else params.delete('tab')
+    const qs = params.toString()
+    const next = window.location.pathname + (qs ? `?${qs}` : '')
+    if (next !== window.location.pathname + window.location.search) {
+      window.history.pushState(null, '', next)
+    }
+  }, [data, isInsertMode, tableName, recordId, isCreate])
+
+  // Browser back/forward: re-derive the active tab from the URL. The app's own
+  // popstate handler re-parses the path (same record → no remount), and this
+  // independently restores the tab the URL points at.
+  useEffect(() => {
+    const onPop = () => {
+      if (isCreate || !recordId || window.location.pathname !== `/${tableName}/${recordId}`) return
+      const tabs = data?.sections ? buildOrderedTabs(data.sections, { includeActivity: !isInsertMode }) : []
+      if (tabs.length === 0) return
+      const raw = new URLSearchParams(window.location.search).get('tab')
+      setActiveTab(raw && tabs.includes(raw) ? raw : tabs[0])
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [data, isInsertMode, tableName, recordId, isCreate])
 
   const loadAllEditOpts = useCallback(async (sections, currentRecord = null) => {
     const pickFields = []
@@ -5940,7 +5995,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               return (
                 <button
                   key={t}
-                  onClick={() => setActiveTab(t)}
+                  onClick={() => selectTab(t)}
                   style={{
                     padding: isMobile ? '12px 14px' : '10px 16px', background: 'none', border: 'none',
                     borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
