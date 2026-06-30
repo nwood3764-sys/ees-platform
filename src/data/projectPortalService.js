@@ -2,19 +2,21 @@
 // projectPortalService — data layer for the customer-facing Project Portal.
 //
 // The Project Portal is a standalone bypass surface (mounted at /project-portal
-// in main.jsx) that lets a property owner / property manager track the stage of
-// their IRA program work at the property → building → unit level. Access is
-// governed entirely by explicit grants in portal_user_property_grants — there is
-// NO inherited authority or account-level hierarchy. The read layer is the
-// SECURITY DEFINER RPC get_portal_project_tracker(), which resolves the
-// authenticated portal user to their grants and returns the in-scope
-// property → building → unit → opportunity tree. Each opportunity carries its
-// record type's full ordered stage list (stages: [{ label, sortOrder }], from
-// picklist_value_record_type_assignments) plus stage_order (the rank of its
-// current stage). Nothing about the stage count is hardcoded.
+// in main.jsx) that lets a property owner / property manager track the status of
+// their IRA program work. Access is governed entirely by explicit grants in
+// portal_user_property_grants — there is NO inherited authority or account-level
+// hierarchy. The read layer is the SECURITY DEFINER RPC
+// get_portal_project_tracker().
 //
-// A unit typically runs two program opportunities — HOMES and HEAR — surfaced
-// here as unit.homes / unit.hear for convenience.
+// MODEL: everything is driven by OPPORTUNITY statuses, and opportunities are
+// BUILDING-level. Properties have their own statuses elsewhere in LEAP, but the
+// portal does NOT track them — here a property is just a container of buildings
+// you click into. Each building carries its own opportunities (one per record
+// type, e.g. an IRA HOMES and an IRA HEAR opportunity), each with its own
+// data-driven stage list ([{ label, sortOrder }], from
+// picklist_value_record_type_assignments) and stage_order. No unit tier, no
+// property status. Nothing about programs or stage counts is hardcoded — the
+// portal discovers the record types present and renders one track per type.
 // =============================================================================
 
 import { supabase } from '../lib/supabase'
@@ -36,11 +38,8 @@ export async function fetchPortalUserSelf() {
   return data || null
 }
 
-// ─── Program helpers ──────────────────────────────────────────────────────────
-// A "program" is simply an opportunity's record type, surfaced by the RPC as
-// opp.program (the record type's picklist_label, e.g. "WI-IRA-MF-HOMES"). The
-// portal is NOT hardcoded to any particular program — it discovers the distinct
-// record types present in the data and renders one track per record type.
+// A "program" is simply an opportunity's record type (opp.program == the record
+// type's picklist_label). The portal is NOT hardcoded to any program.
 export function programLabel(opp) {
   return (opp && opp.program) || 'Program'
 }
@@ -51,9 +50,7 @@ export async function fetchProjectTracker() {
   if (error) throw error
 
   const payload = data || {}
-  if (payload.error) {
-    return { error: payload.error, properties: [] }
-  }
+  if (payload.error) return { error: payload.error, properties: [] }
 
   const mapOpp = (o) => ({
     id: o.id,
@@ -76,25 +73,14 @@ export async function fetchProjectTracker() {
     state: p.state || '',
     totalUnits: p.total_units ?? null,
     totalBuildings: p.total_buildings ?? null,
-    buildings: (p.buildings || []).map((b) => {
-      const units = (b.units || []).map((u) => ({
-        id: u.id,
-        name: u.name || '',
-        unitNumber: u.unit_number || '',
-        recordNumber: u.record_number || '',
-        opportunities: (u.opportunities || []).map(mapOpp),
-      }))
-      return {
-        id: b.id,
-        name: b.name || 'Unnamed Building',
-        recordNumber: b.record_number || '',
-        address: b.address || '',
-        totalUnits: b.total_units ?? units.length,
-        units,
-        // building-level (non-unit) opportunities, if any
-        opportunities: (b.opportunities || []).map(mapOpp),
-      }
-    }),
+    buildings: (p.buildings || []).map((b) => ({
+      id: b.id,
+      name: b.name || 'Unnamed Building',
+      recordNumber: b.record_number || '',
+      address: b.address || '',
+      totalUnits: b.total_units ?? null,
+      opportunities: (b.opportunities || []).map(mapOpp),
+    })),
   }))
 
   return { portalUserId: payload.portal_user_id, properties }
@@ -117,10 +103,6 @@ export function oppPct(opportunity) {
 }
 
 // Bucket a single opportunity by lifecycle position.
-//   complete   — at (or past) its last stage
-//   submittal  — exactly one stage from the end (docs/payment-request territory)
-//   inProgress — somewhere in between
-//   notStarted — no stage yet
 export function oppBucket(opportunity) {
   if (!opportunity) return 'none'
   const count = stageCountOf(opportunity)
@@ -132,38 +114,29 @@ export function oppBucket(opportunity) {
 }
 
 // ─── Program discovery (data-driven; no hardcoded program list) ──────────────
-export function unitOpps(unit) {
-  return (unit?.opportunities) || []
+export function buildingOpps(building) {
+  return (building?.opportunities) || []
 }
 
-// The opportunity on a unit for a given program (record type label), or null.
-export function oppForProgram(unit, program) {
-  return unitOpps(unit).find((o) => o.program === program) || null
+// The opportunity on a building for a given program (record type label), or null.
+export function oppForProgram(building, program) {
+  return buildingOpps(building).find((o) => o.program === program) || null
 }
 
 // Distinct programs (record type labels) present anywhere under a property,
-// in stable alphabetical order. This is what drives how many tracks render.
+// in stable alphabetical order. Drives how many tracks render.
 export function propertyPrograms(property) {
   const set = new Set()
   for (const b of property.buildings || []) {
-    for (const u of b.units || []) for (const o of u.opportunities || []) if (o.program) set.add(o.program)
     for (const o of b.opportunities || []) if (o.program) set.add(o.program)
   }
   return Array.from(set).sort()
 }
 
 // ─── Per-program rollups (keyed by record type label) ────────────────────────
-export function unitProgramPct(unit, program) {
-  const opp = oppForProgram(unit, program)
-  return opp ? oppPct(opp) : null
-}
-
 export function buildingProgramPct(building, program) {
-  const vals = (building.units || [])
-    .map((u) => unitProgramPct(u, program))
-    .filter((v) => v != null)
-  if (!vals.length) return null
-  return Math.round(vals.reduce((a, v) => a + v, 0) / vals.length)
+  const opp = oppForProgram(building, program)
+  return opp ? oppPct(opp) : null
 }
 
 export function propertyProgramPct(property, program) {
@@ -174,9 +147,9 @@ export function propertyProgramPct(property, program) {
   return Math.round(vals.reduce((a, v) => a + v, 0) / vals.length)
 }
 
-// A unit's overall status, considering all its program opportunities.
-export function unitStatus(unit) {
-  const opps = unitOpps(unit)
+// A building's overall status, considering all its opportunities.
+export function buildingStatus(building) {
+  const opps = buildingOpps(building)
   if (!opps.length) return 'notStarted'
   const buckets = opps.map(oppBucket)
   if (buckets.every((b) => b === 'complete')) return 'complete'
@@ -185,25 +158,21 @@ export function unitStatus(unit) {
   return 'inProgress'
 }
 
-export function allUnits(property) {
-  const out = []
-  for (const b of property.buildings || []) {
-    for (const u of b.units || []) out.push({ ...u, buildingId: b.id, buildingName: b.name })
-  }
-  return out
+export function allBuildings(property) {
+  return property.buildings || []
 }
 
-// Property-level unit counts by status bucket (drives the dashboard stat cards).
-export function unitStats(property) {
-  const units = allUnits(property)
+// Property-level building counts by status bucket (drives the dashboard cards).
+export function buildingStats(property) {
+  const buildings = allBuildings(property)
   let complete = 0, inProgress = 0, submittal = 0, notStarted = 0
-  for (const u of units) {
-    switch (unitStatus(u)) {
+  for (const b of buildings) {
+    switch (buildingStatus(b)) {
       case 'complete': complete++; break
       case 'submittal': submittal++; break
       case 'notStarted': notStarted++; break
       default: inProgress++; break
     }
   }
-  return { total: units.length, complete, inProgress, submittal, notStarted }
+  return { total: buildings.length, complete, inProgress, submittal, notStarted }
 }
