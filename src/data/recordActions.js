@@ -68,6 +68,7 @@ export const ACTION_KEYS = Object.freeze({
   UNPUBLISH:               'unpublish',
   ARCHIVE:                 'archive',
   RESTORE:                 'restore',
+  MERGE_ACCOUNT:           'merge_account',
 })
 
 // ---------------------------------------------------------------------------
@@ -337,6 +338,18 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultSortOrder:    90,
     isAvailable: ({ editing, lifecycle, lifecycleStatusValue }) =>
       !editing && !!lifecycle && lifecycleStatusValue === 'Archived',
+  },
+
+  // ── Accounts ──────────────────────────────────────────────────────────────
+  merge_account: {
+    key:                 ACTION_KEYS.MERGE_ACCOUNT,
+    label:               'Merge',
+    icon:                'M7 8l-4 4 4 4M3 12h12a4 4 0 004-4V4M17 16l4-4-4-4',
+    color:               ACTION_COLORS.NEUTRAL,
+    applicableObjects:   ['accounts'],
+    defaultTier:         'menu',
+    defaultSortOrder:    50,
+    isAvailable: ({ tableName, editing }) => !editing && tableName === 'accounts',
   },
 
   // ── Universal — defaulted to menu so they don't crowd the primary row ──
