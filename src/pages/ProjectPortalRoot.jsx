@@ -670,6 +670,48 @@ function downloadICS(appts, filename) {
   document.body.appendChild(el); el.click(); el.remove(); URL.revokeObjectURL(url)
 }
 
+function apptLocation(a) {
+  return [a.buildingAddress || lastSeg(a.buildingName), a.unitNumber ? `Unit ${a.unitNumber}` : '', a.propertyAddress].filter(Boolean).join(', ')
+}
+function googleCalUrl(a) {
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+    + `&text=${encodeURIComponent(a.subject)}`
+    + `&dates=${icsStamp(a.start)}/${icsStamp(a.end || a.start)}`
+    + `&details=${encodeURIComponent('Status: ' + (a.status || ''))}`
+    + `&location=${encodeURIComponent(apptLocation(a))}`
+}
+function outlookCalUrl(a) {
+  return 'https://outlook.office.com/calendar/0/deeplink/compose?path=/calendar/action/compose&rru=addevent'
+    + `&subject=${encodeURIComponent(a.subject)}`
+    + `&startdt=${encodeURIComponent(new Date(a.start).toISOString())}`
+    + `&enddt=${encodeURIComponent(new Date(a.end || a.start).toISOString())}`
+    + `&body=${encodeURIComponent('Status: ' + (a.status || ''))}`
+    + `&location=${encodeURIComponent(apptLocation(a))}`
+}
+
+// "Add to Calendar" menu — deep-links into Google/Outlook, .ics fallback.
+function AddToCalendar({ appt }) {
+  const [open, setOpen] = useState(false)
+  const item = { display: 'block', width: '100%', textAlign: 'left', fontSize: 12, color: C.textSecondary, background: 'transparent', border: 'none', padding: '8px 12px', cursor: 'pointer', whiteSpace: 'nowrap' }
+  const go = (fn) => (e) => { e.stopPropagation(); fn(); setOpen(false) }
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }}
+        style={{ fontSize: 11, fontWeight: 600, color: C.emeraldMid, background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 9px', cursor: 'pointer', whiteSpace: 'nowrap' }}>+ Add to calendar ▾</button>
+      {open && (
+        <>
+          <div onClick={go(() => {})} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
+          <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 51, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: '0 4px 16px rgba(13,26,46,.14)', overflow: 'hidden', minWidth: 188 }}>
+            <button style={item} onClick={go(() => window.open(googleCalUrl(appt), '_blank', 'noopener'))}>Google Calendar</button>
+            <button style={item} onClick={go(() => window.open(outlookCalUrl(appt), '_blank', 'noopener'))}>Outlook</button>
+            <button style={{ ...item, borderTop: `1px solid ${C.border}` }} onClick={go(() => downloadICS([appt], 'site-visit.ics'))}>Apple / download (.ics)</button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function CalendarView({ appointments, onOpenVisit }) {
   const today = new Date()
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
@@ -791,7 +833,7 @@ function CalendarView({ appointments, onOpenVisit }) {
           </select>
         </label>
         <button style={{ ...navBtn, marginLeft: 'auto' }} disabled={!upcoming.length}
-          onClick={() => downloadICS(upcoming, 'ees-upcoming-site-visits.ics')}>⤓ Export upcoming (.ics)</button>
+          onClick={() => downloadICS(upcoming, 'ees-upcoming-site-visits.ics')} title="Downloads all upcoming visits as one .ics file (imports into Google, Outlook, or Apple Calendar)">⤓ Download all (.ics)</button>
       </div>
 
       {/* Legend */}
@@ -872,8 +914,7 @@ function VisitRow({ a, onOpenVisit, showAdd }) {
         <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>{a.propertyName}{a.propertyAddress ? ` · ${a.propertyAddress}` : ''}</div>
       </div>
       <span style={{ fontSize: 10.5, fontWeight: 600, color, background: `${color}1a`, padding: '2px 9px', borderRadius: 20, whiteSpace: 'nowrap' }}>{a.status || '—'}</span>
-      {showAdd && <button onClick={(e) => { e.stopPropagation(); downloadICS([a], 'site-visit.ics') }}
-        style={{ fontSize: 11, color: C.textSecondary, background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>+ Calendar</button>}
+      {showAdd && <AddToCalendar appt={a} />}
     </div>
   )
 }
