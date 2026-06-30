@@ -182,6 +182,7 @@ Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (
 | Schema session instructions | `leap-schema-session.md` |
 | Development workflow (sandbox → prod) | `leap-dev-workflow.md` |
 | Staging environment (full-data copy) | `leap-staging-environment.md` |
+| Environment & promotion standard (prod-safe) | `leap-environment-promotion-standard.md` |
 | HUD data sources | `leap-hud-data-sources.md` |
 | Agent operating mode | `leap-agent-operating-mode.md` |
 | Build discipline (folded into this file) | `leap-build-discipline.md` |
