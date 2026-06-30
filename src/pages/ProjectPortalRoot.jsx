@@ -305,7 +305,7 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11.5, color: '#fff', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.full_name || ''}</div>
-          <div style={{ fontSize: 10, color: C.navInactive }}>{user?.portal_role || 'Portal User'}</div>
+          <div style={{ fontSize: 10, color: C.navInactive }}>{user?.portalRoleLabel || 'Portal User'}</div>
         </div>
         <button onClick={onSignOut} style={{ fontSize: 11, color: C.navInactive, background: 'transparent', border: '1px solid rgba(255,255,255,.14)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>Sign Out</button>
       </div>

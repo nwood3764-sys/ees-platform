@@ -29,13 +29,15 @@ export async function fetchPortalUserSelf() {
 
   const { data, error } = await supabase
     .from('portal_users')
-    .select('id, full_name, email, portal_role, status, record_type')
+    .select('id, full_name, email, portal_role, role:portal_role ( picklist_label ), status, record_type')
     .eq('auth_user_id', authUser.id)
     .eq('is_deleted', false)
     .maybeSingle()
 
   if (error) throw error
-  return data || null
+  if (!data) return null
+  // portal_role is a uuid FK to picklist_values; expose the human label too.
+  return { ...data, portalRoleLabel: data.role?.picklist_label || '' }
 }
 
 // A "program" is simply an opportunity's record type (opp.program == the record
