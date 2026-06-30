@@ -37,6 +37,7 @@ import {
   workOrderStatusCounts,
   projectStatusCounts,
   findProject,
+  buildingProjects,
   workOrdersByUnit,
   buildingUnits,
   unitWorkOrders,
@@ -240,9 +241,9 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
               {pOpen && (p.buildings || []).filter((b) => matchBldg(b, p.name)).map((b) => {
                 const bKey = `${p.id}:${b.id}`
                 const bOpen = open.bldg === bKey
-                const bActive = sel.bid === b.id && !sel.uid
+                const bActive = sel.bid === b.id && !sel.uid && !sel.projId
                 const meta = bucketMeta(buildingStatus(b))
-                const units = buildingUnits(b)
+                const projects = buildingProjects(b)
                 return (
                   <div key={b.id}>
                     <div onClick={() => onSelect({ pid: p.id, bid: b.id })}
@@ -250,22 +251,42 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
                         borderLeft: `3px solid ${bActive ? C.sky : 'transparent'}`,
                         background: bActive ? 'rgba(126,179,232,.16)' : 'transparent' }}>
                       <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, bldg: o.bldg === bKey ? null : bKey })) }}
-                        style={{ width: 16, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: bOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', opacity: units.length ? 1 : 0 }}>{IconChevR}</span>
+                        style={{ width: 16, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: bOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', opacity: projects.length ? 1 : 0 }}>{IconChevR}</span>
                       <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.dot, margin: '0 8px 0 2px', flexShrink: 0 }} />
                       <span style={{ color: 'rgba(255,255,255,.45)', marginRight: 6, display: 'flex' }}>{IconBldg}</span>
                       <span style={{ flex: 1, fontSize: 12, color: bActive ? '#fff' : 'rgba(255,255,255,.8)', fontWeight: bActive ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{shortBuildingName(b.name, p.name)}</span>
                       <MiniTracks programs={programs} colorOf={colorOf} pctOf={(pg) => buildingProgramPct(b, pg)} />
                     </div>
 
-                    {bOpen && units.map((u) => {
-                      const uActive = sel.uid === u.unitId
+                    {bOpen && projects.map((pr) => {
+                      const prKey = `${b.id}:${pr.id}`
+                      const prOpen = open.proj === prKey
+                      const prActive = sel.projId === pr.id && !sel.uid
+                      const prUnits = workOrdersByUnit(pr).filter((u) => u.unitId)
                       return (
-                        <div key={u.unitId} onClick={() => onSelect({ pid: p.id, bid: b.id, uid: u.unitId })}
-                          style={{ display: 'flex', alignItems: 'center', padding: '4px 10px 4px 50px', cursor: 'pointer',
-                            borderLeft: `3px solid ${uActive ? C.emerald : 'transparent'}`,
-                            background: uActive ? 'rgba(62,207,142,.14)' : 'transparent' }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,.4)', marginRight: 8, flexShrink: 0 }} />
-                          <span style={{ flex: 1, fontSize: 11.5, color: uActive ? '#fff' : 'rgba(255,255,255,.66)', fontWeight: uActive ? 700 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Unit {u.unitNumber}</span>
+                        <div key={pr.id}>
+                          <div onClick={() => onSelect({ pid: p.id, bid: b.id, projId: pr.id })}
+                            style={{ display: 'flex', alignItems: 'center', padding: '5px 10px 5px 40px', cursor: 'pointer',
+                              borderLeft: `3px solid ${prActive ? C.emerald : 'transparent'}`,
+                              background: prActive ? 'rgba(62,207,142,.14)' : 'transparent' }}>
+                            <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, proj: o.proj === prKey ? null : prKey })) }}
+                              style={{ width: 14, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: prOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', opacity: prUnits.length ? 1 : 0 }}>{IconChevR}</span>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(pr.opportunity?.program), margin: '0 7px 0 1px', flexShrink: 0 }} />
+                            <span style={{ flex: 1, fontSize: 11.5, color: prActive ? '#fff' : 'rgba(255,255,255,.72)', fontWeight: prActive ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'JetBrains Mono, monospace' }}>{pr.recordType || pr.name}</span>
+                          </div>
+
+                          {prOpen && prUnits.map((u) => {
+                            const uActive = sel.uid === u.unitId && sel.projId === pr.id
+                            return (
+                              <div key={u.unitId} onClick={() => onSelect({ pid: p.id, bid: b.id, projId: pr.id, uid: u.unitId })}
+                                style={{ display: 'flex', alignItems: 'center', padding: '4px 10px 4px 64px', cursor: 'pointer',
+                                  borderLeft: `3px solid ${uActive ? C.emerald : 'transparent'}`,
+                                  background: uActive ? 'rgba(62,207,142,.14)' : 'transparent' }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,.4)', marginRight: 8, flexShrink: 0 }} />
+                                <span style={{ flex: 1, fontSize: 11, color: uActive ? '#fff' : 'rgba(255,255,255,.62)', fontWeight: uActive ? 700 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Unit {u.unitNumber}</span>
+                              </div>
+                            )
+                          })}
                         </div>
                       )
                     })}
@@ -1005,7 +1026,7 @@ export default function ProjectPortalRoot() {
   const [self, setSelf] = useState(null)
   const [tree, setTree] = useState([])
   const [sel, setSel] = useState({ pid: null, bid: null, uid: null, projId: null })
-  const [open, setOpen] = useState({ prop: null, bldg: null })
+  const [open, setOpen] = useState({ prop: null, bldg: null, proj: null })
   const [query, setQuery] = useState('')
   const [errMsg, setErrMsg] = useState(null)
   const [view, setView] = useState('tree')        // tree | calendar
@@ -1024,7 +1045,7 @@ export default function ProjectPortalRoot() {
       setTree(props)
       const first = props[0]
       setSel({ pid: first ? first.id : null, bid: null, uid: null, projId: null })
-      setOpen({ prop: first ? first.id : null, bldg: null })
+      setOpen({ prop: first ? first.id : null, bldg: null, proj: null })
       try { const cal = await fetchPortalCalendar(); setAppointments(cal.appointments || []) } catch { setAppointments([]) }
       setPhase('ready')
     } catch (e) {
@@ -1045,6 +1066,7 @@ export default function ProjectPortalRoot() {
     setOpen((o) => ({
       prop: next.pid || o.prop,
       bldg: next.bid ? `${next.pid}:${next.bid}` : o.bldg,
+      proj: next.projId ? `${next.bid}:${next.projId}` : o.proj,
     }))
   }, [])
 
