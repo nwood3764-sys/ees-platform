@@ -118,6 +118,28 @@ export async function fetchProjectTracker() {
   return { portalUserId: payload.portal_user_id, properties }
 }
 
+// ─── Calendar (site visits / service appointments) ──────────────────────────
+export async function fetchPortalCalendar() {
+  const { data, error } = await supabase.rpc('get_portal_calendar')
+  if (error) throw error
+  const payload = data || {}
+  if (payload.error) return { error: payload.error, appointments: [] }
+  const appointments = (payload.appointments || []).map((a) => ({
+    id: a.id,
+    subject: a.subject || 'Site Visit',
+    status: a.status || '',
+    start: a.start || null,
+    end: a.end || null,
+    propertyId: a.property_id || null,
+    propertyName: a.property_name || '',
+    buildingId: a.building_id || null,
+    buildingName: a.building_name || '',
+    unitNumber: a.unit_number || '',
+    workOrderType: a.work_order_type || '',
+  }))
+  return { appointments }
+}
+
 // ─── Stage math (data-driven; no fixed phase count) ──────────────────────────
 export function stageCountOf(opportunity) {
   return (opportunity?.stages || []).length

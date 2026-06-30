@@ -25,6 +25,7 @@ import { C, CHART_COLORS, STATUS_CFG } from '../data/constants'
 import {
   fetchPortalUserSelf,
   fetchProjectTracker,
+  fetchPortalCalendar,
   oppPct,
   oppBucket,
   oppForProgram,
@@ -163,9 +164,14 @@ function StageBar({ opp, accent }) {
 }
 
 // ─── Tree sidebar (Property → Building) ──────────────────────────────────────
-function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user, onSignOut }) {
+function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user, onSignOut, view, setView }) {
   const q = (query || '').toLowerCase()
   const matchBldg = (b, pName) => !q || (shortBuildingName(b.name, pName) + ' ' + b.name).toLowerCase().includes(q)
+  const navItem = (active) => ({
+    flex: 1, textAlign: 'center', fontSize: 12, fontWeight: 600, padding: '7px 0', cursor: 'pointer', borderRadius: 6,
+    color: active ? '#fff' : C.navInactive, background: active ? 'rgba(62,207,142,.18)' : 'transparent',
+    border: `1px solid ${active ? 'rgba(62,207,142,.5)' : 'rgba(255,255,255,.1)'}`,
+  })
 
   return (
     <nav style={{ width: 272, background: C.sidebar, display: 'flex', flexDirection: 'column', height: '100vh', flexShrink: 0 }}>
@@ -179,7 +185,12 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
         </div>
       </div>
 
-      <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+      <div style={{ display: 'flex', gap: 6, padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+        <div style={navItem(view === 'tree')} onClick={() => setView('tree')}>Projects</div>
+        <div style={navItem(view === 'calendar')} onClick={() => setView('calendar')}>Calendar</div>
+      </div>
+
+      <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,.08)', opacity: view === 'tree' ? 1 : 0.4, pointerEvents: view === 'tree' ? 'auto' : 'none' }}>
         <div style={{ position: 'relative' }}>
           <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: C.navInactive, display: 'flex' }}>{IconSearch}</span>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search buildings…"
@@ -619,6 +630,122 @@ function UnitPage({ property, building, unit, colorOf }) {
   )
 }
 
+// ─── Calendar (site visits) ──────────────────────────────────────────────────
+function apptColor(status) {
+  if (/complete/i.test(status)) return C.emerald
+  if (/cancel|no-?show|cannot/i.test(status)) return C.textMuted
+  return C.sky
+}
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+function dayKey(d) { return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` }
+function lastSeg(name) { const parts = String(name || '').split(' - '); return parts[parts.length - 1] }
+
+function CalendarView({ appointments }) {
+  const today = new Date()
+  const [cur, setCur] = useState({ y: today.getFullYear(), m: today.getMonth() })
+  const [propId, setPropId] = useState('all')
+  const [bldgId, setBldgId] = useState('all')
+  const [selDay, setSelDay] = useState(null)
+
+  const propOptions = Array.from(new Map(appointments.map((a) => [a.propertyId, a.propertyName])).entries()).map(([id, name]) => ({ id, name }))
+  const bldgOptions = Array.from(new Map(appointments.filter((a) => propId === 'all' || a.propertyId === propId).map((a) => [a.buildingId, a.buildingName])).entries()).map(([id, name]) => ({ id, name }))
+
+  const filtered = appointments.filter((a) =>
+    (propId === 'all' || a.propertyId === propId) &&
+    (bldgId === 'all' || a.buildingId === bldgId) && a.start)
+
+  const byDay = {}
+  for (const a of filtered) { const k = dayKey(new Date(a.start)); (byDay[k] = byDay[k] || []).push(a) }
+
+  const first = new Date(cur.y, cur.m, 1)
+  const startWd = first.getDay()
+  const dim = new Date(cur.y, cur.m + 1, 0).getDate()
+  const cells = []
+  for (let i = 0; i < startWd; i++) cells.push(null)
+  for (let d = 1; d <= dim; d++) cells.push(d)
+  while (cells.length % 7 !== 0) cells.push(null)
+  const monthName = first.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  const isToday = (d) => d && cur.y === today.getFullYear() && cur.m === today.getMonth() && d === today.getDate()
+  const shiftMonth = (delta) => { const d = new Date(cur.y, cur.m + delta, 1); setCur({ y: d.getFullYear(), m: d.getMonth() }); setSelDay(null) }
+
+  const selAppts = selDay ? (byDay[selDay] || []) : []
+  const navBtn = { fontSize: 12, color: C.textSecondary, background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer' }
+  const sel = { fontSize: 12.5, color: C.textPrimary, background: C.card, border: `1px solid ${C.borderDark}`, borderRadius: 6, padding: '6px 9px', outline: 'none' }
+
+  return (
+    <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, minWidth: 180 }}>{monthName}</div>
+        <button style={navBtn} onClick={() => shiftMonth(-1)}>‹ Prev</button>
+        <button style={navBtn} onClick={() => { setCur({ y: today.getFullYear(), m: today.getMonth() }); setSelDay(null) }}>Today</button>
+        <button style={navBtn} onClick={() => shiftMonth(1)}>Next ›</button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <select style={sel} value={propId} onChange={(e) => { setPropId(e.target.value); setBldgId('all') }}>
+            <option value="all">All properties</option>
+            {propOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          <select style={sel} value={bldgId} onChange={(e) => setBldgId(e.target.value)}>
+            <option value="all">All buildings</option>
+            {bldgOptions.map((o) => <option key={o.id} value={o.id}>{lastSeg(o.name)}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', borderBottom: `1px solid ${C.border}` }}>
+          {WEEKDAYS.map((w) => <div key={w} style={{ padding: '8px 10px', fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.4px' }}>{w}</div>)}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)' }}>
+          {cells.map((d, i) => {
+            const k = d ? `${cur.y}-${cur.m}-${d}` : null
+            const appts = k ? (byDay[k] || []) : []
+            const active = selDay && selDay === k
+            return (
+              <div key={i} onClick={() => d && setSelDay(k)}
+                style={{ minHeight: 92, borderRight: (i % 7 !== 6) ? `1px solid ${C.border}` : 'none', borderBottom: `1px solid ${C.border}`,
+                  padding: 6, cursor: d ? 'pointer' : 'default', background: active ? '#eef5ff' : (d ? C.card : C.page) }}>
+                {d && (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 22, height: 22, borderRadius: '50%', fontSize: 11.5, fontWeight: isToday(d) ? 700 : 500, color: isToday(d) ? '#fff' : C.textSecondary, background: isToday(d) ? C.emerald : 'transparent', marginBottom: 3 }}>{d}</div>
+                    {appts.slice(0, 3).map((a) => (
+                      <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, color: C.textSecondary, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: apptColor(a.status), flexShrink: 0 }} />
+                        {a.unitNumber ? `U${a.unitNumber} ` : ''}{a.workOrderType || a.subject}
+                      </div>
+                    ))}
+                    {appts.length > 3 && <div style={{ fontSize: 9, color: C.textMuted }}>+{appts.length - 3} more</div>}
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {selDay && (
+        <div style={{ marginTop: 16 }}>
+          <SectionHeader title={`Visits — ${new Date(cur.y, cur.m, Number(selDay.split('-')[2])).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`} desc={`${selAppts.length} site visit${selAppts.length === 1 ? '' : 's'}`} />
+          {selAppts.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No site visits scheduled this day.</div>}
+          {selAppts.map((a) => (
+            <div key={a.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 16px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ width: 9, height: 9, borderRadius: '50%', background: apptColor(a.status), flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{a.subject}</div>
+                <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2 }}>
+                  {new Date(a.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  {' · '}{lastSeg(a.buildingName)}{a.unitNumber ? ` · Unit ${a.unitNumber}` : ''}
+                  {a.propertyName ? ` · ${a.propertyName}` : ''}
+                </div>
+              </div>
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: apptColor(a.status), background: `${apptColor(a.status)}1a`, padding: '2px 9px', borderRadius: 20 }}>{a.status || '—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Login gate ────────────────────────────────────────────────────────────────
 function LoginGate({ onSignedIn }) {
   const [email, setEmail] = useState('')
@@ -670,6 +797,8 @@ export default function ProjectPortalRoot() {
   const [open, setOpen] = useState({ prop: null, bldg: null })
   const [query, setQuery] = useState('')
   const [errMsg, setErrMsg] = useState(null)
+  const [view, setView] = useState('tree')        // tree | calendar
+  const [appointments, setAppointments] = useState([])
 
   const load = useCallback(async () => {
     setPhase('loading')
@@ -685,6 +814,7 @@ export default function ProjectPortalRoot() {
       const first = props[0]
       setSel({ pid: first ? first.id : null, bid: null, uid: null, projId: null })
       setOpen({ prop: first ? first.id : null, bldg: null })
+      try { const cal = await fetchPortalCalendar(); setAppointments(cal.appointments || []) } catch { setAppointments([]) }
       setPhase('ready')
     } catch (e) {
       setErrMsg(e?.message || 'Failed to load the portal.')
@@ -731,21 +861,26 @@ export default function ProjectPortalRoot() {
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif', background: C.page }}>
       <TreeSidebar tree={tree} sel={sel} open={open} setOpen={setOpen} onSelect={onSelect}
-        query={query} setQuery={setQuery} user={self} onSignOut={signOut} />
+        query={query} setQuery={setQuery} user={self} onSignOut={signOut} view={view} setView={setView} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
         <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, height: 54, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
-          <Crumb items={crumb} />
+          {view === 'calendar'
+            ? <Crumb items={[{ label: 'Calendar', onClick: null }]} />
+            : <Crumb items={crumb} />}
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 12px', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6 }}>
             <span style={{ width: 14, height: 14, color: C.emerald, display: 'flex' }}>{IconBolt}</span>
             <span style={{ fontSize: 11.5, fontWeight: 600, color: C.textSecondary }}>Multi-Family Project Portal</span>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', background: C.page }}>
-          {!property && <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>}
-          {property && building && unit && <UnitPage property={property} building={building} unit={unit} colorOf={colorOf} />}
-          {property && building && !unit && project && <ProjectPage property={property} building={building} project={project} opportunity={projectOpp} color={colorOf(projectOpp?.program)} />}
-          {property && building && !unit && !project && <BuildingPage property={property} building={building} colorOf={colorOf} onOpenProject={(pr) => onSelect({ pid: property.id, bid: building.id, projId: pr.id })} />}
-          {property && !building && <PropertyPage property={property} programs={programs} colorOf={colorOf} onOpenBuilding={(b) => onSelect({ pid: property.id, bid: b.id })} />}
+          {view === 'calendar' && <CalendarView appointments={appointments} />}
+          {view === 'tree' && <>
+            {!property && <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>}
+            {property && building && unit && <UnitPage property={property} building={building} unit={unit} colorOf={colorOf} />}
+            {property && building && !unit && project && <ProjectPage property={property} building={building} project={project} opportunity={projectOpp} color={colorOf(projectOpp?.program)} />}
+            {property && building && !unit && !project && <BuildingPage property={property} building={building} colorOf={colorOf} onOpenProject={(pr) => onSelect({ pid: property.id, bid: building.id, projId: pr.id })} />}
+            {property && !building && <PropertyPage property={property} programs={programs} colorOf={colorOf} onOpenBuilding={(b) => onSelect({ pid: property.id, bid: b.id })} />}
+          </>}
         </div>
       </div>
     </div>
