@@ -267,6 +267,27 @@ export function findProject(building, projectId) {
   return null
 }
 
+// Distinct units in a building (derived from its work orders), for the tree.
+export function buildingUnits(building) {
+  const m = new Map()
+  for (const o of building?.opportunities || [])
+    for (const pr of o.projects || [])
+      for (const w of pr.workOrders || [])
+        if (w.unitId && !m.has(w.unitId)) m.set(w.unitId, { unitId: w.unitId, unitNumber: w.unitNumber })
+  return Array.from(m.values()).sort((a, b) =>
+    String(a.unitNumber || '').localeCompare(String(b.unitNumber || ''), undefined, { numeric: true }))
+}
+
+// A single unit's work orders, with their project + program context.
+export function unitWorkOrders(building, unitId) {
+  const out = []
+  for (const o of building?.opportunities || [])
+    for (const pr of o.projects || [])
+      for (const w of pr.workOrders || [])
+        if (w.unitId === unitId) out.push({ ...w, program: o.program, projectName: pr.name, projectRecordType: pr.recordType })
+  return out
+}
+
 // Group a project's work orders by unit (for the per-unit work-order view).
 export function workOrdersByUnit(project) {
   const map = new Map()

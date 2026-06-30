@@ -38,6 +38,8 @@ import {
   opportunityStageCounts,
   findProject,
   workOrdersByUnit,
+  buildingUnits,
+  unitWorkOrders,
 } from '../data/projectPortalService'
 
 function makeColorOf(programs) {
@@ -124,7 +126,7 @@ function StageBar({ opp, accent }) {
   const pct = Math.round(stageOrder / count * 100)
   return (
     <div style={{ margin: '6px 0 2px' }}>
-      <div style={{ position: 'relative', height: 4, background: C.border, borderRadius: 10, marginBottom: 30 }}>
+      <div style={{ position: 'relative', height: 4, background: C.border, borderRadius: 10, marginBottom: 56 }}>
         <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, background: accent, borderRadius: 10, transition: 'width .25s ease' }} />
         <div style={{ position: 'absolute', top: -8, left: 0, right: 0, display: 'flex', justifyContent: 'space-between' }}>
           {stages.map((s) => {
@@ -172,7 +174,7 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
           <div style={{ width: 28, height: 28, background: C.emerald, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{IconBolt}</div>
           <div style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Energy Efficiency Services</div>
-            <div style={{ fontSize: 10, color: C.navInactive, letterSpacing: '.5px', textTransform: 'uppercase' }}>Project Portal</div>
+            <div style={{ fontSize: 10, color: C.navInactive, letterSpacing: '.5px', textTransform: 'uppercase' }}>Multi-Family Project Portal</div>
           </div>
         </div>
       </div>
@@ -197,7 +199,7 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
                 style={{ display: 'flex', alignItems: 'center', padding: '7px 10px 7px 8px', cursor: 'pointer',
                   borderLeft: `3px solid ${pActive ? C.emerald : 'transparent'}`,
                   background: pActive ? 'rgba(62,207,142,.16)' : 'transparent' }}>
-                <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ prop: o.prop === p.id ? null : p.id })) }}
+                <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, prop: o.prop === p.id ? null : p.id })) }}
                   style={{ width: 18, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: pOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>{IconChevR}</span>
                 <span style={{ color: C.navInactive, marginRight: 6, display: 'flex' }}>{IconProp}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -208,17 +210,37 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
               </div>
 
               {pOpen && (p.buildings || []).filter((b) => matchBldg(b, p.name)).map((b) => {
-                const bActive = sel.bid === b.id
+                const bKey = `${p.id}:${b.id}`
+                const bOpen = open.bldg === bKey
+                const bActive = sel.bid === b.id && !sel.uid
                 const meta = bucketMeta(buildingStatus(b))
+                const units = buildingUnits(b)
                 return (
-                  <div key={b.id} onClick={() => onSelect({ pid: p.id, bid: b.id })}
-                    style={{ display: 'flex', alignItems: 'center', padding: '6px 10px 6px 30px', cursor: 'pointer',
-                      borderLeft: `3px solid ${bActive ? C.sky : 'transparent'}`,
-                      background: bActive ? 'rgba(126,179,232,.16)' : 'transparent' }}>
-                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.dot, marginRight: 8, flexShrink: 0 }} />
-                    <span style={{ color: 'rgba(255,255,255,.45)', marginRight: 6, display: 'flex' }}>{IconBldg}</span>
-                    <span style={{ flex: 1, fontSize: 12, color: bActive ? '#fff' : 'rgba(255,255,255,.8)', fontWeight: bActive ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{shortBuildingName(b.name, p.name)}</span>
-                    <MiniTracks programs={programs} colorOf={colorOf} pctOf={(pg) => buildingProgramPct(b, pg)} />
+                  <div key={b.id}>
+                    <div onClick={() => onSelect({ pid: p.id, bid: b.id })}
+                      style={{ display: 'flex', alignItems: 'center', padding: '6px 10px 6px 22px', cursor: 'pointer',
+                        borderLeft: `3px solid ${bActive ? C.sky : 'transparent'}`,
+                        background: bActive ? 'rgba(126,179,232,.16)' : 'transparent' }}>
+                      <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, bldg: o.bldg === bKey ? null : bKey })) }}
+                        style={{ width: 16, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: bOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', opacity: units.length ? 1 : 0 }}>{IconChevR}</span>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.dot, margin: '0 8px 0 2px', flexShrink: 0 }} />
+                      <span style={{ color: 'rgba(255,255,255,.45)', marginRight: 6, display: 'flex' }}>{IconBldg}</span>
+                      <span style={{ flex: 1, fontSize: 12, color: bActive ? '#fff' : 'rgba(255,255,255,.8)', fontWeight: bActive ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{shortBuildingName(b.name, p.name)}</span>
+                      <MiniTracks programs={programs} colorOf={colorOf} pctOf={(pg) => buildingProgramPct(b, pg)} />
+                    </div>
+
+                    {bOpen && units.map((u) => {
+                      const uActive = sel.uid === u.unitId
+                      return (
+                        <div key={u.unitId} onClick={() => onSelect({ pid: p.id, bid: b.id, uid: u.unitId })}
+                          style={{ display: 'flex', alignItems: 'center', padding: '4px 10px 4px 50px', cursor: 'pointer',
+                            borderLeft: `3px solid ${uActive ? C.emerald : 'transparent'}`,
+                            background: uActive ? 'rgba(62,207,142,.14)' : 'transparent' }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,.4)', marginRight: 8, flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontSize: 11.5, color: uActive ? '#fff' : 'rgba(255,255,255,.66)', fontWeight: uActive ? 700 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Unit {u.unitNumber}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })}
@@ -563,6 +585,40 @@ function ProjectPage({ property, building, project, opportunity, color }) {
   )
 }
 
+// ─── Unit page (this unit's work orders → steps → photos) ────────────────────
+function UnitPage({ property, building, unit, colorOf }) {
+  const wos = unitWorkOrders(building, unit.unitId)
+  // group by program + project
+  const groups = []
+  const seen = new Map()
+  for (const w of wos) {
+    const key = `${w.program}|${w.projectRecordType}`
+    if (!seen.has(key)) { const g = { program: w.program, project: w.projectRecordType, wos: [] }; seen.set(key, g); groups.push(g) }
+    seen.get(key).wos.push(w)
+  }
+  return (
+    <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
+      <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>Unit {unit.unitNumber}</div>
+      <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{property.name} · {shortBuildingName(building.name, property.name)}</div>
+
+      {groups.map((g) => (
+        <div key={g.program + g.project} style={{ marginBottom: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: colorOf(g.program) }} />
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{g.program}</span>
+            <span style={{ fontSize: 12, color: C.textMuted }}>·</span>
+            <span style={{ fontSize: 12.5, color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace' }}>{g.project}</span>
+          </div>
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+            {g.wos.map((w) => <WorkOrderRow key={w.id} wo={w} />)}
+          </div>
+        </div>
+      ))}
+      {groups.length === 0 && <div style={{ fontSize: 12.5, color: C.textMuted }}>No work orders for this unit yet.</div>}
+    </div>
+  )
+}
+
 // ─── Login gate ────────────────────────────────────────────────────────────────
 function LoginGate({ onSignedIn }) {
   const [email, setEmail] = useState('')
@@ -610,8 +666,8 @@ export default function ProjectPortalRoot() {
   const [phase, setPhase] = useState('loading')   // loading | login | ready | error | notportal
   const [self, setSelf] = useState(null)
   const [tree, setTree] = useState([])
-  const [sel, setSel] = useState({ pid: null, bid: null, projId: null })
-  const [open, setOpen] = useState({ prop: null })
+  const [sel, setSel] = useState({ pid: null, bid: null, uid: null, projId: null })
+  const [open, setOpen] = useState({ prop: null, bldg: null })
   const [query, setQuery] = useState('')
   const [errMsg, setErrMsg] = useState(null)
 
@@ -627,8 +683,8 @@ export default function ProjectPortalRoot() {
       const props = t.properties || []
       setTree(props)
       const first = props[0]
-      setSel({ pid: first ? first.id : null, bid: null, projId: null })
-      setOpen({ prop: first ? first.id : null })
+      setSel({ pid: first ? first.id : null, bid: null, uid: null, projId: null })
+      setOpen({ prop: first ? first.id : null, bldg: null })
       setPhase('ready')
     } catch (e) {
       setErrMsg(e?.message || 'Failed to load the portal.')
@@ -644,15 +700,19 @@ export default function ProjectPortalRoot() {
   const signOut = async () => { await supabase.auth.signOut(); setSelf(null); setTree([]); setPhase('login') }
 
   const onSelect = useCallback((next) => {
-    setSel({ pid: next.pid || null, bid: next.bid || null, projId: next.projId || null })
-    setOpen({ prop: next.pid || null })
+    setSel({ pid: next.pid || null, bid: next.bid || null, uid: next.uid || null, projId: next.projId || null })
+    setOpen((o) => ({
+      prop: next.pid || o.prop,
+      bldg: next.bid ? `${next.pid}:${next.bid}` : o.bldg,
+    }))
   }, [])
 
-  const { property, building, project, projectOpp } = useMemo(() => {
+  const { property, building, unit, project, projectOpp } = useMemo(() => {
     const property = tree.find((p) => p.id === sel.pid) || tree[0] || null
     const building = property && sel.bid ? (property.buildings || []).find((b) => b.id === sel.bid) : null
+    const unit = building && sel.uid ? buildingUnits(building).find((u) => u.unitId === sel.uid) : null
     const found = building && sel.projId ? findProject(building, sel.projId) : null
-    return { property, building, project: found?.project || null, projectOpp: found?.opportunity || null }
+    return { property, building, unit, project: found?.project || null, projectOpp: found?.opportunity || null }
   }, [tree, sel])
 
   const programs = useMemo(() => (property ? propertyPrograms(property) : []), [property])
@@ -663,22 +723,28 @@ export default function ProjectPortalRoot() {
   if (phase === 'notportal') return <Centered>{errMsg}<SignOutLink onClick={signOut} /></Centered>
   if (phase === 'error') return <Centered>{errMsg || 'Something went wrong.'}<SignOutLink onClick={signOut} /></Centered>
 
-  const crumb = [{ label: property ? property.name : 'Properties', onClick: building ? () => onSelect({ pid: property.id }) : null }]
-  if (building) crumb.push({ label: shortBuildingName(building.name, property.name), onClick: project ? () => onSelect({ pid: property.id, bid: building.id }) : null })
+  const crumb = [{ label: property ? property.name : 'Properties', onClick: (building || unit) ? () => onSelect({ pid: property.id }) : null }]
+  if (building) crumb.push({ label: shortBuildingName(building.name, property.name), onClick: (project || unit) ? () => onSelect({ pid: property.id, bid: building.id }) : null })
   if (project) crumb.push({ label: project.recordType || project.name, onClick: null })
+  if (unit) crumb.push({ label: `Unit ${unit.unitNumber}`, onClick: null })
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif', background: C.page }}>
       <TreeSidebar tree={tree} sel={sel} open={open} setOpen={setOpen} onSelect={onSelect}
         query={query} setQuery={setQuery} user={self} onSignOut={signOut} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
-        <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, height: 54, display: 'flex', alignItems: 'center', padding: '0 24px', flexShrink: 0 }}>
+        <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, height: 54, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
           <Crumb items={crumb} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 12px', background: C.page, border: `1px solid ${C.border}`, borderRadius: 6 }}>
+            <span style={{ width: 14, height: 14, color: C.emerald, display: 'flex' }}>{IconBolt}</span>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: C.textSecondary }}>Multi-Family Project Portal</span>
+          </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', background: C.page }}>
           {!property && <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>}
-          {property && building && project && <ProjectPage property={property} building={building} project={project} opportunity={projectOpp} color={colorOf(projectOpp?.program)} />}
-          {property && building && !project && <BuildingPage property={property} building={building} colorOf={colorOf} onOpenProject={(pr) => onSelect({ pid: property.id, bid: building.id, projId: pr.id })} />}
+          {property && building && unit && <UnitPage property={property} building={building} unit={unit} colorOf={colorOf} />}
+          {property && building && !unit && project && <ProjectPage property={property} building={building} project={project} opportunity={projectOpp} color={colorOf(projectOpp?.program)} />}
+          {property && building && !unit && !project && <BuildingPage property={property} building={building} colorOf={colorOf} onOpenProject={(pr) => onSelect({ pid: property.id, bid: building.id, projId: pr.id })} />}
           {property && !building && <PropertyPage property={property} programs={programs} colorOf={colorOf} onOpenBuilding={(b) => onSelect({ pid: property.id, bid: b.id })} />}
         </div>
       </div>
