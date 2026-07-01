@@ -140,6 +140,7 @@
   </div>
 
   <div class="bar">
+    <button class="btn" id="aiExtract" disabled>🧠 AI Extract &amp; Map</button>
     <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
     <button class="btn" id="buildBase" disabled>↓ Baseline Audit Template</button>
     <button class="btn" id="buildImp" disabled>↓ Improved Audit Template</button>
@@ -501,6 +502,7 @@ function refresh(){
   document.getElementById('utilBase').disabled=!have;
   document.getElementById('utilImp').disabled=!have;
   document.getElementById('smartReview').disabled=!have;
+  document.getElementById('aiExtract').disabled=!have;
   if(!have){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
   // monthly shape, so the resulting EUI matches the Asset Score PDF. Runs once per refresh.
@@ -997,6 +999,16 @@ async function build50121XML(which){
     const cap=cs.getElementsByTagNameNS(NS_AUC,'Capacity')[0];
     if(cap&&as.coolTons!=null)cap.textContent=Number(as.coolTons*12).toFixed(1);
   }
+  // Enum/type labels (from the AI extractor; only set when present, and it only
+  // ever returns a valid BuildingSync enum value).
+  if(boiler){
+    const bt=boiler.getElementsByTagNameNS(NS_AUC,'BoilerType')[0]; if(bt&&as.boilerType)bt.textContent=as.boilerType;
+    const dt=boiler.getElementsByTagNameNS(NS_AUC,'DraftType')[0]; if(dt&&as.boilerDraft)dt.textContent=as.boilerDraft;
+    const bq=boiler.getElementsByTagNameNS(NS_AUC,'Quantity')[0]; if(bq&&as.boilerQuantity!=null)bq.textContent=String(as.boilerQuantity);
+  }
+  if(hp&&as.boilerFuel){const pf=hp.getElementsByTagNameNS(NS_AUC,'PrimaryFuel')[0]; if(pf)pf.textContent=as.boilerFuel;}
+  _setFirst(doc,'FenestrationFrameMaterial', as.windowFrame);
+  _setFirst(doc,'FenestrationGlassLayers', as.windowGlassLayers);
   // Space-function section floor areas -> scale the template's split to THIS
   // building's multifamily use-type area (from "Building Use Types"), preserving
   // the internal conditioned/common/tenant proportions.
@@ -1139,6 +1151,35 @@ function buildMappedForReview(){
           <div style="font-size:13.5px;margin-top:3px">${f.message||''}</div>${sugg}${ask}</div>`;
       }).join('');
     }catch(err){stat.textContent='';sum.innerHTML='<span style="color:var(--warn)">⚠ Could not run review: '+err.message+'</span>';}
+  };
+})();
+
+/* ---------- Intelligent extraction: Claude reads the reports and returns the
+   enum-correct field set, which we merge over the regex parse before building. */
+(function(){
+  const btn=document.getElementById('aiExtract'); if(!btn)return;
+  const fs=()=>document.getElementById('finalStatus');
+  btn.onclick=async ()=>{
+    const s=fs(); s.className='status'; s.textContent='AI reading your reports…'; btn.disabled=true;
+    try{
+      const resp=await fetch('/.netlify/functions/extract',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({reports:{baseline:rawDocs.asBase,improved:rawDocs.asImp,
+          openStudio:(rawDocs.osBase||'').slice(0,30000)}})});
+      const r=await resp.json().catch(()=>({error:'Bad response'}));
+      if(!resp.ok||r.error){s.className='status err';s.textContent='AI extract: '+(r.error||('Error '+resp.status))+(r.detail?(' — '+r.detail):'');return;}
+      // Merge AI values over the regex parse (AI wins for any field it returned).
+      const merge=(target,src)=>{if(!target||!src)return;for(const k in src){if(src[k]!==null&&src[k]!==undefined&&src[k]!=='')target[k]=src[k];}};
+      // Map extractor keys onto the field names build50121XML reads.
+      const remap=(o)=>{ if(!o)return o; const m=Object.assign({},o);
+        if(o.coolingCOP!=null)m.coolCop=o.coolingCOP; if(o.coolingTons!=null)m.coolTons=o.coolingTons;
+        if(o.boilerCapacity_kBtu_hr!=null)m.heatCap=o.boilerCapacity_kBtu_hr;
+        if(o.waterHeaterEt!=null)m.whe=o.waterHeaterEt; return m; };
+      merge(data.asBase, remap(r.baseline)); merge(data.asImp, remap(r.improved));
+      refresh();
+      s.className='status ok';
+      s.textContent='AI extraction complete — fields updated from your reports'+(r.notes&&r.notes.length?(' ('+r.notes.length+' note(s) — run Smart Review)'):'')+'.';
+    }catch(err){s.className='status err';s.textContent='AI extract failed: '+err.message;}
+    finally{btn.disabled=false;}
   };
 })();
 
