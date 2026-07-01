@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Audit Template Builder</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Runner endpoint config (set per-deploy in config.js). Loaded before the app
+     so the .osm upload branch can read window.AUDIT_RUNNER_URL. -->
+<script src="config.js"></script>
+<style>
+  :root{
+    --ink:#1a2620; --paper:#f7f5ef; --line:#dcd7c8; --card:#fff;
+    --moss:#3f6b4a; --moss-d:#294d33; --gold:#bf8a2e;
+    --warn:#9c3a2c; --mut:#6c7268;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font:16px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:880px;margin:0 auto;padding:36px 24px 96px}
+  .eyebrow{font:600 12px/1 ui-monospace,monospace;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--moss)}
+  h1{font:700 32px/1.08 Georgia,"Times New Roman",serif;margin:10px 0 6px}
+  .sub{color:var(--mut);font-size:15px;max-width:60ch;margin:0}
+  .slots{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:28px}
+  @media(max-width:640px){.slots{grid-template-columns:1fr}}
+  .slot{border:1.5px dashed var(--line);border-radius:10px;background:var(--card);
+    padding:18px;cursor:pointer;transition:.15s;position:relative;min-height:104px;
+    display:flex;flex-direction:column;justify-content:center}
+  .slot:hover{border-color:var(--moss)}
+  .slot.hot{border-color:var(--moss);background:#eef4ed}
+  .slot.ok{border-style:solid;border-color:var(--moss);background:#edf3ec}
+  .slot .role{font:600 11px/1.3 ui-monospace,monospace;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--moss-d)}
+  .slot .hint{font-size:12.5px;color:var(--mut);margin-top:6px}
+  .slot .got{font-size:13px;color:var(--moss-d);margin-top:8px;font-weight:600;
+    word-break:break-all;display:none}
+  .slot.ok .got{display:block}
+  .slot.ok .hint{display:none}
+  .slot input{display:none}
+  .tag{position:absolute;top:10px;right:12px;font:600 11px/1 monospace;
+    color:var(--mut)}
+  .review{margin-top:30px;border:1px solid var(--line);border-radius:12px;
+    background:var(--card);overflow:hidden;display:none}
+  .review.show{display:block}
+  .review h2{font:700 18px/1.2 Georgia,serif;margin:0;padding:18px 22px 14px}
+  .review .band{background:#eef4ed;padding:16px 22px;border-top:1px solid var(--line);
+    border-bottom:1px solid var(--line)}
+  .savings{font:700 30px/1 Georgia,serif;color:var(--moss-d)}
+  .savings small{display:block;font:600 13px/1.4 monospace;color:var(--mut);margin-top:5px}
+  .pill{display:inline-block;font:600 12px/1 monospace;padding:5px 11px;border-radius:20px;
+    background:#dcebd9;color:var(--moss-d);margin-top:10px}
+  .pill.warn{background:#f3e2de;color:var(--warn)}
+  .sect{padding:8px 22px 4px}
+  .sect h3{font:600 11px/1 monospace;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--moss);margin:16px 0 8px}
+  table.kv{width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:6px}
+  table.kv td{padding:5px 0;border-bottom:1px solid #efece2;vertical-align:top}
+  table.kv td:first-child{color:var(--mut);width:46%}
+  table.kv td:last-child{font-weight:600;text-align:right}
+  table.mo{width:100%;border-collapse:collapse;font-size:11.5px;margin:4px 0 12px}
+  table.mo th,table.mo td{border:1px solid var(--line);padding:3px 5px;text-align:right}
+  table.mo th:first-child,table.mo td:first-child{text-align:left}
+  table.mo thead th{background:#f0efe8}
+  .bar{position:sticky;bottom:0;margin-top:26px;padding:18px 0 6px;
+    background:linear-gradient(transparent,var(--paper) 30%);
+    display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .btn{appearance:none;border:0;border-radius:8px;padding:14px 24px;
+    font:600 16px/1 inherit;cursor:pointer;background:var(--moss);color:#fff}
+  .btn:hover{background:var(--moss-d)}
+  .btn[disabled]{background:#bcc0b5;cursor:not-allowed}
+  .btn.ghost{background:#fff;color:var(--moss-d);border:1px solid var(--moss)}
+  .btn.ghost:hover{background:#eef4ed}
+  .btn.ghost[disabled]{background:#f3f2ec;color:#aaa;border-color:#d8d4c6}
+  .status{font-size:13px;color:var(--mut)}
+  .status.err{color:var(--warn)}
+  .status.ok{color:var(--moss-d)}
+  .copyrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 0 10px}
+  .copyrow code{font:600 17px/1 ui-monospace,monospace;background:#eef4ed;color:var(--moss-d);
+    padding:8px 14px;border-radius:6px;border:1px solid var(--line)}
+  .copybtn{appearance:none;border:1px solid var(--moss);background:#fff;color:var(--moss-d);
+    border-radius:6px;padding:8px 14px;font:600 13px/1 inherit;cursor:pointer}
+  .copybtn:hover{background:#eef4ed}
+  .copyhint{font-size:12.5px;color:var(--mut);flex:1;min-width:200px}
+  .cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+  .fcard{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#fcfbf7}
+  .fcard .flabel{font-size:11.5px;color:var(--mut);margin-bottom:6px;line-height:1.3}
+  .fcard .copyrow{padding:0}
+  .fcard .copyrow code{font-size:15px;padding:6px 10px;flex:1;min-width:0;overflow:auto}
+  .fcard .copybtn{padding:6px 10px;font-size:12px}
+  .note{border-left:3px solid var(--gold);background:#fbf7ee;padding:11px 15px;
+    font-size:13px;margin:14px 22px 20px;border-radius:0 6px 6px 0;color:#5c5230}
+  .flag{border-left:3px solid var(--warn);background:#fbf0ee;padding:11px 15px;
+    font-size:13px;margin:14px 22px 0;border-radius:0 6px 6px 0;color:#6a352c}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Leap · Qualification Workflow</div>
+  <h1>Audit Template Builder</h1>
+  <p class="sub">Drop in the four files for a building. The tool reads them and builds
+  two BuildingSync files — one Baseline and one Improved Audit Template — each importing
+  into the DOE Audit Template as its own building record. No data entry.</p>
+
+  <div class="slots">
+    <div class="slot" data-key="asBase"><span class="tag">PDF</span>
+      <div class="role">Baseline Asset Score Report</div>
+      <div class="hint">The as-is building report (EUI chart on top)</div>
+      <div class="got"></div>
+      <input type="file" accept=".pdf"></div>
+    <div class="slot" data-key="asImp"><span class="tag">PDF</span>
+      <div class="role">Improved Asset Score Report</div>
+      <div class="hint">The recommended/upgraded building report</div>
+      <div class="got"></div>
+      <input type="file" accept=".pdf"></div>
+    <div class="slot" data-key="osBase"><span class="tag">HTML / OSM</span>
+      <div class="role">Baseline OpenStudio Results</div>
+      <div class="hint">Results report (.html) for the baseline model — or the raw .osm model if the EnergyPlus runner is configured</div>
+      <div class="got"></div>
+      <input type="file" accept=".html,.htm,.osm"></div>
+    <div class="slot" data-key="osImp"><span class="tag">HTML / OSM</span>
+      <div class="role">Improved OpenStudio Results</div>
+      <div class="hint">Results report (.html) for the improved model — or the raw .osm model if the EnergyPlus runner is configured</div>
+      <div class="got"></div>
+      <input type="file" accept=".html,.htm,.osm"></div>
+  </div>
+
+  <div class="status" id="status" style="margin-top:14px"></div>
+
+  <div class="review" id="review">
+    <h2 id="rTitle">Review</h2>
+    <div class="band">
+      <div class="savings" id="rSavings"></div>
+      <div id="rTier"></div>
+    </div>
+    <div id="rBody"></div>
+    <div class="note" id="rNote"></div>
+    <div class="flag" id="rFlag" style="display:none"></div>
+  </div>
+
+  <div class="bar">
+    <button class="btn" id="buildBase" disabled>↓ Baseline Audit Template</button>
+    <button class="btn" id="buildImp" disabled>↓ Improved Audit Template</button>
+    <button class="btn ghost" id="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
+    <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
+    <span class="status" id="finalStatus"></span>
+  </div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const KWH_KBTU=3.412, THERM_KBTU=100, MMBTU_THERM=10;
+// Wisconsin residential utility rates (EIA state averages, 2026).
+const RATE_ELEC=0.188;  // $ per kWh
+const RATE_GAS=0.97;    // $ per therm
+const files={asBase:null,asImp:null,osBase:null,osImp:null};
+const data={asBase:null,asImp:null,osBase:null,osImp:null};
+// Raw extracted text of each uploaded document, so the in-app assistant can
+// "read the documents" (not just the parsed fields).
+const rawDocs={asBase:null,asImp:null,osBase:null,osImp:null};
+
+/* ---------- Asset Score PDF parser ---------- */
+async function pdfText(arrayBuffer){
+  const pdf=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+  let out=[];
+  for(let p=1;p<=pdf.numPages;p++){
+    const page=await pdf.getPage(p);
+    const tc=await page.getTextContent();
+    // reconstruct lines by y-position
+    const rows={};
+    tc.items.forEach(it=>{
+      const y=Math.round(it.transform[5]);
+      (rows[y]=rows[y]||[]).push([it.transform[4],it.str]);
+    });
+    Object.keys(rows).map(Number).sort((a,b)=>b-a).forEach(y=>{
+      const line=rows[y].sort((a,b)=>a[0]-b[0]).map(x=>x[1]).join(' ');
+      out.push(line);
+    });
+    out.push('\f');
+  }
+  return out.join('\n');
+}
+function num(re,t,d){const m=t.match(re);return m?parseFloat(m[1].replace(/,/g,'')):d;}
+function parseAssetScore(t){
+  const d={};
+  const bi=t.split('BUILDING INFORMATION')[1]||t;
+  const lines=bi.split('\n').map(l=>l.trim()).filter(Boolean);
+  // name: first line, cut at the first 2+ space gap (separates from the Building Type column).
+  // The name may wrap to a 2nd line that also starts before any column text.
+  let nm=lines[0].split(/\s{2,}/)[0].trim();
+  if(lines[1]){
+    let cont=lines[1].split(/\s{2,}/)[0].trim();
+    // pdf.js may merge the Building Type value onto this line with single spaces;
+    // cut it off at the known type fragments.
+    cont=cont.replace(/\s*\((fewer|four|more)\b.*$/i,'').replace(/\s*floors\).*$/i,'')
+             .replace(/\s*(Multi-family|Multifamily|Office|Mixed).*$/i,'').trim();
+    if(cont && !/:/.test(cont) && !/^\d/.test(cont) &&
+       !/^(Building Type|Milwaukee|WI |Gross|Climate|Year|Score)/i.test(cont) &&
+       /Project|Baseline|Improved|HOMES/i.test(cont))
+      nm+=' '+cont;
+  }
+  d.name=nm;
+  for(let i=0;i<lines.length;i++){
+    if(/,\s*[A-Z]{2}\s*\d{5}/.test(lines[i])){
+      // city/state/zip: cut at first 2+ space gap or at a known label
+      d.cityStateZip=lines[i].split(/\s{2,}|\s+(?:Climate|Building|Gross|Year|Score)\b/)[0].trim();
+      // street: previous line, cut at the Gross Floor Area / Building Type label
+      d.street=lines[i-1].split(/\s+(?:Gross Floor Area|Building Type|Climate|Building ID|Year)\b/)[0]
+                         .split(/\s{2,}/)[0].trim();
+      const z=d.cityStateZip.match(/(.+),\s*([A-Z]{2})\s*(\d{5})/);
+      if(z){d.city=z[1].trim();d.state=z[2];d.zip=z[3];}
+      break;
+    }
+  }
+  d.gfa=num(/Gross Floor Area:\s*([\d,]+)\s*ft/,t);
+  d.buildingId=(t.match(/Building ID #:\s*(\d+)/)||[])[1];
+  d.climateZone=(t.match(/Climate Zone:\s*(\S+)/)||[])[1];
+  d.yearBuilt=num(/Year Built:\s*(\d+)/,t);
+  const sd=t.match(/Score Date:\s*(\d{2})\/(\d{2})\/(\d{4})/);
+  if(sd)d.scoreDate={month:parseInt(sd[1]),day:parseInt(sd[2]),year:parseInt(sd[3])};
+  const cur=t.match(/Current\s+(\d+)\s+([\d.]+)/), upg=t.match(/Upgraded\s+(\d+)\s+([\d.]+)/);
+  d.euiCurrent=cur?parseInt(cur[1]):null; d.euiUpgraded=upg?parseInt(upg[1]):null;
+  // Per-fuel EUI from the "Energy Use Intensity by Fuel Type" table: "Fuel [current, upgraded]"
+  const gEui=t.match(/Natural Gas\s*\[\s*([\d.]+)\s*,\s*([\d.]+)\s*\]/i);
+  const eEui=t.match(/Electricity\s*\[\s*([\d.]+)\s*,\s*([\d.]+)\s*\]/i);
+  d.gasEuiCur =gEui?parseFloat(gEui[1]):null; d.gasEuiUpg =gEui?parseFloat(gEui[2]):null;
+  d.elecEuiCur=eEui?parseFloat(eEui[1]):null; d.elecEuiUpg=eEui?parseFloat(eEui[2]):null;
+  d.savingsPct=num(/site energy savings:\s*([\d.]+)%/,t);
+  d.occupants=num(/Number of Assumed Occupants\s+(\d+)/,t);
+  d.wallArea=num(/Total Gross Above Grade Wall Area\s+([\d.]+)\s*ft/,t);
+  d.windowArea=num(/Total Window Area\s+([\d.]+)\s*ft/,t);
+  d.roofArea=num(/Total Gross Roof Area\s+([\d.]+)\s*ft/,t);
+  d.roofR=num(/Roof R-Value\s+([\d.]+)/,t);
+  d.wallR=num(/Wall R-value\s+([\d.]+)/,t);
+  d.wwr=num(/Window-to-Wall Ratio\s+([\d.]+)/,t);
+  d.infiltration=num(/air leakage rate.*?([\d.]+)\s*CFM/,t);
+  d.heatCap=num(/Capacity\s+([\d.]+)\s*kBtu\/hr/,t);
+  d.coolCop=num(/Efficiency\s+([\d.]+)\s*COP/,t);
+  d.coolTons=num(/Capacity\s+([\d.]+)\s*tons/,t);
+  d.whe=num(/Water Heater Efficiency\s+([\d.]+)\s*Et/,t);
+  // Floor count from block detail ("Above Ground: 2 floors / Below Ground: 0 floors")
+  d.floorsAbove=num(/Above Ground:\s*(\d+)\s*floors?/i,t);
+  d.floorsBelow=num(/Below Ground:\s*(\d+)\s*floors?/i,t);
+  const meas=[...t.matchAll(/•\s*(.+?)(?:†|\s*-\s*Learn)/g)].map(m=>m[1].replace(/\s+/g,' ').trim())
+    .filter(x=>x && !/No opportunities/i.test(x) && x.length>8);
+  d.measures=[...new Set(meas)];
+  return d;
+}
+
+/* ---------- OpenStudio Results parser ---------- */
+function parseOpenStudio(htmlText){
+  const doc=new DOMParser().parseFromString(htmlText,'text/html');
+  const tables=[...doc.querySelectorAll('table')];
+  function captionFor(tbl){
+    let n=tbl,hops=0;
+    while(n&&hops<6){n=n.previousElementSibling||n.parentElement;hops++;
+      if(n&&/Consumption|Demand|Load Profiles/.test(n.textContent||''))return n.textContent;}
+    return tbl.previousElementSibling?tbl.previousElementSibling.textContent:'';
+  }
+  function totalRow(tbl){
+    for(const tr of tbl.querySelectorAll('tr')){
+      const c=[...tr.querySelectorAll('th,td')].map(x=>x.textContent.trim());
+      if(c[0]==='Total')return c.slice(1,13).map(v=>{v=v.replace(/,/g,'');return v&&v!=='-'?parseFloat(v):0;});
+    }
+    return null;
+  }
+  let elec=null,gas=null,name=null;
+  for(const tbl of tables) for(const tr of tbl.querySelectorAll('tr')){
+    const c=[...tr.querySelectorAll('th,td')].map(x=>x.textContent.trim());
+    if(c[0]==='Building Name'&&c[1])name=c[1];
+  }
+  for(const tbl of tables){
+    const hdr=[...(tbl.querySelectorAll('tr')[0]?.querySelectorAll('th,td')||[])].map(x=>x.textContent.trim());
+    if(hdr.slice(1,13).join()!==MONTHS.join())continue;
+    const cap=captionFor(tbl);
+    if(/Electricity Consumption \(kWh\)/.test(cap))elec=totalRow(tbl);
+    else if(/Natural Gas Consumption \(MBtu\)/.test(cap)){const t=totalRow(tbl);gas=t?t.map(v=>v*MMBTU_THERM):null;}
+  }
+  // End-use breakdown: the "EUI - Electricity" / "EUI - Gas" two-column tables.
+  function toggleLabel(tbl){
+    // find the nearest preceding element whose text ends with "- view table"
+    let n=tbl,hops=0;
+    while(n&&hops<8){n=n.previousElementSibling||n.parentElement;hops++;
+      const t=(n&&n.textContent||'').replace(/\s+/g,' ');
+      const m=t.match(/([A-Za-z][\w \-\/()]+?) - view table/);
+      if(m)return m[1].trim();}
+    return '';
+  }
+  function endUseMap(tbl){
+    const d={};
+    for(const tr of tbl.querySelectorAll('tr')){
+      const c=[...tr.querySelectorAll('th,td')].map(x=>x.textContent.trim());
+      if(c.length>=2&&c[0]&&c[0]!=='End Use'&&c[0]!=='Total'){
+        const v=parseFloat((c[1]||'').replace(/,/g,''));
+        if(!isNaN(v))d[c[0]]=v;
+      }
+    }
+    return d;
+  }
+  let elecEnd={},gasEnd={};
+  for(const tbl of tables){
+    const lab=toggleLabel(tbl);
+    if(lab==='EUI - Electricity')elecEnd=endUseMap(tbl);
+    else if(lab==='EUI - Gas')gasEnd=endUseMap(tbl);
+  }
+  // Full monthly-by-end-use matrices (each end use × 12 months), from the
+  // "Electricity Consumption (kWh)" and "Natural Gas Consumption (MBtu)" tables.
+  function monthlyMatrix(tbl,scale){
+    const m={};
+    for(const tr of tbl.querySelectorAll('tr')){
+      const c=[...tr.querySelectorAll('th,td')].map(x=>x.textContent.trim());
+      const label=c[0];
+      if(!label||MONTHS.includes(label)||label===''||label==='Total')continue;
+      const vals=c.slice(1,13).map(v=>{v=(v||'').replace(/,/g,'');const n=parseFloat(v);return isNaN(n)?0:n*(scale||1);});
+      if(vals.length===12 && vals.some(x=>x!==0))m[label]=vals;  // drop all-zero end uses
+    }
+    return m;
+  }
+  let elecMonthly={},gasMonthly={};
+  for(const tbl of tables){
+    const hdr=[...(tbl.querySelectorAll('tr')[0]?.querySelectorAll('th,td')||[])].map(x=>x.textContent.trim());
+    if(hdr.slice(1,13).join()!==MONTHS.join())continue;
+    const cap=captionFor(tbl);
+    if(/Electricity Consumption \(kWh\)/.test(cap))elecMonthly=monthlyMatrix(tbl,1);
+    else if(/Natural Gas Consumption \(MBtu\)/.test(cap))gasMonthly=monthlyMatrix(tbl,MMBTU_THERM);
+  }
+  return {elec:elec||Array(12).fill(0),gas:gas||Array(12).fill(0),name,elecEnd,gasEnd,elecMonthly,gasMonthly};
+}
+
+/* Map OpenStudio end-use categories to Audit Template end uses.
+   Electricity: Heating->Space Heating, Cooling->Space Cooling,
+   Interior Lighting->Lighting, Interior Equipment->Plug Loads,
+   Fans+Pumps+Water Systems+Heat Rejection+others->Other.
+   Gas: Water Systems->Water Distribution, Heating->Space Heating, etc. */
+function auditEndUses(os){
+  const e=os.elecEnd||{}, g=os.gasEnd||{};
+  const eOut={'Space Heating':0,'Space Cooling':0,'Lighting':0,'Plug Loads':0,'Other':0};
+  for(const [k,v] of Object.entries(e)){
+    if(!v)continue;
+    if(/^Heating/.test(k))eOut['Space Heating']+=v;
+    else if(/^Cooling/.test(k))eOut['Space Cooling']+=v;
+    else if(/Interior Lighting|^Lighting/.test(k))eOut['Lighting']+=v;
+    else if(/Interior Equipment|Plug/.test(k))eOut['Plug Loads']+=v;
+    else eOut['Other']+=v;   // Fans, Pumps, Water Systems, Heat Rejection, Exterior, etc.
+  }
+  const gOut={};
+  for(const [k,v] of Object.entries(g)){
+    if(!v)continue;
+    if(/Water Systems|Water Heating/.test(k))gOut['Water Distribution']=(gOut['Water Distribution']||0)+v;
+    else if(/^Heating/.test(k))gOut['Space Heating']=(gOut['Space Heating']||0)+v;
+    else if(/^Cooling/.test(k))gOut['Space Cooling']=(gOut['Space Cooling']||0)+v;
+    else gOut['Other']=(gOut['Other']||0)+v;
+  }
+  return {elec:eOut,gas:gOut};
+}
+
+/* ---------- file wiring ---------- */
+document.querySelectorAll('.slot').forEach(slot=>{
+  const key=slot.dataset.key, inp=slot.querySelector('input');
+  slot.onclick=()=>inp.click();
+  ['dragover','dragenter'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.add('hot');}));
+  ['dragleave','drop'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.remove('hot');}));
+  slot.addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])handle(ev.dataTransfer.files[0]);});
+  inp.addEventListener('change',()=>{if(inp.files[0])handle(inp.files[0]);});
+  async function handle(file){
+    files[key]=file;
+    setStatus(`Reading ${file.name}…`);
+    try{
+      if(key==='asBase'||key==='asImp'){
+        const buf=await file.arrayBuffer();
+        const txt=await pdfText(buf);
+        rawDocs[key]=txt;
+        data[key]=parseAssetScore(txt);
+      }else if(/\.osm$/i.test(file.name)){
+        // Raw OpenStudio model: the browser can't run EnergyPlus, so POST the
+        // .osm to the runner. It repairs + simulates the model and returns JSON
+        // in the SAME shape parseOpenStudio() produces, so everything
+        // downstream (scaling, XML, xlsx) works unchanged.
+        const runner=(window.AUDIT_RUNNER_URL||'').replace(/\/+$/,'');
+        if(!runner){
+          files[key]=null;
+          slot.classList.remove('ok');
+          setStatus('EnergyPlus runner not configured — upload the OpenStudio Results HTML for '+
+            (key==='osBase'?'the baseline':'the improved')+' model instead. (.osm runs require the runner; see config.js.)','err');
+          return;
+        }
+        setStatus('Running EnergyPlus for '+file.name+'… this takes ~15–20 s.');
+        const fd=new FormData(); fd.append('file',file,file.name);
+        let resp;
+        try{ resp=await fetch(runner+'/run-osm',{method:'POST',body:fd}); }
+        catch(netErr){ throw new Error('could not reach the EnergyPlus runner at '+runner+' ('+netErr.message+')'); }
+        if(!resp.ok){
+          let detail=''; try{ detail=(await resp.text()).slice(0,300); }catch(e){}
+          throw new Error('runner returned '+resp.status+(detail?': '+detail:''));
+        }
+        const r=await resp.json();
+        // Normalize to the parseOpenStudio() shape, defending against missing keys.
+        data[key]={
+          elec:r.elec||Array(12).fill(0), gas:r.gas||Array(12).fill(0), name:r.name||null,
+          elecEnd:r.elecEnd||{}, gasEnd:r.gasEnd||{},
+          elecMonthly:r.elecMonthly||{}, gasMonthly:r.gasMonthly||{}
+        };
+      }else{
+        const txt=await file.text();
+        rawDocs[key]=txt.slice(0,200000);
+        data[key]=parseOpenStudio(txt);
+      }
+      slot.classList.add('ok');
+      slot.querySelector('.got').textContent='✓ '+file.name;
+      setStatus('');
+      refresh();
+    }catch(err){
+      setStatus('Could not read '+file.name+': '+err.message,'err');
+      slot.classList.remove('ok');
+    }
+  }
+});
+function setStatus(msg,cls){const s=document.getElementById('status');s.textContent=msg||'';s.className='status'+(cls?' '+cls:'');}
+function fmt(n,d=0){return (n||0).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:d});}
+function copyText(text,btn){
+  const done=()=>{if(btn){const o=btn.textContent;btn.textContent='Copied ✓';setTimeout(()=>btn.textContent=o,1400);}};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(()=>fallback());
+  }else fallback();
+  function fallback(){
+    const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);
+    ta.select();try{document.execCommand('copy');done();}catch(e){}document.body.removeChild(ta);
+  }
+}
+// Generic: copy the value held in the <code> immediately before this button.
+function copyVal(btn){
+  const code=btn.parentElement.querySelector('code');
+  if(code)copyText(code.textContent.trim(),btn);
+}
+function copyStart(){
+  const code=document.getElementById('startDateVal');
+  const btn=code?code.parentElement.querySelector('.copybtn'):null;
+  copyText(code?code.textContent.trim():'',btn);
+}
+/* Scale an OpenStudio scenario's monthly energy so its annual total per fuel equals the
+   Asset Score energy (per-fuel EUI x floor area), keeping the monthly shape. Idempotent:
+   always scales from a preserved copy of the original OpenStudio monthly values.
+   which = 'cur' (baseline) or 'upg' (improved) selects which Asset Score EUI column. */
+function scaleToAssetScore(os, as, which){
+  if(!os||!as)return;
+  // Preserve originals once.
+  if(!os._origElec){os._origElec=os.elec.slice(); os._origGas=os.gas.slice();}
+  const area=as.gfa;
+  const gasEui = which==='upg' ? as.gasEuiUpg : as.gasEuiCur;
+  const elecEui= which==='upg' ? as.elecEuiUpg: as.elecEuiCur;
+  // Target annual in native units (kWh, therms). EUI is kBtu/ft2/yr.
+  const elecTarget = (elecEui!=null) ? (elecEui*area)/KWH_KBTU : null;     // kWh
+  const gasTarget  = (gasEui !=null) ? (gasEui *area)/THERM_KBTU : null;   // therms
+  const oe=os._origElec, og=os._origGas;
+  const oeSum=oe.reduce((a,b)=>a+b,0), ogSum=og.reduce((a,b)=>a+b,0);
+  os.elec = (elecTarget!=null && oeSum>0) ? oe.map(v=>v*elecTarget/oeSum) : oe.slice();
+  os.gas  = (gasTarget !=null && ogSum>0) ? og.map(v=>v*gasTarget /ogSum) : og.slice();
+  os._scaled = (elecTarget!=null||gasTarget!=null);
+  os._asElecTarget=elecTarget; os._asGasTarget=gasTarget;
+}
+function annual(os){const e=os.elec.reduce((a,b)=>a+b,0),g=os.gas.reduce((a,b)=>a+b,0);return{e,g,kbtu:e*KWH_KBTU+g*THERM_KBTU};}
+function refresh(){
+  const have=Object.values(data).every(Boolean);
+  document.getElementById('buildBase').disabled=!have;
+  document.getElementById('buildImp').disabled=!have;
+  document.getElementById('utilBase').disabled=!have;
+  document.getElementById('utilImp').disabled=!have;
+  if(!have){return;}
+  // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
+  // monthly shape, so the resulting EUI matches the Asset Score PDF. Runs once per refresh.
+  scaleToAssetScore(data.osBase, data.asBase, 'cur');
+  scaleToAssetScore(data.osImp, data.asImp||data.asBase, 'upg');
+  const as=data.asImp||data.asBase;          // identity/physics from improved if present
+  const asB=data.asBase, asI=data.asImp;
+  const b=annual(data.osBase), i=annual(data.osImp);
+  const osPct=(b.kbtu-i.kbtu)/b.kbtu*100;
+  const statedPct=asI&&asI.savingsPct!=null?asI.savingsPct:osPct;
+
+  const rv=document.getElementById('review'); rv.classList.add('show');
+  document.getElementById('rTitle').textContent=cleanName(asB?asB.name:as.name);
+  document.getElementById('rSavings').innerHTML=
+    `${statedPct.toFixed(2)}% site energy savings<small>Asset Score: ${asB?asB.euiCurrent:'?'} → ${asI?asI.euiUpgraded:'?'} kBtu/ft²/yr · OpenStudio monthly: ${osPct.toFixed(1)}%</small>`;
+  const tier=statedPct>=35?'35%+ tier':(statedPct>=20?'20–34% tier':'below 20% — does not qualify');
+  document.getElementById('rTier').innerHTML=`<span class="pill${statedPct>=20?'':' warn'}">${tier}</span>`;
+
+  // body: building + envelope + energy tables
+  let h='';
+
+  // ---- Baseline vs Improved comparison summary ----
+  h+='<div class="sect"><h3>Baseline vs improved</h3><table class="mo">';
+  h+='<thead><tr><th>Metric</th><th>Baseline</th><th>Improved</th><th>Savings</th></tr></thead><tbody>';
+  const bCost=b.e*RATE_ELEC+b.g*RATE_GAS, iCost=i.e*RATE_ELEC+i.g*RATE_GAS;
+  const compRows=[
+    ['Site EUI (kBtu/ft²/yr)', asB?asB.euiCurrent:0, asI?asI.euiUpgraded:0, (asB&&asI?asB.euiCurrent-asI.euiUpgraded:0)],
+    ['Electricity (kWh)', b.e, i.e, b.e-i.e],
+    ['Natural gas (therms)', b.g, i.g, b.g-i.g],
+    ['Site energy (kBtu)', b.kbtu, i.kbtu, b.kbtu-i.kbtu],
+    ['Annual energy cost', bCost, iCost, bCost-iCost, '$'],
+  ];
+  compRows.forEach(r=>{
+    const money=r[4]==='$';
+    const f=v=>money?'$'+fmt(v,0):fmt(v,r[0].includes('therms')?1:0);
+    h+=`<tr><td style="text-align:left">${r[0]}</td><td>${f(r[1])}</td><td>${f(r[2])}</td><td>${f(r[3])}</td></tr>`;
+  });
+  h+=`<tr style="font-weight:700;background:#f0efe8"><td style="text-align:left">Whole-building savings</td><td colspan="3">Asset Score ${statedPct.toFixed(2)}% · OpenStudio monthly ${osPct.toFixed(1)}% · ${tier}</td></tr>`;
+  h+='</tbody></table></div>';
+
+  h+='<div class="sect"><h3>Building</h3><table class="kv">';
+  const rows=[['Address',`${asB.street}, ${asB.cityStateZip}`],['Gross floor area',`${fmt(asB.gfa)} ft² (laser)`],
+    ['Year built',asB.yearBuilt],['Climate zone',asB.climateZone],['Occupants',asB.occupants],
+    ['Baseline building ID',asB.buildingId],['Improved building ID',asI?asI.buildingId:'—']];
+  rows.forEach(r=>h+=`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`);
+  h+='</table></div>';
+
+  // Copyable Metered Energy Year Start Date (yyyy-mm-dd) for the utility import.
+  const startDate=startDateFor(asB);
+  h+=`<div class="sect"><h3>Metered Energy Year Start Date</h3>
+    <div class="copyrow">
+      <code id="startDateVal">${startDate}</code>
+      <button class="copybtn" onclick="copyStart()">Copy</button>
+      <span class="copyhint">Paste into the required “Metered Energy Year Start Date” field (yyyy-mm-dd) on the import screen. Same for baseline and improved. The 12-month window ends two full calendar months before the current month, so the newest reading is never an implausibly-recent bill.</span>
+    </div></div>`;
+
+  // ---- Benchmarking screen, copyable fields (two sections: baseline + improved) ----
+  function benchFields(label, e, g){
+    const kbtu=e*KWH_KBTU+g*THERM_KBTU;
+    const cost=e*RATE_ELEC+g*RATE_GAS;
+    const eui=(kbtu/asB.gfa).toFixed(1);
+    const costInt=(cost/asB.gfa).toFixed(2);
+    const fields=[
+      ['Benchmarking Source','Other'],
+      ['Benchmarking Source (Other)','Energy Modeling'],
+      ['Year Benchmarked', String(asB.scoreDate?asB.scoreDate.year:new Date().getFullYear())],
+      ['Site Energy Use Intensity (kBtu/ft²)', eui],
+      ['Site Energy Cost Intensity ($/ft²)', costInt],
+    ];
+    let s=`<div class="sect"><h3>Benchmarking — ${label}</h3>`;
+    s+=`<div class="cardgrid">`;
+    fields.forEach(f=>{
+      s+=`<div class="fcard"><div class="flabel">${f[0]}</div>
+        <div class="copyrow"><code>${f[1]}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div></div>`;
+    });
+    s+=`</div><div class="copyhint" style="margin-top:6px">Total site energy for reference: ${fmt(kbtu)} kBtu · annual cost $${fmt(cost)}. The field is labeled “Intensity” (per ft²); some submittals enter the total instead — match your reviewer.</div></div>`;
+    return s;
+  }
+  h+=benchFields('Baseline (benchmark / current)', b.e, b.g);
+  h+=benchFields('Improved (target)', i.e, i.g);
+
+  // Whole-building reported energy savings — its own copyable field
+  h+=`<div class="sect"><h3>Whole Building Reported Energy Savings</h3>
+    <div class="cardgrid">
+      <div class="fcard"><div class="flabel">Asset Score stated (%)</div>
+        <div class="copyrow"><code>${statedPct.toFixed(2)}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div></div>
+      <div class="fcard"><div class="flabel">OpenStudio monthly (%)</div>
+        <div class="copyrow"><code>${osPct.toFixed(1)}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div></div>
+    </div>
+    <div class="copyhint" style="margin-top:6px">The 50121 qualification field. Asset Score stated value is the headline; OpenStudio monthly is from the metered grid.</div></div>`;
+
+  // ---- Building Characteristics (Audit Template screen) ----
+  // Readable straight from the Asset Score PDF: GFA, floors above/below grade, HVAC assignment.
+  // NOT printed on the report: Conditioned Floor Area Heated/Cooled, and General Building Shape — confirm-prompts.
+  {
+    const fa = asB.floorsAbove, fb = asB.floorsBelow;
+    const totFloors = (fa!=null?fa:0) + (fb!=null?fb:0);
+    const card=(label,val,hint)=>`<div class="fcard"><div class="flabel">${label}</div>
+      <div class="copyrow"><code>${val}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div>
+      ${hint?`<div class="copyhint" style="margin-top:4px">${hint}</div>`:''}</div>`;
+    const prompt=(label,val,hint)=>`<div class="fcard" style="border-style:dashed">
+      <div class="flabel">${label} <span style="color:var(--gold)">— confirm</span></div>
+      <div class="copyrow"><code>${val}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div>
+      <div class="copyhint" style="margin-top:4px">${hint}</div></div>`;
+    let s='<div class="sect"><h3>Building Characteristics</h3><div class="cardgrid">';
+    s+=card('Gross Floor Area (ft²)', fmt(asB.gfa), 'Page-1 value from the Asset Score Report.');
+    s+=card('Floors Above-grade, Conditioned', fa!=null?fa:'—', 'Asset Score block detail.');
+    s+=card('Floors Below-grade, Conditioned', fb!=null?fb:'—', 'Asset Score block detail.');
+    s+=card('Number of Floors, Conditioned', totFloors||'—', 'Above + below grade.');
+    s+=prompt('Conditioned Floor Area, Heated and Cooled (ft²)', fmt(asB.gfa),
+      'NOT printed on the Asset Score Report — this is your entry. Start from Gross Floor Area and subtract any unconditioned space (e.g. an excluded basement), to match what you set in Asset Score.');
+    s+=prompt('General Building Shape', 'Rectangle',
+      'NOT printed as a shape on the report (it gives footprint/perimeter geometry). Select the shape you used in Asset Score: Rectangle, L, T, H, or U.');
+    s+='</div>';
+    // HVAC assignment — read from the block detail
+    s+='<div class="copyhint" style="margin-top:10px"><strong>Heating/cooling system assignment</strong> (Asset Score block detail): ';
+    const hv=[];
+    if(asB.coolTons!=null||asB.coolCop!=null) hv.push(`Primary — Through-the-Wall AC / Terminal DX${asB.coolCop!=null?' · '+asB.coolCop+' COP':''}${asB.coolTons!=null?' · '+asB.coolTons+' tons':''}`);
+    if(asB.heatCap!=null) hv.push(`Secondary — Convective Baseboard: Electric · ${asB.heatCap} kBtu/hr`);
+    s+= hv.length? hv.join(' &nbsp;|&nbsp; ') : 'see Envelope &amp; systems below';
+    s+='</div></div>';
+    h+=s;
+  }
+
+  h+='<div class="sect"><h3>Envelope &amp; systems</h3><table class="kv">';
+  const env=[['Roof','Shingles/Shakes · R-'+asB.roofR+' → R-'+(asI?asI.roofR:asB.roofR)],
+    ['Wall','Siding on wood frame · R-'+asB.wallR],
+    ['Windows','Wood/Vinyl/Fiberglass dbl · WWR '+asB.wwr],
+    ['Foundation','Slab-on-grade · R-0'],
+    ['Wall area',fmt(asB.wallArea)+' ft²'],['Window area',fmt(asB.windowArea)+' ft²'],
+    ['Roof area',fmt(asB.roofArea)+' ft²'],
+    ['Heating','Electric baseboard · '+fmt(asB.heatCap)+' kBtu/hr'],
+    ['Cooling','Terminal DX · '+asB.coolCop+' COP · '+asB.coolTons+' ton'],
+    ['Water heater','Natural gas · '+asB.whe+' Et'],
+    ['Infiltration',asB.infiltration+' CFM/ft² @ 0.3"']];
+  env.forEach(r=>h+=`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`);
+  h+='</table></div>';
+
+  h+='<div class="sect"><h3>Monthly energy (whole building)</h3>';
+  h+=monthTable('Baseline',data.osBase);
+  h+=monthTable('Improved',data.osImp);
+  h+='</div>';
+
+  // End-use breakdown — the Audit Template "Building Energy Use by End Use" screen
+  const euB=auditEndUses(data.osBase), euI=auditEndUses(data.osImp);
+  h+='<div class="sect"><h3>Electricity by end use (kWh)</h3>';
+  h+=endUseTable(['Space Heating','Space Cooling','Lighting','Plug Loads','Other'],euB.elec,euI.elec);
+  h+='</div>';
+  h+='<div class="sect"><h3>Natural gas by end use (therms)</h3>';
+  h+=endUseTable(['Space Heating','Space Cooling','Water Distribution','Other'],euB.gas,euI.gas);
+  h+='</div>';
+
+  // Combined end-use in kBtu (matches the Audit Template "Building End Use Summary")
+  h+='<div class="sect"><h3>Building end-use summary (kBtu)</h3>';
+  h+=combinedEndUse(euB,euI);
+  h+='</div>';
+
+  // Full monthly grid by end use — exactly like the OpenStudio consumption tables.
+  h+='<div class="sect"><h3>Baseline — electricity by end use, monthly (kWh)</h3>';
+  h+=monthlyMatrixTable(data.osBase.elecMonthly);
+  h+='</div>';
+  h+='<div class="sect"><h3>Baseline — natural gas by end use, monthly (therms)</h3>';
+  h+=monthlyMatrixTable(data.osBase.gasMonthly);
+  h+='</div>';
+  h+='<div class="sect"><h3>Improved — electricity by end use, monthly (kWh)</h3>';
+  h+=monthlyMatrixTable(data.osImp.elecMonthly);
+  h+='</div>';
+  h+='<div class="sect"><h3>Improved — natural gas by end use, monthly (therms)</h3>';
+  h+=monthlyMatrixTable(data.osImp.gasMonthly);
+  h+='</div>';
+
+  if(asI&&asI.measures.length){
+    h+='<div class="sect"><h3>Measures</h3><table class="kv">';
+    asI.measures.forEach(m=>h+=`<tr><td colspan="2" style="text-align:left;font-weight:600">${m}</td></tr>`);
+    h+='</table></div>';
+  }
+  document.getElementById('rBody').innerHTML=h;
+
+  document.getElementById('rNote').textContent=
+    'EUI and headline savings come from the Asset Score Report (the document of record). '+
+    'The monthly metered energy uses the OpenStudio month-to-month shape, scaled so each fuel\'s annual total equals the Asset Score energy (per-fuel EUI × floor area) — so the EUI matches the Asset Score PDF. '+
+    'Floor area uses the page-1 value ('+fmt(asB.gfa)+' ft²), not the block-driven figure on later pages. '+
+    'Annual energy cost uses Wisconsin residential averages: $'+RATE_ELEC.toFixed(3)+'/kWh and $'+RATE_GAS.toFixed(2)+'/therm (EIA, 2026).';
+
+  // sanity flags
+  const flags=[];
+  if(asB&&asI&&asB.street!==asI.street) flags.push('Baseline and improved addresses differ.');
+  if(data.osBase.name&&data.osImp.name&&data.osBase.name===data.osImp.name)
+    flags.push('Both OpenStudio reports carry the same building name — confirm you loaded distinct baseline and improved files.');
+  const fl=document.getElementById('rFlag');
+  if(flags.length){fl.style.display='block';fl.innerHTML='⚠ '+flags.join('<br>⚠ ');}else fl.style.display='none';
+}
+function cleanName(n){return (n||'Building').replace(/\s*–\s*/g,' – ');}
+function monthTable(label,os){
+  let h=`<table class="mo"><thead><tr><th>${label}</th>`+MONTHS.map(m=>`<th>${m}</th>`).join('')+'<th>Tot</th></tr></thead><tbody>';
+  h+='<tr><td>kWh</td>'+os.elec.map(v=>`<td>${fmt(v)}</td>`).join('')+`<td>${fmt(os.elec.reduce((a,b)=>a+b,0))}</td></tr>`;
+  h+='<tr><td>therms</td>'+os.gas.map(v=>`<td>${fmt(v,0)}</td>`).join('')+`<td>${fmt(os.gas.reduce((a,b)=>a+b,0),0)}</td></tr>`;
+  return h+'</tbody></table>';
+}
+function monthlyMatrixTable(matrix){
+  // matrix: { 'Heating':[12], 'Cooling':[12], ... } — render like the OpenStudio table
+  const keys=Object.keys(matrix||{});
+  if(!keys.length)return '<p class="hint">No monthly end-use data found in this report.</p>';
+  let h='<table class="mo"><thead><tr><th>End use</th>'+MONTHS.map(m=>`<th>${m}</th>`).join('')+'<th>Total</th></tr></thead><tbody>';
+  const colTot=Array(12).fill(0);
+  keys.forEach(k=>{
+    const row=matrix[k];
+    const rowTot=row.reduce((a,b)=>a+b,0);
+    row.forEach((v,i)=>colTot[i]+=v);
+    h+=`<tr><td>${k}</td>`+row.map(v=>`<td>${v?fmt(v,0):''}</td>`).join('')+`<td>${fmt(rowTot,0)}</td></tr>`;
+  });
+  h+='<tr style="font-weight:700;background:#f0efe8"><td>Total</td>'+colTot.map(v=>`<td>${fmt(v,0)}</td>`).join('')+`<td>${fmt(colTot.reduce((a,b)=>a+b,0),0)}</td></tr>`;
+  return h+'</tbody></table>';
+}
+function endUseTable(order,base,imp){
+  let h='<table class="mo"><thead><tr><th>End use</th><th>Baseline</th><th>Improved</th><th>Savings</th></tr></thead><tbody>';
+  let tb=0,ti=0;
+  order.forEach(k=>{
+    const b=base[k]||0, i=imp[k]||0;
+    if(b||i){h+=`<tr><td>${k}</td><td>${fmt(b)}</td><td>${fmt(i)}</td><td>${fmt(b-i)}</td></tr>`;tb+=b;ti+=i;}
+  });
+  h+=`<tr style="font-weight:700;background:#f0efe8"><td>Total</td><td>${fmt(tb)}</td><td>${fmt(ti)}</td><td>${fmt(tb-ti)}</td></tr>`;
+  return h+'</tbody></table>';
+}
+function combinedEndUse(euB,euI){
+  // convert each fuel's end use to kBtu and sum by category
+  function toKbtu(eu){
+    const o={};
+    for(const[k,v]of Object.entries(eu.elec))o[k]=(o[k]||0)+v*KWH_KBTU;
+    for(const[k,v]of Object.entries(eu.gas))o[k]=(o[k]||0)+v*THERM_KBTU;
+    return o;
+  }
+  const b=toKbtu(euB), i=toKbtu(euI);
+  const order=['Space Heating','Space Cooling','Water Distribution','Lighting','Plug Loads','Other'];
+  const tot=Object.values(b).reduce((a,x)=>a+x,0);
+  let h='<table class="mo"><thead><tr><th>End use</th><th>Baseline kBtu</th><th>% of total</th><th>Improved kBtu</th></tr></thead><tbody>';
+  let tb=0,tiv=0;
+  order.forEach(k=>{const bb=b[k]||0,ii=i[k]||0;
+    if(bb||ii){h+=`<tr><td>${k}</td><td>${fmt(bb)}</td><td>${tot?Math.round(bb/tot*100):0}%</td><td>${fmt(ii)}</td></tr>`;tb+=bb;tiv+=ii;}});
+  h+=`<tr style="font-weight:700;background:#f0efe8"><td>Total</td><td>${fmt(tb)}</td><td>100%</td><td>${fmt(tiv)}</td></tr>`;
+  return h+'</tbody></table>';
+}
+
+/* ---------- BuildingSync output ---------- */
+const NS='http://buildingsync.net/schemas/bedes-auc/2019';
+function el(doc,parent,name,text,attrs){const e=doc.createElementNS(NS,'auc:'+name);
+  if(text!==undefined&&text!==null&&text!=='')e.textContent=text;
+  if(attrs)for(const k in attrs)e.setAttribute(k,attrs[k]);parent.appendChild(e);return e;}
+function monthBounds(year,m){const mm=String(m+1).padStart(2,'0');
+  const start=`${year}-${mm}-01T00:00:00`;
+  const ny=m===11?year+1:year,nm=m===11?1:m+2;
+  return [start,`${ny}-${String(nm).padStart(2,'0')}-01T00:00:00`];}
+
+/* Build a complete, standalone Audit Template (one building record) for either
+   'baseline' or 'improved'. Each is independently importable. The improved file
+   additionally carries the measures and the package-of-measures savings vs baseline. */
+function buildSingleXML(which){
+  const asB=data.asBase, asI=data.asImp;
+  const as = which==='improved' ? (asI||asB) : asB;       // physics/identity for this building
+  const os = which==='improved' ? data.osImp : data.osBase; // energy for this building
+  // Metered-reading year: the year the 12-month window ends in (two full
+  // calendar months before the current month — same window as the utility xlsx),
+  // so the TimeSeries timestamps track today's date instead of being frozen.
+  let _em=new Date().getMonth()+1-2, year=new Date().getFullYear();
+  while(_em<1){_em+=12;year-=1;}
+  const area=as.gfa||asB.gfa;
+  const doc=document.implementation.createDocument(NS,'auc:BuildingSync',null);
+  const root=doc.documentElement; root.setAttribute('version','2.6.0');
+  const facs=el(doc,root,'Facilities'), fac=el(doc,facs,'Facility',null,{ID:'Facility-1'});
+  const sites=el(doc,fac,'Sites'), site=el(doc,sites,'Site',null,{ID:'Site-1'});
+  const bldgs=el(doc,site,'Buildings'), b=el(doc,bldgs,'Building',null,{ID:'Building-1'});
+  el(doc,b,'PremisesName',cleanName(as.name));
+  const addr=el(doc,b,'Address'), sad=el(doc,addr,'StreetAddressDetail'), si=el(doc,sad,'Simplified');
+  el(doc,si,'StreetAddress',as.street||asB.street||'');
+  el(doc,addr,'City',as.city||asB.city||''); el(doc,addr,'State',as.state||'WI'); el(doc,addr,'PostalCode',as.zip||asB.zip||'');
+  el(doc,b,'BuildingClassification','Residential');
+  el(doc,b,'OccupancyClassification','Multifamily');
+  el(doc,b,'FloorsAboveGrade', as.floorsAbove!=null ? as.floorsAbove : (asB.floorsAbove!=null ? asB.floorsAbove : 2));
+  const fas=el(doc,b,'FloorAreas');
+  let fa=el(doc,fas,'FloorArea'); el(doc,fa,'FloorAreaType','Gross'); el(doc,fa,'FloorAreaValue',area.toFixed(1));
+  fa=el(doc,fas,'FloorArea'); el(doc,fa,'FloorAreaType','Conditioned'); el(doc,fa,'FloorAreaValue',area.toFixed(1));
+  if(as.yearBuilt)el(doc,b,'YearOfConstruction',as.yearBuilt);
+  const secs=el(doc,b,'Sections'), sec=el(doc,secs,'Section',null,{ID:'Section-1'});
+  el(doc,sec,'SectionType','Whole building'); el(doc,sec,'OccupancyClassification','Multifamily');
+  if(as.occupants){const ols=el(doc,sec,'OccupancyLevels'),ol=el(doc,ols,'OccupancyLevel');
+    el(doc,ol,'OccupantQuantityType','Peak total occupants');el(doc,ol,'OccupantQuantity',as.occupants);}
+
+  // Facility order: Sites, Systems, Schedules, Measures, Reports.
+  // Measures element only exists for the improved building (it has measures); an empty
+  // Measures element is invalid, so the baseline omits it entirely.
+  const measList = (which==='improved' && asI && asI.measures.length) ? asI.measures : [];
+  const measEl = measList.length ? el(doc,fac,'Measures') : null;
+  const reports=el(doc,fac,'Reports'), report=el(doc,reports,'Report',null,{ID:'Report-1'});
+  const scenarios=el(doc,report,'Scenarios');
+
+  function meteredScenario(os,id,suffix){
+    const sc=el(doc,scenarios,'Scenario',null,{ID:id});
+    el(doc,sc,'ScenarioName','Audit Template Metered '+suffix);
+    const stp=el(doc,sc,'ScenarioType'),cb=el(doc,stp,'CurrentBuilding'),cm=el(doc,cb,'CalculationMethod');
+    el(doc,cm,'Measured');
+    const rus=el(doc,sc,'ResourceUses');
+    // Round monthly readings to whole numbers; derive annual totals from the rounded
+    // monthly values so AnnualFuelUseNativeUnits equals the sum of the 12 readings.
+    const elecR=os.elec.map(v=>Math.round(v));
+    const gasR=os.gas.map(v=>Math.round(v));
+    const eTot=elecR.reduce((a,b)=>a+b,0), gTot=gasR.reduce((a,b)=>a+b,0);
+    const eru=el(doc,rus,'ResourceUse',null,{ID:id+'-Elec'});
+    el(doc,eru,'EnergyResource','Electricity');el(doc,eru,'ResourceUnits','kWh');el(doc,eru,'EndUse','All end uses');
+    el(doc,eru,'AnnualFuelUseNativeUnits',String(eTot));
+    el(doc,eru,'AnnualFuelUseConsistentUnits',Math.round(eTot*KWH_KBTU/1000).toString());
+    el(doc,eru,'AnnualFuelCost',Math.round(eTot*RATE_ELEC).toString());
+    const gru=el(doc,rus,'ResourceUse',null,{ID:id+'-Gas'});
+    el(doc,gru,'EnergyResource','Natural gas');el(doc,gru,'ResourceUnits','therms');el(doc,gru,'EndUse','All end uses');
+    el(doc,gru,'AnnualFuelUseNativeUnits',String(gTot));
+    el(doc,gru,'AnnualFuelUseConsistentUnits',Math.round(gTot*THERM_KBTU/1000).toString());
+    el(doc,gru,'AnnualFuelCost',Math.round(gTot*RATE_GAS).toString());
+    const eu=auditEndUses(os);
+    const EU_MAP={'Space Heating':'Heating','Space Cooling':'Cooling','Lighting':'Interior lighting',
+      'Plug Loads':'Plug load','Water Distribution':'Domestic hot water','Other':'Process load'};
+    let ei=0;
+    for(const[cat,val]of Object.entries(eu.elec)){ if(!val)continue; ei++;
+      const r=el(doc,rus,'ResourceUse',null,{ID:`${id}-E-EU${ei}`});
+      el(doc,r,'EnergyResource','Electricity');el(doc,r,'ResourceUnits','kWh');
+      el(doc,r,'EndUse',EU_MAP[cat]||'Other');
+      el(doc,r,'AnnualFuelUseNativeUnits',String(Math.round(val)));
+      el(doc,r,'AnnualFuelUseConsistentUnits',Math.round(val*KWH_KBTU/1000).toString());
+    }
+    let gi=0;
+    for(const[cat,val]of Object.entries(eu.gas)){ if(!val)continue; gi++;
+      const r=el(doc,rus,'ResourceUse',null,{ID:`${id}-G-EU${gi}`});
+      el(doc,r,'EnergyResource','Natural gas');el(doc,r,'ResourceUnits','therms');
+      el(doc,r,'EndUse',EU_MAP[cat]||'Other');
+      el(doc,r,'AnnualFuelUseNativeUnits',String(Math.round(val)));
+      el(doc,r,'AnnualFuelUseConsistentUnits',Math.round(val*THERM_KBTU/1000).toString());
+    }
+    const tsd=el(doc,sc,'TimeSeriesData');
+    elecR.forEach((val,m)=>{const[st,en]=monthBounds(year,m);
+      const ts=el(doc,tsd,'TimeSeries',null,{ID:`${id}-E${m+1}`});
+      el(doc,ts,'ReadingType','Total');el(doc,ts,'TimeSeriesReadingQuantity','Energy');
+      el(doc,ts,'StartTimestamp',st);el(doc,ts,'EndTimestamp',en);
+      el(doc,ts,'IntervalFrequency','Month');el(doc,ts,'IntervalReading',String(val));
+      el(doc,ts,'ResourceUseID',null,{IDref:id+'-Elec'});});
+    gasR.forEach((val,m)=>{const[st,en]=monthBounds(year,m);
+      const ts=el(doc,tsd,'TimeSeries',null,{ID:`${id}-G${m+1}`});
+      el(doc,ts,'ReadingType','Total');el(doc,ts,'TimeSeriesReadingQuantity','Energy');
+      el(doc,ts,'StartTimestamp',st);el(doc,ts,'EndTimestamp',en);
+      el(doc,ts,'IntervalFrequency','Month');el(doc,ts,'IntervalReading',String(val));
+      el(doc,ts,'ResourceUseID',null,{IDref:id+'-Gas'});});
+    const art=el(doc,sc,'AllResourceTotals'),a1=el(doc,art,'AllResourceTotal',null,{ID:id+'-ART'});
+    const kbtu=eTot*KWH_KBTU+gTot*THERM_KBTU;
+    el(doc,a1,'SiteEnergyUse',Math.round(kbtu).toString());
+    el(doc,a1,'SiteEnergyUseIntensity',Math.round(kbtu/area).toString());
+    el(doc,a1,'EnergyCost',Math.round(eTot*RATE_ELEC+gTot*RATE_GAS).toString());
+    return kbtu;
+  }
+
+  // This building's own metered scenario (current building for this record).
+  const thisK = meteredScenario(os,'Scenario-Current','Current');
+
+  if(which==='improved'){
+    // Improved record also carries measures + a package-of-measures vs the baseline energy.
+    // Baseline energy from rounded monthly values, to stay consistent with the readings.
+    const baseK = data.osBase.elec.reduce((a,b)=>a+Math.round(b),0)*KWH_KBTU
+                + data.osBase.gas.reduce((a,b)=>a+Math.round(b),0)*THERM_KBTU;
+    const mIds=[];
+    measList.forEach((line,i)=>{const mid='Measure-'+(i+1);mIds.push(mid);
+      const m=el(doc,measEl,'Measure',null,{ID:mid});
+      el(doc,m,'SystemCategoryAffected','Other');
+      const tcs=el(doc,m,'TechnologyCategories'),tc=el(doc,tcs,'TechnologyCategory'),
+        oth=el(doc,tc,'BuildingEnvelopeModifications');
+      el(doc,oth,'MeasureName','Other');
+      el(doc,m,'LongDescription',line);});
+    const pom=el(doc,scenarios,'Scenario',null,{ID:'Scenario-Package'});
+    el(doc,pom,'ScenarioName','Improved Package');
+    const pst=el(doc,pom,'ScenarioType'),pkg=el(doc,pst,'PackageOfMeasures',null,{ID:'Package-1'});
+    el(doc,pkg,'ReferenceCase',null,{IDref:'Scenario-Current'});
+    if(mIds.length){const mi=el(doc,pkg,'MeasureIDs');mIds.forEach(id=>el(doc,mi,'MeasureID',null,{IDref:id}));}
+    el(doc,pkg,'AnnualSavingsSiteEnergy',Math.round((baseK-thisK)/1000).toString());
+  }
+
+  el(doc,report,'ASHRAEAuditLevel','Level 2: Energy Survey and Analysis');
+  const lpo=el(doc,report,'LinkedPremisesOrSystem'),lb=el(doc,lpo,'Building');
+  el(doc,lb,'LinkedBuildingID',null,{IDref:'Building-1'});
+
+  return '<?xml version="1.0" encoding="utf-8"?>\n'+new XMLSerializer().serializeToString(doc);
+}
+
+function downloadXML(which){
+  const fs=document.getElementById('finalStatus');
+  try{
+    const as = which==='improved' ? (data.asImp||data.asBase) : data.asBase;
+    const xml=buildSingleXML(which);
+    const blob=new Blob([xml],{type:'application/xml'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    const tag = which==='improved' ? 'Improved' : 'Baseline';
+    a.download=cleanName(as.name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_'+tag+'_AuditTemplate.xml';
+    a.click();
+    fs.className='status ok';
+    fs.textContent=tag+' Audit Template downloaded. Import it under Buildings → Import.';
+  }catch(err){fs.className='status err';fs.textContent='Build error: '+err.message;}
+}
+document.getElementById('buildBase').onclick=()=>downloadXML('baseline');
+document.getElementById('buildImp').onclick=()=>downloadXML('improved');
+
+/* ---- Utility usage xlsx (Portfolio Manager "Energy Use By Calendar Month" format) ---- */
+/* Metered Energy Year Start Date (yyyy-mm-dd): first day of the import window =
+   12 months back from the month prior to the score date. */
+function startDateFor(as){
+  // Newest metered month = 2 full calendar months before the current month, so no
+  // implausibly-recent bill appears. Window is the 12 months ending there; first month
+  // is the month after the newest, one year earlier.
+  const now=new Date();
+  let endM=now.getMonth()+1-2, endY=now.getFullYear();   // current month (1-12) minus 2
+  while(endM<1){endM+=12;endY-=1;}
+  let startM=endM+1, startY=endY-1;
+  if(startM>12){startM=1;startY=endY;}
+  return `${startY}-${String(startM).padStart(2,'0')}-01`;
+}
+
+function buildUtilityXLSX(which){
+  const as = which==='improved' ? (data.asImp||data.asBase) : data.asBase;
+  const os = which==='improved' ? data.osImp : data.osBase;
+  // 12-month window ending 2 full calendar months before the current month (so the newest
+  // metered month is never implausibly recent — e.g. in June, newest month is April).
+  // OpenStudio arrays are calendar Jan..Dec (index 0=Jan).
+  const now=new Date();
+  let endM=now.getMonth()+1-2, endY=now.getFullYear();   // current month (1-12) minus 2
+  while(endM<1){endM+=12;endY-=1;}
+  // build 12 months ending at endM/endY, oldest first
+  const seq=[];
+  let mm=endM, yy=endY;
+  for(let k=0;k<12;k++){seq.unshift({m:mm,y:yy});mm--;if(mm<1){mm=12;yy--;}}
+  const MNAME=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  // rows: header rows then table
+  const propName=cleanName(as.name);
+  const propId=as.buildingId||'';
+  const aoa=[
+    ['Energy Use By Calendar Month'],
+    [`Property: ${propName} (ID ${propId})`],
+    [todayStamp()],
+    [],
+    [],
+    ['Month','Electric - Grid\n(kBtu)','Natural Gas\n(kBtu)'],
+  ];
+  seq.forEach(({m,y})=>{
+    const ci=m-1; // calendar index into OpenStudio arrays
+    const eKbtu=Math.round(os.elec[ci]*KWH_KBTU);
+    const gKbtu=Math.round(os.gas[ci]*THERM_KBTU);
+    const label=`${MNAME[ci]}-${String(y).slice(-2)}`;
+    aoa.push([label, eKbtu, gKbtu]);
+  });
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  // force the month label cells to text so the import keeps them 'General'/text
+  for(let r=6;r<6+seq.length;r++){
+    const ref=XLSX.utils.encode_cell({r:r,c:0});
+    if(ws[ref]){ws[ref].t='s';}
+  }
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Consumption Info');
+  return wb;
+}
+function todayStamp(){
+  const d=new Date();
+  const mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
+  let h=d.getHours(),ap=h>=12?'PM':'AM';h=h%12||12;
+  const mi=String(d.getMinutes()).padStart(2,'0');
+  return `${mm}/${dd}/${d.getFullYear()} ${String(h).padStart(2,'0')}:${mi} ${ap}`;
+}
+function downloadUtility(which){
+  const fs=document.getElementById('finalStatus');
+  try{
+    const as = which==='improved' ? (data.asImp||data.asBase) : data.asBase;
+    const wb=buildUtilityXLSX(which);
+    const tag = which==='improved'?'Improved':'Baseline';
+    const fname=cleanName(as.name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_'+tag+'_Utility.xlsx';
+    XLSX.writeFile(wb,fname);
+    fs.className='status ok';
+    fs.textContent=tag+' utility file downloaded. Import it under Utility Data and Benchmarking → Energy Reporting Years → Choose File.';
+  }catch(err){fs.className='status err';fs.textContent='Utility build error: '+err.message;}
+}
+document.getElementById('utilBase').onclick=()=>downloadUtility('baseline');
+document.getElementById('utilImp').onclick=()=>downloadUtility('improved');
+</script>
+
+<!-- ================= In-app energy-auditing assistant ================= -->
+<style>
+  #asstLauncher{position:fixed;right:20px;bottom:20px;z-index:50;
+    background:var(--moss);color:#fff;border:none;border-radius:24px;
+    padding:12px 18px;font:600 14px/1 ui-sans-serif,system-ui,sans-serif;
+    box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer;display:flex;gap:8px;align-items:center}
+  #asstLauncher:hover{background:var(--moss-d)}
+  #asstPanel{position:fixed;right:20px;bottom:20px;z-index:51;width:390px;max-width:calc(100vw - 24px);
+    height:560px;max-height:calc(100vh - 24px);background:var(--card);border:1px solid var(--line);
+    border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.22);display:none;flex-direction:column;overflow:hidden}
+  #asstPanel.open{display:flex}
+  .asstHead{background:var(--moss-d);color:#fff;padding:12px 14px;display:flex;justify-content:space-between;align-items:center}
+  .asstHead b{font:700 15px/1.2 Georgia,serif}
+  .asstHead small{display:block;font:400 11px/1.3 ui-sans-serif;opacity:.8}
+  .asstHead button{background:transparent;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1}
+  #asstLog{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--paper)}
+  .asstMsg{max-width:88%;padding:9px 12px;border-radius:12px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+  .asstMsg.user{align-self:flex-end;background:var(--moss);color:#fff;border-bottom-right-radius:3px}
+  .asstMsg.bot{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:3px}
+  .asstMsg.sys{align-self:center;background:transparent;color:var(--mut);font-size:12px;text-align:center;max-width:100%}
+  .asstForm{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);background:var(--card)}
+  .asstForm textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    font:14px/1.4 ui-sans-serif,system-ui,sans-serif;height:40px;max-height:120px}
+  .asstForm button{background:var(--moss);color:#fff;border:none;border-radius:8px;padding:0 16px;font-weight:600;cursor:pointer}
+  .asstForm button:disabled{background:var(--mut);cursor:default}
+  .asstDot{display:inline-block;animation:asstblink 1.2s infinite}
+  @keyframes asstblink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+</style>
+
+<button id="asstLauncher" aria-label="Open assistant">💬 Ask the auditor</button>
+<div id="asstPanel" role="dialog" aria-label="Energy auditing assistant">
+  <div class="asstHead">
+    <div><b>Energy Auditor Assistant</b><small>Reads the uploaded reports · HOMES 50121</small></div>
+    <button id="asstClose" aria-label="Close">×</button>
+  </div>
+  <div id="asstLog"></div>
+  <form class="asstForm" id="asstForm">
+    <textarea id="asstInput" placeholder="Ask about this building, the model, or 50121 eligibility…" rows="1"></textarea>
+    <button type="submit" id="asstSend">Send</button>
+  </form>
+</div>
+
+<script>
+/* In-app assistant: sends the current building context + the raw uploaded
+   document text to the serverless function, which calls Claude (Opus 4.8). */
+(function(){
+  const launcher=document.getElementById('asstLauncher');
+  const panel=document.getElementById('asstPanel');
+  const logEl=document.getElementById('asstLog');
+  const form=document.getElementById('asstForm');
+  const input=document.getElementById('asstInput');
+  const sendBtn=document.getElementById('asstSend');
+  const history=[];   // {role, content}
+  let greeted=false;
+
+  launcher.onclick=()=>{panel.classList.add('open');launcher.style.display='none';
+    if(!greeted){greeted=true;addMsg('sys','Ask me anything about the loaded building, the energy model, or HOMES 50121 eligibility. I read the uploaded reports directly.');}
+    input.focus();};
+  document.getElementById('asstClose').onclick=()=>{panel.classList.remove('open');launcher.style.display='flex';};
+  input.addEventListener('input',()=>{input.style.height='40px';input.style.height=Math.min(input.scrollHeight,120)+'px';});
+  input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
+
+  function addMsg(role,text){
+    const d=document.createElement('div');
+    d.className='asstMsg '+(role==='user'?'user':role==='sys'?'sys':'bot');
+    d.textContent=text; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; return d;
+  }
+
+  // Assemble a compact, useful context from the parsed data + raw documents.
+  function buildContext(){
+    const c={};
+    if(data.asBase||data.asImp){
+      const pick=a=>a?{name:a.name,address:(a.street||'')+', '+(a.cityStateZip||''),gfa:a.gfa,
+        yearBuilt:a.yearBuilt,climateZone:a.climateZone,occupants:a.occupants,buildingId:a.buildingId,
+        euiCurrent:a.euiCurrent,euiUpgraded:a.euiUpgraded,gasEuiCur:a.gasEuiCur,gasEuiUpg:a.gasEuiUpg,
+        elecEuiCur:a.elecEuiCur,elecEuiUpg:a.elecEuiUpg,savingsPct:a.savingsPct,roofR:a.roofR,wallR:a.wallR,
+        wwr:a.wwr,heatCap:a.heatCap,coolCop:a.coolCop,coolTons:a.coolTons,whe:a.whe,
+        floorsAbove:a.floorsAbove,floorsBelow:a.floorsBelow,measures:a.measures}:null;
+      c.assetScore={baseline:pick(data.asBase),improved:pick(data.asImp)};
+    }
+    const os=o=>o?{annualElecKWh:o.elec&&o.elec.reduce((a,b)=>a+b,0),annualGasTherms:o.gas&&o.gas.reduce((a,b)=>a+b,0),
+      elecByEndUse:o.elecEnd,gasByEndUse:o.gasEnd}:null;
+    if(data.osBase||data.osImp) c.openStudio={baseline:os(data.osBase),improved:os(data.osImp)};
+    // Computed summary when everything is present.
+    try{
+      if(data.asBase&&data.osBase&&data.osImp){
+        const b=annual(data.osBase),i=annual(data.osImp);
+        const osPct=(b.kbtu-i.kbtu)/b.kbtu*100;
+        const statedPct=(data.asImp&&data.asImp.savingsPct!=null)?data.asImp.savingsPct:osPct;
+        c.computed={siteSavingsPct_assetScore:statedPct,siteSavingsPct_openStudio:+osPct.toFixed(1),
+          qualificationTier:statedPct>=35?'35%+ tier':(statedPct>=20?'20-34% tier':'below 20% - does not qualify'),
+          baselineSiteKbtu:Math.round(b.kbtu),improvedSiteKbtu:Math.round(i.kbtu)};
+      }
+    }catch(e){}
+    c.documentsText={baselineAssetScoreReport:rawDocs.asBase,improvedAssetScoreReport:rawDocs.asImp,
+      baselineOpenStudio:rawDocs.osBase?rawDocs.osBase.slice(0,40000):null,
+      improvedOpenStudio:rawDocs.osImp?rawDocs.osImp.slice(0,40000):null};
+    return c;
+  }
+
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const q=input.value.trim(); if(!q)return;
+    input.value='';input.style.height='40px';
+    addMsg('user',q); history.push({role:'user',content:q});
+    sendBtn.disabled=true;
+    const thinking=addMsg('bot',''); thinking.innerHTML='<span class="asstDot">●</span> thinking…';
+    try{
+      const resp=await fetch('/.netlify/functions/chat',{method:'POST',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify({messages:history,context:buildContext()})});
+      const out=await resp.json().catch(()=>({error:'Bad response from the assistant.'}));
+      if(!resp.ok||out.error){
+        thinking.classList.remove('bot');thinking.classList.add('sys');
+        thinking.textContent='⚠ '+(out.error||('Error '+resp.status))+(out.detail?(' — '+out.detail):'');
+      }else{
+        thinking.textContent=out.reply; history.push({role:'assistant',content:out.reply});
+      }
+    }catch(err){
+      thinking.classList.remove('bot');thinking.classList.add('sys');
+      thinking.textContent='⚠ Could not reach the assistant: '+err.message;
+    }finally{
+      sendBtn.disabled=false; logEl.scrollTop=logEl.scrollHeight;
+    }
+  });
+})();
+</script>
+</body>
+</html>

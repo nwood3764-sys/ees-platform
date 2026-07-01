@@ -1,0 +1,13 @@
+# Validation schema cache
+validation/.schema-cache/
+
+# Runner local artifacts
+runner/rundir/
+runner/**/*.idf
+runner/**/*.sql
+runner/**/eplustbl.htm
+runner/weather/*.epw
+
+# Python
+__pycache__/
+*.pyc

@@ -1,0 +1,25 @@
+# Netlify config for the Audit Template Builder front end.
+#
+# This is a STANDALONE static site, completely separate from the LEAP app and
+# its Netlify site / Supabase project. There is no build step — the page loads
+# pdf.js and SheetJS from a CDN and runs entirely in the browser.
+#
+# Deploy this directory (audit-template-builder/frontend) as its OWN Netlify
+# site (e.g. audit-template.ees-wi.org). Do not point the LEAP site at it.
+#
+# Before deploying, set window.AUDIT_RUNNER_URL in config.js to the EnergyPlus
+# runner URL (the Fly.io app) so the .osm upload path works. The HTML-input
+# path works with no runner.
+
+[build]
+  # Static files only; nothing to compile. publish is this directory itself.
+  command  = ""
+  publish  = "."
+
+# The in-app assistant runs as a serverless function (holds the Anthropic API
+# key server-side). Netlify bundles it automatically, no build command needed.
+[functions]
+  directory = "netlify/functions"
+
+# No SPA redirect: this is a single page, not a client-side router. Unknown
+# paths should 404 normally rather than rewrite to index.html.

@@ -837,7 +837,7 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
   };
 
   return (
-    <th style={{ padding: 0, position: 'relative', userSelect: 'none', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+    <th style={{ padding: 0, position: 'sticky', top: 0, zIndex: 3, background: C.card, userSelect: 'none', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
         <div onClick={handleSort}
           style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '10px 4px 10px 12px', cursor: col.sortable ? 'pointer' : 'default', flex: '1 1 auto', minWidth: 0 }}
@@ -1055,11 +1055,20 @@ function ViewSelector({
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  // A saved view created by overriding a system view carries systemBase = that
-  // system view's id. Hide the in-code system view when an override exists, so
-  // it shows once (in Saved Views) rather than duplicated in both sections.
+  // One unified, de-duplicated "List Views" list. The selector used to split
+  // views into "System Views" and "Saved Views", but ObjectListSection passes
+  // the saved views in as `systemViews` AND ListView loads them again as
+  // `personalViews`, so the same rows landed in both buckets and showed twice.
+  // Merge both sources, drop a system base that a saved override supersedes,
+  // and de-dupe by id so each view appears exactly once.
   const overriddenBaseIds = new Set(personalViews.map(v => v.systemBase).filter(Boolean));
-  const visibleSystemViews = systemViews.filter(v => !overriddenBaseIds.has(v.id));
+  const listViews = [];
+  const seenViewIds = new Set();
+  for (const v of [...systemViews, ...personalViews]) {
+    if (!v || overriddenBaseIds.has(v.id) || seenViewIds.has(v.id)) continue;
+    seenViewIds.add(v.id);
+    listViews.push(v);
+  }
 
   const IconBtn = ({ title, onClick, children, danger }) => (
     <button title={title} onClick={(e) => { e.stopPropagation(); onClick(); }}
@@ -1125,15 +1134,8 @@ function ViewSelector({
       maxHeight: maxH, overflowY: 'auto', overflowX: 'hidden',
     }}>
       <div style={{ padding: '8px 0' }}>
-        <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>System Views</div>
-        {visibleSystemViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
-        {personalViews.length > 0 && (
-          <>
-            <div style={{ height: 1, background: C.border, margin: '6px 0' }} />
-            <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Saved Views</div>
-            {personalViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
-          </>
-        )}
+        <div style={{ padding: '4px 14px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>List Views</div>
+        {listViews.map(v => <Row key={v.id} v={v} editable={persistEnabled} />)}
         {persistEnabled && (
           <>
             <div style={{ height: 1, background: C.border, margin: '6px 0' }} />
@@ -2627,8 +2629,11 @@ export function ListView({
 
       {/* Table + detail panel */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
-        <div style={{ flex: '1 1 0', minWidth: 0, width: 0, overflow: 'auto', padding: '14px 14px 24px' }}>
-          <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+        <div style={{ flex: '1 1 0', minWidth: 0, width: 0, padding: '14px 14px 24px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* The card itself is the scroll container so its rounded corners clip
+              AND the sticky <thead> has a proper scrollport to freeze against.
+              (A wrapping overflow:hidden here previously defeated position:sticky.) */}
+          <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'auto', flex: 1, minHeight: 0 }}>
             <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
               <colgroup>
                 {editMode && <col style={{ width: 36 }} />}

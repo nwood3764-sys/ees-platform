@@ -33,9 +33,14 @@ export function loadPicklists() {
     const valueById = new Map()
     const byField = new Map()
     for (const row of data) {
-      if (row.picklist_is_active === false) continue
+      // Resolution maps (byId/valueById) include INACTIVE values so an existing
+      // record that references a since-deactivated value (e.g. an older record
+      // type like "Property Management Company") still displays its label
+      // instead of a raw UUID. Only the picker options list (byField) is
+      // filtered to active, so deactivated values stay out of NEW selections.
       byId.set(row.id, row.picklist_label || row.picklist_value)
       valueById.set(row.id, row.picklist_value)
+      if (row.picklist_is_active === false) continue
       const k = `${row.picklist_object}.${row.picklist_field}`
       if (!byField.has(k)) byField.set(k, [])
       byField.get(k).push(row.picklist_label || row.picklist_value)

@@ -3441,14 +3441,11 @@ function RelatedListWidget({
       })
     }
 
-    // Contact Role: the Contact must always be chosen by the user, never
-    // pre-seeded from the chain. Seeding contact_id makes the field show a raw
-    // id before any selection and lets a contact be added without a deliberate
-    // pick. Keep opportunity_id (it scopes the contact picker) but drop the
-    // contact so the field starts blank.
-    if (childTable === 'opportunity_contact_roles') {
-      delete prefillObj.contact_id
-    }
+    // Contact Role is contact-first: keep whichever parent FK the related list
+    // prefilled. From a Contact, contact_id is carried and locked (and it scopes
+    // the Opportunity picker to that contact's account via the
+    // opportunities_for_contact_account dependent lookup); from an Opportunity,
+    // opportunity_id is carried. Nothing is dropped.
 
     // Projects derive their name (trg_project_name) as
     // "<opportunity_name> - <record_type_label>". Seed the opportunity-name
@@ -4408,7 +4405,11 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 
 function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes, onNavigateToRecord, requiredFields }) {
   const isMobile = useIsMobile()
-  const [collapsed, setCollapsed] = useState(section.section_is_collapsed_by_default || false)
+  // Standing rule: every record-detail section opens EXPANDED. We intentionally
+  // ignore section_is_collapsed_by_default for the initial state (the user can
+  // still collapse any section via its header), so the rule holds globally and
+  // survives layouts/sections that were configured collapsed.
+  const [collapsed, setCollapsed] = useState(false)
   // Render any widgets that live inside a section card. Today: field_group,
   // section_config_editor, filter_config_editor, and merge_field_reference.
   // Related lists, file galleries, prtsn history, and the activity timeline
@@ -4488,6 +4489,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Which tab is active on the record detail page. Null until data loads,
   // then initialized to the first tab (Details) by the useEffect below.
   const [activeTab, setActiveTab] = useState(null)
+  // Parent-name lookups for the breadcrumb in CREATE mode. The loaded record is
+  // empty while creating, so prefilled parent FKs (e.g. property_id on a new
+  // Building, or opportunity_id on a new Contact Role) can't resolve to names —
+  // leaving the breadcrumb flat ("Module / Object") instead of hierarchical.
+  // The effect below resolves them from the prefill.
+  const [createCrumbLookups, setCreateCrumbLookups] = useState(() => new Map())
   // When non-null, we are cloning the current record: same table, insert path,
   // draft pre-populated from the source.
   const [cloneSource, setCloneSource] = useState(null)
@@ -4755,14 +4762,34 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     return () => { cancelled = true }
   }, [tableName, recordId, isCreate, reloadTick, pickerEvaluated, pickedRecordType])
 
+  // True when THIS record is the one currently addressed in the browser URL
+  // (/<table>/<id>). Only then do we sync the active tab into the URL — this
+  // gates out standalone/local-detail mounts (ObjectListSection's fallback) and
+  // any non-URL-addressable host, so the URL is never corrupted there.
+  const recordIsUrlAddressed = () =>
+    !isCreate && !!recordId && window.location.pathname === `/${tableName}/${recordId}`
+
+  // The ordered tab list, computed from loaded data (mirrors the render-time
+  // `orderedTabs`). Used by the URL-sync helpers below, which run outside the
+  // render scope where `orderedTabs` is defined.
+  const tabsFromData = () =>
+    data?.sections ? buildOrderedTabs(data.sections, { includeActivity: !isInsertMode }) : []
+
   // When data first loads (or when the loaded record changes tables),
-  // pick the first tab as active. Only initializes — does not override
-  // user selection.
+  // pick the active tab. Honors a ?tab= deep link / restored history entry
+  // when this record is the URL-addressed one; otherwise the first tab.
+  // Only initializes — does not override an in-session selection.
   useEffect(() => {
     if (!data?.sections) return
     if (activeTab !== null) return
-    const tabs = buildOrderedTabs(data.sections)
-    if (tabs.length > 0) setActiveTab(tabs[0])
+    const tabs = buildOrderedTabs(data.sections, { includeActivity: !isInsertMode })
+    if (tabs.length === 0) return
+    let initial = tabs[0]
+    if (recordIsUrlAddressed()) {
+      const raw = new URLSearchParams(window.location.search).get('tab')
+      if (raw && tabs.includes(raw)) initial = raw
+    }
+    setActiveTab(initial)
   }, [data, activeTab])
 
   // Reset active tab when switching records so the new record opens on
@@ -4770,6 +4797,78 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   useEffect(() => {
     setActiveTab(null)
   }, [tableName, recordId])
+
+  // Resolve prefilled parent FK names so the breadcrumb is hierarchical while
+  // CREATING a child from a parent's related list — e.g. "New Building" under a
+  // property shows "Enrollment / Buildings / <Property>", and a new Contact Role
+  // shows its opportunity/contact parents. Keyed on the parent FK values so it
+  // runs once when the prefill arrives, not on every keystroke.
+  const createCrumbKey = (() => {
+    const meta = TABLE_META[tableName]
+    if (!isCreate || !meta || !prefill) return ''
+    return (meta.parents || []).map(fk => prefill[fk] || '').join('|')
+  })()
+  useEffect(() => {
+    if (!isCreate || !prefill) { setCreateCrumbLookups(new Map()); return }
+    const meta = TABLE_META[tableName]
+    if (!meta?.parents?.length) return
+    const targets = []
+    meta.parents.forEach((fk, i) => {
+      const parentTable = (meta.parentTables || [])[i]
+      const nameCol = parentTable ? TABLE_META[parentTable]?.nameColumn : null
+      const val = prefill[fk]
+      if (val && parentTable && nameCol) targets.push({ val, parentTable, nameCol })
+    })
+    if (targets.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      const map = new Map()
+      for (const { val, parentTable, nameCol } of targets) {
+        try {
+          const { data: row } = await supabase.from(parentTable).select(`id, ${nameCol}`).eq('id', val).maybeSingle()
+          if (row) map.set(val, { label: row[nameCol] || '(record)', table: parentTable })
+        } catch { /* best-effort: an unresolved parent just leaves that crumb out */ }
+      }
+      if (!cancelled) setCreateCrumbLookups(map)
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreate, tableName, createCrumbKey])
+
+  // Select a tab AND push it onto browser history as ?tab=<name> (Salesforce
+  // parity: the related-list/Activity view is its own history entry, so the
+  // browser Back button steps exactly one level — Related → Details → list —
+  // instead of jumping past the record entirely). The default (first) tab uses
+  // the clean record URL with no query, so back from Related lands on Details.
+  const selectTab = useCallback((t) => {
+    setActiveTab(t)
+    if (isCreate || !recordId || window.location.pathname !== `/${tableName}/${recordId}`) return
+    const tabs = data?.sections ? buildOrderedTabs(data.sections, { includeActivity: !isInsertMode }) : []
+    const defaultTab = tabs[0] || null
+    const params = new URLSearchParams(window.location.search)
+    if (t && t !== defaultTab) params.set('tab', t)
+    else params.delete('tab')
+    const qs = params.toString()
+    const next = window.location.pathname + (qs ? `?${qs}` : '')
+    if (next !== window.location.pathname + window.location.search) {
+      window.history.pushState(null, '', next)
+    }
+  }, [data, isInsertMode, tableName, recordId, isCreate])
+
+  // Browser back/forward: re-derive the active tab from the URL. The app's own
+  // popstate handler re-parses the path (same record → no remount), and this
+  // independently restores the tab the URL points at.
+  useEffect(() => {
+    const onPop = () => {
+      if (isCreate || !recordId || window.location.pathname !== `/${tableName}/${recordId}`) return
+      const tabs = data?.sections ? buildOrderedTabs(data.sections, { includeActivity: !isInsertMode }) : []
+      if (tabs.length === 0) return
+      const raw = new URLSearchParams(window.location.search).get('tab')
+      setActiveTab(raw && tabs.includes(raw) ? raw : tabs[0])
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [data, isInsertMode, tableName, recordId, isCreate])
 
   const loadAllEditOpts = useCallback(async (sections, currentRecord = null) => {
     const pickFields = []
@@ -5602,6 +5701,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   )
 
   const { record, layout, sections, picklists, lookups } = data
+  // In create mode the breadcrumb reads the prefilled parent FKs (and their
+  // names resolved by createCrumbLookups) so it stays hierarchical; otherwise
+  // it uses the loaded record and its lookups.
+  const crumbRecord = isCreate ? { ...record, ...(prefill || {}) } : record
+  const crumbLookups = isCreate ? createCrumbLookups : lookups
 
   // Build the ordered tab list from the loaded sections. Details first,
   // Related second (if any section has related_list widgets), Activity third
@@ -5632,7 +5736,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       padding: isMobile ? '12px' : '20px 24px',
       paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom))' : '20px',
     }}>
-      {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
+      {!isMobile && <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
       {isMobile && (
         <button
           onClick={onBack}
@@ -5812,7 +5916,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         paddingBottom: isMobile && editing ? 'calc(80px + env(safe-area-inset-bottom))' : isMobile ? 'calc(24px + env(safe-area-inset-bottom))' : undefined,
       }}>
         {/* Desktop breadcrumbs (hidden on mobile — the sticky header handles back navigation) */}
-        {!isMobile && <Breadcrumbs tableName={tableName} record={record} lookups={lookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
+        {!isMobile && <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
 
         {/* Desktop header card (mobile already shows this info in the sticky bar above — mobile shows a compact title + status chip instead) */}
         {!isMobile ? (
@@ -5940,7 +6044,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               return (
                 <button
                   key={t}
-                  onClick={() => setActiveTab(t)}
+                  onClick={() => selectTab(t)}
                   style={{
                     padding: isMobile ? '12px 14px' : '10px 16px', background: 'none', border: 'none',
                     borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',

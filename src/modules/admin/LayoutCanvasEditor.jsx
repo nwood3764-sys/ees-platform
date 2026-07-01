@@ -60,6 +60,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const [columns, setColumns] = useState([])
   const [sections, setSections] = useState([])
   const [activeSection, setActiveSection] = useState(null)
+  const [fieldSearch, setFieldSearch] = useState('')
   const [saving, setSaving]   = useState(false)
   const [savedAt, setSavedAt] = useState(null)
   const [saveError, setSaveError] = useState(null)
@@ -102,6 +103,65 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   }, [])
   const activate = useCallback((key) => setActiveSection(key), [])
 
+  // One shared drag context for the whole canvas so a placed field can be
+  // dragged BETWEEN sections (not just reordered within its own). active.id is
+  // the field name; over.id is either a column drop-zone ("<sectionKey>::col:N")
+  // or another field's name.
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const onFieldDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return
+    const activeName = active.id
+    const overId = String(over.id)
+    setSections(prev => {
+      // Locate the field being moved (it lives in exactly one section).
+      let srcField = null
+      for (const sec of prev) {
+        const fg = (sec.widgets || []).find(w => w.type === 'field_group')
+        const f = fg?.config?.fields?.find(x => x.name === activeName)
+        if (f) { srcField = f; break }
+      }
+      if (!srcField) return prev
+      // Resolve the drop target's section + column.
+      let tgtSecKey = null, tgtCol = 1, overName = null
+      if (overId.includes('::col:')) {
+        const [secKey, colPart] = overId.split('::col:')
+        tgtSecKey = secKey; tgtCol = Number(colPart) || 1
+      } else {
+        overName = overId
+        for (const sec of prev) {
+          const fg = (sec.widgets || []).find(w => w.type === 'field_group')
+          const f = fg?.config?.fields?.find(x => x.name === overName)
+          if (f) { tgtSecKey = sec.key; tgtCol = f.column || 1; break }
+        }
+      }
+      if (!tgtSecKey) return prev
+      const moved = { ...srcField, column: tgtCol }
+      return prev.map(sec => {
+        const fg = (sec.widgets || []).find(w => w.type === 'field_group')
+        if (!fg) return sec
+        // Remove the field from wherever it currently is...
+        let fields = (fg.config?.fields || []).filter(f => f.name !== activeName)
+        // ...and insert it into the target section at the right spot.
+        if (sec.key === tgtSecKey) {
+          let insertAt
+          if (overName) {
+            insertAt = fields.findIndex(f => f.name === overName)
+            if (insertAt < 0) insertAt = fields.length
+          } else {
+            let last = -1
+            fields.forEach((f, i) => { if ((f.column || 1) === tgtCol) last = i })
+            insertAt = last + 1
+          }
+          fields = [...fields.slice(0, insertAt), moved, ...fields.slice(insertAt)]
+        }
+        return { ...sec, widgets: sec.widgets.map(w => w === fg ? { ...w, config: { ...w.config, fields } } : w) }
+      })
+    })
+  }
+
   const addSection = () => {
     const key = `sec-new-${Date.now()}`
     setSections(s => [...s, { key, label: 'New Section', columns: 2, tab: 'Details', isCollapsible: false, isCollapsedByDefault: false, placement: 'main',
@@ -135,7 +195,16 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const placedFieldNames = new Set(
     sections.flatMap(s => (s.widgets || []).filter(w => w.type === 'field_group').flatMap(w => (w.config?.fields || []).map(f => f.name)))
   )
-  const available = columns.filter(c => !placedFieldNames.has(c.name))
+  const unplaced = columns.filter(c => !placedFieldNames.has(c.name))
+  // Filter the palette by the search box — match on both the humanized label
+  // and the raw API name so a user can find a field either way without
+  // scrolling the (often long) field list.
+  const fieldQuery = fieldSearch.trim().toLowerCase()
+  const available = fieldQuery
+    ? unplaced.filter(c =>
+        humanize(c.name, meta.object).toLowerCase().includes(fieldQuery) ||
+        c.name.toLowerCase().includes(fieldQuery))
+    : unplaced
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
@@ -174,10 +243,12 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-          {sections.map(sec => (
-            <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
-              onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields} />
-          ))}
+          <DndContext sensors={dndSensors} collisionDetection={closestCorners} onDragEnd={onFieldDragEnd}>
+            {sections.map(sec => (
+              <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
+                onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields} />
+            ))}
+          </DndContext>
           <button onClick={addSection} style={{ width: '100%', padding: '10px', fontSize: 13, fontWeight: 500, background: C.card, color: C.emeraldMid, border: `1px dashed ${C.borderDark}`, borderRadius: 8, cursor: 'pointer' }}>
             + Add Section
           </button>
@@ -217,6 +288,7 @@ const SectionCard = memo(function SectionCard({ section, object, active, onActiv
             cols={cols}
             fields={fg.config?.fields || []}
             object={object}
+            sectionKey={section.key}
             onChange={(next) => onSetFields(section.key, fg.key, next)}
           />
         ) : null}
@@ -232,57 +304,27 @@ const SectionCard = memo(function SectionCard({ section, object, active, onActiv
 })
 
 // ─── Multi-column field placement (dnd-kit multi-container) ──────────────────
-function MultiColumnFields({ cols, fields, object, onChange }) {
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  )
+// No DndContext here — the whole canvas shares ONE context (in LayoutCanvasEditor)
+// so a field can be dragged across sections, not just within this one. This just
+// lays out the columns as section-scoped drop zones. `removeField` (the × button)
+// still edits this section's fields directly via onChange.
+function MultiColumnFields({ cols, fields, object, onChange, sectionKey }) {
   const colFields = (c) => fields.filter(f => (f.column || 1) === c)
   const removeField = (name) => onChange(fields.filter(f => f.name !== name))
 
-  function handleDragEnd({ active, over }) {
-    if (!over || active.id === over.id) return
-    const activeName = active.id
-    const moving = fields.find(f => f.name === activeName)
-    if (!moving) return
-
-    let targetCol, overName = null
-    if (typeof over.id === 'string' && over.id.startsWith('col:')) {
-      targetCol = Number(over.id.slice(4))
-    } else {
-      overName = over.id
-      const o = fields.find(f => f.name === overName)
-      targetCol = o ? (o.column || 1) : 1
-    }
-
-    const without = fields.filter(f => f.name !== activeName)
-    const moved = { ...moving, column: targetCol }
-    let insertAt
-    if (overName) {
-      insertAt = without.findIndex(f => f.name === overName)
-      if (insertAt < 0) insertAt = without.length
-    } else {
-      // Dropped on the column container → append to the end of that column.
-      let last = -1
-      without.forEach((f, i) => { if ((f.column || 1) === targetCol) last = i })
-      insertAt = last + 1
-    }
-    onChange([...without.slice(0, insertAt), moved, ...without.slice(insertAt)])
-  }
-
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 8 }}>
-        {Array.from({ length: cols }, (_, i) => i + 1).map(c => (
-          <ColumnZone key={c} col={c} fields={colFields(c)} object={object} onRemoveField={removeField} />
-        ))}
-      </div>
-    </DndContext>
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 8 }}>
+      {Array.from({ length: cols }, (_, i) => i + 1).map(c => (
+        <ColumnZone key={c} sectionKey={sectionKey} col={c} fields={colFields(c)} object={object} onRemoveField={removeField} />
+      ))}
+    </div>
   )
 }
 
-function ColumnZone({ col, fields, object, onRemoveField }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `col:${col}` })
+function ColumnZone({ sectionKey, col, fields, object, onRemoveField }) {
+  // Section-scoped id so the shared drag handler knows which section + column a
+  // field was dropped into ("<sectionKey>::col:<n>").
+  const { setNodeRef, isOver } = useDroppable({ id: `${sectionKey}::col:${col}` })
   return (
     <div ref={setNodeRef} style={{
       minHeight: 56, padding: 6, borderRadius: 6,
