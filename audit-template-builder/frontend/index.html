@@ -1020,6 +1020,33 @@ async function build50121XML(which){
     }
   }
 
+  // Measures: reflect THIS building's upgrades (parsed from the Improved report's
+  // "Selected Upgrade Opportunities") rather than the template's. Set each
+  // Measure's description; if the building has fewer measures than the template,
+  // remove the surplus Measure nodes and their PackageOfMeasures references.
+  const parsedMeasures=(asI&&Array.isArray(asI.measures))?asI.measures.filter(Boolean):[];
+  if(parsedMeasures.length){
+    const measures=[..._q(doc,'Measure')];
+    measures.forEach((m,idx)=>{
+      if(idx<parsedMeasures.length){
+        const ld=m.getElementsByTagNameNS(NS_AUC,'LongDescription')[0];
+        if(ld)ld.textContent=parsedMeasures[idx];
+        const cm=m.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0];
+        if(cm)cm.textContent=parsedMeasures[idx];
+      }
+    });
+    if(parsedMeasures.length<measures.length){
+      const removed=[];
+      for(let idx=parsedMeasures.length; idx<measures.length; idx++){
+        const id=measures[idx].getAttribute('ID'); if(id)removed.push(id);
+        measures[idx].parentNode.removeChild(measures[idx]);
+      }
+      for(const mid of [..._q(doc,'MeasureID')]){
+        if(removed.includes(mid.getAttribute('IDref'))) mid.parentNode.removeChild(mid);
+      }
+    }
+  }
+
   // Occupancy: units x (bedrooms + 1)  [2 in the master + 1 per extra bedroom].
   const units=Math.max(1, parseInt((document.getElementById('occUnits')||{}).value)||6);
   const beds =Math.max(0, parseInt((document.getElementById('occBeds')||{}).value)||2);
