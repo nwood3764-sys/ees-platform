@@ -96,6 +96,21 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
     }))
   }, [])
   const removeSection = useCallback((key) => setSections(s => s.filter(x => x.key !== key)), [])
+  // Move a whole section up or down in the layout. Section order is simply the
+  // array order — saveLayoutFromCanvas recreates sections in that order (its
+  // section_order = index), so a swap here is all that's needed to persist the
+  // new arrangement on Save. No separate reorder call.
+  const moveSection = useCallback((key, dir) => {
+    setSections(s => {
+      const i = s.findIndex(x => x.key === key)
+      if (i < 0) return s
+      const j = dir === 'up' ? i - 1 : i + 1
+      if (j < 0 || j >= s.length) return s
+      const next = [...s]
+      ;[next[i], next[j]] = [next[j], next[i]]
+      return next
+    })
+  }, [])
   const setFieldGroupFields = useCallback((sectionKey, widgetKey, nextFields) => {
     setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
       ...sec, widgets: sec.widgets.map(w => w.key !== widgetKey ? w : { ...w, config: { ...w.config, fields: nextFields } }),
@@ -251,9 +266,10 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
           <DndContext sensors={dndSensors} collisionDetection={closestCorners} onDragEnd={onFieldDragEnd}>
-            {sections.map(sec => (
+            {sections.map((sec, i) => (
               <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
-                onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields} />
+                onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
+                onMove={moveSection} isFirst={i === 0} isLast={i === sections.length - 1} />
             ))}
           </DndContext>
           <button onClick={addSection} style={{ width: '100%', padding: '10px', fontSize: 13, fontWeight: 500, background: C.card, color: C.emeraldMid, border: `1px dashed ${C.borderDark}`, borderRadius: 8, cursor: 'pointer' }}>
@@ -267,7 +283,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
 
 // memo: only the edited section (or the two whose `active` flips) re-renders —
 // keeps the drag contexts from re-mounting on every keystroke (the sluggishness).
-const SectionCard = memo(function SectionCard({ section, object, active, onActivate, onPatch, onRemove, onSetFields }) {
+const SectionCard = memo(function SectionCard({ section, object, active, onActivate, onPatch, onRemove, onSetFields, onMove, isFirst, isLast }) {
   const fg = (section.widgets || []).find(w => w.type === 'field_group')
   const others = (section.widgets || []).filter(w => w.type !== 'field_group')
   const cols = section.columns || 2
@@ -278,6 +294,11 @@ const SectionCard = memo(function SectionCard({ section, object, active, onActiv
       marginBottom: 14, overflow: 'hidden', boxShadow: active ? `0 0 0 1px ${C.emerald}` : 'none',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${C.border}`, background: C.cardSecondary }}>
+        {/* Move the whole section up / down in the layout. Disabled at the ends. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+          <button onClick={() => onMove(section.key, 'up')} disabled={isFirst} title="Move section up" style={moveBtn(isFirst)}>▲</button>
+          <button onClick={() => onMove(section.key, 'down')} disabled={isLast} title="Move section down" style={moveBtn(isLast)}>▼</button>
+        </div>
         <input value={section.label} onChange={e => onPatch(section.key, { label: e.target.value })}
           style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.textPrimary, border: 'none', background: 'transparent', outline: 'none' }} />
         <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -371,4 +392,12 @@ function btnSecondary() {
 }
 function miniBtn() {
   return { width: 22, height: 22, fontSize: 13, fontWeight: 600, background: '#e8f1fb', color: C.sky, border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer', flexShrink: 0 }
+}
+function moveBtn(disabled) {
+  return {
+    width: 20, height: 15, fontSize: 8, lineHeight: '13px', padding: 0,
+    background: disabled ? C.cardSecondary : C.card, color: disabled ? C.borderDark : C.textSecondary,
+    border: `1px solid ${C.border}`, borderRadius: 3, cursor: disabled ? 'default' : 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  }
 }
