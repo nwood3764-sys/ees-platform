@@ -543,8 +543,11 @@ function OpportunityCard({ program, opp, color, onOpenProject }) {
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11, overflow: 'hidden', marginBottom: 16 }}>
       <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'flex-start', gap: 9, background: `${color}14` }}>
-        <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 4 }} />
-        <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', lineHeight: 1.3 }} title={opp?.name || program}>{opp?.name || program}</span>
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 5 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{program}</div>
+          {opp?.recordTypeDescription && <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 2, lineHeight: 1.35 }}>{opp.recordTypeDescription}</div>}
+        </div>
         {opp && <span style={{ fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', flexShrink: 0, marginTop: 3 }}>{opp.recordNumber}</span>}
       </div>
       <div style={{ padding: '20px 22px 16px' }}>
