@@ -6575,10 +6575,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             onMerged={() => { setShowMergeModal(false); setReloadTick(t => t + 1) }}
           />
         )}
-        {showPortalModal && tableName === 'accounts' && (
+        {showPortalModal && tableName === 'contacts' && (
           <AddToPortalModal
-            accountId={recordId}
-            account={record}
+            contactId={recordId}
+            contact={record}
             onClose={() => setShowPortalModal(false)}
             onDone={({ message } = {}) => {
               setShowPortalModal(false)
