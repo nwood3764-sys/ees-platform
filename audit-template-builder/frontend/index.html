@@ -140,11 +140,20 @@
   </div>
 
   <div class="bar">
+    <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
     <button class="btn" id="buildBase" disabled>↓ Baseline Audit Template</button>
     <button class="btn" id="buildImp" disabled>↓ Improved Audit Template</button>
     <button class="btn ghost" id="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
     <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
     <span class="status" id="finalStatus"></span>
+  </div>
+  <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <strong style="font:700 15px/1.2 Georgia,serif">AI pre-export review</strong>
+      <span class="copyhint" id="reviewStatus"></span>
+    </div>
+    <div id="reviewSummary" style="margin:8px 0;font-size:13.5px"></div>
+    <div id="reviewFindings"></div>
   </div>
   <div id="occRow" style="margin-top:12px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
     <strong>Occupancy</strong>
@@ -491,6 +500,7 @@ function refresh(){
   document.getElementById('buildImp').disabled=!have;
   document.getElementById('utilBase').disabled=!have;
   document.getElementById('utilImp').disabled=!have;
+  document.getElementById('smartReview').disabled=!have;
   if(!have){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
   // monthly shape, so the resulting EUI matches the Asset Score PDF. Runs once per refresh.
@@ -1050,6 +1060,59 @@ document.getElementById('buildImp').onclick=()=>downloadXML('improved');
   function upd(){const units=Math.max(1,parseInt(u.value)||6),beds=Math.max(0,parseInt(bd.value)||2);
     out.textContent='→ '+(units*Math.max(1,beds+1))+' occupants';}
   if(u&&bd&&out){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
+})();
+
+/* ---------- Smart pre-export review (Claude audits the mapping) ---------- */
+// Collect exactly what the tool will write, so Claude can check it vs the reports.
+function buildMappedForReview(){
+  const asB=data.asBase, asI=data.asImp;
+  const units=Math.max(1,parseInt((document.getElementById('occUnits')||{}).value)||6);
+  const beds =Math.max(0,parseInt((document.getElementById('occBeds')||{}).value)||2);
+  let osPct=null;
+  try{const b=annual(data.osBase),i=annual(data.osImp);osPct=+((b.kbtu-i.kbtu)/b.kbtu*100).toFixed(1);}catch(e){}
+  const pick=a=>a?{name:a.name,address:(a.street||'')+', '+(a.cityStateZip||''),grossFloorArea:a.gfa,
+    yearBuilt:a.yearBuilt,climateZone:a.climateZone,euiCurrent:a.euiCurrent,euiUpgraded:a.euiUpgraded,
+    gasEui:[a.gasEuiCur,a.gasEuiUpg],elecEui:[a.elecEuiCur,a.elecEuiUpg],savingsPct:a.savingsPct,
+    wallR:a.wallR,roofR:a.roofR,wwr:a.wwr,wallArea:a.wallArea,windowArea:a.windowArea,roofArea:a.roofArea,
+    floorsAbove:a.floorsAbove,floorsBelow:a.floorsBelow,boilerCapacity_kBtu_hr:a.heatCap,boilerEfficiency:a.boilerEff,
+    boilerYear:a.boilerYear,coolingCOP:a.coolCop,coolingTons:a.coolTons,waterHeaterEt:a.whe,
+    useMultifamilyArea:a.useMultifamilyArea,useCommonArea:a.useCommonArea,measures:a.measures}:null;
+  return {baseline:pick(asB), improved:pick(asI),
+    occupancy:{dwellingUnits:units,bedroomsPerUnit:beds,computedOccupants:units*Math.max(1,beds+1)},
+    openStudioSavingsPct:osPct, meteringYearStart:startDateFor(asB)};
+}
+(function(){
+  const btn=document.getElementById('smartReview'), panel=document.getElementById('reviewPanel'),
+        stat=document.getElementById('reviewStatus'), sum=document.getElementById('reviewSummary'),
+        list=document.getElementById('reviewFindings');
+  if(!btn)return;
+  const SEV={gap:['✗','var(--warn)'],mismatch:['≠','var(--warn)'],question:['?','var(--gold)'],ok:['✓','var(--moss)']};
+  btn.onclick=async ()=>{
+    panel.style.display='block'; sum.innerHTML=''; list.innerHTML='';
+    stat.textContent='Reviewing against your reports…';
+    try{
+      const resp=await fetch('/.netlify/functions/review',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({mapped:buildMappedForReview(),
+          reports:{baseline:rawDocs.asBase,improved:rawDocs.asImp,
+                   openStudio:(rawDocs.osBase||'').slice(0,30000)}})});
+      const r=await resp.json().catch(()=>({error:'Bad response'}));
+      if(!resp.ok||r.error){stat.textContent='';sum.innerHTML='<span style="color:var(--warn)">⚠ '+(r.error||('Error '+resp.status))+(r.detail?(' — '+r.detail):'')+'</span>';return;}
+      stat.textContent='';
+      const findings=(r.findings||[]).filter(f=>f&&f.severity&&f.severity!=='ok');
+      sum.textContent=r.summary||(findings.length?'':'Everything checks out against the reports.');
+      if(!findings.length){sum.innerHTML='<span style="color:var(--moss)">✓ '+(r.summary||'No issues found — the mapping matches your reports.')+'</span>';return;}
+      list.innerHTML=findings.map(f=>{
+        const s=SEV[f.severity]||SEV.question;
+        const sugg=f.suggested?`<div class="copyhint">Report value: <strong>${f.suggested}</strong></div>`:'';
+        const ask=(f.severity==='gap'||f.severity==='question')?
+          `<div class="copyrow" style="margin-top:6px"><input data-field="${f.field||''}" placeholder="Your answer / value" style="flex:1;padding:6px 8px;border:1px solid var(--line);border-radius:6px"></div>`:'';
+        return `<div style="border-top:1px solid var(--line);padding:10px 0">
+          <div><span style="color:${s[1]};font-weight:700">${s[0]} ${f.severity.toUpperCase()}</span>
+          &nbsp;<strong>${f.field||''}</strong></div>
+          <div style="font-size:13.5px;margin-top:3px">${f.message||''}</div>${sugg}${ask}</div>`;
+      }).join('');
+    }catch(err){stat.textContent='';sum.innerHTML='<span style="color:var(--warn)">⚠ Could not run review: '+err.message+'</span>';}
+  };
 })();
 
 /* ---- Utility usage xlsx (Portfolio Manager "Energy Use By Calendar Month" format) ---- */
