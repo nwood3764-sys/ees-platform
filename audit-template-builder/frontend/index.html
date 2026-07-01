@@ -977,6 +977,16 @@ async function build50121XML(which){
     const yi=hp.getElementsByTagNameNS(NS_AUC,'YearInstalled')[0];
     if(yi)yi.textContent=String(as.boilerYear);
   }
+  // Cooling (DX): set efficiency (COP) + capacity (tons -> kBtu/hr) on the
+  // cooling source that carries an efficiency value (the DX one; a NoCooling
+  // block has none, so it's skipped).
+  for(const cs of _q(doc,'CoolingSource')){
+    const eff=cs.getElementsByTagNameNS(NS_AUC,'AnnualCoolingEfficiencyValue')[0];
+    if(!eff)continue;
+    if(as.coolCop!=null)eff.textContent=Number(as.coolCop).toFixed(2);
+    const cap=cs.getElementsByTagNameNS(NS_AUC,'Capacity')[0];
+    if(cap&&as.coolTons!=null)cap.textContent=Number(as.coolTons*12).toFixed(1);
+  }
   // Space-function section floor areas -> scale the template's split to THIS
   // building's multifamily use-type area (from "Building Use Types"), preserving
   // the internal conditioned/common/tenant proportions.
