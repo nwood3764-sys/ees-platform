@@ -269,6 +269,7 @@ function RecordTypeRow({
   const toast = useToast()
   const [label, setLabel] = useState(row.label)
   const [value, setValue] = useState(row.value)
+  const [description, setDescription] = useState(row.description || '')
   const [sortOrder, setSortOrder] = useState(String(row.sortOrder))
   const [state, setState] = useState(row.state || '')
   const [saving, setSaving] = useState(false)
@@ -278,10 +279,11 @@ function RecordTypeRow({
     if (!editing) {
       setLabel(row.label)
       setValue(row.value)
+      setDescription(row.description || '')
       setSortOrder(String(row.sortOrder))
       setState(row.state || '')
     }
-  }, [row.id, editing, row.label, row.value, row.sortOrder, row.state])
+  }, [row.id, editing, row.label, row.value, row.description, row.sortOrder, row.state])
 
   async function save() {
     if (!label.trim() || !value.trim()) {
@@ -297,6 +299,7 @@ function RecordTypeRow({
       await updateRecordType(row.id, {
         label: label.trim(),
         value: value.trim(),
+        description: description.trim() || null,
         sortOrder: parseInt(sortOrder, 10) || 0,
         state: state.trim().toUpperCase() || null,
       })
@@ -311,10 +314,11 @@ function RecordTypeRow({
 
   return (
     <div style={{
-      ...tableRowStyle,
       opacity: !row.isActive ? 0.55 : 1,
       background: busy ? '#f7f9fc' : 'transparent',
+      borderBottom: `1px solid ${C.border}`,
     }}>
+    <div style={{ ...tableRowStyle, borderBottom: 'none' }}>
       {/* Value */}
       <div style={{ color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, minWidth: 0 }}>
         {editing
@@ -323,11 +327,18 @@ function RecordTypeRow({
         }
       </div>
 
-      {/* Label */}
+      {/* Label (+ description subtitle) */}
       <div style={{ color: C.textPrimary, fontSize: 12.5, minWidth: 0 }}>
         {editing
           ? <TextInput value={label} onChange={setLabel} placeholder="Single Family" />
-          : <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', maxWidth: '100%' }}>{row.label}</span>
+          : (
+            <div style={{ minWidth: 0 }}>
+              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</div>
+              {row.description && (
+                <div style={{ fontSize: 10.5, color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.description}>{row.description}</div>
+              )}
+            </div>
+          )
         }
       </div>
 
@@ -412,6 +423,19 @@ function RecordTypeRow({
         )}
       </div>
     </div>
+    {editing && (
+      <div style={{ padding: '2px 14px 12px' }}>
+        <label style={{ display: 'block', fontSize: 10.5, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>Description</label>
+        <textarea
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Optional — a short explanation of this record type. Also shown to customers in the portal."
+          rows={2}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, fontFamily: 'inherit', color: C.textPrimary, background: C.card, border: `1px solid ${C.borderDark || C.border}`, borderRadius: 4, outline: 'none', resize: 'vertical' }}
+        />
+      </div>
+    )}
+    </div>
   )
 }
 
@@ -428,6 +452,7 @@ function NewRecordTypeModal({
   const [label, setLabel] = useState('')
   const [value, setValue] = useState('')
   const [valueEdited, setValueEdited] = useState(false)
+  const [description, setDescription] = useState('')
   const [sortOrder, setSortOrder] = useState('')
   const [state, setState] = useState('')
   const [strategy, setStrategy] = useState('clone_master')
@@ -494,6 +519,7 @@ function NewRecordTypeModal({
         object: objectName,
         value: value.trim(),
         label: label.trim(),
+        description: description.trim() || null,
         sortOrder: parseInt(sortOrder, 10) || 0,
         state: state.trim().toUpperCase() || null,
         layoutStrategy: strategy,
@@ -560,6 +586,17 @@ function NewRecordTypeModal({
             disabled={busy}
             placeholder="single_family"
             style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5 }}
+          />
+        </FormField>
+
+        <FormField label="Description" hint="Optional — a short explanation of this record type. Also shown to customers in the portal.">
+          <textarea
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            disabled={busy}
+            rows={2}
+            placeholder="e.g. Wisconsin IRA — Multifamily HEAR (electrification & heat pumps)"
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
           />
         </FormField>
 
