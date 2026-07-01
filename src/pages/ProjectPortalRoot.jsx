@@ -450,7 +450,7 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
   const woStatuses = workOrderStatusCounts(property)
   const projStatuses = projectStatusCounts(property)
   return (
-    <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
+    <div style={{ padding: 22, maxWidth: 1500, margin: '0 auto' }}>
       <div style={{ background: `linear-gradient(135deg, ${C.sidebar} 0%, #12243d 100%)`, borderRadius: 12, padding: '20px 24px', marginBottom: 22, display: 'flex', alignItems: 'center', gap: 20 }}>
         <div style={{ width: 48, height: 48, background: 'rgba(62,207,142,.25)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0 }}>{IconProp}</div>
         <div style={{ flex: 1 }}>
@@ -542,10 +542,10 @@ function OpportunityCard({ program, opp, color, onOpenProject }) {
   const projects = opp?.projects || []
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11, overflow: 'hidden', marginBottom: 16 }}>
-      <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 9, background: `${color}14` }}>
-        <span style={{ width: 9, height: 9, borderRadius: '50%', background: color }} />
-        <span style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{program}</span>
-        {opp && <span style={{ marginLeft: 'auto', fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{opp.recordNumber}</span>}
+      <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'flex-start', gap: 9, background: `${color}14` }}>
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 4 }} />
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', lineHeight: 1.3 }} title={opp?.name || program}>{opp?.name || program}</span>
+        {opp && <span style={{ fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', flexShrink: 0, marginTop: 3 }}>{opp.recordNumber}</span>}
       </div>
       <div style={{ padding: '20px 22px 16px' }}>
         <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 16 }}>
@@ -581,7 +581,7 @@ function OpportunityCard({ program, opp, color, onOpenProject }) {
 function BuildingPage({ property, building, colorOf, onOpenProject }) {
   const opps = building.opportunities || []
   return (
-    <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ padding: 22, maxWidth: 1200, margin: '0 auto' }}>
       <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>{shortBuildingName(building.name, property.name)}</div>
       <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{property.name}{building.address ? ` · ${building.address}` : ''}</div>
       {opps.map((o) => <OpportunityCard key={o.id} program={o.program} opp={o} color={colorOf(o.program)} onOpenProject={(pr) => onOpenProject(pr)} />)}
@@ -625,7 +625,7 @@ function WorkOrderRow({ wo }) {
 function ProjectPage({ property, building, project, opportunity, color }) {
   const groups = workOrdersByUnit(project)
   return (
-    <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ padding: 22, maxWidth: 1200, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
         <span style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{project.recordType || project.name}</span>
@@ -657,7 +657,7 @@ function UnitPage({ property, building, unit, colorOf }) {
     seen.get(key).wos.push(w)
   }
   return (
-    <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ padding: 22, maxWidth: 1200, margin: '0 auto' }}>
       <div style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary }}>Unit {unit.unitNumber}</div>
       <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{property.name} · {shortBuildingName(building.name, property.name)}</div>
 
@@ -840,7 +840,7 @@ function CalendarView({ appointments, onOpenVisit }) {
   )
 
   return (
-    <div style={{ padding: 22, maxWidth: 1180, margin: '0 auto' }}>
+    <div style={{ padding: 22, maxWidth: 1500, margin: '0 auto' }}>
       {/* Controls — row 1: title + nav + view toggle */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, minWidth: 190 }}>{title}</div>
