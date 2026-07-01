@@ -3467,6 +3467,22 @@ function RelatedListWidget({
       prefillObj.__derivedNameBase = parentRecord.project_name
     }
 
+    // A building sits at its property's address, so seed the new building's
+    // address/location and year-built from the parent property — the user can
+    // still edit (e.g. a multi-building property where buildings have distinct
+    // addresses). Only fill blanks; never clobber a chain-seeded value.
+    if (childTable === 'buildings' && parentTable === 'properties' && parentRecord) {
+      const copyFromParent = (src, dst) => {
+        const v = parentRecord[src]
+        if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
+      }
+      copyFromParent('property_street', 'building_address')
+      copyFromParent('property_city', 'building_city')
+      copyFromParent('property_state', 'building_state')
+      copyFromParent('property_zip', 'building_zip')
+      copyFromParent('property_year_built', 'building_year_built')
+    }
+
     onNavigateToRecord({ table: childTable, id: null, mode: 'create', prefill: prefillObj })
   }
 
