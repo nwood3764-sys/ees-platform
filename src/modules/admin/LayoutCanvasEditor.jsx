@@ -22,6 +22,24 @@ import { C } from '../../data/constants'
 import { LoadingState, ErrorState } from '../../components/UI'
 import { inputStyle } from '../../builder/inspectorControls'
 import { loadLayoutForCanvas, saveLayoutFromCanvas } from '../../builder/adapters/pageLayoutAdapter'
+import { describeObject } from '../../data/adminService'
+import { deriveEesFieldType, humanizeColumnName } from './widgets/eesFieldTypes'
+
+// Display formats a related-list column can render as. Mirrors the type
+// dispatch in RecordDetail's renderRelatedCell (text / phone / date / number /
+// picklist badge / boolean), so what you pick here is exactly how the live
+// record page renders the cell.
+const RL_FORMATS = [
+  { value: 'text',     label: 'Text' },
+  { value: 'phone',    label: 'Phone' },
+  { value: 'date',     label: 'Date' },
+  { value: 'number',   label: 'Number' },
+  { value: 'picklist', label: 'Status (badge)' },
+  { value: 'boolean',  label: 'Yes / No' },
+]
+
+// System columns never worth offering in the related-list column picker.
+const RL_HIDDEN_COLUMNS = new Set(['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'deletion_reason'])
 
 const WIDGET_LABELS = {
   field_group: 'Field Group', related_list: 'Related List', report: 'Report',
@@ -114,6 +132,14 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const setFieldGroupFields = useCallback((sectionKey, widgetKey, nextFields) => {
     setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
       ...sec, widgets: sec.widgets.map(w => w.key !== widgetKey ? w : { ...w, config: { ...w.config, fields: nextFields } }),
+    }))
+  }, [])
+  // Merge a patch into a widget's config (used by the related-list column
+  // editor). Persists through the normal Save — saveLayoutFromCanvas recreates
+  // each widget from its config, so an edited columns array round-trips.
+  const patchWidgetConfig = useCallback((sectionKey, widgetKey, patch) => {
+    setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
+      ...sec, widgets: sec.widgets.map(w => w.key !== widgetKey ? w : { ...w, config: { ...w.config, ...patch } }),
     }))
   }, [])
   const activate = useCallback((key) => setActiveSection(key), [])
@@ -269,6 +295,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
             {sections.map((sec, i) => (
               <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
                 onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
+                onPatchWidgetConfig={patchWidgetConfig}
                 onMove={moveSection} isFirst={i === 0} isLast={i === sections.length - 1} />
             ))}
           </DndContext>
@@ -283,7 +310,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
 
 // memo: only the edited section (or the two whose `active` flips) re-renders —
 // keeps the drag contexts from re-mounting on every keystroke (the sluggishness).
-const SectionCard = memo(function SectionCard({ section, object, active, onActivate, onPatch, onRemove, onSetFields, onMove, isFirst, isLast }) {
+const SectionCard = memo(function SectionCard({ section, object, active, onActivate, onPatch, onRemove, onSetFields, onPatchWidgetConfig, onMove, isFirst, isLast }) {
   const fg = (section.widgets || []).find(w => w.type === 'field_group')
   const others = (section.widgets || []).filter(w => w.type !== 'field_group')
   const cols = section.columns || 2
@@ -321,15 +348,116 @@ const SectionCard = memo(function SectionCard({ section, object, active, onActiv
           />
         ) : null}
         {others.map(w => (
-          <div key={w.key} style={{ marginTop: 8, padding: '10px 12px', background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12.5, color: C.textPrimary, fontWeight: 500 }}>{w.title || WIDGET_LABELS[w.type] || w.type}</span>
-            <span style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4 }}>{WIDGET_LABELS[w.type] || w.type}</span>
-          </div>
+          w.type === 'related_list'
+            ? <RelatedListEditor key={w.key} widget={w} onPatchConfig={(patch) => onPatchWidgetConfig(section.key, w.key, patch)} />
+            : (
+              <div key={w.key} style={{ marginTop: 8, padding: '10px 12px', background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12.5, color: C.textPrimary, fontWeight: 500 }}>{w.title || WIDGET_LABELS[w.type] || w.type}</span>
+                <span style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4 }}>{WIDGET_LABELS[w.type] || w.type}</span>
+              </div>
+            )
         ))}
       </div>
     </div>
   )
 })
+
+// ─── Related-list column editor ──────────────────────────────────────────────
+// Inline builder for a related_list widget: add / remove / reorder columns,
+// rename their labels, and set each column's display format (which is exactly
+// how RecordDetail's renderRelatedCell renders it — text / phone / date /
+// number / status badge / yes-no). Edits merge into the widget's config via
+// onPatchConfig and persist with the canvas Save. The available-column list is
+// the target table's live schema, fetched lazily the first time you expand it.
+function RelatedListEditor({ widget, onPatchConfig }) {
+  const cfg = widget.config || {}
+  const columns = Array.isArray(cfg.columns) ? cfg.columns : []
+  const [open, setOpen] = useState(false)
+  const [avail, setAvail] = useState(null)
+  const [loadingAvail, setLoadingAvail] = useState(false)
+
+  useEffect(() => {
+    if (!open || avail || !cfg.table) return
+    let cancelled = false
+    setLoadingAvail(true)
+    describeObject(cfg.table)
+      .then(cols => { if (!cancelled) setAvail(cols || []) })
+      .catch(() => { if (!cancelled) setAvail([]) })
+      .finally(() => { if (!cancelled) setLoadingAvail(false) })
+    return () => { cancelled = true }
+  }, [open, avail, cfg.table])
+
+  const setColumns = (next) => onPatchConfig({ columns: next })
+  const move = (i, dir) => {
+    const j = dir === 'up' ? i - 1 : i + 1
+    if (j < 0 || j >= columns.length) return
+    const next = [...columns]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    setColumns(next)
+  }
+  const patchCol = (i, patch) => setColumns(columns.map((c, x) => x === i ? { ...c, ...patch } : c))
+  const removeCol = (i) => setColumns(columns.filter((_, x) => x !== i))
+  const addCol = (name) => {
+    if (!name || columns.some(c => c.name === name)) return
+    const m = (avail || []).find(a => a.column_name === name)
+    const derived = m ? deriveEesFieldType(m) : 'text'
+    const type = RL_FORMATS.some(f => f.value === derived) ? derived : 'text'
+    setColumns([...columns, { name, type, label: humanizeColumnName(name) }])
+  }
+
+  const present = new Set(columns.map(c => c.name))
+  // Offer only columns that render cleanly as a cell: skip system plumbing,
+  // the primary key, and lookup (FK) columns — those need lookup config the
+  // simple editor doesn't set, so they'd otherwise show a raw UUID.
+  const addable = (avail || []).filter(a =>
+    !present.has(a.column_name) &&
+    !RL_HIDDEN_COLUMNS.has(a.column_name) &&
+    !a.is_primary_key &&
+    deriveEesFieldType(a) !== 'lookup')
+
+  return (
+    <div style={{ marginTop: 8, background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', cursor: 'pointer' }}>
+        <span style={{ fontSize: 12.5, color: C.textPrimary, fontWeight: 500 }}>
+          {widget.title || cfg.title || 'Related List'}
+          <span style={{ fontSize: 10.5, color: C.textMuted, marginLeft: 8, fontFamily: 'JetBrains Mono, monospace' }}>{cfg.table || '—'}</span>
+        </span>
+        <span style={{ fontSize: 11, color: C.textSecondary }}>{columns.length} column{columns.length === 1 ? '' : 's'} {open ? '▲' : '▼'}</span>
+      </div>
+      {open && (
+        <div style={{ padding: '0 12px 12px', borderTop: `1px solid ${C.border}` }}>
+          {columns.length === 0 && <div style={{ fontSize: 11.5, color: C.textMuted, padding: '8px 0' }}>No columns yet — add one below.</div>}
+          {columns.map((c, i) => (
+            <div key={c.name || i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <button onClick={() => move(i, 'up')} disabled={i === 0} title="Move column up" style={moveBtn(i === 0)}>▲</button>
+                <button onClick={() => move(i, 'down')} disabled={i === columns.length - 1} title="Move column down" style={moveBtn(i === columns.length - 1)}>▼</button>
+              </div>
+              <input value={c.label || ''} onChange={e => patchCol(i, { label: e.target.value })} placeholder={humanizeColumnName(c.name)}
+                style={{ ...inputStyle(), flex: 1, minWidth: 0, padding: '5px 8px', fontSize: 12 }} />
+              <span title={c.name} style={{ fontSize: 10, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>{c.name}</span>
+              <select value={RL_FORMATS.some(f => f.value === c.type) ? c.type : 'text'} onChange={e => patchCol(i, { type: e.target.value })}
+                style={{ ...inputStyle(), width: 'auto', padding: '5px 6px', fontSize: 12, flexShrink: 0 }}>
+                {RL_FORMATS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </select>
+              <button onClick={() => removeCol(i)} title="Remove column" style={miniBtn()}>×</button>
+            </div>
+          ))}
+          <div style={{ marginTop: 10 }}>
+            <select value="" onChange={e => addCol(e.target.value)} disabled={loadingAvail}
+              style={{ ...inputStyle(), width: '100%', padding: '6px 8px', fontSize: 12 }}>
+              <option value="">{loadingAvail ? 'Loading fields…' : `+ Add column from ${cfg.table || 'target'}…`}</option>
+              {addable.map(a => <option key={a.column_name} value={a.column_name}>{humanizeColumnName(a.column_name)} — {a.column_name}</option>)}
+            </select>
+          </div>
+          <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 8 }}>
+            First column is the record link. Changes save with the layout.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ─── Multi-column field placement (dnd-kit multi-container) ──────────────────
 // No DndContext here — the whole canvas shares ONE context (in LayoutCanvasEditor)
