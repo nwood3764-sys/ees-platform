@@ -157,6 +157,9 @@ const RATE_ELEC=0.188;  // $ per kWh
 const RATE_GAS=0.97;    // $ per therm
 const files={asBase:null,asImp:null,osBase:null,osImp:null};
 const data={asBase:null,asImp:null,osBase:null,osImp:null};
+// Raw extracted text of each uploaded document, so the in-app assistant can
+// "read the documents" (not just the parsed fields).
+const rawDocs={asBase:null,asImp:null,osBase:null,osImp:null};
 
 /* ---------- Asset Score PDF parser ---------- */
 async function pdfText(arrayBuffer){
@@ -368,6 +371,7 @@ document.querySelectorAll('.slot').forEach(slot=>{
       if(key==='asBase'||key==='asImp'){
         const buf=await file.arrayBuffer();
         const txt=await pdfText(buf);
+        rawDocs[key]=txt;
         data[key]=parseAssetScore(txt);
       }else if(/\.osm$/i.test(file.name)){
         // Raw OpenStudio model: the browser can't run EnergyPlus, so POST the
@@ -400,6 +404,7 @@ document.querySelectorAll('.slot').forEach(slot=>{
         };
       }else{
         const txt=await file.text();
+        rawDocs[key]=txt.slice(0,200000);
         data[key]=parseOpenStudio(txt);
       }
       slot.classList.add('ok');
@@ -945,6 +950,134 @@ function downloadUtility(which){
 }
 document.getElementById('utilBase').onclick=()=>downloadUtility('baseline');
 document.getElementById('utilImp').onclick=()=>downloadUtility('improved');
+</script>
+
+<!-- ================= In-app energy-auditing assistant ================= -->
+<style>
+  #asstLauncher{position:fixed;right:20px;bottom:20px;z-index:50;
+    background:var(--moss);color:#fff;border:none;border-radius:24px;
+    padding:12px 18px;font:600 14px/1 ui-sans-serif,system-ui,sans-serif;
+    box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer;display:flex;gap:8px;align-items:center}
+  #asstLauncher:hover{background:var(--moss-d)}
+  #asstPanel{position:fixed;right:20px;bottom:20px;z-index:51;width:390px;max-width:calc(100vw - 24px);
+    height:560px;max-height:calc(100vh - 24px);background:var(--card);border:1px solid var(--line);
+    border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.22);display:none;flex-direction:column;overflow:hidden}
+  #asstPanel.open{display:flex}
+  .asstHead{background:var(--moss-d);color:#fff;padding:12px 14px;display:flex;justify-content:space-between;align-items:center}
+  .asstHead b{font:700 15px/1.2 Georgia,serif}
+  .asstHead small{display:block;font:400 11px/1.3 ui-sans-serif;opacity:.8}
+  .asstHead button{background:transparent;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1}
+  #asstLog{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--paper)}
+  .asstMsg{max-width:88%;padding:9px 12px;border-radius:12px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+  .asstMsg.user{align-self:flex-end;background:var(--moss);color:#fff;border-bottom-right-radius:3px}
+  .asstMsg.bot{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:3px}
+  .asstMsg.sys{align-self:center;background:transparent;color:var(--mut);font-size:12px;text-align:center;max-width:100%}
+  .asstForm{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);background:var(--card)}
+  .asstForm textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    font:14px/1.4 ui-sans-serif,system-ui,sans-serif;height:40px;max-height:120px}
+  .asstForm button{background:var(--moss);color:#fff;border:none;border-radius:8px;padding:0 16px;font-weight:600;cursor:pointer}
+  .asstForm button:disabled{background:var(--mut);cursor:default}
+  .asstDot{display:inline-block;animation:asstblink 1.2s infinite}
+  @keyframes asstblink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+</style>
+
+<button id="asstLauncher" aria-label="Open assistant">💬 Ask the auditor</button>
+<div id="asstPanel" role="dialog" aria-label="Energy auditing assistant">
+  <div class="asstHead">
+    <div><b>Energy Auditor Assistant</b><small>Reads the uploaded reports · HOMES 50121</small></div>
+    <button id="asstClose" aria-label="Close">×</button>
+  </div>
+  <div id="asstLog"></div>
+  <form class="asstForm" id="asstForm">
+    <textarea id="asstInput" placeholder="Ask about this building, the model, or 50121 eligibility…" rows="1"></textarea>
+    <button type="submit" id="asstSend">Send</button>
+  </form>
+</div>
+
+<script>
+/* In-app assistant: sends the current building context + the raw uploaded
+   document text to the serverless function, which calls Claude (Opus 4.8). */
+(function(){
+  const launcher=document.getElementById('asstLauncher');
+  const panel=document.getElementById('asstPanel');
+  const logEl=document.getElementById('asstLog');
+  const form=document.getElementById('asstForm');
+  const input=document.getElementById('asstInput');
+  const sendBtn=document.getElementById('asstSend');
+  const history=[];   // {role, content}
+  let greeted=false;
+
+  launcher.onclick=()=>{panel.classList.add('open');launcher.style.display='none';
+    if(!greeted){greeted=true;addMsg('sys','Ask me anything about the loaded building, the energy model, or HOMES 50121 eligibility. I read the uploaded reports directly.');}
+    input.focus();};
+  document.getElementById('asstClose').onclick=()=>{panel.classList.remove('open');launcher.style.display='flex';};
+  input.addEventListener('input',()=>{input.style.height='40px';input.style.height=Math.min(input.scrollHeight,120)+'px';});
+  input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
+
+  function addMsg(role,text){
+    const d=document.createElement('div');
+    d.className='asstMsg '+(role==='user'?'user':role==='sys'?'sys':'bot');
+    d.textContent=text; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; return d;
+  }
+
+  // Assemble a compact, useful context from the parsed data + raw documents.
+  function buildContext(){
+    const c={};
+    if(data.asBase||data.asImp){
+      const pick=a=>a?{name:a.name,address:(a.street||'')+', '+(a.cityStateZip||''),gfa:a.gfa,
+        yearBuilt:a.yearBuilt,climateZone:a.climateZone,occupants:a.occupants,buildingId:a.buildingId,
+        euiCurrent:a.euiCurrent,euiUpgraded:a.euiUpgraded,gasEuiCur:a.gasEuiCur,gasEuiUpg:a.gasEuiUpg,
+        elecEuiCur:a.elecEuiCur,elecEuiUpg:a.elecEuiUpg,savingsPct:a.savingsPct,roofR:a.roofR,wallR:a.wallR,
+        wwr:a.wwr,heatCap:a.heatCap,coolCop:a.coolCop,coolTons:a.coolTons,whe:a.whe,
+        floorsAbove:a.floorsAbove,floorsBelow:a.floorsBelow,measures:a.measures}:null;
+      c.assetScore={baseline:pick(data.asBase),improved:pick(data.asImp)};
+    }
+    const os=o=>o?{annualElecKWh:o.elec&&o.elec.reduce((a,b)=>a+b,0),annualGasTherms:o.gas&&o.gas.reduce((a,b)=>a+b,0),
+      elecByEndUse:o.elecEnd,gasByEndUse:o.gasEnd}:null;
+    if(data.osBase||data.osImp) c.openStudio={baseline:os(data.osBase),improved:os(data.osImp)};
+    // Computed summary when everything is present.
+    try{
+      if(data.asBase&&data.osBase&&data.osImp){
+        const b=annual(data.osBase),i=annual(data.osImp);
+        const osPct=(b.kbtu-i.kbtu)/b.kbtu*100;
+        const statedPct=(data.asImp&&data.asImp.savingsPct!=null)?data.asImp.savingsPct:osPct;
+        c.computed={siteSavingsPct_assetScore:statedPct,siteSavingsPct_openStudio:+osPct.toFixed(1),
+          qualificationTier:statedPct>=35?'35%+ tier':(statedPct>=20?'20-34% tier':'below 20% - does not qualify'),
+          baselineSiteKbtu:Math.round(b.kbtu),improvedSiteKbtu:Math.round(i.kbtu)};
+      }
+    }catch(e){}
+    c.documentsText={baselineAssetScoreReport:rawDocs.asBase,improvedAssetScoreReport:rawDocs.asImp,
+      baselineOpenStudio:rawDocs.osBase?rawDocs.osBase.slice(0,40000):null,
+      improvedOpenStudio:rawDocs.osImp?rawDocs.osImp.slice(0,40000):null};
+    return c;
+  }
+
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const q=input.value.trim(); if(!q)return;
+    input.value='';input.style.height='40px';
+    addMsg('user',q); history.push({role:'user',content:q});
+    sendBtn.disabled=true;
+    const thinking=addMsg('bot',''); thinking.innerHTML='<span class="asstDot">●</span> thinking…';
+    try{
+      const resp=await fetch('/.netlify/functions/chat',{method:'POST',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify({messages:history,context:buildContext()})});
+      const out=await resp.json().catch(()=>({error:'Bad response from the assistant.'}));
+      if(!resp.ok||out.error){
+        thinking.classList.remove('bot');thinking.classList.add('sys');
+        thinking.textContent='⚠ '+(out.error||('Error '+resp.status))+(out.detail?(' — '+out.detail):'');
+      }else{
+        thinking.textContent=out.reply; history.push({role:'assistant',content:out.reply});
+      }
+    }catch(err){
+      thinking.classList.remove('bot');thinking.classList.add('sys');
+      thinking.textContent='⚠ Could not reach the assistant: '+err.message;
+    }finally{
+      sendBtn.disabled=false; logEl.scrollTop=logEl.scrollHeight;
+    }
+  });
+})();
 </script>
 </body>
 </html>
