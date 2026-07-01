@@ -146,13 +146,22 @@
     <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
     <span class="status" id="finalStatus"></span>
   </div>
+  <div id="occRow" style="margin-top:12px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+    <strong>Occupancy</strong>
+    <label>Dwelling units
+      <input id="occUnits" type="number" min="1" value="6" style="width:64px;margin-left:4px"></label>
+    <label>Bedrooms per unit
+      <input id="occBeds" type="number" min="0" value="2" style="width:64px;margin-left:4px"></label>
+    <span class="copyhint" id="occCalc"></span>
+  </div>
   <p class="note" style="font-size:12.5px;color:var(--mut);margin-top:10px">
     <strong>50121 files:</strong> built from a known-good 50121 export so they import + submit.
-    <strong>Live-mapped from your reports:</strong> name, address, year, gross floor area,
-    window-to-wall ratio, wall area, conditioned floors, occupancy, headline EUIs, and the
-    50121 whole-building savings %. <strong>Draft placeholders (still the reference model's
-    values — verify before a real submission):</strong> monthly meter readings, envelope R-values,
-    HVAC details, and the measures/package. These are the next mapping pass.
+    <strong>Live-mapped from your Asset Score report:</strong> name, address, year, gross &amp;
+    use-type floor areas, window-to-wall ratio, wall area, conditioned floors, envelope R-values,
+    boiler (capacity/efficiency/year), water heater, headline EUIs, and the 50121 whole-building
+    savings %. Occupancy is computed from the units &amp; bedrooms above (2 in the master + 1 per
+    additional bedroom). Monthly energy loads from the utility spreadsheet (DOE loads that
+    separately). HVAC delivery/measures detail is the remaining refinement pass.
   </p>
 </div>
 
@@ -248,6 +257,13 @@ function parseAssetScore(t){
   d.coolCop=num(/Efficiency\s+([\d.]+)\s*COP/,t);
   d.coolTons=num(/Capacity\s+([\d.]+)\s*tons/,t);
   d.whe=num(/Water Heater Efficiency\s+([\d.]+)\s*Et/,t);
+  // Boiler / heating plant detail (page "BUILDING CHARACTERISTICS SUMMARY / Plants").
+  d.boilerYear=num(/Year of Manufacture\s+(\d{4})/,t);          // first = heating plant
+  d.boilerEff=num(/Thermal Efficiency\s+([\d.]+)%/,t);          // "Thermal Efficiency 80.0% Et"
+  // Use-type square footage from the "Building Use Types" section — gives the
+  // conditioned/common split the Audit Template asks for (e.g. 5,796 + 701 = GFA).
+  d.useMultifamilyArea=num(/Multi-family\s*\(fewer than 4 floors\):\s*([\d,]+)\s*ft/i,t);
+  d.useCommonArea=num(/Common Area:\s*([\d,]+)\s*ft/i,t);
   // Floor count from block detail ("Above Ground: 2 floors / Below Ground: 0 floors")
   d.floorsAbove=num(/Above Ground:\s*(\d+)\s*floors?/i,t);
   d.floorsBelow=num(/Below Ground:\s*(\d+)\s*floors?/i,t);
@@ -942,6 +958,56 @@ async function build50121XML(which){
   if(which==='improved'){ _setScenarioEUI(doc,'benchmark', impEUI); }
   else { _setScenarioEUI(doc,'benchmark', baseEUI); _setScenarioEUI(doc,'target', impEUI); }
 
+  // ---- Deep building-science fields (Asset Score PDF is authoritative) ----
+  // Envelope assemblies
+  _setFirst(doc,'WallInsulationRValue', as.wallR);
+  _setFirst(doc,'RoofInsulationRValue', as.roofR);
+  // Domestic hot water
+  _setFirst(doc,'WaterHeaterEfficiency', as.whe);
+  // Heating plant / boiler: capacity (kBtu/hr), efficiency, year installed.
+  const boiler=_q(doc,'Boiler')[0];
+  if(boiler){
+    const oc=boiler.getElementsByTagNameNS(NS_AUC,'OutputCapacity')[0];
+    if(oc&&as.heatCap!=null)oc.textContent=Number(as.heatCap).toFixed(1);
+    const eff=boiler.getElementsByTagNameNS(NS_AUC,'AnnualHeatingEfficiencyValue')[0];
+    if(eff&&(as.boilerEff!=null||as.whe!=null))eff.textContent=Number(as.boilerEff!=null?as.boilerEff:as.whe).toFixed(1);
+  }
+  const hp=_q(doc,'HeatingPlant')[0];
+  if(hp&&as.boilerYear!=null){
+    const yi=hp.getElementsByTagNameNS(NS_AUC,'YearInstalled')[0];
+    if(yi)yi.textContent=String(as.boilerYear);
+  }
+  // Space-function section floor areas -> scale the template's split to THIS
+  // building's multifamily use-type area (from "Building Use Types"), preserving
+  // the internal conditioned/common/tenant proportions.
+  if(as.useMultifamilyArea){
+    for(const sec of _q(doc,'Section')){
+      const st=sec.getElementsByTagNameNS(NS_AUC,'SectionType')[0];
+      if(!st||st.textContent!=='Space function')continue;
+      // the section's own FloorAreas (direct child)
+      for(const c of sec.children){ if(c.localName!=='FloorAreas')continue;
+        const fas=[...c.children];
+        // find current Gross value to compute the scale ratio
+        let curGross=null;
+        for(const fa of fas){const t=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaType')[0];
+          if(t&&t.textContent==='Gross'){curGross=parseFloat(fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0].textContent);}}
+        if(curGross>0){const ratio=as.useMultifamilyArea/curGross;
+          for(const fa of fas){const v=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0];
+            if(v){v.textContent=(parseFloat(v.textContent)*ratio).toFixed(1);}}}
+        break;
+      }
+      break;
+    }
+  }
+
+  // Occupancy: units x (bedrooms + 1)  [2 in the master + 1 per extra bedroom].
+  const units=Math.max(1, parseInt((document.getElementById('occUnits')||{}).value)||6);
+  const beds =Math.max(0, parseInt((document.getElementById('occBeds')||{}).value)||2);
+  const occupants=units*Math.max(1, beds+1);
+  _setFirst(doc,'OccupantQuantity', occupants);
+  const su=_q(doc,'SpatialUnit')[0];
+  if(su){const nu=su.getElementsByTagNameNS(NS_AUC,'NumberOfUnits')[0]; if(nu)nu.textContent=String(units);}
+
   let s=new XMLSerializer().serializeToString(doc);
   // The template already carries an XML declaration (and the serializer re-emits
   // it); only add one if it's somehow missing, so we never produce a duplicate.
@@ -967,6 +1033,14 @@ async function downloadXML(which){
 }
 document.getElementById('buildBase').onclick=()=>downloadXML('baseline');
 document.getElementById('buildImp').onclick=()=>downloadXML('improved');
+// Live occupancy readout (units x (bedrooms+1)).
+(function(){
+  const u=document.getElementById('occUnits'), bd=document.getElementById('occBeds'),
+        out=document.getElementById('occCalc');
+  function upd(){const units=Math.max(1,parseInt(u.value)||6),beds=Math.max(0,parseInt(bd.value)||2);
+    out.textContent='→ '+(units*Math.max(1,beds+1))+' occupants';}
+  if(u&&bd&&out){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
+})();
 
 /* ---- Utility usage xlsx (Portfolio Manager "Energy Use By Calendar Month" format) ---- */
 /* Metered Energy Year Start Date (yyyy-mm-dd): first day of the import window =
