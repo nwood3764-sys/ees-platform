@@ -3290,6 +3290,16 @@ function ConfigFieldRow({ field, value, editing, onChange }) {
 
 const RELATED_LIST_MAX_ROWS = 7
 
+// Format a raw phone string as (XXX) XXX-XXXX for display. Falls back to the
+// raw value when it isn't a 10-digit North American number, so partial/foreign
+// numbers are shown as-entered rather than mangled. Applied to related-list
+// columns whose config type is 'phone'.
+function formatPhoneDisplay(raw) {
+  const d = String(raw ?? '').replace(/\D/g, '').slice(-10)
+  if (d.length !== 10) return raw
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`
+}
+
 // Render a single cell. Extracted so the editable and read-only paths can
 // share formatting without duplicating the picklist / date / number logic.
 function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
@@ -3300,6 +3310,7 @@ function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
   }
   if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
   if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
+  if (col.type === 'phone' && shown) shown = formatPhoneDisplay(shown)
   return (
     <td key={col.name} style={{
       padding: '10px 14px',
@@ -3325,6 +3336,7 @@ function renderRelatedValue(col, val, picklists) {
   }
   if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
   if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
+  if (col.type === 'phone' && shown) shown = formatPhoneDisplay(shown)
   if (col.type === 'picklist' && shown) return <Badge s={shown} />
   if (shown == null || shown === '') return <span style={{ color: C.textMuted }}>—</span>
   return (

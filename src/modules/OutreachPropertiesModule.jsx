@@ -716,7 +716,7 @@ export default function OutreachPropertiesModule({
         </div>
       </div>
 
-      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts4Tabs} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts4Tabs} moduleId="outreach" />
 
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (

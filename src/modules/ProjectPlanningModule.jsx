@@ -291,7 +291,7 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: '0 24px', flexShrink: 0 }}>
-        <SectionTabs sections={SECTIONS} active={sec} onChange={changeSection} />
+        <SectionTabs sections={SECTIONS} active={sec} onChange={changeSection} moduleId="planning" />
       </div>
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {sec === 'home' && (
