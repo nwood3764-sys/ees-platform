@@ -22,6 +22,7 @@ const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkO
 const SendForSignatureModal               = lazy(() => import('./SendForSignatureModal'))
 const AccountMergeModal                    = lazy(() => import('./AccountMergeModal'))
 const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
+const LogCallModal                         = lazy(() => import('./LogCallModal'))
 
 import { useToast } from './Toast'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
@@ -4545,6 +4546,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showReportModal, setShowReportModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
+  const [showLogCall, setShowLogCall] = useState(false)
+  // Bumped when a call is logged from the header action so the Activity tab's
+  // timeline remounts and shows the new entry.
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0)
   // Project Scheduler wizard (only used when tableName === 'projects').
   // Bulk-schedules unscheduled work orders for the project to a Team Lead.
   // After a successful commit, the tick is bumped so the related-records area
@@ -5835,6 +5840,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RESTORE]:                handleRestore,
     [ACTION_KEYS.MERGE_ACCOUNT]:          () => setShowMergeModal(true),
     [ACTION_KEYS.ADD_TO_PORTAL]:          () => setShowPortalModal(true),
+    [ACTION_KEYS.LOG_A_CALL]:             () => setShowLogCall(true),
   }
 
   // Per-action pending flag — drives the disabled+wait-cursor+ellipsis label
@@ -6289,7 +6295,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             changes and record-level actions (create, soft-delete, restore).
             Hidden on new records since there's no history yet. */}
         {!isInsertMode && activeTab === 'Activity' && (
-          <ActivityTimeline tableName={tableName} recordId={recordId} />
+          <ActivityTimeline key={activityRefreshKey} tableName={tableName} recordId={recordId} />
         )}
           </div>
 
@@ -6588,6 +6594,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               setShowPortalModal(false)
               if (message) window.alert(message)
               setReloadTick(t => t + 1)
+            }}
+          />
+        )}
+        {showLogCall && (
+          <LogCallModal
+            tableName={tableName}
+            recordId={recordId}
+            onClose={() => setShowLogCall(false)}
+            onLogged={() => {
+              setShowLogCall(false)
+              // Refresh the timeline and jump the user to the Activity tab so
+              // the call they just logged is immediately visible.
+              setActivityRefreshKey(k => k + 1)
+              setActiveTab('Activity')
             }}
           />
         )}
