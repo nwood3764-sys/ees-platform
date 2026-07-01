@@ -191,6 +191,27 @@ export default function ObjectListSection({ objectTable, moduleId }) {
       onOpenRecord={(row) => { if (row?._id) openRecord({ id: row._id, mode: 'view', name: row.name }) }}
       onNew={() => openRecord({ id: null, mode: 'create' })}
       renderCell={(col, r) => {
+        // Record # column (field 'id') → a real anchor too, so right-clicking
+        // the record number (the leftmost cell, where users instinctively aim)
+        // offers "Open in new tab" just like the name. Styled to match
+        // ListView's default id cell exactly (muted, JetBrains Mono) so this is
+        // a pure affordance change, not a visual one.
+        if (col.field === 'id') {
+          const targetTable = r.table || objectTable
+          return (
+            <td key="id" style={{ padding: '11px 12px', borderBottom: '1px solid #e4e9f2', color: '#8fa0b8', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
+              <RecordLink
+                table={targetTable}
+                id={r?._id}
+                title={String(r.id || '')}
+                onActivate={() => { if (r?._id) openRecord({ id: r._id, mode: 'view', name: r.name }) }}
+                style={{ color: 'inherit' }}
+              >
+                {r.id || ''}
+              </RecordLink>
+            </td>
+          )
+        }
         // Make the Name a single-click link that opens the record, so the
         // generic list behaves like a standard list view (the table otherwise
         // opens on double-click).

@@ -352,7 +352,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
         </button>
       </div>
 
-      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} moduleId="enrollment" />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {selectedRecord ? (

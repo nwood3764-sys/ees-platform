@@ -2,7 +2,19 @@ import { useState, useEffect } from 'react';
 import { C, STATUS_CFG, NAV_MODULES } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
+import { buildPath } from '../lib/urlNav';
 import UserMenu from './UserMenu';
+
+// A left-click the browser should handle natively — open in a new tab/window,
+// copy link address, etc. — rather than us intercepting it for in-app SPA
+// navigation. Middle-click and right-click never fire a left onClick on an
+// anchor, so we only need to let modified left-clicks through here. This is
+// what makes sidebar modules and section tabs behave like real Salesforce
+// links: rendered as <a href>, a plain click navigates in-app (no reload)
+// while Ctrl/Cmd/middle-click opens the destination in a new tab.
+function isNativeNavClick(e) {
+  return e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
+}
 
 export function Badge({ s }) {
   const cfg = STATUS_CFG[s] || { bg: '#f0f3f8', color: '#4a5e7a', dot: '#8fa0b8' };
@@ -93,7 +105,16 @@ export function Topbar({ breadcrumb, onReports }) {
   );
 }
 
-export function SectionTabs({ sections, active, onChange, counts = {}, urgentSections = {} }) {
+// SectionTabs — the module sub-tab bar (e.g. Home / Opportunities / Accounts).
+//
+// When `moduleId` is provided, each tab is rendered as a REAL <a href> pointing
+// at the tab's own URL (`/m/<module>/<section>`), so right-click → "Open in new
+// tab", middle-click, and Ctrl/Cmd-click all work like a Salesforce list tab —
+// the whole point of "everyone lives in many tabs". A plain left-click still
+// navigates in-app (no reload) via onChange. Callers whose tabs are not
+// section-URL addressable (record-detail tabs, the Admin object sub-tabs, which
+// live on `?tab=` instead) simply omit `moduleId` and keep the button behavior.
+export function SectionTabs({ sections, active, onChange, counts = {}, urgentSections = {}, moduleId }) {
   const isMobile = useIsMobile();
   return (
     <div className={isMobile ? 'ees-hscroll' : ''} style={{
@@ -105,24 +126,45 @@ export function SectionTabs({ sections, active, onChange, counts = {}, urgentSec
       {sections.map(s => {
         const on = s.id === active;
         const urgent = urgentSections[s.id];
-        return (
-          <button key={s.id} onClick={() => onChange(s.id)} style={{
-            padding: isMobile ? '12px 14px' : '10px 16px',
-            background: 'none', border: 'none',
-            borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
-            color: on ? C.textPrimary : C.textMuted,
-            fontSize: isMobile ? 14 : 13,
-            fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
-            display: 'flex', alignItems: 'center', gap: 6,
-            whiteSpace: 'nowrap', flexShrink: 0,
-            ...(isMobile ? { scrollSnapAlign: 'start' } : {}),
-          }}>
+        const style = {
+          padding: isMobile ? '12px 14px' : '10px 16px',
+          background: 'none', border: 'none',
+          borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
+          color: on ? C.textPrimary : C.textMuted,
+          fontSize: isMobile ? 14 : 13,
+          fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
+          display: 'flex', alignItems: 'center', gap: 6,
+          whiteSpace: 'nowrap', flexShrink: 0,
+          textDecoration: 'none',
+          ...(isMobile ? { scrollSnapAlign: 'start' } : {}),
+        };
+        const inner = (
+          <>
             {s.label}
             {urgent > 0 && (
               <span style={{ background: C.danger, color: '#fff', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10 }}>
                 {urgent}
               </span>
             )}
+          </>
+        );
+        // Section-URL addressable → render a real anchor so the browser offers
+        // native new-tab / new-window / copy-link on the tab.
+        const href = moduleId ? buildPath({ activeModule: moduleId, section: s.id }) : null;
+        if (href) {
+          return (
+            <a key={s.id} href={href} style={style} onClick={(e) => {
+              if (isNativeNavClick(e)) return;   // let the browser open a new tab
+              e.preventDefault();
+              onChange(s.id);
+            }}>
+              {inner}
+            </a>
+          );
+        }
+        return (
+          <button key={s.id} onClick={() => onChange(s.id)} style={style}>
+            {inner}
           </button>
         );
       })}
@@ -371,10 +413,21 @@ export function Sidebar({
             ? '14px 20px'
             : isCollapsed ? '11px 0' : '9px 20px';
           const rowFontSize = isMobile ? 15 : 13.5;
+          // Each module row is a REAL <a href="/m/<module>"> so right-click →
+          // "Open in new tab", middle-click, and Ctrl/Cmd-click open the module
+          // in a separate browser tab — the Salesforce workflow of living in
+          // many tabs at once. A plain left-click still switches modules in-app
+          // (no reload) via handleModuleClick.
+          const href = buildPath({ activeModule: m.id });
           return (
-            <div
+            <a
               key={m.id}
-              onClick={() => handleModuleClick(m.id)}
+              href={href}
+              onClick={(e) => {
+                if (isNativeNavClick(e)) return;   // let the browser open a new tab
+                e.preventDefault();
+                handleModuleClick(m.id);
+              }}
               title={isCollapsed ? m.label : undefined}
               style={{
                 display: 'flex', alignItems: 'center',
@@ -385,14 +438,14 @@ export function Sidebar({
                 background: on ? C.sidebarHover : 'transparent',
                 borderLeft: on ? `3px solid ${C.emerald}` : '3px solid transparent',
                 fontSize: rowFontSize, fontWeight: on ? 500 : 400, transition: 'all 0.12s',
-                userSelect: 'none',
+                userSelect: 'none', textDecoration: 'none',
               }}
               onMouseEnter={e => { if (!on) e.currentTarget.style.background = C.sidebarHover; }}
               onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'transparent'; }}
             >
               <Icon path={m.icon} color="currentColor" size={isMobile ? 17 : 15} />
               {!isCollapsed && m.label}
-            </div>
+            </a>
           );
         })}
       </nav>

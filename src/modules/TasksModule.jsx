@@ -187,7 +187,7 @@ export default function TasksModule({ selectedRecord, sectionFromUrl, onNavigate
         </div>
       </div>
 
-      <SectionTabs sections={SECTIONS} active={section} onChange={setSection} />
+      <SectionTabs sections={SECTIONS} active={section} onChange={setSection} moduleId="tasks" />
 
       <div style={{ marginTop: 14 }}>
         {loading ? <LoadingState /> :
