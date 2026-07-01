@@ -16,5 +16,10 @@
   command  = ""
   publish  = "."
 
+# The in-app assistant runs as a serverless function (holds the Anthropic API
+# key server-side). Netlify bundles it automatically, no build command needed.
+[functions]
+  directory = "netlify/functions"
+
 # No SPA redirect: this is a single page, not a client-side router. Unknown
 # paths should 404 normally rather than rewrite to index.html.
