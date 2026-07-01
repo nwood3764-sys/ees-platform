@@ -1,23 +1,31 @@
 // -----------------------------------------------------------------------------
-// LogCallModal.jsx
+// LogActivityModal.jsx
 //
-// Salesforce-style "Log a Call" composer. Opened from the Activity tab on a
-// record (opportunities in particular, for outreach). Writes a Call activity
-// to public.activities via callActivityService.logCall(), optionally linked to
-// a contact associated with the record.
+// Salesforce-style "Log Activity" composer. Opened from a record's header
+// action or the Activity tab. Logs a past interaction — call, email, meeting,
+// site visit, event, note, etc. — to public.activities via
+// callActivityService.logActivity(), optionally linked to a contact on the
+// record.
 //
-// Direction options come from the activities.direction picklist; the contact
-// list comes from opportunity_contact_roles for opportunities (empty elsewhere,
-// in which case the contact field is simply hidden).
+// The activity-type list and direction options are managed picklists
+// (picklist_object='activities'), so admins can extend them without a code
+// change. The form adapts to the chosen type: communication types (Call,
+// Email, Text Message) show a Direction; time-based types (Call, Meeting,
+// Site Visit, Event) show a Duration.
 // -----------------------------------------------------------------------------
 
 import { useEffect, useMemo, useState } from 'react'
 import { C } from '../data/constants'
 import {
-  logCall,
+  logActivity,
   fetchActivityPicklist,
   fetchLinkedContactsForRecord,
 } from '../data/callActivityService'
+
+// Which types get which optional fields. Kept as plain sets so new picklist
+// values default gracefully (no Direction/Duration unless listed).
+const DIRECTION_TYPES = new Set(['Call', 'Email', 'Text Message'])
+const DURATION_TYPES  = new Set(['Call', 'Meeting', 'Site Visit', 'Event'])
 
 const OVERLAY_STYLE = {
   position: 'fixed',
@@ -118,13 +126,21 @@ function toDatetimeLocal(date) {
   )
 }
 
-export default function LogCallModal({ tableName, recordId, onClose, onLogged }) {
+export default function LogActivityModal({
+  tableName,
+  recordId,
+  defaultType = 'Call',
+  onClose,
+  onLogged,
+}) {
+  const [typeOptions, setTypeOptions] = useState([])
   const [directionOptions, setDirectionOptions] = useState([])
   const [contacts, setContacts] = useState([])
 
+  const [activityType, setActivityType] = useState(defaultType)
   const [direction, setDirection] = useState('Outbound')
   const [contactId, setContactId] = useState('')
-  const [subject, setSubject] = useState('Call')
+  const [subject, setSubject] = useState('')
   const [occurredAtLocal, setOccurredAtLocal] = useState(() => toDatetimeLocal(new Date()))
   const [durationMinutes, setDurationMinutes] = useState('')
   const [comments, setComments] = useState('')
@@ -132,28 +148,34 @@ export default function LogCallModal({ tableName, recordId, onClose, onLogged })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
-  // Load picklist + linked contacts once when opened.
+  // Load picklists + linked contacts once when opened.
   useEffect(() => {
     let cancelled = false
     Promise.all([
+      fetchActivityPicklist('activity_type').catch(() => []),
       fetchActivityPicklist('direction').catch(() => []),
       fetchLinkedContactsForRecord(tableName, recordId).catch(() => []),
-    ]).then(([dirs, cts]) => {
+    ]).then(([types, dirs, cts]) => {
       if (cancelled) return
+      setTypeOptions(types)
       setDirectionOptions(dirs)
       setContacts(cts)
-      // Default direction to the first option if 'Outbound' isn't present.
+      // Keep defaultType if present, else fall back to the first option.
+      if (types.length && !types.some(t => t.value === defaultType)) {
+        setActivityType(types[0].value)
+      }
       if (dirs.length && !dirs.some(d => d.value === 'Outbound')) {
         setDirection(dirs[0].value)
       }
-      // Default the contact to the primary one when there's a clear choice.
       const primary = cts.find(c => c.isPrimary)
       if (primary) setContactId(primary.id)
     })
     return () => { cancelled = true }
-  }, [tableName, recordId])
+  }, [tableName, recordId, defaultType])
 
-  const canSave = useMemo(() => !saving && subject.trim().length > 0, [saving, subject])
+  const showDirection = DIRECTION_TYPES.has(activityType)
+  const showDuration  = DURATION_TYPES.has(activityType)
+  const canSave = useMemo(() => !saving && !!activityType, [saving, activityType])
 
   const handleSave = async () => {
     if (!canSave) return
@@ -161,12 +183,13 @@ export default function LogCallModal({ tableName, recordId, onClose, onLogged })
     setError(null)
     try {
       const occurredAt = occurredAtLocal ? new Date(occurredAtLocal).toISOString() : null
-      const newId = await logCall({
+      const newId = await logActivity({
         tableName,
         recordId,
+        activityType,
         subject,
-        direction,
-        durationMinutes,
+        direction: showDirection ? direction : null,
+        durationMinutes: showDuration ? durationMinutes : null,
         occurredAt,
         contactId: contactId || null,
         comments,
@@ -178,11 +201,13 @@ export default function LogCallModal({ tableName, recordId, onClose, onLogged })
     }
   }
 
+  const isOpportunity = tableName === 'opportunities'
+
   return (
     <div style={OVERLAY_STYLE} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
-      <div style={MODAL_STYLE} role="dialog" aria-modal="true" aria-label="Log a Call">
+      <div style={MODAL_STYLE} role="dialog" aria-modal="true" aria-label="Log Activity">
         <div style={HEADER_STYLE}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>Log a Call</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>Log Activity</div>
           <button
             type="button"
             onClick={onClose}
@@ -194,37 +219,58 @@ export default function LogCallModal({ tableName, recordId, onClose, onLogged })
         </div>
 
         <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Direction + duration on one row */}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 180px' }}>
-              <label style={FIELD_LABEL}>Direction</label>
-              <select
-                style={INPUT_STYLE}
-                value={direction}
-                onChange={(e) => setDirection(e.target.value)}
-              >
-                {directionOptions.length === 0 && <option value="Outbound">Outbound</option>}
-                {directionOptions.map(d => (
-                  <option key={d.value} value={d.value}>{d.label}</option>
-                ))}
-              </select>
-            </div>
-            <div style={{ flex: '1 1 140px' }}>
-              <label style={FIELD_LABEL}>Duration (min)</label>
-              <input
-                type="number"
-                min="0"
-                step="1"
-                style={INPUT_STYLE}
-                value={durationMinutes}
-                onChange={(e) => setDurationMinutes(e.target.value)}
-                placeholder="e.g. 5"
-              />
-            </div>
+          {/* Activity type — always first, drives which fields show */}
+          <div>
+            <label style={FIELD_LABEL}>Activity Type</label>
+            <select
+              style={INPUT_STYLE}
+              value={activityType}
+              onChange={(e) => setActivityType(e.target.value)}
+            >
+              {typeOptions.length === 0 && <option value={activityType}>{activityType}</option>}
+              {typeOptions.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
           </div>
 
-          {/* Contact — only shown when the record has linked contacts */}
-          {contacts.length > 0 && (
+          {/* Direction + duration — only for the types they apply to */}
+          {(showDirection || showDuration) && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {showDirection && (
+                <div style={{ flex: '1 1 180px' }}>
+                  <label style={FIELD_LABEL}>Direction</label>
+                  <select
+                    style={INPUT_STYLE}
+                    value={direction}
+                    onChange={(e) => setDirection(e.target.value)}
+                  >
+                    {directionOptions.length === 0 && <option value="Outbound">Outbound</option>}
+                    {directionOptions.map(d => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {showDuration && (
+                <div style={{ flex: '1 1 140px' }}>
+                  <label style={FIELD_LABEL}>Duration (min)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    style={INPUT_STYLE}
+                    value={durationMinutes}
+                    onChange={(e) => setDurationMinutes(e.target.value)}
+                    placeholder="e.g. 15"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Contact — populated from the record's Contact Roles */}
+          {contacts.length > 0 ? (
             <div>
               <label style={FIELD_LABEL}>Contact</label>
               <select
@@ -240,7 +286,15 @@ export default function LogCallModal({ tableName, recordId, onClose, onLogged })
                 ))}
               </select>
             </div>
-          )}
+          ) : isOpportunity ? (
+            <div style={{
+              fontSize: 12, color: C.textSecondary, background: C.cardSecondary || '#f7f9fc',
+              border: `1px solid ${C.border}`, borderRadius: 5, padding: '8px 10px',
+            }}>
+              No contacts linked to this record yet. You can still log the activity — to attribute
+              it to a person, add a Contact Role under the <strong>Related</strong> tab first.
+            </div>
+          ) : null}
 
           <div>
             <label style={FIELD_LABEL}>Subject</label>
@@ -249,7 +303,7 @@ export default function LogCallModal({ tableName, recordId, onClose, onLogged })
               style={INPUT_STYLE}
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder="Call"
+              placeholder={activityType}
             />
           </div>
 
@@ -269,7 +323,7 @@ export default function LogCallModal({ tableName, recordId, onClose, onLogged })
               style={{ ...INPUT_STYLE, minHeight: 90, resize: 'vertical' }}
               value={comments}
               onChange={(e) => setComments(e.target.value)}
-              placeholder="What was discussed, next steps, outcome…"
+              placeholder="What happened, the outcome, and any next steps…"
             />
           </div>
 
@@ -278,7 +332,7 @@ export default function LogCallModal({ tableName, recordId, onClose, onLogged })
               fontSize: 12, color: '#1e466b', background: '#e8f1fb',
               border: '1px solid #bcd9f2', borderRadius: 5, padding: '8px 10px',
             }}>
-              Couldn't log the call: {error}
+              Couldn't log the activity: {error}
             </div>
           )}
         </div>
@@ -293,7 +347,7 @@ export default function LogCallModal({ tableName, recordId, onClose, onLogged })
             onClick={handleSave}
             disabled={!canSave}
           >
-            {saving ? 'Saving…' : 'Log Call'}
+            {saving ? 'Saving…' : 'Log Activity'}
           </button>
         </div>
       </div>

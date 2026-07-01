@@ -77,13 +77,16 @@ export async function fetchLinkedContactsForRecord(tableName, recordId) {
     .sort((a, b) => (b.isPrimary - a.isPrimary) || a.name.localeCompare(b.name))
 }
 
-// Log a call against a record. Returns the new activity id. duration is taken
-// in minutes from the composer and stored as seconds. occurredAt is an ISO
-// string (defaults server-side to now() when null). contactId, when provided,
-// is stored as the activity's secondary link (secondary_object='contacts').
-export async function logCall({
+// Log an activity against a record (call, email, meeting, site visit, event,
+// note, …). Returns the new activity id. `activityType` is a managed
+// picklist value. duration is taken in minutes from the composer and stored
+// as seconds. occurredAt is an ISO string (defaults server-side to now() when
+// null). contactId, when provided, is stored as the activity's secondary link
+// (secondary_object='contacts').
+export async function logActivity({
   tableName,
   recordId,
+  activityType = 'Call',
   subject,
   direction = null,
   durationMinutes = null,
@@ -91,7 +94,8 @@ export async function logCall({
   contactId = null,
   comments = null,
 }) {
-  if (!tableName || !recordId) throw new Error('A record is required to log a call.')
+  if (!tableName || !recordId) throw new Error('A record is required to log an activity.')
+  if (!activityType) throw new Error('An activity type is required.')
 
   const minutes = Number(durationMinutes)
   const durationSeconds =
@@ -100,8 +104,8 @@ export async function logCall({
   const { data, error } = await supabase.rpc('log_activity', {
     p_related_object: tableName,
     p_related_id: recordId,
-    p_activity_type: 'Call',
-    p_subject: (subject && subject.trim()) || 'Call',
+    p_activity_type: activityType,
+    p_subject: (subject && subject.trim()) || activityType,
     p_body: (comments && comments.trim()) || null,
     p_direction: direction || null,
     p_duration_seconds: durationSeconds,

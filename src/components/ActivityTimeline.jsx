@@ -17,7 +17,7 @@ import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { fetchActivityTimeline } from '../data/activityService'
 import { fetchActivitiesForRecord } from '../data/callActivityService'
-import LogCallModal from './LogCallModal'
+import LogActivityModal from './LogActivityModal'
 import { supabase } from '../lib/supabase'
 
 // Relative time: "just now", "5 min ago", "2 hr ago", "yesterday", or full date
@@ -55,9 +55,9 @@ const KIND_STYLES = {
   email:        { label: 'Email Sent',   bg: '#eef4fc', color: '#2557a7', dot: '#2557a7' },
   email_failed: { label: 'Email Failed', bg: '#e8f1fb', color: '#1e466b', dot: C.danger },
   // Manually-logged activities (activities table). 'call' is the primary case
-  // (Log a Call); any other activity_type renders with the generic 'activity'
-  // style but still shows its own type label.
-  call:         { label: 'Call Logged',  bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
+  // (green); any other logged activity_type renders with the generic 'activity'
+  // style. The actual type (Meeting, Site Visit, …) is shown via entry.badgeLabel.
+  call:         { label: 'Call',         bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
   activity:     { label: 'Activity',     bg: '#eef4fc', color: '#2557a7', dot: C.sky },
   // Envelope lifecycle entries — populated by list_envelope_events_for_record().
   // Created/Sent are envelope-scoped (no recipient); Opened/Viewed/ConsentGranted/
@@ -143,6 +143,9 @@ function toActivityEntry(row) {
     id: `activity_${row.id}`,
     timestamp: row.performed_at,
     kind: isCall ? 'call' : 'activity',
+    // Badge shows the actual type (Call, Meeting, Site Visit, Email, …) so the
+    // one generic 'activity' style scales as admins add new picklist types.
+    badgeLabel: row.activity_type || 'Activity',
     actorName: row.performed_by_name || 'System',
     changes: [],
     activity: {
@@ -239,7 +242,7 @@ function TimelineEntry({ entry, isLast }) {
             background: kindStyle.bg, color: kindStyle.color,
             fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10,
             textTransform: 'uppercase', letterSpacing: 0.3,
-          }}>{kindStyle.label}</span>
+          }}>{entry.badgeLabel || kindStyle.label}</span>
           <span
             title={fullTimestamp(entry.timestamp)}
             style={{ fontSize: 11, color: C.textMuted, marginLeft: 'auto' }}
@@ -411,9 +414,9 @@ const FILTERS = [
     test: (e) => e.kind === 'update' && e.changes.length > 0,
   },
   {
-    id: 'calls',
-    label: 'Calls',
-    test: (e) => e.kind === 'call',
+    id: 'logged',
+    label: 'Logged activity',
+    test: (e) => e.kind === 'call' || e.kind === 'activity',
   },
   {
     id: 'create_delete',
@@ -423,10 +426,10 @@ const FILTERS = [
   },
 ]
 
-// Small emerald "Log a Call" action button (icon + label). Shown in the
-// timeline header and the empty state so logging a call is always one click
-// away from the record's Activity tab.
-function LogCallButton({ onClick }) {
+// Small emerald "Log Activity" action button (icon + label). Shown in the
+// timeline header and the empty state so logging an activity is always one
+// click away from the record's Activity tab.
+function LogActivityButton({ onClick }) {
   return (
     <button
       type="button"
@@ -441,9 +444,9 @@ function LogCallButton({ onClick }) {
       onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
     >
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.94.36 1.86.68 2.75a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.33-1.33a2 2 0 0 1 2.11-.45c.89.32 1.81.55 2.75.68A2 2 0 0 1 22 16.92z"/>
+        <path d="M12 5v14M5 12h14"/>
       </svg>
-      Log a Call
+      Log Activity
     </button>
   )
 }
@@ -590,11 +593,11 @@ export default function ActivityTimeline({ tableName, recordId }) {
           <div style={{ fontWeight: 500, color: C.textSecondary, marginBottom: 4 }}>
             No activity yet
           </div>
-          <div style={{ marginBottom: 16 }}>Log a call, or changes to tracked fields will appear here.</div>
-          <LogCallButton onClick={() => setShowLogCall(true)} />
+          <div style={{ marginBottom: 16 }}>Log an activity, or changes to tracked fields will appear here.</div>
+          <LogActivityButton onClick={() => setShowLogCall(true)} />
         </div>
         {showLogCall && (
-          <LogCallModal
+          <LogActivityModal
             tableName={tableName}
             recordId={recordId}
             onClose={() => setShowLogCall(false)}
@@ -629,12 +632,12 @@ export default function ActivityTimeline({ tableName, recordId }) {
               ? `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`
               : `${visible.length} of ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`}
           </span>
-          <LogCallButton onClick={() => setShowLogCall(true)} />
+          <LogActivityButton onClick={() => setShowLogCall(true)} />
         </div>
       </div>
 
       {showLogCall && (
-        <LogCallModal
+        <LogActivityModal
           tableName={tableName}
           recordId={recordId}
           onClose={() => setShowLogCall(false)}
