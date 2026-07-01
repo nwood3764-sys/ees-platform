@@ -146,6 +146,14 @@
     <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
     <span class="status" id="finalStatus"></span>
   </div>
+  <p class="note" style="font-size:12.5px;color:var(--mut);margin-top:10px">
+    <strong>50121 files:</strong> built from a known-good 50121 export so they import + submit.
+    <strong>Live-mapped from your reports:</strong> name, address, year, gross floor area,
+    window-to-wall ratio, wall area, conditioned floors, occupancy, headline EUIs, and the
+    50121 whole-building savings %. <strong>Draft placeholders (still the reference model's
+    values — verify before a real submission):</strong> monthly meter readings, envelope R-values,
+    HVAC details, and the measures/package. These are the next mapping pass.
+  </p>
 </div>
 
 <script>
@@ -854,19 +862,107 @@ function buildSingleXML(which){
   return '<?xml version="1.0" encoding="utf-8"?>\n'+new XMLSerializer().serializeToString(doc);
 }
 
-function downloadXML(which){
+/* ---- 50121 HOMES Audit Template output ----
+   The DOE Audit Template importer only accepts a *complete* 50121 file (a bare
+   BuildingSync file is rejected as an unrecognized "cities"/reporting-program
+   report). So instead of hand-building the XML, we start from a known-good 50121
+   export (templates/50121_*_template.xml, both confirmed to import + submit) and
+   inject THIS building's values into it. Fields not derivable from the Asset
+   Score report keep the template's values (flagged in the UI as draft). */
+const NS_AUC='http://buildingsync.net/schemas/bedes-auc/2019';
+function _q(doc,tag){return doc.getElementsByTagNameNS(NS_AUC,tag);}
+function _setFirst(doc,tag,val){const e=_q(doc,tag)[0];if(e&&val!=null&&val!=='')e.textContent=String(val);}
+function _setUDF(doc,name,val){
+  if(val==null||val==='')return false;
+  const flds=_q(doc,'UserDefinedField');
+  for(const f of flds){const n=f.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
+    if(n&&n.textContent===name){const v=f.getElementsByTagNameNS(NS_AUC,'FieldValue')[0];
+      if(v)v.textContent=String(val);return true;}}
+  return false;
+}
+function _setScenarioEUI(doc,scenarioName,val){
+  if(val==null)return;
+  for(const s of _q(doc,'Scenario')){
+    const nm=s.getElementsByTagNameNS(NS_AUC,'ScenarioName')[0];
+    if(nm&&nm.textContent.trim()===scenarioName){
+      const eui=s.getElementsByTagNameNS(NS_AUC,'SiteEnergyUseIntensity')[0];
+      if(eui)eui.textContent=String(val);return;}}
+}
+async function build50121XML(which){
+  const url = which==='improved' ? 'templates/50121_improved_template.xml'
+                                 : 'templates/50121_baseline_template.xml';
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('could not load the 50121 template ('+resp.status+')');
+  const doc = new DOMParser().parseFromString(await resp.text(),'application/xml');
+  if(doc.querySelector('parsererror')) throw new Error('template parse error');
+
+  const asB=data.asBase, asI=data.asImp;
+  const as = which==='improved' ? (asI||asB) : asB;
+
+  // Whole-building savings % (the 50121 qualification driver) + headline EUIs.
+  const b=annual(data.osBase), i=annual(data.osImp);
+  const osPct=(b.kbtu-i.kbtu)/b.kbtu*100;
+  const statedPct=(asI&&asI.savingsPct!=null)?asI.savingsPct:osPct;
+  const baseEUI = asB?asB.euiCurrent:null;
+  const impEUI  = asI?asI.euiUpgraded:(asB?asB.euiUpgraded:null);
+
+  // Identity
+  _setFirst(doc,'PremisesName', cleanName(as.name));
+  _setFirst(doc,'StreetAddress', as.street||asB.street||'');
+  _setFirst(doc,'City', as.city||asB.city||'');
+  _setFirst(doc,'State', as.state||'WI');
+  _setFirst(doc,'PostalCode', as.zip||asB.zip||'');
+  _setFirst(doc,'YearOfConstruction', as.yearBuilt);
+  _setFirst(doc,'OverallWindowToWallRatio', as.wwr);
+  _setFirst(doc,'TotalExteriorAboveGradeWallArea', as.wallArea);
+  if(as.floorsAbove!=null)_setFirst(doc,'ConditionedFloorsAboveGrade', as.floorsAbove);
+  if(as.floorsBelow!=null)_setFirst(doc,'ConditionedFloorsBelowGrade', as.floorsBelow);
+
+  // Building-level gross / heated-and-cooled floor areas -> GFA (page-1 value).
+  const building=_q(doc,'Building')[0];
+  if(building){
+    for(const c of building.children){ if(c.localName!=='FloorAreas') continue;
+      for(const fa of c.children){
+        const t=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaType')[0];
+        const v=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0];
+        if(t&&v&&(t.textContent==='Gross'||t.textContent==='Heated and Cooled')&&as.gfa)
+          v.textContent=Number(as.gfa).toFixed(1);
+      }
+      break; // only the building-level FloorAreas, not the sections'
+    }
+  }
+
+  // Occupancy + the 50121 fields.
+  if(as.occupants!=null)_setFirst(doc,'OccupantQuantity', as.occupants);
+  _setUDF(doc,'50121 HOMES Whole Building Reported Energy Savings Percentage', Math.round(statedPct));
+  _setUDF(doc,'Metering Year Start Dates', startDateFor(asB));
+
+  // Headline EUIs. In the baseline file: benchmark=current(baseline), target=improved.
+  // In the improved file: benchmark=current(improved).
+  if(which==='improved'){ _setScenarioEUI(doc,'benchmark', impEUI); }
+  else { _setScenarioEUI(doc,'benchmark', baseEUI); _setScenarioEUI(doc,'target', impEUI); }
+
+  let s=new XMLSerializer().serializeToString(doc);
+  // The template already carries an XML declaration (and the serializer re-emits
+  // it); only add one if it's somehow missing, so we never produce a duplicate.
+  if(!/^\s*<\?xml/i.test(s)) s='<?xml version="1.0" encoding="utf-8" ?>\n'+s;
+  return s;
+}
+
+async function downloadXML(which){
   const fs=document.getElementById('finalStatus');
+  fs.className='status'; fs.textContent='Building 50121 file…';
   try{
     const as = which==='improved' ? (data.asImp||data.asBase) : data.asBase;
-    const xml=buildSingleXML(which);
+    const xml=await build50121XML(which);
     const blob=new Blob([xml],{type:'application/xml'});
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
     const tag = which==='improved' ? 'Improved' : 'Baseline';
-    a.download=cleanName(as.name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_'+tag+'_AuditTemplate.xml';
+    a.download=cleanName(as.name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_'+tag+'_50121_AuditTemplate.xml';
     a.click();
     fs.className='status ok';
-    fs.textContent=tag+' Audit Template downloaded. Import it under Buildings → Import.';
+    fs.textContent=tag+' 50121 file downloaded. Import under Building → Import buildings → Import BuildingSync XML.';
   }catch(err){fs.className='status err';fs.textContent='Build error: '+err.message;}
 }
 document.getElementById('buildBase').onclick=()=>downloadXML('baseline');
