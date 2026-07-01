@@ -22,7 +22,7 @@ const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkO
 const SendForSignatureModal               = lazy(() => import('./SendForSignatureModal'))
 const AccountMergeModal                    = lazy(() => import('./AccountMergeModal'))
 const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
-const LogCallModal                         = lazy(() => import('./LogCallModal'))
+const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
 
 import { useToast } from './Toast'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
@@ -5840,7 +5840,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RESTORE]:                handleRestore,
     [ACTION_KEYS.MERGE_ACCOUNT]:          () => setShowMergeModal(true),
     [ACTION_KEYS.ADD_TO_PORTAL]:          () => setShowPortalModal(true),
-    [ACTION_KEYS.LOG_A_CALL]:             () => setShowLogCall(true),
+    [ACTION_KEYS.LOG_ACTIVITY]:           () => setShowLogCall(true),
   }
 
   // Per-action pending flag — drives the disabled+wait-cursor+ellipsis label
@@ -6598,7 +6598,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           />
         )}
         {showLogCall && (
-          <LogCallModal
+          <LogActivityModal
             tableName={tableName}
             recordId={recordId}
             onClose={() => setShowLogCall(false)}
