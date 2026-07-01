@@ -272,7 +272,7 @@ function TreeSidebar({ tree, sel, open, setOpen, onSelect, query, setQuery, user
                             <span onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, proj: o.proj === prKey ? null : prKey })) }}
                               style={{ width: 14, display: 'flex', justifyContent: 'center', color: C.navInactive, transform: prOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', opacity: prUnits.length ? 1 : 0 }}>{IconChevR}</span>
                             <span style={{ width: 7, height: 7, borderRadius: '50%', background: colorOf(pr.opportunity?.program), margin: '0 7px 0 1px', flexShrink: 0 }} />
-                            <span style={{ flex: 1, fontSize: 11.5, color: prActive ? '#fff' : 'rgba(255,255,255,.72)', fontWeight: prActive ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'JetBrains Mono, monospace' }}>{pr.recordType || pr.name}</span>
+                            <span style={{ flex: 1, fontSize: 11.5, color: prActive ? '#fff' : 'rgba(255,255,255,.72)', fontWeight: prActive ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{pr.recordType || pr.name}</span>
                           </div>
 
                           {prOpen && prUnits.map((u) => {
@@ -392,7 +392,7 @@ function PhotoStrip({ photos }) {
 function ProgRow({ program, pct, color }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
-      <span style={{ width: 132, fontWeight: 600, color, fontSize: 10, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={program}>{program}</span>
+      <span style={{ width: 132, fontWeight: 600, color, fontSize: 10, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={program}>{program}</span>
       <Bar pct={pct ?? 0} color={color} />
       <span style={{ width: 34, fontSize: 11, fontWeight: 600, color: C.textSecondary, textAlign: 'right' }}>{pct == null ? '—' : `${pct}%`}</span>
     </div>
@@ -406,7 +406,7 @@ function ProgramLegend({ programs, colorOf }) {
       {programs.map((pg) => (
         <span key={pg} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: C.textSecondary }}>
           <span style={{ width: 10, height: 10, borderRadius: 3, background: colorOf(pg) }} />
-          <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{pg}</span>
+          <span style={{ fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{pg}</span>
         </span>
       ))}
     </div>
@@ -487,7 +487,7 @@ function PropertyPage({ property, programs, colorOf, onOpenBuilding }) {
             <div key={o.id} onClick={() => onOpenBuilding(b)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: colorOf(o.program), flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={o.name}>{shortOppName(o.name, property.name)}</div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={o.name}>{shortOppName(o.name, property.name)}</div>
                 {o.recordTypeDescription && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>{o.recordTypeDescription}</div>}
               </div>
               <span style={{ fontSize: 11.5, color: C.textSecondary, whiteSpace: 'nowrap' }}>{shortStageLabel(o.stageLabel)}</span>
@@ -544,7 +544,7 @@ function OpportunityCard({ program, opp, color, onOpenProject }) {
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11, overflow: 'hidden', marginBottom: 16 }}>
       <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 9, background: `${color}14` }}>
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: color }} />
-        <span style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{program}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{program}</span>
         {opp && <span style={{ marginLeft: 'auto', fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{opp.recordNumber}</span>}
       </div>
       <div style={{ padding: '20px 22px 16px' }}>
@@ -564,7 +564,7 @@ function OpportunityCard({ program, opp, color, onOpenProject }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {projects.map((pr) => (
                 <div key={pr.id} onClick={() => onOpenProject(pr)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', border: `1px solid ${C.border}`, borderRadius: 8, cursor: 'pointer', background: C.page }}>
-                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pr.recordType || pr.name}</span>
+                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pr.recordType || pr.name}</span>
                   <StatusBadge status={pr.status} />
                   <span style={{ fontSize: 11, color: C.textMuted, width: 52, textAlign: 'right' }}>{pr.workOrders.length} WO</span>
                   <span style={{ fontSize: 13, color: C.emeraldMid, fontWeight: 700 }}>→</span>
@@ -599,7 +599,7 @@ function WorkOrderRow({ wo }) {
       <div onClick={() => steps.length && setOpen((o) => !o)}
         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px', fontSize: 12.5, cursor: steps.length ? 'pointer' : 'default' }}>
         <span style={{ width: 14, display: 'flex', justifyContent: 'center', color: C.textMuted, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', opacity: steps.length ? 1 : 0 }}>{IconChevR}</span>
-        <span style={{ flex: 1, color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace' }}>{wo.recordType || wo.name}</span>
+        <span style={{ flex: 1, color: C.textSecondary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{wo.recordType || wo.name}</span>
         <span style={{ fontSize: 11, color: C.textMuted }}>{steps.length ? `${steps.length} steps` : ''}</span>
         <StatusBadge status={wo.status} />
       </div>
@@ -628,7 +628,7 @@ function ProjectPage({ property, building, project, opportunity, color }) {
     <div style={{ padding: 22, maxWidth: 1000, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
-        <span style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{project.recordType || project.name}</span>
+        <span style={{ fontSize: 19, fontWeight: 700, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{project.recordType || project.name}</span>
         <StatusBadge status={project.status} />
       </div>
       <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 20 }}>{shortBuildingName(building.name, property.name)} · {opportunity.program}</div>
@@ -665,9 +665,9 @@ function UnitPage({ property, building, unit, colorOf }) {
         <div key={g.program + g.project} style={{ marginBottom: 18 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: colorOf(g.program) }} />
-            <span style={{ fontSize: 12.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>{g.program}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: C.textPrimary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{g.program}</span>
             <span style={{ fontSize: 12, color: C.textMuted }}>·</span>
-            <span style={{ fontSize: 12.5, color: C.textSecondary, fontFamily: 'JetBrains Mono, monospace' }}>{g.project}</span>
+            <span style={{ fontSize: 12.5, color: C.textSecondary, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>{g.project}</span>
           </div>
           <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
             {g.wos.map((w) => <WorkOrderRow key={w.id} wo={w} />)}
@@ -994,7 +994,7 @@ function LoginGate({ onSignedIn }) {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: C.page, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: C.page, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' }}>
       <div style={{ width: '100%', maxWidth: 380, background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 28, boxShadow: '0 1px 3px rgba(13,26,46,.06)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 18 }}>
           <div style={{ width: 30, height: 30, background: C.emerald, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{IconBolt}</div>
@@ -1092,7 +1092,7 @@ export default function ProjectPortalRoot() {
   if (unit) crumb.push({ label: `Unit ${unit.unitNumber}`, onClick: null })
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif', background: C.page }}>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', background: C.page }}>
       <TreeSidebar tree={tree} sel={sel} open={open} setOpen={setOpen} onSelect={onSelect}
         query={query} setQuery={setQuery} user={self} onSignOut={signOut} view={view} setView={setView} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
@@ -1125,7 +1125,7 @@ export default function ProjectPortalRoot() {
 
 function Centered({ children }) {
   return (
-    <div style={{ minHeight: '100vh', background: C.page, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, fontFamily: 'Inter, system-ui, sans-serif', color: C.textSecondary, fontSize: 13.5, textAlign: 'center' }}>
+    <div style={{ minHeight: '100vh', background: C.page, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', color: C.textSecondary, fontSize: 13.5, textAlign: 'center' }}>
       {children}
     </div>
   )
