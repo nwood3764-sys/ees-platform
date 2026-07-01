@@ -352,15 +352,19 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultSortOrder:    50,
     isAvailable: ({ tableName, editing }) => !editing && tableName === 'accounts',
   },
+  // ── Contacts ──────────────────────────────────────────────────────────────
+  // Portal access is granted per CONTACT: adding a contact to the portal is the
+  // single place you pick their role and which of their account's properties
+  // they can view. There is no separate "add account to portal" step.
   add_to_portal: {
     key:                 ACTION_KEYS.ADD_TO_PORTAL,
     label:               'Add to Portal',
     icon:                'M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3',
     color:               ACTION_COLORS.EMERALD,
-    applicableObjects:   ['accounts'],
+    applicableObjects:   ['contacts'],
     defaultTier:         'menu',
     defaultSortOrder:    48,
-    isAvailable: ({ tableName, editing }) => !editing && tableName === 'accounts',
+    isAvailable: ({ tableName, editing }) => !editing && tableName === 'contacts',
   },
 
   // ── Universal — defaulted to menu so they don't crowd the primary row ──
