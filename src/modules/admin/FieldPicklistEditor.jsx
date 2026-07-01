@@ -49,6 +49,7 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
   const [valDragId, setValDragId] = useState(null)
   const [valDragOverId, setValDragOverId] = useState(null)
   const [valBusy, setValBusy] = useState(false)
+  const [valSearch, setValSearch] = useState('')
   // Per-record-type stage ordering (right panel, when a record type is scoped).
   const [rtOrderDragId, setRtOrderDragId] = useState(null)
   const [rtOrderDragOverId, setRtOrderDragOverId] = useState(null)
@@ -278,6 +279,15 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
     ? recordTypes.filter(r => (r.label + r.value).toLowerCase().includes(rtSearch.trim().toLowerCase()))
     : recordTypes
 
+  // Master value-list search. Matches on both the label and the stored value.
+  // While a search is active, drag-to-reorder is disabled — reordering renumbers
+  // the full list by row position, which a filtered subset can't express.
+  const valNeedle = valSearch.trim().toLowerCase()
+  const valFiltering = !!valNeedle
+  const shownValues = valFiltering
+    ? values.filter(v => (v.label || '').toLowerCase().includes(valNeedle) || (v.value || '').toLowerCase().includes(valNeedle))
+    : values
+
   return (
     <div style={{ padding: '16px 24px' }}>
       <div
@@ -305,12 +315,22 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
       <>
         {/* ── Field Values: add / rename / activate / reorder ── */}
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.card, overflow: 'hidden', marginBottom: 20 }}>
-          <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Field Values</div>
-            <button onClick={() => { setAddingValue(true); setNewLabel(''); setNewValue('') }}
-              style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: C.emerald, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <Icon path="M12 5v14M5 12h14" size={12} color="currentColor" /> New Value
-            </button>
+          <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, whiteSpace: 'nowrap' }}>
+              Field Values{valFiltering ? ` (${shownValues.length} of ${values.length})` : ''}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'flex-end' }}>
+              <input
+                value={valSearch}
+                onChange={e => setValSearch(e.target.value)}
+                placeholder="Search values…"
+                style={{ width: '100%', maxWidth: 280, boxSizing: 'border-box', padding: '6px 10px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12, background: C.page, color: C.textPrimary, outline: 'none' }}
+              />
+              <button onClick={() => { setAddingValue(true); setNewLabel(''); setNewValue('') }}
+                style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: C.emerald, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                <Icon path="M12 5v14M5 12h14" size={12} color="currentColor" /> New Value
+              </button>
+            </div>
           </div>
 
           {addingValue && (
@@ -329,10 +349,10 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
           <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 1fr 110px 100px', gap: 8, padding: '8px 14px', background: '#fafbfd', borderBottom: `1px solid ${C.border}`, fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
             <div></div><div>Label</div><div>Stored Value</div><div style={{ textAlign: 'center' }}>Status</div><div style={{ textAlign: 'right' }}>Actions</div>
           </div>
-          {values.map(v => (
+          {shownValues.map(v => (
             <div key={v._id}>
             <div
-              draggable={editingValueId !== v._id && editingDescId !== v._id}
+              draggable={!valFiltering && editingValueId !== v._id && editingDescId !== v._id}
               onDragStart={() => setValDragId(v._id)}
               onDragOver={e => { e.preventDefault(); setValDragOverId(v._id) }}
               onDrop={() => onValueDrop(v._id)}
@@ -340,7 +360,8 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
               style={{ display: 'grid', gridTemplateColumns: '32px 1fr 1fr 110px 168px', gap: 8, alignItems: 'center', padding: '8px 14px', borderBottom: `1px solid ${C.border}`,
                 background: valDragOverId === v._id && valDragId !== v._id ? '#f0faf5' : (v.active ? 'transparent' : '#fafbfd'),
                 opacity: valDragId === v._id ? 0.5 : (v.active ? 1 : 0.6) }}>
-              <div style={{ cursor: 'grab', color: C.textMuted, textAlign: 'center', fontSize: 14 }} title="Drag to reorder">⋮⋮</div>
+              <div style={{ cursor: valFiltering ? 'default' : 'grab', color: C.textMuted, textAlign: 'center', fontSize: 14, opacity: valFiltering ? 0.3 : 1 }}
+                title={valFiltering ? 'Clear the search to reorder values' : 'Drag to reorder'}>⋮⋮</div>
               {editingValueId === v._id ? (
                 <input autoFocus value={editLabel} onChange={e => setEditLabel(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') commitRename(v._id); if (e.key === 'Escape') setEditingValueId(null) }}
@@ -400,8 +421,10 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
             )}
             </div>
           ))}
-          {values.length === 0 && (
-            <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>No values yet. Add the first one.</div>
+          {shownValues.length === 0 && (
+            <div style={{ padding: 16, fontSize: 12, color: C.textMuted }}>
+              {valFiltering ? `No values match "${valSearch.trim()}".` : 'No values yet. Add the first one.'}
+            </div>
           )}
         </div>
 
