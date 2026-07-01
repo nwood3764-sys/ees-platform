@@ -72,6 +72,16 @@ const WIDGET_TYPES = [
           'must be set in widget config after creation.',
     placeholder: 'e.g. Conversations',
   },
+  {
+    value: 'map',
+    widgetType: 'map',
+    config: { tile_layer: 'satellite', zoom: 17, height: 420 },
+    label: 'Map',
+    hint: 'Interactive satellite map pinned to the record’s coordinates ' +
+          '(property_latitude / property_longitude). Best on Properties. ' +
+          'Includes an Open in Google Maps link.',
+    placeholder: 'e.g. Map',
+  },
 ]
 
 export default function AddWidgetModal({
