@@ -187,3 +187,4 @@ Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (
 | Agent operating mode | `leap-agent-operating-mode.md` |
 | Build discipline (folded into this file) | `leap-build-discipline.md` |
 | Naming standard (folded into this file) | `leap-naming-standard.md` |
+| Session log 2026-07-01 (nav/list/layout/property fixes + verification) | `leap-session-2026-07-01.md` |
