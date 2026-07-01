@@ -1219,6 +1219,23 @@ export async function fetchDependentLookupOptions(field, record) {
         label: r.building_name || r.id.slice(0, 8),
       }))
     }
+    case 'opportunities_for_contact_account': {
+      // Contact-first Opportunity Contact Roles: once a contact is chosen (or
+      // prefilled from the contact you came from), scope the Opportunity picker
+      // to that contact's account. Empty until a contact is set.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_opportunities_for_contact_account', {
+        p_contact_id: dependencyValues[0],
+        p_include_opportunity_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.opportunity_name || r.id.slice(0, 8),
+      }))
+    }
     default:
       throw new Error(`Unknown lookup_dependency kind: ${dep.kind}`)
   }
