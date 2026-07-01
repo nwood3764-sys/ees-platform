@@ -269,6 +269,7 @@ function RecordTypeRow({
   const toast = useToast()
   const [label, setLabel] = useState(row.label)
   const [value, setValue] = useState(row.value)
+  const [description, setDescription] = useState(row.description || '')
   const [sortOrder, setSortOrder] = useState(String(row.sortOrder))
   const [state, setState] = useState(row.state || '')
   const [saving, setSaving] = useState(false)
@@ -278,10 +279,11 @@ function RecordTypeRow({
     if (!editing) {
       setLabel(row.label)
       setValue(row.value)
+      setDescription(row.description || '')
       setSortOrder(String(row.sortOrder))
       setState(row.state || '')
     }
-  }, [row.id, editing, row.label, row.value, row.sortOrder, row.state])
+  }, [row.id, editing, row.label, row.value, row.description, row.sortOrder, row.state])
 
   async function save() {
     if (!label.trim() || !value.trim()) {
@@ -297,6 +299,7 @@ function RecordTypeRow({
       await updateRecordType(row.id, {
         label: label.trim(),
         value: value.trim(),
+        description: description.trim(),
         sortOrder: parseInt(sortOrder, 10) || 0,
         state: state.trim().toUpperCase() || null,
       })
@@ -310,8 +313,10 @@ function RecordTypeRow({
   }
 
   return (
+    <>
     <div style={{
       ...tableRowStyle,
+      borderBottom: editing ? 'none' : tableRowStyle.borderBottom,
       opacity: !row.isActive ? 0.55 : 1,
       background: busy ? '#f7f9fc' : 'transparent',
     }}>
@@ -412,6 +417,25 @@ function RecordTypeRow({
         )}
       </div>
     </div>
+    {editing && (
+      <div style={{
+        padding: '0 14px 12px',
+        borderBottom: `1px solid ${C.border}`,
+        background: busy ? '#f7f9fc' : 'transparent',
+      }}>
+        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+          Description
+        </label>
+        <textarea
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="What this record type is for (e.g. which program, property, or process it applies to)…"
+          rows={2}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '6px 9px', fontSize: 12.5, color: C.textPrimary, background: C.card, border: `1px solid ${C.borderDark || C.border}`, borderRadius: 4, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }}
+        />
+      </div>
+    )}
+    </>
   )
 }
 
