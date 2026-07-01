@@ -227,9 +227,16 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
           <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}`, background: C.cardSecondary }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Fields</div>
             <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Click to add to the selected section (column 1; drag to place).</div>
+            <input
+              value={fieldSearch}
+              onChange={e => setFieldSearch(e.target.value)}
+              placeholder="Search fields…"
+              style={{ width: '100%', boxSizing: 'border-box', marginTop: 8, padding: '6px 9px', fontSize: 12,
+                border: `1px solid ${C.border}`, borderRadius: 5, background: C.card, color: C.textPrimary, outline: 'none' }}
+            />
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
-            {available.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, padding: 6 }}>All fields placed.</div>
+            {available.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, padding: 6 }}>{fieldQuery ? 'No fields match your search.' : 'All fields placed.'}</div>
               : available.map(c => (
                 <button key={c.name} onClick={() => activeSection && addField(activeSection, c)} disabled={!activeSection}
                   title={activeSection ? `Add ${c.name}` : 'Select a section first'}
