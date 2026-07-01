@@ -33,6 +33,7 @@ import { runIncomeQualification } from '../data/incomeQualificationService'
 import ConversationPanelWidget from './ConversationPanel'
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
+import PropertyMapWidget from './PropertyMapWidget'
 import StatusTransitionsBar from './StatusTransitionsBar'
 import TopbarActions from './TopbarActions'
 import { ACTION_KEYS } from '../data/recordActions'
@@ -4431,7 +4432,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   // section_config_editor, filter_config_editor, and merge_field_reference.
   // Related lists, file galleries, prtsn history, and the activity timeline
   // render as their own standalone cards outside sections.
-  const inSectionTypes = new Set(['field_group', 'section_config_editor', 'filter_config_editor', 'merge_field_reference'])
+  const inSectionTypes = new Set(['field_group', 'section_config_editor', 'filter_config_editor', 'merge_field_reference', 'map'])
   // hiddenWidgetTypes is a Set of widget_type values to suppress at render
   // time — used by the parent to hide context-dependent widgets (e.g.
   // merge_field_reference is only relevant when document_templates is in
@@ -4467,6 +4468,9 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
         }
         if (w.widget_type === 'merge_field_reference') {
           return <MergeFieldReferenceWidget key={w.id} widget={w} />
+        }
+        if (w.widget_type === 'map') {
+          return <PropertyMapWidget key={w.id} widget={w} record={record} tableName={tableName} embedded />
         }
         return null
       })}
