@@ -140,12 +140,38 @@
   </div>
 
   <div class="bar">
+    <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
     <button class="btn" id="buildBase" disabled>↓ Baseline Audit Template</button>
     <button class="btn" id="buildImp" disabled>↓ Improved Audit Template</button>
     <button class="btn ghost" id="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
     <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
     <span class="status" id="finalStatus"></span>
   </div>
+  <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <strong style="font:700 15px/1.2 Georgia,serif">AI pre-export review</strong>
+      <span class="copyhint" id="reviewStatus"></span>
+    </div>
+    <div id="reviewSummary" style="margin:8px 0;font-size:13.5px"></div>
+    <div id="reviewFindings"></div>
+  </div>
+  <div id="occRow" style="margin-top:12px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+    <strong>Occupancy</strong>
+    <label>Dwelling units
+      <input id="occUnits" type="number" min="1" value="6" style="width:64px;margin-left:4px"></label>
+    <label>Bedrooms per unit
+      <input id="occBeds" type="number" min="0" value="2" style="width:64px;margin-left:4px"></label>
+    <span class="copyhint" id="occCalc"></span>
+  </div>
+  <p class="note" style="font-size:12.5px;color:var(--mut);margin-top:10px">
+    <strong>50121 files:</strong> built from a known-good 50121 export so they import + submit.
+    <strong>Live-mapped from your Asset Score report:</strong> name, address, year, gross &amp;
+    use-type floor areas, window-to-wall ratio, wall area, conditioned floors, envelope R-values,
+    boiler (capacity/efficiency/year), water heater, headline EUIs, and the 50121 whole-building
+    savings %. Occupancy is computed from the units &amp; bedrooms above (2 in the master + 1 per
+    additional bedroom). Monthly energy loads from the utility spreadsheet (DOE loads that
+    separately). HVAC delivery/measures detail is the remaining refinement pass.
+  </p>
 </div>
 
 <script>
@@ -240,6 +266,13 @@ function parseAssetScore(t){
   d.coolCop=num(/Efficiency\s+([\d.]+)\s*COP/,t);
   d.coolTons=num(/Capacity\s+([\d.]+)\s*tons/,t);
   d.whe=num(/Water Heater Efficiency\s+([\d.]+)\s*Et/,t);
+  // Boiler / heating plant detail (page "BUILDING CHARACTERISTICS SUMMARY / Plants").
+  d.boilerYear=num(/Year of Manufacture\s+(\d{4})/,t);          // first = heating plant
+  d.boilerEff=num(/Thermal Efficiency\s+([\d.]+)%/,t);          // "Thermal Efficiency 80.0% Et"
+  // Use-type square footage from the "Building Use Types" section — gives the
+  // conditioned/common split the Audit Template asks for (e.g. 5,796 + 701 = GFA).
+  d.useMultifamilyArea=num(/Multi-family\s*\(fewer than 4 floors\):\s*([\d,]+)\s*ft/i,t);
+  d.useCommonArea=num(/Common Area:\s*([\d,]+)\s*ft/i,t);
   // Floor count from block detail ("Above Ground: 2 floors / Below Ground: 0 floors")
   d.floorsAbove=num(/Above Ground:\s*(\d+)\s*floors?/i,t);
   d.floorsBelow=num(/Below Ground:\s*(\d+)\s*floors?/i,t);
@@ -467,6 +500,7 @@ function refresh(){
   document.getElementById('buildImp').disabled=!have;
   document.getElementById('utilBase').disabled=!have;
   document.getElementById('utilImp').disabled=!have;
+  document.getElementById('smartReview').disabled=!have;
   if(!have){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
   // monthly shape, so the resulting EUI matches the Asset Score PDF. Runs once per refresh.
@@ -854,23 +888,232 @@ function buildSingleXML(which){
   return '<?xml version="1.0" encoding="utf-8"?>\n'+new XMLSerializer().serializeToString(doc);
 }
 
-function downloadXML(which){
+/* ---- 50121 HOMES Audit Template output ----
+   The DOE Audit Template importer only accepts a *complete* 50121 file (a bare
+   BuildingSync file is rejected as an unrecognized "cities"/reporting-program
+   report). So instead of hand-building the XML, we start from a known-good 50121
+   export (templates/50121_*_template.xml, both confirmed to import + submit) and
+   inject THIS building's values into it. Fields not derivable from the Asset
+   Score report keep the template's values (flagged in the UI as draft). */
+const NS_AUC='http://buildingsync.net/schemas/bedes-auc/2019';
+function _q(doc,tag){return doc.getElementsByTagNameNS(NS_AUC,tag);}
+function _setFirst(doc,tag,val){const e=_q(doc,tag)[0];if(e&&val!=null&&val!=='')e.textContent=String(val);}
+function _setUDF(doc,name,val){
+  if(val==null||val==='')return false;
+  const flds=_q(doc,'UserDefinedField');
+  for(const f of flds){const n=f.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
+    if(n&&n.textContent===name){const v=f.getElementsByTagNameNS(NS_AUC,'FieldValue')[0];
+      if(v)v.textContent=String(val);return true;}}
+  return false;
+}
+function _setScenarioEUI(doc,scenarioName,val){
+  if(val==null)return;
+  for(const s of _q(doc,'Scenario')){
+    const nm=s.getElementsByTagNameNS(NS_AUC,'ScenarioName')[0];
+    if(nm&&nm.textContent.trim()===scenarioName){
+      const eui=s.getElementsByTagNameNS(NS_AUC,'SiteEnergyUseIntensity')[0];
+      if(eui)eui.textContent=String(val);return;}}
+}
+async function build50121XML(which){
+  const url = which==='improved' ? 'templates/50121_improved_template.xml'
+                                 : 'templates/50121_baseline_template.xml';
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('could not load the 50121 template ('+resp.status+')');
+  const doc = new DOMParser().parseFromString(await resp.text(),'application/xml');
+  if(doc.querySelector('parsererror')) throw new Error('template parse error');
+
+  const asB=data.asBase, asI=data.asImp;
+  const as = which==='improved' ? (asI||asB) : asB;
+
+  // Whole-building savings % (the 50121 qualification driver) + headline EUIs.
+  const b=annual(data.osBase), i=annual(data.osImp);
+  const osPct=(b.kbtu-i.kbtu)/b.kbtu*100;
+  const statedPct=(asI&&asI.savingsPct!=null)?asI.savingsPct:osPct;
+  const baseEUI = asB?asB.euiCurrent:null;
+  const impEUI  = asI?asI.euiUpgraded:(asB?asB.euiUpgraded:null);
+
+  // Identity
+  _setFirst(doc,'PremisesName', cleanName(as.name));
+  _setFirst(doc,'StreetAddress', as.street||asB.street||'');
+  _setFirst(doc,'City', as.city||asB.city||'');
+  _setFirst(doc,'State', as.state||'WI');
+  _setFirst(doc,'PostalCode', as.zip||asB.zip||'');
+  _setFirst(doc,'YearOfConstruction', as.yearBuilt);
+  _setFirst(doc,'OverallWindowToWallRatio', as.wwr);
+  _setFirst(doc,'TotalExteriorAboveGradeWallArea', as.wallArea);
+  if(as.floorsAbove!=null)_setFirst(doc,'ConditionedFloorsAboveGrade', as.floorsAbove);
+  if(as.floorsBelow!=null)_setFirst(doc,'ConditionedFloorsBelowGrade', as.floorsBelow);
+
+  // Building-level gross / heated-and-cooled floor areas -> GFA (page-1 value).
+  const building=_q(doc,'Building')[0];
+  if(building){
+    for(const c of building.children){ if(c.localName!=='FloorAreas') continue;
+      for(const fa of c.children){
+        const t=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaType')[0];
+        const v=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0];
+        if(t&&v&&(t.textContent==='Gross'||t.textContent==='Heated and Cooled')&&as.gfa)
+          v.textContent=Number(as.gfa).toFixed(1);
+      }
+      break; // only the building-level FloorAreas, not the sections'
+    }
+  }
+
+  // Occupancy + the 50121 fields.
+  if(as.occupants!=null)_setFirst(doc,'OccupantQuantity', as.occupants);
+  _setUDF(doc,'50121 HOMES Whole Building Reported Energy Savings Percentage', Math.round(statedPct));
+  _setUDF(doc,'Metering Year Start Dates', startDateFor(asB));
+
+  // Headline EUIs. In the baseline file: benchmark=current(baseline), target=improved.
+  // In the improved file: benchmark=current(improved).
+  if(which==='improved'){ _setScenarioEUI(doc,'benchmark', impEUI); }
+  else { _setScenarioEUI(doc,'benchmark', baseEUI); _setScenarioEUI(doc,'target', impEUI); }
+
+  // ---- Deep building-science fields (Asset Score PDF is authoritative) ----
+  // Envelope assemblies
+  _setFirst(doc,'WallInsulationRValue', as.wallR);
+  _setFirst(doc,'RoofInsulationRValue', as.roofR);
+  // Domestic hot water
+  _setFirst(doc,'WaterHeaterEfficiency', as.whe);
+  // Heating plant / boiler: capacity (kBtu/hr), efficiency, year installed.
+  const boiler=_q(doc,'Boiler')[0];
+  if(boiler){
+    const oc=boiler.getElementsByTagNameNS(NS_AUC,'OutputCapacity')[0];
+    if(oc&&as.heatCap!=null)oc.textContent=Number(as.heatCap).toFixed(1);
+    const eff=boiler.getElementsByTagNameNS(NS_AUC,'AnnualHeatingEfficiencyValue')[0];
+    if(eff&&(as.boilerEff!=null||as.whe!=null))eff.textContent=Number(as.boilerEff!=null?as.boilerEff:as.whe).toFixed(1);
+  }
+  const hp=_q(doc,'HeatingPlant')[0];
+  if(hp&&as.boilerYear!=null){
+    const yi=hp.getElementsByTagNameNS(NS_AUC,'YearInstalled')[0];
+    if(yi)yi.textContent=String(as.boilerYear);
+  }
+  // Cooling (DX): set efficiency (COP) + capacity (tons -> kBtu/hr) on the
+  // cooling source that carries an efficiency value (the DX one; a NoCooling
+  // block has none, so it's skipped).
+  for(const cs of _q(doc,'CoolingSource')){
+    const eff=cs.getElementsByTagNameNS(NS_AUC,'AnnualCoolingEfficiencyValue')[0];
+    if(!eff)continue;
+    if(as.coolCop!=null)eff.textContent=Number(as.coolCop).toFixed(2);
+    const cap=cs.getElementsByTagNameNS(NS_AUC,'Capacity')[0];
+    if(cap&&as.coolTons!=null)cap.textContent=Number(as.coolTons*12).toFixed(1);
+  }
+  // Space-function section floor areas -> scale the template's split to THIS
+  // building's multifamily use-type area (from "Building Use Types"), preserving
+  // the internal conditioned/common/tenant proportions.
+  if(as.useMultifamilyArea){
+    for(const sec of _q(doc,'Section')){
+      const st=sec.getElementsByTagNameNS(NS_AUC,'SectionType')[0];
+      if(!st||st.textContent!=='Space function')continue;
+      // the section's own FloorAreas (direct child)
+      for(const c of sec.children){ if(c.localName!=='FloorAreas')continue;
+        const fas=[...c.children];
+        // find current Gross value to compute the scale ratio
+        let curGross=null;
+        for(const fa of fas){const t=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaType')[0];
+          if(t&&t.textContent==='Gross'){curGross=parseFloat(fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0].textContent);}}
+        if(curGross>0){const ratio=as.useMultifamilyArea/curGross;
+          for(const fa of fas){const v=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0];
+            if(v){v.textContent=(parseFloat(v.textContent)*ratio).toFixed(1);}}}
+        break;
+      }
+      break;
+    }
+  }
+
+  // Occupancy: units x (bedrooms + 1)  [2 in the master + 1 per extra bedroom].
+  const units=Math.max(1, parseInt((document.getElementById('occUnits')||{}).value)||6);
+  const beds =Math.max(0, parseInt((document.getElementById('occBeds')||{}).value)||2);
+  const occupants=units*Math.max(1, beds+1);
+  _setFirst(doc,'OccupantQuantity', occupants);
+  const su=_q(doc,'SpatialUnit')[0];
+  if(su){const nu=su.getElementsByTagNameNS(NS_AUC,'NumberOfUnits')[0]; if(nu)nu.textContent=String(units);}
+
+  let s=new XMLSerializer().serializeToString(doc);
+  // The template already carries an XML declaration (and the serializer re-emits
+  // it); only add one if it's somehow missing, so we never produce a duplicate.
+  if(!/^\s*<\?xml/i.test(s)) s='<?xml version="1.0" encoding="utf-8" ?>\n'+s;
+  return s;
+}
+
+async function downloadXML(which){
   const fs=document.getElementById('finalStatus');
+  fs.className='status'; fs.textContent='Building 50121 file…';
   try{
     const as = which==='improved' ? (data.asImp||data.asBase) : data.asBase;
-    const xml=buildSingleXML(which);
+    const xml=await build50121XML(which);
     const blob=new Blob([xml],{type:'application/xml'});
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
     const tag = which==='improved' ? 'Improved' : 'Baseline';
-    a.download=cleanName(as.name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_'+tag+'_AuditTemplate.xml';
+    a.download=cleanName(as.name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_'+tag+'_50121_AuditTemplate.xml';
     a.click();
     fs.className='status ok';
-    fs.textContent=tag+' Audit Template downloaded. Import it under Buildings → Import.';
+    fs.textContent=tag+' 50121 file downloaded. Import under Building → Import buildings → Import BuildingSync XML.';
   }catch(err){fs.className='status err';fs.textContent='Build error: '+err.message;}
 }
 document.getElementById('buildBase').onclick=()=>downloadXML('baseline');
 document.getElementById('buildImp').onclick=()=>downloadXML('improved');
+// Live occupancy readout (units x (bedrooms+1)).
+(function(){
+  const u=document.getElementById('occUnits'), bd=document.getElementById('occBeds'),
+        out=document.getElementById('occCalc');
+  function upd(){const units=Math.max(1,parseInt(u.value)||6),beds=Math.max(0,parseInt(bd.value)||2);
+    out.textContent='→ '+(units*Math.max(1,beds+1))+' occupants';}
+  if(u&&bd&&out){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
+})();
+
+/* ---------- Smart pre-export review (Claude audits the mapping) ---------- */
+// Collect exactly what the tool will write, so Claude can check it vs the reports.
+function buildMappedForReview(){
+  const asB=data.asBase, asI=data.asImp;
+  const units=Math.max(1,parseInt((document.getElementById('occUnits')||{}).value)||6);
+  const beds =Math.max(0,parseInt((document.getElementById('occBeds')||{}).value)||2);
+  let osPct=null;
+  try{const b=annual(data.osBase),i=annual(data.osImp);osPct=+((b.kbtu-i.kbtu)/b.kbtu*100).toFixed(1);}catch(e){}
+  const pick=a=>a?{name:a.name,address:(a.street||'')+', '+(a.cityStateZip||''),grossFloorArea:a.gfa,
+    yearBuilt:a.yearBuilt,climateZone:a.climateZone,euiCurrent:a.euiCurrent,euiUpgraded:a.euiUpgraded,
+    gasEui:[a.gasEuiCur,a.gasEuiUpg],elecEui:[a.elecEuiCur,a.elecEuiUpg],savingsPct:a.savingsPct,
+    wallR:a.wallR,roofR:a.roofR,wwr:a.wwr,wallArea:a.wallArea,windowArea:a.windowArea,roofArea:a.roofArea,
+    floorsAbove:a.floorsAbove,floorsBelow:a.floorsBelow,boilerCapacity_kBtu_hr:a.heatCap,boilerEfficiency:a.boilerEff,
+    boilerYear:a.boilerYear,coolingCOP:a.coolCop,coolingTons:a.coolTons,waterHeaterEt:a.whe,
+    useMultifamilyArea:a.useMultifamilyArea,useCommonArea:a.useCommonArea,measures:a.measures}:null;
+  return {baseline:pick(asB), improved:pick(asI),
+    occupancy:{dwellingUnits:units,bedroomsPerUnit:beds,computedOccupants:units*Math.max(1,beds+1)},
+    openStudioSavingsPct:osPct, meteringYearStart:startDateFor(asB)};
+}
+(function(){
+  const btn=document.getElementById('smartReview'), panel=document.getElementById('reviewPanel'),
+        stat=document.getElementById('reviewStatus'), sum=document.getElementById('reviewSummary'),
+        list=document.getElementById('reviewFindings');
+  if(!btn)return;
+  const SEV={gap:['✗','var(--warn)'],mismatch:['≠','var(--warn)'],question:['?','var(--gold)'],ok:['✓','var(--moss)']};
+  btn.onclick=async ()=>{
+    panel.style.display='block'; sum.innerHTML=''; list.innerHTML='';
+    stat.textContent='Reviewing against your reports…';
+    try{
+      const resp=await fetch('/.netlify/functions/review',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({mapped:buildMappedForReview(),
+          reports:{baseline:rawDocs.asBase,improved:rawDocs.asImp,
+                   openStudio:(rawDocs.osBase||'').slice(0,30000)}})});
+      const r=await resp.json().catch(()=>({error:'Bad response'}));
+      if(!resp.ok||r.error){stat.textContent='';sum.innerHTML='<span style="color:var(--warn)">⚠ '+(r.error||('Error '+resp.status))+(r.detail?(' — '+r.detail):'')+'</span>';return;}
+      stat.textContent='';
+      const findings=(r.findings||[]).filter(f=>f&&f.severity&&f.severity!=='ok');
+      sum.textContent=r.summary||(findings.length?'':'Everything checks out against the reports.');
+      if(!findings.length){sum.innerHTML='<span style="color:var(--moss)">✓ '+(r.summary||'No issues found — the mapping matches your reports.')+'</span>';return;}
+      list.innerHTML=findings.map(f=>{
+        const s=SEV[f.severity]||SEV.question;
+        const sugg=f.suggested?`<div class="copyhint">Report value: <strong>${f.suggested}</strong></div>`:'';
+        const ask=(f.severity==='gap'||f.severity==='question')?
+          `<div class="copyrow" style="margin-top:6px"><input data-field="${f.field||''}" placeholder="Your answer / value" style="flex:1;padding:6px 8px;border:1px solid var(--line);border-radius:6px"></div>`:'';
+        return `<div style="border-top:1px solid var(--line);padding:10px 0">
+          <div><span style="color:${s[1]};font-weight:700">${s[0]} ${f.severity.toUpperCase()}</span>
+          &nbsp;<strong>${f.field||''}</strong></div>
+          <div style="font-size:13.5px;margin-top:3px">${f.message||''}</div>${sugg}${ask}</div>`;
+      }).join('');
+    }catch(err){stat.textContent='';sum.innerHTML='<span style="color:var(--warn)">⚠ Could not run review: '+err.message+'</span>';}
+  };
+})();
 
 /* ---- Utility usage xlsx (Portfolio Manager "Energy Use By Calendar Month" format) ---- */
 /* Metered Energy Year Start Date (yyyy-mm-dd): first day of the import window =

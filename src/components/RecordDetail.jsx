@@ -21,6 +21,7 @@ const ServiceAppointmentRescheduleModal   = lazy(() => import('./scheduler/Servi
 const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkOrderScheduleModal'))
 const SendForSignatureModal               = lazy(() => import('./SendForSignatureModal'))
 const AccountMergeModal                    = lazy(() => import('./AccountMergeModal'))
+const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
 
 import { useToast } from './Toast'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
@@ -4539,6 +4540,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
+  const [showPortalModal, setShowPortalModal] = useState(false)
   // Project Scheduler wizard (only used when tableName === 'projects').
   // Bulk-schedules unscheduled work orders for the project to a Team Lead.
   // After a successful commit, the tick is bumped so the related-records area
@@ -5828,6 +5830,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.ARCHIVE]:                handleArchive,
     [ACTION_KEYS.RESTORE]:                handleRestore,
     [ACTION_KEYS.MERGE_ACCOUNT]:          () => setShowMergeModal(true),
+    [ACTION_KEYS.ADD_TO_PORTAL]:          () => setShowPortalModal(true),
   }
 
   // Per-action pending flag — drives the disabled+wait-cursor+ellipsis label
@@ -6570,6 +6573,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             master={record}
             onClose={() => setShowMergeModal(false)}
             onMerged={() => { setShowMergeModal(false); setReloadTick(t => t + 1) }}
+          />
+        )}
+        {showPortalModal && tableName === 'contacts' && (
+          <AddToPortalModal
+            contactId={recordId}
+            contact={record}
+            onClose={() => setShowPortalModal(false)}
+            onDone={({ message } = {}) => {
+              setShowPortalModal(false)
+              if (message) window.alert(message)
+              setReloadTick(t => t + 1)
+            }}
           />
         )}
       </Suspense>
