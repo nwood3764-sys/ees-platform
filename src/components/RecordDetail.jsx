@@ -3441,14 +3441,11 @@ function RelatedListWidget({
       })
     }
 
-    // Contact Role: the Contact must always be chosen by the user, never
-    // pre-seeded from the chain. Seeding contact_id makes the field show a raw
-    // id before any selection and lets a contact be added without a deliberate
-    // pick. Keep opportunity_id (it scopes the contact picker) but drop the
-    // contact so the field starts blank.
-    if (childTable === 'opportunity_contact_roles') {
-      delete prefillObj.contact_id
-    }
+    // Contact Role is contact-first: keep whichever parent FK the related list
+    // prefilled. From a Contact, contact_id is carried and locked (and it scopes
+    // the Opportunity picker to that contact's account via the
+    // opportunities_for_contact_account dependent lookup); from an Opportunity,
+    // opportunity_id is carried. Nothing is dropped.
 
     // Projects derive their name (trg_project_name) as
     // "<opportunity_name> - <record_type_label>". Seed the opportunity-name
