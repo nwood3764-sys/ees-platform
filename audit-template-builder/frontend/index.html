@@ -6,6 +6,7 @@
 <title>Audit Template Builder</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <!-- Runner endpoint config (set per-deploy in config.js). Loaded before the app
      so the .osm upload branch can read window.AUDIT_RUNNER_URL. -->
 <script src="config.js"></script>
@@ -146,6 +147,7 @@
     <button class="btn" id="buildImp" disabled>↓ Improved Audit Template</button>
     <button class="btn ghost" id="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
     <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
+    <button class="btn" id="packet" disabled>📦 Download Energy Model Packet</button>
     <span class="status" id="finalStatus"></span>
   </div>
   <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
@@ -503,6 +505,7 @@ function refresh(){
   document.getElementById('utilImp').disabled=!have;
   document.getElementById('smartReview').disabled=!have;
   document.getElementById('aiExtract').disabled=!have;
+  document.getElementById('packet').disabled=!have;
   if(!have){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
   // monthly shape, so the resulting EUI matches the Asset Score PDF. Runs once per refresh.
@@ -1261,6 +1264,44 @@ function downloadUtility(which){
 }
 document.getElementById('utilBase').onclick=()=>downloadUtility('baseline');
 document.getElementById('utilImp').onclick=()=>downloadUtility('improved');
+
+/* ---- Energy Model Packet: one zip with the source reports + everything the
+   tool generated (both XMLs + both utility files), named for the building. ---- */
+async function downloadPacket(){
+  const fs=document.getElementById('finalStatus');
+  if(typeof JSZip==='undefined'){fs.className='status err';fs.textContent='Zip library not loaded — check your connection and retry.';return;}
+  fs.className='status'; fs.textContent='Assembling energy model packet…';
+  try{
+    const asB=data.asBase, base=cleanName((data.asImp||asB).name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'');
+    const zip=new JSZip();
+    // 1) the original uploaded reports (raw File objects kept in `files`)
+    const srcNames={asBase:'AssetScore_Baseline',asImp:'AssetScore_Improved',
+                    osBase:'OpenStudio_Baseline',osImp:'OpenStudio_Improved'};
+    const src=zip.folder('1_Source_Reports');
+    for(const k of ['asBase','asImp','osBase','osImp']){
+      const f=files[k]; if(f){const ext=(f.name.match(/\.[^.]+$/)||[''])[0]; src.file(srcNames[k]+ext, f);}
+    }
+    // 2) generated 50121 Audit Template XML (baseline + improved)
+    const xf=zip.folder('2_Audit_Template_XML');
+    xf.file(base+'_Baseline_50121_AuditTemplate.xml', await build50121XML('baseline'));
+    xf.file(base+'_Improved_50121_AuditTemplate.xml', await build50121XML('improved'));
+    // 3) generated utility spreadsheets (baseline + improved)
+    const uf=zip.folder('3_Utility_Data');
+    uf.file(base+'_Baseline_Utility.xlsx', XLSX.write(buildUtilityXLSX('baseline'),{type:'array',bookType:'xlsx'}));
+    uf.file(base+'_Improved_Utility.xlsx', XLSX.write(buildUtilityXLSX('improved'),{type:'array',bookType:'xlsx'}));
+    // manifest for future reference
+    zip.file('README.txt',
+      'Energy Model Packet — '+cleanName((data.asImp||asB).name)+'\nGenerated '+todayStamp()+
+      ' by the EES Audit Template Builder.\n\n1_Source_Reports/  the uploaded Asset Score + OpenStudio files\n'+
+      '2_Audit_Template_XML/  the 50121 BuildingSync files (import under Building -> Import buildings)\n'+
+      '3_Utility_Data/  the Portfolio Manager utility spreadsheets (upload under Utility Data and Benchmarking)\n');
+    const blob=await zip.generateAsync({type:'blob'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=base+'_Energy_Model_Packet.zip'; a.click();
+    fs.className='status ok'; fs.textContent='Energy Model Packet downloaded.';
+  }catch(err){fs.className='status err';fs.textContent='Packet error: '+err.message;}
+}
+document.getElementById('packet').onclick=downloadPacket;
 </script>
 
 <!-- ================= In-app energy-auditing assistant ================= -->
