@@ -486,11 +486,41 @@ function scaleToAssetScore(os, as, which){
   const area=as.gfa;
   const gasEui = which==='upg' ? as.gasEuiUpg : as.gasEuiCur;
   const elecEui= which==='upg' ? as.elecEuiUpg: as.elecEuiCur;
-  // Target annual in native units (kWh, therms). EUI is kBtu/ft2/yr.
-  const elecTarget = (elecEui!=null) ? (elecEui*area)/KWH_KBTU : null;     // kWh
-  const gasTarget  = (gasEui !=null) ? (gasEui *area)/THERM_KBTU : null;   // therms
+  // The Asset Score Report's page-1 HEADLINE Site EUI is the document of record;
+  // the Audit Template computes Site EUI = total energy / conditioned floor area,
+  // so the imported total MUST equal headlineEUI x area. The per-fuel table on the
+  // report can sum to slightly less/more than the headline (rounding, or a fuel it
+  // rolls up differently), so we pin the TOTAL to the headline and use the per-fuel
+  // EUIs only to split electricity vs. gas — guaranteeing the imported Site EUI
+  // matches the report headline exactly.
+  const headEui = which==='upg' ? as.euiUpgraded : as.euiCurrent;
   const oe=os._origElec, og=os._origGas;
   const oeSum=oe.reduce((a,b)=>a+b,0), ogSum=og.reduce((a,b)=>a+b,0);
+  let elecTarget=null, gasTarget=null;                                    // kWh, therms
+  if(headEui!=null && area){
+    const totalKbtu = headEui*area;
+    // Electricity's share of the total. Prefer the report's per-fuel EUI ratio;
+    // fall back to OpenStudio's own elec/gas energy split when a per-fuel value
+    // is missing.
+    const clamp=x=>Math.max(0,Math.min(1,x));
+    let elecShare;
+    if(elecEui!=null && gasEui!=null && (elecEui+gasEui)>0){
+      elecShare = elecEui/(elecEui+gasEui);          // both known -> proportional
+    } else if(elecEui!=null && gasEui==null){
+      elecShare = clamp(elecEui/headEui);            // elec known -> rest is gas
+    } else if(gasEui!=null && elecEui==null){
+      elecShare = 1-clamp(gasEui/headEui);           // gas known -> rest is elec
+    } else {
+      const oeKbtu=oeSum*KWH_KBTU, ogKbtu=ogSum*THERM_KBTU, tot=oeKbtu+ogKbtu;
+      elecShare = tot>0 ? oeKbtu/tot : 1;            // neither -> OpenStudio split
+    }
+    elecTarget = (totalKbtu*elecShare)/KWH_KBTU;                          // kWh
+    gasTarget  = (totalKbtu*(1-elecShare))/THERM_KBTU;                    // therms
+  } else {
+    // No headline EUI — fall back to the per-fuel-EUI targets (legacy behavior).
+    elecTarget = (elecEui!=null) ? (elecEui*area)/KWH_KBTU : null;
+    gasTarget  = (gasEui !=null) ? (gasEui *area)/THERM_KBTU : null;
+  }
   os.elec = (elecTarget!=null && oeSum>0) ? oe.map(v=>v*elecTarget/oeSum) : oe.slice();
   os.gas  = (gasTarget !=null && ogSum>0) ? og.map(v=>v*gasTarget /ogSum) : og.slice();
   os._scaled = (elecTarget!=null||gasTarget!=null);
@@ -973,6 +1003,46 @@ async function build50121XML(which){
   if(which==='improved'){ _setScenarioEUI(doc,'benchmark', impEUI); }
   else { _setScenarioEUI(doc,'benchmark', baseEUI); _setScenarioEUI(doc,'target', impEUI); }
 
+  // Annual energy: the template's ResourceUse blocks carry the GOLDEN reference
+  // building's energy (its end-use breakdown). The Audit Template importer
+  // RECOMPUTES the building's Site EUI from this energy ÷ our injected floor
+  // area, so if we leave the reference energy in place the imported EUI is wrong
+  // (reference total ÷ this building's area). Rescale every energy-carrying
+  // scenario's per-fuel annual energy to THIS building's headline-pinned totals
+  // (from scaleToAssetScore), preserving each scenario's internal breakdown.
+  // Result: total site energy = headline Site EUI × floor area, so the imported
+  // EUI equals the Asset Score Report headline exactly.
+  scaleToAssetScore(data.osBase, asB, 'cur');
+  scaleToAssetScore(data.osImp, asI||asB, 'upg');
+  const eos = which==='improved' ? data.osImp : data.osBase;
+  if(eos){
+    const tgt={ 'Electricity': eos.elec.reduce((a,b)=>a+b,0),      // kWh
+                'Natural gas': eos.gas.reduce((a,b)=>a+b,0) };     // therms
+    for(const sc of _q(doc,'Scenario')){
+      const tot={'Electricity':0,'Natural gas':0}, uses={'Electricity':[],'Natural gas':[]};
+      for(const ru of sc.getElementsByTagNameNS(NS_AUC,'ResourceUse')){
+        const er=ru.getElementsByTagNameNS(NS_AUC,'EnergyResource')[0];
+        const afu=ru.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0];
+        if(!er||!afu)continue;
+        const fuel=er.textContent.trim(); if(!(fuel in tot))continue;
+        tot[fuel]+=parseFloat(afu.textContent)||0; uses[fuel].push(ru);
+      }
+      for(const fuel of ['Electricity','Natural gas']){
+        if(!(tot[fuel]>0) || tgt[fuel]==null) continue;
+        const f=tgt[fuel]/tot[fuel];
+        for(const ru of uses[fuel]){
+          for(const tag of ['AnnualFuelUseNativeUnits','AnnualFuelUseConsistentUnits']){
+            const e=ru.getElementsByTagNameNS(NS_AUC,tag)[0];
+            if(e){const nv=parseFloat(e.textContent); if(!isNaN(nv)) e.textContent=(nv*f).toFixed(1);}
+          }
+          for(const em of ru.getElementsByTagNameNS(NS_AUC,'GHGEmissions')){
+            const nv=parseFloat(em.textContent); if(!isNaN(nv)) em.textContent=String(nv*f);
+          }
+        }
+      }
+    }
+  }
+
   // ---- Deep building-science fields (Asset Score PDF is authoritative) ----
   // Envelope assemblies
   _setFirst(doc,'WallInsulationRValue', as.wallR);
@@ -1012,23 +1082,29 @@ async function build50121XML(which){
   if(hp&&as.boilerFuel){const pf=hp.getElementsByTagNameNS(NS_AUC,'PrimaryFuel')[0]; if(pf)pf.textContent=as.boilerFuel;}
   _setFirst(doc,'FenestrationFrameMaterial', as.windowFrame);
   _setFirst(doc,'FenestrationGlassLayers', as.windowGlassLayers);
-  // Space-function section floor areas -> scale the template's split to THIS
-  // building's multifamily use-type area (from "Building Use Types"), preserving
-  // the internal conditioned/common/tenant proportions.
-  if(as.useMultifamilyArea){
+  // Space-function section floor areas. In the DOE Audit Template there is no
+  // separate common-area breakout for this building — the ENTIRE conditioned
+  // gross floor area is the single "Multifamily Housing" use type. So set the
+  // section to span 100% of GFA (Gross = Conditioned = Tenant = GFA, Common = 0),
+  // rather than scaling to only the report's multi-family sub-area (which left
+  // the common area unassigned and showed a misleading <100% use-type ratio and
+  // a stale Percent Common Area carried from the reference file).
+  const gfa = as.gfa || asB.gfa;
+  if(gfa){
     for(const sec of _q(doc,'Section')){
       const st=sec.getElementsByTagNameNS(NS_AUC,'SectionType')[0];
       if(!st||st.textContent!=='Space function')continue;
-      // the section's own FloorAreas (direct child)
       for(const c of sec.children){ if(c.localName!=='FloorAreas')continue;
-        const fas=[...c.children];
-        // find current Gross value to compute the scale ratio
-        let curGross=null;
-        for(const fa of fas){const t=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaType')[0];
-          if(t&&t.textContent==='Gross'){curGross=parseFloat(fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0].textContent);}}
-        if(curGross>0){const ratio=as.useMultifamilyArea/curGross;
-          for(const fa of fas){const v=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0];
-            if(v){v.textContent=(parseFloat(v.textContent)*ratio).toFixed(1);}}}
+        for(const fa of c.children){
+          const t=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaType')[0];
+          const v=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0];
+          if(!t||!v)continue;
+          const type=t.textContent.trim();
+          if(type==='Common') v.textContent='0.0';                        // no common breakout
+          else if(type==='Gross'||type==='Conditioned'||type==='Tenant'||type==='Heated and Cooled')
+            v.textContent=Number(gfa).toFixed(1);                         // all multifamily = full GFA
+          // 'Cooled only' / 'Heated only' stay 0.0 (whole building is heated & cooled)
+        }
         break;
       }
       break;
