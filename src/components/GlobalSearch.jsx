@@ -55,6 +55,7 @@ import { createPortal } from 'react-dom'
 import { C } from '../data/constants'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { supabase } from '../lib/supabase'
+import { recordHref, isModifiedClick } from './RecordLink'
 
 // ─── Object type → icon path (lucide-style single-stroke paths) ──────────────
 // Keep paths single-d so they render through the existing Icon convention.
@@ -163,12 +164,22 @@ export function ObjectIcon({ type, size = 14, color = C.textSecondary }) {
 // individual hits this way so the user sees the same visual record across
 // surfaces. `active` toggles the selected highlight (used only in the
 // modal's keyboard nav). `compact` shrinks padding for the modal density.
+//
+// Rendered as a REAL anchor to the record's stable URL so the browser's
+// native right-click → "Open in new tab", middle-click, and Ctrl/Cmd-click
+// all work. Plain left-click is intercepted for fast in-app navigation
+// (same pattern as RecordLink).
 export function SearchResultRow({ row, active = false, compact = false, onSelect, onMouseEnter }) {
   return (
-    <div
+    <a
+      href={recordHref(row.table_name, row.id) || undefined}
       role="option"
       aria-selected={active}
-      onClick={() => onSelect?.(row)}
+      onClick={(e) => {
+        if (isModifiedClick(e)) return
+        e.preventDefault()
+        onSelect?.(row)
+      }}
       onMouseEnter={onMouseEnter}
       style={{
         display: 'flex', alignItems: 'center', gap: 12,
@@ -177,6 +188,7 @@ export function SearchResultRow({ row, active = false, compact = false, onSelect
         borderLeft: active ? `3px solid ${C.emerald}` : '3px solid transparent',
         cursor: 'pointer',
         transition: 'background 80ms',
+        textDecoration: 'none',
       }}
     >
       <div style={{
@@ -214,7 +226,7 @@ export function SearchResultRow({ row, active = false, compact = false, onSelect
           {row.record_number}
         </span>
       )}
-    </div>
+    </a>
   )
 }
 
@@ -619,10 +631,16 @@ export function GlobalSearchInline({
           />
         ))}
 
-        {/* View all results CTA */}
+        {/* View all results CTA — a real anchor to the shareable /search URL
+            so right-click / middle-click open the full results in a new tab. */}
         {groups.length > 0 && onViewAll && (
-          <button
-            onClick={handleViewAll}
+          <a
+            href={`/search?q=${encodeURIComponent(query.trim())}`}
+            onClick={(e) => {
+              if (isModifiedClick(e)) return
+              e.preventDefault()
+              handleViewAll()
+            }}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               gap: 8,
@@ -635,6 +653,7 @@ export function GlobalSearchInline({
               fontSize: 13, fontWeight: 600,
               cursor: 'pointer',
               fontFamily: 'inherit',
+              textDecoration: 'none',
             }}
             onMouseEnter={e => { e.currentTarget.style.background = '#f4fbf7' }}
             onMouseLeave={e => { e.currentTarget.style.background = C.card }}
@@ -644,7 +663,7 @@ export function GlobalSearchInline({
               stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 12h14 M12 5l7 7-7 7" />
             </svg>
-          </button>
+          </a>
         )}
       </div>
 
