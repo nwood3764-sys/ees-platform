@@ -679,6 +679,33 @@ export async function resolvePolymorphicLookups(requests) {
 export async function fetchRelatedRecords(config, parentRecordId) {
   const { table, fk, is_deleted_col, columns, sort_field, sort_dir } = config
 
+  // Row cap is configurable per widget (`row_limit`); default stays at 25 so
+  // existing related lists are unchanged. Large portfolios (e.g. every property
+  // an account manages) set a higher limit so nothing is silently truncated.
+  const rowLimit = Number.isFinite(config.row_limit) && config.row_limit > 0
+    ? Math.floor(config.row_limit)
+    : 25
+
+  // Optional account-hierarchy roll-up. When `roll_up_hierarchy` is true (set
+  // only on account -> child related lists), the list includes rows attached to
+  // this account AND all of its descendant accounts, resolved via the
+  // `account_descendant_ids` RPC (recursive over accounts.parent_account_id).
+  // This lets a parent account (e.g. Lutheran Services) show the whole family's
+  // owned/managed properties, not just its own directly-linked rows.
+  let fkMatchIds = null
+  if (config.roll_up_hierarchy) {
+    try {
+      const { data: descData, error: descErr } = await supabase
+        .rpc('account_descendant_ids', { root_account_id: parentRecordId })
+      if (!descErr && Array.isArray(descData) && descData.length) {
+        fkMatchIds = descData.map((r) => (typeof r === 'object' ? r.id ?? r.account_id : r))
+      }
+    } catch {
+      // RPC missing / RLS denial: fall back to the plain single-account match.
+      fkMatchIds = null
+    }
+  }
+
   // Build the select. Plain columns are listed by name. A column of
   // type 'lookup' (with lookup_table + lookup_field) is fetched as a
   // PostgREST embedded resource so the related list can show the FK's
@@ -699,7 +726,8 @@ export async function fetchRelatedRecords(config, parentRecordId) {
   let query = supabase
     .from(table)
     .select(selectParts.join(', '))
-    .eq(fk, parentRecordId)
+
+  query = fkMatchIds ? query.in(fk, fkMatchIds) : query.eq(fk, parentRecordId)
 
   if (is_deleted_col) {
     query = query.eq(is_deleted_col, false)
@@ -709,7 +737,7 @@ export async function fetchRelatedRecords(config, parentRecordId) {
     query = query.order(sort_field, { ascending: sort_dir !== 'desc' })
   }
 
-  query = query.limit(25)
+  query = query.limit(rowLimit)
 
   const { data, error } = await query
   if (error) throw error
