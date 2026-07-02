@@ -20,6 +20,7 @@ import {
   logActivity,
   fetchActivityPicklist,
   fetchLinkedContactsForRecord,
+  fetchRelatableRecords,
 } from '../data/callActivityService'
 
 // Which types get which optional fields. Kept as plain sets so new picklist
@@ -136,6 +137,9 @@ export default function LogActivityModal({
   const [typeOptions, setTypeOptions] = useState([])
   const [directionOptions, setDirectionOptions] = useState([])
   const [contacts, setContacts] = useState([])
+  const [relatable, setRelatable] = useState([])
+  // Keys ("object:id") of related records the user has chosen to link.
+  const [selectedRelations, setSelectedRelations] = useState(() => new Set())
 
   const [activityType, setActivityType] = useState(defaultType)
   const [direction, setDirection] = useState('Outbound')
@@ -155,11 +159,15 @@ export default function LogActivityModal({
       fetchActivityPicklist('activity_type').catch(() => []),
       fetchActivityPicklist('direction').catch(() => []),
       fetchLinkedContactsForRecord(tableName, recordId).catch(() => []),
-    ]).then(([types, dirs, cts]) => {
+      fetchRelatableRecords(tableName, recordId).catch(() => []),
+    ]).then(([types, dirs, cts, rel]) => {
       if (cancelled) return
       setTypeOptions(types)
       setDirectionOptions(dirs)
       setContacts(cts)
+      setRelatable(rel)
+      // Default: link all connected records (user can uncheck any).
+      setSelectedRelations(new Set(rel.map(r => `${r.object}:${r.id}`)))
       // Keep defaultType if present, else fall back to the first option.
       if (types.length && !types.some(t => t.value === defaultType)) {
         setActivityType(types[0].value)
@@ -177,12 +185,21 @@ export default function LogActivityModal({
   const showDuration  = DURATION_TYPES.has(activityType)
   const canSave = useMemo(() => !saving && !!activityType, [saving, activityType])
 
+  const toggleRelation = (key) => {
+    setSelectedRelations(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
+
   const handleSave = async () => {
     if (!canSave) return
     setSaving(true)
     setError(null)
     try {
       const occurredAt = occurredAtLocal ? new Date(occurredAtLocal).toISOString() : null
+      const relations = relatable.filter(r => selectedRelations.has(`${r.object}:${r.id}`))
       const newId = await logActivity({
         tableName,
         recordId,
@@ -193,6 +210,7 @@ export default function LogActivityModal({
         occurredAt,
         contactId: contactId || null,
         comments,
+        relations,
       })
       onLogged?.(newId)
     } catch (err) {
@@ -295,6 +313,33 @@ export default function LogActivityModal({
               it to a person, add a Contact Role under the <strong>Related</strong> tab first.
             </div>
           ) : null}
+
+          {/* Also relate to — the record's connected parents. This activity
+              will show on each checked record's Activity timeline. */}
+          {relatable.length > 0 && (
+            <div>
+              <label style={FIELD_LABEL}>Also relate to</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {relatable.map(r => {
+                  const key = `${r.object}:${r.id}`
+                  const checked = selectedRelations.has(key)
+                  return (
+                    <label key={key} style={{
+                      display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                      fontSize: 13, color: C.textPrimary,
+                    }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleRelation(key)} />
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3,
+                        color: C.textMuted, minWidth: 66,
+                      }}>{r.typeLabel}</span>
+                      <span>{r.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           <div>
             <label style={FIELD_LABEL}>Subject</label>

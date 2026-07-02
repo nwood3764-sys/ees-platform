@@ -77,12 +77,31 @@ export async function fetchLinkedContactsForRecord(tableName, recordId) {
     .sort((a, b) => (b.isPrimary - a.isPrimary) || a.name.localeCompare(b.name))
 }
 
+// The connected parent records a user can also link an activity to when
+// logging from a given record (its property/account/building/opportunity).
+// Returns [{ object, id, label, typeLabel }]. Contacts are handled separately.
+export async function fetchRelatableRecords(tableName, recordId) {
+  if (!tableName || !recordId) return []
+  const { data, error } = await supabase.rpc('list_relatable_records', {
+    p_object: tableName,
+    p_id: recordId,
+  })
+  if (error) throw error
+  return (data || []).map(r => ({
+    object: r.rel_object,
+    id: r.rel_id,
+    label: r.rel_label || r.rel_type_label,
+    typeLabel: r.rel_type_label,
+  }))
+}
+
 // Log an activity against a record (call, email, meeting, site visit, event,
-// note, …). Returns the new activity id. `activityType` is a managed
-// picklist value. duration is taken in minutes from the composer and stored
-// as seconds. occurredAt is an ISO string (defaults server-side to now() when
-// null). contactId, when provided, is stored as the activity's secondary link
-// (secondary_object='contacts').
+// note, …). Returns the new activity id. `activityType` is a managed picklist
+// value. duration is taken in minutes from the composer and stored as seconds.
+// occurredAt is an ISO string (defaults server-side to now() when null).
+// contactId, when provided, is stored as the activity's secondary link. The
+// activity is also related to every record in `relations` ([{object, id}]) so
+// it rolls up onto each of those records' Activity timelines.
 export async function logActivity({
   tableName,
   recordId,
@@ -93,6 +112,7 @@ export async function logActivity({
   occurredAt = null,
   contactId = null,
   comments = null,
+  relations = [],
 }) {
   if (!tableName || !recordId) throw new Error('A record is required to log an activity.')
   if (!activityType) throw new Error('An activity type is required.')
@@ -100,6 +120,10 @@ export async function logActivity({
   const minutes = Number(durationMinutes)
   const durationSeconds =
     Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes * 60) : null
+
+  const relPayload = (relations || [])
+    .filter(r => r && r.object && r.id)
+    .map(r => ({ object: r.object, id: r.id, role: r.role || 'related' }))
 
   const { data, error } = await supabase.rpc('log_activity', {
     p_related_object: tableName,
@@ -112,6 +136,7 @@ export async function logActivity({
     p_performed_at: occurredAt || null,
     p_secondary_object: contactId ? 'contacts' : null,
     p_secondary_id: contactId || null,
+    p_relations: relPayload,
   })
   if (error) throw error
   return data // new activity uuid
