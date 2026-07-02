@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 04:50 UTC · build 19 — wall-AC delivery structure removed so DOE shows 'Other (Please Specify): Through the Wall AC'</div>
+    Last updated 2026-07-03 06:00 UTC · build 21 — Smart Review now audits the actual generated XML; DOE validation fixes (delivery, door)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -1478,7 +1478,10 @@ async function build50121XML(which){
         if(!ze)continue;
         if(ze.getElementsByTagNameNS(NS_AUC,'Convection')[0])continue;   // heating baseboard
         const fb=ze.getElementsByTagNameNS(NS_AUC,'FanBased')[0];
-        if(fb&&fb.getElementsByTagNameNS(NS_AUC,'FanCoil')[0]) ze.removeChild(fb);
+        if(fb&&fb.getElementsByTagNameNS(NS_AUC,'FanCoil')[0]){
+          ze.removeChild(fb);
+          ze.appendChild(doc.createElementNS(NS_AUC,'auc:Other'));   // sole child = valid
+        }
       }
     }
     _setUDF(doc,'Other Distribution Equipment Type',other||' ');
@@ -1504,8 +1507,10 @@ async function build50121XML(which){
   // 'Basement Excluded as is not conditioned.' — the REFERENCE's note; this
   // building excludes nothing from GFA.
   setAllUDF('Spaces Excluded From Gross Floor Area','');
-  // '3/4ths of Metal Door is a window / lite' — reference's door note.
-  setAllUDF('Other Exterior Door Type','');
+  // Door type stays 'Other', whose specify-text is REQUIRED by DOE. The report
+  // prints no door info, so use the EES standard entry: 'Metal door' (replaces
+  // the reference's '3/4ths of Metal Door is a window / lite' note).
+  setAllUDF('Other Exterior Door Type','Metal door');
   // EVERY Central Distribution Type = None (unitized) — the reference carried a
   // second one saying 'Refrigerant (VRF)'.
   setAllUDF('Central Distribution Type','None (unitized heating/cooling)');
@@ -1781,8 +1786,90 @@ document.getElementById('buildImp').onclick=()=>downloadXML('improved');
   if(u&&bd){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
 })();
 
-/* ---------- Smart pre-export review (Claude audits the mapping) ---------- */
-// Collect exactly what the tool will write, so Claude can check it vs the reports.
+/* ---------- Smart pre-export review (Claude audits the ACTUAL generated XML) ---------- */
+// Generate both 50121 files with the real generator, then extract every
+// building-describing value from the XML into a digest the AI can audit against
+// the raw report text — the same fields DOE's import screens display. This is
+// what makes the review intelligent: it checks what will actually be exported,
+// not just the parser's field list.
+async function buildXmlDigest(){
+  const NSA='http://buildingsync.net/schemas/bedes-auc/2019';
+  async function digestOne(which){
+    const xml=await build50121XML(which);
+    const doc=new DOMParser().parseFromString(xml,'text/xml');
+    if(doc.getElementsByTagName('parsererror').length)return{error:'generated XML failed to parse'};
+    const all=t=>Array.from(doc.getElementsByTagNameNS(NSA,t));
+    const t1=t=>{const e=all(t)[0];return e?e.textContent.trim():null;};
+    // Flatten one element's leaf values into path:value pairs (UDFs handled separately).
+    const leafDump=el=>{const out={};(function walk(e,p){
+      const kids=Array.from(e.children).filter(k=>k.localName!=='UserDefinedFields');
+      if(!kids.length){const v=e.textContent.trim();if(p)out[p]=v!==''?v:'(empty element present)';return;}
+      for(const k of kids)walk(k,p?p+'/'+k.localName:k.localName);})(el,'');return out;};
+    const d={file:which};
+    d.identity={name:t1('PremisesName'),street:t1('StreetAddress'),city:t1('City'),
+      state:t1('State'),zip:t1('PostalCode'),yearBuilt:t1('YearOfConstruction'),
+      floorsAboveGrade:t1('ConditionedFloorsAboveGrade'),floorsBelowGrade:t1('ConditionedFloorsBelowGrade'),
+      footprintShape:t1('FootprintShape'),occupantQuantity:t1('OccupantQuantity'),
+      dwellingUnits:t1('NumberOfUnits'),unitsOccupiedPct:t1('SpatialUnitOccupiedPercentage'),
+      windowToWallRatio:t1('OverallWindowToWallRatio')};
+    d.floorAreas=all('FloorArea').map(fa=>{const g=n=>{const e=fa.getElementsByTagNameNS(NSA,n)[0];
+      return e?e.textContent.trim():null;};return{type:g('FloorAreaType'),value:g('FloorAreaValue')};});
+    // Every UDF with its owner element — covers LPD, roof area, savings %, distribution
+    // type, other-door text, and the Is-Not-Applicable flags that hide DOE fields.
+    d.userDefinedFields=all('UserDefinedField').map(u=>{const g=n=>{const e=u.getElementsByTagNameNS(NSA,n)[0];
+      return e?e.textContent.trim():null;};
+      let own=u.parentElement;own=own&&own.parentElement?own.parentElement.localName:'(root)';
+      return{owner:own,name:g('FieldName'),value:g('FieldValue')};})
+      .filter(u=>u.name);
+    // Systems: full leaf dump of each — the AI sees exactly what DOE will show.
+    d.systems={};
+    for(const tag of['HeatingSource','CoolingSource','Delivery','DomesticHotWaterSystem',
+      'WallSystem','RoofSystem','CeilingSystem','FenestrationSystem','FoundationSystem','LightingSystem','Door'])
+      d.systems[tag]=all(tag).map(leafDump);
+    // Delivery encoding is structural (DOE derives "Delivery Equipment Type" from the
+    // element names, not values) — list ZoneEquipment child elements explicitly.
+    d.deliveryZoneEquipment=all('Delivery').map(dv=>{
+      const ze=dv.getElementsByTagNameNS(NSA,'ZoneEquipment')[0];
+      return ze?Array.from(ze.children).map(c=>c.localName):[];});
+    d.measures=all('Measure').map(leafDump);
+    // Scenario financials + energy reconciliation.
+    const scen=name=>all('Scenario').find(s=>{const n=s.getElementsByTagNameNS(NSA,'ScenarioName')[0];
+      return n&&n.textContent.trim()===name;});
+    const scenNum=(s,tag)=>{const e=s?s.getElementsByTagNameNS(NSA,tag)[0]:null;
+      return e?e.textContent.trim():null;};
+    d.benchmark={siteEUI:scenNum(scen('benchmark'),'SiteEnergyUseIntensity'),
+      siteEnergyCostIntensity:scenNum(scen('benchmark'),'EnergyCost')};
+    d.target={siteEUI:scenNum(scen('target'),'SiteEnergyUseIntensity'),
+      siteEnergyCostIntensity:scenNum(scen('target'),'EnergyCost')};
+    d.meters={};
+    for(const fuel of['Electricity','Natural gas']){
+      const s=scen('Audit Template Energy Meter Readings - '+fuel);if(!s)continue;
+      const vals=Array.from(s.getElementsByTagNameNS(NSA,'SiteEnergyUse')).map(e=>+e.textContent);
+      const costs=Array.from(s.getElementsByTagNameNS(NSA,'EnergyCost')).map(e=>+e.textContent);
+      const stamps=Array.from(s.getElementsByTagNameNS(NSA,'StartTimestamp')).map(e=>e.textContent.trim());
+      d.meters[fuel]={monthlyValues:vals,annualTotal:+vals.reduce((a,b)=>a+b,0).toFixed(2),
+        monthlyCostTotal:+costs.reduce((a,b)=>a+b,0).toFixed(2),
+        firstMonth:stamps[0]||null,lastMonth:stamps[stamps.length-1]||null};
+    }
+    const eu=scen('Audit Template Energy Uses');
+    d.endUses=eu?Array.from(eu.getElementsByTagNameNS(NSA,'ResourceUse')).map(ru=>{
+      const g=n=>{const e=ru.getElementsByTagNameNS(NSA,n)[0];return e?e.textContent.trim():null;};
+      return{fuel:g('EnergyResource'),endUse:g('EndUse'),annualNativeUnits:g('AnnualFuelUseNativeUnits')};}):[];
+    // Quality gates my offline audit enforces: DOE float32 storage garbles >2-decimal
+    // values, and duplicate xs:IDs fail the import outright.
+    d.decimalViolations=[];const dupIds=[];const seen={};
+    for(const el of Array.from(doc.getElementsByTagName('*'))){
+      const id=el.getAttribute&&el.getAttribute('ID');
+      if(id){if(seen[id])dupIds.push(id);seen[id]=1;}
+      if(!el.children.length&&/^-?\d+\.\d{3,}$/.test(el.textContent.trim())&&d.decimalViolations.length<20)
+        d.decimalViolations.push(el.localName+'='+el.textContent.trim());
+    }
+    d.duplicateIds=dupIds;
+    return d;
+  }
+  return{baseline:await digestOne('baseline'),improved:await digestOne('improved')};
+}
+// Parser field list — kept as a cross-check alongside the XML digest.
 function buildMappedForReview(){
   const asB=data.asBase, asI=data.asImp;
   const _u=parseInt((document.getElementById('occUnits')||{}).value,10);
@@ -1810,10 +1897,20 @@ function buildMappedForReview(){
   const SEV={gap:['✗','var(--warn)'],mismatch:['≠','var(--warn)'],question:['?','var(--gold)'],ok:['✓','var(--moss)']};
   btn.onclick=async ()=>{
     panel.style.display='block'; sum.innerHTML=''; list.innerHTML='';
-    stat.textContent='Reviewing against your reports…';
+    stat.textContent='Generating both 50121 files and auditing the actual XML against your reports…';
     try{
+      // Audit the real export, not just the parse: run the generator for both files
+      // and digest every building-describing value out of the XML.
+      let xmlDigest=null;
+      if(occValid()){
+        try{xmlDigest=await buildXmlDigest();}
+        catch(e){xmlDigest={error:'XML generation failed: '+e.message};}
+      }else{
+        xmlDigest={skipped:'Occupancy (dwelling units + bedrooms) not entered — the generated-XML audit was skipped; only the parsed fields were reviewed.'};
+      }
+      stat.textContent='Reviewing the generated files against your reports…';
       const resp=await fetch('/.netlify/functions/review',{method:'POST',headers:{'content-type':'application/json'},
-        body:JSON.stringify({mapped:buildMappedForReview(),
+        body:JSON.stringify({xmlDigest,mapped:buildMappedForReview(),
           reports:{baseline:rawDocs.asBase,improved:rawDocs.asImp,
                    openStudio:(rawDocs.osBase||'').slice(0,30000)}})});
       const r=await resp.json().catch(()=>({error:'Bad response'}));
