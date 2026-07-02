@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-02 19:20 UTC · build 3 — EUI pinned to Asset Score headline; use type spans full GFA</div>
+    Last updated 2026-07-02 20:05 UTC · build 4 — EUI fixed via meter readings (imports at headline); savings = Site EUI delta</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -522,12 +522,17 @@ function refresh(){
   const asB=data.asBase, asI=data.asImp;
   const b=annual(data.osBase), i=annual(data.osImp);
   const osPct=(b.kbtu-i.kbtu)/b.kbtu*100;
-  const statedPct=asI&&asI.savingsPct!=null?asI.savingsPct:osPct;
+  // Whole-building savings = the site-EUI delta from the baseline→improved table
+  // (the document-of-record EUIs), NOT the % printed on the report, which is
+  // computed on a different basis. Fall back to the scaled site-energy delta only
+  // if a headline EUI is missing.
+  const statedPct=(asB&&asI&&asB.euiCurrent&&asI.euiUpgraded!=null)
+    ? (asB.euiCurrent-asI.euiUpgraded)/asB.euiCurrent*100 : osPct;
 
   const rv=document.getElementById('review'); rv.classList.add('show');
   document.getElementById('rTitle').textContent=cleanName(asB?asB.name:as.name);
   document.getElementById('rSavings').innerHTML=
-    `${statedPct.toFixed(2)}% site energy savings<small>Asset Score: ${asB?asB.euiCurrent:'?'} → ${asI?asI.euiUpgraded:'?'} kBtu/ft²/yr · OpenStudio monthly: ${osPct.toFixed(1)}%</small>`;
+    `${statedPct.toFixed(2)}% site energy savings<small>Site EUI delta: ${asB?asB.euiCurrent:'?'} → ${asI?asI.euiUpgraded:'?'} kBtu/ft²/yr · OpenStudio monthly: ${osPct.toFixed(1)}%${asI&&asI.savingsPct!=null?' · report published: '+asI.savingsPct.toFixed(2)+'%':''}</small>`;
   const tier=statedPct>=35?'35%+ tier':(statedPct>=20?'20–34% tier':'below 20% — does not qualify');
   document.getElementById('rTier').innerHTML=`<span class="pill${statedPct>=20?'':' warn'}">${tier}</span>`;
 
@@ -550,7 +555,7 @@ function refresh(){
     const f=v=>money?'$'+fmt(v,0):fmt(v,r[0].includes('therms')?1:0);
     h+=`<tr><td style="text-align:left">${r[0]}</td><td>${f(r[1])}</td><td>${f(r[2])}</td><td>${f(r[3])}</td></tr>`;
   });
-  h+=`<tr style="font-weight:700;background:#f0efe8"><td style="text-align:left">Whole-building savings</td><td colspan="3">Asset Score ${statedPct.toFixed(2)}% · OpenStudio monthly ${osPct.toFixed(1)}% · ${tier}</td></tr>`;
+  h+=`<tr style="font-weight:700;background:#f0efe8"><td style="text-align:left">Whole-building savings</td><td colspan="3">Site EUI delta ${statedPct.toFixed(2)}% · OpenStudio monthly ${osPct.toFixed(1)}%${asI&&asI.savingsPct!=null?' · report published '+asI.savingsPct.toFixed(2)+'%':''} · ${tier}</td></tr>`;
   h+='</tbody></table></div>';
 
   h+='<div class="sect"><h3>Building</h3><table class="kv">';
@@ -940,7 +945,9 @@ async function build50121XML(which){
   // Whole-building savings % (the 50121 qualification driver) + headline EUIs.
   const b=annual(data.osBase), i=annual(data.osImp);
   const osPct=(b.kbtu-i.kbtu)/b.kbtu*100;
-  const statedPct=(asI&&asI.savingsPct!=null)?asI.savingsPct:osPct;
+  // Site-EUI delta (document-of-record), not the report's printed savings %.
+  const statedPct=(asB&&asI&&asB.euiCurrent&&asI.euiUpgraded!=null)
+    ? (asB.euiCurrent-asI.euiUpgraded)/asB.euiCurrent*100 : osPct;
   const baseEUI = asB?asB.euiCurrent:null;
   const impEUI  = asI?asI.euiUpgraded:(asB?asB.euiUpgraded:null);
 
@@ -980,42 +987,55 @@ async function build50121XML(which){
   if(which==='improved'){ _setScenarioEUI(doc,'benchmark', impEUI); }
   else { _setScenarioEUI(doc,'benchmark', baseEUI); _setScenarioEUI(doc,'target', impEUI); }
 
-  // Annual energy: the template's ResourceUse blocks carry the GOLDEN reference
-  // building's energy (its end-use breakdown). The Audit Template importer
-  // RECOMPUTES the building's Site EUI from this energy ÷ our injected floor
-  // area, so if we leave the reference energy in place the imported EUI is wrong
-  // (reference total ÷ this building's area). Rescale every energy-carrying
-  // scenario's per-fuel annual energy to THIS building's headline-pinned totals
-  // (from scaleToAssetScore), preserving each scenario's internal breakdown.
-  // Result: total site energy = headline Site EUI × floor area, so the imported
-  // EUI equals the Asset Score Report headline exactly.
+  // Annual energy: the template carries the GOLDEN reference building's energy.
+  // The Audit Template importer computes the building's Site EUI from the
+  // "Audit Template Energy Meter Readings" scenarios — 12 monthly values per fuel
+  // stored as <AllResourceTotal><SiteEnergyUse> — divided by the floor area. If we
+  // leave the reference meter readings in place, the imported EUI is wrong
+  // (reference energy ÷ this building's area = 101 instead of 115). So we derive a
+  // per-fuel scale factor from those meter totals and apply it UNIFORMLY to every
+  // energy value of that fuel in the file (meter SiteEnergyUse + all ResourceUse
+  // AnnualFuelUse / consistent-units / GHG). Uniform scaling pins the meter total
+  // (→ imported EUI = the Asset Score headline) while preserving the template's
+  // internal ratios (site vs. end-use basis, monthly shape).
   scaleToAssetScore(data.osBase, asB, 'cur');
   scaleToAssetScore(data.osImp, asI||asB, 'upg');
   const eos = which==='improved' ? data.osImp : data.osBase;
   if(eos){
-    const tgt={ 'Electricity': eos.elec.reduce((a,b)=>a+b,0),      // kWh
-                'Natural gas': eos.gas.reduce((a,b)=>a+b,0) };     // therms
+    const target={ 'Electricity': eos.elec.reduce((a,b)=>a+b,0),   // kWh
+                   'Natural gas': eos.gas.reduce((a,b)=>a+b,0) };   // therms
+    // Meter-reading SiteEnergyUse elements, grouped by the scenario's fuel.
+    const meterEls={'Electricity':[],'Natural gas':[]};
+    const meterTotal={'Electricity':0,'Natural gas':0};
     for(const sc of _q(doc,'Scenario')){
-      const tot={'Electricity':0,'Natural gas':0}, uses={'Electricity':[],'Natural gas':[]};
-      for(const ru of sc.getElementsByTagNameNS(NS_AUC,'ResourceUse')){
-        const er=ru.getElementsByTagNameNS(NS_AUC,'EnergyResource')[0];
-        const afu=ru.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0];
-        if(!er||!afu)continue;
-        const fuel=er.textContent.trim(); if(!(fuel in tot))continue;
-        tot[fuel]+=parseFloat(afu.textContent)||0; uses[fuel].push(ru);
+      const nm=(sc.getElementsByTagNameNS(NS_AUC,'ScenarioName')[0]||{}).textContent||'';
+      if(!/Energy Meter Readings/i.test(nm))continue;
+      const er=sc.getElementsByTagNameNS(NS_AUC,'EnergyResource')[0];
+      const fuel=er?er.textContent.trim():null; if(!(fuel in meterTotal))continue;
+      for(const seu of sc.getElementsByTagNameNS(NS_AUC,'SiteEnergyUse')){
+        const v=parseFloat(seu.textContent); if(isNaN(v))continue;
+        meterTotal[fuel]+=v; meterEls[fuel].push(seu);
       }
-      for(const fuel of ['Electricity','Natural gas']){
-        if(!(tot[fuel]>0) || tgt[fuel]==null) continue;
-        const f=tgt[fuel]/tot[fuel];
-        for(const ru of uses[fuel]){
-          for(const tag of ['AnnualFuelUseNativeUnits','AnnualFuelUseConsistentUnits']){
-            const e=ru.getElementsByTagNameNS(NS_AUC,tag)[0];
-            if(e){const nv=parseFloat(e.textContent); if(!isNaN(nv)) e.textContent=(nv*f).toFixed(1);}
-          }
-          for(const em of ru.getElementsByTagNameNS(NS_AUC,'GHGEmissions')){
-            const nv=parseFloat(em.textContent); if(!isNaN(nv)) em.textContent=String(nv*f);
-          }
-        }
+    }
+    const factor={
+      'Electricity': meterTotal.Electricity>0 ? target.Electricity/meterTotal.Electricity : null,
+      'Natural gas': meterTotal['Natural gas']>0 ? target['Natural gas']/meterTotal['Natural gas'] : null
+    };
+    // (a) the meter readings themselves (these drive the imported Site EUI)
+    for(const fuel of ['Electricity','Natural gas']){
+      const f=factor[fuel]; if(f==null)continue;
+      for(const seu of meterEls[fuel]){const v=parseFloat(seu.textContent); if(!isNaN(v)) seu.textContent=(v*f).toFixed(1);}
+    }
+    // (b) every other per-fuel energy value, by the SAME factor (keeps ratios)
+    for(const ru of _q(doc,'ResourceUse')){
+      const er=ru.getElementsByTagNameNS(NS_AUC,'EnergyResource')[0]; if(!er)continue;
+      const f=factor[er.textContent.trim()]; if(f==null)continue;
+      for(const tag of ['AnnualFuelUseNativeUnits','AnnualFuelUseConsistentUnits']){
+        const e=ru.getElementsByTagNameNS(NS_AUC,tag)[0];
+        if(e){const v=parseFloat(e.textContent); if(!isNaN(v)) e.textContent=(v*f).toFixed(1);}
+      }
+      for(const em of ru.getElementsByTagNameNS(NS_AUC,'GHGEmissions')){
+        const v=parseFloat(em.textContent); if(!isNaN(v)) em.textContent=String(v*f);
       }
     }
   }
@@ -1445,8 +1465,12 @@ document.getElementById('packet').onclick=downloadPacket;
       if(data.asBase&&data.osBase&&data.osImp){
         const b=annual(data.osBase),i=annual(data.osImp);
         const osPct=(b.kbtu-i.kbtu)/b.kbtu*100;
-        const statedPct=(data.asImp&&data.asImp.savingsPct!=null)?data.asImp.savingsPct:osPct;
-        c.computed={siteSavingsPct_assetScore:statedPct,siteSavingsPct_openStudio:+osPct.toFixed(1),
+        const aB=data.asBase, aI=data.asImp;
+        const statedPct=(aB&&aI&&aB.euiCurrent&&aI.euiUpgraded!=null)
+          ? (aB.euiCurrent-aI.euiUpgraded)/aB.euiCurrent*100 : osPct;
+        c.computed={siteSavingsPct_euiDelta:+statedPct.toFixed(2),
+          siteSavingsPct_reportPublished:(aI&&aI.savingsPct!=null)?aI.savingsPct:null,
+          siteSavingsPct_openStudio:+osPct.toFixed(1),
           qualificationTier:statedPct>=35?'35%+ tier':(statedPct>=20?'20-34% tier':'below 20% - does not qualify'),
           baselineSiteKbtu:Math.round(b.kbtu),improvedSiteKbtu:Math.round(i.kbtu)};
       }
