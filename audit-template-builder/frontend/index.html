@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-02 23:20 UTC · build 10 — wrap-proof measure parsing (attic fix) + EEM checklist; roof areas by use type; end-use tables match the XML; totals reconcile (no ±10 drift); 1-decimal everywhere</div>
+    Last updated 2026-07-03 00:20 UTC · build 11 — full report-fidelity pass: foundations, electric-resistance HVAC, meter months+dates, envelope types, WWR, areas, conditions</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -262,19 +262,23 @@ function parseAssetScore(t){
   d.elecEuiCur=eEui?parseFloat(eEui[1]):null; d.elecEuiUpg=eEui?parseFloat(eEui[2]):null;
   d.savingsPct=num(/site energy savings:\s*([\d.]+)%/,t);
   d.occupants=num(/Number of Assumed Occupants\s+(\d+)/,t);
-  d.wallArea=num(/Total Gross Above Grade Wall Area\s+([\d.]+)\s*ft/,t);
-  d.windowArea=num(/Total Window Area\s+([\d.]+)\s*ft/,t);
-  d.roofArea=num(/Total Gross Roof Area\s+([\d.]+)\s*ft/,t);
+  // Footnote-tolerant: the summary prints superscript digits ("Wall Area 1 5709.0 ft2"),
+  // so require the decimal-bearing number and skip a stray footnote digit.
+  d.wallArea=num(/Total Gross Above Grade Wall Area[\s\d]*?([\d,]+\.\d+)\s*ft/,t);
+  d.windowArea=num(/Total Window Area[\s\d]*?([\d,]+\.\d+)\s*ft/,t);
+  d.roofArea=num(/Total Gross Roof Area[\s\d]*?([\d,]+\.\d+)\s*ft/,t);
   d.roofR=num(/Roof R-Value\s+([\d.]+)/,t);
   // ALL distinct roof R-values on the report (each block prints its own roof —
   // e.g. an R-0 kneewall attic plus an R-19 main roof are two roof systems).
   d.roofRs=[...new Set([...t.matchAll(/Roof R-Value\s+([\d.]+)/g)].map(m=>parseFloat(m[1])))];
+  const _rt=t.match(/Roof Type\s+([^\n]+)/); d.roofType=_rt?_rt[1].trim():null;
   // Roof name ↔ R pairs ("Roof Multifamily Units Roof ... Roof R-Value 19.0"),
   // used to split the total roof area by use type (multifamily vs common).
   d.roofPairs=[...t.matchAll(/Roof\s+([A-Za-z][\w /-]*?Roof)(?:(?!Skylight)[\s\S]){0,180}?Roof R-Value\s+([\d.]+)/g)]
     .map(m=>({name:m[1].replace(/\s+/g,' ').trim(), r:parseFloat(m[2])}));
   d.wallR=num(/Wall R-value\s+([\d.]+)/,t);
-  d.wwr=num(/Window-to-Wall Ratio\s+([\d.]+)/,t);
+  const _bwwr=t.match(/Building Window to Wall Ratio\s+([\d.]+)\s*%/i);
+  d.wwr=_bwwr?parseFloat(_bwwr[1])/100:num(/Window-to-Wall Ratio\s+([\d.]+)/,t);
   d.infiltration=num(/air leakage rate.*?([\d.]+)\s*CFM/,t);
   d.heatCap=num(/Capacity\s+([\d.]+)\s*kBtu\/hr/,t);
   d.coolCop=num(/Efficiency\s+([\d.]+)\s*COP/,t);
@@ -283,6 +287,30 @@ function parseAssetScore(t){
   // Boiler / heating plant detail (page "BUILDING CHARACTERISTICS SUMMARY / Plants").
   d.boilerYear=num(/Year of Manufacture\s+(\d{4})/,t);          // first = heating plant
   d.boilerEff=num(/Thermal Efficiency\s+([\d.]+)%/,t);          // "Thermal Efficiency 80.0% Et"
+  // Heating system: first REAL heating source on the block pages + its fuel.
+  // (A "Through The Wall AC" system reports "Heating Source No Heating"; the
+  // actual heat shows on the secondary system, e.g. "Convective Baseboard: Electric".)
+  const _hs=[...t.matchAll(/Heating Source\s+([^\n]+)/g)].map(m=>m[1].trim()).filter(x=>!/^No Heating/i.test(x));
+  d.heatingSource=_hs[0]||null;
+  if(d.heatingSource){
+    const _hi=t.indexOf('Heating Source '+d.heatingSource);
+    const _hf=t.slice(Math.max(0,_hi),_hi+180).match(/Fuel Type\s+([^\n]+)/);
+    d.heatingFuel=_hf?_hf[1].trim():null;
+  }
+  d.heatingIsElectric=!!((d.heatingSource&&/electric/i.test(d.heatingSource))||(d.heatingFuel&&/electric/i.test(d.heatingFuel)));
+  // Service water heating fuel ("Water Heater Natural Gas", not the Efficiency line).
+  const _wf=t.match(/Water Heater\s+(?!Efficiency)([A-Za-z][^\n]*)/);
+  d.whFuel=_wf?_wf[1].trim():null;
+  // Envelope types printed per block.
+  const _wt=t.match(/Wall Type\s+([^\n]+)/); d.wallType=_wt?_wt[1].trim():null;
+  const _wfr=t.match(/Window Framing Type\s+([^\n]+)/);
+  if(_wfr){const v=_wfr[1]; d.windowFrame=/vinyl/i.test(v)?'Vinyl':(/fiberglass/i.test(v)?'Fiberglass':(/alum/i.test(v)?'Aluminum':(/wood/i.test(v)?'Wood':null)));}
+  const _wg=t.match(/Window Glass Type\s+([^\n]+)/);
+  if(_wg)d.windowGlassLayers=/triple/i.test(_wg[1])?'Triple pane':(/single/i.test(_wg[1])?'Single pane':'Double pane');
+  const _lt=t.match(/Lighting Type\s+([^\n]+)/); d.lightingType=_lt?_lt[1].trim():null;
+  // Floor types -> which foundation kinds actually exist (prunes reference leftovers).
+  d.floorTypes=[...new Set([...t.matchAll(/Floor Type\s+([^\n]+)/g)].map(m=>m[1].trim()))];
+  d.foundationKinds=[...new Set(d.floorTypes.map(x=>/slab/i.test(x)?'SlabOnGrade':(/basement/i.test(x)?'Basement':(/crawl/i.test(x)?'Crawlspace':null))).filter(Boolean))];
   // Use-type square footage from the "Building Use Types" section — gives the
   // conditioned/common split the Audit Template asks for (e.g. 5,796 + 701 = GFA).
   d.useMultifamilyArea=num(/Multi-family\s*\(fewer than 4 floors\):\s*([\d,]+)\s*ft/i,t);
@@ -290,13 +318,31 @@ function parseAssetScore(t){
   // Floor count from block detail ("Above Ground: 2 floors / Below Ground: 0 floors")
   d.floorsAbove=num(/Above Ground:\s*(\d+)\s*floors?/i,t);
   d.floorsBelow=num(/Below Ground:\s*(\d+)\s*floors?/i,t);
-  // Measures ("Selected Upgrade Opportunities"). [^•†] instead of `.` so a
-  // measure that WRAPS across lines in the PDF text (e.g. the long "Add Roof
-  // Insulation for Block in block ... Roof.") still matches — `.` stops at a
-  // newline and silently dropped it. Whitespace-normalized, deduped.
-  const meas=[...t.matchAll(/•\s*([^•†]{8,220}?)(?:†|\s*-\s*Learn)/g)].map(m=>m[1].replace(/\s+/g,' ').trim())
-    .filter(x=>x && !/No opportunities/i.test(x) && x.length>8);
-  d.measures=[...new Set(meas)];
+  // Measures — parse ONLY the "Selected Upgrade Opportunities" summary section.
+  // In the pdf.js line layout the dagger sits on its OWN line (superscript y),
+  // cost markers ("Low $$") merge inline, and long names wrap onto a
+  // continuation line ending in "- Learn More". The detail section repeats each
+  // bullet with prose merged inline (no delimiter), so it must NOT be parsed.
+  d.measures=(function(){
+    const si=t.indexOf('Selected Upgrade Opportunities');
+    if(si===-1)return [];
+    let region=t.slice(si);
+    const endM=region.slice(30).search(/Upgrade Opportunit|Health and Safety|BUILDING CHARACTERISTICS|\f/);
+    if(endM>0)region=region.slice(0,30+endM);
+    const out=[]; let cur=null;
+    for(let line of region.split('\n')){
+      line=line.trim();
+      if(!line||line==='†')continue;
+      if(/^•/.test(line)){ if(cur)out.push(cur); cur=line.replace(/^•\s*/,''); if(/Learn More/.test(cur)){out.push(cur);cur=null;} continue; }
+      if(cur){ cur+=' '+line; if(/Learn More/.test(line)){out.push(cur);cur=null;} }
+    }
+    if(cur)out.push(cur);
+    const clean=x=>x.replace(/-?\s*Learn More.*$/,'')
+      .replace(/\s+(?:Low|Medium|High)\s+\${1,3}(?=\s|$)/g,'')
+      .replace(/\s+\${1,3}(?=\s|$)/g,'')
+      .replace(/†/g,'').replace(/\s+/g,' ').trim();
+    return [...new Set(out.map(clean).filter(x=>x&&x.length>8&&!/No opportunities/i.test(x)))];
+  })();
   return d;
 }
 
@@ -406,6 +452,21 @@ function auditEndUses(os){
   }
   return {elec:eOut,gas:gOut};
 }
+/* Measures for export/review: the improved report's parsed list PLUS the
+   roof-insulation measure derived from the two reports — when the improved
+   model's weakest roof R exceeds the baseline's weakest roof R, an attic
+   insulation upgrade happened even though the report can't list it (Asset
+   Score only offers the upgrade below R-15, so it gets modeled directly). */
+function effectiveMeasures(){
+  const asB=data.asBase, asI=data.asImp;
+  const ms=(asI&&Array.isArray(asI.measures))?asI.measures.slice():[];
+  const bMin=(asB&&asB.roofRs&&asB.roofRs.length)?Math.min(...asB.roofRs):null;
+  const iMin=(asI&&asI.roofRs&&asI.roofRs.length)?Math.min(...asI.roofRs):null;
+  if(bMin!=null&&iMin!=null&&iMin>bMin&&!ms.some(m=>/roof|attic|ceiling/i.test(m)))
+    ms.push('Add Roof Insulation: attic improved from R-'+bMin+' to R-'+iMin+' (modeled directly in the improved Asset Score)');
+  return ms;
+}
+
 /* End uses SCALED to the Asset-Score-pinned annual totals (what the XML carries
    and the DOE import shows). Raw OpenStudio buckets × (scaled fuel total ÷ raw
    fuel sum) — so every table on this page matches the imported file. */
@@ -688,15 +749,16 @@ function refresh(){
   }
 
   h+='<div class="sect"><h3>Envelope &amp; systems</h3><table class="kv">';
-  const env=[['Roof','Shingles/Shakes · R-'+asB.roofR+' → R-'+(asI?asI.roofR:asB.roofR)],
-    ['Wall','Siding on wood frame · R-'+asB.wallR],
-    ['Windows','Wood/Vinyl/Fiberglass dbl · WWR '+asB.wwr],
-    ['Foundation','Slab-on-grade · R-0'],
+  const env=[['Roof',(asB.roofType||'?')+' · R: '+(asB.roofRs&&asB.roofRs.length?asB.roofRs.join(' / '):asB.roofR)+' → '+((asI&&asI.roofRs&&asI.roofRs.length)?asI.roofRs.join(' / '):(asI?asI.roofR:asB.roofR))],
+    ['Wall',(asB.wallType||'?')+' · R-'+asB.wallR],
+    ['Windows',(asB.windowFrame||'?')+' · '+(asB.windowGlassLayers||'?')+' · WWR '+asB.wwr],
+    ['Foundation',(asB.floorTypes&&asB.floorTypes.length?asB.floorTypes.join(' / '):'?')],
     ['Wall area',fmt(asB.wallArea)+' ft²'],['Window area',fmt(asB.windowArea)+' ft²'],
     ['Roof area',fmt(asB.roofArea)+' ft²'],
-    ['Heating','Electric baseboard · '+fmt(asB.heatCap)+' kBtu/hr'],
-    ['Cooling','Terminal DX · '+asB.coolCop+' COP · '+asB.coolTons+' ton'],
-    ['Water heater','Natural gas · '+asB.whe+' Et'],
+    ['Heating',(asB.heatingSource||'?')+' · '+fmt(asB.heatCap)+' kBtu/hr'+(asB.heatingIsElectric?' · electric':'')],
+    ['Cooling','DX · '+asB.coolCop+' COP · '+asB.coolTons+' ton'],
+    ['Water heater',(asB.whFuel||'?')+' · '+asB.whe+' Et'],
+    ['Lighting',asB.lightingType||'?'],
     ['Infiltration',asB.infiltration+' CFM/ft² @ 0.3"']];
   env.forEach(r=>h+=`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`);
   h+='</table></div>';
@@ -709,7 +771,7 @@ function refresh(){
   // Energy efficiency measures (EEMs) — prominent, with a checklist for the
   // measures nearly every building has, so a parser miss is visible BEFORE export.
   {
-    const ms=(asI&&asI.measures)||[];
+    const ms=effectiveMeasures();
     h+='<div class="sect"><h3>Energy efficiency measures ('+ms.length+' parsed from the improved report)</h3><table class="kv">';
     if(ms.length) ms.forEach(m=>h+=`<tr><td colspan="2" style="text-align:left;font-weight:600">✓ ${m}</td></tr>`);
     else h+='<tr><td colspan="2" style="text-align:left;font-weight:700">⚠ NO measures parsed — check the improved report before exporting.</td></tr>';
@@ -1038,6 +1100,24 @@ async function build50121XML(which){
   // file's T-Shape is its own shape, not this building's.
   _setFirst(doc,'FootprintShape','Rectangular');
 
+  // Foundations: keep only the kinds the report's floor types show (e.g. an
+  // all-slab building loses the reference file's Basement foundation and its
+  // Section link). GroundCoupling-less stub systems are left alone.
+  if(as.foundationKinds&&as.foundationKinds.length){
+    for(const fs of [..._q(doc,'FoundationSystem')]){
+      const gc=fs.getElementsByTagNameNS(NS_AUC,'GroundCoupling')[0];
+      if(!gc)continue;
+      const kind=['Basement','SlabOnGrade','Crawlspace'].find(k=>gc.getElementsByTagNameNS(NS_AUC,k)[0]);
+      if(kind&&!as.foundationKinds.includes(kind)){
+        const fid=fs.getAttribute('ID');
+        fs.parentNode.removeChild(fs);
+        for(const l of [..._q(doc,'FoundationID')]) if(l.getAttribute('IDref')===fid){
+          const w=l.parentNode; w.parentNode.removeChild(w);
+        }
+      }
+    }
+  }
+
   // Building-level gross / heated-and-cooled floor areas -> GFA (page-1 value).
   const building=_q(doc,'Building')[0];
   if(building){
@@ -1059,7 +1139,7 @@ async function build50121XML(which){
 
   // Headline EUIs. In the baseline file: benchmark=current(baseline), target=improved.
   // In the improved file: benchmark=current(improved).
-  if(which==='improved'){ _setScenarioEUI(doc,'benchmark', impEUI); }
+  if(which==='improved'){ _setScenarioEUI(doc,'benchmark', impEUI); _setScenarioEUI(doc,'target', impEUI); }
   else { _setScenarioEUI(doc,'benchmark', baseEUI); _setScenarioEUI(doc,'target', impEUI); }
 
   // Site Energy COST Intensity ($/ft²) for the same scenarios. The tool already
@@ -1073,7 +1153,7 @@ async function build50121XML(which){
   const costIntensity = os => (os && gfaCost)
     ? +(( os.elec.reduce((a,b)=>a+b,0)*RATE_ELEC + os.gas.reduce((a,b)=>a+b,0)*RATE_GAS )/gfaCost).toFixed(1) : null;
   const baseCostInt = costIntensity(data.osBase), impCostInt = costIntensity(data.osImp);
-  if(which==='improved'){ _setScenarioCost(doc,'benchmark', impCostInt); }
+  if(which==='improved'){ _setScenarioCost(doc,'benchmark', impCostInt); _setScenarioCost(doc,'target', impCostInt); }
   else { _setScenarioCost(doc,'benchmark', baseCostInt); _setScenarioCost(doc,'target', impCostInt); }
 
   // Annual energy: the template carries the GOLDEN reference building's energy.
@@ -1110,21 +1190,37 @@ async function build50121XML(which){
       'Electricity': meterTotal.Electricity>0 ? target.Electricity/meterTotal.Electricity : null,
       'Natural gas': meterTotal['Natural gas']>0 ? target['Natural gas']/meterTotal['Natural gas'] : null
     };
-    // (a) the meter readings themselves (these drive the imported Site EUI).
-    // Residual-correcting rounding: round each month to 1 decimal, then absorb
-    // the leftover rounding drift into the LARGEST month so the 12 readings sum
-    // EXACTLY to the annual target (kills the QA/QC "Difference" rows).
-    for(const fuel of ['Electricity','Natural gas']){
-      const f=factor[fuel]; if(f==null)continue;
-      const els=meterEls[fuel];
-      const vals=els.map(seu=>{const v=parseFloat(seu.textContent); return isNaN(v)?0:+(v*f).toFixed(1);});
-      const tgt=+target[fuel].toFixed(1);
-      const drift=+(tgt - vals.reduce((a,b)=>a+b,0)).toFixed(1);
-      if(Math.abs(drift)>0 && vals.length){
-        let mx=0; vals.forEach((v,i)=>{if(v>vals[mx])mx=i;});
-        vals[mx]=+(vals[mx]+drift).toFixed(1);
+    // (a) the meter readings: OUR scaled monthly values in the SAME 12-month
+    // window as the utility xlsx (ends two full calendar months back) — the
+    // reference building's month-to-month shape AND its 2025-06 timestamps are
+    // fully replaced. Residual-correcting rounding: absorb the rounding drift
+    // into the largest month so the 12 readings sum EXACTLY to the annual total.
+    {
+      const now=new Date(); let endM=now.getMonth()+1-2, endY=now.getFullYear();
+      while(endM<1){endM+=12;endY-=1;}
+      const seq=[]; let mm=endM, yy=endY;
+      for(let k=0;k<12;k++){seq.unshift({m:mm,y:yy});mm--;if(mm<1){mm=12;yy--;}}
+      const pad=n=>String(n).padStart(2,'0');
+      for(const sc of _q(doc,'Scenario')){
+        const nm=(sc.getElementsByTagNameNS(NS_AUC,'ScenarioName')[0]||{}).textContent||'';
+        if(!/Energy Meter Readings/i.test(nm))continue;
+        const er=sc.getElementsByTagNameNS(NS_AUC,'EnergyResource')[0];
+        const fuel=er?er.textContent.trim():null;
+        if(fuel!=='Electricity'&&fuel!=='Natural gas')continue;
+        const arr=fuel==='Electricity'?eos.elec:eos.gas;
+        const vals=seq.map(({m})=>+(arr[m-1]||0).toFixed(1));
+        const tgt=+arr.reduce((a,b)=>a+b,0).toFixed(1);
+        const drift=+(tgt-vals.reduce((a,b)=>a+b,0)).toFixed(1);
+        if(Math.abs(drift)>0){let mx=0;vals.forEach((v,i)=>{if(v>vals[mx])mx=i;});vals[mx]=+(vals[mx]+drift).toFixed(1);}
+        [...sc.getElementsByTagNameNS(NS_AUC,'SiteEnergyUse')].forEach((seu,i)=>{ if(i<12) seu.textContent=vals[i].toFixed(1); });
+        [...sc.getElementsByTagNameNS(NS_AUC,'TimeSeries')].forEach((ts,i)=>{
+          if(i>=12)return; const {m,y}=seq[i]; const nm2=m===12?1:m+1, ny=m===12?y+1:y;
+          const st=ts.getElementsByTagNameNS(NS_AUC,'StartTimestamp')[0];
+          const en=ts.getElementsByTagNameNS(NS_AUC,'EndTimestamp')[0];
+          if(st)st.textContent=y+'-'+pad(m)+'-01T00:00:00+00:00';
+          if(en)en.textContent=ny+'-'+pad(nm2)+'-01T00:00:00+00:00';
+        });
       }
-      els.forEach((seu,i)=>seu.textContent=vals[i].toFixed(1));
     }
     // Meter-scenario GHG values are the reference building's — rescale by the
     // same per-fuel factor (each meter scenario is single-fuel).
@@ -1235,10 +1331,14 @@ async function build50121XML(which){
     if(rsProto){
       const setRoofR=(node,val)=>{const e=node.getElementsByTagNameNS(NS_AUC,'RoofInsulationRValue')[0]; if(e)e.textContent=Number(val).toFixed(1);};
       const mfA=as.useMultifamilyArea, comA=(as.useCommonArea!=null)?as.useCommonArea:((as.gfa!=null&&mfA!=null)?as.gfa-mfA:null);
+      const isCommonRoof=n=>/common|hallway|corridor|stair|lobby|kneewall|hall\b/i.test(n||'');
       const roofShare=(rv,idx)=>{
         if(roofRs.length===1)return 1;
-        const pair=(as.roofPairs||[]).find(p=>p.r===rv);
-        if(pair&&mfA>0&&comA>0) return /common/i.test(pair.name)?comA/(mfA+comA):mfA/(mfA+comA);
+        const pairs=(as.roofPairs||[]);
+        const pair=pairs.find(p=>p.r===rv);
+        const anyCommon=pairs.some(p=>isCommonRoof(p.name));
+        if(pair&&mfA>0&&comA>0&&anyCommon)
+          return isCommonRoof(pair.name)?comA/(mfA+comA):mfA/(mfA+comA);
         if(mfA>0&&comA>0) return idx===0?mfA/(mfA+comA):(comA/(mfA+comA))/(roofRs.length-1);
         return 1/roofRs.length;
       };
@@ -1273,8 +1373,48 @@ async function build50121XML(which){
   }
   // Total Roof Area UDF — was the REFERENCE building's 1932.0 passing through.
   if(as.roofArea!=null)_setUDF(doc,'Roof Area', Number(as.roofArea).toFixed(1));
-  // Domestic hot water
+  // Domestic hot water: efficiency (report gives Et -> Thermal Efficiency) + fuel.
   _setFirst(doc,'WaterHeaterEfficiency', as.whe);
+  if(as.whe!=null)_setFirst(doc,'WaterHeaterEfficiencyType','Thermal Efficiency');
+  if(as.whFuel){
+    const dhw=_q(doc,'DomesticHotWaterSystem')[0];
+    if(dhw){const pf=dhw.getElementsByTagNameNS(NS_AUC,'PrimaryFuel')[0];
+      if(pf)pf.textContent=/electric/i.test(as.whFuel)?'Electricity':'Natural gas';}
+  }
+  // Wall finish from the report's wall type (enum: Brick/Stone/Wood/EIFS/Metal).
+  if(as.wallType){
+    const fin=/brick/i.test(as.wallType)?'Brick':(/stone/i.test(as.wallType)?'Stone':(/stucco/i.test(as.wallType)?'EIFS':(/metal/i.test(as.wallType)?'Metal':(/siding|wood/i.test(as.wallType)?'Wood':null))));
+    if(fin)_setFirst(doc,'ExteriorWallFinish',fin);
+  }
+  // Equipment conditions are NOT on the Asset Score report — neutral 'Average'
+  // instead of the reference building's judgments ('Poor').
+  for(const tag of ['RoofCondition','HeatingPlantCondition','CoolingSourceCondition'])
+    for(const ce of _q(doc,tag)) ce.textContent='Average';
+  // Heating: the report is authoritative. Electric building -> swap the hydronic
+  // plant reference for <ElectricResistance/>, remove the boiler plant's
+  // HVACSystem entirely, make delivery fuel Electricity, and carry the heating
+  // capacity on the heating source itself.
+  if(as.heatingIsElectric){
+    for(const hst of _q(doc,'HeatingSourceType')){
+      const ref=hst.getElementsByTagNameNS(NS_AUC,'SourceHeatingPlantID')[0];
+      if(ref){hst.removeChild(ref); hst.appendChild(doc.createElementNS(NS_AUC,'auc:ElectricResistance'));}
+    }
+    const hp0=_q(doc,'HeatingPlant')[0];
+    if(hp0){let sys=hp0; while(sys&&sys.localName!=='HVACSystem')sys=sys.parentNode;
+      if(sys&&sys.parentNode)sys.parentNode.removeChild(sys); else hp0.parentNode.removeChild(hp0);}
+    for(const dv of _q(doc,'Delivery')){
+      const pf=dv.getElementsByTagNameNS(NS_AUC,'PrimaryFuel')[0];
+      if(pf&&/hot water|steam|natural gas|fuel oil/i.test(pf.textContent))pf.textContent='Electricity';
+    }
+    if(as.heatCap!=null){
+      const hs0=_q(doc,'HeatingSource')[0];
+      if(hs0&&!hs0.getElementsByTagNameNS(NS_AUC,'Capacity')[0]){
+        const cu=hs0.getElementsByTagNameNS(NS_AUC,'CapacityUnits')[0];
+        if(cu){const c=doc.createElementNS(NS_AUC,'auc:Capacity'); c.textContent=Number(as.heatCap).toFixed(1); cu.parentNode.insertBefore(c,cu);}
+      }
+    }
+  }
+
   // Heating plant / boiler: capacity (kBtu/hr), efficiency, year installed.
   const boiler=_q(doc,'Boiler')[0];
   if(boiler){
@@ -1355,7 +1495,7 @@ async function build50121XML(which){
   // Measure's description; fewer parsed than template slots -> remove surplus
   // Measure nodes + their PackageOfMeasures refs; MORE parsed -> clone the last
   // Measure with a fresh unique ID (xs:ID) and add a matching MeasureID ref.
-  const parsedMeasures=(asI&&Array.isArray(asI.measures))?asI.measures.filter(Boolean):[];
+  const parsedMeasures=effectiveMeasures().filter(Boolean);
   if(parsedMeasures.length){
     const measures=[..._q(doc,'Measure')];
     const setDesc=(m,txt)=>{
