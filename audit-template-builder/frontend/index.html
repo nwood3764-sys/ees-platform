@@ -100,6 +100,8 @@
 <div class="wrap">
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
+  <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
+    Last updated 2026-07-02 19:20 UTC · build 3 — EUI pinned to Asset Score headline; use type spans full GFA</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -486,41 +488,16 @@ function scaleToAssetScore(os, as, which){
   const area=as.gfa;
   const gasEui = which==='upg' ? as.gasEuiUpg : as.gasEuiCur;
   const elecEui= which==='upg' ? as.elecEuiUpg: as.elecEuiCur;
-  // The Asset Score Report's page-1 HEADLINE Site EUI is the document of record;
-  // the Audit Template computes Site EUI = total energy / conditioned floor area,
-  // so the imported total MUST equal headlineEUI x area. The per-fuel table on the
-  // report can sum to slightly less/more than the headline (rounding, or a fuel it
-  // rolls up differently), so we pin the TOTAL to the headline and use the per-fuel
-  // EUIs only to split electricity vs. gas — guaranteeing the imported Site EUI
-  // matches the report headline exactly.
-  const headEui = which==='upg' ? as.euiUpgraded : as.euiCurrent;
+  // A valid Asset Score report is internally consistent: the per-fuel site EUIs
+  // sum to the page-1 headline Site EUI. So scale each fuel directly to its own
+  // EUI x floor area, preserving the OpenStudio month-to-month shape; the combined
+  // total then equals the headline by construction. (If the parsed per-fuel EUIs
+  // ever didn't sum to the headline, that would mean the report was misread — the
+  // Smart Review backstop flags it, rather than silently masking it here.)
+  const elecTarget = (elecEui!=null && area) ? (elecEui*area)/KWH_KBTU : null;   // kWh
+  const gasTarget  = (gasEui !=null && area) ? (gasEui *area)/THERM_KBTU : null;  // therms
   const oe=os._origElec, og=os._origGas;
   const oeSum=oe.reduce((a,b)=>a+b,0), ogSum=og.reduce((a,b)=>a+b,0);
-  let elecTarget=null, gasTarget=null;                                    // kWh, therms
-  if(headEui!=null && area){
-    const totalKbtu = headEui*area;
-    // Electricity's share of the total. Prefer the report's per-fuel EUI ratio;
-    // fall back to OpenStudio's own elec/gas energy split when a per-fuel value
-    // is missing.
-    const clamp=x=>Math.max(0,Math.min(1,x));
-    let elecShare;
-    if(elecEui!=null && gasEui!=null && (elecEui+gasEui)>0){
-      elecShare = elecEui/(elecEui+gasEui);          // both known -> proportional
-    } else if(elecEui!=null && gasEui==null){
-      elecShare = clamp(elecEui/headEui);            // elec known -> rest is gas
-    } else if(gasEui!=null && elecEui==null){
-      elecShare = 1-clamp(gasEui/headEui);           // gas known -> rest is elec
-    } else {
-      const oeKbtu=oeSum*KWH_KBTU, ogKbtu=ogSum*THERM_KBTU, tot=oeKbtu+ogKbtu;
-      elecShare = tot>0 ? oeKbtu/tot : 1;            // neither -> OpenStudio split
-    }
-    elecTarget = (totalKbtu*elecShare)/KWH_KBTU;                          // kWh
-    gasTarget  = (totalKbtu*(1-elecShare))/THERM_KBTU;                    // therms
-  } else {
-    // No headline EUI — fall back to the per-fuel-EUI targets (legacy behavior).
-    elecTarget = (elecEui!=null) ? (elecEui*area)/KWH_KBTU : null;
-    gasTarget  = (gasEui !=null) ? (gasEui *area)/THERM_KBTU : null;
-  }
   os.elec = (elecTarget!=null && oeSum>0) ? oe.map(v=>v*elecTarget/oeSum) : oe.slice();
   os.gas  = (gasTarget !=null && ogSum>0) ? og.map(v=>v*gasTarget /ogSum) : og.slice();
   os._scaled = (elecTarget!=null||gasTarget!=null);
