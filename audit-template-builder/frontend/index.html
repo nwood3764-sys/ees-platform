@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 03:30 UTC · build 16 — dollar savings on the headline + per-fuel cost rows in the comparison table</div>
+    Last updated 2026-07-03 04:25 UTC · build 18 — delivery equipment + central distribution fully report-driven (wall AC / mini-split / VRF / other) — no reference carryover</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -311,6 +311,8 @@ function parseAssetScore(t){
   d.heatingIsElectric=!!((d.heatingSource&&/electric/i.test(d.heatingSource))||(d.heatingFuel&&/electric/i.test(d.heatingFuel)));
   const _sys=t.match(/Primary Heating\/Cooling System\s+([^\n]+)/);
   d.hvacSystemLabel=_sys?_sys[1].trim():null;
+  const _csrc=[...t.matchAll(/Cooling Source\s+([^\n]+)/g)].map(m=>m[1].trim()).filter(x=>!/^No Cooling/i.test(x));
+  d.coolingSourceLabel=_csrc[0]||null;
   d.coolingIsWallAC=!!(d.hvacSystemLabel&&/wall ac|window ac|through the wall/i.test(d.hvacSystemLabel));
   // Service water heating fuel ("Water Heater Natural Gas", not the Efficiency line).
   const _wf=t.match(/Water Heater\s+(?!Efficiency)([A-Za-z][^\n]*)/);
@@ -1449,17 +1451,62 @@ async function build50121XML(which){
   // reference file's Mini-split fan-coil is replaced with <Other/> plus the
   // specify-text UDF. (Fan Control 'Constant Volume', ERV 'None', and Outdoor
   // Air 'Natural Ventilation' already match the template defaults.)
-  if(as.coolingIsWallAC){
-    // XSD-valid encoding: FanCoilType 'Other' + the specify-text UDF (the
-    // reference file's 'Mini-split' is its own equipment, not this building's).
-    for(const fct of _q(doc,'FanCoilType')) fct.textContent='Other';
-    _setUDF(doc,'Other Distribution Equipment Type','Through the Wall AC');
-    _setUDF(doc,'Other Distribution Equipment Type Is Not Applicable','false');
+  // Delivery equipment: ALWAYS derived from the report's system labels — never
+  // left as the reference file's equipment. Mapping (XSD FanCoilType enum):
+  //   wall/window AC  -> 'Other' + specify 'Through the Wall AC'
+  //   mini/multi-split-> 'Mini-split' / 'Multi-split'
+  //   VRF             -> 'VRF terminal units' (+ central distribution VRF)
+  //   anything else   -> 'Other' + specify = the report's own label
+  {
+    const label=(as.hvacSystemLabel||as.coolingSourceLabel||'');
+    let fct, other='';
+    if(as.coolingIsWallAC){fct='Other'; other='Through the Wall AC';}
+    else if(/multi.?split/i.test(label)) fct='Multi-split';
+    else if(/mini.?split/i.test(label)) fct='Mini-split';
+    else if(/vrf|variable refrigerant/i.test(label)) fct='VRF terminal units';
+    else if(label){fct='Other'; other=label;}
+    if(fct) for(const e of _q(doc,'FanCoilType')) e.textContent=fct;
+    _setUDF(doc,'Other Distribution Equipment Type',other||' ');
+    if(other)_setUDF(doc,'Other Distribution Equipment Type Is Not Applicable','false');
+    // Central distribution: VRF systems are 'Refrigerant (VRF)'; all unitized/DX
+    // systems are 'None (unitized heating/cooling)' (EES rule).
+    const cdt=/vrf|variable refrigerant/i.test(label)?'Refrigerant (VRF)':'None (unitized heating/cooling)';
+    for(const u of _q(doc,'UserDefinedField')){
+      const n=u.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
+      if(n&&n.textContent.trim()==='Central Distribution Type'){
+        const v=u.getElementsByTagNameNS(NS_AUC,'FieldValue')[0]; if(v)v.textContent=cdt;}
+    }
   }
   // Equipment conditions are NOT on the Asset Score report — neutral 'Average'
   // instead of the reference building's judgments ('Poor').
   for(const tag of ['RoofCondition','HeatingPlantCondition','CoolingSourceCondition'])
     for(const ce of _q(doc,tag)) ce.textContent='Average';
+
+  // Reference-building leftovers in free-text fields and equipment metadata:
+  const setAllUDF=(name,val)=>{for(const u of _q(doc,'UserDefinedField')){
+    const n=u.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
+    if(n&&n.textContent.trim()===name){const v=u.getElementsByTagNameNS(NS_AUC,'FieldValue')[0]; if(v)v.textContent=val;}}};
+  // 'Basement Excluded as is not conditioned.' — the REFERENCE's note; this
+  // building excludes nothing from GFA.
+  setAllUDF('Spaces Excluded From Gross Floor Area','');
+  // '3/4ths of Metal Door is a window / lite' — reference's door note.
+  setAllUDF('Other Exterior Door Type','');
+  // EVERY Central Distribution Type = None (unitized) — the reference carried a
+  // second one saying 'Refrigerant (VRF)'.
+  setAllUDF('Central Distribution Type','None (unitized heating/cooling)');
+  // Reference's 'Critical IT Systems' (Server / Trading floor) — not this
+  // building's equipment; no IDrefs point at them.
+  for(const its of [..._q(doc,'CriticalITSystems')]) its.parentNode.removeChild(its);
+  // Water heater + cooling equipment: the report prints no install year or
+  // location — year installed = year built (EES rule), location Interior.
+  for(const tag of ['DomesticHotWaterSystem','CoolingSource']){
+    for(const sys of _q(doc,tag)){
+      const yi=sys.getElementsByTagNameNS(NS_AUC,'YearInstalled')[0];
+      if(yi&&as.yearBuilt!=null)yi.textContent=String(as.yearBuilt);
+      const lo=sys.getElementsByTagNameNS(NS_AUC,'Location')[0];
+      if(lo)lo.textContent='Interior';
+    }
+  }
   // Heating: the report is authoritative. Electric building -> swap the hydronic
   // plant reference for <ElectricResistance/>, remove the boiler plant's
   // HVACSystem entirely, make delivery fuel Electricity, and carry the heating
