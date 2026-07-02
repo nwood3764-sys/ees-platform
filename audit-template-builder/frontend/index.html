@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-02 22:40 UTC · build 9 — building shape always Rectangular; all roof systems from the report (e.g. R-0 + R-19)</div>
+    Last updated 2026-07-02 23:20 UTC · build 10 — wrap-proof measure parsing (attic fix) + EEM checklist; roof areas by use type; end-use tables match the XML; totals reconcile (no ±10 drift); 1-decimal everywhere</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -269,6 +269,10 @@ function parseAssetScore(t){
   // ALL distinct roof R-values on the report (each block prints its own roof —
   // e.g. an R-0 kneewall attic plus an R-19 main roof are two roof systems).
   d.roofRs=[...new Set([...t.matchAll(/Roof R-Value\s+([\d.]+)/g)].map(m=>parseFloat(m[1])))];
+  // Roof name ↔ R pairs ("Roof Multifamily Units Roof ... Roof R-Value 19.0"),
+  // used to split the total roof area by use type (multifamily vs common).
+  d.roofPairs=[...t.matchAll(/Roof\s+([A-Za-z][\w /-]*?Roof)(?:(?!Skylight)[\s\S]){0,180}?Roof R-Value\s+([\d.]+)/g)]
+    .map(m=>({name:m[1].replace(/\s+/g,' ').trim(), r:parseFloat(m[2])}));
   d.wallR=num(/Wall R-value\s+([\d.]+)/,t);
   d.wwr=num(/Window-to-Wall Ratio\s+([\d.]+)/,t);
   d.infiltration=num(/air leakage rate.*?([\d.]+)\s*CFM/,t);
@@ -286,7 +290,11 @@ function parseAssetScore(t){
   // Floor count from block detail ("Above Ground: 2 floors / Below Ground: 0 floors")
   d.floorsAbove=num(/Above Ground:\s*(\d+)\s*floors?/i,t);
   d.floorsBelow=num(/Below Ground:\s*(\d+)\s*floors?/i,t);
-  const meas=[...t.matchAll(/•\s*(.+?)(?:†|\s*-\s*Learn)/g)].map(m=>m[1].replace(/\s+/g,' ').trim())
+  // Measures ("Selected Upgrade Opportunities"). [^•†] instead of `.` so a
+  // measure that WRAPS across lines in the PDF text (e.g. the long "Add Roof
+  // Insulation for Block in block ... Roof.") still matches — `.` stops at a
+  // newline and silently dropped it. Whitespace-normalized, deduped.
+  const meas=[...t.matchAll(/•\s*([^•†]{8,220}?)(?:†|\s*-\s*Learn)/g)].map(m=>m[1].replace(/\s+/g,' ').trim())
     .filter(x=>x && !/No opportunities/i.test(x) && x.length>8);
   d.measures=[...new Set(meas)];
   return d;
@@ -397,6 +405,29 @@ function auditEndUses(os){
     else gOut['Other']=(gOut['Other']||0)+v;
   }
   return {elec:eOut,gas:gOut};
+}
+/* End uses SCALED to the Asset-Score-pinned annual totals (what the XML carries
+   and the DOE import shows). Raw OpenStudio buckets × (scaled fuel total ÷ raw
+   fuel sum) — so every table on this page matches the imported file. */
+function scaledEndUses(os){
+  const raw=auditEndUses(os);
+  const out={elec:{},gas:{}};
+  for(const [fuel,arr] of [['elec',os.elec],['gas',os.gas]]){
+    const target=(arr||[]).reduce((a,b)=>a+b,0);
+    const sum=Object.values(raw[fuel]).reduce((a,b)=>a+(b||0),0);
+    const f=(sum>0&&target>0)?target/sum:1;
+    for(const [k,v] of Object.entries(raw[fuel])) out[fuel][k]=v*f;
+  }
+  return out;
+}
+/* Per-fuel scale factor (scaled monthly total ÷ raw end-use sum) for scaling the
+   raw monthly-by-end-use matrices in the review. */
+function fuelScaleFactor(os,fuel){
+  const arr=fuel==='elec'?os.elec:os.gas;
+  const raw=auditEndUses(os)[fuel];
+  const target=(arr||[]).reduce((a,b)=>a+b,0);
+  const sum=Object.values(raw).reduce((a,b)=>a+(b||0),0);
+  return (sum>0&&target>0)?target/sum:1;
 }
 
 /* ---------- file wiring ---------- */
@@ -546,7 +577,7 @@ function refresh(){
   const rv=document.getElementById('review'); rv.classList.add('show');
   document.getElementById('rTitle').textContent=cleanName(asB?asB.name:as.name);
   document.getElementById('rSavings').innerHTML=
-    `${statedPct.toFixed(2)}% site energy savings<small>Site EUI delta: ${asB?asB.euiCurrent:'?'} → ${asI?asI.euiUpgraded:'?'} kBtu/ft²/yr · OpenStudio monthly: ${osPct.toFixed(1)}%${asI&&asI.savingsPct!=null?' · report published: '+asI.savingsPct.toFixed(2)+'%':''}</small>`;
+    `${statedPct.toFixed(1)}% site energy savings<small>Site EUI delta: ${asB?asB.euiCurrent:'?'} → ${asI?asI.euiUpgraded:'?'} kBtu/ft²/yr · OpenStudio monthly: ${osPct.toFixed(1)}%${asI&&asI.savingsPct!=null?' · report published: '+asI.savingsPct.toFixed(1)+'%':''}</small>`;
   const tier=statedPct>=35?'35%+ tier':(statedPct>=20?'20–34% tier':'below 20% — does not qualify');
   document.getElementById('rTier').innerHTML=`<span class="pill${statedPct>=20?'':' warn'}">${tier}</span>`;
 
@@ -569,7 +600,7 @@ function refresh(){
     const f=v=>money?'$'+fmt(v,0):fmt(v,r[0].includes('therms')?1:0);
     h+=`<tr><td style="text-align:left">${r[0]}</td><td>${f(r[1])}</td><td>${f(r[2])}</td><td>${f(r[3])}</td></tr>`;
   });
-  h+=`<tr style="font-weight:700;background:#f0efe8"><td style="text-align:left">Whole-building savings</td><td colspan="3">Site EUI delta ${statedPct.toFixed(2)}% · OpenStudio monthly ${osPct.toFixed(1)}%${asI&&asI.savingsPct!=null?' · report published '+asI.savingsPct.toFixed(2)+'%':''} · ${tier}</td></tr>`;
+  h+=`<tr style="font-weight:700;background:#f0efe8"><td style="text-align:left">Whole-building savings</td><td colspan="3">Site EUI delta ${statedPct.toFixed(1)}% · OpenStudio monthly ${osPct.toFixed(1)}%${asI&&asI.savingsPct!=null?' · report published '+asI.savingsPct.toFixed(1)+'%':''} · ${tier}</td></tr>`;
   h+='</tbody></table></div>';
 
   h+='<div class="sect"><h3>Building</h3><table class="kv">';
@@ -593,7 +624,7 @@ function refresh(){
     const kbtu=e*KWH_KBTU+g*THERM_KBTU;
     const cost=e*RATE_ELEC+g*RATE_GAS;
     const eui=(kbtu/asB.gfa).toFixed(1);
-    const costInt=(cost/asB.gfa).toFixed(2);
+    const costInt=(cost/asB.gfa).toFixed(1);
     const fields=[
       ['Benchmarking Source','Other'],
       ['Benchmarking Source (Other)','Energy Modeling'],
@@ -617,7 +648,7 @@ function refresh(){
   h+=`<div class="sect"><h3>Whole Building Reported Energy Savings</h3>
     <div class="cardgrid">
       <div class="fcard"><div class="flabel">Asset Score stated (%)</div>
-        <div class="copyrow"><code>${statedPct.toFixed(2)}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div></div>
+        <div class="copyrow"><code>${statedPct.toFixed(1)}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div></div>
       <div class="fcard"><div class="flabel">OpenStudio monthly (%)</div>
         <div class="copyrow"><code>${osPct.toFixed(1)}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div></div>
     </div>
@@ -675,8 +706,25 @@ function refresh(){
   h+=monthTable('Improved',data.osImp);
   h+='</div>';
 
-  // End-use breakdown — the Audit Template "Building Energy Use by End Use" screen
-  const euB=auditEndUses(data.osBase), euI=auditEndUses(data.osImp);
+  // Energy efficiency measures (EEMs) — prominent, with a checklist for the
+  // measures nearly every building has, so a parser miss is visible BEFORE export.
+  {
+    const ms=(asI&&asI.measures)||[];
+    h+='<div class="sect"><h3>Energy efficiency measures ('+ms.length+' parsed from the improved report)</h3><table class="kv">';
+    if(ms.length) ms.forEach(m=>h+=`<tr><td colspan="2" style="text-align:left;font-weight:600">✓ ${m}</td></tr>`);
+    else h+='<tr><td colspan="2" style="text-align:left;font-weight:700">⚠ NO measures parsed — check the improved report before exporting.</td></tr>';
+    const expected=[['air seal',/air\s*(seal|infiltra)|seal(ing)?\s*(the\s*)?(building)?\s*envelope/i],
+                    ['attic/roof insulation',/roof|attic|ceiling/i],
+                    ['low-flow fixtures',/low[\s-]*flow|shower|aerator|hot water fixture/i]];
+    const missing=expected.filter(([,re])=>!ms.some(m=>re.test(m))).map(([n])=>n);
+    if(missing.length) h+=`<tr><td colspan="2" style="text-align:left;color:#2a4a6a;font-weight:700">⚠ Not found on this report (verify — most buildings have them): ${missing.join(', ')}</td></tr>`;
+    h+='</table></div>';
+  }
+
+  // End-use breakdown — SCALED to the Asset-Score-pinned totals, so these tables
+  // match the XML / DOE import exactly (raw OpenStudio values would disagree
+  // with the metered totals above).
+  const euB=scaledEndUses(data.osBase), euI=scaledEndUses(data.osImp);
   h+='<div class="sect"><h3>Electricity by end use (kWh)</h3>';
   h+=endUseTable(['Space Heating','Space Cooling','Lighting','Plug Loads','Other'],euB.elec,euI.elec);
   h+='</div>';
@@ -689,25 +737,23 @@ function refresh(){
   h+=combinedEndUse(euB,euI);
   h+='</div>';
 
-  // Full monthly grid by end use — exactly like the OpenStudio consumption tables.
+  // Full monthly grid by end use — OpenStudio shape, scaled per fuel to the same
+  // Asset-Score-pinned totals as everything else on this page.
+  const sc=(m,f)=>{const o={};for(const[k,v]of Object.entries(m||{}))o[k]=v.map(x=>x*f);return o;};
+  const fEb=fuelScaleFactor(data.osBase,'elec'), fGb=fuelScaleFactor(data.osBase,'gas');
+  const fEi=fuelScaleFactor(data.osImp,'elec'), fGi=fuelScaleFactor(data.osImp,'gas');
   h+='<div class="sect"><h3>Baseline — electricity by end use, monthly (kWh)</h3>';
-  h+=monthlyMatrixTable(data.osBase.elecMonthly);
+  h+=monthlyMatrixTable(sc(data.osBase.elecMonthly,fEb));
   h+='</div>';
   h+='<div class="sect"><h3>Baseline — natural gas by end use, monthly (therms)</h3>';
-  h+=monthlyMatrixTable(data.osBase.gasMonthly);
+  h+=monthlyMatrixTable(sc(data.osBase.gasMonthly,fGb));
   h+='</div>';
   h+='<div class="sect"><h3>Improved — electricity by end use, monthly (kWh)</h3>';
-  h+=monthlyMatrixTable(data.osImp.elecMonthly);
+  h+=monthlyMatrixTable(sc(data.osImp.elecMonthly,fEi));
   h+='</div>';
   h+='<div class="sect"><h3>Improved — natural gas by end use, monthly (therms)</h3>';
-  h+=monthlyMatrixTable(data.osImp.gasMonthly);
+  h+=monthlyMatrixTable(sc(data.osImp.gasMonthly,fGi));
   h+='</div>';
-
-  if(asI&&asI.measures.length){
-    h+='<div class="sect"><h3>Measures</h3><table class="kv">';
-    asI.measures.forEach(m=>h+=`<tr><td colspan="2" style="text-align:left;font-weight:600">${m}</td></tr>`);
-    h+='</table></div>';
-  }
   document.getElementById('rBody').innerHTML=h;
 
   document.getElementById('rNote').textContent=
@@ -1025,7 +1071,7 @@ async function build50121XML(which){
   scaleToAssetScore(data.osImp, asI||asB, 'upg');
   const gfaCost = as.gfa || asB.gfa;
   const costIntensity = os => (os && gfaCost)
-    ? +(( os.elec.reduce((a,b)=>a+b,0)*RATE_ELEC + os.gas.reduce((a,b)=>a+b,0)*RATE_GAS )/gfaCost).toFixed(2) : null;
+    ? +(( os.elec.reduce((a,b)=>a+b,0)*RATE_ELEC + os.gas.reduce((a,b)=>a+b,0)*RATE_GAS )/gfaCost).toFixed(1) : null;
   const baseCostInt = costIntensity(data.osBase), impCostInt = costIntensity(data.osImp);
   if(which==='improved'){ _setScenarioCost(doc,'benchmark', impCostInt); }
   else { _setScenarioCost(doc,'benchmark', baseCostInt); _setScenarioCost(doc,'target', impCostInt); }
@@ -1064,10 +1110,34 @@ async function build50121XML(which){
       'Electricity': meterTotal.Electricity>0 ? target.Electricity/meterTotal.Electricity : null,
       'Natural gas': meterTotal['Natural gas']>0 ? target['Natural gas']/meterTotal['Natural gas'] : null
     };
-    // (a) the meter readings themselves (these drive the imported Site EUI)
+    // (a) the meter readings themselves (these drive the imported Site EUI).
+    // Residual-correcting rounding: round each month to 1 decimal, then absorb
+    // the leftover rounding drift into the LARGEST month so the 12 readings sum
+    // EXACTLY to the annual target (kills the QA/QC "Difference" rows).
     for(const fuel of ['Electricity','Natural gas']){
       const f=factor[fuel]; if(f==null)continue;
-      for(const seu of meterEls[fuel]){const v=parseFloat(seu.textContent); if(!isNaN(v)) seu.textContent=(v*f).toFixed(1);}
+      const els=meterEls[fuel];
+      const vals=els.map(seu=>{const v=parseFloat(seu.textContent); return isNaN(v)?0:+(v*f).toFixed(1);});
+      const tgt=+target[fuel].toFixed(1);
+      const drift=+(tgt - vals.reduce((a,b)=>a+b,0)).toFixed(1);
+      if(Math.abs(drift)>0 && vals.length){
+        let mx=0; vals.forEach((v,i)=>{if(v>vals[mx])mx=i;});
+        vals[mx]=+(vals[mx]+drift).toFixed(1);
+      }
+      els.forEach((seu,i)=>seu.textContent=vals[i].toFixed(1));
+    }
+    // Meter-scenario GHG values are the reference building's — rescale by the
+    // same per-fuel factor (each meter scenario is single-fuel).
+    for(const sc of _q(doc,'Scenario')){
+      const nm=(sc.getElementsByTagNameNS(NS_AUC,'ScenarioName')[0]||{}).textContent||'';
+      if(!/Energy Meter Readings/i.test(nm))continue;
+      const er=sc.getElementsByTagNameNS(NS_AUC,'EnergyResource')[0];
+      const f=er?factor[er.textContent.trim()]:null; if(f==null)continue;
+      for(const tag of ['GHGEmissions','AnnualAverageGHGEmissions','AnnualGHGEmissions']){
+        for(const gel of sc.getElementsByTagNameNS(NS_AUC,tag)){
+          const v=parseFloat(gel.textContent); if(!isNaN(v)) gel.textContent=(v*f).toFixed(1);
+        }
+      }
     }
     // (b) every other per-fuel energy value, by the SAME factor (keeps ratios)
     for(const ru of _q(doc,'ResourceUse')){
@@ -1078,7 +1148,7 @@ async function build50121XML(which){
         if(e){const v=parseFloat(e.textContent); if(!isNaN(v)) e.textContent=(v*f).toFixed(1);}
       }
       for(const em of ru.getElementsByTagNameNS(NS_AUC,'GHGEmissions')){
-        const v=parseFloat(em.textContent); if(!isNaN(v)) em.textContent=String(v*f);
+        const v=parseFloat(em.textContent); if(!isNaN(v)) em.textContent=(v*f).toFixed(1);
       }
     }
   }
@@ -1104,7 +1174,18 @@ async function build50121XML(which){
     if(rus){
       for(const [fuel,target,raw] of [['Electricity',tElec,bkt.elec],['Natural gas',tGas,bkt.gas]]){
         const sum=Object.values(raw).reduce((a,b)=>a+(b||0),0);
-        const list=Object.entries(raw).filter(([,v])=>v>0).map(([label,v])=>({label, val: sum>0 ? v*target/sum : 0}));
+        const list=Object.entries(raw).filter(([,v])=>v>0).map(([label,v])=>({label, val: sum>0 ? +(v*target/sum).toFixed(1) : 0}));
+        // Residual-correcting rounding: absorb the rounding drift into the
+        // LARGEST end use so the rows sum EXACTLY to the 'All end uses' total
+        // (same rule as the meter readings — kills the QA/QC Difference row).
+        if(list.length){
+          const tgt=+target.toFixed(1);
+          const drift=+(tgt - list.reduce((a,b)=>a+b.val,0)).toFixed(1);
+          if(Math.abs(drift)>0){
+            let mx=0; list.forEach((it,i)=>{if(it.val>list[mx].val)mx=i;});
+            list[mx].val=+(list[mx].val+drift).toFixed(1);
+          }
+        }
         const all=[...rus.getElementsByTagNameNS(NS_AUC,'ResourceUse')].filter(ru=>{
           const er=ru.getElementsByTagNameNS(NS_AUC,'EnergyResource')[0];
           return er&&er.textContent.trim()===fuel;});
@@ -1128,7 +1209,7 @@ async function build50121XML(which){
           for(const f of node.getElementsByTagNameNS(NS_AUC,'UserDefinedField')){
             const fn=f.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
             if(fn&&fn.textContent.trim()==='Other End Use'){const fv=f.getElementsByTagNameNS(NS_AUC,'FieldValue')[0]; if(fv)fv.textContent=other;}}
-          const g=node.getElementsByTagNameNS(NS_AUC,'GHGEmissions')[0]; if(g)g.textContent=String(item.val*ghgF);
+          const g=node.getElementsByTagNameNS(NS_AUC,'GHGEmissions')[0]; if(g)g.textContent=(item.val*ghgF).toFixed(1);
         });
         for(let i=list.length;i<existing.length;i++) existing[i].parentNode.removeChild(existing[i]);
         // 'All end uses' total for the fuel = meter total
@@ -1145,31 +1226,53 @@ async function build50121XML(which){
   // plus an R-19 main roof). Set the template's RoofSystem to the first R-value,
   // then clone it (fresh unique ID — xs:ID must be unique) for each additional
   // distinct R-value and link each clone in the Section's Roofs container.
+  // Per-roof AREA is not printed on the report, so split the Total Gross Roof
+  // Area by the use-type floor areas the roof names map to (Multifamily Units
+  // Roof vs Common Space Roof) — user-approved derivation.
   const roofRs=(as.roofRs&&as.roofRs.length)?as.roofRs:(as.roofR!=null?[as.roofR]:[]);
   if(roofRs.length){
     const rsProto=_q(doc,'RoofSystem')[0];
     if(rsProto){
       const setRoofR=(node,val)=>{const e=node.getElementsByTagNameNS(NS_AUC,'RoofInsulationRValue')[0]; if(e)e.textContent=Number(val).toFixed(1);};
+      const mfA=as.useMultifamilyArea, comA=(as.useCommonArea!=null)?as.useCommonArea:((as.gfa!=null&&mfA!=null)?as.gfa-mfA:null);
+      const roofShare=(rv,idx)=>{
+        if(roofRs.length===1)return 1;
+        const pair=(as.roofPairs||[]).find(p=>p.r===rv);
+        if(pair&&mfA>0&&comA>0) return /common/i.test(pair.name)?comA/(mfA+comA):mfA/(mfA+comA);
+        if(mfA>0&&comA>0) return idx===0?mfA/(mfA+comA):(comA/(mfA+comA))/(roofRs.length-1);
+        return 1/roofRs.length;
+      };
+      // RoofArea goes FIRST inside the RoofID link (schema order: RoofArea,
+      // RoofInsulatedArea, RoofCondition — verified against BuildingSync 2.6 XSD).
+      const setLinkArea=(linkEl,area)=>{ if(area==null||!(area>=0))return;
+        const rid=linkEl.getElementsByTagNameNS(NS_AUC,'RoofID')[0]; if(!rid)return;
+        let ra=rid.getElementsByTagNameNS(NS_AUC,'RoofArea')[0];
+        if(!ra){ra=doc.createElementNS(NS_AUC,'auc:RoofArea'); rid.insertBefore(ra,rid.firstChild);}
+        ra.textContent=Number(area).toFixed(1);
+      };
       setRoofR(rsProto,roofRs[0]);
       const roofsLink=_q(doc,'Roofs')[0];                      // Section-level roof links
+      const linkProto=roofsLink&&roofsLink.getElementsByTagNameNS(NS_AUC,'Roof')[0];
+      const totRoof=as.roofArea;
+      if(linkProto&&totRoof!=null) setLinkArea(linkProto, totRoof*roofShare(roofRs[0],0));
       for(let i=1;i<roofRs.length;i++){
         const clone=rsProto.cloneNode(true);
         const nid='RoofSystemExtra-'+i+'-'+Math.floor(Math.random()*1e9);
         clone.setAttribute('ID',nid);
         setRoofR(clone,roofRs[i]);
         rsProto.parentNode.appendChild(clone);
-        if(roofsLink){
-          const linkProto=roofsLink.getElementsByTagNameNS(NS_AUC,'Roof')[0];
-          if(linkProto){
-            const l=linkProto.cloneNode(true);
-            const rid=l.getElementsByTagNameNS(NS_AUC,'RoofID')[0];
-            if(rid)rid.setAttribute('IDref',nid);
-            roofsLink.appendChild(l);
-          }
+        if(roofsLink&&linkProto){
+          const l=linkProto.cloneNode(true);
+          const rid=l.getElementsByTagNameNS(NS_AUC,'RoofID')[0];
+          if(rid)rid.setAttribute('IDref',nid);
+          if(totRoof!=null) setLinkArea(l, totRoof*roofShare(roofRs[i],i));
+          roofsLink.appendChild(l);
         }
       }
     }
   }
+  // Total Roof Area UDF — was the REFERENCE building's 1932.0 passing through.
+  if(as.roofArea!=null)_setUDF(doc,'Roof Area', Number(as.roofArea).toFixed(1));
   // Domestic hot water
   _setFirst(doc,'WaterHeaterEfficiency', as.whe);
   // Heating plant / boiler: capacity (kBtu/hr), efficiency, year installed.
@@ -1191,7 +1294,7 @@ async function build50121XML(which){
   for(const cs of _q(doc,'CoolingSource')){
     const eff=cs.getElementsByTagNameNS(NS_AUC,'AnnualCoolingEfficiencyValue')[0];
     if(!eff)continue;
-    if(as.coolCop!=null)eff.textContent=Number(as.coolCop).toFixed(2);
+    if(as.coolCop!=null)eff.textContent=Number(as.coolCop).toFixed(1);
     const cap=cs.getElementsByTagNameNS(NS_AUC,'Capacity')[0];
     if(cap&&as.coolTons!=null)cap.textContent=Number(as.coolTons*12).toFixed(1);
   }
@@ -1249,19 +1352,19 @@ async function build50121XML(which){
 
   // Measures: reflect THIS building's upgrades (parsed from the Improved report's
   // "Selected Upgrade Opportunities") rather than the template's. Set each
-  // Measure's description; if the building has fewer measures than the template,
-  // remove the surplus Measure nodes and their PackageOfMeasures references.
+  // Measure's description; fewer parsed than template slots -> remove surplus
+  // Measure nodes + their PackageOfMeasures refs; MORE parsed -> clone the last
+  // Measure with a fresh unique ID (xs:ID) and add a matching MeasureID ref.
   const parsedMeasures=(asI&&Array.isArray(asI.measures))?asI.measures.filter(Boolean):[];
   if(parsedMeasures.length){
     const measures=[..._q(doc,'Measure')];
-    measures.forEach((m,idx)=>{
-      if(idx<parsedMeasures.length){
-        const ld=m.getElementsByTagNameNS(NS_AUC,'LongDescription')[0];
-        if(ld)ld.textContent=parsedMeasures[idx];
-        const cm=m.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0];
-        if(cm)cm.textContent=parsedMeasures[idx];
-      }
-    });
+    const setDesc=(m,txt)=>{
+      const ld=m.getElementsByTagNameNS(NS_AUC,'LongDescription')[0];
+      if(ld)ld.textContent=txt;
+      const cm=m.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0];
+      if(cm)cm.textContent=txt;
+    };
+    measures.forEach((m,idx)=>{ if(idx<parsedMeasures.length) setDesc(m,parsedMeasures[idx]); });
     if(parsedMeasures.length<measures.length){
       const removed=[];
       for(let idx=parsedMeasures.length; idx<measures.length; idx++){
@@ -1270,6 +1373,17 @@ async function build50121XML(which){
       }
       for(const mid of [..._q(doc,'MeasureID')]){
         if(removed.includes(mid.getAttribute('IDref'))) mid.parentNode.removeChild(mid);
+      }
+    } else if(parsedMeasures.length>measures.length && measures.length){
+      const proto=measures[measures.length-1];
+      const refProto=[..._q(doc,'MeasureID')].find(mid=>mid.getAttribute('IDref')===proto.getAttribute('ID'));
+      for(let idx=measures.length; idx<parsedMeasures.length; idx++){
+        const clone=proto.cloneNode(true);
+        const nid='MeasureExtra-'+idx+'-'+Math.floor(Math.random()*1e9);
+        clone.setAttribute('ID',nid);
+        setDesc(clone,parsedMeasures[idx]);
+        proto.parentNode.appendChild(clone);
+        if(refProto){const r=refProto.cloneNode(true); r.setAttribute('IDref',nid); refProto.parentNode.appendChild(r);}
       }
     }
   }
@@ -1289,6 +1403,16 @@ async function build50121XML(which){
     // building's 88 leftover).
     const op=su.getElementsByTagNameNS(NS_AUC,'SpatialUnitOccupiedPercentage')[0];
     if(op)op.textContent='100';
+  }
+
+  // Final formatting pass: GHG- and savings-family values carry the DOE export's
+  // full float precision (e.g. 3.161986828331347) — clamp every one to 1 decimal.
+  for(const tag of ['GHGEmissions','AnnualAverageGHGEmissions','AnnualGHGEmissions',
+                    'AnnualSavingsNativeUnits','AnnualSavingsSiteEnergy','AnnualSavingsCost']){
+    for(const gel of _q(doc,tag)){
+      const v=parseFloat(gel.textContent);
+      if(!isNaN(v) && /\.\d{2,}/.test(gel.textContent)) gel.textContent=v.toFixed(1);
+    }
   }
 
   let s=new XMLSerializer().serializeToString(doc);
@@ -1611,8 +1735,9 @@ document.getElementById('packet').onclick=downloadPacket;
         floorsAbove:a.floorsAbove,floorsBelow:a.floorsBelow,measures:a.measures}:null;
       c.assetScore={baseline:pick(data.asBase),improved:pick(data.asImp)};
     }
-    const os=o=>o?{annualElecKWh:o.elec&&o.elec.reduce((a,b)=>a+b,0),annualGasTherms:o.gas&&o.gas.reduce((a,b)=>a+b,0),
-      elecByEndUse:o.elecEnd,gasByEndUse:o.gasEnd}:null;
+    const os=o=>{if(!o)return null; const s=scaledEndUses(o);   // scaled = what the XML carries
+      return {annualElecKWh:o.elec&&o.elec.reduce((a,b)=>a+b,0),annualGasTherms:o.gas&&o.gas.reduce((a,b)=>a+b,0),
+      elecByEndUse:s.elec,gasByEndUse:s.gas,rawOpenStudioElecByEndUse:o.elecEnd,rawOpenStudioGasByEndUse:o.gasEnd};};
     if(data.osBase||data.osImp) c.openStudio={baseline:os(data.osBase),improved:os(data.osImp)};
     // Computed summary when everything is present.
     try{
@@ -1622,7 +1747,7 @@ document.getElementById('packet').onclick=downloadPacket;
         const aB=data.asBase, aI=data.asImp;
         const statedPct=(aB&&aI&&aB.euiCurrent&&aI.euiUpgraded!=null)
           ? (aB.euiCurrent-aI.euiUpgraded)/aB.euiCurrent*100 : osPct;
-        c.computed={siteSavingsPct_euiDelta:+statedPct.toFixed(2),
+        c.computed={siteSavingsPct_euiDelta:+statedPct.toFixed(1),
           siteSavingsPct_reportPublished:(aI&&aI.savingsPct!=null)?aI.savingsPct:null,
           siteSavingsPct_openStudio:+osPct.toFixed(1),
           qualificationTier:statedPct>=35?'35%+ tier':(statedPct>=20?'20-34% tier':'below 20% - does not qualify'),
