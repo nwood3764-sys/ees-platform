@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 01:40 UTC · build 12 — DOE-rulebook enums (wall/window), full heating details, whole-number energy, monthly meter costs</div>
+    Last updated 2026-07-03 02:00 UTC · build 13 — hard 2-decimal cap on every field in the document</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -298,6 +298,9 @@ function parseAssetScore(t){
     d.heatingFuel=_hf?_hf[1].trim():null;
   }
   d.heatingIsElectric=!!((d.heatingSource&&/electric/i.test(d.heatingSource))||(d.heatingFuel&&/electric/i.test(d.heatingFuel)));
+  const _sys=t.match(/Primary Heating\/Cooling System\s+([^\n]+)/);
+  d.hvacSystemLabel=_sys?_sys[1].trim():null;
+  d.coolingIsWallAC=!!(d.hvacSystemLabel&&/wall ac|window ac|through the wall/i.test(d.hvacSystemLabel));
   // Service water heating fuel ("Water Heater Natural Gas", not the Efficiency line).
   const _wf=t.match(/Water Heater\s+(?!Efficiency)([A-Za-z][^\n]*)/);
   d.whFuel=_wf?_wf[1].trim():null;
@@ -1379,8 +1382,8 @@ async function build50121XML(which){
   }
   // Total Roof Area UDF — was the REFERENCE building's 1932.0 passing through.
   if(as.roofArea!=null)_setUDF(doc,'Roof Area', Number(as.roofArea).toFixed(1));
-  // Domestic hot water: efficiency (report gives Et -> Thermal Efficiency) + fuel.
-  _setFirst(doc,'WaterHeaterEfficiency', as.whe);
+  // Domestic hot water: efficiency as a DECIMAL rating (Et 96 -> 0.96; 1 = 100%).
+  if(as.whe!=null)_setFirst(doc,'WaterHeaterEfficiency', (as.whe>1.5?as.whe/100:as.whe).toFixed(2));
   if(as.whe!=null)_setFirst(doc,'WaterHeaterEfficiencyType','Thermal Efficiency');
   if(as.whFuel){
     const dhw=_q(doc,'DomesticHotWaterSystem')[0];
@@ -1394,6 +1397,21 @@ async function build50121XML(which){
   if(as.wallType){
     const fin=/brick|stone/i.test(as.wallType)?'Brick':(/metal/i.test(as.wallType)?'Metal panel':'Other');
     _setFirst(doc,'ExteriorWallFinish',fin);
+  }
+  // Central Distribution Type: ALWAYS 'None (unitized heating/cooling)' for DX
+  // systems (EES rule — pinned so it can never drift from the reference value).
+  _setUDF(doc,'Central Distribution Type','None (unitized heating/cooling)');
+  // Through-the-Wall / Window AC (EES rule from the DOE UI): the cooling
+  // delivery is 'Other (Please Specify)' = 'Through the Wall AC' — the
+  // reference file's Mini-split fan-coil is replaced with <Other/> plus the
+  // specify-text UDF. (Fan Control 'Constant Volume', ERV 'None', and Outdoor
+  // Air 'Natural Ventilation' already match the template defaults.)
+  if(as.coolingIsWallAC){
+    // XSD-valid encoding: FanCoilType 'Other' + the specify-text UDF (the
+    // reference file's 'Mini-split' is its own equipment, not this building's).
+    for(const fct of _q(doc,'FanCoilType')) fct.textContent='Other';
+    _setUDF(doc,'Other Distribution Equipment Type','Through the Wall AC');
+    _setUDF(doc,'Other Distribution Equipment Type Is Not Applicable','false');
   }
   // Equipment conditions are NOT on the Asset Score report — neutral 'Average'
   // instead of the reference building's judgments ('Poor').
@@ -1431,19 +1449,36 @@ async function build50121XML(which){
         before.parentNode.insertBefore(e,before); };
       const cu=hs0.getElementsByTagNameNS(NS_AUC,'CapacityUnits')[0];
       const controls=hs0.getElementsByTagNameNS(NS_AUC,'Controls')[0];
-      const eff=(as.boilerEff!=null)?as.boilerEff:100;   // report 'Thermal Efficiency 100.00%'
       if(cu){
-        mk('AnnualHeatingEfficiencyValue',Number(eff).toFixed(1),cu);
+        // Electric resistance is ALWAYS 100% efficient; the field is a DECIMAL
+        // rating (1.0 = 100%, EES rule). Capacity as a WHOLE number (float32).
+        mk('AnnualHeatingEfficiencyValue','1.0',cu);
         mk('AnnualHeatingEfficiencyUnits','Thermal Efficiency',cu);
-        if(as.heatCap!=null)mk('OutputCapacity',Number(as.heatCap).toFixed(1),cu);
+        if(as.heatCap!=null)mk('OutputCapacity',String(Math.round(as.heatCap)),cu);
       }
       if(controls){
         mk('PrimaryFuel','Electricity',controls);
         mk('HeatingSourceCondition','Average',controls);
       }
+      // Location + Year Installed are REQUIRED (never N/A): electric baseboards
+      // live in the units -> 'Interior'; year installed = the report's equipment
+      // year when printed, else year built (approximate = original equipment).
+      const udfs=hs0.getElementsByTagNameNS(NS_AUC,'UserDefinedFields')[0];
+      if(udfs){
+        mk('Location','Interior',udfs);
+        // Baseboard heaters: year installed = year the building was built (EES rule).
+        if(as.yearBuilt!=null)mk('YearInstalled',String(as.yearBuilt),udfs);
+      }
+      // Number of pieces of equipment: ALWAYS 1 — whole-building entry (EES rule).
+      // XSD order puts Quantity after UserDefinedFields, so append at the end.
+      if(!hs0.getElementsByTagNameNS(NS_AUC,'Quantity')[0]){
+        const q=doc.createElementNS(NS_AUC,'auc:Quantity'); q.textContent='1'; hs0.appendChild(q);
+      }
       const flips={'Primary Fuel Is Not Applicable':'false','Output Capacity Is Not Applicable':'false',
         'Annual Heating Efficiency Value Is Not Applicable':'false','Annual Heating Efficiency Units Is Not Applicable':'false',
-        'Heating Source Condition Is Not Applicable':'false','Source Heating Plant ID Is Not Applicable':'true'};
+        'Heating Source Condition Is Not Applicable':'false','Source Heating Plant ID Is Not Applicable':'true',
+        'Location Is Not Applicable':'false','Year Installed Is Not Applicable':'false',
+        'Quantity Is Not Applicable':'false'};
       for(const u of hs0.getElementsByTagNameNS(NS_AUC,'UserDefinedField')){
         const fn=u.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
         const k=fn?fn.textContent.trim():null;
@@ -1456,7 +1491,7 @@ async function build50121XML(which){
   const boiler=_q(doc,'Boiler')[0];
   if(boiler){
     const oc=boiler.getElementsByTagNameNS(NS_AUC,'OutputCapacity')[0];
-    if(oc&&as.heatCap!=null)oc.textContent=Number(as.heatCap).toFixed(1);
+    if(oc&&as.heatCap!=null)oc.textContent=String(Math.round(as.heatCap));
     const eff=boiler.getElementsByTagNameNS(NS_AUC,'AnnualHeatingEfficiencyValue')[0];
     if(eff&&(as.boilerEff!=null||as.whe!=null))eff.textContent=Number(as.boilerEff!=null?as.boilerEff:as.whe).toFixed(1);
   }
@@ -1473,7 +1508,7 @@ async function build50121XML(which){
     if(!eff)continue;
     if(as.coolCop!=null)eff.textContent=Number(as.coolCop).toFixed(1);
     const cap=cs.getElementsByTagNameNS(NS_AUC,'Capacity')[0];
-    if(cap&&as.coolTons!=null)cap.textContent=Number(as.coolTons*12).toFixed(1);
+    if(cap&&as.coolTons!=null)cap.textContent=String(Math.round(as.coolTons*12));
   }
   // Enum/type labels (from the AI extractor; only set when present, and it only
   // ever returns a valid BuildingSync enum value).
@@ -1590,6 +1625,14 @@ async function build50121XML(which){
       const v=parseFloat(gel.textContent);
       if(!isNaN(v) && /\.\d{2,}/.test(gel.textContent)) gel.textContent=v.toFixed(1);
     }
+  }
+  // HARD RULE: no field anywhere in the document may carry more than 2 decimals.
+  // Defensive clamp over every numeric leaf (timestamps/IDs excluded by the
+  // numeric-only match).
+  for(const el2 of doc.getElementsByTagName('*')){
+    if(el2.children.length)continue;
+    const t2=(el2.textContent||'').trim();
+    if(/^-?\d+\.\d{3,}$/.test(t2)) el2.textContent=(+t2).toFixed(2);
   }
 
   let s=new XMLSerializer().serializeToString(doc);
