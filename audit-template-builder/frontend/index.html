@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 00:20 UTC · build 11 — full report-fidelity pass: foundations, electric-resistance HVAC, meter months+dates, envelope types, WWR, areas, conditions</div>
+    Last updated 2026-07-03 01:40 UTC · build 12 — DOE-rulebook enums (wall/window), full heating details, whole-number energy, monthly meter costs</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -304,7 +304,8 @@ function parseAssetScore(t){
   // Envelope types printed per block.
   const _wt=t.match(/Wall Type\s+([^\n]+)/); d.wallType=_wt?_wt[1].trim():null;
   const _wfr=t.match(/Window Framing Type\s+([^\n]+)/);
-  if(_wfr){const v=_wfr[1]; d.windowFrame=/vinyl/i.test(v)?'Vinyl':(/fiberglass/i.test(v)?'Fiberglass':(/alum/i.test(v)?'Aluminum':(/wood/i.test(v)?'Wood':null)));}
+  // DOE accepts ONLY Vinyl / Aluminum (no|with thermal break) / Other.
+  if(_wfr){const v=_wfr[1]; d.windowFrame=/vinyl/i.test(v)?'Vinyl':(/alum/i.test(v)?'Aluminum no thermal break':'Other');}
   const _wg=t.match(/Window Glass Type\s+([^\n]+)/);
   if(_wg)d.windowGlassLayers=/triple/i.test(_wg[1])?'Triple pane':(/single/i.test(_wg[1])?'Single pane':'Double pane');
   const _lt=t.match(/Lighting Type\s+([^\n]+)/); d.lightingType=_lt?_lt[1].trim():null;
@@ -1208,11 +1209,17 @@ async function build50121XML(which){
         const fuel=er?er.textContent.trim():null;
         if(fuel!=='Electricity'&&fuel!=='Natural gas')continue;
         const arr=fuel==='Electricity'?eos.elec:eos.gas;
-        const vals=seq.map(({m})=>+(arr[m-1]||0).toFixed(1));
-        const tgt=+arr.reduce((a,b)=>a+b,0).toFixed(1);
-        const drift=+(tgt-vals.reduce((a,b)=>a+b,0)).toFixed(1);
-        if(Math.abs(drift)>0){let mx=0;vals.forEach((v,i)=>{if(v>vals[mx])mx=i;});vals[mx]=+(vals[mx]+drift).toFixed(1);}
-        [...sc.getElementsByTagNameNS(NS_AUC,'SiteEnergyUse')].forEach((seu,i)=>{ if(i<12) seu.textContent=vals[i].toFixed(1); });
+        // WHOLE numbers: DOE stores metered energy as float32, so any decimal
+        // (even one) displays as e.g. 7164.89990234375 — integers are exact.
+        const vals=seq.map(({m})=>Math.round(arr[m-1]||0));
+        const tgt=Math.round(arr.reduce((a,b)=>a+b,0));
+        const drift=tgt-vals.reduce((a,b)=>a+b,0);
+        if(drift!==0){let mx=0;vals.forEach((v,i)=>{if(v>vals[mx])mx=i;});vals[mx]+=drift;}
+        [...sc.getElementsByTagNameNS(NS_AUC,'SiteEnergyUse')].forEach((seu,i)=>{ if(i<12) seu.textContent=String(vals[i]); });
+        // Monthly $ cost per meter reading (reference file had 0.0 -> DOE showed
+        // Site Energy Cost Intensity 0.00). WI rates: $/kWh, $/therm; integers.
+        const rate=fuel==='Electricity'?RATE_ELEC:RATE_GAS;
+        [...sc.getElementsByTagNameNS(NS_AUC,'EnergyCost')].forEach((ec,i)=>{ if(i<12) ec.textContent=String(Math.round(vals[i]*rate)); });
         [...sc.getElementsByTagNameNS(NS_AUC,'TimeSeries')].forEach((ts,i)=>{
           if(i>=12)return; const {m,y}=seq[i]; const nm2=m===12?1:m+1, ny=m===12?y+1:y;
           const st=ts.getElementsByTagNameNS(NS_AUC,'StartTimestamp')[0];
@@ -1241,7 +1248,7 @@ async function build50121XML(which){
       const f=factor[er.textContent.trim()]; if(f==null)continue;
       for(const tag of ['AnnualFuelUseNativeUnits','AnnualFuelUseConsistentUnits']){
         const e=ru.getElementsByTagNameNS(NS_AUC,tag)[0];
-        if(e){const v=parseFloat(e.textContent); if(!isNaN(v)) e.textContent=(v*f).toFixed(1);}
+        if(e){const v=parseFloat(e.textContent); if(!isNaN(v)) e.textContent=String(Math.round(v*f));}
       }
       for(const em of ru.getElementsByTagNameNS(NS_AUC,'GHGEmissions')){
         const v=parseFloat(em.textContent); if(!isNaN(v)) em.textContent=(v*f).toFixed(1);
@@ -1270,16 +1277,15 @@ async function build50121XML(which){
     if(rus){
       for(const [fuel,target,raw] of [['Electricity',tElec,bkt.elec],['Natural gas',tGas,bkt.gas]]){
         const sum=Object.values(raw).reduce((a,b)=>a+(b||0),0);
-        const list=Object.entries(raw).filter(([,v])=>v>0).map(([label,v])=>({label, val: sum>0 ? +(v*target/sum).toFixed(1) : 0}));
-        // Residual-correcting rounding: absorb the rounding drift into the
-        // LARGEST end use so the rows sum EXACTLY to the 'All end uses' total
-        // (same rule as the meter readings — kills the QA/QC Difference row).
+        const list=Object.entries(raw).filter(([,v])=>v>0).map(([label,v])=>({label, val: sum>0 ? Math.round(v*target/sum) : 0}));
+        // WHOLE numbers (float32 display) + integer reconciliation: absorb the
+        // drift into the LARGEST end use so rows sum EXACTLY to 'All end uses'.
         if(list.length){
-          const tgt=+target.toFixed(1);
-          const drift=+(tgt - list.reduce((a,b)=>a+b.val,0)).toFixed(1);
-          if(Math.abs(drift)>0){
+          const tgt=Math.round(target);
+          const drift=tgt - list.reduce((a,b)=>a+b.val,0);
+          if(drift!==0){
             let mx=0; list.forEach((it,i)=>{if(it.val>list[mx].val)mx=i;});
-            list[mx].val=+(list[mx].val+drift).toFixed(1);
+            list[mx].val+=drift;
           }
         }
         const all=[...rus.getElementsByTagNameNS(NS_AUC,'ResourceUse')].filter(ru=>{
@@ -1301,7 +1307,7 @@ async function build50121XML(which){
           }
           const [enumVal,other]=MAP[item.label]||['Laundry',item.label];
           const eu=node.getElementsByTagNameNS(NS_AUC,'EndUse')[0]; if(eu)eu.textContent=enumVal;
-          const afu=node.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0]; if(afu)afu.textContent=item.val.toFixed(1);
+          const afu=node.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0]; if(afu)afu.textContent=String(item.val);
           for(const f of node.getElementsByTagNameNS(NS_AUC,'UserDefinedField')){
             const fn=f.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
             if(fn&&fn.textContent.trim()==='Other End Use'){const fv=f.getElementsByTagNameNS(NS_AUC,'FieldValue')[0]; if(fv)fv.textContent=other;}}
@@ -1310,7 +1316,7 @@ async function build50121XML(which){
         for(let i=list.length;i<existing.length;i++) existing[i].parentNode.removeChild(existing[i]);
         // 'All end uses' total for the fuel = meter total
         const allEnd=all.find(ru=>{const eu=ru.getElementsByTagNameNS(NS_AUC,'EndUse')[0]; return eu&&eu.textContent.trim()==='All end uses';});
-        if(allEnd){const afu=allEnd.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0]; if(afu)afu.textContent=target.toFixed(1);}
+        if(allEnd){const afu=allEnd.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0]; if(afu)afu.textContent=String(Math.round(target));}
       }
     }
   }
@@ -1381,10 +1387,13 @@ async function build50121XML(which){
     if(dhw){const pf=dhw.getElementsByTagNameNS(NS_AUC,'PrimaryFuel')[0];
       if(pf)pf.textContent=/electric/i.test(as.whFuel)?'Electricity':'Natural gas';}
   }
-  // Wall finish from the report's wall type (enum: Brick/Stone/Wood/EIFS/Metal).
+  // Wall finish. DOE's Audit Template accepts ONLY 'Brick', 'Metal panel', or
+  // 'Other' (per the PNNL Audit Template Schematron) — anything else leaves the
+  // Wall Construction Type dropdown unmapped ('Please select'). Siding/stucco/
+  // wood/everything-else => 'Other'.
   if(as.wallType){
-    const fin=/brick/i.test(as.wallType)?'Brick':(/stone/i.test(as.wallType)?'Stone':(/stucco/i.test(as.wallType)?'EIFS':(/metal/i.test(as.wallType)?'Metal':(/siding|wood/i.test(as.wallType)?'Wood':null))));
-    if(fin)_setFirst(doc,'ExteriorWallFinish',fin);
+    const fin=/brick|stone/i.test(as.wallType)?'Brick':(/metal/i.test(as.wallType)?'Metal panel':'Other');
+    _setFirst(doc,'ExteriorWallFinish',fin);
   }
   // Equipment conditions are NOT on the Asset Score report — neutral 'Average'
   // instead of the reference building's judgments ('Poor').
@@ -1406,11 +1415,39 @@ async function build50121XML(which){
       const pf=dv.getElementsByTagNameNS(NS_AUC,'PrimaryFuel')[0];
       if(pf&&/hot water|steam|natural gas|fuel oil/i.test(pf.textContent))pf.textContent='Electricity';
     }
-    if(as.heatCap!=null){
-      const hs0=_q(doc,'HeatingSource')[0];
-      if(hs0&&!hs0.getElementsByTagNameNS(NS_AUC,'Capacity')[0]){
-        const cu=hs0.getElementsByTagNameNS(NS_AUC,'CapacityUnits')[0];
-        if(cu){const c=doc.createElementNS(NS_AUC,'auc:Capacity'); c.textContent=Number(as.heatCap).toFixed(1); cu.parentNode.insertBefore(c,cu);}
+    // Full heating-source details from the report. The reference source deferred
+    // everything to the boiler plant ('... Is Not Applicable' UDFs all true), so
+    // the imported Electric Resistance source showed N/A on every field. Write
+    // the report's values in XSD order (EffValue, EffUnits, OutputCapacity
+    // before CapacityUnits; PrimaryFuel, Condition before Controls) and flip
+    // the matching N/A UDFs to false.
+    const hs0=_q(doc,'HeatingSource')[0];
+    if(hs0){
+      const mk=(tag,txt,before)=>{ if(txt==null)return;
+        const ex=hs0.getElementsByTagNameNS(NS_AUC,tag)[0];
+        if(ex){ex.textContent=String(txt);return;}
+        if(!before)return;
+        const e=doc.createElementNS(NS_AUC,'auc:'+tag); e.textContent=String(txt);
+        before.parentNode.insertBefore(e,before); };
+      const cu=hs0.getElementsByTagNameNS(NS_AUC,'CapacityUnits')[0];
+      const controls=hs0.getElementsByTagNameNS(NS_AUC,'Controls')[0];
+      const eff=(as.boilerEff!=null)?as.boilerEff:100;   // report 'Thermal Efficiency 100.00%'
+      if(cu){
+        mk('AnnualHeatingEfficiencyValue',Number(eff).toFixed(1),cu);
+        mk('AnnualHeatingEfficiencyUnits','Thermal Efficiency',cu);
+        if(as.heatCap!=null)mk('OutputCapacity',Number(as.heatCap).toFixed(1),cu);
+      }
+      if(controls){
+        mk('PrimaryFuel','Electricity',controls);
+        mk('HeatingSourceCondition','Average',controls);
+      }
+      const flips={'Primary Fuel Is Not Applicable':'false','Output Capacity Is Not Applicable':'false',
+        'Annual Heating Efficiency Value Is Not Applicable':'false','Annual Heating Efficiency Units Is Not Applicable':'false',
+        'Heating Source Condition Is Not Applicable':'false','Source Heating Plant ID Is Not Applicable':'true'};
+      for(const u of hs0.getElementsByTagNameNS(NS_AUC,'UserDefinedField')){
+        const fn=u.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
+        const k=fn?fn.textContent.trim():null;
+        if(k&&flips[k]!=null){const fv=u.getElementsByTagNameNS(NS_AUC,'FieldValue')[0]; if(fv)fv.textContent=flips[k];}
       }
     }
   }
