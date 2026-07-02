@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 02:00 UTC · build 13 — hard 2-decimal cap on every field in the document</div>
+    Last updated 2026-07-03 02:40 UTC · build 14 — LPD from report (tenant/common); WWR = multifamily units' ratio; wall-AC delivery; heating field rules</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -277,8 +277,19 @@ function parseAssetScore(t){
   d.roofPairs=[...t.matchAll(/Roof\s+([A-Za-z][\w /-]*?Roof)(?:(?!Skylight)[\s\S]){0,180}?Roof R-Value\s+([\d.]+)/g)]
     .map(m=>({name:m[1].replace(/\s+/g,' ').trim(), r:parseFloat(m[2])}));
   d.wallR=num(/Wall R-value\s+([\d.]+)/,t);
-  const _bwwr=t.match(/Building Window to Wall Ratio\s+([\d.]+)\s*%/i);
-  d.wwr=_bwwr?parseFloat(_bwwr[1])/100:num(/Window-to-Wall Ratio\s+([\d.]+)/,t);
+  // WWR (EES rule): use the MULTIFAMILY UNITS' window-to-wall ratio — the
+  // exterior walls that matter — taking the highest multifamily block value.
+  // Fallbacks: highest block value of any use type, then the building-level %.
+  const _wwrPairs=[...t.matchAll(/Window-to-Wall Ratio\s+([\d.]+)/g)].map(m=>{
+    const pre=t.slice(Math.max(0,m.index-2600),m.index);
+    const ut=[...pre.matchAll(/Use Type:\s*([^\n]+)/g)].pop();
+    return {r:parseFloat(m[1]), common:!!(ut&&/common/i.test(ut[1]))};
+  });
+  const _mfW=_wwrPairs.filter(x=>!x.common).map(x=>x.r);
+  if(_mfW.length) d.wwr=Math.max(..._mfW);
+  else if(_wwrPairs.length) d.wwr=Math.max(..._wwrPairs.map(x=>x.r));
+  else { const _bwwr=t.match(/Building Window to Wall Ratio\s+([\d.]+)\s*%/i);
+    d.wwr=_bwwr?parseFloat(_bwwr[1])/100:null; }
   d.infiltration=num(/air leakage rate.*?([\d.]+)\s*CFM/,t);
   d.heatCap=num(/Capacity\s+([\d.]+)\s*kBtu\/hr/,t);
   d.coolCop=num(/Efficiency\s+([\d.]+)\s*COP/,t);
@@ -312,6 +323,15 @@ function parseAssetScore(t){
   const _wg=t.match(/Window Glass Type\s+([^\n]+)/);
   if(_wg)d.windowGlassLayers=/triple/i.test(_wg[1])?'Triple pane':(/single/i.test(_wg[1])?'Single pane':'Double pane');
   const _lt=t.match(/Lighting Type\s+([^\n]+)/); d.lightingType=_lt?_lt[1].trim():null;
+  // Lighting Power Density per block, paired with the block's use type
+  // (tenant = multifamily-unit blocks, common = common-area blocks).
+  d.lpdPairs=[...t.matchAll(/Lighting Power Density\s+([\d.]+)\s*W/g)].map(m=>{
+    const pre=t.slice(Math.max(0,m.index-2600),m.index);
+    const ut=[...pre.matchAll(/Use Type:\s*([^\n]+)/g)].pop();
+    return {lpd:parseFloat(m[1]), common:!!(ut&&/common/i.test(ut[1]))};
+  });
+  d.lpdTenant=(d.lpdPairs.find(x=>!x.common)||{}).lpd!=null?(d.lpdPairs.find(x=>!x.common)).lpd:null;
+  d.lpdCommon=(d.lpdPairs.find(x=>x.common)||{}).lpd!=null?(d.lpdPairs.find(x=>x.common)).lpd:null;
   // Floor types -> which foundation kinds actually exist (prunes reference leftovers).
   d.floorTypes=[...new Set([...t.matchAll(/Floor Type\s+([^\n]+)/g)].map(m=>m[1].trim()))];
   d.foundationKinds=[...new Set(d.floorTypes.map(x=>/slab/i.test(x)?'SlabOnGrade':(/basement/i.test(x)?'Basement':(/crawl/i.test(x)?'Crawlspace':null))).filter(Boolean))];
@@ -1398,6 +1418,26 @@ async function build50121XML(which){
     const fin=/brick|stone/i.test(as.wallType)?'Brick':(/metal/i.test(as.wallType)?'Metal panel':'Other');
     _setFirst(doc,'ExteriorWallFinish',fin);
   }
+  // Lighting Power Density (W/ft2): the reference file's three LPD UDFs are
+  // EMPTY — fill from the report's per-block values (tenant = multifamily
+  // blocks, common = common-area blocks; overall = tenant, the dominant area).
+  {
+    const setLpd=(prefix,val)=>{ if(val==null)return;
+      for(const u of _q(doc,'UserDefinedField')){
+        const fn=u.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
+        if(!fn)continue;
+        const k=fn.textContent.trim();
+        if(k.startsWith(prefix)){
+          const fv=u.getElementsByTagNameNS(NS_AUC,'FieldValue')[0];
+          if(fv)fv.textContent=/Is Not Applicable$/.test(k)?'false':String(val);
+        }
+      }
+    };
+    setLpd('Lighting Power Density For', as.lpdTenant!=null?as.lpdTenant:as.lpdCommon);
+    setLpd('Common Areas Lighting Power Density For', as.lpdCommon);
+    setLpd('Tenant Areas Lighting Power Density For', as.lpdTenant);
+  }
+
   // Central Distribution Type: ALWAYS 'None (unitized heating/cooling)' for DX
   // systems (EES rule — pinned so it can never drift from the reference value).
   _setUDF(doc,'Central Distribution Type','None (unitized heating/cooling)');
