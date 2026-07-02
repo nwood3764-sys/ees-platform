@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-02 20:05 UTC · build 4 — EUI fixed via meter readings (imports at headline); savings = Site EUI delta</div>
+    Last updated 2026-07-02 20:40 UTC · build 5 — Percent Common Area from report; all systems serve common+tenant; dwellings 100% occupied</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -1079,15 +1079,18 @@ async function build50121XML(which){
   if(hp&&as.boilerFuel){const pf=hp.getElementsByTagNameNS(NS_AUC,'PrimaryFuel')[0]; if(pf)pf.textContent=as.boilerFuel;}
   _setFirst(doc,'FenestrationFrameMaterial', as.windowFrame);
   _setFirst(doc,'FenestrationGlassLayers', as.windowGlassLayers);
-  // Space-function section floor areas. In the DOE Audit Template there is no
-  // separate common-area breakout for this building — the ENTIRE conditioned
-  // gross floor area is the single "Multifamily Housing" use type. So set the
-  // section to span 100% of GFA (Gross = Conditioned = Tenant = GFA, Common = 0),
-  // rather than scaling to only the report's multi-family sub-area (which left
-  // the common area unassigned and showed a misleading <100% use-type ratio and
-  // a stale Percent Common Area carried from the reference file).
+  // Space-function section floor areas. The building is a single "Multifamily
+  // Housing" use type spanning 100% of the gross floor area (one use type, no
+  // separate common-area use type). Within it, the Common / Tenant split is what
+  // DOE turns into "Percent Common Area": Common = the report's common area (else
+  // GFA − multi-family area), Tenant = the remainder, Gross/Conditioned = full GFA.
   const gfa = as.gfa || asB.gfa;
+  let commonArea = 0;
   if(gfa){
+    if(as.useCommonArea!=null) commonArea = as.useCommonArea;
+    else if(as.useMultifamilyArea!=null && as.useMultifamilyArea < gfa) commonArea = gfa - as.useMultifamilyArea;
+    commonArea = Math.max(0, Math.min(commonArea, gfa));
+    const tenantArea = gfa - commonArea;
     for(const sec of _q(doc,'Section')){
       const st=sec.getElementsByTagNameNS(NS_AUC,'SectionType')[0];
       if(!st||st.textContent!=='Space function')continue;
@@ -1097,9 +1100,10 @@ async function build50121XML(which){
           const v=fa.getElementsByTagNameNS(NS_AUC,'FloorAreaValue')[0];
           if(!t||!v)continue;
           const type=t.textContent.trim();
-          if(type==='Common') v.textContent='0.0';                        // no common breakout
-          else if(type==='Gross'||type==='Conditioned'||type==='Tenant'||type==='Heated and Cooled')
-            v.textContent=Number(gfa).toFixed(1);                         // all multifamily = full GFA
+          if(type==='Common') v.textContent=Number(commonArea).toFixed(1);
+          else if(type==='Tenant') v.textContent=Number(tenantArea).toFixed(1);
+          else if(type==='Gross'||type==='Conditioned'||type==='Heated and Cooled')
+            v.textContent=Number(gfa).toFixed(1);                         // whole building
           // 'Cooled only' / 'Heated only' stay 0.0 (whole building is heated & cooled)
         }
         break;
@@ -1107,6 +1111,15 @@ async function build50121XML(which){
       break;
     }
   }
+
+  // System coverage (lighting, HVAC, service hot water). Once a common area
+  // exists, DOE requires each system to state the % of common AND tenant area it
+  // serves — and the HVAC common-served total must be ≥100% or the report is
+  // incomplete. Every system here serves this single, fully-served building, so
+  // set every system-served FloorAreaPercentage to 100 (fixes the reference
+  // file's SHW and secondary-HVAC that carried Common=0). These LinkedSection
+  // percentages are distinct from the use-type FloorAreaValue set above.
+  for(const fap of _q(doc,'FloorAreaPercentage')) fap.textContent='100';
 
   // Measures: reflect THIS building's upgrades (parsed from the Improved report's
   // "Selected Upgrade Opportunities") rather than the template's. Set each
@@ -1141,7 +1154,13 @@ async function build50121XML(which){
   const occupants=units*Math.max(1, beds+1);
   _setFirst(doc,'OccupantQuantity', occupants);
   const su=_q(doc,'SpatialUnit')[0];
-  if(su){const nu=su.getElementsByTagNameNS(NS_AUC,'NumberOfUnits')[0]; if(nu)nu.textContent=String(units);}
+  if(su){
+    const nu=su.getElementsByTagNameNS(NS_AUC,'NumberOfUnits')[0]; if(nu)nu.textContent=String(units);
+    // Percent Dwelling Units Currently Occupied — always 100 (was the reference
+    // building's 88 leftover).
+    const op=su.getElementsByTagNameNS(NS_AUC,'SpatialUnitOccupiedPercentage')[0];
+    if(op)op.textContent='100';
+  }
 
   let s=new XMLSerializer().serializeToString(doc);
   // The template already carries an XML declaration (and the serializer re-emits
