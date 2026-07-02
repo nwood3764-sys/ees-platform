@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-02 20:40 UTC · build 5 — Percent Common Area from report; all systems serve common+tenant; dwellings 100% occupied</div>
+    Last updated 2026-07-02 21:35 UTC · build 7 — end-use breakdown rebuilt from your OpenStudio results (real per-fuel end uses)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -931,6 +931,18 @@ function _setScenarioEUI(doc,scenarioName,val){
       const eui=s.getElementsByTagNameNS(NS_AUC,'SiteEnergyUseIntensity')[0];
       if(eui)eui.textContent=String(val);return;}}
 }
+// Site Energy Cost Intensity ($/ft²) lives in the scenario's AllResourceTotal
+// EnergyCost element, right beside SiteEnergyUseIntensity.
+function _setScenarioCost(doc,scenarioName,val){
+  if(val==null)return;
+  for(const s of _q(doc,'Scenario')){
+    const nm=s.getElementsByTagNameNS(NS_AUC,'ScenarioName')[0];
+    if(nm&&nm.textContent.trim()===scenarioName){
+      for(const a of s.getElementsByTagNameNS(NS_AUC,'AllResourceTotal')){
+        const c=a.getElementsByTagNameNS(NS_AUC,'EnergyCost')[0];
+        if(c){c.textContent=String(val);return;}}
+      return;}}
+}
 async function build50121XML(which){
   const url = which==='improved' ? 'templates/50121_improved_template.xml'
                                  : 'templates/50121_baseline_template.xml';
@@ -987,6 +999,20 @@ async function build50121XML(which){
   if(which==='improved'){ _setScenarioEUI(doc,'benchmark', impEUI); }
   else { _setScenarioEUI(doc,'benchmark', baseEUI); _setScenarioEUI(doc,'target', impEUI); }
 
+  // Site Energy COST Intensity ($/ft²) for the same scenarios. The tool already
+  // computes this for the review, but the template's EnergyCost is a reference-
+  // file leftover (benchmark 2.8, target 0.0), so inject it: scaled annual energy
+  // × the Wisconsin utility rates ÷ GFA — matching the copy-card values (5.66 /
+  // 2.77 for Hampton).
+  scaleToAssetScore(data.osBase, asB, 'cur');
+  scaleToAssetScore(data.osImp, asI||asB, 'upg');
+  const gfaCost = as.gfa || asB.gfa;
+  const costIntensity = os => (os && gfaCost)
+    ? +(( os.elec.reduce((a,b)=>a+b,0)*RATE_ELEC + os.gas.reduce((a,b)=>a+b,0)*RATE_GAS )/gfaCost).toFixed(2) : null;
+  const baseCostInt = costIntensity(data.osBase), impCostInt = costIntensity(data.osImp);
+  if(which==='improved'){ _setScenarioCost(doc,'benchmark', impCostInt); }
+  else { _setScenarioCost(doc,'benchmark', baseCostInt); _setScenarioCost(doc,'target', impCostInt); }
+
   // Annual energy: the template carries the GOLDEN reference building's energy.
   // The Audit Template importer computes the building's Site EUI from the
   // "Audit Template Energy Meter Readings" scenarios — 12 monthly values per fuel
@@ -1036,6 +1062,55 @@ async function build50121XML(which){
       }
       for(const em of ru.getElementsByTagNameNS(NS_AUC,'GHGEmissions')){
         const v=parseFloat(em.textContent); if(!isNaN(v)) em.textContent=String(v*f);
+      }
+    }
+  }
+
+  // End-use breakdown ("Audit Template Energy Uses" scenario). The template carries
+  // the REFERENCE building's end uses (e.g. gas space heating), wrong for this
+  // building — which may be all-electric. Rebuild each fuel's per-end-use nodes
+  // from THIS building's actual OpenStudio end uses (auditEndUses), scaled so each
+  // fuel's total equals the meter total. Empty fuels (e.g. no gas heating) drop
+  // out, so no phantom categories survive.
+  if(eos && (Object.keys(eos.elecEnd||{}).length || Object.keys(eos.gasEnd||{}).length)){
+    const bkt=auditEndUses(eos);
+    const tElec=eos.elec.reduce((a,b)=>a+b,0), tGas=eos.gas.reduce((a,b)=>a+b,0);
+    // display bucket -> [BuildingSync EndUse enum, Other End Use label] (mapping
+    // reverse-engineered from how the importer displays each enum).
+    const MAP={'Space Heating':['Heating',''],'Space Cooling':['Cooling',''],
+      'Lighting':['Total lighting',''],'Plug Loads':['Plug load',''],
+      'Water Distribution':['Domestic hot water',''],'Other':['Laundry','Other']};
+    let scen=null;
+    for(const sc of _q(doc,'Scenario')){const nm=sc.getElementsByTagNameNS(NS_AUC,'ScenarioName')[0];
+      if(nm&&nm.textContent.trim()==='Audit Template Energy Uses'){scen=sc;break;}}
+    const rus=scen&&scen.getElementsByTagNameNS(NS_AUC,'ResourceUses')[0];
+    if(rus){
+      for(const [fuel,target,raw] of [['Electricity',tElec,bkt.elec],['Natural gas',tGas,bkt.gas]]){
+        const sum=Object.values(raw).reduce((a,b)=>a+(b||0),0);
+        const list=Object.entries(raw).filter(([,v])=>v>0).map(([label,v])=>({label, val: sum>0 ? v*target/sum : 0}));
+        const all=[...rus.getElementsByTagNameNS(NS_AUC,'ResourceUse')].filter(ru=>{
+          const er=ru.getElementsByTagNameNS(NS_AUC,'EnergyResource')[0];
+          return er&&er.textContent.trim()===fuel;});
+        const existing=all.filter(ru=>{const eu=ru.getElementsByTagNameNS(NS_AUC,'EndUse')[0]; return eu&&eu.textContent.trim()!=='All end uses';});
+        const proto=existing[0]; if(!proto||!list.length)continue;
+        const pAFU=parseFloat((proto.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0]||{}).textContent)||0;
+        const pGHG=parseFloat((proto.getElementsByTagNameNS(NS_AUC,'GHGEmissions')[0]||{}).textContent)||0;
+        const ghgF=pAFU>0?pGHG/pAFU:0;
+        list.forEach((item,i)=>{
+          const node=existing[i]||proto.cloneNode(true);
+          if(!existing[i]) proto.parentNode.insertBefore(node, proto.nextSibling);
+          const [enumVal,other]=MAP[item.label]||['Laundry',item.label];
+          const eu=node.getElementsByTagNameNS(NS_AUC,'EndUse')[0]; if(eu)eu.textContent=enumVal;
+          const afu=node.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0]; if(afu)afu.textContent=item.val.toFixed(1);
+          for(const f of node.getElementsByTagNameNS(NS_AUC,'UserDefinedField')){
+            const fn=f.getElementsByTagNameNS(NS_AUC,'FieldName')[0];
+            if(fn&&fn.textContent.trim()==='Other End Use'){const fv=f.getElementsByTagNameNS(NS_AUC,'FieldValue')[0]; if(fv)fv.textContent=other;}}
+          const g=node.getElementsByTagNameNS(NS_AUC,'GHGEmissions')[0]; if(g)g.textContent=String(item.val*ghgF);
+        });
+        for(let i=list.length;i<existing.length;i++) existing[i].parentNode.removeChild(existing[i]);
+        // 'All end uses' total for the fuel = meter total
+        const allEnd=all.find(ru=>{const eu=ru.getElementsByTagNameNS(NS_AUC,'EndUse')[0]; return eu&&eu.textContent.trim()==='All end uses';});
+        if(allEnd){const afu=allEnd.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0]; if(afu)afu.textContent=target.toFixed(1);}
       }
     }
   }
