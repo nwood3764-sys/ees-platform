@@ -188,16 +188,30 @@ Deno.serve(async (req) => {
   }
 
   // ── 6. Find or create conversation thread ────────────────────────────────
-  const { data: convResult, error: convErr } = await admin.rpc("find_or_create_conversation", {
-    p_channel:                "email",
-    p_our_address:            mailbox.obm_address,
-    p_customer_address:       body.to.email,
-    p_contact_id:             body.contact_id || null,
-    p_account_id:             null,  // TODO: derive from anchor walk
-    p_project_id:             body.anchor_object === "projects" ? body.anchor_record_id : null,
-    p_service_appointment_id: body.anchor_object === "service_appointments" ? body.anchor_record_id : null,
-    p_subject:                subject,
-  })
+  // Pin the thread to the record it was sent from, whatever object that is, so
+  // it shows in that record's Conversations panel (which already supports these
+  // FKs). Map the anchor object → the conversations FK param it sets.
+  const ANCHOR_FK_PARAM: Record<string, string> = {
+    opportunities:          "p_opportunity_id",
+    properties:             "p_property_id",
+    buildings:              "p_building_id",
+    projects:               "p_project_id",
+    service_appointments:   "p_service_appointment_id",
+    incentive_applications: "p_incentive_application_id",
+    work_orders:            "p_work_order_id",
+    assessments:            "p_assessment_id",
+    accounts:               "p_account_id",
+  }
+  const convParams: Record<string, unknown> = {
+    p_channel:          "email",
+    p_our_address:      mailbox.obm_address,
+    p_customer_address: body.to.email,
+    p_contact_id:       body.contact_id || null,
+    p_subject:          subject,
+  }
+  const anchorParam = ANCHOR_FK_PARAM[body.anchor_object]
+  if (anchorParam) convParams[anchorParam] = body.anchor_record_id
+  const { data: convResult, error: convErr } = await admin.rpc("find_or_create_conversation", convParams)
   if (convErr || !convResult) {
     console.error("send-email-v1: find_or_create_conversation failed", convErr)
     return json({ error: `Conversation resolution failed: ${convErr?.message || "no id returned"}` }, 500)
