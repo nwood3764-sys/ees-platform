@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-02 22:05 UTC · build 8 — fixed import (duplicate ID); occupancy now required (no default) and gates exports</div>
+    Last updated 2026-07-02 22:40 UTC · build 9 — building shape always Rectangular; all roof systems from the report (e.g. R-0 + R-19)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -266,6 +266,9 @@ function parseAssetScore(t){
   d.windowArea=num(/Total Window Area\s+([\d.]+)\s*ft/,t);
   d.roofArea=num(/Total Gross Roof Area\s+([\d.]+)\s*ft/,t);
   d.roofR=num(/Roof R-Value\s+([\d.]+)/,t);
+  // ALL distinct roof R-values on the report (each block prints its own roof —
+  // e.g. an R-0 kneewall attic plus an R-19 main roof are two roof systems).
+  d.roofRs=[...new Set([...t.matchAll(/Roof R-Value\s+([\d.]+)/g)].map(m=>parseFloat(m[1])))];
   d.wallR=num(/Wall R-value\s+([\d.]+)/,t);
   d.wwr=num(/Window-to-Wall Ratio\s+([\d.]+)/,t);
   d.infiltration=num(/air leakage rate.*?([\d.]+)\s*CFM/,t);
@@ -985,6 +988,9 @@ async function build50121XML(which){
   _setFirst(doc,'TotalExteriorAboveGradeWallArea', as.wallArea);
   if(as.floorsAbove!=null)_setFirst(doc,'ConditionedFloorsAboveGrade', as.floorsAbove);
   if(as.floorsBelow!=null)_setFirst(doc,'ConditionedFloorsBelowGrade', as.floorsBelow);
+  // General Building Shape: always Rectangular (per EES standard). The reference
+  // file's T-Shape is its own shape, not this building's.
+  _setFirst(doc,'FootprintShape','Rectangular');
 
   // Building-level gross / heated-and-cooled floor areas -> GFA (page-1 value).
   const building=_q(doc,'Building')[0];
@@ -1135,7 +1141,35 @@ async function build50121XML(which){
   // ---- Deep building-science fields (Asset Score PDF is authoritative) ----
   // Envelope assemblies
   _setFirst(doc,'WallInsulationRValue', as.wallR);
-  _setFirst(doc,'RoofInsulationRValue', as.roofR);
+  // Roofs: the report can list MULTIPLE roof systems (e.g. an R-0 kneewall attic
+  // plus an R-19 main roof). Set the template's RoofSystem to the first R-value,
+  // then clone it (fresh unique ID — xs:ID must be unique) for each additional
+  // distinct R-value and link each clone in the Section's Roofs container.
+  const roofRs=(as.roofRs&&as.roofRs.length)?as.roofRs:(as.roofR!=null?[as.roofR]:[]);
+  if(roofRs.length){
+    const rsProto=_q(doc,'RoofSystem')[0];
+    if(rsProto){
+      const setRoofR=(node,val)=>{const e=node.getElementsByTagNameNS(NS_AUC,'RoofInsulationRValue')[0]; if(e)e.textContent=Number(val).toFixed(1);};
+      setRoofR(rsProto,roofRs[0]);
+      const roofsLink=_q(doc,'Roofs')[0];                      // Section-level roof links
+      for(let i=1;i<roofRs.length;i++){
+        const clone=rsProto.cloneNode(true);
+        const nid='RoofSystemExtra-'+i+'-'+Math.floor(Math.random()*1e9);
+        clone.setAttribute('ID',nid);
+        setRoofR(clone,roofRs[i]);
+        rsProto.parentNode.appendChild(clone);
+        if(roofsLink){
+          const linkProto=roofsLink.getElementsByTagNameNS(NS_AUC,'Roof')[0];
+          if(linkProto){
+            const l=linkProto.cloneNode(true);
+            const rid=l.getElementsByTagNameNS(NS_AUC,'RoofID')[0];
+            if(rid)rid.setAttribute('IDref',nid);
+            roofsLink.appendChild(l);
+          }
+        }
+      }
+    }
+  }
   // Domestic hot water
   _setFirst(doc,'WaterHeaterEfficiency', as.whe);
   // Heating plant / boiler: capacity (kBtu/hr), efficiency, year installed.
