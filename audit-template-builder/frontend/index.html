@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 02:40 UTC · build 14 — LPD from report (tenant/common); WWR = multifamily units' ratio; wall-AC delivery; heating field rules</div>
+    Last updated 2026-07-03 03:10 UTC · build 15 — measures carry matching classifications (no more scrambled category/description rows)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -1602,40 +1602,43 @@ async function build50121XML(which){
   // percentages are distinct from the use-type FloorAreaValue set above.
   for(const fap of _q(doc,'FloorAreaPercentage')) fap.textContent='100';
 
-  // Measures: reflect THIS building's upgrades (parsed from the Improved report's
-  // "Selected Upgrade Opportunities") rather than the template's. Set each
-  // Measure's description; fewer parsed than template slots -> remove surplus
-  // Measure nodes + their PackageOfMeasures refs; MORE parsed -> clone the last
-  // Measure with a fresh unique ID (xs:ID) and add a matching MeasureID ref.
+  // Measures: each template Measure slot carries a TYPED classification
+  // (SystemCategoryAffected + TechnologyCategories MeasureName) that the DOE UI
+  // shows as System Category / Measure Category / Measure Name. Overwriting only
+  // the description text scrambles rows (a low-flow description in the
+  // ceiling-insulation slot). So: for each parsed measure pick the PROTOTYPE
+  // slot whose classification matches it (seal -> air-seal slot, low-flow ->
+  // water slot, roof/attic -> ceiling-insulation slot), clone the whole slot
+  // (fresh xs:ID), set the description, then remove the originals and rebuild
+  // the PackageOfMeasures MeasureID refs.
   const parsedMeasures=effectiveMeasures().filter(Boolean);
   if(parsedMeasures.length){
     const measures=[..._q(doc,'Measure')];
-    const setDesc=(m,txt)=>{
-      const ld=m.getElementsByTagNameNS(NS_AUC,'LongDescription')[0];
-      if(ld)ld.textContent=txt;
-      const cm=m.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0];
-      if(cm)cm.textContent=txt;
-    };
-    measures.forEach((m,idx)=>{ if(idx<parsedMeasures.length) setDesc(m,parsedMeasures[idx]); });
-    if(parsedMeasures.length<measures.length){
-      const removed=[];
-      for(let idx=parsedMeasures.length; idx<measures.length; idx++){
-        const id=measures[idx].getAttribute('ID'); if(id)removed.push(id);
-        measures[idx].parentNode.removeChild(measures[idx]);
-      }
-      for(const mid of [..._q(doc,'MeasureID')]){
-        if(removed.includes(mid.getAttribute('IDref'))) mid.parentNode.removeChild(mid);
-      }
-    } else if(parsedMeasures.length>measures.length && measures.length){
-      const proto=measures[measures.length-1];
-      const refProto=[..._q(doc,'MeasureID')].find(mid=>mid.getAttribute('IDref')===proto.getAttribute('ID'));
-      for(let idx=measures.length; idx<parsedMeasures.length; idx++){
-        const clone=proto.cloneNode(true);
-        const nid='MeasureExtra-'+idx+'-'+Math.floor(Math.random()*1e9);
-        clone.setAttribute('ID',nid);
-        setDesc(clone,parsedMeasures[idx]);
-        proto.parentNode.appendChild(clone);
-        if(refProto){const r=refProto.cloneNode(true); r.setAttribute('IDref',nid); refProto.parentNode.appendChild(r);}
+    if(measures.length){
+      const ldOf=m=>{const e=m.getElementsByTagNameNS(NS_AUC,'LongDescription')[0];return e?e.textContent:'';};
+      const findProto=re2=>measures.find(m=>re2.test(ldOf(m)));
+      const protoFor=txt=>{
+        if(/seal|infiltrat/i.test(txt)) return findProto(/seal|infiltrat/i)||measures[0];
+        if(/low.?flow|shower|faucet|hot water fixture/i.test(txt)) return findProto(/low.?flow|hot water fixture/i)||measures[0];
+        if(/roof|attic|ceiling/i.test(txt)) return findProto(/roof|attic|ceiling/i)||measures[measures.length-1];
+        return measures[0];
+      };
+      const parent=measures[0].parentNode;
+      const refProto=[..._q(doc,'MeasureID')][0];
+      const newIds=[];
+      parsedMeasures.forEach((txt,i)=>{
+        const node=protoFor(txt).cloneNode(true);
+        const nid='MeasureNew-'+(i+1)+'-'+Math.floor(Math.random()*1e9);
+        node.setAttribute('ID',nid);
+        const ld=node.getElementsByTagNameNS(NS_AUC,'LongDescription')[0]; if(ld)ld.textContent=txt;
+        const cm=node.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0]; if(cm)cm.textContent=txt;
+        parent.appendChild(node); newIds.push(nid);
+      });
+      measures.forEach(m=>m.parentNode.removeChild(m));
+      if(refProto){
+        const refParent=refProto.parentNode;
+        [..._q(doc,'MeasureID')].forEach(r=>r.parentNode.removeChild(r));
+        newIds.forEach(id2=>{const r=refProto.cloneNode(true); r.setAttribute('IDref',id2); refParent.appendChild(r);});
       }
     }
   }
