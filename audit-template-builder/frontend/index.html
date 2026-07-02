@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 04:25 UTC · build 18 — delivery equipment + central distribution fully report-driven (wall AC / mini-split / VRF / other) — no reference carryover</div>
+    Last updated 2026-07-03 04:50 UTC · build 19 — wall-AC delivery structure removed so DOE shows 'Other (Please Specify): Through the Wall AC'</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -1459,13 +1459,28 @@ async function build50121XML(which){
   //   anything else   -> 'Other' + specify = the report's own label
   {
     const label=(as.hvacSystemLabel||as.coolingSourceLabel||'');
-    let fct, other='';
-    if(as.coolingIsWallAC){fct='Other'; other='Through the Wall AC';}
+    let fct=null, other='';
+    if(as.coolingIsWallAC){other='Through the Wall AC';}
     else if(/multi.?split/i.test(label)) fct='Multi-split';
     else if(/mini.?split/i.test(label)) fct='Mini-split';
     else if(/vrf|variable refrigerant/i.test(label)) fct='VRF terminal units';
-    else if(label){fct='Other'; other=label;}
-    if(fct) for(const e of _q(doc,'FanCoilType')) e.textContent=fct;
+    else if(label){other=label;}
+    if(fct){ for(const e of _q(doc,'FanCoilType')) e.textContent=fct; }
+    else if(other){
+      // 'Other (Please Specify)': DOE derives the Delivery Equipment dropdown
+      // from the STRUCTURE — a FanCoil element displays as 'Split unit
+      // (mini-split/multi-split)' regardless of FanCoilType. Remove FanBased
+      // from the cooling delivery (empty ZoneEquipment is schema-valid; the
+      // baseboard delivery with Convection is untouched) so the UDF text shows
+      // as Other (Please Specify).
+      for(const dv of _q(doc,'Delivery')){
+        const ze=dv.getElementsByTagNameNS(NS_AUC,'ZoneEquipment')[0];
+        if(!ze)continue;
+        if(ze.getElementsByTagNameNS(NS_AUC,'Convection')[0])continue;   // heating baseboard
+        const fb=ze.getElementsByTagNameNS(NS_AUC,'FanBased')[0];
+        if(fb&&fb.getElementsByTagNameNS(NS_AUC,'FanCoil')[0]) ze.removeChild(fb);
+      }
+    }
     _setUDF(doc,'Other Distribution Equipment Type',other||' ');
     if(other)_setUDF(doc,'Other Distribution Equipment Type Is Not Applicable','false');
     // Central distribution: VRF systems are 'Refrigerant (VRF)'; all unitized/DX
