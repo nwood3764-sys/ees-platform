@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 03:10 UTC · build 15 — measures carry matching classifications (no more scrambled category/description rows)</div>
+    Last updated 2026-07-03 03:30 UTC · build 16 — dollar savings on the headline + per-fuel cost rows in the comparison table</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -661,8 +661,9 @@ function refresh(){
 
   const rv=document.getElementById('review'); rv.classList.add('show');
   document.getElementById('rTitle').textContent=cleanName(asB?asB.name:as.name);
+  const _bC=b.e*RATE_ELEC+b.g*RATE_GAS, _iC=i.e*RATE_ELEC+i.g*RATE_GAS;
   document.getElementById('rSavings').innerHTML=
-    `${statedPct.toFixed(1)}% site energy savings<small>Site EUI delta: ${asB?asB.euiCurrent:'?'} → ${asI?asI.euiUpgraded:'?'} kBtu/ft²/yr · OpenStudio monthly: ${osPct.toFixed(1)}%${asI&&asI.savingsPct!=null?' · report published: '+asI.savingsPct.toFixed(1)+'%':''}</small>`;
+    `${statedPct.toFixed(1)}% site energy savings · $${fmt(_bC-_iC,0)}/yr<small>Site EUI delta: ${asB?asB.euiCurrent:'?'} → ${asI?asI.euiUpgraded:'?'} kBtu/ft²/yr · OpenStudio monthly: ${osPct.toFixed(1)}%${asI&&asI.savingsPct!=null?' · report published: '+asI.savingsPct.toFixed(1)+'%':''} · $${RATE_ELEC.toFixed(3)}/kWh, $${RATE_GAS.toFixed(2)}/therm</small>`;
   const tier=statedPct>=35?'35%+ tier':(statedPct>=20?'20–34% tier':'below 20% — does not qualify');
   document.getElementById('rTier').innerHTML=`<span class="pill${statedPct>=20?'':' warn'}">${tier}</span>`;
 
@@ -676,9 +677,11 @@ function refresh(){
   const compRows=[
     ['Site EUI (kBtu/ft²/yr)', asB?asB.euiCurrent:0, asI?asI.euiUpgraded:0, (asB&&asI?asB.euiCurrent-asI.euiUpgraded:0)],
     ['Electricity (kWh)', b.e, i.e, b.e-i.e],
+    ['Electricity cost', b.e*RATE_ELEC, i.e*RATE_ELEC, (b.e-i.e)*RATE_ELEC, '$'],
     ['Natural gas (therms)', b.g, i.g, b.g-i.g],
+    ['Natural gas cost', b.g*RATE_GAS, i.g*RATE_GAS, (b.g-i.g)*RATE_GAS, '$'],
     ['Site energy (kBtu)', b.kbtu, i.kbtu, b.kbtu-i.kbtu],
-    ['Annual energy cost', bCost, iCost, bCost-iCost, '$'],
+    ['TOTAL annual energy cost', bCost, iCost, bCost-iCost, '$'],
   ];
   compRows.forEach(r=>{
     const money=r[4]==='$';
