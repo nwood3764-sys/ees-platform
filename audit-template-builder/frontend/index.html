@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-02 21:35 UTC · build 7 — end-use breakdown rebuilt from your OpenStudio results (real per-fuel end uses)</div>
+    Last updated 2026-07-02 22:05 UTC · build 8 — fixed import (duplicate ID); occupancy now required (no default) and gates exports</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -142,6 +142,16 @@
     <div class="flag" id="rFlag" style="display:none"></div>
   </div>
 
+  <div id="occRow" style="margin-top:12px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+    <strong>Occupancy <span style="color:#7eb3e8">*</span></strong>
+    <label>Dwelling units
+      <input id="occUnits" type="number" min="1" placeholder="required" style="width:88px;margin-left:4px"></label>
+    <label>Bedrooms per unit
+      <input id="occBeds" type="number" min="0" placeholder="required" style="width:88px;margin-left:4px"></label>
+    <span class="copyhint" id="occCalc"></span>
+  </div>
+  <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and bedrooms per unit to enable exports.</div>
+
   <div class="bar">
     <button class="btn" id="aiExtract" disabled>🧠 AI Extract &amp; Map</button>
     <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
@@ -159,14 +169,6 @@
     </div>
     <div id="reviewSummary" style="margin:8px 0;font-size:13.5px"></div>
     <div id="reviewFindings"></div>
-  </div>
-  <div id="occRow" style="margin-top:12px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-    <strong>Occupancy</strong>
-    <label>Dwelling units
-      <input id="occUnits" type="number" min="1" value="6" style="width:64px;margin-left:4px"></label>
-    <label>Bedrooms per unit
-      <input id="occBeds" type="number" min="0" value="2" style="width:64px;margin-left:4px"></label>
-    <span class="copyhint" id="occCalc"></span>
   </div>
   <p class="note" style="font-size:12.5px;color:var(--mut);margin-top:10px">
     <strong>50121 files:</strong> built from a known-good 50121 export so they import + submit.
@@ -504,16 +506,25 @@ function scaleToAssetScore(os, as, which){
   os._asElecTarget=elecTarget; os._asGasTarget=gasTarget;
 }
 function annual(os){const e=os.elec.reduce((a,b)=>a+b,0),g=os.gas.reduce((a,b)=>a+b,0);return{e,g,kbtu:e*KWH_KBTU+g*THERM_KBTU};}
+function occValid(){
+  const u=document.getElementById('occUnits'), b=document.getElementById('occBeds');
+  if(!u||!b) return false;
+  const uv=parseInt(u.value,10), bv=parseInt(b.value,10);
+  return u.value.trim()!=='' && b.value.trim()!=='' && Number.isFinite(uv) && uv>=1 && Number.isFinite(bv) && bv>=0;
+}
 function refresh(){
-  const have=Object.values(data).every(Boolean);
-  document.getElementById('buildBase').disabled=!have;
-  document.getElementById('buildImp').disabled=!have;
-  document.getElementById('utilBase').disabled=!have;
-  document.getElementById('utilImp').disabled=!have;
-  document.getElementById('smartReview').disabled=!have;
-  document.getElementById('aiExtract').disabled=!have;
-  document.getElementById('packet').disabled=!have;
-  if(!have){return;}
+  const filesReady=Object.values(data).every(Boolean);
+  const occOk=occValid();
+  const canExport=filesReady&&occOk;   // no export until occupancy is entered (no default)
+  document.getElementById('buildBase').disabled=!canExport;
+  document.getElementById('buildImp').disabled=!canExport;
+  document.getElementById('utilBase').disabled=!canExport;
+  document.getElementById('utilImp').disabled=!canExport;
+  document.getElementById('packet').disabled=!canExport;
+  document.getElementById('smartReview').disabled=!filesReady;   // AI review doesn't export
+  document.getElementById('aiExtract').disabled=!filesReady;
+  const occErr=document.getElementById('occErr'); if(occErr) occErr.style.display=occOk?'none':'';
+  if(!filesReady){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
   // monthly shape, so the resulting EUI matches the Asset Score PDF. Runs once per refresh.
   scaleToAssetScore(data.osBase, data.asBase, 'cur');
@@ -1098,7 +1109,13 @@ async function build50121XML(which){
         const ghgF=pAFU>0?pGHG/pAFU:0;
         list.forEach((item,i)=>{
           const node=existing[i]||proto.cloneNode(true);
-          if(!existing[i]) proto.parentNode.insertBefore(node, proto.nextSibling);
+          if(!existing[i]){
+            // cloneNode copies the ID — xs:ID must be unique, so give the clone a
+            // fresh, non-colliding ID before inserting (this was the build-7 import
+            // failure: duplicate ResourceUse ID → schema-invalid).
+            node.setAttribute('ID','RU-EU-'+fuel.replace(/[^A-Za-z]/g,'')+'-'+i+'-'+Math.floor(Math.random()*1e9));
+            proto.parentNode.insertBefore(node, proto.nextSibling);
+          }
           const [enumVal,other]=MAP[item.label]||['Laundry',item.label];
           const eu=node.getElementsByTagNameNS(NS_AUC,'EndUse')[0]; if(eu)eu.textContent=enumVal;
           const afu=node.getElementsByTagNameNS(NS_AUC,'AnnualFuelUseNativeUnits')[0]; if(afu)afu.textContent=item.val.toFixed(1);
@@ -1224,11 +1241,14 @@ async function build50121XML(which){
   }
 
   // Occupancy: units x (bedrooms + 1)  [2 in the master + 1 per extra bedroom].
-  const units=Math.max(1, parseInt((document.getElementById('occUnits')||{}).value)||6);
-  const beds =Math.max(0, parseInt((document.getElementById('occBeds')||{}).value)||2);
-  const occupants=units*Math.max(1, beds+1);
-  _setFirst(doc,'OccupantQuantity', occupants);
-  const su=_q(doc,'SpatialUnit')[0];
+  // No default — the user must enter these (exports are gated on them). Only
+  // inject when a valid entry is present, so nothing silently defaults.
+  const units=parseInt((document.getElementById('occUnits')||{}).value,10);
+  const beds =parseInt((document.getElementById('occBeds')||{}).value,10);
+  const occ_ok = Number.isFinite(units) && units>=1 && Number.isFinite(beds) && beds>=0;
+  const occupants = occ_ok ? units*Math.max(1, beds+1) : null;
+  if(occupants!=null) _setFirst(doc,'OccupantQuantity', occupants);
+  const su=occ_ok?_q(doc,'SpatialUnit')[0]:null;
   if(su){
     const nu=su.getElementsByTagNameNS(NS_AUC,'NumberOfUnits')[0]; if(nu)nu.textContent=String(units);
     // Percent Dwelling Units Currently Occupied — always 100 (was the reference
@@ -1266,17 +1286,23 @@ document.getElementById('buildImp').onclick=()=>downloadXML('improved');
 (function(){
   const u=document.getElementById('occUnits'), bd=document.getElementById('occBeds'),
         out=document.getElementById('occCalc');
-  function upd(){const units=Math.max(1,parseInt(u.value)||6),beds=Math.max(0,parseInt(bd.value)||2);
-    out.textContent='→ '+(units*Math.max(1,beds+1))+' occupants';}
-  if(u&&bd&&out){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
+  function upd(){
+    if(occValid()){const units=parseInt(u.value,10),beds=parseInt(bd.value,10);
+      out.textContent='→ '+(units*Math.max(1,beds+1))+' occupants';}
+    else out.textContent='';
+    refresh();   // re-evaluate export gating on every occupancy edit
+  }
+  if(u&&bd){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
 })();
 
 /* ---------- Smart pre-export review (Claude audits the mapping) ---------- */
 // Collect exactly what the tool will write, so Claude can check it vs the reports.
 function buildMappedForReview(){
   const asB=data.asBase, asI=data.asImp;
-  const units=Math.max(1,parseInt((document.getElementById('occUnits')||{}).value)||6);
-  const beds =Math.max(0,parseInt((document.getElementById('occBeds')||{}).value)||2);
+  const _u=parseInt((document.getElementById('occUnits')||{}).value,10);
+  const _b=parseInt((document.getElementById('occBeds')||{}).value,10);
+  const units=Number.isFinite(_u)&&_u>=1?_u:null;   // null = not entered yet (no default)
+  const beds =Number.isFinite(_b)&&_b>=0?_b:null;
   let osPct=null;
   try{const b=annual(data.osBase),i=annual(data.osImp);osPct=+((b.kbtu-i.kbtu)/b.kbtu*100).toFixed(1);}catch(e){}
   const pick=a=>a?{name:a.name,address:(a.street||'')+', '+(a.cityStateZip||''),grossFloorArea:a.gfa,
@@ -1287,7 +1313,7 @@ function buildMappedForReview(){
     boilerYear:a.boilerYear,coolingCOP:a.coolCop,coolingTons:a.coolTons,waterHeaterEt:a.whe,
     useMultifamilyArea:a.useMultifamilyArea,useCommonArea:a.useCommonArea,measures:a.measures}:null;
   return {baseline:pick(asB), improved:pick(asI),
-    occupancy:{dwellingUnits:units,bedroomsPerUnit:beds,computedOccupants:units*Math.max(1,beds+1)},
+    occupancy:{dwellingUnits:units,bedroomsPerUnit:beds,computedOccupants:(units!=null&&beds!=null)?units*Math.max(1,beds+1):null},
     openStudioSavingsPct:osPct, meteringYearStart:startDateFor(asB)};
 }
 (function(){
