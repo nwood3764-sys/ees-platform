@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 07:00 UTC · build 22 — cooling year/COP from report; fan control; measure categories; WWR rounds up</div>
+    Last updated 2026-07-03 07:45 UTC · build 23 — clean measure names (EES schema): deduped blocks, roof + kneewall description</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -276,6 +276,9 @@ function parseAssetScore(t){
   // used to split the total roof area by use type (multifamily vs common).
   d.roofPairs=[...t.matchAll(/Roof\s+([A-Za-z][\w /-]*?Roof)(?:(?!Skylight)[\s\S]){0,180}?Roof R-Value\s+([\d.]+)/g)]
     .map(m=>({name:m[1].replace(/\s+/g,' ').trim(), r:parseFloat(m[2])}));
+  // Exposed knee walls (e.g. "Hallway Roof - No Insulation and Exposed Knee
+  // Wall") — drives the roof measure's kneewall-insulation clause.
+  d.hasKneeWall=/knee\s*wall/i.test(t);
   d.wallR=num(/Wall R-value\s+([\d.]+)/,t);
   // WWR (EES rule): use the MULTIFAMILY UNITS' window-to-wall ratio — the
   // exterior walls that matter — taking the highest multifamily block value.
@@ -486,13 +489,30 @@ function auditEndUses(os){
    model's weakest roof R exceeds the baseline's weakest roof R, an attic
    insulation upgrade happened even though the report can't list it (Asset
    Score only offers the upgrade below R-15, so it gets modeled directly). */
+// Measures as clean {title, desc} pairs (EES naming schema):
+//  - title = the plain measure name, per-block suffixes stripped
+//    ("... for Block in block for Multifamily Units - East and North." -> gone)
+//  - identical measures repeated per block collapse into ONE measure
+//  - roof/attic measure composed from the two reports' roof R-values, covering
+//    every distinct baseline roof, plus the EES kneewall spec (R-15) when the
+//    baseline names an exposed knee wall.
 function effectiveMeasures(){
   const asB=data.asBase, asI=data.asImp;
-  const ms=(asI&&Array.isArray(asI.measures))?asI.measures.slice():[];
+  const raw=(asI&&Array.isArray(asI.measures))?asI.measures.slice():[];
+  const titleOf=x=>x.replace(/\s+for Block\b.*$/i,'').replace(/\s+in block\b.*$/i,'')
+                    .replace(/[.\s]+$/,'').trim();
+  const seen=new Set(), ms=[];
+  for(const m of raw){const t=titleOf(m); if(!t||seen.has(t))continue; seen.add(t); ms.push({title:t,desc:t});}
   const bMin=(asB&&asB.roofRs&&asB.roofRs.length)?Math.min(...asB.roofRs):null;
   const iMin=(asI&&asI.roofRs&&asI.roofRs.length)?Math.min(...asI.roofRs):null;
-  if(bMin!=null&&iMin!=null&&iMin>bMin&&!ms.some(m=>/roof|attic|ceiling/i.test(m)))
-    ms.push('Add Roof Insulation: attic improved from R-'+bMin+' to R-'+iMin+' (modeled directly in the improved Asset Score)');
+  if(bMin!=null&&iMin!=null&&iMin>bMin&&!ms.some(m=>/roof|attic|ceiling/i.test(m.title))){
+    const bRs=[...new Set(asB.roofRs)].filter(r2=>r2<iMin).sort((a,b)=>a-b);
+    const knee=!!(asB&&asB.hasKneeWall);
+    const fmtR=r2=>'R-'+(r2%1?r2:Math.round(r2));
+    const deltas=bRs.map(r2=>fmtR(r2)+' to '+fmtR(iMin)).join(', and ');
+    ms.push({title:'Add Roof Insulation'+(knee?' and KneeWall Insulation':''),
+      desc:'Add Roof Insulation: attic improved from '+deltas+(knee?', insulate knee walls to R-15':'')});
+  }
   return ms;
 }
 
@@ -805,12 +825,12 @@ function refresh(){
   {
     const ms=effectiveMeasures();
     h+='<div class="sect"><h3>Energy efficiency measures ('+ms.length+' parsed from the improved report)</h3><table class="kv">';
-    if(ms.length) ms.forEach(m=>h+=`<tr><td colspan="2" style="text-align:left;font-weight:600">✓ ${m}</td></tr>`);
+    if(ms.length) ms.forEach(m=>h+=`<tr><td colspan="2" style="text-align:left;font-weight:600">✓ ${m.title}${m.desc!==m.title?`<div style="font-weight:400;color:#4a5e7a">${m.desc}</div>`:''}</td></tr>`);
     else h+='<tr><td colspan="2" style="text-align:left;font-weight:700">⚠ NO measures parsed — check the improved report before exporting.</td></tr>';
     const expected=[['air seal',/air\s*(seal|infiltra)|seal(ing)?\s*(the\s*)?(building)?\s*envelope/i],
                     ['attic/roof insulation',/roof|attic|ceiling/i],
                     ['low-flow fixtures',/low[\s-]*flow|shower|aerator|hot water fixture/i]];
-    const missing=expected.filter(([,re])=>!ms.some(m=>re.test(m))).map(([n])=>n);
+    const missing=expected.filter(([,re])=>!ms.some(m=>re.test(m.title+' '+m.desc))).map(([n])=>n);
     if(missing.length) h+=`<tr><td colspan="2" style="text-align:left;color:#2a4a6a;font-weight:700">⚠ Not found on this report (verify — most buildings have them): ${missing.join(', ')}</td></tr>`;
     h+='</table></div>';
   }
@@ -1715,12 +1735,15 @@ async function build50121XML(which){
       const parent=measures[0].parentNode;
       const refProto=[..._q(doc,'MeasureID')][0];
       const newIds=[];
-      parsedMeasures.forEach((txt,i)=>{
+      parsedMeasures.forEach((meas,i)=>{
+        const txt=meas.title+' '+meas.desc;   // classification matching text
         const node=protoFor(txt).cloneNode(true);
         const nid='MeasureNew-'+(i+1)+'-'+Math.floor(Math.random()*1e9);
         node.setAttribute('ID',nid);
-        const ld=node.getElementsByTagNameNS(NS_AUC,'LongDescription')[0]; if(ld)ld.textContent=txt;
-        const cm=node.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0]; if(cm)cm.textContent=txt;
+        // EES naming schema: CustomMeasureName = the clean measure identifier,
+        // LongDescription = the full description (R-value deltas etc.).
+        const ld=node.getElementsByTagNameNS(NS_AUC,'LongDescription')[0]; if(ld)ld.textContent=meas.desc;
+        const cm=node.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0]; if(cm)cm.textContent=meas.title;
         // System Category Affected: the reference file's picks ('Water Use',
         // 'Heat Recovery') were ITS choices — set from this measure. DOE shows
         // 'Domestic Hot Water' as "Service Hot Water".
