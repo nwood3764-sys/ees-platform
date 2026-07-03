@@ -35,9 +35,12 @@ B. DOE ACCEPTED VALUES (from the Audit Template rulebook) — flag any value out
 
 C. EES STANDING RULES — flag any deviation:
 - Electric resistance heating: AnnualHeatingEfficiencyValue is exactly "1.0" (decimal, 1.0 = 100%) with efficiency type "Thermal Efficiency"; never 100 or a COP.
-- Heating/DHW/cooling Location = "Interior"; YearInstalled = the building's year built; Quantity/number of pieces = 1 (whole building).
-- DX / unitized cooling: "Central Distribution Type" UDF = "None (unitized heating/cooling)".
-- Window-to-wall ratio = the HIGHEST multifamily-unit block ratio from the report, never a building average.
+- Heating/DHW/cooling Location = "Interior"; Quantity/number of pieces = 1 (whole building).
+- YearInstalled: baseboard heating and DHW = the building's year built; COOLING = the report's "Cooling Equipment ... Year of Manufacture" (year built only if the report prints none).
+- Cooling rated efficiency = the report's exact COP (e.g. 2.04), max 2 decimals, units COP.
+- DX / unitized cooling: "Central Distribution Type" UDF = "None (unitized heating/cooling)"; wall-AC fan control = Constant Volume (FanSystem FanControlType).
+- Window-to-wall ratio = the HIGHEST multifamily-unit block ratio from the report, never a building average. Its XML encoding is DELIBERATELY nudged onto the float32 just above the 2-decimal value (e.g. 0.16000001) so DOE's float32 display reads rounded UP — do not flag that extra precision.
+- Measure "SystemCategoryAffected": low-flow fixtures = "Domestic Hot Water" (DOE displays "Service Hot Water"); attic/roof insulation = "Ceiling"; air sealing = "Other HVAC". Never the reference's "Water Use"/"Heat Recovery".
 - Whole-building savings % = (baseline report Current Site EUI − improved report Upgraded Site EUI) ÷ baseline Current Site EUI. The improved report's printed savings % is on a different basis (attic R-15 rule workaround) and must NOT be the reported value.
 - Occupants = dwelling units × (bedrooms per unit + 1); dwelling units occupied = 100%.
 - Energy values (meter readings, end uses, capacities) are WHOLE numbers; nothing anywhere carries more than 2 decimal places (DOE stores float32 — longer decimals display as garbage). Any entry in decimalViolations is automatically a "mismatch" finding.
