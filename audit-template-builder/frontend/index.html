@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 06:00 UTC · build 21 — Smart Review now audits the actual generated XML; DOE validation fixes (delivery, door)</div>
+    Last updated 2026-07-03 07:00 UTC · build 22 — cooling year/COP from report; fan control; measure categories; WWR rounds up</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -294,6 +294,9 @@ function parseAssetScore(t){
   d.heatCap=num(/Capacity\s+([\d.]+)\s*kBtu\/hr/,t);
   d.coolCop=num(/Efficiency\s+([\d.]+)\s*COP/,t);
   d.coolTons=num(/Capacity\s+([\d.]+)\s*tons/,t);
+  // Cooling equipment's own manufacture year ("Cooling Equipment ... Year of
+  // Manufacture 2020") — the year-built rule applies to baseboards/DHW only.
+  d.coolYear=num(/Cooling Equipment[\s\S]{0,200}?Year of Manufacture\s+(\d{4})/,t);
   d.whe=num(/Water Heater Efficiency\s+([\d.]+)\s*Et/,t);
   // Boiler / heating plant detail (page "BUILDING CHARACTERISTICS SUMMARY / Plants").
   d.boilerYear=num(/Year of Manufacture\s+(\d{4})/,t);          // first = heating plant
@@ -1121,7 +1124,14 @@ async function build50121XML(which){
   _setFirst(doc,'State', as.state||'WI');
   _setFirst(doc,'PostalCode', as.zip||asB.zip||'');
   _setFirst(doc,'YearOfConstruction', as.yearBuilt);
-  _setFirst(doc,'OverallWindowToWallRatio', as.wwr);
+  // Window-to-Wall Ratio: DOE stores this as a 32-bit float and its UI prints
+  // the full stored value — a plain 0.16 lands on the float32 BELOW it and
+  // displays 0.15999999... Encode the value nudged onto the float32 just ABOVE
+  // the 2-decimal target so DOE displays 0.16000001... (rounded UP, per EES).
+  const wwrFloat32Up=v=>{const t=Math.round(v*100)/100;
+    let u=t,i=0; while(Math.fround(u)<t&&i++<50)u=+(u+1e-8).toFixed(10);
+    return String(u);};
+  _setFirst(doc,'OverallWindowToWallRatio', as.wwr==null?null:wwrFloat32Up(as.wwr));
   _setFirst(doc,'TotalExteriorAboveGradeWallArea', as.wallArea);
   if(as.floorsAbove!=null)_setFirst(doc,'ConditionedFloorsAboveGrade', as.floorsAbove);
   if(as.floorsBelow!=null)_setFirst(doc,'ConditionedFloorsBelowGrade', as.floorsBelow);
@@ -1486,6 +1496,11 @@ async function build50121XML(which){
     }
     _setUDF(doc,'Other Distribution Equipment Type',other||' ');
     if(other)_setUDF(doc,'Other Distribution Equipment Type Is Not Applicable','false');
+    // Fan Control (EES rule for through-the-wall / window AC): ALWAYS Constant
+    // Volume. DOE reads it from the FanSystem linked to the HVAC system — the
+    // reference file's cooling FanSystem said 'Variable Volume'.
+    if(as.coolingIsWallAC)
+      for(const e of _q(doc,'FanControlType')) e.textContent='Constant Volume';
     // Central distribution: VRF systems are 'Refrigerant (VRF)'; all unitized/DX
     // systems are 'None (unitized heating/cooling)' (EES rule).
     const cdt=/vrf|variable refrigerant/i.test(label)?'Refrigerant (VRF)':'None (unitized heating/cooling)';
@@ -1517,12 +1532,14 @@ async function build50121XML(which){
   // Reference's 'Critical IT Systems' (Server / Trading floor) — not this
   // building's equipment; no IDrefs point at them.
   for(const its of [..._q(doc,'CriticalITSystems')]) its.parentNode.removeChild(its);
-  // Water heater + cooling equipment: the report prints no install year or
-  // location — year installed = year built (EES rule), location Interior.
+  // Water heater: the report prints no install year — year built (EES rule).
+  // Cooling: the report DOES print the equipment's own year ("Cooling Equipment
+  // ... Year of Manufacture"), so use it; year built only as fallback.
   for(const tag of ['DomesticHotWaterSystem','CoolingSource']){
+    const yr = tag==='CoolingSource' ? (as.coolYear!=null?as.coolYear:as.yearBuilt) : as.yearBuilt;
     for(const sys of _q(doc,tag)){
       const yi=sys.getElementsByTagNameNS(NS_AUC,'YearInstalled')[0];
-      if(yi&&as.yearBuilt!=null)yi.textContent=String(as.yearBuilt);
+      if(yi&&yr!=null)yi.textContent=String(yr);
       const lo=sys.getElementsByTagNameNS(NS_AUC,'Location')[0];
       if(lo)lo.textContent='Interior';
     }
@@ -1616,7 +1633,9 @@ async function build50121XML(which){
   for(const cs of _q(doc,'CoolingSource')){
     const eff=cs.getElementsByTagNameNS(NS_AUC,'AnnualCoolingEfficiencyValue')[0];
     if(!eff)continue;
-    if(as.coolCop!=null)eff.textContent=Number(as.coolCop).toFixed(1);
+    // The report's exact rating ("Efficiency 2.04 COP") — max 2 decimals, no
+    // padding (2.04 stays 2.04; a whole-number COP stays whole).
+    if(as.coolCop!=null)eff.textContent=String(+Number(as.coolCop).toFixed(2));
     const cap=cs.getElementsByTagNameNS(NS_AUC,'Capacity')[0];
     if(cap&&as.coolTons!=null)cap.textContent=String(Math.round(as.coolTons*12));
   }
@@ -1702,6 +1721,15 @@ async function build50121XML(which){
         node.setAttribute('ID',nid);
         const ld=node.getElementsByTagNameNS(NS_AUC,'LongDescription')[0]; if(ld)ld.textContent=txt;
         const cm=node.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0]; if(cm)cm.textContent=txt;
+        // System Category Affected: the reference file's picks ('Water Use',
+        // 'Heat Recovery') were ITS choices — set from this measure. DOE shows
+        // 'Domestic Hot Water' as "Service Hot Water".
+        const sca=node.getElementsByTagNameNS(NS_AUC,'SystemCategoryAffected')[0];
+        if(sca){
+          if(/low.?flow|shower|faucet|hot water fixture/i.test(txt)) sca.textContent='Domestic Hot Water';
+          else if(/roof|attic|ceiling/i.test(txt)) sca.textContent='Ceiling';
+          else if(/seal|infiltrat/i.test(txt)) sca.textContent='Other HVAC';
+        }
         parent.appendChild(node); newIds.push(nid);
       });
       measures.forEach(m=>m.parentNode.removeChild(m));
@@ -1744,6 +1772,9 @@ async function build50121XML(which){
   // numeric-only match).
   for(const el2 of doc.getElementsByTagName('*')){
     if(el2.children.length)continue;
+    // WWR is the one deliberate exception: encoded onto the float32 above the
+    // 2-decimal value so DOE's float32 display reads rounded UP.
+    if(el2.localName==='OverallWindowToWallRatio')continue;
     const t2=(el2.textContent||'').trim();
     if(/^-?\d+\.\d{3,}$/.test(t2)) el2.textContent=(+t2).toFixed(2);
   }
@@ -1861,7 +1892,8 @@ async function buildXmlDigest(){
     for(const el of Array.from(doc.getElementsByTagName('*'))){
       const id=el.getAttribute&&el.getAttribute('ID');
       if(id){if(seen[id])dupIds.push(id);seen[id]=1;}
-      if(!el.children.length&&/^-?\d+\.\d{3,}$/.test(el.textContent.trim())&&d.decimalViolations.length<20)
+      if(!el.children.length&&el.localName!=='OverallWindowToWallRatio'
+        &&/^-?\d+\.\d{3,}$/.test(el.textContent.trim())&&d.decimalViolations.length<20)
         d.decimalViolations.push(el.localName+'='+el.textContent.trim());
     }
     d.duplicateIds=dupIds;
