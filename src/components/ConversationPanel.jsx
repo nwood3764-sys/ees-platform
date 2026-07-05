@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import DOMPurify from 'dompurify'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
@@ -704,6 +705,14 @@ function ThreadHeader({ thread, isMobile, onBack }) {
   )
 }
 
+// An email message whose body contains markup should render as HTML; plain
+// bodies (SMS, or emails that arrived as plain text) keep the text path.
+function isEmailHtml(message) {
+  return message.msg_channel === 'email'
+      && typeof message.msg_body === 'string'
+      && /<[a-z][\s\S]*>/i.test(message.msg_body)
+}
+
 // ---------------------------------------------------------------------------
 // MessageBubble — one row in the message timeline
 // ---------------------------------------------------------------------------
@@ -741,9 +750,19 @@ function MessageBubble({ message, attachments = [] }) {
         padding: '8px 12px',
         fontSize: 13, lineHeight: 1.45,
         color: isFailed ? '#1e466b' : dir.color,
-        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        whiteSpace: isEmailHtml(message) ? 'normal' : 'pre-wrap',
+        wordBreak: 'break-word',
+        overflowX: 'auto',
       }}>
-        {message.msg_body || '—'}
+        {isEmailHtml(message) ? (
+          // Email bodies are HTML (composed in TipTap or received from real
+          // mail clients). Render them, sanitized — showing raw markup as
+          // text made every email unreadable. SMS stays plain text.
+          // eslint-disable-next-line react/no-danger
+          <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(message.msg_body) }} />
+        ) : (
+          message.msg_body || '—'
+        )}
       </div>
 
       {/* Attachments — paperclip chips below the body, same max-width and

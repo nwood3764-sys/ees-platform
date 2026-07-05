@@ -166,9 +166,12 @@ Deno.serve(async (req) => {
       bodyHtml = substituteTokens(template.body_html || "", mergeDict)
     }
   } else {
-    // Free-form compose — caller supplied subject + body
-    subject  = body.subject!
-    bodyHtml = body.body_html!
+    // Free-form compose — caller supplied subject + body. Merge chips inserted
+    // by the TipTap composer are styled <span data-merge-field> wrappers around
+    // a {{token}}; unwrap them and substitute against the anchor's merge dict
+    // so free-form sends resolve fields exactly like template sends do.
+    subject  = substituteTokens(body.subject!, mergeDict)
+    bodyHtml = substituteTokens(unwrapMergeChips(body.body_html!), mergeDict)
   }
 
   // ── 5. Validate locked regions appear verbatim in final body ─────────────
@@ -301,6 +304,11 @@ Deno.serve(async (req) => {
             toRecipients:  [toGraphRecipient(body.to)],
             ccRecipients:  (body.cc  || []).map(toGraphRecipient),
             bccRecipients: (body.bcc || []).map(toGraphRecipient),
+            // Replies must come back to the plus-addressed alias so the
+            // inbound webhook's tier-1 token match can thread them. Graph
+            // sends From the mailbox's primary address regardless, so
+            // replyTo is the only way the token survives the round trip.
+            replyTo: [{ emailAddress: { address: fromAddressWithToken, name: mailbox.obm_display_name || mailbox.obm_address } }],
             // Custom header carries the conversation token as a fallback for
             // clients that strip the plus address. Graph rejects setting
             // Message-ID directly, so we use an X- header here.
@@ -566,6 +574,13 @@ function assembleFromLockedRegions(
     }
   }
   return parts.join("\n\n")
+}
+
+// Strip the TipTap composer's merge-chip wrappers, leaving the bare {{token}}
+// for substituteTokens. Chips are our own generated markup with a fixed
+// data-merge-field attribute, so this targeted regex is safe here.
+function unwrapMergeChips(html: string): string {
+  return html.replace(/<span[^>]*\bdata-merge-field=(?:"[^"]*"|'[^']*')[^>]*>([\s\S]*?)<\/span>/gi, "$1")
 }
 
 function plusAddress(address: string, token: string): string {
