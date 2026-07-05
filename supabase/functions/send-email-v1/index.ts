@@ -97,6 +97,11 @@ interface ReqBody {
     mime_type?:   string
     size_bytes:   number
   }>
+
+  // Self-test harness only: honored ONLY when the gateway-verified JWT is
+  // the service role (i.e. a trusted server-side caller like
+  // _admin-test-send-email). Ignored for normal user JWTs.
+  on_behalf_of_user_id?: string
 }
 
 const ATTACHMENT_BUCKET = "communications-attachments"
@@ -129,7 +134,7 @@ Deno.serve(async (req) => {
 
   // Resolve caller's public.users.id for audit columns
   const authHeader = req.headers.get("Authorization") || ""
-  const callerUserId = await resolveCallerUserId(admin, authHeader)
+  const callerUserId = await resolveCallerUserId(admin, authHeader, body.on_behalf_of_user_id)
   if (!callerUserId) return json({ error: "Caller is not a registered LEAP user" }, 401)
 
   // ── 1. Resolve outbound mailbox ──────────────────────────────────────────
@@ -495,15 +500,32 @@ function validateRequest(b: ReqBody): string | null {
   return null
 }
 
-async function resolveCallerUserId(admin: SupabaseClient, authHeader: string): Promise<string | null> {
+async function resolveCallerUserId(admin: SupabaseClient, authHeader: string, onBehalfOfUserId?: string): Promise<string | null> {
   if (!authHeader.startsWith("Bearer ")) return null
   const jwt = authHeader.slice(7)
+
+  // Service-role callers (the self-test harness) carry no auth user; they
+  // act on behalf of an explicit, existing app user. Full-trust key, so this
+  // adds no privilege a service-role caller doesn't already have. Compared
+  // directly against the env var because newer projects issue non-JWT
+  // sb_secret keys that can't be decoded below.
+  if (jwt === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
+    if (!onBehalfOfUserId || !UUID_RE.test(onBehalfOfUserId)) return null
+    const { data: obo } = await admin.from("users").select("id").eq("id", onBehalfOfUserId).maybeSingle()
+    return obo?.id || null
+  }
+
   // Decode the JWT to extract auth.uid (sub claim) without verifying — the
   // gateway already verified the JWT before invoking this function.
   try {
     const parts = jwt.split(".")
     if (parts.length !== 3) return null
     const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")))
+    if (payload.role === "service_role") {
+      if (!onBehalfOfUserId || !UUID_RE.test(onBehalfOfUserId)) return null
+      const { data: obo } = await admin.from("users").select("id").eq("id", onBehalfOfUserId).maybeSingle()
+      return obo?.id || null
+    }
     const authUserId = payload.sub as string
     if (!authUserId) return null
     const { data: u } = await admin
