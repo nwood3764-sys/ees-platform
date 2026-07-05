@@ -148,10 +148,13 @@ Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (
 
 **Architecture facts confirmed:** Dashboards (`dashboards` + `dashboard_widgets`, rendered by `DashboardRunner`) and Home Pages (`home_pages` + `home_page_components`, rendered by `HomeComponentRenderer`) are parallel subsystems. A home page component with `hpc_type='dashboard'` and `hpc_source_id` = a dashboard UUID renders `DashboardRunner` directly. Home page resolves per module via `resolve_home_page_for_module` RPC. `report_aggregate` RPC returns `{label, value, raw_value}`, verified NC-scoped for County (20 groups), Owner (20 groups), Pipeline by Stage (1 group). Note: `report_groupings.rgr_field_via_path` documented shape `{from,fk,to}` does NOT match what `getRowValue` in the live runner expects (bare FK string arrays like `["property_id"]`) — verify against the runner before authoring related-field groupings.
 
+**Shipped 2026-07-05 — Activity + email layer (PRs #57–61, #84–90, live on prod):**
+Salesforce-parity activity logging (Log Activity composer, type picklist, multi-relate `activity_relations` junction with rollup) + fully intelligent two-way email: real Graph sends from shared state mailboxes, per-thread conversations, cross-object merge fields, attachments on the actual email, hidden reply-to token → replies auto-thread in ~60s, 6h subscription auto-renew, NC DKIM signed. Autonomous self-test harness `admin-test-send-email` (send/reply_sim/inspect) — **run it after any email-pipeline change**. Full handoff, per-state rollout playbook, and follow-up list: `docs/leap-activity-email-layer.md`. Help articles HA-00118/119.
+
 **Open / on the horizon (confirm with Nicholas before acting):**
 - **By Status widget disposition** — all NC properties currently have null `property_status`, so the widget may warrant soft-deletion. Confirm: keep or remove.
 - Verify all four grouped widgets render correctly on the live site after the recent pushes.
-- Activity tracking layer for DSH-00010 (emails/calls logged against opportunities) — additive, no rework.
+- Email-layer follow-ups (see handoff doc §5): Message-ID reconciliation, virus-scan function, program-aware mailbox routing, remaining state mailboxes/DKIM (WI/MI/CO/IN), CC/BCC in composer.
 - Financial visibility tier gating (Tier 1/2/3) — hard blocker before external/portal users; `field_metadata` and `field_permissions` are currently empty.
 - Null record types on real records across multi-type objects (`work_steps` 52, `buildings` 7, `contacts` 6, `work_orders` 5, `opportunities` 4, `projects` 3, `incentive_applications` 2) — resolve via Salesforce import.
 - Docs cleanup: ✅ Done — the 19 `anura-`-prefixed files in `/docs/` were renamed to `leap-*`, "Anura" scrubbed from content (→ LEAP / EES), and internal cross-references fixed. The word now appears only in `leap-naming-standard.md` and one line of `leap-build-discipline.md`, where it is the deliberate definition of the forbidden-word rule.
@@ -188,3 +191,4 @@ Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (
 | Build discipline (folded into this file) | `leap-build-discipline.md` |
 | Naming standard (folded into this file) | `leap-naming-standard.md` |
 | Session log 2026-07-01 (nav/list/layout/property fixes + verification) | `leap-session-2026-07-01.md` |
+| Activity + email layer (log activity, two-way Graph email, self-test harness) | `leap-activity-email-layer.md` |
