@@ -113,7 +113,22 @@ Deno.serve(async (req) => {
           attachments,
         }),
       })
-      const sendResult = await resp.json().catch(() => ({}))
+      const sendResult = await resp.json().catch(() => ({})) as Record<string, unknown>
+      // Mirror the composer's post-send bookkeeping: link the uploaded file to
+      // the new message so the thread shows the paperclip in LEAP.
+      if (resp.ok && attachments && sendResult?.message_id) {
+        await admin.from("message_attachments").insert({
+          ma_message_id:        sendResult.message_id,
+          ma_storage_path:      attachments[0].storage_path,
+          ma_file_name:         attachments[0].file_name,
+          ma_file_size_bytes:   attachments[0].size_bytes,
+          ma_mime_type:         attachments[0].mime_type,
+          ma_delivery_method:   "inline",
+          ma_virus_scan_status: "pending",
+          ma_created_by:        body.on_behalf_of_user_id,
+          ma_updated_by:        body.on_behalf_of_user_id,
+        })
+      }
       return json({ ok: resp.ok, http_status: resp.status, attachment_path: attachmentPath, send_result: sendResult }, 200)
     }
 
