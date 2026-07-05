@@ -81,6 +81,11 @@ interface ReqBody {
 
   // Optional contact for thread resolution (preferred over email-only matching)
   contact_id?: string
+
+  // Reply flow: the existing thread to send on. Absent = fresh compose, which
+  // always starts a NEW conversation (email threads like email — one thread
+  // per exchange, not one eternal thread per customer address).
+  conversation_id?: string
 }
 
 Deno.serve(async (req) => {
@@ -214,12 +219,30 @@ Deno.serve(async (req) => {
   }
   const anchorParam = ANCHOR_FK_PARAM[body.anchor_object]
   if (anchorParam) convParams[anchorParam] = body.anchor_record_id
-  const { data: convResult, error: convErr } = await admin.rpc("find_or_create_conversation", convParams)
-  if (convErr || !convResult) {
-    console.error("send-email-v1: find_or_create_conversation failed", convErr)
-    return json({ error: `Conversation resolution failed: ${convErr?.message || "no id returned"}` }, 500)
+
+  let conversationId: string
+  if (body.conversation_id) {
+    // Reply flow — send on the thread the caller is replying in.
+    const { data: conv, error: convLookupErr } = await admin
+      .from("conversations")
+      .select("id")
+      .eq("id", body.conversation_id)
+      .eq("conv_is_deleted", false)
+      .maybeSingle()
+    if (convLookupErr || !conv) {
+      return json({ error: `conversation_id ${body.conversation_id} not found` }, 404)
+    }
+    conversationId = conv.id
+  } else {
+    // Fresh compose — always a new thread.
+    convParams.p_force_new = true
+    const { data: convResult, error: convErr } = await admin.rpc("find_or_create_conversation", convParams)
+    if (convErr || !convResult) {
+      console.error("send-email-v1: find_or_create_conversation failed", convErr)
+      return json({ error: `Conversation resolution failed: ${convErr?.message || "no id returned"}` }, 500)
+    }
+    conversationId = convResult as string
   }
-  const conversationId = convResult as string
 
   // ── 7. Compose plus-addressed From + generate Message-ID ─────────────────
   const convShortToken = `c_${conversationId.replace(/-/g, "").slice(0, 8)}`
@@ -395,6 +418,7 @@ function validateRequest(b: ReqBody): string | null {
   if (hasTemplate && !UUID_RE.test(b.email_template_id!)) return "email_template_id must be a UUID"
   if (b.outbound_mailbox_id && !UUID_RE.test(b.outbound_mailbox_id)) return "outbound_mailbox_id must be a UUID"
   if (b.contact_id && !UUID_RE.test(b.contact_id)) return "contact_id must be a UUID"
+  if (b.conversation_id && !UUID_RE.test(b.conversation_id)) return "conversation_id must be a UUID"
 
   if (b.cc && !Array.isArray(b.cc))   return "cc must be an array"
   if (b.bcc && !Array.isArray(b.bcc)) return "bcc must be an array"
