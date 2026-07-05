@@ -86,7 +86,23 @@ interface ReqBody {
   // always starts a NEW conversation (email threads like email — one thread
   // per exchange, not one eternal thread per customer address).
   conversation_id?: string
+
+  // Files already uploaded to the communications-attachments bucket by the
+  // composer (pre-send). Small files ride the Graph message as inline
+  // fileAttachments; anything past the inline budget ships as a 30-day
+  // signed download link appended to the body.
+  attachments?: Array<{
+    storage_path: string
+    file_name:    string
+    mime_type?:   string
+    size_bytes:   number
+  }>
 }
+
+const ATTACHMENT_BUCKET = "communications-attachments"
+// Graph sendMail is one JSON request capped around 4 MB total; keep inline
+// attachment bytes comfortably under that (base64 inflates by ~33%).
+const INLINE_TOTAL_BUDGET_BYTES = 2_500_000
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
@@ -148,7 +164,7 @@ Deno.serve(async (req) => {
   // ── 3. Build merge dict from anchor record ───────────────────────────────
   let mergeDict: Record<string, any>
   try {
-    mergeDict = await buildMergeDict(admin, body.anchor_object, body.anchor_record_id, template?.name || "")
+    mergeDict = await buildMergeDict(admin, body.anchor_object, body.anchor_record_id, template?.name || "", body.contact_id || null)
   } catch (e) {
     return json({ error: `Merge dict build failed: ${(e as Error).message}` }, 400)
   }
@@ -314,6 +330,50 @@ Deno.serve(async (req) => {
 
   // ── 10. Real Graph send ──────────────────────────────────────────────────
   try {
+    // Attachments: inline small files as Graph fileAttachments; anything past
+    // the inline budget ships as a 30-day signed download link appended to
+    // the body. Files are already in storage (uploaded by the composer
+    // pre-send) — a failure to read one fails the send rather than silently
+    // dropping the file the user meant to include.
+    const graphAttachments: Array<Record<string, unknown>> = []
+    const linkBlocks: string[] = []
+    if (Array.isArray(body.attachments) && body.attachments.length > 0) {
+      let inlineBudget = INLINE_TOTAL_BUDGET_BYTES
+      for (const att of body.attachments) {
+        if (att.size_bytes <= inlineBudget) {
+          const { data: blob, error: dlErr } = await admin.storage
+            .from(ATTACHMENT_BUCKET)
+            .download(att.storage_path)
+          if (dlErr || !blob) {
+            const reason = `Attachment read failed for ${att.file_name}: ${dlErr?.message || "no data"}`
+            await markMessageFailed(admin, msgRow.id, reason, null, callerUserId)
+            return json({ status: "failed", mode: "real", message_id: msgRow.id, msg_record_number: msgRow.msg_record_number, conversation_id: conversationId, failure_reason: reason }, 200)
+          }
+          const bytes = new Uint8Array(await blob.arrayBuffer())
+          graphAttachments.push({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            name:          att.file_name,
+            contentType:   att.mime_type || "application/octet-stream",
+            contentBytes:  bytesToBase64(bytes),
+          })
+          inlineBudget -= att.size_bytes
+        } else {
+          const { data: signed, error: signErr } = await admin.storage
+            .from(ATTACHMENT_BUCKET)
+            .createSignedUrl(att.storage_path, 30 * 24 * 60 * 60)
+          if (signErr || !signed?.signedUrl) {
+            const reason = `Signed link creation failed for ${att.file_name}: ${signErr?.message || "no url"}`
+            await markMessageFailed(admin, msgRow.id, reason, null, callerUserId)
+            return json({ status: "failed", mode: "real", message_id: msgRow.id, msg_record_number: msgRow.msg_record_number, conversation_id: conversationId, failure_reason: reason }, 200)
+          }
+          linkBlocks.push(`<li><a href="${signed.signedUrl}">${escapeHtml(att.file_name)}</a> (${(att.size_bytes / 1024 / 1024).toFixed(1)} MB — link valid 30 days)</li>`)
+        }
+      }
+    }
+    const bodyHtmlFinal = linkBlocks.length > 0
+      ? `${bodyHtml}\n<p>Attached files (download links):</p>\n<ul>${linkBlocks.join("")}</ul>`
+      : bodyHtml
+
     const accessToken = await getAppAccessToken(tenantId!, clientId!, clientSecret!)
     const graphRes = await fetch(
       `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox.obm_address)}/sendMail`,
@@ -323,7 +383,8 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           message: {
             subject,
-            body: { contentType: "HTML", content: bodyHtml },
+            body: { contentType: "HTML", content: bodyHtmlFinal },
+            attachments: graphAttachments,
             toRecipients:  [toGraphRecipient(body.to)],
             ccRecipients:  (body.cc  || []).map(toGraphRecipient),
             bccRecipients: (body.bcc || []).map(toGraphRecipient),
@@ -419,6 +480,15 @@ function validateRequest(b: ReqBody): string | null {
   if (b.outbound_mailbox_id && !UUID_RE.test(b.outbound_mailbox_id)) return "outbound_mailbox_id must be a UUID"
   if (b.contact_id && !UUID_RE.test(b.contact_id)) return "contact_id must be a UUID"
   if (b.conversation_id && !UUID_RE.test(b.conversation_id)) return "conversation_id must be a UUID"
+  if (b.attachments) {
+    if (!Array.isArray(b.attachments)) return "attachments must be an array"
+    for (const a of b.attachments) {
+      if (!a || typeof a.storage_path !== "string" || !a.storage_path) return "attachments[].storage_path required"
+      if (typeof a.file_name !== "string" || !a.file_name) return "attachments[].file_name required"
+      if (typeof a.size_bytes !== "number" || a.size_bytes < 0) return "attachments[].size_bytes required"
+      if (a.storage_path.includes("..")) return "attachments[].storage_path invalid"
+    }
+  }
 
   if (b.cc && !Array.isArray(b.cc))   return "cc must be an array"
   if (b.bcc && !Array.isArray(b.bcc)) return "bcc must be an array"
@@ -550,13 +620,65 @@ async function resolveRowForMerge(admin: SupabaseClient, row: Record<string, any
   return out
 }
 
-async function buildMergeDict(admin: SupabaseClient, anchorObject: string, anchorRecordId: string, templateName: string): Promise<Record<string, any>> {
+// Which related-parent records each anchor object can pull merge fields
+// from: dict root ← [table, FK column on the anchor row]. This is what makes
+// {{property.property_name}} resolve when sending from an opportunity —
+// cross-object merge fields, the Salesforce behavior users expect.
+const RELATED_MERGE_ROOTS: Record<string, Array<[string, string, string]>> = {
+  opportunities: [
+    ["property", "properties", "property_id"],
+    ["building", "buildings", "building_id"],
+    ["account", "accounts", "opportunity_account_id"],
+  ],
+  projects: [
+    ["property", "properties", "property_id"],
+    ["building", "buildings", "building_id"],
+    ["account", "accounts", "project_account_id"],
+    ["opportunity", "opportunities", "opportunity_id"],
+  ],
+  properties: [
+    ["account", "accounts", "property_account_id"],
+  ],
+  buildings: [
+    ["property", "properties", "property_id"],
+  ],
+  work_orders: [
+    ["property", "properties", "property_id"],
+    ["project", "projects", "project_id"],
+  ],
+  assessments: [
+    ["property", "properties", "property_id"],
+    ["building", "buildings", "building_id"],
+    ["project", "projects", "project_id"],
+  ],
+  contacts: [
+    ["account", "accounts", "contact_account_id"],
+  ],
+}
+
+async function buildMergeDict(admin: SupabaseClient, anchorObject: string, anchorRecordId: string, templateName: string, contactId?: string | null): Promise<Record<string, any>> {
   const dict: Record<string, any> = {}
   const { data: parentRow, error } = await admin.from(anchorObject).select("*").eq("id", anchorRecordId).maybeSingle()
   if (error)      throw new Error(`Anchor record lookup failed: ${error.message}`)
   if (!parentRow) throw new Error("Anchor record not found")
   const root = singularize(anchorObject)
   dict[root] = await resolveRowForMerge(admin, parentRow)
+
+  // Hydrate related parents so {{property.*}}, {{building.*}}, {{account.*}},
+  // etc. resolve from any anchor that links to them.
+  for (const [dictKey, table, fkCol] of (RELATED_MERGE_ROOTS[anchorObject] || [])) {
+    const fkVal = parentRow[fkCol]
+    if (!fkVal || dict[dictKey]) continue
+    const { data: relRow } = await admin.from(table).select("*").eq("id", fkVal).maybeSingle()
+    if (relRow) dict[dictKey] = await resolveRowForMerge(admin, relRow)
+  }
+
+  // The contact the email is being sent to, when the composer picked one.
+  if (contactId && !dict.contact) {
+    const { data: contactRow } = await admin.from("contacts").select("*").eq("id", contactId).maybeSingle()
+    if (contactRow) dict.contact = await resolveRowForMerge(admin, contactRow)
+  }
+
   const now = new Date()
   dict.today = {
     iso:   now.toISOString().slice(0, 10),
@@ -569,7 +691,9 @@ async function buildMergeDict(admin: SupabaseClient, anchorObject: string, ancho
 
 function substituteTokens(input: string, dict: Record<string, any>): string {
   return input.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_full, path) => {
-    const segs = String(path).split(".")
+    // The composer's related-record picker emits paths like
+    // building.first.building_name — 'first' is a UI artifact, skip it.
+    const segs = String(path).split(".").filter((s: string) => s !== "first")
     let cur: any = dict
     for (const s of segs) {
       if (cur == null || typeof cur !== "object") return `[unknown: {{${path}}}]`
@@ -578,6 +702,21 @@ function substituteTokens(input: string, dict: Record<string, any>): string {
     if (cur === null || cur === undefined) return "—"
     return String(cur)
   })
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+// Chunked base64 — String.fromCharCode(...bytes) overflows the arg limit on
+// large files; 32 KB chunks keep it safe.
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ""
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(binary)
 }
 
 function assembleFromLockedRegions(
