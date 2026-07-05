@@ -193,21 +193,6 @@ function identityColumns(table, cols) {
   return { recordNumber, nameCol }
 }
 
-// The object's own location columns (by exact platform-convention name, e.g.
-// building_address / property_street / building_city / building_state) are
-// promoted to the front of the default-visible business columns, in this
-// order. Location is how users tell same-named records apart across the five
-// operating states, and these columns otherwise sit so late in schema order
-// that the MAX_BUSINESS_COLS cap always cut them. Exact names only — raw
-// import columns (property_mf_raw_std_city, building_cif_address, …) stay in
-// schema order.
-const LOCATION_COLUMN_SUFFIX_ORDER = ['_address', '_street', '_city', '_state', '_zip']
-function locationColumnRank(table, columnName) {
-  const prefix = table.replace(/ies$/, 'y').replace(/s$/, '')
-  const i = LOCATION_COLUMN_SUFFIX_ORDER.findIndex(suf => columnName === `${prefix}${suf}`)
-  return i === -1 ? null : i
-}
-
 // ---------------------------------------------------------------------------
 // buildObjectColumns: the DEFAULT-VISIBLE ListView column set for a table.
 // Returns [{ field, label, type, group }], with 'id' (record number) and
@@ -224,16 +209,9 @@ export async function buildObjectColumns(table) {
   if (recordNumber) out.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup })
   if (nameCol) out.push({ field: 'name', label: 'Name', type: 'text', group: objectGroup })
 
-  // Location columns first (address → street → city → state → zip), then the
-  // rest in schema order, both under the same default-visible cap.
-  const listable = cols.filter(c => isListableColumn(c, { recordNumber, nameCol }))
-  const location = listable
-    .filter(c => locationColumnRank(table, c.column_name) !== null)
-    .sort((a, b) => locationColumnRank(table, a.column_name) - locationColumnRank(table, b.column_name))
-  const rest = listable.filter(c => locationColumnRank(table, c.column_name) === null)
-
   let businessCount = 0
-  for (const c of [...location, ...rest]) {
+  for (const c of cols) {
+    if (!isListableColumn(c, { recordNumber, nameCol })) continue
     if (businessCount >= MAX_BUSINESS_COLS) break
     out.push(ownColumnDescriptor(c, objectGroup, table))
     businessCount++
