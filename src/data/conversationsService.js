@@ -270,6 +270,9 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
       body_html: textToMinimalHtml(trimmed),
       outbound_mailbox_id: outboundMailboxId || undefined,
       contact_id: conversation.contact_id || undefined,
+      // Keep the reply on THIS thread — without it, send-email-v1 starts a
+      // fresh conversation for every send (the new-email behavior).
+      conversation_id: conversation.id,
     }
     const { data, error } = await supabase.functions.invoke('send-email-v1', {
       body: payload,
