@@ -18,6 +18,7 @@ Salesforce-parity activity tracking: every interaction — call, email, meeting,
 
 ### Email pipeline (PRs #61, #84–#90)
 - **Outbound**: `send-email-v1` (v12) — real Graph send from the state/program shared mailbox (`resolve_outbound_mailbox_for_anchor`, non-overridable). Conversation pinned to the anchor record (opportunity/property/building/project/etc. FKs on `conversations`).
+- **Purpose-aware mailbox routing** (2026-07-05, migration `20260705232819`): `outbound_mailboxes.obm_purpose` managed picklist (`General Correspondence` / `Assessments`). The resolver picks the state's single active **General Correspondence** mailbox for record-anchored sends; a state with only one active mailbox of any purpose falls back to it; two-plus ambiguous boxes still return empty so the caller surfaces the config problem. Live routing: NC → `ncira@ees-nc.org`, WI → `ira@ees-wi.org` (`assessments.wi@EES-WI.org` is signatures/assessment-only and is never picked for correspondence).
 - **Threading**: each fresh compose = a NEW conversation (`find_or_create_conversation(p_force_new)`); the one-open-thread unique index is scoped to SMS only. In-app replies pass `conversation_id`; customer replies route by token.
 - **Hidden token**: `conv_short_token` (`c_` + 8 hex of conversation id) rides as the **reply-to** plus-address (`ncira+c_xxxxxxxx@ees-nc.org`) + `X-LEAP-Conversation-Token` header. Inbound webhook tier-1 matches it; tier-2 = In-Reply-To/Message-ID; tier-3 = sender→contact email; else → Unmatched Inbox triage.
 - **Merge fields**: free-form AND template sends substitute `{{tokens}}`; cross-object roots hydrated per anchor (`RELATED_MERGE_ROOTS`): opportunity → property/building/account (+contact); project → those + opportunity; composer's `X.first.Y` paths normalized.
@@ -47,7 +48,7 @@ Salesforce-parity activity tracking: every interaction — call, email, meeting,
 | Self-test harness | `supabase/functions/admin-test-send-email/` (v2) |
 | DB: activities | `activities`, `activity_relations` (junction), picklists `activities.activity_type` / `.direction` |
 | DB: email | `conversations` (anchor FKs incl. opportunity/property/building), `messages`, `message_attachments`, `outbound_mailboxes`, `unmatched_inbox` |
-| Migrations (this layer) | `20260701120000`, `20260701140000`, `20260701160000`, `20260701170000`, `20260701180000`, `20260705190000`, `20260705191000` |
+| Migrations (this layer) | `20260701120000`, `20260701140000`, `20260701160000`, `20260701170000`, `20260701180000`, `20260705190000`, `20260705191000`, `20260705232819` (mailbox purpose routing) |
 
 **Pain points / hazards**
 - Edge-function sources deployed out-of-band before this workstream (`outlook-oauth-*`, `outlook-disconnect`, `send-email-via-graph`, `create-graph-subscriptions`) are NOT in the repo. Repo has: send-email-v1, inbound-email-webhook, renew-graph-subscriptions, admin-test-send-email (all current).
@@ -55,11 +56,11 @@ Salesforce-parity activity tracking: every interaction — call, email, meeting,
 - Outbound Message-ID is synthetic (`graph-<msg id>`) — tier-2 reply matching is dead until reconciliation (tier-1 token carries the load and is verified working).
 - Self-tests send the mailbox to ITSELF; the outbound copy of a self-send lands in Unmatched (no token on To) — the harness run-book is: dismiss with reason afterward.
 
-## 4. Per-state email rollout playbook (NC done; WI/MI/CO/IN remain)
+## 4. Per-state email rollout playbook (NC + WI done; MI/CO/IN remain)
 
 For each state, in order:
 1. **M365**: create the shared program mailbox (e.g. `ncira@ees-nc.org` pattern for that state's program).
-2. **LEAP**: insert/activate the `outbound_mailboxes` row (`obm_state`, `obm_address`, `obm_is_active=true`). The resolver requires **exactly one active mailbox per state** today (see follow-up #3 before adding a second mailbox to any state).
+2. **LEAP**: insert/activate the `outbound_mailboxes` row (`obm_state`, `obm_address`, `obm_purpose='General Correspondence'`, `obm_is_active=true`). Assessment/signature-only boxes get `obm_purpose='Assessments'` and are never selected for record-anchored correspondence. Keep exactly ONE active General Correspondence box per state.
 3. **DKIM**: Defender portal → Email authentication → DKIM → domain → copy the 2 selector CNAMEs → add at GoDaddy DNS → toggle Enabled.
 4. **Subscription**: create the Graph inbox subscription for the new mailbox (via `create-graph-subscriptions`, deployed in prod) — the 6h cron then keeps it renewed.
 5. **Verify autonomously**: `admin-test-send-email` → `send` (self, with attachment + merge tag) → `inspect` (hasAttachments + resolved body) → `reply_sim` (token) → confirm inbound message row on the conversation; dismiss the self-send's unmatched row.
@@ -68,7 +69,7 @@ For each state, in order:
 
 1. **Message-ID reconciliation** — after Graph 202, read the sent item's real `internetMessageId` into `msg_external_message_id` so tier-2 reply matching works. (Tier-1 verified working.)
 2. **Virus scan** — `ma_virus_scan_status` is stuck `pending`; the ClamAV function was spec'd, never built.
-3. **Program-aware mailbox routing** — `outbound_mailboxes.obm_program_id` exists but `resolve_outbound_mailbox_for_anchor` keys on state only and demands exactly one active mailbox per state. Needed the moment any state runs two mailboxes (e.g. assessments@ + program box).
+3. ~~Program-aware mailbox routing~~ — **DONE 2026-07-05** as purpose-aware routing (`obm_purpose`, migration `20260705232819`). Program-level (`obm_program_id`) granularity remains available if a state ever runs two General Correspondence boxes for different programs.
 4. **Commit out-of-band function sources** — pull `outlook-oauth-*`, `create-graph-subscriptions`, `send-email-via-graph` sources into the repo (or retire the per-user path).
 5. **Contact dedupe** — `nwood3764@gmail.com` is on two contacts (test remnants); ambiguous for tier-3 matching. Clean via UI.
 6. **Multi-contact activities** — composer links one contact; `activity_relations` already supports many (role `contact`), UI multi-select is additive.
@@ -76,7 +77,7 @@ For each state, in order:
 
 ## 6. Decisions (all DECIDED 2026-07-05, owner Nicholas)
 
-- **Shared team mailboxes per state+program** (not per-user Outlook) for outreach/coordination email. NC = `ncira@ees-nc.org`.
+- **Shared team mailboxes per state+program** (not per-user Outlook) for outreach/coordination email. NC = `ncira@ees-nc.org`; WI = `ira@ees-wi.org` (assessments.wi@ is signatures-only, never used for correspondence).
 - **Email threads like email**: one conversation per exchange; new compose = new thread. (SMS stays one thread per number.)
 - **Activity relations are user-picked** (checkboxes, defaults on), not auto-derived; rollup shows the activity on every linked record.
 - **One shared secret** (`GRAPH_WEBHOOK_CLIENT_STATE`) gates the whole Graph pipeline (webhook, renewal cron, self-test harness).
