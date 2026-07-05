@@ -311,6 +311,10 @@ export default function ComposeEmailModal({
     // editor body to be non-empty.
     const editorEmpty = editorRef.current?.isEmpty?.() ?? true
     const regions = editorRef.current?.getEditableRegions?.() || {}
+    // Snapshot the body NOW — the first await below yields to React, and any
+    // editor remount (e.g. the disabled toggle) would wipe the typed content
+    // before a later getHtml() call could read it.
+    const bodyHtmlSnapshot = editorRef.current?.getHtml?.() || ''
     if (mode === 'free-form' && editorEmpty) {
       toast.error('Message body is empty.')
       return
@@ -355,7 +359,7 @@ export default function ComposeEmailModal({
           anchorRecordId,
           to: { email: toEmail.trim(), name: toName.trim() || undefined },
           subject: subject.trim(),
-          bodyHtml: editorRef.current?.getHtml?.() || '',
+          bodyHtml: bodyHtmlSnapshot,
           outboundMailboxId: mailboxId,
           contactId: defaultContactId || undefined,
           attachments: uploads,

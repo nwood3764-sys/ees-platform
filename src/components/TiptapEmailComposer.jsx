@@ -610,11 +610,19 @@ const TiptapEmailComposer = forwardRef(function TiptapEmailComposer({
       if (!mfLoaded) loadMergeFields()
       onChange?.(editor.getHTML())
     },
-    // Re-create editor when mode/template/initialHtml changes — avoids
-    // the lifecycle-mismatch warning when switching between free-form
-    // and template after a template is picked.
+    // Re-create editor when mode/template changes — avoids the
+    // lifecycle-mismatch warning when switching between free-form and
+    // template after a template is picked. `disabled` is deliberately NOT a
+    // dep: re-creating on the submitting toggle wiped the typed body
+    // mid-send (and on a failed send). It's applied via setEditable below.
     autofocus: false,
-  }, [mode, JSON.stringify(templateLockedRegions || null), disabled])
+  }, [mode, JSON.stringify(templateLockedRegions || null)])
+
+  // Toggle read-only in place instead of rebuilding the editor.
+  useEffect(() => {
+    if (!editor || editor.isEditable === !disabled) return
+    editor.setEditable(!disabled)
+  }, [editor, disabled])
 
   // Imperative API exposed to the modal.
   useImperativeHandle(ref, () => ({
