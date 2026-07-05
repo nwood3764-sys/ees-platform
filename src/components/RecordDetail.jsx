@@ -27,7 +27,6 @@ const LogActivityModal                     = lazy(() => import('./LogActivityMod
 import { useToast } from './Toast'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl } from '../lib/urlNav'
-import RecordLink from './RecordLink'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
@@ -3295,7 +3294,7 @@ const RELATED_LIST_MAX_ROWS = 7
 
 // Render a single cell. Extracted so the editable and read-only paths can
 // share formatting without duplicating the picklist / date / number logic.
-function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate, table, id, onActivate }) {
+function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
   let shown = val
   if (col.type === 'picklist' && shown) shown = picklists.byId.get(shown) || shown
   if (col.type === 'date' && shown) {
@@ -3303,7 +3302,6 @@ function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate, table
   }
   if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
   if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
-  const content = col.type === 'picklist' && shown ? <Badge s={shown} /> : (shown != null && shown !== '' ? shown : '—')
   return (
     <td key={col.name} style={{
       padding: '10px 14px',
@@ -3313,16 +3311,7 @@ function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate, table
       fontFamily: col.type === 'number' ? 'JetBrains Mono, monospace' : 'inherit',
       whiteSpace: 'nowrap', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis',
     }}>
-      {/* First cell is a real anchor to the child record so right-click →
-          "Open in new tab" / middle-click work; plain click still navigates
-          in-app via onActivate (RecordLink intercepts unmodified left-clicks). */}
-      {isFirstCol && canNavigate && id
-        ? (
-          <RecordLink table={table} id={id} onActivate={onActivate} style={{ color: 'inherit', fontWeight: 'inherit' }}>
-            {content}
-          </RecordLink>
-        )
-        : content}
+      {col.type === 'picklist' && shown ? <Badge s={shown} /> : (shown != null && shown !== '' ? shown : '—')}
     </td>
   )
 }
@@ -3867,9 +3856,6 @@ function RelatedListWidget({
                             renderRelatedCell(col, row[col.name], picklists, {
                               isFirstCol: ci === 0,
                               canNavigate: canNavigate && !editableReorder,
-                              table: childTable,
-                              id: row.id,
-                              onActivate: () => handleRowClick(row),
                             })
                           )}
                           {editable && (

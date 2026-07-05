@@ -29,9 +29,8 @@ export function recordHref(table, id) {
 // A click the browser should handle natively rather than intercepting for SPA
 // navigation (new tab/window, etc.). Middle-click and right-click open the
 // native menu on an anchor without firing a left onClick, so we only need to
-// guard modified left-clicks here. Exported for other real-anchor surfaces
-// (global search rows) that can't use the RecordLink wrapper directly.
-export function isModifiedClick(e) {
+// guard modified left-clicks here.
+function isModifiedClick(e) {
   return e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey
 }
 
