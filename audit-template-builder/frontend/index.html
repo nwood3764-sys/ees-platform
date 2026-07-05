@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-03 07:45 UTC · build 23 — clean measure names (EES schema): deduped blocks, roof + kneewall description</div>
+    Last updated 2026-07-03 08:45 UTC · build 24 — editable EEM section drives the export; IRA HOMES package carries the EUI-table savings</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -190,6 +190,11 @@ const RATE_ELEC=0.188;  // $ per kWh
 const RATE_GAS=0.97;    // $ per therm
 const files={asBase:null,asImp:null,osBase:null,osImp:null};
 const data={asBase:null,asImp:null,osBase:null,osImp:null};
+// Editable EEM section state — the SOURCE OF TRUTH for the export. Seeded from
+// the Asset Score reports (effectiveMeasures / EUI-table savings deltas) once
+// all four files are loaded; every edit on the page lands here, and
+// build50121XML reads exactly this. Reset (reseeded) whenever a file changes.
+let eemState=null, eemPkg=null;
 // Raw extracted text of each uploaded document, so the in-app assistant can
 // "read the documents" (not just the parsed fields).
 const rawDocs={asBase:null,asImp:null,osBase:null,osImp:null};
@@ -550,6 +555,7 @@ document.querySelectorAll('.slot').forEach(slot=>{
   inp.addEventListener('change',()=>{if(inp.files[0])handle(inp.files[0]);});
   async function handle(file){
     files[key]=file;
+    eemState=null; eemPkg=null;   // new source file -> reseed the EEM section defaults
     setStatus(`Reading ${file.name}…`);
     try{
       if(key==='asBase'||key==='asImp'){
@@ -677,6 +683,12 @@ function refresh(){
   const asB=data.asBase, asI=data.asImp;
   const b=annual(data.osBase), i=annual(data.osImp);
   const osPct=(b.kbtu-i.kbtu)/b.kbtu*100;
+  // Seed the editable EEM section from the reports (once per file set): default
+  // measures from the improved Asset Score, and one IRA HOMES package whose
+  // savings are the EUI table's baseline − improved totals per fuel.
+  if(!eemState) eemState=effectiveMeasures();
+  if(!eemPkg) eemPkg={name:'IRA HOMES',
+    kwh:Math.round(b.e)-Math.round(i.e), therms:Math.round(b.g)-Math.round(i.g)};
   // Whole-building savings = the site-EUI delta from the baseline→improved table
   // (the document-of-record EUIs), NOT the % printed on the report, which is
   // computed on a different basis. Fall back to the scaled site-energy delta only
@@ -820,19 +832,38 @@ function refresh(){
   h+=monthTable('Improved',data.osImp);
   h+='</div>';
 
-  // Energy efficiency measures (EEMs) — prominent, with a checklist for the
-  // measures nearly every building has, so a parser miss is visible BEFORE export.
+  // Energy efficiency measures (EEMs) — EDITABLE. Seeded from the improved
+  // Asset Score report; whatever is in these fields (after any edits) is
+  // EXACTLY what the 50121 XML export carries, measures and package savings.
   {
-    const ms=effectiveMeasures();
-    h+='<div class="sect"><h3>Energy efficiency measures ('+ms.length+' parsed from the improved report)</h3><table class="kv">';
-    if(ms.length) ms.forEach(m=>h+=`<tr><td colspan="2" style="text-align:left;font-weight:600">✓ ${m.title}${m.desc!==m.title?`<div style="font-weight:400;color:#4a5e7a">${m.desc}</div>`:''}</td></tr>`);
-    else h+='<tr><td colspan="2" style="text-align:left;font-weight:700">⚠ NO measures parsed — check the improved report before exporting.</td></tr>';
+    const ms=eemState||effectiveMeasures();
+    const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    h+='<div class="sect" id="eemSect"><h3>Energy efficiency measures ('+ms.length+') — editable; the XML export uses exactly what is here</h3><table class="kv">';
+    ms.forEach((m,idx)=>{
+      h+=`<tr><td colspan="2" style="text-align:left;padding:8px 0">
+        <div style="display:flex;gap:6px;align-items:center">
+          <input data-eem="${idx}" data-f="title" value="${esc(m.title)}" placeholder="Measure name" style="flex:1;font-weight:600;padding:6px 8px;border:1px solid var(--line);border-radius:6px">
+          <button type="button" data-deleem="${idx}" title="Remove this measure" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer">✕</button>
+        </div>
+        <textarea data-eem="${idx}" data-f="desc" rows="2" placeholder="Description (shown on the DOE Packages screen)" style="width:100%;box-sizing:border-box;margin-top:4px;padding:6px 8px;border:1px solid var(--line);border-radius:6px">${esc(m.desc)}</textarea>
+      </td></tr>`;
+    });
+    if(!ms.length) h+='<tr><td colspan="2" style="text-align:left;font-weight:700">⚠ NO measures — check the improved report, or add one below.</td></tr>';
+    h+='</table>';
+    h+='<div style="display:flex;gap:8px;margin-top:6px"><button type="button" id="eemAdd" style="padding:6px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer">+ Add measure</button><button type="button" id="eemReset" style="padding:6px 12px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer">Reset to report defaults</button></div>';
+    const pkg=eemPkg||{name:'IRA HOMES',kwh:null,therms:null};
+    h+=`<h3 style="margin-top:14px">Savings package — one package holding the whole-building savings (from the EUI table; editable)</h3>
+    <table class="kv">
+    <tr><td>Package name</td><td style="text-align:left"><input data-pkg="name" value="${esc(pkg.name)}" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:220px"></td></tr>
+    <tr><td>Electricity savings (kWh/yr)</td><td style="text-align:left"><input data-pkg="kwh" type="number" step="1" value="${pkg.kwh!=null?pkg.kwh:''}" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:160px"></td></tr>
+    <tr><td>Natural gas savings (therms/yr)</td><td style="text-align:left"><input data-pkg="therms" type="number" step="1" value="${pkg.therms!=null?pkg.therms:''}" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;width:160px"></td></tr>
+    </table>`;
     const expected=[['air seal',/air\s*(seal|infiltra)|seal(ing)?\s*(the\s*)?(building)?\s*envelope/i],
                     ['attic/roof insulation',/roof|attic|ceiling/i],
                     ['low-flow fixtures',/low[\s-]*flow|shower|aerator|hot water fixture/i]];
-    const missing=expected.filter(([,re])=>!ms.some(m=>re.test(m.title+' '+m.desc))).map(([n])=>n);
-    if(missing.length) h+=`<tr><td colspan="2" style="text-align:left;color:#2a4a6a;font-weight:700">⚠ Not found on this report (verify — most buildings have them): ${missing.join(', ')}</td></tr>`;
-    h+='</table></div>';
+    const missing=expected.filter(([,re])=>!ms.some(m=>re.test((m.title||'')+' '+(m.desc||'')))).map(([n])=>n);
+    if(missing.length) h+=`<div style="color:#2a4a6a;font-weight:700;margin-top:8px">⚠ Not in the list (verify — most buildings have them): ${missing.join(', ')}</div>`;
+    h+='</div>';
   }
 
   // End-use breakdown — SCALED to the Asset-Score-pinned totals, so these tables
@@ -1720,7 +1751,10 @@ async function build50121XML(which){
   // water slot, roof/attic -> ceiling-insulation slot), clone the whole slot
   // (fresh xs:ID), set the description, then remove the originals and rebuild
   // the PackageOfMeasures MeasureID refs.
-  const parsedMeasures=effectiveMeasures().filter(Boolean);
+  // The page's editable EEM section is authoritative — export exactly what the
+  // user sees there (falls back to the report defaults if not yet seeded).
+  const parsedMeasures=(eemState||effectiveMeasures())
+    .filter(m=>m&&(((m.title||'').trim())||((m.desc||'').trim())));
   if(parsedMeasures.length){
     const measures=[..._q(doc,'Measure')];
     if(measures.length){
@@ -1736,14 +1770,16 @@ async function build50121XML(which){
       const refProto=[..._q(doc,'MeasureID')][0];
       const newIds=[];
       parsedMeasures.forEach((meas,i)=>{
-        const txt=meas.title+' '+meas.desc;   // classification matching text
+        const mTitle=((meas.title||'').trim())||((meas.desc||'').trim());
+        const mDesc =((meas.desc ||'').trim())||mTitle;
+        const txt=mTitle+' '+mDesc;   // classification matching text
         const node=protoFor(txt).cloneNode(true);
         const nid='MeasureNew-'+(i+1)+'-'+Math.floor(Math.random()*1e9);
         node.setAttribute('ID',nid);
         // EES naming schema: CustomMeasureName = the clean measure identifier,
         // LongDescription = the full description (R-value deltas etc.).
-        const ld=node.getElementsByTagNameNS(NS_AUC,'LongDescription')[0]; if(ld)ld.textContent=meas.desc;
-        const cm=node.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0]; if(cm)cm.textContent=meas.title;
+        const ld=node.getElementsByTagNameNS(NS_AUC,'LongDescription')[0]; if(ld)ld.textContent=mDesc;
+        const cm=node.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0]; if(cm)cm.textContent=mTitle;
         // System Category Affected: the reference file's picks ('Water Use',
         // 'Heat Recovery') were ITS choices — set from this measure. DOE shows
         // 'Domestic Hot Water' as "Service Hot Water".
@@ -1760,6 +1796,33 @@ async function build50121XML(which){
         const refParent=refProto.parentNode;
         [..._q(doc,'MeasureID')].forEach(r=>r.parentNode.removeChild(r));
         newIds.forEach(id2=>{const r=refProto.cloneNode(true); r.setAttribute('IDref',id2); refParent.appendChild(r);});
+      }
+    }
+  }
+
+  // IRA HOMES savings package: ONE package holding the whole-building savings,
+  // exactly as shown (and possibly edited) on the page. Defaults are the EUI
+  // table's baseline − improved totals per fuel — never the reference file's
+  // scaled savings numbers.
+  {
+    const pomEl=_q(doc,'PackageOfMeasures')[0];
+    if(pomEl){
+      const kwhDef=Math.round(data.osBase.elec.reduce((a2,b2)=>a2+b2,0))
+                  -Math.round(data.osImp.elec.reduce((a2,b2)=>a2+b2,0));
+      const thermsDef=Math.round(data.osBase.gas.reduce((a2,b2)=>a2+b2,0))
+                     -Math.round(data.osImp.gas.reduce((a2,b2)=>a2+b2,0));
+      const pkg=eemPkg||{};
+      const kwh=(pkg.kwh!=null&&isFinite(pkg.kwh))?Math.round(pkg.kwh):kwhDef;
+      const therms=(pkg.therms!=null&&isFinite(pkg.therms))?Math.round(pkg.therms):thermsDef;
+      let scn=pomEl; while(scn&&scn.localName!=='Scenario')scn=scn.parentNode;
+      if(scn){const nm=scn.getElementsByTagNameNS(NS_AUC,'ScenarioName')[0];
+        if(nm&&(pkg.name||'').trim())nm.textContent=pkg.name.trim();}
+      for(const sf of pomEl.getElementsByTagNameNS(NS_AUC,'AnnualSavingsByFuel')){
+        const er=sf.getElementsByTagNameNS(NS_AUC,'EnergyResource')[0];
+        const v=sf.getElementsByTagNameNS(NS_AUC,'AnnualSavingsNativeUnits')[0];
+        if(!er||!v)continue;
+        if(/electric/i.test(er.textContent))v.textContent=String(kwh);
+        else if(/gas/i.test(er.textContent))v.textContent=String(therms);
       }
     }
   }
@@ -1840,6 +1903,25 @@ document.getElementById('buildImp').onclick=()=>downloadXML('improved');
   if(u&&bd){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
 })();
 
+/* ---------- Editable EEM section wiring (delegated — the review re-renders) ---------- */
+(function(){
+  const rb=document.getElementById('rBody'); if(!rb)return;
+  rb.addEventListener('input',e=>{
+    const t=e.target; if(!t||!t.dataset)return;
+    if(t.dataset.eem!==undefined&&eemState){
+      const m=eemState[+t.dataset.eem]; if(m)m[t.dataset.f]=t.value;
+    }else if(t.dataset.pkg&&eemPkg){
+      eemPkg[t.dataset.pkg]=t.dataset.pkg==='name'?t.value:(t.value===''?null:parseFloat(t.value));
+    }
+  });
+  rb.addEventListener('click',e=>{
+    const btn=e.target.closest?e.target.closest('button'):null; if(!btn)return;
+    if(btn.dataset&&btn.dataset.deleem!==undefined&&eemState){eemState.splice(+btn.dataset.deleem,1);refresh();}
+    else if(btn.id==='eemAdd'){if(!eemState)eemState=[];eemState.push({title:'New measure',desc:''});refresh();}
+    else if(btn.id==='eemReset'){eemState=null;eemPkg=null;refresh();}
+  });
+})();
+
 /* ---------- Smart pre-export review (Claude audits the ACTUAL generated XML) ---------- */
 // Generate both 50121 files with the real generator, then extract every
 // building-describing value from the XML into a digest the AI can audit against
@@ -1886,6 +1968,14 @@ async function buildXmlDigest(){
       const ze=dv.getElementsByTagNameNS(NSA,'ZoneEquipment')[0];
       return ze?Array.from(ze.children).map(c=>c.localName):[];});
     d.measures=all('Measure').map(leafDump);
+    // The IRA HOMES savings package: scenario name + per-fuel savings.
+    const pom0=all('PackageOfMeasures')[0];
+    d.savingsPackage=pom0?(()=>{let s=pom0;while(s&&s.localName!=='Scenario')s=s.parentElement;
+      const nm=s?s.getElementsByTagNameNS(NSA,'ScenarioName')[0]:null;
+      return{name:nm?nm.textContent.trim():null,
+        byFuel:Array.from(pom0.getElementsByTagNameNS(NSA,'AnnualSavingsByFuel')).map(sf=>{
+          const g=n=>{const e=sf.getElementsByTagNameNS(NSA,n)[0];return e?e.textContent.trim():null;};
+          return{fuel:g('EnergyResource'),units:g('ResourceUnits'),annualSavings:g('AnnualSavingsNativeUnits')};})};})():null;
     // Scenario financials + energy reconciliation.
     const scen=name=>all('Scenario').find(s=>{const n=s.getElementsByTagNameNS(NSA,'ScenarioName')[0];
       return n&&n.textContent.trim()===name;});
