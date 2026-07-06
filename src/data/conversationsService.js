@@ -859,7 +859,7 @@ export async function fetchAttachmentsForMessages(messageIds) {
   if (!Array.isArray(messageIds) || messageIds.length === 0) return {}
   const { data, error } = await supabase
     .from('message_attachments')
-    .select('id, ma_message_id, ma_storage_path, ma_file_name, ma_file_size_bytes, ma_mime_type, ma_delivery_method, ma_virus_scan_status, ma_signed_link_expires_at, ma_created_at')
+    .select('id, ma_message_id, ma_storage_path, ma_file_name, ma_file_size_bytes, ma_mime_type, ma_delivery_method, ma_virus_scan_status, ma_virus_scan_detail, ma_signed_link_expires_at, ma_created_at')
     .in('ma_message_id', messageIds)
     .eq('ma_is_deleted', false)
     .order('ma_created_at', { ascending: true })

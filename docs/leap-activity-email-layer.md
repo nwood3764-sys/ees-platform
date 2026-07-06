@@ -30,7 +30,7 @@ Salesforce-parity activity tracking: every interaction — call, email, meeting,
 - `send-email-v1` accepts `on_behalf_of_user_id` for service-role callers only (compared against the service key env var; newer projects issue non-JWT secret keys).
 
 ### Help articles (prod)
-- **HA-00118** Logging an Activity on a record. **HA-00119** Sending email from a record.
+- **HA-00118** Logging an Activity on a record. **HA-00119** Sending email from a record. **HA-00120** Email attachment virus scanning.
 
 ## 3. Current-state architecture map
 
@@ -46,6 +46,7 @@ Salesforce-parity activity tracking: every interaction — call, email, meeting,
 | Inbound webhook | `supabase/functions/inbound-email-webhook/` |
 | Subscription renewal | `supabase/functions/renew-graph-subscriptions/` (v6) |
 | Self-test harness | `supabase/functions/admin-test-send-email/` (v2) |
+| Attachment scanner | `supabase/functions/scan-message-attachments/` (5-min cron) |
 | DB: activities | `activities`, `activity_relations` (junction), picklists `activities.activity_type` / `.direction` |
 | DB: email | `conversations` (anchor FKs incl. opportunity/property/building), `messages`, `message_attachments`, `outbound_mailboxes`, `unmatched_inbox` |
 | Migrations (this layer) | `20260701120000`, `20260701140000`, `20260701160000`, `20260701170000`, `20260701180000`, `20260705190000`, `20260705191000`, `20260705232819` (mailbox purpose routing) |
@@ -68,7 +69,7 @@ For each state, in order:
 ## 5. Follow-ups (none blocking daily use)
 
 1. **Message-ID reconciliation** — after Graph 202, read the sent item's real `internetMessageId` into `msg_external_message_id` so tier-2 reply matching works. (Tier-1 verified working.)
-2. **Virus scan** — `ma_virus_scan_status` is stuck `pending`; the ClamAV function was spec'd, never built.
+2. ~~Virus scan~~ — **DONE 2026-07-06**: `scan-message-attachments` edge function (5-min pg_cron `scan-message-attachments-every-5min`) runs LEAP's policy scan on every stored attachment — EICAR signature, executable magic bytes (PE/ELF/Mach-O), dangerous-extension blocklist, content-type spoofing — on top of Microsoft EOP's transit AV. Verdicts: `clean` / `blocked` (+`ma_virus_scan_engine`, `ma_virus_scan_detail`; `scan_failed` slow-retries hourly). ConversationPanel disables download on blocked files and shows the reason. Full ClamAV stays optional if a dedicated scan host ever exists.
 3. ~~Program-aware mailbox routing~~ — **DONE 2026-07-05** as purpose-aware routing (`obm_purpose`, migration `20260705232819`). Program-level (`obm_program_id`) granularity remains available if a state ever runs two General Correspondence boxes for different programs.
 4. **Commit out-of-band function sources** — pull `outlook-oauth-*`, `create-graph-subscriptions`, `send-email-via-graph` sources into the repo (or retire the per-user path).
 5. **Contact dedupe** — `nwood3764@gmail.com` is on two contacts (test remnants); ambiguous for tier-3 matching. Clean via UI.

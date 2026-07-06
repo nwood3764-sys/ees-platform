@@ -776,13 +776,16 @@ function MessageBubble({ message, attachments = [] }) {
           {attachments.map(att => {
             const isPending  = att.ma_virus_scan_status === 'pending'
             const isInfected = att.ma_virus_scan_status === 'infected'
+                            || att.ma_virus_scan_status === 'blocked'
             const blocked    = isInfected
             return (
               <button
                 key={att.id}
                 onClick={blocked ? undefined : (e) => handleAttachmentClick(att, e)}
                 disabled={blocked}
-                title={blocked ? 'Attachment failed virus scan — download blocked.' : `Open ${att.ma_file_name}`}
+                title={blocked
+                  ? `Attachment blocked by virus scan — ${att.ma_virus_scan_detail || 'download disabled.'}`
+                  : `Open ${att.ma_file_name}`}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '6px 10px',
@@ -816,7 +819,7 @@ function MessageBubble({ message, attachments = [] }) {
                     background: '#e8f1fb', color: '#1e466b',
                     fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
                     padding: '1px 6px', borderRadius: 8, textTransform: 'uppercase',
-                  }} title="Virus scan pending — ClamAV hook ships in a follow-up slice">
+                  }} title="Virus scan queued — the scanner runs every 5 minutes">
                     Scan pending
                   </span>
                 )}
