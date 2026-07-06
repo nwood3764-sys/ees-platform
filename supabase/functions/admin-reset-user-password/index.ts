@@ -65,11 +65,14 @@ async function resolveCaller(admin: SupabaseClient, authHeader: string):
   if (!authHeader.startsWith("Bearer ")) return null
   const jwt = authHeader.slice(7)
   try {
-    const parts = jwt.split(".")
-    if (parts.length !== 3) return null
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")))
-    const authUserId = payload.sub as string
-    if (!authUserId) return null
+    // Verify the JWT signature + expiry via GoTrue instead of trusting an
+    // unsigned base64 decode of the payload. A blind atob() decode authorizes
+    // on an attacker-forgeable `sub`; if verify_jwt were ever disabled for this
+    // function that would be instant account takeover (forge an Admin's sub →
+    // reset any user's password). getUser rejects any token it can't verify.
+    const { data: authData, error: authErr } = await admin.auth.getUser(jwt)
+    const authUserId = authData?.user?.id
+    if (authErr || !authUserId) return null
     const { data: u } = await admin
       .from("users")
       .select("id, role:role_id ( role_name )")
