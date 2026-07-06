@@ -216,6 +216,17 @@ Deno.serve(async (req) => {
     }
   }
 
+  // ── 5b. Append the mailbox's program signature ───────────────────────────
+  // Every outbound email carries the sending mailbox's signature — program
+  // identity managed on the outbound_mailboxes record, never typed by the
+  // sender. Tokens inside the signature resolve against the same merge dict
+  // as the body. Appended after locked-region validation so validation runs
+  // against the composed body alone.
+  const signatureHtml = (mailbox.obm_signature_html || "").trim()
+  if (signatureHtml) {
+    bodyHtml = `${bodyHtml}\n<br>\n${substituteTokens(signatureHtml, mergeDict)}`
+  }
+
   // ── 6. Find or create conversation thread ────────────────────────────────
   // Pin the thread to the record it was sent from, whatever object that is, so
   // it shows in that record's Conversations panel (which already supports these
