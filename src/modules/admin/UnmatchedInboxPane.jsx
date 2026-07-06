@@ -18,6 +18,7 @@
 // =============================================================================
 
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import DOMPurify from 'dompurify'
 import { C } from '../../data/constants'
 import { Icon, LoadingState, ErrorState } from '../../components/UI'
 import HelpIcon from '../../components/help/HelpIcon'
@@ -320,7 +321,7 @@ function UnmatchedDetail({ row, onActionComplete }) {
         {row.ui_body_preview ? (
           <div
             style={{ fontSize: 13, lineHeight: 1.6, color: C.textPrimary, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-            dangerouslySetInnerHTML={{ __html: sanitizePreview(row.ui_body_preview) }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(row.ui_body_preview) }}
           />
         ) : (
           <div style={{ fontSize: 12.5, color: C.textMuted, fontStyle: 'italic' }}>
@@ -339,19 +340,6 @@ function UnmatchedDetail({ row, onActionComplete }) {
   )
 }
 
-// Coarse, defensive HTML sanitization — kill scripts and inline event handlers.
-// This is preview-only (`ui_body_preview` is already truncated to 500 chars in
-// the webhook) and not a substitute for proper sanitization when we render
-// the full body on the messages timeline. Good enough to defang inline JS
-// while keeping line breaks and bold/italic readable.
-function sanitizePreview(html) {
-  if (!html) return ''
-  return String(html)
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
-    .replace(/javascript:/gi, '')
-}
 
 function MetaRow({ label, value, mono, small }) {
   return (
