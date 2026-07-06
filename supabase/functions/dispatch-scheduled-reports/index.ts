@@ -89,28 +89,22 @@ Deno.serve(async (req) => {
     return json({ error: "Server misconfiguration — missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" }, 500)
   }
 
+  const supabase = createClient(supabaseUrl, serviceRoleKey)
+
   // Authorization gate. This dispatcher runs reports with the service role
   // (RLS-bypassing) and emails their output to author-chosen recipients, so it
   // must NOT be reachable with the public anon key — otherwise any authenticated
   // user could POST {schedule_id} to force-send a schedule and read data their
-  // own RLS forbids. Require the service-role key.
-  //
-  // DEPLOY NOTE — paired change required so the pg_cron trigger keeps working:
-  // the cron job currently sends NO Authorization header. Before/at deploy,
-  // update it to send the service-role key, e.g.:
-  //   UPDATE cron.job SET command = replace(command,
-  //     $$jsonb_build_object('Content-Type','application/json')$$,
-  //     $$jsonb_build_object('Content-Type','application/json',
-  //       'Authorization','Bearer ' || current_setting('app.service_role_key'))$$)
-  //   WHERE jobname = 'dispatch-scheduled-reports-every-15min';
-  // (or inject the literal key). Deploy the cron change first, then this gate.
-  const authz = req.headers.get("Authorization") || ""
-  const presented = authz.startsWith("Bearer ") ? authz.slice(7) : ""
-  if (!timingSafeEqualStr(presented, serviceRoleKey)) {
+  // own RLS forbids. The paired pg_cron job sends a shared secret in the
+  // x-internal-cron-secret header; the secret lives in internal_cron_auth,
+  // readable only by the service role (anon/authenticated are revoked). This
+  // authenticates the cron without ever exposing the service-role key to it.
+  const { data: cronAuth } = await supabase
+    .from("internal_cron_auth").select("secret").eq("name", "dispatch").maybeSingle()
+  const presentedSecret = req.headers.get("x-internal-cron-secret") || ""
+  if (!cronAuth?.secret || !timingSafeEqualStr(presentedSecret, cronAuth.secret)) {
     return json({ error: "Unauthorized" }, 401)
   }
-
-  const supabase = createClient(supabaseUrl, serviceRoleKey)
 
   const dryRun = !resendApiKey || body.dry_run_force === true
 
