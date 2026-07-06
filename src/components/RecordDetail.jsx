@@ -3381,6 +3381,9 @@ function RelatedListWidget({
   // Read-only mode keeps the Salesforce-style truncated card.
   const shownRows = editable ? localRows : localRows.slice(0, RELATED_LIST_MAX_ROWS)
   const hiddenCount = editable ? 0 : Math.max(0, localRows.length - shownRows.length)
+  // True total for the header count, accurate beyond the 25-row fetch cap
+  // (fetchRelatedRecords attaches _total via PostgREST count:'exact').
+  const totalCount = (typeof allRows._total === 'number') ? allRows._total : localRows.length
 
   // hide_when_empty: opt-in widget_config flag for related lists that
   // should disappear entirely when no rows exist (rather than rendering
@@ -3591,6 +3594,19 @@ function RelatedListWidget({
             <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {title}
             </span>
+            {totalCount > 0 && (
+              <span
+                title={`${totalCount.toLocaleString()} total`}
+                style={{
+                  fontSize: 11, fontWeight: 600, color: C.textMuted,
+                  background: '#eef2f7', borderRadius: 10,
+                  padding: '1px 8px', flexShrink: 0,
+                  fontFamily: 'JetBrains Mono, monospace',
+                }}
+              >
+                {totalCount.toLocaleString()}
+              </span>
+            )}
             {editable && (
               <span style={{
                 background: 'rgba(62,207,142,0.14)', color: '#2aab72',
