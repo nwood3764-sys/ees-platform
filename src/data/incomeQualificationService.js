@@ -1,5 +1,8 @@
-import { jsPDF } from 'jspdf'
-import * as XLSX from 'xlsx'
+// jspdf (~350KB) and xlsx (~350KB) are dynamically imported inside the two
+// builder functions below so they load only when a HUD income-qualification
+// run actually generates its files — not on every record open. RecordDetail
+// (which pulls this module in) is in the shared chunk loaded by ~11 modules,
+// so a static import here would ship both libs to every record view.
 import { supabase } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
 import { uploadDocument, listDocuments, hydrateDocumentUrls } from './storageService'
@@ -211,7 +214,8 @@ function docBaseName(r, doctype, ext) {
 
 // ─── Tenant Data Sheet XLSX (ported from genXLSX) → Blob ───────────────────
 
-function buildTenantXlsxBlob(r) {
+async function buildTenantXlsxBlob(r) {
+  const XLSX = await import('xlsx')
   const wb = XLSX.utils.book_new()
   const aoa = []
   aoa[1] = ['IRA Home Energy Rebates: Multiple Unit Tenant Data Sheet']
@@ -239,7 +243,8 @@ function buildTenantXlsxBlob(r) {
 // is preserved in spirit via the supporting rows but trimmed to the data
 // LEAP actually holds.
 
-function buildApplicationPdfBlob(r, determination) {
+async function buildApplicationPdfBlob(r, determination) {
+  const { default: jsPDF } = await import('jspdf')
   const d = new jsPDF({ unit: 'pt', format: 'letter' })
   const W = 612, M = 46
   const GREEN = [31, 92, 61], INK = [16, 19, 15], MUT = [107, 102, 87], FLAG = [168, 50, 31], LINE = [200, 194, 180]
@@ -406,8 +411,8 @@ export async function runIncomeQualification(enrollmentId) {
   const r = det.record
 
   // Generate both files as Blobs, wrap as File so uploadDocument gets a name.
-  const pdfBlob = buildApplicationPdfBlob(r, det)
-  const xlsxBlob = buildTenantXlsxBlob(r)
+  const pdfBlob = await buildApplicationPdfBlob(r, det)
+  const xlsxBlob = await buildTenantXlsxBlob(r)
   const pdfName = docBaseName(r, 'IRA_Multifamily_Application', 'pdf')
   const xlsxName = docBaseName(r, 'Tenant_Data_Sheet', 'xlsx')
   const pdfFile = new File([pdfBlob], pdfName, { type: 'application/pdf' })

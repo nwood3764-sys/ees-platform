@@ -14,6 +14,7 @@
 // -----------------------------------------------------------------------------
 
 import { useState, useEffect } from 'react'
+import DOMPurify from 'dompurify'
 import { C } from '../data/constants'
 import { fetchActivityTimeline } from '../data/activityService'
 import { fetchActivitiesForRecord } from '../data/callActivityService'
@@ -314,8 +315,10 @@ function EmailEntryBody({ email }) {
           border: `1px solid ${C.border}`, borderRadius: 4,
           maxHeight: 400, overflow: 'auto', fontSize: 13,
         }}>
+          {/* Inbound email bodies are attacker-controlled; sanitize before
+              injecting (same pattern as ConversationPanel). */}
           {/* eslint-disable-next-line react/no-danger */}
-          <div dangerouslySetInnerHTML={{ __html: email.body_html }} />
+          <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.body_html) }} />
         </div>
       )}
     </div>
