@@ -267,10 +267,12 @@ Deno.serve(async (req) => {
       recipient_sent_at: new Date().toISOString(),
     }).eq("id", nextRecipient.id)
 
-    const signingBase =
-      req.headers.get("Origin") ||
-      (req.headers.get("Referer")?.split("/").slice(0, 3).join("/")) ||
-      "https://ees-ops.netlify.app"
+    // Build the next signer's link from a server-configured base URL, never
+    // from the request's Origin/Referer. A malicious current signer could set
+    // Origin: https://evil.com and the next recipient would then receive a
+    // genuine EES email carrying their valid signing token pointed at the
+    // attacker's host — silent token theft / envelope hijack.
+    const signingBase = Deno.env.get("APP_BASE_URL") || "https://ees-ops.netlify.app"
     const nextSigningUrl = `${signingBase}/sign/${env.env_record_number}/${nextRecipient.recipient_signing_token}`
 
     if (eventAdvancedId) {

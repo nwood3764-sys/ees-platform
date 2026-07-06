@@ -28,6 +28,17 @@ const DEFAULT_SENDER_BY_STATE: Record<string, string> = {
 }
 const FALLBACK_SENDER = "assessments.wi@EES-WI.org"
 
+// Constant-time string comparison so the auth gate below doesn't leak the
+// service-role key through response timing.
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a)
+  const eb = new TextEncoder().encode(b)
+  if (ea.length !== eb.length) return false
+  let diff = 0
+  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i]
+  return diff === 0
+}
+
 interface Recipient { name?: string; email: string }
 
 interface ReqBody {
@@ -81,6 +92,17 @@ Deno.serve(async (req) => {
   const clientSecret = Deno.env.get("OUTLOOK_CLIENT_SECRET")
   const tenantId     = Deno.env.get("OUTLOOK_TENANT_ID")
   if (!supabaseUrl || !serviceKey) return json({ error: "Server misconfiguration: Supabase keys missing" }, 500)
+
+  // Server-to-server only. This function sends DKIM-signed mail from company
+  // mailboxes via Graph application credentials; both legitimate callers
+  // (fire-notification, request-dispatcher-followup) invoke it with the
+  // service-role key. Require it so a holder of the public anon key cannot use
+  // this as an open relay to send spoofed mail from EES mailboxes.
+  const authz = req.headers.get("Authorization") || ""
+  const presented = authz.startsWith("Bearer ") ? authz.slice(7) : ""
+  if (!timingSafeEqualStr(presented, serviceKey)) {
+    return json({ error: "Unauthorized" }, 401)
+  }
 
   const supabase = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },

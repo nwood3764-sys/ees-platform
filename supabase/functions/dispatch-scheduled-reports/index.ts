@@ -63,6 +63,16 @@ interface ScheduledReport {
   sr_owner_user_id:         string
 }
 
+// Constant-time comparison so the auth gate doesn't leak the key via timing.
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a)
+  const eb = new TextEncoder().encode(b)
+  if (ea.length !== eb.length) return false
+  let diff = 0
+  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i]
+  return diff === 0
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
   if (req.method !== "POST")    return json({ error: "POST required" }, 405)
@@ -78,6 +88,28 @@ Deno.serve(async (req) => {
   if (!supabaseUrl || !serviceRoleKey) {
     return json({ error: "Server misconfiguration — missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" }, 500)
   }
+
+  // Authorization gate. This dispatcher runs reports with the service role
+  // (RLS-bypassing) and emails their output to author-chosen recipients, so it
+  // must NOT be reachable with the public anon key — otherwise any authenticated
+  // user could POST {schedule_id} to force-send a schedule and read data their
+  // own RLS forbids. Require the service-role key.
+  //
+  // DEPLOY NOTE — paired change required so the pg_cron trigger keeps working:
+  // the cron job currently sends NO Authorization header. Before/at deploy,
+  // update it to send the service-role key, e.g.:
+  //   UPDATE cron.job SET command = replace(command,
+  //     $$jsonb_build_object('Content-Type','application/json')$$,
+  //     $$jsonb_build_object('Content-Type','application/json',
+  //       'Authorization','Bearer ' || current_setting('app.service_role_key'))$$)
+  //   WHERE jobname = 'dispatch-scheduled-reports-every-15min';
+  // (or inject the literal key). Deploy the cron change first, then this gate.
+  const authz = req.headers.get("Authorization") || ""
+  const presented = authz.startsWith("Bearer ") ? authz.slice(7) : ""
+  if (!timingSafeEqualStr(presented, serviceRoleKey)) {
+    return json({ error: "Unauthorized" }, 401)
+  }
+
   const supabase = createClient(supabaseUrl, serviceRoleKey)
 
   const dryRun = !resendApiKey || body.dry_run_force === true
