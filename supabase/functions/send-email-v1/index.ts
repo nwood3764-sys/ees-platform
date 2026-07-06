@@ -174,6 +174,15 @@ Deno.serve(async (req) => {
     return json({ error: `Merge dict build failed: ${(e as Error).message}` }, 400)
   }
 
+  // Sender identity — the app user the send runs as, for {{sender.*}} tokens
+  // (used by mailbox signatures to carry the actual person's name).
+  const { data: senderRow } = await admin
+    .from("users")
+    .select("id, user_first_name, user_last_name, user_title, user_email, user_phone")
+    .eq("id", callerUserId)
+    .maybeSingle()
+  if (senderRow) mergeDict.sender = senderRow
+
   // ── 4. Compose subject + body ────────────────────────────────────────────
   let subject:  string
   let bodyHtml: string
