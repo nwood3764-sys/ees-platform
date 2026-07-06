@@ -676,7 +676,7 @@ export default function ComposeEmailModal({
               Attach file{stagedFiles.length > 0 ? 's' : ''}…
             </button>
             <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-              Files ≤25 MB ride along as normal email attachments. Files &gt;25 MB ship as a 30-day signed download link. Virus scan is pending — `ma_virus_scan_status` flips to clean/infected once the ClamAV hook lands.
+              Files ≤25 MB ride along as normal email attachments. Files &gt;25 MB ship as a 30-day signed download link. Every attachment is virus-scanned within 5 minutes; flagged files are blocked from download.
             </div>
             {stagedFiles.length > 0 && (
               <div style={{
