@@ -30,6 +30,7 @@ import { getTableListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
+import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
 import ConversationPanelWidget from './ConversationPanel'
 import StatusPathWidget from './StatusPathWidget'
@@ -6243,6 +6244,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             enrollments, Related tab. */}
         {!isInsertMode && activeTab === 'Related' && tableName === 'enrollments' && (
           <IncomeQualificationPanel enrollmentId={recordId} />
+        )}
+
+        {/* Property Owner Research — finds the decision makers (CEO, asset
+            manager, facilities director — not site property-management staff)
+            behind this owner-group account or property. Tiered by cost: free
+            AI web research → Lusha prospecting search (no credits) →
+            per-person contact reveal (paid credits). Candidates promote to
+            real Contacts. Only on accounts and properties, Related tab. */}
+        {!isInsertMode && activeTab === 'Related' && (tableName === 'properties' || tableName === 'accounts') && (
+          <PropertyOwnerResearchPanel tableName={tableName} recordId={recordId} />
         )}
 
         {/* Conversation panel — Service Cloud Messaging-style split-pane
