@@ -56,7 +56,7 @@ const ANTHROPIC_MODEL = "claude-opus-4-8"
 // clock, so the research pass is deliberately time-boxed: few searches, low
 // effort (fast; plenty for name/title extraction), and an explicit speed
 // instruction in the prompt.
-const MAX_WEB_SEARCHES = 5
+const MAX_WEB_SEARCHES = 6
 const MAX_PAUSE_CONTINUATIONS = 3
 const STALE_RUN_MINUTES = 8
 
@@ -113,6 +113,13 @@ async function getLushaApiKey(admin: SupabaseClient): Promise<string | null> {
 // domain to research. Property → its owning account first, HUD owner org as
 // fallback; account → account_name + website domain.
 
+// Placeholder org names ("Unknown Owner", "N/A", ...) must never be treated
+// as a researchable organization — searching them returns honest nothing.
+function isPlaceholderOrgName(name: string | null | undefined): boolean {
+  if (!name || !name.trim()) return true
+  return /^(unknown|unnamed|n\/?a\b|none\b|tbd\b|placeholder|no owner|not available)/i.test(name.trim())
+}
+
 function domainFromUrl(url: string | null | undefined): string | null {
   if (!url) return null
   try {
@@ -130,6 +137,8 @@ interface Target {
   accountId: string | null
   propertyId: string | null
   contextLines: string[]
+  propertyLabel: string | null   // "Name (City, ST)" — the research subject when the owner is unknown
+  ownerUnknown: boolean
 }
 
 async function resolveTarget(admin: SupabaseClient, body: Record<string, unknown>): Promise<Target | string> {
@@ -139,6 +148,8 @@ async function resolveTarget(admin: SupabaseClient, body: Record<string, unknown
     accountId: (body.account_id as string) || null,
     propertyId: (body.property_id as string) || null,
     contextLines: [],
+    propertyLabel: null,
+    ownerUnknown: false,
   }
 
   if (target.propertyId) {
@@ -147,7 +158,8 @@ async function resolveTarget(admin: SupabaseClient, body: Record<string, unknown
       .select("id, property_name, property_city, property_state, property_website, property_account_id, property_hud_owner_org, property_hud_management_org")
       .eq("id", target.propertyId).maybeSingle()
     if (error || !prop) return "Property not found"
-    target.contextLines.push(`Property: ${prop.property_name} (${prop.property_city || "?"}, ${prop.property_state || "?"})`)
+    target.propertyLabel = `${prop.property_name} (${prop.property_city || "?"}, ${prop.property_state || "?"})`
+    target.contextLines.push(`Property: ${target.propertyLabel}`)
     if (!target.accountId) target.accountId = prop.property_account_id
     if (!target.companyDomain) target.companyDomain = domainFromUrl(prop.property_website)
     if (prop.property_hud_owner_org) target.contextLines.push(`HUD-listed owner organization: ${prop.property_hud_owner_org}`)
@@ -161,17 +173,29 @@ async function resolveTarget(admin: SupabaseClient, body: Record<string, unknown
       .select("id, account_name, account_website, account_organization_name, parent_account_id")
       .eq("id", target.accountId).maybeSingle()
     if (error || !acct) return "Account not found"
-    target.companyName = acct.account_name || acct.account_organization_name || target.companyName
+    const acctName = acct.account_name || acct.account_organization_name
+    if (acctName && !isPlaceholderOrgName(acctName)) {
+      target.companyName = acctName
+      target.contextLines.push(`Owner group (account): ${acctName}`)
+    }
     if (!target.companyDomain) target.companyDomain = domainFromUrl(acct.account_website)
-    target.contextLines.push(`Owner group (account): ${acct.account_name}`)
     if (acct.parent_account_id) {
       const { data: parent } = await admin
         .from("accounts").select("account_name").eq("id", acct.parent_account_id).maybeSingle()
-      if (parent?.account_name) target.contextLines.push(`Parent account in CRM: ${parent.account_name}`)
+      if (parent?.account_name && !isPlaceholderOrgName(parent.account_name)) {
+        target.contextLines.push(`Parent account in CRM: ${parent.account_name}`)
+      }
     }
   }
 
-  if (!target.companyName) return "Could not resolve an organization name to research — provide company_name"
+  // A placeholder ("Unknown Owner") is not a researchable organization.
+  if (isPlaceholderOrgName(target.companyName)) {
+    target.companyName = null
+    target.ownerUnknown = true
+  }
+  if (!target.companyName && !target.propertyLabel) {
+    return "No owner organization on file to research — open a specific property (web research can identify its owner) or set the account's real organization name"
+  }
   return target
 }
 
@@ -272,11 +296,22 @@ function extractJsonArray(text: string): unknown[] | null {
 async function runWebResearch(
   anthropicKey: string, target: Target, jobTitles: string[],
 ): Promise<{ candidates: CandidateDraft[]; summary: string; raw: unknown }> {
+  const mission = target.companyName
+    ? [
+        `Research the real-estate organization below and identify its DECISION MAKERS — the people who can approve building-level energy efficiency / HVAC retrofit projects. Prioritize titles like: ${jobTitles.join(", ")}. Property-management site staff (property managers, leasing agents, maintenance techs) are NOT decision makers — exclude them unless nothing better exists.`,
+        ``,
+        `Organization: ${target.companyName}`,
+        target.companyDomain ? `Known website domain: ${target.companyDomain}` : `Website domain: unknown — find it.`,
+      ]
+    : [
+        `The OWNER of the property below is not known. Your mission has two steps:`,
+        `1. IDENTIFY who owns and controls the property — search the property name + city/state, affordable-housing listings (LIHTC/HUD databases, waitlist pages that name the managing housing authority or owner), county assessor/parcel records, apartment listings, and news.`,
+        `2. Then identify that owner organization's DECISION MAKERS — the people who can approve building-level energy efficiency / HVAC retrofit projects. Prioritize titles like: ${jobTitles.join(", ")}. Property-management site staff are NOT decision makers — but the OWNER organization itself (including a housing authority and its executive director) absolutely counts.`,
+        ``,
+        `Property to investigate: ${target.propertyLabel}`,
+      ]
   const prompt = [
-    `Research the real-estate organization below and identify its DECISION MAKERS — the people who can approve building-level energy efficiency / HVAC retrofit projects. Prioritize titles like: ${jobTitles.join(", ")}. Property-management site staff (property managers, leasing agents, maintenance techs) are NOT decision makers — exclude them unless nothing better exists.`,
-    ``,
-    `Organization: ${target.companyName}`,
-    target.companyDomain ? `Known website domain: ${target.companyDomain}` : `Website domain: unknown — find it.`,
+    ...mission,
     ...target.contextLines.map((l) => `Context: ${l}`),
     ``,
     `Be creative with FREE public sources:`,
@@ -372,6 +407,9 @@ async function runLushaSearch(
   const companies: Record<string, unknown> = {}
   if (target.companyDomain) companies.domains = [target.companyDomain]
   else if (target.companyName) companies.names = [target.companyName]
+  if (!companies.domains && !companies.names) {
+    throw new Error("No known owner organization to search in Lusha — run Web Research first to identify the owner, or set the owner account's real organization name")
+  }
 
   const body = {
     pages: { page: 0, size: 40 },

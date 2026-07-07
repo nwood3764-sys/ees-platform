@@ -48,26 +48,48 @@ export async function fetchResearchTarget(tableName, recordId) {
       .select('id, account_name, account_website, billing_state')
       .eq('id', recordId).maybeSingle()
     if (error || !data) throw new Error(error?.message || 'Account not found')
+    const placeholder = isPlaceholderOrgName(data.account_name)
     return {
       accountId: data.id,
-      companyName: data.account_name,
+      companyName: placeholder ? null : data.account_name,
       companyDomain: extractDomain(data.account_website),
       state: data.billing_state || null,
+      ownerUnknown: placeholder,
+      propertyName: null,
     }
   }
   const { data, error } = await supabase
     .from('properties')
-    .select('id, property_name, property_state, property_website, property_account_id, property_hud_owner_org, accounts:property_account_id (account_name, account_website)')
+    .select('id, property_name, property_city, property_state, property_website, property_account_id, property_hud_owner_org, accounts:property_account_id (account_name, account_website)')
     .eq('id', recordId).maybeSingle()
   if (error || !data) throw new Error(error?.message || 'Property not found')
   const account = data.accounts || null
+  // The CRM account wins unless it's a placeholder ("Unknown Owner"), in
+  // which case fall back to the HUD-listed owner org; if that's missing too,
+  // the owner is genuinely unknown and web research pivots to identifying it
+  // from the property itself.
+  let companyName = null
+  if (account?.account_name && !isPlaceholderOrgName(account.account_name)) {
+    companyName = account.account_name
+  } else if (data.property_hud_owner_org && !isPlaceholderOrgName(data.property_hud_owner_org)) {
+    companyName = data.property_hud_owner_org
+  }
   return {
     propertyId: data.id,
     accountId: data.property_account_id || null,
-    companyName: account?.account_name || data.property_hud_owner_org || null,
+    companyName,
     companyDomain: extractDomain(account?.account_website || data.property_website),
     state: data.property_state || null,
+    ownerUnknown: !companyName,
+    propertyName: data.property_name || null,
+    propertyCity: data.property_city || null,
   }
+}
+
+/** Placeholder org names ("Unknown Owner", "N/A", ...) are not researchable. */
+export function isPlaceholderOrgName(name) {
+  if (!name || !String(name).trim()) return true
+  return /^(unknown|unnamed|n\/?a\b|none\b|tbd\b|placeholder|no owner|not available)/i.test(String(name).trim())
 }
 
 function extractDomain(url) {
@@ -239,7 +261,16 @@ export async function promoteCandidateToContact(candidate) {
  * a new tab (Google, LinkedIn, state corporate registries) when the
  * automated passes need a human follow-up.
  */
-export function buildManualSearchLinks({ companyName, companyDomain, state }) {
+export function buildManualSearchLinks({ companyName, companyDomain, state, propertyName, propertyCity }) {
+  // No known owner org: search the property itself to identify who owns it.
+  if (!companyName && !companyDomain && propertyName) {
+    const pq = encodeURIComponent([propertyName, propertyCity, state].filter(Boolean).join(' '))
+    return [
+      { label: 'Google — who owns this property', url: `https://www.google.com/search?q=${encodeURIComponent('who owns')}+${pq}` },
+      { label: 'Google — property owner records', url: `https://www.google.com/search?q=${pq}+${encodeURIComponent('owner LLC assessor parcel')}` },
+      { label: 'Google — property listing', url: `https://www.google.com/search?q=${pq}+${encodeURIComponent('apartments LIHTC affordable housing')}` },
+    ]
+  }
   const q = encodeURIComponent(companyName || companyDomain || '')
   const links = []
   if (!q) return links
