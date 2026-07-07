@@ -118,9 +118,17 @@ Then set the **CURRENT BUILD STATE → Active workstream** line to point at the 
 
 ---
 
-## CURRENT BUILD STATE (as of 2026-07-06)
+## CURRENT BUILD STATE (as of 2026-07-07)
 
 Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (Salesforce parity).** Full handoff + per-phase status: `docs/leap-builder-rearchitecture.md`. Goal: one three-pane canvas (palette / live canvas / inspector) + a per-surface component registry, replacing the form-driven builders.
+
+**Shipped 2026-07-07 — Page layout section + related-list customization (PRs #99/#100/#101/#103, live on master/prod, tested by Nicholas):**
+`LayoutCanvasEditor` full section/related-list control, no schema change (persists through the existing bulk soft-delete + recreate adapter):
+- **Sections:** drag-reorderable (⠿ handle; array order → `section_order`, which also drives Related-tab card order); **Tab select** (Details/Related, custom values preserved) per section; "+ Add Section" buttons at BOTH top (prepends) and bottom (appends) of the canvas.
+- **Card widgets** (related lists, file galleries, conversation panels, reports, prtsn history) are first-class tiles: inline title rename (title = the Related-tab card heading), drag within/across sections, remove, and "+ Add Related List" per section → `RelatedListCanvasModal` (canvas-local; target table from `describe_object_incoming_fks`, FK, display columns, sort). Column entries emitted in the live renderer's shape: `{name,type,label}`, picklist FKs → `picklist`, other FKs → `lookup` with `fk_column`/`lookup_table`/`lookup_field` resolved from the referenced table's first `*_name` column. Tiles labeled "· Related tab" since cards always render there regardless of section tab.
+- **Renderer consistency (RecordDetail `Section`):** blank sections now RENDER (header + muted empty state — "cards appear on the Related tab" / "no fields yet") instead of vanishing, so record pages match the editor 1:1. Exception preserved: sections whose widgets are all suppressed via `hiddenWidgetTypes` (docx-only widgets on document templates) still hide.
+- One shared DndContext drives all three drag families (`sec::`/`wgt::`+`wzone::`/field names) with family-filtered collision detection (`dragFamily` in `LayoutCanvasEditor`).
+- Help article **HA-00122** (`page-layout-sections-related-lists`). The old `AddWidgetModal.jsx`/`WidgetEditorRelatedList.jsx` are orphaned dead code from the pre-canvas builder (save bare-string columns the renderer can't display) — safe to delete in a cleanup pass.
 
 **Shipped 2026-07-06 — Security & efficiency hardening + related-list counts (live on master/prod):**
 Whole-platform security + efficiency review (PR #11/#98 + follow-ups on `master`).
