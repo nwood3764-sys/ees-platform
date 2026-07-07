@@ -60,11 +60,13 @@ const MAX_WEB_SEARCHES = 6
 // Unknown-owner runs are a two-step mission (identify the owner, then find
 // its people) and need a bigger search budget. Still fits the wall clock at
 // effort: low.
-const MAX_WEB_SEARCHES_OWNER_UNKNOWN = 8
+const MAX_WEB_SEARCHES_OWNER_UNKNOWN = 6
 // Search snippets alone rarely name a property's owner — the researcher must
 // be able to OPEN the listing pages it finds (LIHTC databases, waitlist
-// pages, assessor records), like a human clicking a result.
-const MAX_WEB_FETCHES = 5
+// pages, assessor records), like a human clicking a result. Fetched pages
+// are capped hard: uncapped fetches blew the 400s worker wall clock.
+const MAX_WEB_FETCHES = 4
+const MAX_FETCH_CONTENT_TOKENS = 8000
 const MAX_PAUSE_CONTINUATIONS = 3
 const STALE_RUN_MINUTES = 8
 
@@ -380,7 +382,7 @@ async function runWebResearch(
         output_config: { effort: "low" },
         tools: [
           { type: "web_search_20260209", name: "web_search", max_uses: maxSearches },
-          { type: "web_fetch_20260209", name: "web_fetch", max_uses: MAX_WEB_FETCHES },
+          { type: "web_fetch_20260209", name: "web_fetch", max_uses: MAX_WEB_FETCHES, max_content_tokens: MAX_FETCH_CONTENT_TOKENS },
         ],
         messages,
       }),
