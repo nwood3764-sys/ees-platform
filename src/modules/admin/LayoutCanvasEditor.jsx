@@ -265,10 +265,13 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
     else                           onFieldDragEnd(activeId, overId)
   }
 
-  const addSection = () => {
+  // position 'start' inserts the new section at the top of the layout (the
+  // top button), 'end' appends it after the last section (the bottom button).
+  const addSection = (position = 'end') => {
     const key = `sec-new-${Date.now()}`
-    setSections(s => [...s, { key, label: 'New Section', columns: 2, tab: 'Details', isCollapsible: false, isCollapsedByDefault: false, placement: 'main',
-      widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [] } }] }])
+    const section = { key, label: 'New Section', columns: 2, tab: 'Details', isCollapsible: false, isCollapsedByDefault: false, placement: 'main',
+      widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [] } }] }
+    setSections(s => position === 'start' ? [section, ...s] : [...s, section])
     setActiveSection(key)
   }
 
@@ -373,6 +376,9 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <button onClick={() => addSection('start')} style={{ ...addSectionBtn(), marginBottom: 14 }}>
+            + Add Section
+          </button>
           <DndContext sensors={dndSensors} collisionDetection={collisionDetection} onDragEnd={onDragEnd}>
             <SortableContext items={sections.map(s => `sec::${s.key}`)} strategy={verticalListSortingStrategy}>
               {sections.map(sec => (
@@ -382,7 +388,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
               ))}
             </SortableContext>
           </DndContext>
-          <button onClick={addSection} style={{ width: '100%', padding: '10px', fontSize: 13, fontWeight: 500, background: C.card, color: C.emeraldMid, border: `1px dashed ${C.borderDark}`, borderRadius: 8, cursor: 'pointer' }}>
+          <button onClick={() => addSection('end')} style={addSectionBtn()}>
             + Add Section
           </button>
         </div>
@@ -580,6 +586,10 @@ function FieldTile({ field, object, onRemove }) {
       <button onClick={onRemove} style={miniBtn()}>×</button>
     </div>
   )
+}
+
+function addSectionBtn() {
+  return { width: '100%', padding: '10px', fontSize: 13, fontWeight: 500, background: C.card, color: C.emeraldMid, border: `1px dashed ${C.borderDark}`, borderRadius: 8, cursor: 'pointer' }
 }
 
 function btnPrimary(disabled) {
