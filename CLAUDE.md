@@ -118,9 +118,18 @@ Then set the **CURRENT BUILD STATE → Active workstream** line to point at the 
 
 ---
 
-## CURRENT BUILD STATE (as of 2026-06-29)
+## CURRENT BUILD STATE (as of 2026-07-06)
 
 Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (Salesforce parity).** Full handoff + per-phase status: `docs/leap-builder-rearchitecture.md`. Goal: one three-pane canvas (palette / live canvas / inspector) + a per-surface component registry, replacing the form-driven builders.
+
+**Shipped 2026-07-06 — Security & efficiency hardening + related-list counts (live on master/prod):**
+Whole-platform security + efficiency review (PR #11/#98 + follow-ups on `master`).
+- **DB (live):** closed an unauthenticated bulk-data leak on `outreach_properties_v` — a July perf migration had dropped the baseline's `security_invoker`, re-exposing ~17.5k property rows (owner names, HUD emails/phones, LIHTC financials) to any holder of the public anon key. Fixed by **revoking `anon`** (the actual leak) and restoring `security_invoker=on`; then **reverted to `security_definer`** because the Enrollment/Outreach Properties list (loads all ~17.5k rows through the 4-join view) hit `statement_timeout` under invoker-RLS. Anon stays revoked, so the leak is closed regardless of mode. `execute_flow` client EXECUTE revoked; `property_hud_match_review` `USING(true)` policies scoped to admin.
+- **Edge functions (deployed + verified):** `admin-reset-user-password` verifies the JWT via `getUser()` (was unsigned `atob`); `send-notification-email` requires the service-role key (was an unauthenticated open Graph relay); `signing-portal-submit` builds the next-signer link from `APP_BASE_URL` (was request `Origin`/`Referer`); `dispatch-scheduled-reports` gated on a **keyless shared secret** in `internal_cron_auth` sent by its pg_cron job via `x-internal-cron-secret` (cron re-registered via `cron.schedule`).
+- **Frontend (live):** DOMPurify on inbound-email HTML (`ActivityTimeline`, `UnmatchedInboxPane`); help-markdown URL-scheme allowlist; security headers in `netlify.toml`; `xlsx`/`jspdf` lazy-loaded off the record-open path; `describeObject` memoized; **related-list widgets show a subtle total count** (`count:'exact'` via `fetchRelatedRecords._total`, rendered in `RelatedListWidget` header).
+- **Ops:** org over-quota traced to a **separate project (HPR / Heat Pump Ranch, ~104 GB of product-media PDFs)**, not LEAP (~54 MB) — resolved by Nicholas. That throttling was the main page-slowness driver (`count(*)` on the view went 4.1s → 1.2s after the fix). The view's FK join keys are already indexed.
+
+**Deferred (next UI/perf session):** server-side pagination for the big list views (Properties etc. still load all rows) + optional DB compute-tier bump for snappier loads; then restore `security_invoker=on` on `outreach_properties_v` once the list is paginated. Also still open from the review: financial-tier server-side enforcement, strict CSP, `xlsx@0.18.5` upgrade, `verify_jwt` pinning in `config.toml`, remaining `atob`→`getUser` in `ai-assistant`/`flow-*`.
 
 **Shipped to production (master):**
 - **Phase 0 — Foundation:** `react-grid-layout` + `@dnd-kit/*` (isolated vendor chunks, verified no TDZ cycle); `src/builder/` — geometry model (`{x,y,w,h}` 12-col), per-surface component registries, three-pane `LeapCanvas`.
