@@ -48,6 +48,12 @@ const WIDGET_LABELS = {
 // tab names too, so an unrecognized existing value is preserved as-is.
 const SECTION_TABS = ['Details', 'Related']
 
+// Card widgets the record renderer ALWAYS places on the Related tab, no
+// matter which section/tab holds them — the section only controls card order.
+// Everything else (field groups, maps, config editors) renders inside its
+// section on the section's own tab.
+const RELATED_TAB_WIDGET_TYPES = new Set(['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'])
+
 function humanize(col, object) {
   let c = col
   if (object && c.startsWith(object.replace(/s$/, '') + '_')) c = c.slice(object.replace(/s$/, '').length + 1)
@@ -520,8 +526,13 @@ function WidgetTile({ widget, sectionKey, onPatch, onRemove, onOpenRelatedModal 
         style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 500, color: C.textPrimary,
           border: 'none', background: 'transparent', outline: 'none' }}
       />
-      <span style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, flexShrink: 0 }}>
+      <span
+        title={RELATED_TAB_WIDGET_TYPES.has(widget.type)
+          ? "This card always renders on the record's Related tab — its section here only controls card order."
+          : undefined}
+        style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, flexShrink: 0 }}>
         {WIDGET_LABELS[widget.type] || widget.type}
+        {RELATED_TAB_WIDGET_TYPES.has(widget.type) && <span style={{ color: C.sky }}> · Related tab</span>}
       </span>
       {widget.type === 'related_list' && (
         <button onClick={() => onOpenRelatedModal(sectionKey, widget.key)} title="Configure table, FK, and columns"
