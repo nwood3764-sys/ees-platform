@@ -127,7 +127,10 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
     setRunningAction(action)
     setError(null)
     try {
-      let res = await runOwnerResearch(action, target)
+      const runTarget = target.companyName
+        ? target
+        : { ...target, companyName: effectiveCompanyName, companyDomain: effectiveCompanyDomain }
+      let res = await runOwnerResearch(action, runTarget)
       let request = res?.request
       if (res?.background && request?.id) {
         // web_research runs server-side in the background — poll until done
@@ -195,9 +198,16 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
   const visibleCandidates = candidates.filter(c =>
     showDismissed || c.orc_status !== 'Research Candidate Dismissed')
   const lastRequest = requests[0] || null
+  // When the CRM owner is a placeholder, a completed web-research run may have
+  // identified the real owner organization — use it for subsequent runs.
+  const identifiedRequest = target?.ownerUnknown
+    ? requests.find(r => r.orq_status === 'Research Request Completed' && r.orq_company_name) || null
+    : null
+  const effectiveCompanyName = target?.companyName || identifiedRequest?.orq_company_name || null
+  const effectiveCompanyDomain = target?.companyDomain || identifiedRequest?.orq_company_domain || null
   // Web research works with a known org OR an unknown-owner property (it will
   // identify the owner from public records); Lusha always needs a real org.
-  const canResearch = !!(target?.companyName || (target?.ownerUnknown && target?.propertyId))
+  const canResearch = !!(effectiveCompanyName || (target?.ownerUnknown && target?.propertyId))
 
   return (
     <div style={card}>
@@ -222,8 +232,8 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
           </button>
           <button
             onClick={() => handleRun('lusha_search')}
-            disabled={!!runningAction || loading || !target?.companyName}
-            title={target?.companyName
+            disabled={!!runningAction || loading || !effectiveCompanyName}
+            title={effectiveCompanyName
               ? 'Searches the Lusha contact database for people at this organization'
               : 'Lusha needs a known owner organization — run Web Research first to identify the owner'}
             style={{
@@ -241,15 +251,17 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
         Finds decision makers — owners, executives, asset managers, facilities directors — for{' '}
         <span style={{ fontWeight: 600, color: C.textPrimary }}>
           {loading ? '…'
-            : target?.companyName ? target.companyName
+            : effectiveCompanyName ? effectiveCompanyName
             : target?.ownerUnknown && target?.propertyName ? `${target.propertyName} (owner organization not yet identified)`
             : 'this record (no owner organization resolved)'}
         </span>
-        {target?.companyDomain ? <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }}> · {target.companyDomain}</span> : null}
+        {effectiveCompanyDomain ? <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }}> · {effectiveCompanyDomain}</span> : null}
         .
-        {target?.ownerUnknown && target?.propertyName
-          ? ' The owner group on file is a placeholder, so Web Research will work from public records (assessor, HUD, LIHTC) to identify who actually owns this property.'
-          : ''}
+        {identifiedRequest
+          ? ` Identified by Web Research (${identifiedRequest.orq_record_number}) — the owner group on file is a placeholder.`
+          : target?.ownerUnknown && target?.propertyName
+            ? ' The owner group on file is a placeholder, so Web Research will work from public records (assessor, HUD, LIHTC) to identify who actually owns this property.'
+            : ''}
       </div>
 
       {error && (
