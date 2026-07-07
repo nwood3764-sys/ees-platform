@@ -52,8 +52,13 @@ const cors = {
 
 const LUSHA_BASE = "https://api.lusha.com"
 const ANTHROPIC_MODEL = "claude-opus-4-8"
-const MAX_WEB_SEARCHES = 8
-const MAX_PAUSE_CONTINUATIONS = 4
+// The whole background task must finish inside the edge worker's 400s wall
+// clock, so the research pass is deliberately time-boxed: few searches, low
+// effort (fast; plenty for name/title extraction), and an explicit speed
+// instruction in the prompt.
+const MAX_WEB_SEARCHES = 5
+const MAX_PAUSE_CONTINUATIONS = 3
+const STALE_RUN_MINUTES = 8
 
 function json(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -274,10 +279,12 @@ async function runWebResearch(
     target.companyDomain ? `Known website domain: ${target.companyDomain}` : `Website domain: unknown — find it.`,
     ...target.contextLines.map((l) => `Context: ${l}`),
     ``,
-    `Be creative and thorough with FREE public sources:`,
+    `Be creative with FREE public sources:`,
     `- The organization's own website (leadership/about/team pages).`,
     `- Whether it is a subsidiary — find the PARENT COMPANY and its executives if the parent makes capital decisions.`,
     `- State corporate registries (registered agents, officers), HUD/PHA listings, nonprofit filings (IRS 990 officers), LinkedIn company pages, press releases, industry news.`,
+    ``,
+    `You are on a strict time budget: start searching immediately, run at most ${MAX_WEB_SEARCHES} searches, and then answer with what you have. Do not deliberate between searches.`,
     ``,
     `Then reply with ONLY a JSON array (no prose before or after). Each element:`,
     `{"full_name": string, "job_title": string, "company_name": string, "company_domain": string|null, "location": string|null, "linkedin_url": string|null, "emails": string[]|null, "phones": string[]|null, "source_urls": string[], "notes": string}`,
@@ -298,6 +305,7 @@ async function runWebResearch(
       body: JSON.stringify({
         model: ANTHROPIC_MODEL,
         max_tokens: 8000,
+        output_config: { effort: "low" },
         tools: [{ type: "web_search_20260209", name: "web_search", max_uses: MAX_WEB_SEARCHES }],
         messages,
       }),
@@ -347,7 +355,13 @@ async function runWebResearch(
     })
   }
 
-  return { candidates, summary: text.slice(0, 4000), raw: { stop_reason: lastResponse.stop_reason, usage: lastResponse.usage } }
+  return {
+    candidates,
+    summary: text.slice(0, 4000),
+    // Persist the response text too — when parsing yields nothing, the text is
+    // the only way to tell "genuinely found nobody" from a formatting problem.
+    raw: { stop_reason: lastResponse.stop_reason, usage: lastResponse.usage, text: text.slice(0, 6000) },
+  }
 }
 
 // ── Tier 2: Lusha prospecting search (no credits) ───────────────────────────
@@ -454,15 +468,27 @@ async function runLushaEnrich(
     if (!pid) continue
     const cand = (cands || []).find((c) => c.orc_provider_contact_id === pid)
     if (!cand) continue
-    const emails = Array.isArray(e.emailAddresses) ? e.emailAddresses
-      : Array.isArray(e.emails) ? e.emails : null
-    const phones = Array.isArray(e.phoneNumbers) ? e.phoneNumbers
-      : Array.isArray(e.phones) ? e.phones : null
+    // Enrich responses nest the contact under `data`:
+    // { id, isSuccess, data: { emailAddresses:[{email,...}], phoneNumbers:[{number,...}],
+    //   socialLinks:{linkedin}, firstName, lastName, seniority:[{value}], departments:[...] } }
+    const d = (e.data && typeof e.data === "object" ? e.data : e) as Record<string, unknown>
+    const emails = Array.isArray(d.emailAddresses) ? d.emailAddresses
+      : Array.isArray(d.emails) ? d.emails : null
+    const phones = Array.isArray(d.phoneNumbers) ? d.phoneNumbers
+      : Array.isArray(d.phones) ? d.phones : null
+    const social = (d.socialLinks && typeof d.socialLinks === "object" ? d.socialLinks : {}) as Record<string, unknown>
+    const seniorityArr = Array.isArray(d.seniority) ? d.seniority as Array<Record<string, unknown>> : []
+    const departmentsArr = Array.isArray(d.departments) ? d.departments.filter((x) => typeof x === "string") : []
     const { data: row } = await admin
       .from("owner_research_candidates")
       .update({
         orc_emails: emails,
         orc_phones: phones,
+        orc_first_name: (d.firstName as string) || undefined,
+        orc_last_name: (d.lastName as string) || undefined,
+        orc_linkedin_url: (social.linkedin as string) || undefined,
+        orc_seniority: seniorityArr.length ? String(seniorityArr[0].value ?? seniorityArr[0]) : undefined,
+        orc_department: departmentsArr.length ? departmentsArr.join(", ") : undefined,
         orc_status: "Research Candidate Enriched",
         orc_enriched_at: new Date().toISOString(),
         orc_raw_payload: e,
@@ -516,6 +542,19 @@ Deno.serve(async (req) => {
       const result = await runLushaEnrich(admin, lushaKey, requestId, candidateIds, callerUserId)
       return json({ ok: true, candidates: result.updated })
     }
+
+    // Self-healing: a background run killed by the platform wall clock can
+    // leave a request stuck in Submitted. Fail anything stale before starting
+    // new work so the UI never shows a zombie run as in-progress.
+    await admin.from("owner_research_requests")
+      .update({
+        orq_status: "Research Request Failed",
+        orq_error_message: `Run did not finish within ${STALE_RUN_MINUTES} minutes and was marked failed (edge worker time limit)`,
+        orq_completed_at: new Date().toISOString(),
+        orq_updated_at: new Date().toISOString(),
+      })
+      .eq("orq_status", "Research Request Submitted")
+      .lt("orq_created_at", new Date(Date.now() - STALE_RUN_MINUTES * 60_000).toISOString())
 
     // ---- Search actions: create an ORQ row, run, save ORC rows ------------
     const target = await resolveTarget(admin, body)
