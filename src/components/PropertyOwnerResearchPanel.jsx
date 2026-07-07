@@ -195,6 +195,9 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
   const visibleCandidates = candidates.filter(c =>
     showDismissed || c.orc_status !== 'Research Candidate Dismissed')
   const lastRequest = requests[0] || null
+  // Web research works with a known org OR an unknown-owner property (it will
+  // identify the owner from public records); Lusha always needs a real org.
+  const canResearch = !!(target?.companyName || (target?.ownerUnknown && target?.propertyId))
 
   return (
     <div style={card}>
@@ -208,26 +211,28 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
             onClick={() => handleRun('web_research')}
-            disabled={!!runningAction || loading || !target?.companyName}
-            title="Free — AI web research over the organization's site, parent companies, and public registries"
+            disabled={!!runningAction || loading || !canResearch}
+            title="AI web research over the organization's site, parent companies, and public registries"
             style={{
               ...btnBase,
               background: runningAction === 'web_research' ? '#f7f9fc' : C.emerald,
               color: runningAction === 'web_research' ? C.textMuted : '#fff',
             }}>
-            {runningAction === 'web_research' ? 'Researching… (1–3 min)' : 'Run Web Research (Free)'}
+            {runningAction === 'web_research' ? 'Researching… (1–3 min)' : 'Run Web Research'}
           </button>
           <button
             onClick={() => handleRun('lusha_search')}
             disabled={!!runningAction || loading || !target?.companyName}
-            title="No Lusha credits — returns names and titles; revealing email/phone is a separate paid step"
+            title={target?.companyName
+              ? 'Searches the Lusha contact database for people at this organization'
+              : 'Lusha needs a known owner organization — run Web Research first to identify the owner'}
             style={{
               ...btnBase,
               background: runningAction === 'lusha_search' ? '#f7f9fc' : 'transparent',
               color: runningAction === 'lusha_search' ? C.textMuted : C.textPrimary,
               border: `1px solid ${C.borderDark || C.border}`,
             }}>
-            {runningAction === 'lusha_search' ? 'Searching Lusha…' : 'Lusha Search (No Credits)'}
+            {runningAction === 'lusha_search' ? 'Searching Lusha…' : 'Lusha Search'}
           </button>
         </div>
       </div>
@@ -235,10 +240,16 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
       <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 14 }}>
         Finds decision makers — owners, executives, asset managers, facilities directors — for{' '}
         <span style={{ fontWeight: 600, color: C.textPrimary }}>
-          {loading ? '…' : (target?.companyName || 'this record (no owner organization resolved)')}
+          {loading ? '…'
+            : target?.companyName ? target.companyName
+            : target?.ownerUnknown && target?.propertyName ? `${target.propertyName} (owner organization not yet identified)`
+            : 'this record (no owner organization resolved)'}
         </span>
         {target?.companyDomain ? <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }}> · {target.companyDomain}</span> : null}
-        . Free web research first; Lusha credits are only spent when you reveal a specific person&apos;s contact info.
+        .
+        {target?.ownerUnknown && target?.propertyName
+          ? ' The owner group on file is a placeholder, so Web Research will work from public records (assessor, HUD, LIHTC) to identify who actually owns this property.'
+          : ''}
       </div>
 
       {error && (
@@ -269,7 +280,7 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
           No candidates yet.
           {lastRequest?.orq_status === 'Research Request No Results'
             ? ' The last run found nothing — try the other method or the manual search links below.'
-            : ' Run Web Research (free) to start.'}
+            : ' Run Web Research to start.'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -305,7 +316,7 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
                     )}
                     {emails.length === 0 && phones.length === 0 && cand.orc_source === 'Lusha' && (
                       <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 5 }}>
-                        {cand.orc_has_emails ? 'Email on file' : 'No email on file'} · {cand.orc_has_phones ? 'phone on file' : 'no phone on file'} — reveal to view (uses credits)
+                        {cand.orc_has_emails ? 'Email on file' : 'No email on file'} · {cand.orc_has_phones ? 'phone on file' : 'no phone on file'} — reveal to view
                       </div>
                     )}
                     {cand.orc_notes && (
@@ -330,9 +341,9 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {canEnrich && (
                         <button onClick={() => handleEnrich(cand)} disabled={busy}
-                          title="Reveals this person's email and phone — spends Lusha credits"
+                          title="Reveals this person's email and phone from Lusha"
                           style={{ ...btnBase, padding: '6px 10px', fontSize: 11.5, background: 'transparent', color: C.sky, border: `1px solid ${C.sky}` }}>
-                          {busy ? 'Working…' : 'Reveal Contact Info (Credits)'}
+                          {busy ? 'Working…' : 'Reveal Contact Info'}
                         </button>
                       )}
                       <button onClick={() => handlePromote(cand)} disabled={busy}
@@ -355,7 +366,7 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
       {/* Manual search shortcuts */}
       {manualLinks.length > 0 && (
         <div style={{ marginTop: 16 }}>
-          <div style={{ ...labelStyle, marginBottom: 8 }}>Manual Search Shortcuts (Free)</div>
+          <div style={{ ...labelStyle, marginBottom: 8 }}>Manual Search Shortcuts</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {manualLinks.map(link => (
               <a key={link.label} href={link.url} target="_blank" rel="noreferrer"
