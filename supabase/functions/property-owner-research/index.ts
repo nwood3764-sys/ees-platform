@@ -57,6 +57,10 @@ const ANTHROPIC_MODEL = "claude-opus-4-8"
 // effort (fast; plenty for name/title extraction), and an explicit speed
 // instruction in the prompt.
 const MAX_WEB_SEARCHES = 6
+// Unknown-owner runs are a two-step mission (identify the owner, then find
+// its people) and need a bigger search budget. Still fits the wall clock at
+// effort: low.
+const MAX_WEB_SEARCHES_OWNER_UNKNOWN = 10
 const MAX_PAUSE_CONTINUATIONS = 3
 const STALE_RUN_MINUTES = 8
 
@@ -155,16 +159,29 @@ async function resolveTarget(admin: SupabaseClient, body: Record<string, unknown
   if (target.propertyId) {
     const { data: prop, error } = await admin
       .from("properties")
-      .select("id, property_name, property_city, property_state, property_website, property_account_id, property_hud_owner_org, property_hud_management_org")
+      .select("id, property_name, property_street, property_city, property_state, property_zip, property_parcel_number, property_hud_property_id, property_lihtc_project_id, property_lihtc_hud_id, property_website, property_account_id, property_hud_owner_org, property_hud_management_org")
       .eq("id", target.propertyId).maybeSingle()
     if (error || !prop) return "Property not found"
     target.propertyLabel = `${prop.property_name} (${prop.property_city || "?"}, ${prop.property_state || "?"})`
     target.contextLines.push(`Property: ${target.propertyLabel}`)
+    if (prop.property_street) {
+      target.contextLines.push(`Street address: ${prop.property_street}, ${prop.property_city || ""}, ${prop.property_state || ""} ${prop.property_zip || ""}`.trim())
+    }
+    // Database identifiers are the strongest search keys — an ID lookup
+    // usually lands directly on the project's listing page naming the owner.
+    const lihtcId = prop.property_lihtc_project_id || prop.property_lihtc_hud_id
+    if (lihtcId) {
+      target.contextLines.push(`LIHTC project ID: ${lihtcId} — SEARCH THIS ID DIRECTLY (e.g. "${lihtcId}" and "${lihtcId} LIHTC"); the HUD LIHTC database entry for it gives the project's real name and its owner/contact.`)
+    }
+    if (prop.property_hud_property_id) target.contextLines.push(`HUD property ID: ${prop.property_hud_property_id} — also a direct search key.`)
+    if (prop.property_parcel_number) target.contextLines.push(`County parcel number: ${prop.property_parcel_number} — search it against the county assessor/GIS.`)
     if (!target.accountId) target.accountId = prop.property_account_id
     if (!target.companyDomain) target.companyDomain = domainFromUrl(prop.property_website)
     if (prop.property_hud_owner_org) target.contextLines.push(`HUD-listed owner organization: ${prop.property_hud_owner_org}`)
     if (prop.property_hud_management_org) target.contextLines.push(`HUD-listed management organization: ${prop.property_hud_management_org}`)
-    if (!target.companyName && prop.property_hud_owner_org) target.companyName = prop.property_hud_owner_org
+    if (!target.companyName && prop.property_hud_owner_org && !isPlaceholderOrgName(prop.property_hud_owner_org)) {
+      target.companyName = prop.property_hud_owner_org
+    }
   }
 
   if (target.accountId) {
@@ -296,6 +313,7 @@ function extractJsonArray(text: string): unknown[] | null {
 async function runWebResearch(
   anthropicKey: string, target: Target, jobTitles: string[],
 ): Promise<{ candidates: CandidateDraft[]; summary: string; raw: unknown }> {
+  const maxSearches = target.companyName ? MAX_WEB_SEARCHES : MAX_WEB_SEARCHES_OWNER_UNKNOWN
   const mission = target.companyName
     ? [
         `Research the real-estate organization below and identify its DECISION MAKERS — the people who can approve building-level energy efficiency / HVAC retrofit projects. Prioritize titles like: ${jobTitles.join(", ")}. Property-management site staff (property managers, leasing agents, maintenance techs) are NOT decision makers — exclude them unless nothing better exists.`,
@@ -305,7 +323,7 @@ async function runWebResearch(
       ]
     : [
         `The OWNER of the property below is not known. Your mission has two steps:`,
-        `1. IDENTIFY who owns and controls the property — search the property name + city/state, affordable-housing listings (LIHTC/HUD databases, waitlist pages that name the managing housing authority or owner), county assessor/parcel records, apartment listings, and news.`,
+        `1. IDENTIFY who owns and controls the property. Start with the database identifiers in the Context lines below (LIHTC project ID, HUD property ID, parcel number) — searching an ID directly usually finds the project's listing page naming the real project name and owner. Then try the street address + ZIP, affordable-housing listings (LIHTC/HUD databases, waitlist pages that name the managing housing authority or owner), county assessor/parcel records, apartment listings, and news. Note: the property "name" in our system may just be a street address — the project's real marketed name is often different.`,
         `2. Then identify that owner organization's DECISION MAKERS — the people who can approve building-level energy efficiency / HVAC retrofit projects. Prioritize titles like: ${jobTitles.join(", ")}. Property-management site staff are NOT decision makers — but the OWNER organization itself (including a housing authority and its executive director) absolutely counts.`,
         ``,
         `Property to investigate: ${target.propertyLabel}`,
@@ -319,7 +337,7 @@ async function runWebResearch(
     `- Whether it is a subsidiary — find the PARENT COMPANY and its executives if the parent makes capital decisions.`,
     `- State corporate registries (registered agents, officers), HUD/PHA listings, nonprofit filings (IRS 990 officers), LinkedIn company pages, press releases, industry news.`,
     ``,
-    `You are on a strict time budget: start searching immediately, run at most ${MAX_WEB_SEARCHES} searches, and then answer with what you have. Do not deliberate between searches.`,
+    `You are on a strict time budget: start searching immediately, run at most ${maxSearches} searches, and then answer with what you have. Do not deliberate between searches.`,
     ``,
     `Then reply with ONLY a JSON array (no prose before or after). Each element:`,
     `{"full_name": string, "job_title": string, "company_name": string, "company_domain": string|null, "location": string|null, "linkedin_url": string|null, "emails": string[]|null, "phones": string[]|null, "source_urls": string[], "notes": string}`,
@@ -341,7 +359,7 @@ async function runWebResearch(
         model: ANTHROPIC_MODEL,
         max_tokens: 8000,
         output_config: { effort: "low" },
-        tools: [{ type: "web_search_20260209", name: "web_search", max_uses: MAX_WEB_SEARCHES }],
+        tools: [{ type: "web_search_20260209", name: "web_search", max_uses: maxSearches }],
         messages,
       }),
     })
