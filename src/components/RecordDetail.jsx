@@ -4461,7 +4461,21 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
     if (hiddenWidgetTypes && hiddenWidgetTypes.has(w.widget_type)) return false
     return true
   })
-  if (sectionWidgets.length === 0) return null
+  // Blank sections still render — the record page stays consistent with the
+  // page layout editor: every section in the layout shows its header, with a
+  // muted empty state in place of content. The one exception is a section
+  // whose widgets were ALL deliberately suppressed via hiddenWidgetTypes
+  // (context-dependent hides like docx-only widgets) — rendering an empty
+  // shell there would defeat the suppression.
+  const allSectionWidgets = section.widgets || []
+  const allSuppressed = allSectionWidgets.length > 0 && hiddenWidgetTypes &&
+    allSectionWidgets.every(w => hiddenWidgetTypes.has(w.widget_type))
+  if (sectionWidgets.length === 0 && allSuppressed) return null
+  // Cards (related lists, galleries, conversations, reports, publish history)
+  // render on the Related tab, not inside their section — when a section holds
+  // ONLY cards, say where its content went instead of looking broken.
+  const relatedTabCardCount = allSectionWidgets.filter(w =>
+    ['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'].includes(w.widget_type)).length
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
       <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
@@ -4469,6 +4483,13 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
         <span style={{ fontSize: isMobile ? 14 : 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
         {section.section_is_collapsible && <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={14} color={C.textMuted} />}
       </div>
+      {!collapsed && sectionWidgets.length === 0 && (
+        <div style={{ padding: isMobile ? '14px 14px' : '16px 18px', fontSize: 12.5, color: C.textMuted, fontStyle: 'italic' }}>
+          {relatedTabCardCount > 0
+            ? `This section's ${relatedTabCardCount === 1 ? 'card appears' : 'cards appear'} on the Related tab.`
+            : 'No fields in this section yet — add some in the page layout editor.'}
+        </div>
+      )}
       {!collapsed && sectionWidgets.map(w => {
         if (w.widget_type === 'field_group') {
           return <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
