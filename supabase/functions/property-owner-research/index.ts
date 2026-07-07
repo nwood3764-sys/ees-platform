@@ -60,7 +60,11 @@ const MAX_WEB_SEARCHES = 6
 // Unknown-owner runs are a two-step mission (identify the owner, then find
 // its people) and need a bigger search budget. Still fits the wall clock at
 // effort: low.
-const MAX_WEB_SEARCHES_OWNER_UNKNOWN = 10
+const MAX_WEB_SEARCHES_OWNER_UNKNOWN = 8
+// Search snippets alone rarely name a property's owner — the researcher must
+// be able to OPEN the listing pages it finds (LIHTC databases, waitlist
+// pages, assessor records), like a human clicking a result.
+const MAX_WEB_FETCHES = 5
 const MAX_PAUSE_CONTINUATIONS = 3
 const STALE_RUN_MINUTES = 8
 
@@ -297,22 +301,37 @@ async function finishRequest(
 
 // ── Tier 1: free AI web research ────────────────────────────────────────────
 
-function extractJsonArray(text: string): unknown[] | null {
-  const start = text.indexOf("[")
-  if (start === -1) return null
-  for (let end = text.length; end > start; end--) {
-    if (text[end - 1] !== "]") continue
-    try {
-      const parsed = JSON.parse(text.slice(start, end))
-      if (Array.isArray(parsed)) return parsed
-    } catch { /* keep shrinking */ }
+// Tolerant extraction: preferred shape is an object with a `people` array,
+// but accept a bare array (older prompt shape / model drift) too.
+function extractResearchJson(text: string): { people: unknown[]; identifiedOrg: string | null; orgDomain: string | null; identificationNotes: string | null } {
+  const empty = { people: [] as unknown[], identifiedOrg: null as string | null, orgDomain: null as string | null, identificationNotes: null as string | null }
+  const tryParse = (open: string, close: string): unknown | null => {
+    const start = text.indexOf(open)
+    if (start === -1) return null
+    for (let end = text.length; end > start; end--) {
+      if (text[end - 1] !== close) continue
+      try { return JSON.parse(text.slice(start, end)) } catch { /* keep shrinking */ }
+    }
+    return null
   }
-  return null
+  const obj = tryParse("{", "}")
+  if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+    const o = obj as Record<string, unknown>
+    return {
+      people: Array.isArray(o.people) ? o.people : [],
+      identifiedOrg: typeof o.identified_owner_organization === "string" && o.identified_owner_organization.trim() ? o.identified_owner_organization.trim() : null,
+      orgDomain: typeof o.organization_domain === "string" && o.organization_domain.trim() ? o.organization_domain.trim() : null,
+      identificationNotes: typeof o.identification_notes === "string" ? o.identification_notes : null,
+    }
+  }
+  const arr = tryParse("[", "]")
+  if (Array.isArray(arr)) return { ...empty, people: arr }
+  return empty
 }
 
 async function runWebResearch(
   anthropicKey: string, target: Target, jobTitles: string[],
-): Promise<{ candidates: CandidateDraft[]; summary: string; raw: unknown }> {
+): Promise<{ candidates: CandidateDraft[]; identifiedOrg: string | null; identifiedOrgDomain: string | null; identificationNotes: string | null; summary: string; raw: unknown }> {
   const maxSearches = target.companyName ? MAX_WEB_SEARCHES : MAX_WEB_SEARCHES_OWNER_UNKNOWN
   const mission = target.companyName
     ? [
@@ -337,11 +356,11 @@ async function runWebResearch(
     `- Whether it is a subsidiary — find the PARENT COMPANY and its executives if the parent makes capital decisions.`,
     `- State corporate registries (registered agents, officers), HUD/PHA listings, nonprofit filings (IRS 990 officers), LinkedIn company pages, press releases, industry news.`,
     ``,
-    `You are on a strict time budget: start searching immediately, run at most ${maxSearches} searches, and then answer with what you have. Do not deliberate between searches.`,
+    `You are on a strict time budget: start searching immediately, run at most ${maxSearches} searches and ${MAX_WEB_FETCHES} page fetches, and then answer with what you have. When a search result looks like it names the owner or its people, FETCH that page rather than running another search. Do not deliberate between tool calls.`,
     ``,
-    `Then reply with ONLY a JSON array (no prose before or after). Each element:`,
-    `{"full_name": string, "job_title": string, "company_name": string, "company_domain": string|null, "location": string|null, "linkedin_url": string|null, "emails": string[]|null, "phones": string[]|null, "source_urls": string[], "notes": string}`,
-    `Rules: only include people you found real evidence for (source_urls required, no guesses). Include publicly listed emails/phones only. "notes" = one sentence on why this person is the decision maker. If you find nothing, reply with [].`,
+    `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
+    `{"identified_owner_organization": string|null, "organization_domain": string|null, "identification_notes": string, "people": [{"full_name": string, "job_title": string, "company_name": string, "company_domain": string|null, "location": string|null, "linkedin_url": string|null, "emails": string[]|null, "phones": string[]|null, "source_urls": string[], "notes": string}]}`,
+    `Rules: even if you cannot confirm ANY individual, ALWAYS fill identified_owner_organization with the organization you determined owns/controls the property (or its marketed development name and managing organization) — that finding alone is valuable; cite the evidence URL in identification_notes. Only include people you found real evidence for (source_urls required, no guesses). Include publicly listed emails/phones only. Each person's "notes" = one sentence on why they are the decision maker. If you truly learned nothing, use null and an empty people array.`,
   ].join("\n")
 
   const messages: unknown[] = [{ role: "user", content: prompt }]
@@ -359,7 +378,10 @@ async function runWebResearch(
         model: ANTHROPIC_MODEL,
         max_tokens: 8000,
         output_config: { effort: "low" },
-        tools: [{ type: "web_search_20260209", name: "web_search", max_uses: maxSearches }],
+        tools: [
+          { type: "web_search_20260209", name: "web_search", max_uses: maxSearches },
+          { type: "web_fetch_20260209", name: "web_fetch", max_uses: MAX_WEB_FETCHES },
+        ],
         messages,
       }),
     })
@@ -382,10 +404,10 @@ async function runWebResearch(
 
   const blocks = (lastResponse.content as Array<{ type: string; text?: string }>) || []
   const text = blocks.filter((b) => b.type === "text").map((b) => b.text || "").join("\n")
-  const parsed = extractJsonArray(text) || []
+  const extracted = extractResearchJson(text)
 
   const candidates: CandidateDraft[] = []
-  for (const p of parsed as Array<Record<string, unknown>>) {
+  for (const p of extracted.people as Array<Record<string, unknown>>) {
     const fullName = typeof p.full_name === "string" ? p.full_name.trim() : ""
     if (!fullName) continue
     const emails = Array.isArray(p.emails) ? p.emails.filter((e) => typeof e === "string") : null
@@ -410,6 +432,9 @@ async function runWebResearch(
 
   return {
     candidates,
+    identifiedOrg: extracted.identifiedOrg,
+    identifiedOrgDomain: extracted.orgDomain,
+    identificationNotes: extracted.identificationNotes,
     summary: text.slice(0, 4000),
     // Persist the response text too — when parsing yields nothing, the text is
     // the only way to tell "genuinely found nobody" from a formatting problem.
@@ -658,10 +683,18 @@ Deno.serve(async (req) => {
         try {
           const r = await runWebResearch(anthropicKey, target, jobTitles)
           const saved = await insertCandidates(admin, reqRow.id, target, callerUserId, r.candidates)
+          // Identifying the owner organization is a result in its own right —
+          // persist it on the request so the panel can show it and the next
+          // Lusha search can use it, even when no individuals were confirmed.
+          const identified = target.ownerUnknown && r.identifiedOrg && !isPlaceholderOrgName(r.identifiedOrg)
           await finishRequest(admin, reqRow.id, callerUserId, {
-            orq_status: saved.length > 0 ? "Research Request Completed" : "Research Request No Results",
+            orq_status: (saved.length > 0 || identified) ? "Research Request Completed" : "Research Request No Results",
             orq_total_results: saved.length,
-            orq_raw_response: r.raw,
+            ...(identified ? {
+              orq_company_name: r.identifiedOrg,
+              orq_company_domain: r.identifiedOrgDomain || null,
+            } : {}),
+            orq_raw_response: { ...(r.raw as Record<string, unknown>), identified_owner_organization: r.identifiedOrg, identification_notes: r.identificationNotes },
           })
         } catch (inner) {
           await finishRequest(admin, reqRow.id, callerUserId, {
