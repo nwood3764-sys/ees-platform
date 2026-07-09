@@ -7,6 +7,7 @@ import {
   findAccountMatches,
   approveIdentifiedOrganization,
   rejectIdentifiedOrganization,
+  buildRelatedOrgOptions,
   promoteCandidateToContact,
   rejectCandidate,
   isPlaceholderOrgName,
@@ -114,12 +115,23 @@ function Field({ label, value, onChange, placeholder }) {
 
 // ── Approve-organization dialog ─────────────────────────────────────────────
 
+const RELATIONSHIP_LABELS = {
+  parent: 'parent company — will be set as this account’s parent',
+  subsidiary: 'subsidiary — will be created as a child of this account',
+  management: 'management organization — created standalone (a manager isn’t necessarily owned by the owner)',
+}
+
 function ApproveOrgModal({ request, onClose, onApproved }) {
   const toast = useToast()
   const [accountName, setAccountName] = useState(request.orq_company_name || '')
   const [matches, setMatches] = useState(null)      // null = loading
   const [choice, setChoice] = useState('new')       // 'new' | account id
   const [repoint, setRepoint] = useState(!!request.orq_property_id)
+  const relatedOptions = useMemo(() => buildRelatedOrgOptions(request), [request])
+  // Parent + subsidiaries default on (the hierarchy is the point); a
+  // standalone management org defaults off — reviewer opts in.
+  const [relatedChecked, setRelatedChecked] = useState(() =>
+    new Set(relatedOptions.filter(o => o.relationship !== 'management').map(o => o.name)))
   const [working, setWorking] = useState(false)
   const [error, setError] = useState(null)
 
@@ -140,14 +152,21 @@ function ApproveOrgModal({ request, onClose, onApproved }) {
     setWorking(true)
     setError(null)
     try {
-      const account = await approveIdentifiedOrganization(request, {
+      const { account, relatedAccounts, relatedErrors } = await approveIdentifiedOrganization(request, {
         existingAccountId: choice === 'new' ? null : choice,
         repointProperty: repoint,
         accountName: choice === 'new' ? accountName : null,
+        relatedOrgs: relatedOptions.filter(o => relatedChecked.has(o.name)),
       })
-      toast?.success?.(choice === 'new'
+      const relatedNote = relatedAccounts.length
+        ? ` ${relatedAccounts.length} related account${relatedAccounts.length === 1 ? '' : 's'} linked.`
+        : ''
+      toast?.success?.((choice === 'new'
         ? `Account ${account.account_record_number} created for ${account.account_name}.`
-        : `Linked to existing account ${account.account_record_number}.`)
+        : `Linked to existing account ${account.account_record_number}.`) + relatedNote)
+      if (relatedErrors.length) {
+        toast?.error?.(`Some related accounts failed — ${relatedErrors.join(' · ')}`)
+      }
       onApproved()
     } catch (e) {
       setError(e?.message || 'Approval failed.')
@@ -218,6 +237,35 @@ function ApproveOrgModal({ request, onClose, onApproved }) {
 
       {choice === 'new' && (
         <Field label="Account name (edit before creating — keep it clean)" value={accountName} onChange={setAccountName} />
+      )}
+
+      {relatedOptions.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ ...labelStyle, marginBottom: 8 }}>Corporate Structure</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {relatedOptions.map(o => (
+              <label key={o.name} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: C.textPrimary, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={relatedChecked.has(o.name)}
+                  onChange={() => setRelatedChecked(prev => {
+                    const n = new Set(prev)
+                    if (n.has(o.name)) n.delete(o.name); else n.add(o.name)
+                    return n
+                  })}
+                  style={{ marginTop: 2 }}
+                />
+                <span>
+                  Also create/link <span style={{ fontWeight: 600 }}>{o.name}</span>
+                  <span style={{ color: C.textSecondary }}> — {RELATIONSHIP_LABELS[o.relationship]}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 6 }}>
+            Existing accounts are matched by name and linked — never duplicated.
+          </div>
+        </div>
       )}
 
       {request.orq_property_id && (
