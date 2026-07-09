@@ -420,16 +420,65 @@ export async function findAccountMatches(orgName, orgDomain) {
 }
 
 /**
- * Approve an identified owner organization: link it to an existing account
- * (existingAccountId) or create a new one, optionally repoint the property
- * off its placeholder account (explicit reviewer confirmation), and move the
- * request's pending candidates onto the real account. Returns the account.
+ * Owner organizations come in layers — holding companies, property LLCs,
+ * management subsidiaries. Research captures the structure as structured
+ * facts; this derives the related organizations the reviewer can choose to
+ * create as linked accounts alongside the main approval. Relationships:
+ * 'parent' (becomes the approved account's parent), 'subsidiary' (child of
+ * the approved account), 'management' (standalone — a property manager is
+ * not necessarily owned by the owner).
  */
-export async function approveIdentifiedOrganization(request, { existingAccountId = null, repointProperty = false, accountName = null } = {}) {
+export function buildRelatedOrgOptions(request) {
+  const stages = request.orq_stage_results || {}
+  const ident = stages['Owner Identification'] || {}
+  const orgResearch = stages['Organization Research'] || {}
+  const seen = new Set([normalizeOrgName(request.orq_company_name)])
+  const options = []
+  const push = (name, relationship) => {
+    if (!name || typeof name !== 'string' || !name.trim()) return
+    if (isPlaceholderOrgName(name)) return
+    const norm = normalizeOrgName(name)
+    if (!norm || seen.has(norm)) return
+    seen.add(norm)
+    options.push({ name: name.trim(), relationship })
+  }
+  push(orgResearch.parent_company, 'parent')
+  for (const s of Array.isArray(orgResearch.subsidiaries) ? orgResearch.subsidiaries : []) push(s, 'subsidiary')
+  push(ident.management_organization, 'management')
+  return options
+}
+
+// Account Notes content for an account created from research — the clean
+// name goes in account_name; everything narrative lands here.
+function buildAccountNotesFromResearch(request) {
+  const stages = request.orq_stage_results || {}
+  const ident = stages['Owner Identification'] || {}
+  const orgResearch = stages['Organization Research'] || {}
+  const bits = []
+  if (orgResearch.organization_type) bits.push(orgResearch.organization_type)
+  if (orgResearch.headquarters) bits.push(`Headquarters: ${orgResearch.headquarters}`)
+  if (orgResearch.parent_company) bits.push(`Parent company: ${orgResearch.parent_company}`)
+  const subs = Array.isArray(orgResearch.subsidiaries) ? orgResearch.subsidiaries.filter(s => typeof s === 'string') : []
+  if (subs.length) bits.push(`Subsidiaries/affiliates: ${subs.join(', ')}`)
+  if (ident.management_organization) bits.push(`Management organization: ${ident.management_organization}`)
+  if (ident.identification_notes) bits.push(ident.identification_notes)
+  bits.push(`Identified by owner research ${request.orq_record_number}.`)
+  return bits.join('\n')
+}
+
+/**
+ * Approve an identified owner organization: link it to an existing account
+ * (existingAccountId) or create a new one (research context lands in Account
+ * Notes, never in the name), optionally repoint the property off its
+ * placeholder account (explicit reviewer confirmation), optionally create the
+ * related organization accounts the reviewer selected (parent/subsidiary
+ * linked via parent_account_id), and move the request's pending candidates
+ * onto the real account. Returns { account, relatedAccounts, relatedErrors }.
+ */
+export async function approveIdentifiedOrganization(request, { existingAccountId = null, repointProperty = false, accountName = null, relatedOrgs = [] } = {}) {
   const userId = await getCurrentUserId()
   if (!userId) throw new Error('Could not resolve the current LEAP user')
-  // Research output can be verbose ("X, LLC (parent of Y...)") — the reviewer
-  // edits the final account name in the approve dialog.
+  // The reviewer edits the final account name in the approve dialog.
   const orgName = (accountName || request.orq_company_name || '').trim()
   if (!orgName || isPlaceholderOrgName(orgName)) {
     throw new Error('This request has no identified organization to approve')
@@ -439,7 +488,7 @@ export async function approveIdentifiedOrganization(request, { existingAccountId
   if (existingAccountId) {
     const { data, error } = await supabase
       .from('accounts')
-      .select('id, account_record_number, account_name')
+      .select('id, account_record_number, account_name, parent_account_id')
       .eq('id', existingAccountId).maybeSingle()
     if (error || !data) throw new Error(error?.message || 'Selected account not found')
     account = data
@@ -450,13 +499,70 @@ export async function approveIdentifiedOrganization(request, { existingAccountId
         account_record_number: '',
         account_name: orgName,
         account_website: request.orq_company_domain ? `https://${request.orq_company_domain}` : null,
+        account_notes: buildAccountNotesFromResearch(request),
         account_owner: userId,
         account_created_by: userId,
       })
-      .select('id, account_record_number, account_name')
+      .select('id, account_record_number, account_name, parent_account_id')
       .single()
     if (error) throw new Error(`Failed to create account: ${error.message}`)
     account = data
+  }
+
+  // Build the reviewer-selected corporate structure. Existing accounts are
+  // matched by normalized name (never duplicated); hierarchy links are only
+  // ever set where they are currently empty.
+  const relatedAccounts = []
+  const relatedErrors = []
+  for (const org of relatedOrgs) {
+    try {
+      const matches = await findAccountMatches(org.name, null)
+      const exact = matches.find(m => m.matchStrength === 'strong')
+      let related
+      if (exact) {
+        related = { id: exact.id, account_record_number: exact.account_record_number, account_name: exact.account_name, existing: true }
+      } else {
+        const relationshipNote = org.relationship === 'parent'
+          ? `Parent company of ${account.account_name}.`
+          : org.relationship === 'subsidiary'
+            ? `Subsidiary/affiliate of ${account.account_name}.`
+            : `Management organization related to ${account.account_name}.`
+        const { data, error } = await supabase
+          .from('accounts')
+          .insert({
+            account_record_number: '',
+            account_name: org.name,
+            account_notes: `${relationshipNote} Identified by owner research ${request.orq_record_number}.`,
+            account_owner: userId,
+            account_created_by: userId,
+            ...(org.relationship === 'subsidiary' ? { parent_account_id: account.id } : {}),
+          })
+          .select('id, account_record_number, account_name')
+          .single()
+        if (error) throw new Error(error.message)
+        related = { ...data, existing: false }
+      }
+      if (org.relationship === 'parent' && !account.parent_account_id) {
+        const { error: linkErr } = await supabase
+          .from('accounts')
+          .update({ parent_account_id: related.id, account_updated_by: userId, account_updated_at: new Date().toISOString() })
+          .eq('id', account.id)
+        if (linkErr) throw new Error(`created ${related.account_record_number} but parent link failed: ${linkErr.message}`)
+        account.parent_account_id = related.id
+      } else if (org.relationship === 'subsidiary' && related.existing) {
+        // Existing account chosen as the subsidiary — only claim it if it has
+        // no parent yet.
+        const { error: linkErr } = await supabase
+          .from('accounts')
+          .update({ parent_account_id: account.id, account_updated_by: userId, account_updated_at: new Date().toISOString() })
+          .eq('id', related.id)
+          .is('parent_account_id', null)
+        if (linkErr) throw new Error(`linked ${related.account_record_number} but parent link failed: ${linkErr.message}`)
+      }
+      relatedAccounts.push({ ...related, relationship: org.relationship })
+    } catch (e) {
+      relatedErrors.push(`${org.name}: ${e?.message || 'failed'}`)
+    }
   }
 
   const { error: reqErr } = await supabase
@@ -495,7 +601,7 @@ export async function approveIdentifiedOrganization(request, { existingAccountId
     .in('orc_status', PENDING_CANDIDATE_STATUSES)
   if (candErr) throw new Error(`Account approved (${account.account_record_number}) but candidate re-link failed: ${candErr.message}`)
 
-  return account
+  return { account, relatedAccounts, relatedErrors }
 }
 
 /** Reject an identified organization (kept on the request, auditable). */

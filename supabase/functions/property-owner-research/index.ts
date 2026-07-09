@@ -706,7 +706,7 @@ async function stageOwnerIdentification(
     ``,
     `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
     `{"identified_owner_organization": string|null, "organization_domain": string|null, "marketed_property_name": string|null, "management_organization": string|null, "identification_notes": string, "evidence_urls": string[]}`,
-    `Rules: identified_owner_organization is the entity that OWNS/controls the property (developer, housing authority, ownership LLC's parent) — not the on-site manager (put that in management_organization). Cite every claim's URL in evidence_urls. If you truly cannot determine the owner, use null and explain what you found and where the trail ended in identification_notes.`,
+    `Rules: identified_owner_organization must be ONLY the organization's clean legal name exactly as registered (e.g. "JES Holdings, LLC") — NO parentheticals, qualifiers, or explanations inside the name; ALL context (corporate relationships, how you determined it, caveats) belongs in identification_notes. It is the entity that OWNS/controls the property (developer, housing authority, ownership LLC's parent) — not the on-site manager (put that clean name in management_organization). Cite every claim's URL in evidence_urls. If you truly cannot determine the owner, use null and explain what you found and where the trail ended in identification_notes.`,
   ].join("\n")
 
   const r = await callAnthropicResearch(anthropicKey, prompt, {
@@ -759,8 +759,8 @@ async function stageOrganizationResearch(
     speedRules(STAGE_MAX_SEARCHES, STAGE_MAX_FETCHES),
     ``,
     `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
-    `{"official_name": string|null, "organization_domain": string|null, "parent_company": string|null, "organization_type": string|null, "headquarters": string|null, "key_facts": string[], "evidence_urls": string[], "notes": string}`,
-    `Rules: key_facts = short facts useful for finding this organization's decision makers next (officer names from registries/990s go here). Cite evidence_urls for every claim.`,
+    `{"official_name": string|null, "organization_domain": string|null, "parent_company": string|null, "subsidiaries": string[], "organization_type": string|null, "headquarters": string|null, "key_facts": string[], "evidence_urls": string[], "notes": string}`,
+    `Rules: official_name, parent_company, and every subsidiaries entry must be clean legal entity names exactly as registered (e.g. "Fairway Management, Inc.") — no parentheticals or explanations inside names; context goes in notes/key_facts. subsidiaries = companies this organization owns or controls (management arms, development affiliates, property LLCs). key_facts = short facts useful for finding this organization's decision makers next (officer names from registries/990s go here). Cite evidence_urls for every claim.`,
   ].join("\n")
 
   const r = await callAnthropicResearch(anthropicKey, prompt, {
@@ -772,6 +772,7 @@ async function stageOrganizationResearch(
     official_name: typeof o.official_name === "string" ? o.official_name : null,
     organization_domain: domain,
     parent_company: typeof o.parent_company === "string" ? o.parent_company : null,
+    subsidiaries: Array.isArray(o.subsidiaries) ? o.subsidiaries.filter((s) => typeof s === "string") : [],
     organization_type: typeof o.organization_type === "string" ? o.organization_type : null,
     headquarters: typeof o.headquarters === "string" ? o.headquarters : null,
     key_facts: Array.isArray(o.key_facts) ? o.key_facts : [],
@@ -782,6 +783,13 @@ async function stageOrganizationResearch(
   }
   const patch: Record<string, unknown> = {}
   if (domain && !target.companyDomain) patch.orq_company_domain = domain
+  // The verified official name is the cleanest version of the org name we
+  // will ever have — it becomes the request's working name (and therefore
+  // the default account name at approval).
+  const officialName = typeof o.official_name === "string" ? o.official_name.trim() : ""
+  if (officialName && !isPlaceholderOrgName(officialName)) {
+    patch.orq_company_name = officialName
+  }
   return { results, requestPatch: Object.keys(patch).length ? patch : undefined }
 }
 
