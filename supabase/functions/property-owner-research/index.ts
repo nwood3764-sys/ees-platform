@@ -2,25 +2,36 @@
 // property-owner-research
 //
 // Finds decision makers (CEO, asset manager, facilities director, ...) for
-// property owner groups (accounts) and specific properties. Tiered by cost:
+// property owner groups (accounts) and specific properties. Actions:
 //
-//   action: "web_research"   — FREE (no Lusha credits). Claude + web search
-//                              investigates the organization: its domain,
-//                              website leadership pages, parent companies,
-//                              state registries, news. Returns named
-//                              decision-maker candidates with source URLs.
-//   action: "lusha_search"   — NO CREDITS. Lusha Prospecting contact search:
-//                              names + titles + has-email/has-phone flags,
-//                              but contact details stay masked.
-//   action: "lusha_enrich"   — PAID CREDITS. Reveals email/phone for
-//                              explicitly selected candidates only.
+//   action: "deep_research"   — the staged research pipeline (the default the
+//                               UI runs). A request walks a state machine:
+//                               Owner Identification → Organization Research →
+//                               Decision Maker Discovery → Contact Info
+//                               Gathering. Each stage is its OWN invocation
+//                               with a fresh time budget, chained via
+//                               self-invocation, and every stage's output is
+//                               persisted as a stored fact in
+//                               orq_stage_results. Ends at
+//                               "Research Request Ready for Review".
+//   action: "run_stage"       — internal: executes one stage of an existing
+//                               request. Called by the stage chain (shared
+//                               pipeline secret) or to retry a failed stage.
+//   action: "web_research"    — legacy single-pass AI research (kept for
+//                               compatibility; deep_research supersedes it).
+//   action: "lusha_search"    — NO CREDITS. Lusha Prospecting contact search:
+//                               names + titles + has-email/has-phone flags,
+//                               but contact details stay masked.
+//   action: "lusha_enrich"    — PAID CREDITS. Reveals email/phone for
+//                               explicitly selected candidates only.
 //
 // Every run writes an owner_research_requests row (ORQ-) and one
 // owner_research_candidates row (ORC-) per person found, so research is a
 // first-class, auditable LEAP record. Auth mirrors import-prospecting-
 // properties: caller JWT -> public.users.id; that user owns every record.
 // A fail-closed shared-secret gate (same as admin-test-send-email) lets the
-// autonomous self-test harness run on behalf of an explicit app user.
+// autonomous self-test harness AND the stage chain run on behalf of an
+// explicit app user.
 //
 // Secrets: LUSHA_API_KEY is read from Deno env if set, else from Supabase
 // Vault via the service-role-only get_integration_secret() RPC.
@@ -28,14 +39,16 @@
 // ai-assistant).
 //
 // Request body:
-//   { action: "web_research" | "lusha_search",
+//   { action: "deep_research" | "web_research" | "lusha_search",
 //     account_id?, property_id?, company_name?, company_domain?,
 //     job_titles?: string[] }
+//   { action: "run_stage", request_id: uuid, stage: string }
 //   { action: "lusha_enrich", request_id: uuid, candidate_ids: uuid[] }
 //
-// web_research runs as a BACKGROUND task (EdgeRuntime.waitUntil) because a
-// full AI research pass exceeds the platform's 150s request idle timeout —
-// the call returns 202 immediately and the client polls the ORQ row.
+// deep_research / run_stage / web_research all run as BACKGROUND tasks
+// (EdgeRuntime.waitUntil) because a research pass exceeds the platform's
+// 150s request idle timeout — the call returns 202 immediately and the
+// client polls the ORQ row.
 //
 // Responses: 200 { ok, request, candidates } | 202 { ok, background, request }
 //            | 4xx/5xx { ok:false, error }
@@ -53,13 +66,10 @@ const cors = {
 const LUSHA_BASE = "https://api.lusha.com"
 const ANTHROPIC_MODEL = "claude-opus-4-8"
 // The whole background task must finish inside the edge worker's 400s wall
-// clock, so the research pass is deliberately time-boxed: few searches, low
-// effort (fast; plenty for name/title extraction), and an explicit speed
-// instruction in the prompt.
+// clock, so the legacy single-pass research is deliberately time-boxed: few
+// searches, low effort (fast; plenty for name/title extraction), and an
+// explicit speed instruction in the prompt.
 const MAX_WEB_SEARCHES = 6
-// Unknown-owner runs are a two-step mission (identify the owner, then find
-// its people) and need a bigger search budget. Still fits the wall clock at
-// effort: low.
 const MAX_WEB_SEARCHES_OWNER_UNKNOWN = 6
 // Search snippets alone rarely name a property's owner — the researcher must
 // be able to OPEN the listing pages it finds (LIHTC databases, waitlist
@@ -69,6 +79,31 @@ const MAX_WEB_FETCHES = 4
 const MAX_FETCH_CONTENT_TOKENS = 8000
 const MAX_PAUSE_CONTINUATIONS = 3
 const STALE_RUN_MINUTES = 8
+
+// Staged deep research: each stage gets a fresh 400s wall clock, so the
+// per-stage tool budget stays small while effort goes UP to medium (better
+// reasoning about which sources to trust — affordable once stages are small).
+const STAGE_MAX_SEARCHES = 4
+const STAGE_MAX_FETCHES = 3
+const STAGE_FETCH_CONTENT_TOKENS = 6000
+const STAGE_EFFORT = "medium"
+// How many candidates the Contact Info Gathering stage researches per run.
+const STAGE_CONTACT_INFO_MAX_PEOPLE = 5
+
+// Stage names match the admin-managed picklist (owner_research_requests /
+// orq_stage) seeded in the workflow v2 migration.
+const STAGES = [
+  "Owner Identification",
+  "Organization Research",
+  "Decision Maker Discovery",
+  "Contact Info Gathering",
+] as const
+type Stage = typeof STAGES[number]
+
+function nextStageAfter(stage: Stage): Stage | null {
+  const i = STAGES.indexOf(stage)
+  return i >= 0 && i < STAGES.length - 1 ? STAGES[i + 1] : null
+}
 
 function json(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -96,8 +131,9 @@ async function resolveCallerUserId(admin: SupabaseClient, req: Request, body: Re
       }
     } catch { /* fall through to the self-test gate */ }
   }
-  // Self-test gate (same fail-closed shared secret as admin-test-send-email):
-  // lets the autonomous test harness run on behalf of an explicit app user.
+  // Shared-secret gate (same fail-closed secret as admin-test-send-email):
+  // lets the autonomous test harness and the stage chain run on behalf of an
+  // explicit app user.
   const expectedSecret = Deno.env.get("GRAPH_RENEWAL_CRON_SECRET")
                       || Deno.env.get("GRAPH_WEBHOOK_CLIENT_STATE")
   if (expectedSecret && (req.headers.get("x-pipeline-test-secret") || "") === expectedSecret) {
@@ -301,12 +337,64 @@ async function finishRequest(
     .eq("id", requestId)
 }
 
-// ── Tier 1: free AI web research ────────────────────────────────────────────
+// "Jane P. Henderson" / "jane henderson" → "janephenderson" — for merging the
+// same person found by web research and Lusha into one candidate row.
+function normalizeName(name: string | null | undefined): string {
+  return (name || "").toLowerCase().replace(/[^a-z]/g, "")
+}
 
-// Tolerant extraction: preferred shape is an object with a `people` array,
-// but accept a bare array (older prompt shape / model drift) too.
-function extractResearchJson(text: string): { people: unknown[]; identifiedOrg: string | null; orgDomain: string | null; identificationNotes: string | null } {
-  const empty = { people: [] as unknown[], identifiedOrg: null as string | null, orgDomain: null as string | null, identificationNotes: null as string | null }
+// ── Anthropic research core ─────────────────────────────────────────────────
+
+async function callAnthropicResearch(
+  anthropicKey: string, prompt: string,
+  opts: { maxSearches: number; maxFetches: number; maxFetchTokens: number; effort: string },
+): Promise<{ text: string; stopReason: string | null; usage: unknown }> {
+  const messages: unknown[] = [{ role: "user", content: prompt }]
+  let lastResponse: Record<string, unknown> | null = null
+
+  for (let i = 0; i <= MAX_PAUSE_CONTINUATIONS; i++) {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 8000,
+        output_config: { effort: opts.effort },
+        tools: [
+          { type: "web_search_20260209", name: "web_search", max_uses: opts.maxSearches },
+          { type: "web_fetch_20260209", name: "web_fetch", max_uses: opts.maxFetches, max_content_tokens: opts.maxFetchTokens },
+        ],
+        messages,
+      }),
+    })
+    if (!resp.ok) {
+      const errBody = await resp.text()
+      throw new Error(`Anthropic API error ${resp.status}: ${errBody.slice(0, 400)}`)
+    }
+    lastResponse = await resp.json()
+    if (lastResponse?.stop_reason === "pause_turn") {
+      messages.push({ role: "assistant", content: lastResponse.content })
+      continue
+    }
+    break
+  }
+
+  if (!lastResponse) throw new Error("Research produced no response")
+  if (lastResponse.stop_reason === "refusal") {
+    throw new Error("Research was declined by the model's safety system")
+  }
+  const blocks = (lastResponse.content as Array<{ type: string; text?: string }>) || []
+  const text = blocks.filter((b) => b.type === "text").map((b) => b.text || "").join("\n")
+  return { text, stopReason: (lastResponse.stop_reason as string) || null, usage: lastResponse.usage }
+}
+
+// Tolerant JSON extraction: find the first { or [ and parse the longest
+// valid JSON value starting there (models occasionally wrap JSON in prose).
+function extractFirstJson(text: string): unknown | null {
   const tryParse = (open: string, close: string): unknown | null => {
     const start = text.indexOf(open)
     if (start === -1) return null
@@ -316,9 +404,52 @@ function extractResearchJson(text: string): { people: unknown[]; identifiedOrg: 
     }
     return null
   }
-  const obj = tryParse("{", "}")
-  if (obj && typeof obj === "object" && !Array.isArray(obj)) {
-    const o = obj as Record<string, unknown>
+  return tryParse("{", "}") ?? tryParse("[", "]")
+}
+
+const speedRules = (searches: number, fetches: number) =>
+  `You are on a strict time budget: start searching immediately, run at most ${searches} searches and ${fetches} page fetches, and then answer with what you have. When a search result looks like it has the answer, FETCH that page rather than running another search. Do not deliberate between tool calls.`
+
+// Parse a people[] array (shared by single-pass research, Decision Maker
+// Discovery, and Contact Info Gathering).
+function parsePeople(people: unknown[]): CandidateDraft[] {
+  const candidates: CandidateDraft[] = []
+  for (const p of people as Array<Record<string, unknown>>) {
+    const fullName = typeof p.full_name === "string" ? p.full_name.trim() : ""
+    if (!fullName) continue
+    const emails = Array.isArray(p.emails) ? p.emails.filter((e) => typeof e === "string") : null
+    const phones = Array.isArray(p.phones) ? p.phones.filter((e) => typeof e === "string") : null
+    candidates.push({
+      source: "Web Research",
+      full_name: fullName,
+      job_title: typeof p.job_title === "string" ? p.job_title : null,
+      company_name: typeof p.company_name === "string" ? p.company_name : null,
+      company_domain: typeof p.company_domain === "string" ? p.company_domain : null,
+      location: typeof p.location === "string" ? p.location : null,
+      linkedin_url: typeof p.linkedin_url === "string" ? p.linkedin_url : null,
+      emails: emails && emails.length ? emails : null,
+      phones: phones && phones.length ? phones : null,
+      has_emails: emails && emails.length ? true : null,
+      has_phones: phones && phones.length ? true : null,
+      source_urls: Array.isArray(p.source_urls) ? p.source_urls : null,
+      notes: typeof p.notes === "string" ? p.notes : null,
+      raw: p,
+    })
+  }
+  return candidates
+}
+
+const PEOPLE_JSON_SHAPE = `[{"full_name": string, "job_title": string, "company_name": string, "company_domain": string|null, "location": string|null, "linkedin_url": string|null, "emails": string[]|null, "phones": string[]|null, "source_urls": string[], "notes": string}]`
+
+// ── Legacy tier 1: single-pass free AI web research ─────────────────────────
+
+// Tolerant extraction: preferred shape is an object with a `people` array,
+// but accept a bare array (older prompt shape / model drift) too.
+function extractResearchJson(text: string): { people: unknown[]; identifiedOrg: string | null; orgDomain: string | null; identificationNotes: string | null } {
+  const empty = { people: [] as unknown[], identifiedOrg: null as string | null, orgDomain: null as string | null, identificationNotes: null as string | null }
+  const parsed = extractFirstJson(text)
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const o = parsed as Record<string, unknown>
     return {
       people: Array.isArray(o.people) ? o.people : [],
       identifiedOrg: typeof o.identified_owner_organization === "string" && o.identified_owner_organization.trim() ? o.identified_owner_organization.trim() : null,
@@ -326,8 +457,7 @@ function extractResearchJson(text: string): { people: unknown[]; identifiedOrg: 
       identificationNotes: typeof o.identification_notes === "string" ? o.identification_notes : null,
     }
   }
-  const arr = tryParse("[", "]")
-  if (Array.isArray(arr)) return { ...empty, people: arr }
+  if (Array.isArray(parsed)) return { ...empty, people: parsed }
   return empty
 }
 
@@ -358,89 +488,27 @@ async function runWebResearch(
     `- Whether it is a subsidiary — find the PARENT COMPANY and its executives if the parent makes capital decisions.`,
     `- State corporate registries (registered agents, officers), HUD/PHA listings, nonprofit filings (IRS 990 officers), LinkedIn company pages, press releases, industry news.`,
     ``,
-    `You are on a strict time budget: start searching immediately, run at most ${maxSearches} searches and ${MAX_WEB_FETCHES} page fetches, and then answer with what you have. When a search result looks like it names the owner or its people, FETCH that page rather than running another search. Do not deliberate between tool calls.`,
+    speedRules(maxSearches, MAX_WEB_FETCHES),
     ``,
     `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
-    `{"identified_owner_organization": string|null, "organization_domain": string|null, "identification_notes": string, "people": [{"full_name": string, "job_title": string, "company_name": string, "company_domain": string|null, "location": string|null, "linkedin_url": string|null, "emails": string[]|null, "phones": string[]|null, "source_urls": string[], "notes": string}]}`,
+    `{"identified_owner_organization": string|null, "organization_domain": string|null, "identification_notes": string, "people": ${PEOPLE_JSON_SHAPE}}`,
     `Rules: even if you cannot confirm ANY individual, ALWAYS fill identified_owner_organization with the organization you determined owns/controls the property (or its marketed development name and managing organization) — that finding alone is valuable; cite the evidence URL in identification_notes. Only include people you found real evidence for (source_urls required, no guesses). Include publicly listed emails/phones only. Each person's "notes" = one sentence on why they are the decision maker. If you truly learned nothing, use null and an empty people array.`,
   ].join("\n")
 
-  const messages: unknown[] = [{ role: "user", content: prompt }]
-  let lastResponse: Record<string, unknown> | null = null
-
-  for (let i = 0; i <= MAX_PAUSE_CONTINUATIONS; i++) {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 8000,
-        output_config: { effort: "low" },
-        tools: [
-          { type: "web_search_20260209", name: "web_search", max_uses: maxSearches },
-          { type: "web_fetch_20260209", name: "web_fetch", max_uses: MAX_WEB_FETCHES, max_content_tokens: MAX_FETCH_CONTENT_TOKENS },
-        ],
-        messages,
-      }),
-    })
-    if (!resp.ok) {
-      const errBody = await resp.text()
-      throw new Error(`Anthropic API error ${resp.status}: ${errBody.slice(0, 400)}`)
-    }
-    lastResponse = await resp.json()
-    if (lastResponse?.stop_reason === "pause_turn") {
-      messages.push({ role: "assistant", content: lastResponse.content })
-      continue
-    }
-    break
-  }
-
-  if (!lastResponse) throw new Error("Web research produced no response")
-  if (lastResponse.stop_reason === "refusal") {
-    throw new Error("Web research was declined by the model's safety system — try Lusha search instead")
-  }
-
-  const blocks = (lastResponse.content as Array<{ type: string; text?: string }>) || []
-  const text = blocks.filter((b) => b.type === "text").map((b) => b.text || "").join("\n")
-  const extracted = extractResearchJson(text)
-
-  const candidates: CandidateDraft[] = []
-  for (const p of extracted.people as Array<Record<string, unknown>>) {
-    const fullName = typeof p.full_name === "string" ? p.full_name.trim() : ""
-    if (!fullName) continue
-    const emails = Array.isArray(p.emails) ? p.emails.filter((e) => typeof e === "string") : null
-    const phones = Array.isArray(p.phones) ? p.phones.filter((e) => typeof e === "string") : null
-    candidates.push({
-      source: "Web Research",
-      full_name: fullName,
-      job_title: typeof p.job_title === "string" ? p.job_title : null,
-      company_name: typeof p.company_name === "string" ? p.company_name : null,
-      company_domain: typeof p.company_domain === "string" ? p.company_domain : null,
-      location: typeof p.location === "string" ? p.location : null,
-      linkedin_url: typeof p.linkedin_url === "string" ? p.linkedin_url : null,
-      emails: emails && emails.length ? emails : null,
-      phones: phones && phones.length ? phones : null,
-      has_emails: emails && emails.length ? true : null,
-      has_phones: phones && phones.length ? true : null,
-      source_urls: Array.isArray(p.source_urls) ? p.source_urls : null,
-      notes: typeof p.notes === "string" ? p.notes : null,
-      raw: p,
-    })
-  }
+  const r = await callAnthropicResearch(anthropicKey, prompt, {
+    maxSearches, maxFetches: MAX_WEB_FETCHES, maxFetchTokens: MAX_FETCH_CONTENT_TOKENS, effort: "low",
+  })
+  const extracted = extractResearchJson(r.text)
 
   return {
-    candidates,
+    candidates: parsePeople(extracted.people),
     identifiedOrg: extracted.identifiedOrg,
     identifiedOrgDomain: extracted.orgDomain,
     identificationNotes: extracted.identificationNotes,
-    summary: text.slice(0, 4000),
+    summary: r.text.slice(0, 4000),
     // Persist the response text too — when parsing yields nothing, the text is
     // the only way to tell "genuinely found nobody" from a formatting problem.
-    raw: { stop_reason: lastResponse.stop_reason, usage: lastResponse.usage, text: text.slice(0, 6000) },
+    raw: { stop_reason: r.stopReason, usage: r.usage, text: r.text.slice(0, 6000) },
   }
 }
 
@@ -585,6 +653,400 @@ async function runLushaEnrich(
   return { updated, rawCount: enriched.length }
 }
 
+// ── Staged deep research ────────────────────────────────────────────────────
+// Each stage runs in its own invocation (fresh 400s wall clock) and persists
+// its output as a stored fact in orq_stage_results before chaining to the
+// next stage via self-invocation through the shared-secret gate.
+
+interface StageOutcome {
+  results: Record<string, unknown>          // stored under orq_stage_results[stage]
+  requestPatch?: Record<string, unknown>    // extra columns to set on the ORQ row
+  halt?: string | null                      // terminal status short-name ("No Results") to stop the chain
+}
+
+async function selfInvokeStage(requestId: string, stage: Stage, onBehalfOfUserId: string): Promise<void> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")
+  const secret = Deno.env.get("GRAPH_RENEWAL_CRON_SECRET") || Deno.env.get("GRAPH_WEBHOOK_CLIENT_STATE")
+  if (!supabaseUrl || !anonKey || !secret) {
+    throw new Error("Stage chaining is not configured (anon key or shared pipeline secret missing)")
+  }
+  const resp = await fetch(`${supabaseUrl}/functions/v1/property-owner-research`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${anonKey}`,
+      "apikey": anonKey,
+      "x-pipeline-test-secret": secret,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ action: "run_stage", request_id: requestId, stage, on_behalf_of_user_id: onBehalfOfUserId }),
+  })
+  if (resp.status >= 300) {
+    const t = await resp.text().catch(() => "")
+    throw new Error(`Failed to chain to stage "${stage}" (${resp.status}): ${t.slice(0, 200)}`)
+  }
+  // Drain the (small) 202 body so the connection can close cleanly.
+  await resp.text().catch(() => "")
+}
+
+// Stage 1 — Owner Identification: property identifiers → who owns/controls it.
+async function stageOwnerIdentification(
+  anthropicKey: string, target: Target,
+): Promise<StageOutcome> {
+  if (target.companyName) {
+    return { results: { skipped: true, reason: "Owner organization already known", organization: target.companyName } }
+  }
+  const prompt = [
+    `IDENTIFY who owns and controls the property below. Start with the database identifiers in the Context lines (LIHTC project ID, HUD property ID, parcel number) — searching an ID directly usually finds the project's listing page naming the real project name and owner. Then try the street address + ZIP, affordable-housing listings (LIHTC/HUD databases, waitlist pages that name the managing housing authority or owner), county assessor/parcel records, apartment listings, and news. Note: the property "name" in our system may just be a street address — the project's real marketed name is often different.`,
+    ``,
+    `Property to investigate: ${target.propertyLabel}`,
+    ...target.contextLines.map((l) => `Context: ${l}`),
+    ``,
+    speedRules(STAGE_MAX_SEARCHES, STAGE_MAX_FETCHES),
+    ``,
+    `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
+    `{"identified_owner_organization": string|null, "organization_domain": string|null, "marketed_property_name": string|null, "management_organization": string|null, "identification_notes": string, "evidence_urls": string[]}`,
+    `Rules: identified_owner_organization is the entity that OWNS/controls the property (developer, housing authority, ownership LLC's parent) — not the on-site manager (put that in management_organization). Cite every claim's URL in evidence_urls. If you truly cannot determine the owner, use null and explain what you found and where the trail ended in identification_notes.`,
+  ].join("\n")
+
+  const r = await callAnthropicResearch(anthropicKey, prompt, {
+    maxSearches: STAGE_MAX_SEARCHES, maxFetches: STAGE_MAX_FETCHES, maxFetchTokens: STAGE_FETCH_CONTENT_TOKENS, effort: STAGE_EFFORT,
+  })
+  const o = (extractFirstJson(r.text) || {}) as Record<string, unknown>
+  const org = typeof o.identified_owner_organization === "string" && o.identified_owner_organization.trim()
+    && !isPlaceholderOrgName(o.identified_owner_organization) ? o.identified_owner_organization.trim() : null
+  const domain = typeof o.organization_domain === "string" && o.organization_domain.trim() ? o.organization_domain.trim() : null
+  const results: Record<string, unknown> = {
+    identified_owner_organization: org,
+    organization_domain: domain,
+    marketed_property_name: typeof o.marketed_property_name === "string" ? o.marketed_property_name : null,
+    management_organization: typeof o.management_organization === "string" ? o.management_organization : null,
+    identification_notes: typeof o.identification_notes === "string" ? o.identification_notes : null,
+    evidence_urls: Array.isArray(o.evidence_urls) ? o.evidence_urls : [],
+    usage: r.usage,
+    text: r.text.slice(0, 4000),
+  }
+  if (!org) return { results, halt: "No Results" }
+  return {
+    results,
+    // The identified org is staging data until a reviewer approves it — the
+    // approval queue turns it into a real Account / property repoint.
+    requestPatch: {
+      orq_company_name: org,
+      orq_company_domain: domain,
+      orq_org_approval_status: "Organization Approval Pending",
+    },
+  }
+}
+
+// Stage 2 — Organization Research: verify the org (domain, parent, type).
+async function stageOrganizationResearch(
+  anthropicKey: string, target: Target, priorResults: Record<string, unknown>,
+): Promise<StageOutcome> {
+  if (!target.companyName) throw new Error("No owner organization to research (Owner Identification found none)")
+  const identification = (priorResults["Owner Identification"] || {}) as Record<string, unknown>
+  const prompt = [
+    `Research the real-estate organization below and VERIFY its identity and structure. We already believe it owns/controls: ${target.propertyLabel || "properties in our portfolio"}.`,
+    ``,
+    `Organization: ${target.companyName}`,
+    target.companyDomain ? `Known website domain: ${target.companyDomain}` : `Website domain: unknown — find the official website.`,
+    ...(typeof identification.identification_notes === "string" && identification.identification_notes
+      ? [`Prior finding: ${identification.identification_notes}`] : []),
+    ...target.contextLines.map((l) => `Context: ${l}`),
+    ``,
+    `Determine: the official/legal organization name, its website domain, whether it is a subsidiary (find the PARENT COMPANY that makes capital decisions), what kind of organization it is (housing authority, nonprofit, private developer, REIT, property manager...), where it is headquartered, and anything from state corporate registries or IRS 990 filings that names its officers.`,
+    ``,
+    speedRules(STAGE_MAX_SEARCHES, STAGE_MAX_FETCHES),
+    ``,
+    `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
+    `{"official_name": string|null, "organization_domain": string|null, "parent_company": string|null, "organization_type": string|null, "headquarters": string|null, "key_facts": string[], "evidence_urls": string[], "notes": string}`,
+    `Rules: key_facts = short facts useful for finding this organization's decision makers next (officer names from registries/990s go here). Cite evidence_urls for every claim.`,
+  ].join("\n")
+
+  const r = await callAnthropicResearch(anthropicKey, prompt, {
+    maxSearches: STAGE_MAX_SEARCHES, maxFetches: STAGE_MAX_FETCHES, maxFetchTokens: STAGE_FETCH_CONTENT_TOKENS, effort: STAGE_EFFORT,
+  })
+  const o = (extractFirstJson(r.text) || {}) as Record<string, unknown>
+  const domain = typeof o.organization_domain === "string" && o.organization_domain.trim() ? o.organization_domain.trim() : null
+  const results: Record<string, unknown> = {
+    official_name: typeof o.official_name === "string" ? o.official_name : null,
+    organization_domain: domain,
+    parent_company: typeof o.parent_company === "string" ? o.parent_company : null,
+    organization_type: typeof o.organization_type === "string" ? o.organization_type : null,
+    headquarters: typeof o.headquarters === "string" ? o.headquarters : null,
+    key_facts: Array.isArray(o.key_facts) ? o.key_facts : [],
+    evidence_urls: Array.isArray(o.evidence_urls) ? o.evidence_urls : [],
+    notes: typeof o.notes === "string" ? o.notes : null,
+    usage: r.usage,
+    text: r.text.slice(0, 4000),
+  }
+  const patch: Record<string, unknown> = {}
+  if (domain && !target.companyDomain) patch.orq_company_domain = domain
+  return { results, requestPatch: Object.keys(patch).length ? patch : undefined }
+}
+
+// Stage 3 — Decision Maker Discovery: web people pass + credit-free Lusha
+// search, merged into one candidate list (same person → one ORC row).
+async function stageDecisionMakerDiscovery(
+  admin: SupabaseClient, anthropicKey: string, requestId: string, target: Target,
+  jobTitles: string[], priorResults: Record<string, unknown>, callerUserId: string,
+): Promise<StageOutcome> {
+  if (!target.companyName) throw new Error("No owner organization to research (Owner Identification found none)")
+  const orgResearch = (priorResults["Organization Research"] || {}) as Record<string, unknown>
+  const factLines: string[] = []
+  if (typeof orgResearch.parent_company === "string" && orgResearch.parent_company) factLines.push(`Parent company: ${orgResearch.parent_company}`)
+  if (typeof orgResearch.organization_type === "string" && orgResearch.organization_type) factLines.push(`Organization type: ${orgResearch.organization_type}`)
+  if (typeof orgResearch.headquarters === "string" && orgResearch.headquarters) factLines.push(`Headquarters: ${orgResearch.headquarters}`)
+  for (const f of (Array.isArray(orgResearch.key_facts) ? orgResearch.key_facts : []).slice(0, 8)) {
+    if (typeof f === "string") factLines.push(f)
+  }
+
+  const prompt = [
+    `Identify the DECISION MAKERS at the real-estate organization below — the people who can approve building-level energy efficiency / HVAC retrofit projects. Prioritize titles like: ${jobTitles.join(", ")}. Property-management site staff (property managers, leasing agents, maintenance techs) are NOT decision makers — but the owner organization itself (including a housing authority and its executive director) absolutely counts. If a parent company makes capital decisions, its executives count too.`,
+    ``,
+    `Organization: ${target.companyName}`,
+    target.companyDomain ? `Website domain: ${target.companyDomain}` : `Website domain: unknown.`,
+    ...factLines.map((l) => `Known fact: ${l}`),
+    ``,
+    `Best sources: the organization's own leadership/about/team pages, the parent company's leadership page, LinkedIn company pages, press releases, state corporate registries, IRS 990 officer lists.`,
+    ``,
+    speedRules(STAGE_MAX_SEARCHES, STAGE_MAX_FETCHES),
+    ``,
+    `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
+    `{"people": ${PEOPLE_JSON_SHAPE}}`,
+    `Rules: only include people you found real evidence for (source_urls required, no guesses). Include publicly listed emails/phones only. Each person's "notes" = one sentence on why they are the decision maker. If you found nobody, use an empty people array.`,
+  ].join("\n")
+
+  const r = await callAnthropicResearch(anthropicKey, prompt, {
+    maxSearches: STAGE_MAX_SEARCHES, maxFetches: STAGE_MAX_FETCHES, maxFetchTokens: STAGE_FETCH_CONTENT_TOKENS, effort: STAGE_EFFORT,
+  })
+  const o = (extractFirstJson(r.text) || {}) as Record<string, unknown>
+  const webDrafts = parsePeople(Array.isArray(o.people) ? o.people : Array.isArray(o) ? o as unknown[] : [])
+  const savedWeb = await insertCandidates(admin, requestId, target, callerUserId, webDrafts)
+
+  const results: Record<string, unknown> = {
+    web_people_found: savedWeb.length,
+    usage: r.usage,
+    text: r.text.slice(0, 4000),
+  }
+  const patch: Record<string, unknown> = {}
+
+  // Inline credit-free Lusha search, merged by person: a Lusha hit matching a
+  // web-found candidate updates that row (adds the Lusha contact id that
+  // enrich needs) instead of duplicating the person in the review queue.
+  try {
+    const lushaKey = await getLushaApiKey(admin)
+    if (!lushaKey) throw new Error("LUSHA_API_KEY is not configured")
+    const l = await runLushaSearch(lushaKey, target, jobTitles)
+    if (l.providerRequestId) patch.orq_provider_request_id = l.providerRequestId
+    const byName = new Map<string, { id: string }>()
+    for (const row of savedWeb as Array<Record<string, unknown>>) {
+      byName.set(normalizeName(row.orc_full_name as string), { id: row.id as string })
+    }
+    const freshLusha: CandidateDraft[] = []
+    let merged = 0
+    for (const c of l.candidates) {
+      const existing = byName.get(normalizeName(c.full_name))
+      if (existing) {
+        await admin.from("owner_research_candidates")
+          .update({
+            orc_provider_contact_id: c.provider_contact_id || null,
+            orc_has_emails: c.has_emails ?? null,
+            orc_has_phones: c.has_phones ?? null,
+            orc_seniority: c.seniority || undefined,
+            orc_department: c.department || undefined,
+            orc_updated_by: callerUserId,
+            orc_updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id)
+        merged++
+      } else {
+        freshLusha.push(c)
+      }
+    }
+    const savedLusha = await insertCandidates(admin, requestId, target, callerUserId, freshLusha)
+    results.lusha_people_found = savedLusha.length
+    results.lusha_merged_into_web_candidates = merged
+  } catch (e) {
+    // Lusha being down/unconfigured must not sink the whole stage — the web
+    // findings stand on their own and Lusha search can be run manually later.
+    results.lusha_error = (e as Error).message
+  }
+
+  return { results, requestPatch: Object.keys(patch).length ? patch : undefined }
+}
+
+// Stage 4 — Contact Info Gathering: public contact info for found candidates
+// that still lack it (Lusha enrich stays a manual, per-person paid action).
+async function stageContactInfoGathering(
+  admin: SupabaseClient, anthropicKey: string, requestId: string, target: Target, callerUserId: string,
+): Promise<StageOutcome> {
+  const { data: cands } = await admin
+    .from("owner_research_candidates")
+    .select("id, orc_full_name, orc_job_title, orc_company_name, orc_emails, orc_phones, orc_linkedin_url")
+    .eq("orc_request_id", requestId)
+    .eq("orc_is_deleted", false)
+  const needing = (cands || []).filter((c) => !c.orc_emails && !c.orc_phones).slice(0, STAGE_CONTACT_INFO_MAX_PEOPLE)
+  if (needing.length === 0) {
+    return { results: { skipped: true, reason: "No candidates need public contact info" } }
+  }
+
+  const personLines = needing.map((c) =>
+    `- ${c.orc_full_name}${c.orc_job_title ? `, ${c.orc_job_title}` : ""} at ${c.orc_company_name || target.companyName || "the organization"}`)
+  const prompt = [
+    `Find PUBLICLY LISTED work contact information (work email, office/direct phone, LinkedIn profile URL) for the people below. Good sources: the organization's own website (staff directory, contact page, press releases), state registry filings, HUD/PHA contact listings, conference speaker pages, news articles.`,
+    ``,
+    `Organization: ${target.companyName || "?"}${target.companyDomain ? ` (${target.companyDomain})` : ""}`,
+    `People:`,
+    ...personLines,
+    ``,
+    speedRules(STAGE_MAX_SEARCHES, STAGE_MAX_FETCHES),
+    ``,
+    `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
+    `{"people": [{"full_name": string, "emails": string[]|null, "phones": string[]|null, "linkedin_url": string|null, "source_urls": string[], "notes": string}]}`,
+    `Rules: publicly listed information only — never guess or fabricate an email pattern. Cite the page each item came from in source_urls. Omit people you found nothing for.`,
+  ].join("\n")
+
+  const r = await callAnthropicResearch(anthropicKey, prompt, {
+    maxSearches: STAGE_MAX_SEARCHES, maxFetches: STAGE_MAX_FETCHES, maxFetchTokens: STAGE_FETCH_CONTENT_TOKENS, effort: STAGE_EFFORT,
+  })
+  const o = (extractFirstJson(r.text) || {}) as Record<string, unknown>
+  const people = Array.isArray(o.people) ? o.people as Array<Record<string, unknown>> : []
+
+  const byName = new Map(needing.map((c) => [normalizeName(c.orc_full_name), c]))
+  let updated = 0
+  for (const p of people) {
+    const cand = byName.get(normalizeName(typeof p.full_name === "string" ? p.full_name : ""))
+    if (!cand) continue
+    const emails = Array.isArray(p.emails) ? p.emails.filter((e) => typeof e === "string") : []
+    const phones = Array.isArray(p.phones) ? p.phones.filter((e) => typeof e === "string") : []
+    const linkedin = typeof p.linkedin_url === "string" && p.linkedin_url.trim() ? p.linkedin_url.trim() : null
+    const sourceUrls = Array.isArray(p.source_urls) ? p.source_urls : []
+    if (!emails.length && !phones.length && !linkedin) continue
+    await admin.from("owner_research_candidates")
+      .update({
+        ...(emails.length ? { orc_emails: emails, orc_has_emails: true } : {}),
+        ...(phones.length ? { orc_phones: phones, orc_has_phones: true } : {}),
+        ...(linkedin && !cand.orc_linkedin_url ? { orc_linkedin_url: linkedin } : {}),
+        ...(sourceUrls.length ? { orc_source_urls: sourceUrls } : {}),
+        orc_updated_by: callerUserId,
+        orc_updated_at: new Date().toISOString(),
+      })
+      .eq("id", cand.id)
+    updated++
+  }
+
+  return {
+    results: {
+      candidates_checked: needing.length,
+      candidates_updated: updated,
+      usage: r.usage,
+      text: r.text.slice(0, 4000),
+    },
+  }
+}
+
+// Runs one stage end-to-end: mark it started, execute, persist its results,
+// then either chain to the next stage or finalize the request.
+async function executeStage(
+  admin: SupabaseClient, anthropicKey: string, requestId: string, stage: Stage, callerUserId: string,
+): Promise<void> {
+  const { data: row, error } = await admin
+    .from("owner_research_requests")
+    .select("*")
+    .eq("id", requestId).maybeSingle()
+  if (error || !row) throw new Error("Research request not found")
+
+  // Rebuild the target from the live records, then overlay facts persisted by
+  // earlier stages (an identified owner org supersedes the placeholder).
+  const target = await resolveTarget(admin, {
+    account_id: row.orq_account_id, property_id: row.orq_property_id,
+  })
+  if (typeof target === "string") throw new Error(target)
+  if (row.orq_company_name && !isPlaceholderOrgName(row.orq_company_name)) {
+    target.companyName = row.orq_company_name
+    target.ownerUnknown = false
+  }
+  if (row.orq_company_domain && !target.companyDomain) target.companyDomain = row.orq_company_domain
+
+  let jobTitles: string[] = Array.isArray(row.orq_target_job_titles) ? row.orq_target_job_titles : []
+  if (jobTitles.length === 0) jobTitles = await defaultJobTitles(admin)
+
+  await admin.from("owner_research_requests")
+    .update({
+      orq_status: "Research Request In Progress",
+      orq_stage: stage,
+      orq_stage_started_at: new Date().toISOString(),
+      orq_updated_by: callerUserId,
+      orq_updated_at: new Date().toISOString(),
+    })
+    .eq("id", requestId)
+
+  const priorResults = (row.orq_stage_results || {}) as Record<string, unknown>
+  let outcome: StageOutcome
+  switch (stage) {
+    case "Owner Identification":
+      outcome = await stageOwnerIdentification(anthropicKey, target)
+      break
+    case "Organization Research":
+      outcome = await stageOrganizationResearch(anthropicKey, target, priorResults)
+      break
+    case "Decision Maker Discovery":
+      outcome = await stageDecisionMakerDiscovery(admin, anthropicKey, requestId, target, jobTitles, priorResults, callerUserId)
+      break
+    case "Contact Info Gathering":
+      outcome = await stageContactInfoGathering(admin, anthropicKey, requestId, target, callerUserId)
+      break
+    default:
+      throw new Error(`Unknown research stage: ${stage}`)
+  }
+
+  const stageResults = {
+    ...priorResults,
+    [stage]: { ...outcome.results, completed_at: new Date().toISOString() },
+  }
+
+  if (outcome.halt) {
+    await finishRequest(admin, requestId, callerUserId, {
+      orq_status: `Research Request ${outcome.halt}`,
+      orq_stage_results: stageResults,
+      orq_total_results: 0,
+      ...(outcome.requestPatch || {}),
+    })
+    return
+  }
+
+  const next = nextStageAfter(stage)
+  if (next) {
+    await admin.from("owner_research_requests")
+      .update({
+        orq_stage_results: stageResults,
+        ...(outcome.requestPatch || {}),
+        orq_updated_by: callerUserId,
+        orq_updated_at: new Date().toISOString(),
+      })
+      .eq("id", requestId)
+    await selfInvokeStage(requestId, next, callerUserId)
+    return
+  }
+
+  // Last stage done — count what there is to review and finalize.
+  const { count } = await admin
+    .from("owner_research_candidates")
+    .select("id", { count: "exact", head: true })
+    .eq("orc_request_id", requestId)
+    .eq("orc_is_deleted", false)
+  const peopleCount = count || 0
+  const orgAwaitingApproval =
+    (outcome.requestPatch?.orq_org_approval_status || row.orq_org_approval_status) === "Organization Approval Pending"
+  await finishRequest(admin, requestId, callerUserId, {
+    orq_status: (peopleCount > 0 || orgAwaitingApproval) ? "Research Request Ready for Review" : "Research Request No Results",
+    orq_stage_results: stageResults,
+    orq_total_results: peopleCount,
+    ...(outcome.requestPatch || {}),
+  })
+}
+
 // ── Handler ─────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -596,8 +1058,8 @@ Deno.serve(async (req) => {
   catch { return json({ ok: false, error: "Invalid JSON body" }, 400) }
 
   const action = body.action as string
-  if (!["web_research", "lusha_search", "lusha_enrich"].includes(action)) {
-    return json({ ok: false, error: "action must be web_research | lusha_search | lusha_enrich" }, 400)
+  if (!["deep_research", "run_stage", "web_research", "lusha_search", "lusha_enrich"].includes(action)) {
+    return json({ ok: false, error: "action must be deep_research | run_stage | web_research | lusha_search | lusha_enrich" }, 400)
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")
@@ -627,8 +1089,10 @@ Deno.serve(async (req) => {
     }
 
     // Self-healing: a background run killed by the platform wall clock can
-    // leave a request stuck in Submitted. Fail anything stale before starting
-    // new work so the UI never shows a zombie run as in-progress.
+    // leave a request stuck mid-flight. Fail anything stale before starting
+    // new work so the UI never shows a zombie run as in-progress. Staged runs
+    // are judged per stage (each stage resets orq_stage_started_at).
+    const staleCutoff = new Date(Date.now() - STALE_RUN_MINUTES * 60_000).toISOString()
     await admin.from("owner_research_requests")
       .update({
         orq_status: "Research Request Failed",
@@ -637,7 +1101,40 @@ Deno.serve(async (req) => {
         orq_updated_at: new Date().toISOString(),
       })
       .eq("orq_status", "Research Request Submitted")
-      .lt("orq_created_at", new Date(Date.now() - STALE_RUN_MINUTES * 60_000).toISOString())
+      .lt("orq_created_at", staleCutoff)
+    await admin.from("owner_research_requests")
+      .update({
+        orq_status: "Research Request Failed",
+        orq_error_message: `A research stage did not finish within ${STALE_RUN_MINUTES} minutes and was marked failed (edge worker time limit)`,
+        orq_completed_at: new Date().toISOString(),
+        orq_updated_at: new Date().toISOString(),
+      })
+      .eq("orq_status", "Research Request In Progress")
+      .lt("orq_stage_started_at", staleCutoff)
+
+    // ---- run_stage: execute one stage of an existing staged request --------
+    if (action === "run_stage") {
+      const requestId = body.request_id as string
+      const stage = body.stage as Stage
+      if (!requestId || !STAGES.includes(stage)) {
+        return json({ ok: false, error: `request_id and a valid stage (${STAGES.join(" | ")}) are required` }, 400)
+      }
+      const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")
+      if (!anthropicKey) return json({ ok: false, error: "ANTHROPIC_API_KEY is not configured" }, 500)
+      const work = (async () => {
+        try {
+          await executeStage(admin, anthropicKey, requestId, stage, callerUserId)
+        } catch (inner) {
+          await finishRequest(admin, requestId, callerUserId, {
+            orq_status: "Research Request Failed",
+            orq_error_message: `${stage}: ${(inner as Error).message}`,
+          })
+        }
+      })()
+      // deno-lint-ignore no-explicit-any
+      ;(globalThis as any).EdgeRuntime?.waitUntil?.(work)
+      return json({ ok: true, background: true, request_id: requestId, stage }, 202)
+    }
 
     // ---- Search actions: create an ORQ row, run, save ORC rows ------------
     const target = await resolveTarget(admin, body)
@@ -649,6 +1146,45 @@ Deno.serve(async (req) => {
     if (jobTitles.length === 0) jobTitles = await defaultJobTitles(admin)
     if (jobTitles.length === 0) {
       return json({ ok: false, error: "No target job titles configured (picklist orq_target_job_title is empty)" }, 500)
+    }
+
+    // ---- deep_research: create the request and start the stage chain ------
+    if (action === "deep_research") {
+      const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")
+      if (!anthropicKey) return json({ ok: false, error: "ANTHROPIC_API_KEY is not configured" }, 500)
+      const initialStage: Stage = target.companyName ? "Organization Research" : "Owner Identification"
+      const { data: reqRow, error: reqErr } = await admin
+        .from("owner_research_requests")
+        .insert({
+          orq_account_id: target.accountId,
+          orq_property_id: target.propertyId,
+          orq_company_name: target.companyName,
+          orq_company_domain: target.companyDomain,
+          orq_target_job_titles: jobTitles,
+          orq_research_method: "Deep Research",
+          orq_status: "Research Request In Progress",
+          orq_stage: initialStage,
+          orq_stage_started_at: new Date().toISOString(),
+          orq_owner: callerUserId,
+          orq_created_by: callerUserId,
+        })
+        .select().single()
+      if (reqErr || !reqRow) {
+        return json({ ok: false, error: `Failed to create research request: ${reqErr?.message}` }, 500)
+      }
+      const work = (async () => {
+        try {
+          await executeStage(admin, anthropicKey, reqRow.id, initialStage, callerUserId)
+        } catch (inner) {
+          await finishRequest(admin, reqRow.id, callerUserId, {
+            orq_status: "Research Request Failed",
+            orq_error_message: `${initialStage}: ${(inner as Error).message}`,
+          })
+        }
+      })()
+      // deno-lint-ignore no-explicit-any
+      ;(globalThis as any).EdgeRuntime?.waitUntil?.(work)
+      return json({ ok: true, background: true, request: reqRow }, 202)
     }
 
     const method = action === "web_research" ? "Web Research" : "Lusha Prospecting Search"

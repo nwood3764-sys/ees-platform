@@ -5,13 +5,16 @@ import { getCurrentUserId } from './reportsService'
 // ownerResearchService
 //
 // Data layer for the Property Owner Research tool (PropertyOwnerResearchPanel
-// on account and property records). Finds decision makers for property owner
-// groups and specific properties, tiered by cost:
+// on account and property records) and the Owner Research review queue in the
+// Outreach module. Finds decision makers for property owner groups and
+// specific properties:
 //
-//   runOwnerResearch('web_research', …)  — FREE: AI web research (domain,
-//                                          leadership pages, parent companies,
-//                                          registries) via the
-//                                          property-owner-research edge fn.
+//   runOwnerResearch('deep_research', …) — the staged pipeline: Owner
+//                                          Identification → Organization
+//                                          Research → Decision Maker Discovery
+//                                          (web + Lusha search merged) →
+//                                          Contact Info Gathering. Ends
+//                                          "Ready for Review".
 //   runOwnerResearch('lusha_search', …)  — NO CREDITS: Lusha prospecting
 //                                          search (names + titles only).
 //   enrichCandidates(…)                  — PAID Lusha credits: reveal
@@ -19,9 +22,12 @@ import { getCurrentUserId } from './reportsService'
 //                                          selected candidates.
 //
 // Requests are ORQ- records (owner_research_requests); every person found is
-// an ORC- record (owner_research_candidates) that can be promoted to a real
-// Contact or dismissed. Nothing here is hardcoded: target job titles come
-// from the orq_target_job_title picklist (admin-manageable).
+// an ORC- record (owner_research_candidates). The review queue is the only
+// path from research findings to real CRM records: approving a person creates
+// a Contact; approving an identified organization matches/creates the Account
+// and (with confirmation) repoints the property off its placeholder owner.
+// Nothing here is hardcoded: target job titles come from the
+// orq_target_job_title picklist (admin-manageable).
 // ---------------------------------------------------------------------------
 
 /** Target job titles (decision makers) — admin-managed picklist. */
@@ -153,11 +159,17 @@ export async function runOwnerResearch(action, target, jobTitles) {
   return data
 }
 
+/** Statuses that mean a run is still working server-side. */
+const IN_FLIGHT_STATUSES = ['Research Request Submitted', 'Research Request In Progress']
+
 /**
- * Wait for a background research run (web_research returns 202 immediately)
- * to finish, by polling the ORQ row. Resolves with the final request row.
+ * Wait for a background research run (deep_research / web_research return 202
+ * immediately) to finish, by polling the ORQ row. A staged deep-research run
+ * walks several stages, so the default timeout is generous; `onProgress`
+ * receives each polled row (use orq_stage to show live stage progress).
+ * Resolves with the final request row.
  */
-export async function waitForRequestCompletion(requestId, { timeoutMs = 300000, intervalMs = 5000 } = {}) {
+export async function waitForRequestCompletion(requestId, { timeoutMs = 1200000, intervalMs = 5000, onProgress } = {}) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const { data, error } = await supabase
@@ -166,9 +178,10 @@ export async function waitForRequestCompletion(requestId, { timeoutMs = 300000, 
       .eq('id', requestId)
       .maybeSingle()
     if (error) throw new Error(error.message)
-    if (data && data.orq_status !== 'Research Request Submitted') return data
+    if (data && !IN_FLIGHT_STATUSES.includes(data.orq_status)) return data
+    if (data && onProgress) onProgress(data)
     if (Date.now() >= deadline) {
-      throw new Error('Web research is still running in the background — check back in a minute for results.')
+      throw new Error('Research is still running in the background — check back in a few minutes for results.')
     }
     await new Promise(resolve => setTimeout(resolve, intervalMs))
   }
@@ -208,21 +221,27 @@ export async function dismissCandidate(candidateId) {
 /**
  * Promote a candidate to a real Contact on the owner-group account.
  * Creates the contact (CT-), links it back on the candidate, and flips the
- * candidate status. Returns the new contact row.
+ * candidate status. The review queue's edit-then-approve flow passes
+ * `overrides` (reviewer-corrected name/title/email/phone/linkedin) and can
+ * redirect the contact onto an approved account via `accountId` (so a person
+ * found under a placeholder owner lands on the real account once the
+ * identified organization is approved). Returns the new contact row.
  */
-export async function promoteCandidateToContact(candidate) {
+export async function promoteCandidateToContact(candidate, { overrides = {}, accountId: accountIdOverride = null } = {}) {
   const userId = await getCurrentUserId()
   if (!userId) throw new Error('Could not resolve the current LEAP user')
-  const accountId = candidate.orc_account_id
+  const accountId = accountIdOverride || candidate.orc_account_id
   if (!accountId) throw new Error('This candidate has no owner-group account to attach the contact to')
 
-  const fullName = (candidate.orc_full_name || '').trim()
-  const firstName = candidate.orc_first_name || fullName.split(/\s+/)[0] || 'Unknown'
-  const lastName = candidate.orc_last_name || fullName.split(/\s+/).slice(1).join(' ') || 'Unknown'
+  const fullName = (overrides.fullName ?? candidate.orc_full_name ?? '').trim()
+  const firstName = overrides.firstName || candidate.orc_first_name || fullName.split(/\s+/)[0] || 'Unknown'
+  const lastName = overrides.lastName || candidate.orc_last_name || fullName.split(/\s+/).slice(1).join(' ') || 'Unknown'
   const emails = Array.isArray(candidate.orc_emails) ? candidate.orc_emails : []
   const phones = Array.isArray(candidate.orc_phones) ? candidate.orc_phones : []
-  const firstEmail = emails.map(e => (typeof e === 'string' ? e : e?.email || e?.emailAddress || e?.address)).find(Boolean) || null
-  const firstPhone = phones.map(p => (typeof p === 'string' ? p : p?.number || p?.phoneNumber || p?.internationalNumber)).find(Boolean) || null
+  const firstEmail = overrides.email !== undefined ? (overrides.email || null)
+    : emails.map(e => (typeof e === 'string' ? e : e?.email || e?.emailAddress || e?.address)).find(Boolean) || null
+  const firstPhone = overrides.phone !== undefined ? (overrides.phone || null)
+    : phones.map(p => (typeof p === 'string' ? p : p?.number || p?.phoneNumber || p?.internationalNumber)).find(Boolean) || null
 
   const { data: contact, error } = await supabase
     .from('contacts')
@@ -232,10 +251,10 @@ export async function promoteCandidateToContact(candidate) {
       contact_first_name: firstName,
       contact_last_name: lastName,
       contact_account_id: accountId,
-      contact_title: candidate.orc_job_title || null,
+      contact_title: overrides.title !== undefined ? (overrides.title || null) : (candidate.orc_job_title || null),
       contact_email: firstEmail,
       contact_phone: firstPhone,
-      contact_linkedin: candidate.orc_linkedin_url || null,
+      contact_linkedin: overrides.linkedin !== undefined ? (overrides.linkedin || null) : (candidate.orc_linkedin_url || null),
       contact_owner: userId,
       contact_created_by: userId,
     })
@@ -301,4 +320,194 @@ export function buildManualSearchLinks({ companyName, companyDomain, state, prop
   }
   if (state && registries[state]) links.push(registries[state])
   return links
+}
+
+// ---------------------------------------------------------------------------
+// Review queue — the cross-record workspace in the Outreach module.
+// ---------------------------------------------------------------------------
+
+/** Candidate statuses that mean "awaiting a reviewer's decision". */
+export const PENDING_CANDIDATE_STATUSES = ['Research Candidate Found', 'Research Candidate Enriched']
+
+/**
+ * Everything awaiting review across all properties/accounts:
+ *   orgs   — requests whose identified owner organization awaits approval
+ *   people — candidates not yet approved/dismissed/rejected
+ * Both come back with property/account context for display and filtering.
+ */
+export async function listReviewQueue() {
+  const [orgsRes, peopleRes] = await Promise.all([
+    supabase
+      .from('owner_research_requests')
+      .select(`*,
+        property:properties!orq_property_id (id, property_name, property_city, property_state),
+        account:accounts!owner_research_requests_orq_account_id_fkey (id, account_name)`)
+      .eq('orq_is_deleted', false)
+      .eq('orq_org_approval_status', 'Organization Approval Pending')
+      .order('orq_created_at', { ascending: false }),
+    supabase
+      .from('owner_research_candidates')
+      .select(`*,
+        request:owner_research_requests!orc_request_id (id, orq_record_number, orq_company_name, orq_company_domain, orq_status, orq_org_approval_status, orq_approved_account_id),
+        property:properties!orc_property_id (id, property_name, property_city, property_state),
+        account:accounts!orc_account_id (id, account_name)`)
+      .eq('orc_is_deleted', false)
+      .in('orc_status', PENDING_CANDIDATE_STATUSES)
+      .order('orc_created_at', { ascending: false }),
+  ])
+  if (orgsRes.error) throw new Error(orgsRes.error.message)
+  if (peopleRes.error) throw new Error(peopleRes.error.message)
+  return { orgs: orgsRes.data || [], people: peopleRes.data || [] }
+}
+
+/** Reject a candidate from the review queue (auditable, keeps the row). */
+export async function rejectCandidate(candidateId, reason) {
+  const userId = await getCurrentUserId()
+  const { error } = await supabase
+    .from('owner_research_candidates')
+    .update({
+      orc_status: 'Research Candidate Rejected',
+      orc_rejected_reason: reason || null,
+      orc_updated_by: userId,
+      orc_updated_at: new Date().toISOString(),
+    })
+    .eq('id', candidateId)
+  if (error) throw new Error(error.message)
+}
+
+/** "Westminster Company, LLC" → "westminstercompany" — for account matching. */
+function normalizeOrgName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/\b(llc|l\.l\.c|inc|incorporated|lp|llp|ltd|corp|corporation|co|company|companies|group|holdings|partners|properties|apartments)\b/g, '')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * Find existing accounts that could BE the identified organization, so the
+ * approve dialog can offer "link to existing" instead of creating a
+ * duplicate. Match strength: exact normalized name or same website domain =
+ * 'strong'; name contains/contained-by = 'possible'. Anything ambiguous is
+ * only ever surfaced to the reviewer — never auto-merged.
+ */
+export async function findAccountMatches(orgName, orgDomain) {
+  const norm = normalizeOrgName(orgName)
+  const firstToken = String(orgName || '').trim().split(/\s+/)[0] || ''
+  const ors = []
+  if (firstToken.length >= 3) ors.push(`account_name.ilike.%${firstToken}%`)
+  if (orgDomain) ors.push(`account_website.ilike.%${orgDomain}%`)
+  if (ors.length === 0) return []
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('id, account_record_number, account_name, account_website, account_hud_participant_number')
+    .eq('account_is_deleted', false)
+    .or(ors.join(','))
+    .limit(25)
+  if (error) throw new Error(error.message)
+  const matches = []
+  for (const a of data || []) {
+    if (isPlaceholderOrgName(a.account_name)) continue
+    const aNorm = normalizeOrgName(a.account_name)
+    const aDomain = extractDomain(a.account_website)
+    let strength = null
+    if (norm && aNorm === norm) strength = 'strong'
+    else if (orgDomain && aDomain && aDomain.toLowerCase() === orgDomain.toLowerCase()) strength = 'strong'
+    else if (norm && aNorm && (aNorm.includes(norm) || norm.includes(aNorm))) strength = 'possible'
+    if (strength) matches.push({ ...a, matchStrength: strength })
+  }
+  matches.sort((a, b) => (a.matchStrength === 'strong' ? -1 : 1) - (b.matchStrength === 'strong' ? -1 : 1))
+  return matches
+}
+
+/**
+ * Approve an identified owner organization: link it to an existing account
+ * (existingAccountId) or create a new one, optionally repoint the property
+ * off its placeholder account (explicit reviewer confirmation), and move the
+ * request's pending candidates onto the real account. Returns the account.
+ */
+export async function approveIdentifiedOrganization(request, { existingAccountId = null, repointProperty = false, accountName = null } = {}) {
+  const userId = await getCurrentUserId()
+  if (!userId) throw new Error('Could not resolve the current LEAP user')
+  // Research output can be verbose ("X, LLC (parent of Y...)") — the reviewer
+  // edits the final account name in the approve dialog.
+  const orgName = (accountName || request.orq_company_name || '').trim()
+  if (!orgName || isPlaceholderOrgName(orgName)) {
+    throw new Error('This request has no identified organization to approve')
+  }
+
+  let account
+  if (existingAccountId) {
+    const { data, error } = await supabase
+      .from('accounts')
+      .select('id, account_record_number, account_name')
+      .eq('id', existingAccountId).maybeSingle()
+    if (error || !data) throw new Error(error?.message || 'Selected account not found')
+    account = data
+  } else {
+    const { data, error } = await supabase
+      .from('accounts')
+      .insert({
+        account_record_number: '',
+        account_name: orgName,
+        account_website: request.orq_company_domain ? `https://${request.orq_company_domain}` : null,
+        account_owner: userId,
+        account_created_by: userId,
+      })
+      .select('id, account_record_number, account_name')
+      .single()
+    if (error) throw new Error(`Failed to create account: ${error.message}`)
+    account = data
+  }
+
+  const { error: reqErr } = await supabase
+    .from('owner_research_requests')
+    .update({
+      orq_org_approval_status: 'Organization Approved',
+      orq_approved_account_id: account.id,
+      orq_updated_by: userId,
+      orq_updated_at: new Date().toISOString(),
+    })
+    .eq('id', request.id)
+  if (reqErr) throw new Error(`Account ready (${account.account_record_number}) but request update failed: ${reqErr.message}`)
+
+  if (repointProperty && request.orq_property_id) {
+    const { error: propErr } = await supabase
+      .from('properties')
+      .update({
+        property_account_id: account.id,
+        property_updated_by: userId,
+        property_updated_at: new Date().toISOString(),
+      })
+      .eq('id', request.orq_property_id)
+    if (propErr) throw new Error(`Account approved (${account.account_record_number}) but the property repoint failed: ${propErr.message}`)
+  }
+
+  // Pending people from this request belong to the real account now, so
+  // approving them creates contacts in the right place.
+  const { error: candErr } = await supabase
+    .from('owner_research_candidates')
+    .update({
+      orc_account_id: account.id,
+      orc_updated_by: userId,
+      orc_updated_at: new Date().toISOString(),
+    })
+    .eq('orc_request_id', request.id)
+    .in('orc_status', PENDING_CANDIDATE_STATUSES)
+  if (candErr) throw new Error(`Account approved (${account.account_record_number}) but candidate re-link failed: ${candErr.message}`)
+
+  return account
+}
+
+/** Reject an identified organization (kept on the request, auditable). */
+export async function rejectIdentifiedOrganization(requestId) {
+  const userId = await getCurrentUserId()
+  const { error } = await supabase
+    .from('owner_research_requests')
+    .update({
+      orq_org_approval_status: 'Organization Rejected',
+      orq_updated_by: userId,
+      orq_updated_at: new Date().toISOString(),
+    })
+    .eq('id', requestId)
+  if (error) throw new Error(error.message)
 }

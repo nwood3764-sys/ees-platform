@@ -1,7 +1,31 @@
 # Owner Research → Outreach Workflow — Handoff & Build Plan
 
-Status: **PLANNED — awaiting phase confirmation from Nicholas (2026-07-07)**
+Status: **Phases 1 + 2 SHIPPED (2026-07-09)** — staged deep research + the
+Owner Research review queue are live. Phases 3 (batch) and 4 (outreach
+handoff) remain planned below.
 Predecessor: Property Owner Research tool v1 (PRs #102, #105–#108; edge fn v13).
+
+**What shipped in Phases 1+2 (edge fn v14, migration
+`20260708120000_owner_research_workflow_v2.sql`):**
+- `deep_research` action: Owner Identification → Organization Research →
+  Decision Maker Discovery (web + inline credit-free Lusha, merged by person)
+  → Contact Info Gathering. Each stage is its own invocation (fresh 400s
+  budget, effort `medium`), chained via self-invocation through the shared
+  pipeline-secret gate; `run_stage` retries a single stage. Stage outputs
+  persist in `orq_stage_results`; stale sweep covers per-stage timeouts.
+  Runs end at "Research Request Ready for Review".
+- Review queue: `OwnerResearchQueue` in Outreach → **Owner Research**
+  (module_sections seeded). Approve identified org → account match
+  (normalized name/domain, reviewer picks; never auto-merged) or create →
+  optional property repoint (explicit checkbox) → pending candidates
+  re-linked to the real account. Approve person → edit-before-save →
+  Contact created. Reject with reason (`orc_rejected_reason`). Bulk approve.
+- Live-verified on 314 Greendale Dr, Wilmington NC (ORQ-00015): identified
+  **JES Holdings, LLC** (jesholdings.com) as the owner behind the LIHTC
+  entity, mapped its structure (Fairway Management, Affordable Equity
+  Partners, MACO Development), and returned 13 candidates (1 web-evidenced
+  Founder/CEO + 12 enrichable Lusha executives) in ~6.5 minutes across the
+  four stages — left pending in the queue as real review-flow test data.
 
 ---
 
@@ -160,9 +184,9 @@ outreach conversion.
 
 | # | Decision | Recommendation | Status |
 |---|---|---|---|
-| 1 | Phase order | 1 → 2 → 3 → 4 as above (depth first, then the queue, then scale, then handoff) | PROPOSED |
-| 2 | Property repoint on org approval | Yes, with explicit confirmation in the approve dialog (fixes placeholder data as you work) | PROPOSED |
-| 3 | Lusha enrich in batch runs | Never automatic — always per-person manual confirm | PROPOSED |
+| 1 | Phase order | 1 → 2 → 3 → 4 as above (depth first, then the queue, then scale, then handoff) | **DECIDED 2026-07-09** (Nicholas — proceed on recommendation) |
+| 2 | Property repoint on org approval | Yes, with explicit confirmation in the approve dialog (fixes placeholder data as you work) | **DECIDED 2026-07-09** (implemented as recommended — checkbox in the approve dialog) |
+| 3 | Lusha enrich in batch runs | Never automatic — always per-person manual confirm | **DECIDED 2026-07-09** (implemented as recommended) |
 | 4 | Outreach follow-through (Phase 4) | Draft email for review, don't auto-send | PROPOSED |
 
 ## 8. File + DB-table index (what the next session touches)
