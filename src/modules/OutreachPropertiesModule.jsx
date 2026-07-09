@@ -8,6 +8,7 @@ import ConfiguredHome from '../components/ConfiguredHome'
 import HelpIcon from '../components/help/HelpIcon'
 import { OutreachMap } from '../components/OutreachMap'
 import OutreachPropertyCard from '../components/OutreachPropertyCard'
+import OwnerResearchQueue from '../components/OwnerResearchQueue'
 import OutreachFilterPanel, {
   EMPTY_FILTERS,
   applyFilters,
@@ -33,10 +34,11 @@ import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
  */
 
 const CODE_SECTIONS = [
-  { id: 'home',       label: 'Home'       },
-  { id: 'properties', label: 'Properties' },
-  { id: 'map',        label: 'Map'        },
-  { id: 'imports',    label: 'Imports'    },
+  { id: 'home',       label: 'Home'           },
+  { id: 'properties', label: 'Properties'     },
+  { id: 'map',        label: 'Map'            },
+  { id: 'research',   label: 'Owner Research' },
+  { id: 'imports',    label: 'Imports'        },
 ]
 
 // Display columns for the Outreach Properties list.
@@ -749,6 +751,7 @@ export default function OutreachPropertiesModule({
             {sec === 'home'       && <ConfiguredHome crumb="Outreach" moduleId="outreach" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
             {sec === 'properties' && <PropertiesListSection loading={loadingProperties} error={error} properties={properties} onRefresh={loadAll} onRetry={loadAll} onOpenRecord={openProperty} />}
             {sec === 'map'        && <MapSection loading={mapPropertiesQ.loading} error={mapPropertiesQ.error} properties={mapProperties} onRetry={loadAll} onOpenProperty={openPropertyCard} />}
+            {sec === 'research'   && <OwnerResearchQueue onOpenRecord={(r) => setSelectedRecord(r)} />}
             {sec === 'imports'    && <ImportsSection batches={batches} loading={loadingBatches} error={error} onRefresh={loadAll} onRetry={loadAll} onOpenImport={openImport} onOpenImportModal={() => setShowImportModal(true)} />}
           </>
         )}

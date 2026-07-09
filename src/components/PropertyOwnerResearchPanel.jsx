@@ -21,9 +21,12 @@ import {
 // decision makers who can approve energy-efficiency work — CEO, asset
 // manager, facilities director — NOT site property-management staff.
 //
-// Tiered by cost, cheapest first:
-//   1. Web Research  — FREE. AI web search over the org's domain, leadership
-//      pages, parent companies, registries. Evidence links on every hit.
+// Research actions:
+//   1. Deep Research — the staged pipeline (Owner Identification →
+//      Organization Research → Decision Maker Discovery → Contact Info
+//      Gathering). Each stage runs with its own time budget; the panel shows
+//      live stage progress. Ends "Ready for Review" — findings flow into the
+//      Owner Research queue in the Outreach module.
 //   2. Lusha Search  — NO CREDITS. Names + titles + has-email/phone flags.
 //   3. Reveal Contact Info — PAID Lusha credits, per selected person only.
 //
@@ -81,6 +84,7 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
   const [candidates, setCandidates] = useState([])
   const [loading, setLoading] = useState(true)
   const [runningAction, setRunningAction] = useState(null)
+  const [runStage, setRunStage] = useState(null)
   const [busyCandidateId, setBusyCandidateId] = useState(null)
   const [error, setError] = useState(null)
   const [showDismissed, setShowDismissed] = useState(false)
@@ -125,6 +129,7 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
   async function handleRun(action) {
     if (!target) return
     setRunningAction(action)
+    setRunStage(null)
     setError(null)
     try {
       const runTarget = target.companyName
@@ -133,23 +138,30 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
       let res = await runOwnerResearch(action, runTarget)
       let request = res?.request
       if (res?.background && request?.id) {
-        // web_research runs server-side in the background — poll until done
+        // Staged research runs server-side in the background — poll until done,
+        // surfacing the live stage so the user can watch it work.
         await refresh()
-        request = await waitForRequestCompletion(request.id)
+        request = await waitForRequestCompletion(request.id, {
+          onProgress: (row) => setRunStage(row.orq_stage || null),
+        })
       }
       if (request?.orq_status === 'Research Request Failed') {
         throw new Error(request.orq_error_message || 'Research run failed.')
       }
       const n = request?.orq_total_results ?? (res?.candidates?.length || 0)
+      const readyForReview = request?.orq_status === 'Research Request Ready for Review'
       toast?.success?.(n > 0
-        ? `Research complete — ${n} decision maker candidate${n === 1 ? '' : 's'} found.`
-        : 'Research complete — no candidates found. Try the other method or the manual links.')
+        ? `Research complete — ${n} decision maker candidate${n === 1 ? '' : 's'} found${readyForReview ? ', ready for review in the Outreach queue' : ''}.`
+        : readyForReview
+          ? 'Research complete — the identified owner organization is ready for review in the Outreach queue.'
+          : 'Research complete — no candidates found. Try the other method or the manual links.')
       await refresh()
     } catch (e) {
       setError(e?.message || 'Research run failed.')
       await refresh()
     } finally {
       setRunningAction(null)
+      setRunStage(null)
     }
   }
 
@@ -201,7 +213,9 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
   // When the CRM owner is a placeholder, a completed web-research run may have
   // identified the real owner organization — use it for subsequent runs.
   const identifiedRequest = target?.ownerUnknown
-    ? requests.find(r => r.orq_status === 'Research Request Completed' && r.orq_company_name) || null
+    ? requests.find(r =>
+        ['Research Request Completed', 'Research Request Ready for Review'].includes(r.orq_status)
+        && r.orq_company_name) || null
     : null
   const effectiveCompanyName = target?.companyName || identifiedRequest?.orq_company_name || null
   const effectiveCompanyDomain = target?.companyDomain || identifiedRequest?.orq_company_domain || null
@@ -220,15 +234,17 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
-            onClick={() => handleRun('web_research')}
+            onClick={() => handleRun('deep_research')}
             disabled={!!runningAction || loading || !canResearch}
-            title="AI web research over the organization's site, parent companies, and public registries"
+            title="Staged AI research: identify the owner, verify the organization, find its decision makers, gather public contact info"
             style={{
               ...btnBase,
-              background: runningAction === 'web_research' ? '#f7f9fc' : C.emerald,
-              color: runningAction === 'web_research' ? C.textMuted : '#fff',
+              background: runningAction === 'deep_research' ? '#f7f9fc' : C.emerald,
+              color: runningAction === 'deep_research' ? C.textMuted : '#fff',
             }}>
-            {runningAction === 'web_research' ? 'Researching… (1–3 min)' : 'Run Web Research'}
+            {runningAction === 'deep_research'
+              ? (runStage ? `${runStage}…` : 'Starting research…')
+              : 'Run Deep Research'}
           </button>
           <button
             onClick={() => handleRun('lusha_search')}
@@ -404,6 +420,9 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
                 <span style={{ fontFamily: 'JetBrains Mono, monospace', color: C.textMuted }}>{r.orq_record_number}</span>
                 <span>{r.orq_research_method}</span>
                 <span style={{ fontWeight: 600, color: r.orq_status === 'Research Request Failed' ? C.sky : C.textPrimary }}>{r.orq_status}</span>
+                {r.orq_status === 'Research Request In Progress' && r.orq_stage && (
+                  <span style={{ color: C.sky }}>{r.orq_stage}…</span>
+                )}
                 {typeof r.orq_total_results === 'number' && <span>{r.orq_total_results} found</span>}
                 <span style={{ color: C.textMuted }}>{new Date(r.orq_created_at).toLocaleString()}</span>
               </div>
