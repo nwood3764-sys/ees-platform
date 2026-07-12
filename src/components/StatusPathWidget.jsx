@@ -42,47 +42,43 @@ import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
 import { getRecordTypeValue } from '../data/layoutService'
 
-// Display-only chevron. The strip is a visual status indicator, not a
-// control — chevrons are never clickable. Stage advancement is driven by
+// Display-only stage segment. The strip is a visual status indicator, not a
+// control — segments are never clickable. Stage advancement is driven by
 // field-triggered lifecycle transitions, never by a user clicking a stage.
-function ChevronSegment({
+//
+// v1.1 density pass: 26px chevron-free segmented bar (4px outer radius,
+// square inner segments). Completed stages fill emerald-mid; the current
+// stage is tinted with a 1.5px emerald border and slightly wider flex;
+// upcoming stages are white with the default border.
+function StageSegment({
   label, state /* 'complete' | 'current' | 'future' */,
   isFirst, isLast,
 }) {
   const palette = {
     complete: { bg: '#2aab72', text: '#fff',          border: '#2aab72' },
-    current:  { bg: '#3ecf8e', text: '#fff',          border: '#3ecf8e' },
-    future:   { bg: '#f7f9fc', text: C.textSecondary, border: C.border },
+    current:  { bg: '#e6f7ef', text: '#166b47',       border: '#3ecf8e' },
+    future:   { bg: C.card,    text: C.textSecondary, border: C.border },
   }[state]
 
-  // Chevron shape via clip-path: rectangle with a left notch (except first)
-  // and a right point (except last). One element per chevron, no overlap.
-  const clip = (() => {
-    if (isFirst && isLast) return 'none'
-    if (isFirst)           return 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%)'
-    if (isLast)            return 'polygon(0 0, 100% 0, 100% 100%, 0 100%, 12px 50%)'
-    return 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 12px 50%)'
-  })()
-
+  const isCurrent = state === 'current'
   return (
     <div
+      title={label}
       style={{
-        flex: 1,
+        flex: isCurrent ? 1.5 : 1,
         minWidth: 0,
-        height: 36,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: `0 ${isLast ? 14 : 18}px 0 ${isFirst ? 14 : 22}px`,
+        height: 26,
+        lineHeight: isCurrent ? '23px' : '24px',
+        padding: '0 10px',
         background: palette.bg,
         color: palette.text,
-        clipPath: clip,
-        fontSize: 12,
-        fontWeight: state === 'current' ? 700 : 500,
+        border: `${isCurrent ? 1.5 : 1}px solid ${palette.border}`,
+        borderRadius: `${isFirst ? '4px' : '0'} ${isLast ? '4px 4px' : '0 0'} ${isFirst ? '4px' : '0'}`,
+        fontSize: 11.5,
+        fontWeight: isCurrent ? 600 : 500,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
-        marginLeft: isFirst ? 0 : -2,
         textAlign: 'center',
         userSelect: 'none',
       }}
@@ -146,7 +142,6 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
 
   const currentStage = currentIdx >= 0 ? picklistValues[currentIdx] : null
   const currentLabel = currentStage ? currentStage.picklist_label : null
-  const currentDescription = currentStage ? currentStage.picklist_description : null
   const stagePosition = currentIdx >= 0
     ? `Stage ${currentIdx + 1} of ${picklistValues.length}`
     : null
@@ -164,59 +159,40 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
       border: `1px solid ${C.border}`,
       borderRadius: 8,
     }}>
-      {showCounter && stagePosition && (
-        <div style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: C.textMuted,
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-          marginBottom: 8,
-        }}>
-          {stagePosition}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: 2, flex: 1, minWidth: 0 }}>
+          {picklistValues.map((stage, idx) => {
+            let state
+            if (currentIdx < 0)        state = 'future'   // unknown current — nothing filled
+            else if (idx < currentIdx)  state = 'complete'
+            else if (idx === currentIdx) state = 'current'
+            else                         state = 'future'
+
+            return (
+              <StageSegment
+                key={stage.id}
+                label={stage.picklist_label}
+                state={state}
+                isFirst={idx === 0}
+                isLast={idx === picklistValues.length - 1}
+              />
+            )
+          })}
         </div>
-      )}
-
-      <div style={{ display: 'flex', alignItems: 'stretch', width: '100%' }}>
-        {picklistValues.map((stage, idx) => {
-          let state
-          if (currentIdx < 0)        state = 'future'   // unknown current — nothing filled
-          else if (idx < currentIdx)  state = 'complete'
-          else if (idx === currentIdx) state = 'current'
-          else                         state = 'future'
-
-          return (
-            <ChevronSegment
-              key={stage.id}
-              label={stage.picklist_label}
-              state={state}
-              isFirst={idx === 0}
-              isLast={idx === picklistValues.length - 1}
-            />
-          )
-        })}
+        {/* The path is a status indicator, not a control — say so, always,
+            so users don't hunt for a "complete stage" button. */}
+        <span style={{ fontSize: 11, color: C.textMuted, whiteSpace: 'nowrap', flexShrink: 0 }}>
+          Auto-advances on qualifying events
+        </span>
       </div>
 
-      {currentLabel && (
-        <div style={{
-          marginTop: 12,
-          fontSize: 15,
-          fontWeight: 700,
-          color: C.textPrimary,
-        }}>
-          {currentLabel}
-        </div>
-      )}
-
-      {currentDescription && (
-        <div style={{
-          marginTop: 6,
-          fontSize: 13,
-          color: C.textSecondary,
-          lineHeight: 1.5,
-        }}>
-          {currentDescription}
-        </div>
+      {/* Stage counter + current-stage descriptions are still available to
+          screen readers and tooltips; the v1.1 strip carries the state
+          visually. Transition guidance stays available when configured. */}
+      {showCounter && stagePosition && (
+        <span style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
+          {stagePosition}{currentLabel ? ` — ${currentLabel}` : ''}
+        </span>
       )}
 
       {showGuidance && nextTransitionDescription && (
@@ -224,14 +200,14 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
           marginTop: 10,
           padding: '8px 10px',
           background: '#f7f9fc',
-          borderLeft: `3px solid ${C.skyBlueSecondary || '#7eb3e8'}`,
+          borderLeft: `3px solid ${C.sky || '#7eb3e8'}`,
           borderRadius: 4,
           fontSize: 12,
           color: C.textSecondary,
           lineHeight: 1.5,
         }}>
           <span style={{
-            fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase',
+            fontWeight: 600, letterSpacing: 0.3, textTransform: 'uppercase',
             fontSize: 10, color: C.textMuted, marginRight: 6,
           }}>
             Next:

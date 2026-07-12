@@ -1,4 +1,4 @@
-import { C } from '../../data/constants'
+import { C, TYPE, RADIUS } from '../../data/constants'
 
 // ---------------------------------------------------------------------------
 // Shared styles for admin Object Manager panes (RecordTypesPane,
@@ -9,12 +9,12 @@ import { C } from '../../data/constants'
 export const inputStyle = {
   width: '100%',
   padding: '8px 10px',
-  fontSize: 13,
+  fontSize: TYPE.base,
   fontFamily: 'inherit',
   color: C.textPrimary,
   background: C.card,
   border: `1px solid ${C.borderDark || C.border}`,
-  borderRadius: 6,
+  borderRadius: RADIUS.control,
   outline: 'none',
   boxSizing: 'border-box',
 }
@@ -30,63 +30,63 @@ export const textareaStyle = {
 export const buttonPrimaryStyle = {
   display: 'inline-flex', alignItems: 'center', gap: 5,
   padding: '7px 14px',
-  fontSize: 12.5, fontWeight: 600,
+  fontSize: TYPE.button, fontWeight: 600,
   color: '#ffffff',
-  background: C.emerald,
+  background: C.emeraldMid,
   border: 'none',
-  borderRadius: 6,
+  borderRadius: RADIUS.control,
   cursor: 'pointer',
 }
 
 export const buttonSecondaryStyle = {
   display: 'inline-flex', alignItems: 'center', gap: 5,
   padding: '7px 14px',
-  fontSize: 12.5, fontWeight: 500,
+  fontSize: TYPE.button, fontWeight: 500,
   color: C.textSecondary,
   background: C.card,
   border: `1px solid ${C.borderDark || C.border}`,
-  borderRadius: 6,
+  borderRadius: RADIUS.control,
   cursor: 'pointer',
 }
 
 export const buttonDangerStyle = {
   display: 'inline-flex', alignItems: 'center', gap: 5,
   padding: '7px 14px',
-  fontSize: 12.5, fontWeight: 500,
+  fontSize: TYPE.button, fontWeight: 500,
   color: '#1a5a8a',
   background: C.card,
   border: '1px solid #bcd9f2',
-  borderRadius: 6,
+  borderRadius: RADIUS.control,
   cursor: 'pointer',
 }
 
 export const buttonSmPrimaryStyle = {
   padding: '4px 10px',
-  fontSize: 11.5, fontWeight: 600,
+  fontSize: TYPE.buttonSm, fontWeight: 600,
   color: '#ffffff',
-  background: C.emerald,
+  background: C.emeraldMid,
   border: 'none',
-  borderRadius: 4,
+  borderRadius: RADIUS.control,
   cursor: 'pointer',
 }
 
 export const buttonSmSecondaryStyle = {
   padding: '4px 10px',
-  fontSize: 11.5, fontWeight: 500,
+  fontSize: TYPE.buttonSm, fontWeight: 500,
   color: C.textSecondary,
   background: C.card,
   border: `1px solid ${C.borderDark || C.border}`,
-  borderRadius: 4,
+  borderRadius: RADIUS.control,
   cursor: 'pointer',
 }
 
 export const buttonSmDangerStyle = {
   padding: '4px 10px',
-  fontSize: 11.5, fontWeight: 500,
+  fontSize: TYPE.buttonSm, fontWeight: 500,
   color: '#1a5a8a',
   background: C.card,
   border: '1px solid #bcd9f2',
-  borderRadius: 4,
+  borderRadius: RADIUS.control,
   cursor: 'pointer',
 }
 
@@ -130,8 +130,8 @@ export function FormField({ label, hint, children, required, style }) {
   return (
     <div style={{ marginBottom: 14, ...(style || {}) }}>
       <label style={{
-        display: 'block', fontSize: 11.5, fontWeight: 600,
-        color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.04em',
+        display: 'block', fontSize: TYPE.label, fontWeight: 500,
+        color: C.textSecondary,
         marginBottom: 5,
       }}>
         {label}

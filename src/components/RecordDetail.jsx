@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { C } from '../data/constants'
+import { C, TYPE, RADIUS } from '../data/constants'
 import { Badge, Icon } from './UI'
 
 // Heavy modals that only render on specific user actions are lazy-loaded
@@ -199,6 +199,13 @@ function singularizeLabel(word) {
 // in breadcrumb order — innermost (most specific) parent first. `parentTables`
 // gives the table for each parent FK so the breadcrumb crumbs are clickable.
 // Adding a new object to LEAP now just means adding one row here.
+// Singular object name for the record-header eyebrow ("Opportunity · OP-00847").
+// TABLE_META labels are plural list names; this covers the shapes they use.
+function singularObjectLabel(label) {
+  if (!label || !/s$/.test(label)) return label
+  return label.replace(/ies$/, 'y').replace(/([^s])s$/, '$1')
+}
+
 const TABLE_META = {
   accounts:                  { module: 'Enrollment',       label: 'Accounts',             nameColumn: 'account_name',           recordNumberColumn: 'account_record_number',           statusColumn: 'account_status',           parents: ['parent_account_id'],                              parentTables: ['accounts'] },
   contacts:                  { module: 'Enrollment',       label: 'Contacts',             nameColumn: 'contact_name',           recordNumberColumn: 'contact_record_number',           statusColumn: 'contact_status',           parents: ['contact_account_id'],                             parentTables: ['accounts'] },
@@ -334,7 +341,7 @@ function Breadcrumbs({ tableName, record, lookups, onBack, onNavigateToRecord })
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, marginBottom: 14 }}>
       <span style={{ fontSize: 12, color: C.textMuted }}>{meta.module}</span>
       {sep}
-      <button onClick={onBack} style={{ fontSize: 12, color: '#1a5a8a', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+      <button onClick={onBack} style={{ fontSize: 12, color: C.link, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
         {meta.label}
       </button>
       {parentCrumbs.map((c, i) => (
@@ -344,7 +351,7 @@ function Breadcrumbs({ tableName, record, lookups, onBack, onNavigateToRecord })
             <button
               onClick={() => onNavigateToRecord({ table: c.table, id: c.id, mode: 'view' })}
               style={{
-                fontSize: 12, color: '#1a5a8a', background: 'none', border: 'none',
+                fontSize: 12, color: C.link, background: 'none', border: 'none',
                 cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2,
               }}
             >
@@ -2948,7 +2955,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
               padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
-              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+              <span style={{ fontSize: TYPE.label, color: C.textMuted, fontWeight: 400 }}>
                 {f.label}
               </span>
               <DocxUploadField
@@ -2968,7 +2975,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             display: 'flex', flexDirection: 'column', gap: 4,
             background: isEditable ? '#fafffe' : 'transparent',
           }}>
-            <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+            <span style={{ fontSize: TYPE.label, color: C.textMuted, fontWeight: 400 }}>
               {f.label}
               {editing && isRequiredField && !isDerivedField && (
                 <span style={{ color: '#2c5f8a', marginLeft: 3 }}>*</span>
@@ -2990,7 +2997,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
                 type="button"
                 onClick={() => onNavigateToRecord(lookupLinkTarget)}
                 style={{
-                  fontSize: 13, color: '#1a5a8a', background: 'none', border: 'none',
+                  fontSize: TYPE.base, color: C.link, background: 'none', border: 'none',
                   padding: 0, textAlign: 'left', cursor: 'pointer',
                   textDecoration: 'underline', textUnderlineOffset: 2,
                   fontFamily: 'inherit', wordBreak: 'break-word',
@@ -3273,7 +3280,7 @@ function ConfigFieldRow({ field, value, editing, onChange }) {
       display: 'flex', flexDirection: 'column', gap: 4,
       background: editing ? '#fafffe' : 'transparent',
     }}>
-      <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+      <span style={{ fontSize: TYPE.label, color: C.textMuted, fontWeight: 400 }}>
         {field.label}
       </span>
       {editing ? renderEdit() : renderView()}
@@ -3592,16 +3599,17 @@ function RelatedListWidget({
             }}>
               <Icon path="M4 6h16M4 12h16M4 18h7" size={12} color="#1a5a8a" />
             </div>
-            <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span style={{ fontSize: TYPE.sectionHead, fontWeight: 600, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {title}
             </span>
             {totalCount > 0 && (
               <span
                 title={`${totalCount.toLocaleString()} total`}
                 style={{
-                  fontSize: 11, fontWeight: 600, color: C.textMuted,
-                  background: '#eef2f7', borderRadius: 10,
-                  padding: '1px 8px', flexShrink: 0,
+                  fontSize: 10.5, fontWeight: 500, color: C.textSecondary,
+                  background: C.cardSecondary || '#f7f9fc', borderRadius: RADIUS.badge,
+                  border: `1px solid ${C.border}`,
+                  padding: '1px 6px', flexShrink: 0,
                   fontFamily: 'JetBrains Mono, monospace',
                 }}
               >
@@ -4480,7 +4488,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
       <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
         style={{ padding: isMobile ? '12px 14px' : '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: section.section_is_collapsible ? 'pointer' : 'default', borderBottom: collapsed ? 'none' : `1px solid ${C.border}`, background: '#fafbfd' }}>
-        <span style={{ fontSize: isMobile ? 14 : 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
+        <span style={{ fontSize: isMobile ? 13.5 : TYPE.sectionHead, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
         {section.section_is_collapsible && <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={14} color={C.textMuted} />}
       </div>
       {!collapsed && sectionWidgets.length === 0 && (
@@ -5988,17 +5996,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         {/* Desktop header card (mobile already shows this info in the sticky bar above — mobile shows a compact title + status chip instead) */}
         {!isMobile ? (
           <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted, marginBottom: 4 }}>{recordNumber}</div>
-              <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px' }}>{displayName}</h1>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 4 }}>
+                {singularObjectLabel((TABLE_META[tableName] || {}).label) || ''}
+                {recordNumber && <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{TABLE_META[tableName]?.label ? ' · ' : ''}{recordNumber}</span>}
+              </div>
+              <h1 style={{ fontSize: TYPE.titleRecord, fontWeight: 600, color: C.textPrimary, margin: '0 0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</h1>
               {statusLabel && <Badge s={statusLabel} />}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {editing ? (<>
-                <button onClick={handleSave} disabled={saving} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <button onClick={handleSave} disabled={saving} style={{ background: C.emeraldMid, color: '#fff', border: 'none', borderRadius: RADIUS.control, padding: '6px 14px', fontSize: TYPE.button, fontWeight: 500, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Icon path="M5 13l4 4L19 7" size={13} color="#fff" />{saving ? 'Saving…' : 'Save'}
                 </button>
-                <button onClick={cancelEditing} disabled={saving} style={{ background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={cancelEditing} disabled={saving} style={{ background: C.card, color: C.textSecondary, border: `1px solid ${C.borderDark}`, borderRadius: RADIUS.control, padding: '6px 14px', fontSize: TYPE.button, cursor: 'pointer' }}>Cancel</button>
               </>) : (
                 <TopbarActions
                   variant="desktop"
@@ -6115,7 +6126,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   style={{
                     padding: isMobile ? '12px 14px' : '10px 16px', background: 'none', border: 'none',
                     borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
-                    color: on ? C.textPrimary : C.textMuted, fontSize: isMobile ? 14 : 13,
+                    color: on ? C.textPrimary : C.textMuted, fontSize: isMobile ? 14 : TYPE.nav,
                     fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
                     display: 'flex', alignItems: 'center', gap: 6,
                     whiteSpace: 'nowrap', flexShrink: 0,

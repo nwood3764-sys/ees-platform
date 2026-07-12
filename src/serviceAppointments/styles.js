@@ -21,6 +21,7 @@ export const C = {
   danger:         '#7eb3e8',
   dangerBg:       '#e8f1fb',
   emeraldBg:      '#e8f8f2',
+  link:           '#1d5a96',
 }
 
 export const RADIUS = 8

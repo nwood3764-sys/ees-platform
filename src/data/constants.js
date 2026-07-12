@@ -16,6 +16,39 @@ export const C = {
   sky: '#7eb3e8',
   danger: '#7eb3e8',
   purple: '#a78bfa',
+  // v1.1 density pass: dedicated link blue so "clickable" and "brand emerald"
+  // stay distinguishable on lookup-heavy record pages.
+  link: '#1d5a96',
+};
+
+// ── v1.1 design-system tokens (density pass) ─────────────────────────────────
+// The single source of truth for the type scale, radii, and shadows. Shared
+// components read these instead of typing literals; long-tail screens adopt
+// them as they're touched. If the 13px base proves too tight in live use, the
+// approved fallback is bumping TYPE.base once, here, globally — never per-page.
+export const TYPE = {
+  base: 13,          // body / field values (line-height TYPE.lineHeight)
+  titleRecord: 17,   // record page title, weight 600 (list titles may use 18)
+  sectionHead: 12.5, // card / section headings, weight 600, sentence case
+  label: 11,         // field labels, weight 400, sentence case, C.textMuted
+  tableHeader: 11,   // weight 500, sentence case, C.textMuted
+  tableCell: 12.5,
+  badge: 11,
+  button: 12,
+  buttonSm: 11,
+  nav: 12.5,
+  lineHeight: 1.45,
+};
+
+export const RADIUS = {
+  card: 8,     // unchanged from v1.0
+  control: 4,  // buttons, inputs, selects
+  badge: 3,    // badges, chips — no pills
+};
+
+export const SHADOW = {
+  card: 'none', // in-flow cards are defined by their 1px border only
+  floating: '0 8px 24px rgba(13,26,46,0.12)', // dropdowns, popovers, modals
 };
 
 export const CHART_COLORS = ['#3ecf8e','#7eb3e8','#1e466b','#a78bfa','#2aab72','#5eead4','#8fa0b8'];
