@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { C } from '../data/constants'
 import { Icon, LoadingState, ErrorState } from './UI'
 import { useToast } from './Toast'
+import ResearchSourceLink, { isSourceEntry } from './ResearchSourceLink'
 import {
   listReviewQueue,
   findAccountMatches,
@@ -77,7 +78,7 @@ function contactBits(candidate) {
 function orgEvidence(request) {
   const stage = request.orq_stage_results?.['Owner Identification'] || {}
   const notes = stage.identification_notes || request.orq_raw_response?.identification_notes || null
-  const urls = Array.isArray(stage.evidence_urls) ? stage.evidence_urls.filter(u => typeof u === 'string') : []
+  const urls = Array.isArray(stage.evidence_urls) ? stage.evidence_urls.filter(isSourceEntry) : []
   return { notes, urls }
 }
 
@@ -629,10 +630,8 @@ export default function OwnerResearchQueue({ onOpenRecord }) {
                     </div>
                     {notes && <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 5, fontStyle: 'italic' }}>{notes}</div>}
                     {urls.length > 0 && (
-                      <div style={{ display: 'flex', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
-                        {urls.slice(0, 5).map((u, i) => (
-                          <a key={i} href={u} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: C.sky, textDecoration: 'none' }}>Evidence {i + 1} ↗</a>
-                        ))}
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                        {urls.slice(0, 5).map((u, i) => <ResearchSourceLink key={i} source={u} index={i} />)}
                       </div>
                     )}
                   </div>
@@ -674,7 +673,7 @@ export default function OwnerResearchQueue({ onOpenRecord }) {
           {visiblePeople.map(cand => {
             const { emails, phones } = contactBits(cand)
             const busy = busyIds.has(cand.id)
-            const sourceUrls = Array.isArray(cand.orc_source_urls) ? cand.orc_source_urls.filter(u => typeof u === 'string') : []
+            const sourceUrls = Array.isArray(cand.orc_source_urls) ? cand.orc_source_urls.filter(isSourceEntry) : []
             return (
               <div key={cand.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -705,13 +704,11 @@ export default function OwnerResearchQueue({ onOpenRecord }) {
                       <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 5, fontStyle: 'italic' }}>{cand.orc_notes}</div>
                     )}
                     {(sourceUrls.length > 0 || cand.orc_linkedin_url) && (
-                      <div style={{ display: 'flex', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                         {cand.orc_linkedin_url && (
                           <a href={cand.orc_linkedin_url} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: C.sky, textDecoration: 'none', fontWeight: 600 }}>LinkedIn ↗</a>
                         )}
-                        {sourceUrls.slice(0, 4).map((u, i) => (
-                          <a key={i} href={u} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: C.sky, textDecoration: 'none' }}>Source {i + 1} ↗</a>
-                        ))}
+                        {sourceUrls.slice(0, 4).map((u, i) => <ResearchSourceLink key={i} source={u} index={i} />)}
                       </div>
                     )}
                   </div>

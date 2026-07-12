@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
+import ResearchSourceLink, { isSourceEntry } from './ResearchSourceLink'
 import {
   fetchResearchTarget,
   fetchTargetJobTitles,
@@ -320,7 +321,7 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
             const promoted = cand.orc_status === 'Research Candidate Promoted to Contact'
             const canEnrich = cand.orc_source === 'Lusha' && !cand.orc_enriched_at && !promoted && !dismissed
             const busy = busyCandidateId === cand.id
-            const sourceUrls = Array.isArray(cand.orc_source_urls) ? cand.orc_source_urls.filter(u => typeof u === 'string') : []
+            const sourceUrls = Array.isArray(cand.orc_source_urls) ? cand.orc_source_urls.filter(isSourceEntry) : []
             return (
               <div key={cand.id} style={{
                 background: '#f7f9fc', border: `1px solid ${C.border}`, borderRadius: 6,
@@ -353,17 +354,13 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
                       <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 5, fontStyle: 'italic' }}>{cand.orc_notes}</div>
                     )}
                     {(sourceUrls.length > 0 || cand.orc_linkedin_url) && (
-                      <div style={{ display: 'flex', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                         {cand.orc_linkedin_url && (
                           <a href={cand.orc_linkedin_url} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: C.sky, textDecoration: 'none', fontWeight: 600 }}>
                             LinkedIn ↗
                           </a>
                         )}
-                        {sourceUrls.slice(0, 4).map((u, i) => (
-                          <a key={i} href={u} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: C.sky, textDecoration: 'none' }}>
-                            Source {i + 1} ↗
-                          </a>
-                        ))}
+                        {sourceUrls.slice(0, 4).map((u, i) => <ResearchSourceLink key={i} source={u} index={i} />)}
                       </div>
                     )}
                   </div>
