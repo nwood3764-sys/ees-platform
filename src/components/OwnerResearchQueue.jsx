@@ -9,6 +9,7 @@ import {
   rejectIdentifiedOrganization,
   buildRelatedOrgOptions,
   promoteCandidateToContact,
+  findContactMatches,
   rejectCandidate,
   isPlaceholderOrgName,
 } from '../data/ownerResearchService'
@@ -297,6 +298,8 @@ function ApprovePersonModal({ candidate, onClose, onApproved }) {
   const [email, setEmail] = useState(emails[0] || '')
   const [phone, setPhone] = useState(phones[0] || '')
   const [linkedin, setLinkedin] = useState(candidate.orc_linkedin_url || '')
+  const [contactMatches, setContactMatches] = useState(null)   // null = loading
+  const [contactChoice, setContactChoice] = useState('new')    // 'new' | contact id
   const [working, setWorking] = useState(false)
   const [error, setError] = useState(null)
 
@@ -307,6 +310,21 @@ function ApprovePersonModal({ candidate, onClose, onApproved }) {
   const placeholderAccount = isPlaceholderOrgName(candidate.account?.account_name)
     && !candidate.request?.orq_approved_account_id
 
+  // Duplicate check: does this person already exist as a Contact?
+  useEffect(() => {
+    let cancelled = false
+    findContactMatches({ fullName: candidate.orc_full_name, email: emails[0] || null, accountId })
+      .then(m => {
+        if (cancelled) return
+        setContactMatches(m)
+        const strong = m.find(x => x.matchStrength === 'strong')
+        if (strong) setContactChoice(strong.id)
+      })
+      .catch(() => { if (!cancelled) setContactMatches([]) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidate, accountId])
+
   const handleApprove = async () => {
     setWorking(true)
     setError(null)
@@ -314,8 +332,11 @@ function ApprovePersonModal({ candidate, onClose, onApproved }) {
       const contact = await promoteCandidateToContact(candidate, {
         overrides: { fullName, title, email, phone, linkedin },
         accountId,
+        existingContactId: contactChoice === 'new' ? null : contactChoice,
       })
-      toast?.success?.(`Contact ${contact.contact_record_number} created for ${fullName}.`)
+      toast?.success?.(contact.existing
+        ? `Linked to existing contact ${contact.contact_record_number} — new info filled in, nothing overwritten.`
+        : `Contact ${contact.contact_record_number} created for ${fullName}.`)
       onApproved()
     } catch (e) {
       setError(e?.message || 'Approval failed.')
@@ -349,6 +370,41 @@ function ApprovePersonModal({ candidate, onClose, onApproved }) {
           </div>
         )}
       </div>
+      {contactMatches && contactMatches.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ ...labelStyle, marginBottom: 8 }}>Possible Existing Contact</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {contactMatches.map(m => (
+              <label key={m.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+                border: `1px solid ${contactChoice === m.id ? C.emerald : C.border}`, borderRadius: 6,
+                background: contactChoice === m.id ? 'rgba(62,207,142,0.06)' : '#f7f9fc', cursor: 'pointer', fontSize: 12.5,
+              }}>
+                <input type="radio" checked={contactChoice === m.id} onChange={() => setContactChoice(m.id)} />
+                <span style={{ fontWeight: 600, color: C.textPrimary }}>{m.contact_name}</span>
+                <span style={{ color: C.textSecondary }}>{[m.contact_title, m.contact_email].filter(Boolean).join(' · ')}</span>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted }}>{m.contact_record_number}</span>
+                <span style={{
+                  marginLeft: 'auto', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
+                  color: m.matchStrength === 'strong' ? (C.emeraldMid || '#2aab72') : C.sky,
+                }}>{m.matchStrength === 'strong' ? 'Likely same person' : 'Possible match'}</span>
+              </label>
+            ))}
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+              border: `1px solid ${contactChoice === 'new' ? C.emerald : C.border}`, borderRadius: 6,
+              background: contactChoice === 'new' ? 'rgba(62,207,142,0.06)' : '#f7f9fc', cursor: 'pointer', fontSize: 12.5,
+            }}>
+              <input type="radio" checked={contactChoice === 'new'} onChange={() => setContactChoice('new')} />
+              <span style={{ fontWeight: 600, color: C.textPrimary }}>Create a new contact</span>
+            </label>
+          </div>
+          <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 6 }}>
+            Linking fills in missing info on the existing contact — it never overwrites what's already there.
+          </div>
+        </div>
+      )}
+
       <Field label="Full name" value={fullName} onChange={setFullName} />
       <Field label="Title" value={title} onChange={setTitle} />
       <Field label="Email" value={email} onChange={setEmail} placeholder="Publicly listed or revealed email" />
