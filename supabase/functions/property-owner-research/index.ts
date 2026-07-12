@@ -439,7 +439,11 @@ function parsePeople(people: unknown[]): CandidateDraft[] {
   return candidates
 }
 
-const PEOPLE_JSON_SHAPE = `[{"full_name": string, "job_title": string, "company_name": string, "company_domain": string|null, "location": string|null, "linkedin_url": string|null, "emails": string[]|null, "phones": string[]|null, "source_urls": string[], "notes": string}]`
+const PEOPLE_JSON_SHAPE = `[{"full_name": string, "job_title": string, "company_name": string, "company_domain": string|null, "location": string|null, "linkedin_url": string|null, "emails": string[]|null, "phones": string[]|null, "source_urls": [{"url": string, "title": string}], "notes": string}]`
+// Every evidence link carries a short human-readable page title so reviewers
+// can see where a claim came from without clicking ("HUD LIHTC Database —
+// Hanover Gardens"). The UI accepts both this shape and legacy bare strings.
+const EVIDENCE_RULES = `Each source_urls/evidence_urls entry must be {"url", "title"} where title is a short human-readable description of the page (e.g. "Crunchbase — Leah Lyerly profile"). Extract, don't just cite: when a page you visited shows or links to a person's LinkedIn profile, contact info, or official name, capture the VALUE into the output fields — a link left on the cited page is a finding missed.`
 
 // ── Legacy tier 1: single-pass free AI web research ─────────────────────────
 
@@ -705,8 +709,8 @@ async function stageOwnerIdentification(
     speedRules(STAGE_MAX_SEARCHES, STAGE_MAX_FETCHES),
     ``,
     `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
-    `{"identified_owner_organization": string|null, "organization_domain": string|null, "marketed_property_name": string|null, "management_organization": string|null, "identification_notes": string, "evidence_urls": string[]}`,
-    `Rules: identified_owner_organization must be ONLY the organization's clean legal name exactly as registered (e.g. "JES Holdings, LLC") — NO parentheticals, qualifiers, or explanations inside the name; ALL context (corporate relationships, how you determined it, caveats) belongs in identification_notes. It is the entity that OWNS/controls the property (developer, housing authority, ownership LLC's parent) — not the on-site manager (put that clean name in management_organization). Cite every claim's URL in evidence_urls. If you truly cannot determine the owner, use null and explain what you found and where the trail ended in identification_notes.`,
+    `{"identified_owner_organization": string|null, "organization_domain": string|null, "marketed_property_name": string|null, "management_organization": string|null, "identification_notes": string, "evidence_urls": [{"url": string, "title": string}]}`,
+    `Rules: identified_owner_organization must be ONLY the organization's clean legal name exactly as registered (e.g. "JES Holdings, LLC") — NO parentheticals, qualifiers, or explanations inside the name; ALL context (corporate relationships, how you determined it, caveats) belongs in identification_notes. It is the entity that OWNS/controls the property (developer, housing authority, ownership LLC's parent) — not the on-site manager (put that clean name in management_organization). Cite every claim's URL in evidence_urls. ${EVIDENCE_RULES} If you truly cannot determine the owner, use null and explain what you found and where the trail ended in identification_notes.`,
   ].join("\n")
 
   const r = await callAnthropicResearch(anthropicKey, prompt, {
@@ -759,8 +763,8 @@ async function stageOrganizationResearch(
     speedRules(STAGE_MAX_SEARCHES, STAGE_MAX_FETCHES),
     ``,
     `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
-    `{"official_name": string|null, "organization_domain": string|null, "parent_company": string|null, "subsidiaries": string[], "organization_type": string|null, "headquarters": string|null, "key_facts": string[], "evidence_urls": string[], "notes": string}`,
-    `Rules: official_name, parent_company, and every subsidiaries entry must be clean legal entity names exactly as registered (e.g. "Fairway Management, Inc.") — no parentheticals or explanations inside names; context goes in notes/key_facts. subsidiaries = companies this organization owns or controls (management arms, development affiliates, property LLCs). key_facts = short facts useful for finding this organization's decision makers next (officer names from registries/990s go here). Cite evidence_urls for every claim.`,
+    `{"official_name": string|null, "organization_domain": string|null, "parent_company": string|null, "subsidiaries": string[], "organization_type": string|null, "headquarters": string|null, "key_facts": string[], "evidence_urls": [{"url": string, "title": string}], "notes": string}`,
+    `Rules: official_name, parent_company, and every subsidiaries entry must be clean legal entity names exactly as registered (e.g. "Fairway Management, Inc.") — no parentheticals or explanations inside names; context goes in notes/key_facts. subsidiaries = companies this organization owns or controls (management arms, development affiliates, property LLCs). key_facts = short facts useful for finding this organization's decision makers next (officer names from registries/990s go here). Cite evidence_urls for every claim. ${EVIDENCE_RULES}`,
   ].join("\n")
 
   const r = await callAnthropicResearch(anthropicKey, prompt, {
@@ -822,7 +826,7 @@ async function stageDecisionMakerDiscovery(
     ``,
     `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
     `{"people": ${PEOPLE_JSON_SHAPE}}`,
-    `Rules: only include people you found real evidence for (source_urls required, no guesses). Include publicly listed emails/phones only. Each person's "notes" = one sentence on why they are the decision maker. If you found nobody, use an empty people array.`,
+    `Rules: only include people you found real evidence for (source_urls required, no guesses). Include publicly listed emails/phones only. Always fill linkedin_url when any page you visited shows or links to the person's LinkedIn profile. ${EVIDENCE_RULES} Each person's "notes" = one sentence on why they are the decision maker. If you found nobody, use an empty people array.`,
   ].join("\n")
 
   const r = await callAnthropicResearch(anthropicKey, prompt, {
@@ -884,8 +888,10 @@ async function stageDecisionMakerDiscovery(
   return { results, requestPatch: Object.keys(patch).length ? patch : undefined }
 }
 
-// Stage 4 — Contact Info Gathering: public contact info for found candidates
-// that still lack it (Lusha enrich stays a manual, per-person paid action).
+// Stage 4 — Contact Info Gathering: public contact info for found candidates.
+// A candidate missing ANY field (email, phone, LinkedIn) gets a pass — a
+// person with a phone but no LinkedIn is still incomplete. (Lusha enrich
+// stays a manual, per-person paid action.)
 async function stageContactInfoGathering(
   admin: SupabaseClient, anthropicKey: string, requestId: string, target: Target, callerUserId: string,
 ): Promise<StageOutcome> {
@@ -894,25 +900,40 @@ async function stageContactInfoGathering(
     .select("id, orc_full_name, orc_job_title, orc_company_name, orc_emails, orc_phones, orc_linkedin_url")
     .eq("orc_request_id", requestId)
     .eq("orc_is_deleted", false)
-  const needing = (cands || []).filter((c) => !c.orc_emails && !c.orc_phones).slice(0, STAGE_CONTACT_INFO_MAX_PEOPLE)
+  // Most-incomplete candidates first, so the per-run cap spends its budget
+  // where the gaps are biggest.
+  const gaps = (c: Record<string, unknown>) =>
+    (c.orc_emails ? 0 : 1) + (c.orc_phones ? 0 : 1) + (c.orc_linkedin_url ? 0 : 1)
+  const needing = (cands || [])
+    .filter((c) => gaps(c) > 0)
+    .sort((a, b) => gaps(b) - gaps(a))
+    .slice(0, STAGE_CONTACT_INFO_MAX_PEOPLE)
   if (needing.length === 0) {
     return { results: { skipped: true, reason: "No candidates need public contact info" } }
   }
 
-  const personLines = needing.map((c) =>
-    `- ${c.orc_full_name}${c.orc_job_title ? `, ${c.orc_job_title}` : ""} at ${c.orc_company_name || target.companyName || "the organization"}`)
+  const personLines = needing.map((c) => {
+    const missing = [
+      !c.orc_emails ? "work email" : null,
+      !c.orc_phones ? "phone" : null,
+      !c.orc_linkedin_url ? "LinkedIn profile URL" : null,
+    ].filter(Boolean).join(", ")
+    return `- ${c.orc_full_name}${c.orc_job_title ? `, ${c.orc_job_title}` : ""} at ${c.orc_company_name || target.companyName || "the organization"} — still need: ${missing}`
+  })
   const prompt = [
-    `Find PUBLICLY LISTED work contact information (work email, office/direct phone, LinkedIn profile URL) for the people below. Good sources: the organization's own website (staff directory, contact page, press releases), state registry filings, HUD/PHA contact listings, conference speaker pages, news articles.`,
+    `Find PUBLICLY LISTED work contact information for the people below — each line says exactly what is still missing for that person. Good sources: the organization's own website (staff directory, contact page, press releases), state registry filings, HUD/PHA contact listings, conference speaker pages, news articles, and profile pages (Crunchbase, ZoomInfo, RocketReach) which usually list or link the person's LinkedIn.`,
     ``,
     `Organization: ${target.companyName || "?"}${target.companyDomain ? ` (${target.companyDomain})` : ""}`,
     `People:`,
     ...personLines,
     ``,
+    `For LinkedIn: search "<name> <company> LinkedIn" directly — a person's public LinkedIn profile URL (linkedin.com/in/...) counts as found contact info and should almost always be findable for a named executive.`,
+    ``,
     speedRules(STAGE_MAX_SEARCHES, STAGE_MAX_FETCHES),
     ``,
     `Then reply with ONLY a JSON object (no prose before or after) shaped exactly like this:`,
-    `{"people": [{"full_name": string, "emails": string[]|null, "phones": string[]|null, "linkedin_url": string|null, "source_urls": string[], "notes": string}]}`,
-    `Rules: publicly listed information only — never guess or fabricate an email pattern. Cite the page each item came from in source_urls. Omit people you found nothing for.`,
+    `{"people": [{"full_name": string, "emails": string[]|null, "phones": string[]|null, "linkedin_url": string|null, "source_urls": [{"url": string, "title": string}], "notes": string}]}`,
+    `Rules: publicly listed information only — never guess or fabricate an email pattern or profile URL. ${EVIDENCE_RULES} Omit people you found nothing new for.`,
   ].join("\n")
 
   const r = await callAnthropicResearch(anthropicKey, prompt, {
