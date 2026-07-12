@@ -223,6 +223,24 @@ function normalizePersonName(name) {
   return String(name || '').toLowerCase().replace(/[^a-z]/g, '')
 }
 
+// contacts.contact_phone has a DB check constraint requiring exactly 10
+// digits — normalize research-sourced forms ("573.443.2021", "(573) 443-2021",
+// "+1 573-443-2021"). Anything that isn't a US 10-digit number is left off
+// the contact; the raw value stays on the research candidate record.
+// Exported so the approve dialog can preview the conversion live.
+export function normalizePhoneForContact(phone) {
+  const digits = String(phone || '').replace(/\D/g, '')
+  const ten = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits
+  return /^\d{10}$/.test(ten) ? ten : null
+}
+
+// contacts.contact_email has a DB check constraint requiring a valid email
+// shape — anything else is left off the contact rather than failing the save.
+export function normalizeEmailForContact(email) {
+  const e = String(email || '').trim()
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(e) ? e : null
+}
+
 /**
  * Find existing Contacts that could BE this person, so approval links and
  * updates instead of creating a duplicate. Match strength: same email
@@ -279,10 +297,12 @@ export async function promoteCandidateToContact(candidate, { overrides = {}, acc
   const lastName = overrides.lastName || candidate.orc_last_name || fullName.split(/\s+/).slice(1).join(' ') || 'Unknown'
   const emails = Array.isArray(candidate.orc_emails) ? candidate.orc_emails : []
   const phones = Array.isArray(candidate.orc_phones) ? candidate.orc_phones : []
-  const firstEmail = overrides.email !== undefined ? (overrides.email || null)
+  const rawEmail = overrides.email !== undefined ? (overrides.email || null)
     : emails.map(e => (typeof e === 'string' ? e : e?.email || e?.emailAddress || e?.address)).find(Boolean) || null
-  const firstPhone = overrides.phone !== undefined ? (overrides.phone || null)
+  const rawPhone = overrides.phone !== undefined ? (overrides.phone || null)
     : phones.map(p => (typeof p === 'string' ? p : p?.number || p?.phoneNumber || p?.internationalNumber)).find(Boolean) || null
+  const firstEmail = normalizeEmailForContact(rawEmail)
+  const firstPhone = normalizePhoneForContact(rawPhone)
   const linkedin = overrides.linkedin !== undefined ? (overrides.linkedin || null) : (candidate.orc_linkedin_url || null)
   const title = overrides.title !== undefined ? (overrides.title || null) : (candidate.orc_job_title || null)
 

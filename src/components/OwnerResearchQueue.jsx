@@ -10,6 +10,8 @@ import {
   buildRelatedOrgOptions,
   promoteCandidateToContact,
   findContactMatches,
+  normalizePhoneForContact,
+  normalizeEmailForContact,
   rejectCandidate,
   isPlaceholderOrgName,
 } from '../data/ownerResearchService'
@@ -105,11 +107,12 @@ function Modal({ title, onClose, children, footer }) {
   )
 }
 
-function Field({ label, value, onChange, placeholder }) {
+function Field({ label, value, onChange, placeholder, hint }) {
   return (
     <div style={{ marginBottom: 12 }}>
       <label style={{ fontSize: 11, color: C.textMuted, marginBottom: 4, display: 'block', fontWeight: 500 }}>{label}</label>
       <input value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={inputStyle} />
+      {hint && <div style={{ fontSize: 11.5, color: C.sky, marginTop: 4 }}>{hint}</div>}
     </div>
   )
 }
@@ -407,8 +410,16 @@ function ApprovePersonModal({ candidate, onClose, onApproved }) {
 
       <Field label="Full name" value={fullName} onChange={setFullName} />
       <Field label="Title" value={title} onChange={setTitle} />
-      <Field label="Email" value={email} onChange={setEmail} placeholder="Publicly listed or revealed email" />
-      <Field label="Phone" value={phone} onChange={setPhone} />
+      <Field label="Email" value={email} onChange={setEmail} placeholder="Publicly listed or revealed email"
+        hint={email.trim() && !normalizeEmailForContact(email)
+          ? 'Not a valid email format — it will be left off the contact (stays on the research record).'
+          : null} />
+      <Field label="Phone" value={phone} onChange={setPhone}
+        hint={phone.trim()
+          ? (normalizePhoneForContact(phone)
+              ? (normalizePhoneForContact(phone) !== phone.trim() ? `Will be saved as ${normalizePhoneForContact(phone)} (LEAP stores 10-digit numbers).` : null)
+              : 'Not a 10-digit US number — it will be left off the contact (stays on the research record).')
+          : null} />
       <Field label="LinkedIn URL" value={linkedin} onChange={setLinkedin} />
       {error && (
         <div style={{ background: 'rgba(126,179,232,0.1)', border: `1px solid ${C.sky}`, color: C.textPrimary, borderRadius: 6, padding: '10px 12px', fontSize: 13 }}>
@@ -498,12 +509,13 @@ export default function OwnerResearchQueue({ onOpenRecord }) {
     })
   }
 
+  // One-click reject — no reason demanded. The row itself is kept (LEAP
+  // never hard-deletes) so future research runs can skip already-reviewed
+  // people instead of resurfacing them.
   const handleRejectPerson = async (candidate) => {
-    const reason = window.prompt(`Reject ${candidate.orc_full_name}? Enter a short reason (kept on the record):`)
-    if (reason === null) return
     await withBusy(candidate.id, async () => {
       try {
-        await rejectCandidate(candidate.id, reason)
+        await rejectCandidate(candidate.id, null)
         await refresh()
       } catch (e) { setError(e?.message || 'Reject failed.') }
     })
