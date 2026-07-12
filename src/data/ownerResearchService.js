@@ -218,16 +218,57 @@ export async function dismissCandidate(candidateId) {
   if (error) throw new Error(error.message)
 }
 
+// "jane p. henderson" → "janephenderson" — person-name key for contact dedupe.
+function normalizePersonName(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z]/g, '')
+}
+
+/**
+ * Find existing Contacts that could BE this person, so approval links and
+ * updates instead of creating a duplicate. Match strength: same email
+ * (anywhere) or same normalized name on the same account = 'strong';
+ * name containment on the same account = 'possible'.
+ */
+export async function findContactMatches({ fullName, email, accountId }) {
+  const norm = normalizePersonName(fullName)
+  const lastToken = String(fullName || '').trim().split(/\s+/).pop() || ''
+  const ors = []
+  if (accountId && lastToken.length >= 3) ors.push(`and(contact_account_id.eq.${accountId},contact_name.ilike.%${lastToken}%)`)
+  if (email) ors.push(`contact_email.ilike.${email}`)
+  if (ors.length === 0) return []
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('id, contact_record_number, contact_name, contact_title, contact_email, contact_phone, contact_linkedin, contact_account_id')
+    .eq('contact_is_deleted', false)
+    .or(ors.join(','))
+    .limit(15)
+  if (error) throw new Error(error.message)
+  const matches = []
+  for (const c of data || []) {
+    const cNorm = normalizePersonName(c.contact_name)
+    let strength = null
+    if (email && c.contact_email && c.contact_email.toLowerCase() === String(email).toLowerCase()) strength = 'strong'
+    else if (norm && cNorm === norm && c.contact_account_id === accountId) strength = 'strong'
+    else if (norm && cNorm && (cNorm.includes(norm) || norm.includes(cNorm)) && c.contact_account_id === accountId) strength = 'possible'
+    if (strength) matches.push({ ...c, matchStrength: strength })
+  }
+  matches.sort((a, b) => (a.matchStrength === 'strong' ? -1 : 1) - (b.matchStrength === 'strong' ? -1 : 1))
+  return matches
+}
+
 /**
  * Promote a candidate to a real Contact on the owner-group account.
- * Creates the contact (CT-), links it back on the candidate, and flips the
- * candidate status. The review queue's edit-then-approve flow passes
- * `overrides` (reviewer-corrected name/title/email/phone/linkedin) and can
- * redirect the contact onto an approved account via `accountId` (so a person
- * found under a placeholder owner lands on the real account once the
- * identified organization is approved). Returns the new contact row.
+ * Duplicate-safe: an unambiguous existing match (same email, or same name on
+ * the same account) is LINKED and filled in — never duplicated. The review
+ * queue's edit-then-approve dialog surfaces matches for an explicit choice
+ * (`existingContactId`: uuid = link that contact, null = force-create); the
+ * panel's one-click promote and bulk approve auto-link strong matches.
+ * `overrides` carries reviewer-corrected fields; `accountId` redirects the
+ * contact onto an approved account (a person found under a placeholder owner
+ * lands on the real account once the identified organization is approved).
+ * Returns the contact row (with `existing: true` when linked).
  */
-export async function promoteCandidateToContact(candidate, { overrides = {}, accountId: accountIdOverride = null } = {}) {
+export async function promoteCandidateToContact(candidate, { overrides = {}, accountId: accountIdOverride = null, existingContactId } = {}) {
   const userId = await getCurrentUserId()
   if (!userId) throw new Error('Could not resolve the current LEAP user')
   const accountId = accountIdOverride || candidate.orc_account_id
@@ -242,25 +283,62 @@ export async function promoteCandidateToContact(candidate, { overrides = {}, acc
     : emails.map(e => (typeof e === 'string' ? e : e?.email || e?.emailAddress || e?.address)).find(Boolean) || null
   const firstPhone = overrides.phone !== undefined ? (overrides.phone || null)
     : phones.map(p => (typeof p === 'string' ? p : p?.number || p?.phoneNumber || p?.internationalNumber)).find(Boolean) || null
+  const linkedin = overrides.linkedin !== undefined ? (overrides.linkedin || null) : (candidate.orc_linkedin_url || null)
+  const title = overrides.title !== undefined ? (overrides.title || null) : (candidate.orc_job_title || null)
 
-  const { data: contact, error } = await supabase
-    .from('contacts')
-    .insert({
-      contact_record_number: '',
-      contact_name: fullName || `${firstName} ${lastName}`,
-      contact_first_name: firstName,
-      contact_last_name: lastName,
-      contact_account_id: accountId,
-      contact_title: overrides.title !== undefined ? (overrides.title || null) : (candidate.orc_job_title || null),
-      contact_email: firstEmail,
-      contact_phone: firstPhone,
-      contact_linkedin: overrides.linkedin !== undefined ? (overrides.linkedin || null) : (candidate.orc_linkedin_url || null),
-      contact_owner: userId,
-      contact_created_by: userId,
-    })
-    .select()
-    .single()
-  if (error) throw new Error(`Failed to create contact: ${error.message}`)
+  // Resolve which existing contact (if any) this person already is.
+  let linkTargetId = existingContactId !== undefined ? existingContactId : null
+  if (existingContactId === undefined) {
+    const matches = await findContactMatches({ fullName, email: firstEmail, accountId })
+    const strong = matches.find(m => m.matchStrength === 'strong')
+    if (strong) linkTargetId = strong.id
+  }
+
+  let contact
+  if (linkTargetId) {
+    // Link + fill blanks only — research never overwrites data a human put
+    // on the contact.
+    const { data: current, error: curErr } = await supabase
+      .from('contacts')
+      .select('id, contact_record_number, contact_title, contact_email, contact_phone, contact_linkedin')
+      .eq('id', linkTargetId).maybeSingle()
+    if (curErr || !current) throw new Error(curErr?.message || 'Selected contact not found')
+    const { data, error } = await supabase
+      .from('contacts')
+      .update({
+        ...(current.contact_title ? {} : (title ? { contact_title: title } : {})),
+        ...(current.contact_email ? {} : (firstEmail ? { contact_email: firstEmail } : {})),
+        ...(current.contact_phone ? {} : (firstPhone ? { contact_phone: firstPhone } : {})),
+        ...(current.contact_linkedin ? {} : (linkedin ? { contact_linkedin: linkedin } : {})),
+        contact_updated_by: userId,
+        contact_updated_at: new Date().toISOString(),
+      })
+      .eq('id', linkTargetId)
+      .select()
+      .single()
+    if (error) throw new Error(`Failed to update existing contact: ${error.message}`)
+    contact = { ...data, existing: true }
+  } else {
+    const { data, error } = await supabase
+      .from('contacts')
+      .insert({
+        contact_record_number: '',
+        contact_name: fullName || `${firstName} ${lastName}`,
+        contact_first_name: firstName,
+        contact_last_name: lastName,
+        contact_account_id: accountId,
+        contact_title: title,
+        contact_email: firstEmail,
+        contact_phone: firstPhone,
+        contact_linkedin: linkedin,
+        contact_owner: userId,
+        contact_created_by: userId,
+      })
+      .select()
+      .single()
+    if (error) throw new Error(`Failed to create contact: ${error.message}`)
+    contact = data
+  }
 
   const { error: updErr } = await supabase
     .from('owner_research_candidates')

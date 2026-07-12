@@ -185,7 +185,9 @@ export default function PropertyOwnerResearchPanel({ tableName, recordId }) {
     setError(null)
     try {
       const contact = await promoteCandidateToContact(candidate)
-      toast?.success?.(`Contact ${contact.contact_record_number} created for ${candidate.orc_full_name}.`)
+      toast?.success?.(contact.existing
+        ? `${candidate.orc_full_name} already exists as ${contact.contact_record_number} — linked, missing info filled in.`
+        : `Contact ${contact.contact_record_number} created for ${candidate.orc_full_name}.`)
       await refresh()
     } catch (e) {
       setError(e?.message || 'Promote failed.')
