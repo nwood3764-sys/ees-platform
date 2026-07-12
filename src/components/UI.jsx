@@ -1,18 +1,20 @@
 import { useState, useEffect } from 'react';
-import { C, STATUS_CFG, NAV_MODULES } from '../data/constants';
+import { C, STATUS_CFG, NAV_MODULES, TYPE, RADIUS } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
 import UserMenu from './UserMenu';
 
 export function Badge({ s }) {
+  // v1.1: tinted background + dark same-family text carries the status; the
+  // colored dot was retired with the density pass (STATUS_CFG keeps `dot` for
+  // any surface that still wants it).
   const cfg = STATUS_CFG[s] || { bg: '#f0f3f8', color: '#4a5e7a', dot: '#8fa0b8' };
   return (
     <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
+      display: 'inline-flex', alignItems: 'center',
       background: cfg.bg, color: cfg.color,
-      fontSize: 11, fontWeight: 500, padding: '3px 8px', borderRadius: 4, whiteSpace: 'nowrap'
+      fontSize: TYPE.badge, fontWeight: 500, padding: '2px 7px', borderRadius: RADIUS.badge, whiteSpace: 'nowrap'
     }}>
-      <span style={{ width: 5, height: 5, borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
       {s}
     </span>
   );
@@ -111,7 +113,7 @@ export function SectionTabs({ sections, active, onChange, counts = {}, urgentSec
             background: 'none', border: 'none',
             borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
             color: on ? C.textPrimary : C.textMuted,
-            fontSize: isMobile ? 14 : 13,
+            fontSize: isMobile ? 14 : TYPE.nav,
             fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
             display: 'flex', alignItems: 'center', gap: 6,
             whiteSpace: 'nowrap', flexShrink: 0,
@@ -370,7 +372,7 @@ export function Sidebar({
           const rowPadding = isMobile
             ? '14px 20px'
             : isCollapsed ? '11px 0' : '9px 20px';
-          const rowFontSize = isMobile ? 15 : 13.5;
+          const rowFontSize = isMobile ? 15 : TYPE.nav;
           return (
             <div
               key={m.id}

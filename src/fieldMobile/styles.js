@@ -22,6 +22,7 @@ export const C = {
   navWarn:      '#4a5e7a',
   danger:       '#4a6da8',
   sky:          '#7eb3e8',
+  link:         '#1d5a96',
   navActive:    'rgba(255,255,255,0.96)',
   navInactive:  'rgba(255,255,255,0.62)',
 }

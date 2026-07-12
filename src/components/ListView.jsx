@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { C } from '../data/constants';
+import { C, TYPE } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
 import { usePullToRefresh } from '../lib/usePullToRefresh';
@@ -843,7 +843,7 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
           style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '10px 4px 10px 12px', cursor: col.sortable ? 'pointer' : 'default', flex: '1 1 auto', minWidth: 0 }}
           onMouseEnter={e => { if (col.sortable) e.currentTarget.style.background = C.page; }}
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: isSorted ? C.textPrimary : C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, maxWidth: 168 }} title={col.label}>
+          <span style={{ fontSize: TYPE.tableHeader, fontWeight: 500, color: isSorted ? C.textPrimary : C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, maxWidth: 168 }} title={col.label}>
             {col.label}
           </span>
           {col.sortable && (
@@ -2174,10 +2174,10 @@ export function ListView({
   // Default cell renderer
   const defaultCell = (col, r) => {
     const v = r[col.field];
-    if (col.field === 'status' || col.field === 'stage') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}` }}><Badge s={v} /></td>;
-    if (col.field === 'program') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}` }}><ProgramTag value={v} /></td>;
-    if (col.field === 'id') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>{v}</td>;
-    if (col.field === 'name') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</td>;
+    if (col.field === 'status' || col.field === 'stage') return <td key={col.field} style={{ padding: '7px 12px', borderBottom: `1px solid ${C.border}` }}><Badge s={v} /></td>;
+    if (col.field === 'program') return <td key={col.field} style={{ padding: '7px 12px', borderBottom: `1px solid ${C.border}` }}><ProgramTag value={v} /></td>;
+    if (col.field === 'id') return <td key={col.field} style={{ padding: '7px 12px', borderBottom: `1px solid ${C.border}`, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>{v}</td>;
+    if (col.field === 'name') return <td key={col.field} style={{ padding: '7px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</td>;
     if (col.field === 'amount') {
       // `v` may arrive already-formatted (e.g. "$1,234" or "—") from a
       // service's fmtAmount, or as a raw number. Only number-format when it's
@@ -2186,10 +2186,10 @@ export function ListView({
       const display = (typeof v === 'number')
         ? `$${v.toLocaleString()}`
         : (v == null || v === '' ? '—' : String(v));
-      return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{display}</td>;
+      return <td key={col.field} style={{ padding: '7px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{display}</td>;
     }
-    if (col.field === 'email') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: '#1a5a8a', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</td>;
-    return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: v ? C.textSecondary : C.textMuted, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v || '—'}</td>;
+    if (col.field === 'email') return <td key={col.field} style={{ padding: '7px 12px', borderBottom: `1px solid ${C.border}`, color: '#1a5a8a', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</td>;
+    return <td key={col.field} style={{ padding: '7px 12px', borderBottom: `1px solid ${C.border}`, color: v ? C.textSecondary : C.textMuted, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v || '—'}</td>;
   };
 
   // ─── Mobile render ───────────────────────────────────────────────────────
@@ -2634,7 +2634,7 @@ export function ListView({
               AND the sticky <thead> has a proper scrollport to freeze against.
               (A wrapping overflow:hidden here previously defeated position:sticky.) */}
           <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'auto', flex: 1, minHeight: 0 }}>
-            <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
+            <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: TYPE.tableCell, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
               <colgroup>
                 {editMode && <col style={{ width: 36 }} />}
                 {effectiveColumns.map(col => {
@@ -2903,13 +2903,13 @@ function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSav
         onDoubleClick={(e) => { e.stopPropagation(); if (!isSaving) onStartEdit(); }}
         title="Double-click to edit">
       {isSaving ? (
-        <div style={{ padding: '11px 12px', color: C.textMuted, fontStyle: 'italic', fontSize: 12 }}>Saving…</div>
+        <div style={{ padding: '7px 12px', color: C.textMuted, fontStyle: 'italic', fontSize: 12 }}>Saving…</div>
       ) : (
         // Render the baseCell contents inline. baseCell is already a <td>
         // produced by defaultCell/renderCell — we strip its outer td by
         // rendering its `children` inside this td instead. React lets us
         // grab .props.children directly on the element.
-        <div style={{ padding: '11px 12px', fontSize: 12, color: C.textPrimary }}>
+        <div style={{ padding: '7px 12px', fontSize: 12, color: C.textPrimary }}>
           {(baseCell?.props?.children !== undefined) ? baseCell.props.children : baseCell}
         </div>
       )}
