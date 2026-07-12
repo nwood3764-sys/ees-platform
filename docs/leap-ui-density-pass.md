@@ -1,6 +1,9 @@
 # LEAP UI Density Pass — v1.1 Design System (Staging Workstream)
 
-**Status:** PLAN — awaiting go-ahead from Nicholas. Nothing implemented yet.
+**Status:** Phase 0 + Phase 1 SHIPPED TO STAGING (2026-07-12) — soaking on
+`ees-platform-staging.netlify.app`. Direction approved by Nicholas via the
+interactive prototype (Current ↔ v1.1 toggle) on 2026-07-12. Phases 2–3 not
+started. Nothing on `master`/production.
 **Environment rule for this workstream:** everything ships to **staging only**
 (`staging` branch → `ees-platform-staging.netlify.app` → staging DB
 `xlieenkfhypqhevmwxzi`). Nothing goes to `master`/production until Nicholas has
@@ -243,33 +246,33 @@ with the eventual prod promotion, not the staging soak).
 
 Recommendation stated first; mark DECIDED with date + owner as confirmed.
 
-- **D1 — Base scale: start at 13px as specced.** The approved fallback
-  (13.5–14px global) exists precisely for the staging soak; tokens make the
-  switch a one-line change. Decide once after living with staging for a few
-  days. — *Recommended: 13px. PENDING.*
+- **D1 — Base scale: 13px as specced.** — **DECIDED 2026-07-12 (Nicholas,
+  via prototype approval).** The approved fallback (13.5–14px global) remains
+  a one-line `TYPE.base` change after the staging soak if needed.
 - **D2 — Scope: desktop app only for density.** Record pages, list views,
   admin, dashboards, portals get the density pass. **Field Mobile PWA and the
   customer scheduling pages keep their current larger sizing** (glove/thumb
-  ergonomics; customer-facing comfort) but pick up palette parity (link color,
-  badge tints). — *Recommended: yes. PENDING.*
+  ergonomics; customer-facing comfort) but pick up palette parity (link
+  color). — **DECIDED 2026-07-12 (Nicholas, via prototype approval).**
 - **D3 — `audit-template-builder` standalone HTML is out of scope** for this
   pass; its off-system palette (including red, which violates the no-red rule)
-  is logged as a separate follow-up re-skin. — *Recommended: out of scope,
-  separate follow-up. PENDING.*
-- **D4 — Path vs. status transitions.** v1.1 declares the path a pure
-  indicator with **no stage-mutation control** and auto-advance from events.
-  LEAP today advances status via the explicit `StatusTransitionsBar` (a
-  separate component, not the path). Recommendation: restyle the path as
-  indicator-only per spec **and keep the StatusTransitionsBar** as the
-  explicit transition mechanism — it is LEAP's "qualifying event" until
-  event-driven auto-advance exists; folding it away would remove the only way
-  to move records. Render the auto-advance hint verbatim per spec. —
-  *Recommended: keep both. PENDING.*
-- **D5 — v1.1 preview prototype HTML** referenced by the spec is not in the
-  repo. If Nicholas has it, drop it into `docs/` (as
-  `leap-design-v1-1-preview.html`) so ambiguity resolves against it per the
-  spec's own precedence (prototype first, then Salesforce Lightning). —
-  *Recommended: add if available. PENDING.*
+  is logged as a separate follow-up re-skin. — **DECIDED 2026-07-12
+  (Nicholas, via prototype approval).**
+- **D4 — Path vs. status transitions.** The live path widget was already
+  display-only (a prior session removed stage clicking); v1.1 restyles it to
+  26px flat segments and adds the permanent "Auto-advances on qualifying
+  events" hint. The `StatusTransitionsBar` stays as the explicit transition
+  mechanism — it is LEAP's "qualifying event" until event-driven auto-advance
+  exists. The config-gated "Next:" transition guidance box under the path was
+  kept (useful, spec-silent); the stage counter and big current-stage label
+  were retired (screen-reader text preserved). Badge status dot also retired
+  per the approved prototype; `STATUS_CFG` keeps `dot` values if it ever
+  comes back. — **DECIDED 2026-07-12 (Nicholas, via prototype approval).**
+- **D5 — Reference prototype.** Built in-session instead of importing one:
+  interactive Current ↔ v1.1 record-page prototype (Claude artifact
+  `4f4bd8c0-eaba-4a21-819f-5c558028e8d3`), "Current" values sourced from the
+  live components. Ambiguity resolves against it, then Salesforce Lightning.
+  — **DECIDED 2026-07-12.**
 
 ## 8. File + DB-table index (what this workstream touches most)
 
