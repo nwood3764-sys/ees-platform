@@ -212,6 +212,9 @@ function AuthedApp({ session }) {
   // their first allowed module (or home). Runs once access is known.
   useEffect(() => {
     if (!effectiveAccess) return
+    // No allowed modules at all → renderModule shows the no-access screen;
+    // redirecting anywhere would just loop.
+    if (navModules.length === 0) return
     if (activeModule && activeModule !== 'search' && activeModule !== 'help'
         && !moduleAllowed(effectiveAccess, activeModule)) {
       const fallback = navModules[0]?.id || 'home'
@@ -324,6 +327,27 @@ function AuthedApp({ session }) {
     // module isn't permitted (the redirect effect will move us), render a
     // neutral loading state rather than flash a module the user can't keep.
     if (!effectiveAccess) return <ModuleLoader />
+    // Access resolved to NOTHING (e.g. an auth account with no app-user row,
+    // or a role with zero module grants). Without this branch the redirect
+    // effect loops forever behind the spinner — show the situation and give
+    // the user a way out instead.
+    if (navModules.length === 0) {
+      return (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '28px 32px', maxWidth: 440, textAlign: 'center' }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, marginBottom: 8 }}>No module access</div>
+            <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.5, marginBottom: 18 }}>
+              This account isn&apos;t set up for any LEAP modules. If you signed in with
+              a test or portal account, sign out and use your staff account — otherwise
+              ask an administrator to assign your role&apos;s module access.
+            </div>
+            <button onClick={handleSignOut} style={{ background: C.emeraldMid, color: '#fff', border: 'none', borderRadius: 4, padding: '7px 18px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>
+              Sign out
+            </button>
+          </div>
+        </div>
+      )
+    }
     if (activeModule && activeModule !== 'search' && activeModule !== 'help'
         && !moduleAllowed(effectiveAccess, activeModule)) {
       return <ModuleLoader />
