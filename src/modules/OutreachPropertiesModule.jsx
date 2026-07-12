@@ -8,6 +8,7 @@ import ConfiguredHome from '../components/ConfiguredHome'
 import HelpIcon from '../components/help/HelpIcon'
 import { OutreachMap } from '../components/OutreachMap'
 import OutreachPropertyCard from '../components/OutreachPropertyCard'
+import OwnerResearchQueue from '../components/OwnerResearchQueue'
 import OutreachFilterPanel, {
   EMPTY_FILTERS,
   applyFilters,
@@ -33,10 +34,11 @@ import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
  */
 
 const CODE_SECTIONS = [
-  { id: 'home',       label: 'Home'       },
-  { id: 'properties', label: 'Properties' },
-  { id: 'map',        label: 'Map'        },
-  { id: 'imports',    label: 'Imports'    },
+  { id: 'home',       label: 'Home'           },
+  { id: 'properties', label: 'Properties'     },
+  { id: 'map',        label: 'Map'            },
+  { id: 'research',   label: 'Owner Research' },
+  { id: 'imports',    label: 'Imports'        },
 ]
 
 // Display columns for the Outreach Properties list.
@@ -642,13 +644,26 @@ export default function OutreachPropertiesModule({
   // the user opens Properties or Map.
   const countsQ = useCachedFetch('outreach:counts', fetchOutreachCounts)
   const batchesQ = useCachedFetch('outreach:batches', fetchImportBatches)
+  // Properties list = top-of-funnel lens: only properties WITHOUT an active
+  // opportunity (includeEngaged defaults to false).
   const propertiesQ = useCachedFetch('outreach:properties', fetchOutreachProperties, {
-    enabled: sec === 'properties' || sec === 'map',
+    enabled: sec === 'properties',
   })
+  // Map = the full set INCLUDING engaged properties, so the "Include properties
+  // with active opportunity" toggle can actually surface them. Without this the
+  // engaged rows are filtered out at the DB query layer and the toggle (a
+  // client-side filter over this dataset) has nothing to reveal. Distinct cache
+  // key so it never collides with the list's non-engaged fetch.
+  const mapPropertiesQ = useCachedFetch(
+    'outreach:properties:all',
+    () => fetchOutreachProperties({ includeEngaged: true }),
+    { enabled: sec === 'map' },
+  )
 
-  const counts     = countsQ.data
-  const batches    = batchesQ.data    || []
-  const properties = propertiesQ.data || []
+  const counts        = countsQ.data
+  const batches       = batchesQ.data       || []
+  const properties    = propertiesQ.data    || []
+  const mapProperties = mapPropertiesQ.data || []
 
   // Per-dataset loading flags. Mirror the previous local state so the
   // rest of the file (tab badge fallback logic, section gating) reads
@@ -685,12 +700,14 @@ export default function OutreachPropertiesModule({
 
   // Tab-badge counts: prefer the HEAD-query counts (instant on load)
   // over the paginated list lengths (which stay at 0 for ~40 seconds
-  // while properties paginate). Once the lists arrive they take over
-  // as the source of truth — they're filtered identically to the
-  // HEAD query so the numbers always match.
-  const propertiesBadge = loadingProperties
-    ? (counts?.propertiesWithoutOpportunity ?? null)
-    : properties.length
+  // while properties paginate). Once the list arrives it takes over
+  // as the source of truth — it's filtered identically to the HEAD
+  // query so the numbers always match. The list fetch is only enabled
+  // on the Properties tab, so on other tabs (Map, Home, Imports) fall
+  // back to the HEAD count rather than the empty, un-fetched list.
+  const propertiesBadge = propertiesQ.data
+    ? properties.length
+    : (counts?.propertiesWithoutOpportunity ?? null)
   const importsBadge = loadingBatches
     ? (counts?.importBatches ?? null)
     : batches.length
@@ -733,7 +750,8 @@ export default function OutreachPropertiesModule({
           <>
             {sec === 'home'       && <ConfiguredHome crumb="Outreach" moduleId="outreach" onOpenSetup={onOpenSetup} onOpenRecord={(r) => setSelectedRecord(r)} />}
             {sec === 'properties' && <PropertiesListSection loading={loadingProperties} error={error} properties={properties} onRefresh={loadAll} onRetry={loadAll} onOpenRecord={openProperty} />}
-            {sec === 'map'        && <MapSection loading={loadingProperties} error={error} properties={properties} onRetry={loadAll} onOpenProperty={openPropertyCard} />}
+            {sec === 'map'        && <MapSection loading={mapPropertiesQ.loading} error={mapPropertiesQ.error} properties={mapProperties} onRetry={loadAll} onOpenProperty={openPropertyCard} />}
+            {sec === 'research'   && <OwnerResearchQueue onOpenRecord={(r) => setSelectedRecord(r)} />}
             {sec === 'imports'    && <ImportsSection batches={batches} loading={loadingBatches} error={error} onRefresh={loadAll} onRetry={loadAll} onOpenImport={openImport} onOpenImportModal={() => setShowImportModal(true)} />}
           </>
         )}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import DOMPurify from 'dompurify'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
@@ -704,6 +705,14 @@ function ThreadHeader({ thread, isMobile, onBack }) {
   )
 }
 
+// An email message whose body contains markup should render as HTML; plain
+// bodies (SMS, or emails that arrived as plain text) keep the text path.
+function isEmailHtml(message) {
+  return message.msg_channel === 'email'
+      && typeof message.msg_body === 'string'
+      && /<[a-z][\s\S]*>/i.test(message.msg_body)
+}
+
 // ---------------------------------------------------------------------------
 // MessageBubble — one row in the message timeline
 // ---------------------------------------------------------------------------
@@ -741,9 +750,19 @@ function MessageBubble({ message, attachments = [] }) {
         padding: '8px 12px',
         fontSize: 13, lineHeight: 1.45,
         color: isFailed ? '#1e466b' : dir.color,
-        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        whiteSpace: isEmailHtml(message) ? 'normal' : 'pre-wrap',
+        wordBreak: 'break-word',
+        overflowX: 'auto',
       }}>
-        {message.msg_body || '—'}
+        {isEmailHtml(message) ? (
+          // Email bodies are HTML (composed in TipTap or received from real
+          // mail clients). Render them, sanitized — showing raw markup as
+          // text made every email unreadable. SMS stays plain text.
+          // eslint-disable-next-line react/no-danger
+          <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(message.msg_body) }} />
+        ) : (
+          message.msg_body || '—'
+        )}
       </div>
 
       {/* Attachments — paperclip chips below the body, same max-width and
@@ -757,13 +776,16 @@ function MessageBubble({ message, attachments = [] }) {
           {attachments.map(att => {
             const isPending  = att.ma_virus_scan_status === 'pending'
             const isInfected = att.ma_virus_scan_status === 'infected'
+                            || att.ma_virus_scan_status === 'blocked'
             const blocked    = isInfected
             return (
               <button
                 key={att.id}
                 onClick={blocked ? undefined : (e) => handleAttachmentClick(att, e)}
                 disabled={blocked}
-                title={blocked ? 'Attachment failed virus scan — download blocked.' : `Open ${att.ma_file_name}`}
+                title={blocked
+                  ? `Attachment blocked by virus scan — ${att.ma_virus_scan_detail || 'download disabled.'}`
+                  : `Open ${att.ma_file_name}`}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '6px 10px',
@@ -797,7 +819,7 @@ function MessageBubble({ message, attachments = [] }) {
                     background: '#e8f1fb', color: '#1e466b',
                     fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
                     padding: '1px 6px', borderRadius: 8, textTransform: 'uppercase',
-                  }} title="Virus scan pending — ClamAV hook ships in a follow-up slice">
+                  }} title="Virus scan queued — the scanner runs every 5 minutes">
                     Scan pending
                   </span>
                 )}
@@ -873,14 +895,16 @@ function Composer({
   draft, setDraft, sending, onSend, onKeyDown, composerRef,
   channel, customerAddress, isMobile,
 }) {
+  // The 1600-char cap is Twilio's segmented-SMS limit; email has no cap.
+  const isSms = channel === 'sms'
   const remaining = 1600 - (draft?.length || 0)
-  const tooLong = remaining < 0
+  const tooLong = isSms && remaining < 0
   const disabled = sending || !draft.trim() || tooLong
 
-  // For v1 only SMS replies are wired. Email composer is part of the
-  // Communications Module build (TipTap + locked regions); render a
-  // friendly notice on non-SMS threads instead of a broken composer.
-  if (channel !== 'sms') {
+  // SMS and email replies both route through sendReplyToConversation (email
+  // stays on this thread via conversation_id → send-email-v1). Anything else
+  // has no reply transport yet.
+  if (channel !== 'sms' && channel !== 'email') {
     return (
       <div style={{
         padding: '12px 16px',
@@ -889,7 +913,7 @@ function Composer({
         fontSize: 12, color: C.textMuted, fontStyle: 'italic',
         textAlign: 'center',
       }}>
-        Replies on {channel || 'this channel'} threads aren't supported yet — the email composer ships with the Communications Module.
+        Replies on {channel || 'this channel'} threads aren't supported yet.
       </div>
     )
   }
@@ -905,7 +929,9 @@ function Composer({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKeyDown}
-        placeholder={`SMS to ${customerAddress || 'customer'}…`}
+        placeholder={isSms
+          ? `SMS to ${customerAddress || 'customer'}…`
+          : `Email reply to ${customerAddress || 'customer'}…`}
         rows={isMobile ? 3 : 2}
         style={{
           width: '100%',
@@ -930,7 +956,8 @@ function Composer({
         fontSize: 11, color: C.textMuted,
       }}>
         <span style={{ color: tooLong ? '#7eb3e8' : C.textMuted }}>
-          {tooLong ? `${Math.abs(remaining)} over limit` : `${remaining} characters left`}
+          {isSms && (tooLong ? `${Math.abs(remaining)} over limit` : `${remaining} characters left`)}
+          {!isSms && 'Sends as a Re: on this thread from the state mailbox'}
           {!isMobile && (
             <span style={{ marginLeft: 10, fontStyle: 'italic' }}>
               Cmd/Ctrl + Enter to send

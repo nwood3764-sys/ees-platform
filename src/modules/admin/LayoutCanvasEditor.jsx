@@ -8,6 +8,20 @@
 // and drag between/within them (dnd-kit multi-container). Each field carries a
 // `column` (1-based); RecordDetail's FieldGroupWidget honors it.
 //
+// One shared DndContext drives three drag families, kept apart by id prefix
+// and a family-filtered collision detection:
+//   sec::<key>     — section cards (reorder sections; order persists as
+//                    section_order, which also drives Related-tab card order)
+//   wgt::<key>     — non-field-group widget tiles (related lists, galleries,
+//                    reports…) draggable within and between sections;
+//                    wzone::<sectionKey> is each section's widget drop zone
+//   <field name>   — field tiles; <sectionKey>::col:N are column drop zones
+//
+// Related lists are first-class here: rename inline (widget_title is the card
+// heading on the record's Related tab), reorder/move by drag, remove, and add
+// new ones via RelatedListCanvasModal. Sections carry a Tab (Details/Related)
+// select so field sections can be placed on either tab.
+//
 // Persists through the existing page-layout service (bulk soft-delete +
 // recreate). No schema change.
 // =============================================================================
@@ -16,18 +30,29 @@ import { useState, useEffect, useCallback, memo } from 'react'
 import {
   DndContext, closestCorners, PointerSensor, KeyboardSensor, useSensor, useSensors, useDroppable,
 } from '@dnd-kit/core'
-import { SortableContext, useSortable, verticalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
+import { SortableContext, useSortable, arrayMove, verticalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { C } from '../../data/constants'
 import { LoadingState, ErrorState } from '../../components/UI'
 import { inputStyle } from '../../builder/inspectorControls'
 import { loadLayoutForCanvas, saveLayoutFromCanvas } from '../../builder/adapters/pageLayoutAdapter'
+import RelatedListCanvasModal from './widgets/RelatedListCanvasModal'
 
 const WIDGET_LABELS = {
   field_group: 'Field Group', related_list: 'Related List', report: 'Report',
   file_gallery: 'File Gallery', conversation_panel: 'Conversation', status_path: 'Status Path',
-  prtsn_history: 'Publish History',
+  prtsn_history: 'Publish History', map: 'Map',
 }
+
+// The two standard tabs a section can live on. RecordDetail renders custom
+// tab names too, so an unrecognized existing value is preserved as-is.
+const SECTION_TABS = ['Details', 'Related']
+
+// Card widgets the record renderer ALWAYS places on the Related tab, no
+// matter which section/tab holds them — the section only controls card order.
+// Everything else (field groups, maps, config editors) renders inside its
+// section on the section's own tab.
+const RELATED_TAB_WIDGET_TYPES = new Set(['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'])
 
 function humanize(col, object) {
   let c = col
@@ -53,6 +78,16 @@ function normalizeColumns(sections) {
   }))
 }
 
+// Which drag family an id belongs to. Field ids are raw column names and
+// column-zone ids ("<sectionKey>::col:N") — neither can collide with the
+// "sec::" / "wgt::" / "wzone::" prefixes since section keys never contain "::".
+function dragFamily(id) {
+  const s = String(id)
+  if (s.startsWith('sec::')) return 'section'
+  if (s.startsWith('wgt::') || s.startsWith('wzone::')) return 'widget'
+  return 'field'
+}
+
 export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
@@ -64,6 +99,8 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const [saving, setSaving]   = useState(false)
   const [savedAt, setSavedAt] = useState(null)
   const [saveError, setSaveError] = useState(null)
+  // { sectionKey, widgetKey|null } — related-list config modal target.
+  const [relatedModal, setRelatedModal] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -101,20 +138,82 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
       ...sec, widgets: sec.widgets.map(w => w.key !== widgetKey ? w : { ...w, config: { ...w.config, fields: nextFields } }),
     }))
   }, [])
+  const patchWidget = useCallback((sectionKey, widgetKey, patch) => {
+    setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
+      ...sec, widgets: (sec.widgets || []).map(w => w.key !== widgetKey ? w : { ...w, ...patch }),
+    }))
+  }, [])
+  const removeWidget = useCallback((sectionKey, widgetKey) => {
+    setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
+      ...sec, widgets: (sec.widgets || []).filter(w => w.key !== widgetKey),
+    }))
+  }, [])
   const activate = useCallback((key) => setActiveSection(key), [])
+  const openRelatedModal = useCallback((sectionKey, widgetKey = null) => {
+    setRelatedModal({ sectionKey, widgetKey })
+  }, [])
 
-  // One shared drag context for the whole canvas so a placed field can be
-  // dragged BETWEEN sections (not just reordered within its own). active.id is
-  // the field name; over.id is either a column drop-zone ("<sectionKey>::col:N")
-  // or another field's name.
+  // One shared drag context for the whole canvas. active.id decides the
+  // family (section card / widget tile / field), and collision detection is
+  // filtered to same-family droppables so a section drag never lands "inside"
+  // a field column and vice versa.
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-  const onFieldDragEnd = ({ active, over }) => {
-    if (!over || active.id === over.id) return
-    const activeName = active.id
-    const overId = String(over.id)
+  const collisionDetection = useCallback((args) => {
+    const family = dragFamily(args.active.id)
+    return closestCorners({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(c => dragFamily(c.id) === family),
+    })
+  }, [])
+
+  const onSectionDragEnd = (activeId, overId) => {
+    setSections(prev => {
+      const from = prev.findIndex(s => `sec::${s.key}` === activeId)
+      const to   = prev.findIndex(s => `sec::${s.key}` === overId)
+      if (from < 0 || to < 0) return prev
+      return arrayMove(prev, from, to)
+    })
+  }
+
+  const onWidgetDragEnd = (activeId, overId) => {
+    const movedKey = activeId.slice('wgt::'.length)
+    setSections(prev => {
+      let moving = null
+      for (const sec of prev) {
+        const w = (sec.widgets || []).find(x => x.key === movedKey)
+        if (w) { moving = w; break }
+      }
+      if (!moving || moving.type === 'field_group') return prev
+      // Resolve the target section (+ the tile to insert before, if any).
+      let tgtSecKey = null, overWidgetKey = null
+      if (overId.startsWith('wzone::')) {
+        tgtSecKey = overId.slice('wzone::'.length)
+      } else {
+        overWidgetKey = overId.slice('wgt::'.length)
+        for (const sec of prev) {
+          if ((sec.widgets || []).some(x => x.key === overWidgetKey)) { tgtSecKey = sec.key; break }
+        }
+      }
+      if (!tgtSecKey) return prev
+      return prev.map(sec => {
+        let widgets = (sec.widgets || []).filter(x => x.key !== movedKey)
+        if (sec.key === tgtSecKey) {
+          let insertAt = widgets.length
+          if (overWidgetKey) {
+            const i = widgets.findIndex(x => x.key === overWidgetKey)
+            if (i >= 0) insertAt = i
+          }
+          widgets = [...widgets.slice(0, insertAt), moving, ...widgets.slice(insertAt)]
+        }
+        return { ...sec, widgets }
+      })
+    })
+  }
+
+  const onFieldDragEnd = (activeName, overId) => {
     setSections(prev => {
       // Locate the field being moved (it lives in exactly one section).
       let srcField = null
@@ -162,10 +261,23 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
     })
   }
 
-  const addSection = () => {
+  const onDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return
+    const activeId = String(active.id)
+    const overId = String(over.id)
+    const family = dragFamily(activeId)
+    if (family === 'section')      onSectionDragEnd(activeId, overId)
+    else if (family === 'widget')  onWidgetDragEnd(activeId, overId)
+    else                           onFieldDragEnd(activeId, overId)
+  }
+
+  // position 'start' inserts the new section at the top of the layout (the
+  // top button), 'end' appends it after the last section (the bottom button).
+  const addSection = (position = 'end') => {
     const key = `sec-new-${Date.now()}`
-    setSections(s => [...s, { key, label: 'New Section', columns: 2, tab: 'Details', isCollapsible: false, isCollapsedByDefault: false, placement: 'main',
-      widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [] } }] }])
+    const section = { key, label: 'New Section', columns: 2, tab: 'Details', isCollapsible: false, isCollapsedByDefault: false, placement: 'main',
+      widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [] } }] }
+    setSections(s => position === 'start' ? [section, ...s] : [...s, section])
     setActiveSection(key)
   }
 
@@ -180,6 +292,22 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
       }
       return { ...sec, widgets: widgets.map(w => w === fg ? { ...w, config: { ...w.config, fields: [...(w.config?.fields || []), field] } } : w) }
     }))
+  }
+
+  const applyRelatedModal = ({ title, config }) => {
+    const { sectionKey, widgetKey } = relatedModal
+    if (widgetKey) {
+      patchWidget(sectionKey, widgetKey, { title, config })
+    } else {
+      setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
+        ...sec,
+        widgets: [...(sec.widgets || []), {
+          key: `w-new-${Date.now()}`, type: 'related_list', title,
+          column: 1, size: 'medium', isRequired: false, config,
+        }],
+      }))
+    }
+    setRelatedModal(null)
   }
 
   const handleSave = async () => {
@@ -205,6 +333,10 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
         humanize(c.name, meta.object).toLowerCase().includes(fieldQuery) ||
         c.name.toLowerCase().includes(fieldQuery))
     : unplaced
+
+  const modalWidget = relatedModal?.widgetKey
+    ? sections.find(s => s.key === relatedModal.sectionKey)?.widgets?.find(w => w.key === relatedModal.widgetKey)
+    : null
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
@@ -250,36 +382,73 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-          <DndContext sensors={dndSensors} collisionDetection={closestCorners} onDragEnd={onFieldDragEnd}>
-            {sections.map(sec => (
-              <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
-                onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields} />
-            ))}
+          <button onClick={() => addSection('start')} style={{ ...addSectionBtn(), marginBottom: 14 }}>
+            + Add Section
+          </button>
+          <DndContext sensors={dndSensors} collisionDetection={collisionDetection} onDragEnd={onDragEnd}>
+            <SortableContext items={sections.map(s => `sec::${s.key}`)} strategy={verticalListSortingStrategy}>
+              {sections.map(sec => (
+                <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
+                  onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
+                  onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal} />
+              ))}
+            </SortableContext>
           </DndContext>
-          <button onClick={addSection} style={{ width: '100%', padding: '10px', fontSize: 13, fontWeight: 500, background: C.card, color: C.emeraldMid, border: `1px dashed ${C.borderDark}`, borderRadius: 8, cursor: 'pointer' }}>
+          <button onClick={() => addSection('end')} style={addSectionBtn()}>
             + Add Section
           </button>
         </div>
       </div>
+
+      {relatedModal && (
+        <RelatedListCanvasModal
+          objectName={meta.object}
+          initial={modalWidget ? { title: modalWidget.title, config: modalWidget.config || {} } : null}
+          onClose={() => setRelatedModal(null)}
+          onApply={applyRelatedModal}
+        />
+      )}
     </div>
   )
 }
 
 // memo: only the edited section (or the two whose `active` flips) re-renders —
 // keeps the drag contexts from re-mounting on every keystroke (the sluggishness).
-const SectionCard = memo(function SectionCard({ section, object, active, onActivate, onPatch, onRemove, onSetFields }) {
+const SectionCard = memo(function SectionCard({
+  section, object, active,
+  onActivate, onPatch, onRemove, onSetFields,
+  onPatchWidget, onRemoveWidget, onOpenRelatedModal,
+}) {
   const fg = (section.widgets || []).find(w => w.type === 'field_group')
   const others = (section.widgets || []).filter(w => w.type !== 'field_group')
   const cols = section.columns || 2
+  const tab = section.tab || 'Details'
+  const tabOptions = SECTION_TABS.includes(tab) ? SECTION_TABS : [...SECTION_TABS, tab]
+
+  // The whole card is sortable; only the ⠿ handle activates the drag so the
+  // label input / selects / nested field drags keep working normally.
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `sec::${section.key}` })
 
   return (
-    <div onMouseDown={() => onActivate(section.key)} style={{
+    <div ref={setNodeRef} onMouseDown={() => onActivate(section.key)} style={{
+      transform: CSS.Transform.toString(transform), transition,
+      opacity: isDragging ? 0.55 : 1,
       background: C.card, border: `1px solid ${active ? C.emerald : C.border}`, borderRadius: 8,
       marginBottom: 14, overflow: 'hidden', boxShadow: active ? `0 0 0 1px ${C.emerald}` : 'none',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${C.border}`, background: C.cardSecondary }}>
+        <span {...attributes} {...listeners} title="Drag to reorder sections"
+          style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none', fontSize: 14, lineHeight: 1, flexShrink: 0 }}>⠿</span>
         <input value={section.label} onChange={e => onPatch(section.key, { label: e.target.value })}
           style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.textPrimary, border: 'none', background: 'transparent', outline: 'none' }} />
+        <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
+          Tab
+          <select value={tab} onChange={e => onPatch(section.key, { tab: e.target.value })}
+            title="Which record-page tab this section's fields render on"
+            style={{ ...inputStyle(), width: 'auto', padding: '3px 6px', fontSize: 12 }}>
+            {tabOptions.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
         <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
           Columns
           <select value={cols} onChange={e => onPatch(section.key, { columns: Number(e.target.value) })}
@@ -299,16 +468,83 @@ const SectionCard = memo(function SectionCard({ section, object, active, onActiv
             onChange={(next) => onSetFields(section.key, fg.key, next)}
           />
         ) : null}
-        {others.map(w => (
-          <div key={w.key} style={{ marginTop: 8, padding: '10px 12px', background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12.5, color: C.textPrimary, fontWeight: 500 }}>{w.title || WIDGET_LABELS[w.type] || w.type}</span>
-            <span style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4 }}>{WIDGET_LABELS[w.type] || w.type}</span>
-          </div>
-        ))}
+        <WidgetZone
+          sectionKey={section.key}
+          widgets={others}
+          onPatchWidget={onPatchWidget}
+          onRemoveWidget={onRemoveWidget}
+          onOpenRelatedModal={onOpenRelatedModal}
+        />
       </div>
     </div>
   )
 })
+
+// ─── Widget tiles (related lists, galleries, reports…) ───────────────────────
+// Each section's non-field-group widgets live in a shared-context drop zone
+// ("wzone::<sectionKey>") so a related-list card can be dragged within its
+// section or into another one — the resulting array order persists as
+// widget_position, which is exactly the order the Related tab renders cards.
+function WidgetZone({ sectionKey, widgets, onPatchWidget, onRemoveWidget, onOpenRelatedModal }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `wzone::${sectionKey}` })
+  return (
+    <div ref={setNodeRef} style={{
+      marginTop: 8, padding: 6, borderRadius: 6,
+      border: `1px dashed ${isOver ? C.emerald : 'transparent'}`,
+      background: isOver ? '#f0faf5' : 'transparent',
+    }}>
+      <SortableContext items={widgets.map(w => `wgt::${w.key}`)} strategy={verticalListSortingStrategy}>
+        {widgets.map(w => (
+          <WidgetTile key={w.key} widget={w} sectionKey={sectionKey}
+            onPatch={onPatchWidget} onRemove={onRemoveWidget} onOpenRelatedModal={onOpenRelatedModal} />
+        ))}
+      </SortableContext>
+      <button onClick={() => onOpenRelatedModal(sectionKey, null)}
+        style={{ width: '100%', padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
+          color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
+        + Add Related List
+      </button>
+    </div>
+  )
+}
+
+function WidgetTile({ widget, sectionKey, onPatch, onRemove, onOpenRelatedModal }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `wgt::${widget.key}` })
+  return (
+    <div ref={setNodeRef} style={{
+      transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1,
+      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', marginBottom: 6,
+      background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6,
+    }}>
+      <span {...attributes} {...listeners} title="Drag to reorder (within or across sections)"
+        style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none', flexShrink: 0 }}>⠿</span>
+      <input
+        value={widget.title || ''}
+        onChange={e => onPatch(sectionKey, widget.key, { title: e.target.value })}
+        placeholder={WIDGET_LABELS[widget.type] || widget.type}
+        title="Card title shown on the record page"
+        style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 500, color: C.textPrimary,
+          border: 'none', background: 'transparent', outline: 'none' }}
+      />
+      <span
+        title={RELATED_TAB_WIDGET_TYPES.has(widget.type)
+          ? "This card always renders on the record's Related tab — its section here only controls card order."
+          : undefined}
+        style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, flexShrink: 0 }}>
+        {WIDGET_LABELS[widget.type] || widget.type}
+        {RELATED_TAB_WIDGET_TYPES.has(widget.type) && <span style={{ color: C.sky }}> · Related tab</span>}
+      </span>
+      {widget.type === 'related_list' && (
+        <button onClick={() => onOpenRelatedModal(sectionKey, widget.key)} title="Configure table, FK, and columns"
+          style={{ padding: '3px 8px', fontSize: 11, fontWeight: 500, background: C.card, color: C.textSecondary,
+            border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer', flexShrink: 0 }}>
+          Configure
+        </button>
+      )}
+      <button onClick={() => onRemove(sectionKey, widget.key)} title="Remove widget" style={miniBtn()}>×</button>
+    </div>
+  )
+}
 
 // ─── Multi-column field placement (dnd-kit multi-container) ──────────────────
 // No DndContext here — the whole canvas shares ONE context (in LayoutCanvasEditor)
@@ -361,6 +597,10 @@ function FieldTile({ field, object, onRemove }) {
       <button onClick={onRemove} style={miniBtn()}>×</button>
     </div>
   )
+}
+
+function addSectionBtn() {
+  return { width: '100%', padding: '10px', fontSize: 13, fontWeight: 500, background: C.card, color: C.emeraldMid, border: `1px dashed ${C.borderDark}`, borderRadius: 8, cursor: 'pointer' }
 }
 
 function btnPrimary(disabled) {

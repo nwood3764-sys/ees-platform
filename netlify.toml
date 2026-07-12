@@ -25,6 +25,23 @@
   VITE_SUPABASE_ANON_KEY = "sb_publishable_VWDcdop6P3qQxYWsHhzSuA_TSIYKMr1"
   NODE_VERSION           = "20"
 
+# Security response headers applied to every route. Deliberately conservative
+# so nothing in the app breaks:
+#   - X-Frame-Options SAMEORIGIN (not DENY) — allows same-origin embedding.
+#   - Permissions-Policy allows camera/geolocation for `self` only — the field
+#     PWA captures photo evidence and location; third-party access is denied.
+#   - No Content-Security-Policy here yet: a strict CSP must be validated on
+#     staging first (inline styles + Supabase/Graph/Twilio connect-src) before
+#     it can go live without breaking the app.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options           = "SAMEORIGIN"
+    X-Content-Type-Options    = "nosniff"
+    Referrer-Policy           = "strict-origin-when-cross-origin"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    Permissions-Policy        = "geolocation=(self), camera=(self), microphone=()"
+
 # SPA routing — any unknown path should serve index.html so the React
 # router (via AuthGate) can handle it client-side.
 [[redirects]]

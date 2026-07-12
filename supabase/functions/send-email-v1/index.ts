@@ -81,7 +81,33 @@ interface ReqBody {
 
   // Optional contact for thread resolution (preferred over email-only matching)
   contact_id?: string
+
+  // Reply flow: the existing thread to send on. Absent = fresh compose, which
+  // always starts a NEW conversation (email threads like email — one thread
+  // per exchange, not one eternal thread per customer address).
+  conversation_id?: string
+
+  // Files already uploaded to the communications-attachments bucket by the
+  // composer (pre-send). Small files ride the Graph message as inline
+  // fileAttachments; anything past the inline budget ships as a 30-day
+  // signed download link appended to the body.
+  attachments?: Array<{
+    storage_path: string
+    file_name:    string
+    mime_type?:   string
+    size_bytes:   number
+  }>
+
+  // Self-test harness only: honored ONLY when the gateway-verified JWT is
+  // the service role (i.e. a trusted server-side caller like
+  // _admin-test-send-email). Ignored for normal user JWTs.
+  on_behalf_of_user_id?: string
 }
+
+const ATTACHMENT_BUCKET = "communications-attachments"
+// Graph sendMail is one JSON request capped around 4 MB total; keep inline
+// attachment bytes comfortably under that (base64 inflates by ~33%).
+const INLINE_TOTAL_BUDGET_BYTES = 2_500_000
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
@@ -108,7 +134,7 @@ Deno.serve(async (req) => {
 
   // Resolve caller's public.users.id for audit columns
   const authHeader = req.headers.get("Authorization") || ""
-  const callerUserId = await resolveCallerUserId(admin, authHeader)
+  const callerUserId = await resolveCallerUserId(admin, authHeader, body.on_behalf_of_user_id)
   if (!callerUserId) return json({ error: "Caller is not a registered LEAP user" }, 401)
 
   // ── 1. Resolve outbound mailbox ──────────────────────────────────────────
@@ -143,10 +169,19 @@ Deno.serve(async (req) => {
   // ── 3. Build merge dict from anchor record ───────────────────────────────
   let mergeDict: Record<string, any>
   try {
-    mergeDict = await buildMergeDict(admin, body.anchor_object, body.anchor_record_id, template?.name || "")
+    mergeDict = await buildMergeDict(admin, body.anchor_object, body.anchor_record_id, template?.name || "", body.contact_id || null)
   } catch (e) {
     return json({ error: `Merge dict build failed: ${(e as Error).message}` }, 400)
   }
+
+  // Sender identity — the app user the send runs as, for {{sender.*}} tokens
+  // (used by mailbox signatures to carry the actual person's name).
+  const { data: senderRow } = await admin
+    .from("users")
+    .select("id, user_first_name, user_last_name, user_title, user_email, user_phone")
+    .eq("id", callerUserId)
+    .maybeSingle()
+  if (senderRow) mergeDict.sender = senderRow
 
   // ── 4. Compose subject + body ────────────────────────────────────────────
   let subject:  string
@@ -166,9 +201,12 @@ Deno.serve(async (req) => {
       bodyHtml = substituteTokens(template.body_html || "", mergeDict)
     }
   } else {
-    // Free-form compose — caller supplied subject + body
-    subject  = body.subject!
-    bodyHtml = body.body_html!
+    // Free-form compose — caller supplied subject + body. Merge chips inserted
+    // by the TipTap composer are styled <span data-merge-field> wrappers around
+    // a {{token}}; unwrap them and substitute against the anchor's merge dict
+    // so free-form sends resolve fields exactly like template sends do.
+    subject  = substituteTokens(body.subject!, mergeDict)
+    bodyHtml = substituteTokens(unwrapMergeChips(body.body_html!), mergeDict)
   }
 
   // ── 5. Validate locked regions appear verbatim in final body ─────────────
@@ -187,22 +225,65 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ── 6. Find or create conversation thread ────────────────────────────────
-  const { data: convResult, error: convErr } = await admin.rpc("find_or_create_conversation", {
-    p_channel:                "email",
-    p_our_address:            mailbox.obm_address,
-    p_customer_address:       body.to.email,
-    p_contact_id:             body.contact_id || null,
-    p_account_id:             null,  // TODO: derive from anchor walk
-    p_project_id:             body.anchor_object === "projects" ? body.anchor_record_id : null,
-    p_service_appointment_id: body.anchor_object === "service_appointments" ? body.anchor_record_id : null,
-    p_subject:                subject,
-  })
-  if (convErr || !convResult) {
-    console.error("send-email-v1: find_or_create_conversation failed", convErr)
-    return json({ error: `Conversation resolution failed: ${convErr?.message || "no id returned"}` }, 500)
+  // ── 5b. Append the mailbox's program signature ───────────────────────────
+  // Every outbound email carries the sending mailbox's signature — program
+  // identity managed on the outbound_mailboxes record, never typed by the
+  // sender. Tokens inside the signature resolve against the same merge dict
+  // as the body. Appended after locked-region validation so validation runs
+  // against the composed body alone.
+  const signatureHtml = (mailbox.obm_signature_html || "").trim()
+  if (signatureHtml) {
+    bodyHtml = `${bodyHtml}\n<br>\n${substituteTokens(signatureHtml, mergeDict)}`
   }
-  const conversationId = convResult as string
+
+  // ── 6. Find or create conversation thread ────────────────────────────────
+  // Pin the thread to the record it was sent from, whatever object that is, so
+  // it shows in that record's Conversations panel (which already supports these
+  // FKs). Map the anchor object → the conversations FK param it sets.
+  const ANCHOR_FK_PARAM: Record<string, string> = {
+    opportunities:          "p_opportunity_id",
+    properties:             "p_property_id",
+    buildings:              "p_building_id",
+    projects:               "p_project_id",
+    service_appointments:   "p_service_appointment_id",
+    incentive_applications: "p_incentive_application_id",
+    work_orders:            "p_work_order_id",
+    assessments:            "p_assessment_id",
+    accounts:               "p_account_id",
+  }
+  const convParams: Record<string, unknown> = {
+    p_channel:          "email",
+    p_our_address:      mailbox.obm_address,
+    p_customer_address: body.to.email,
+    p_contact_id:       body.contact_id || null,
+    p_subject:          subject,
+  }
+  const anchorParam = ANCHOR_FK_PARAM[body.anchor_object]
+  if (anchorParam) convParams[anchorParam] = body.anchor_record_id
+
+  let conversationId: string
+  if (body.conversation_id) {
+    // Reply flow — send on the thread the caller is replying in.
+    const { data: conv, error: convLookupErr } = await admin
+      .from("conversations")
+      .select("id")
+      .eq("id", body.conversation_id)
+      .eq("conv_is_deleted", false)
+      .maybeSingle()
+    if (convLookupErr || !conv) {
+      return json({ error: `conversation_id ${body.conversation_id} not found` }, 404)
+    }
+    conversationId = conv.id
+  } else {
+    // Fresh compose — always a new thread.
+    convParams.p_force_new = true
+    const { data: convResult, error: convErr } = await admin.rpc("find_or_create_conversation", convParams)
+    if (convErr || !convResult) {
+      console.error("send-email-v1: find_or_create_conversation failed", convErr)
+      return json({ error: `Conversation resolution failed: ${convErr?.message || "no id returned"}` }, 500)
+    }
+    conversationId = convResult as string
+  }
 
   // ── 7. Compose plus-addressed From + generate Message-ID ─────────────────
   const convShortToken = `c_${conversationId.replace(/-/g, "").slice(0, 8)}`
@@ -274,6 +355,50 @@ Deno.serve(async (req) => {
 
   // ── 10. Real Graph send ──────────────────────────────────────────────────
   try {
+    // Attachments: inline small files as Graph fileAttachments; anything past
+    // the inline budget ships as a 30-day signed download link appended to
+    // the body. Files are already in storage (uploaded by the composer
+    // pre-send) — a failure to read one fails the send rather than silently
+    // dropping the file the user meant to include.
+    const graphAttachments: Array<Record<string, unknown>> = []
+    const linkBlocks: string[] = []
+    if (Array.isArray(body.attachments) && body.attachments.length > 0) {
+      let inlineBudget = INLINE_TOTAL_BUDGET_BYTES
+      for (const att of body.attachments) {
+        if (att.size_bytes <= inlineBudget) {
+          const { data: blob, error: dlErr } = await admin.storage
+            .from(ATTACHMENT_BUCKET)
+            .download(att.storage_path)
+          if (dlErr || !blob) {
+            const reason = `Attachment read failed for ${att.file_name}: ${dlErr?.message || "no data"}`
+            await markMessageFailed(admin, msgRow.id, reason, null, callerUserId)
+            return json({ status: "failed", mode: "real", message_id: msgRow.id, msg_record_number: msgRow.msg_record_number, conversation_id: conversationId, failure_reason: reason }, 200)
+          }
+          const bytes = new Uint8Array(await blob.arrayBuffer())
+          graphAttachments.push({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            name:          att.file_name,
+            contentType:   att.mime_type || "application/octet-stream",
+            contentBytes:  bytesToBase64(bytes),
+          })
+          inlineBudget -= att.size_bytes
+        } else {
+          const { data: signed, error: signErr } = await admin.storage
+            .from(ATTACHMENT_BUCKET)
+            .createSignedUrl(att.storage_path, 30 * 24 * 60 * 60)
+          if (signErr || !signed?.signedUrl) {
+            const reason = `Signed link creation failed for ${att.file_name}: ${signErr?.message || "no url"}`
+            await markMessageFailed(admin, msgRow.id, reason, null, callerUserId)
+            return json({ status: "failed", mode: "real", message_id: msgRow.id, msg_record_number: msgRow.msg_record_number, conversation_id: conversationId, failure_reason: reason }, 200)
+          }
+          linkBlocks.push(`<li><a href="${signed.signedUrl}">${escapeHtml(att.file_name)}</a> (${(att.size_bytes / 1024 / 1024).toFixed(1)} MB — link valid 30 days)</li>`)
+        }
+      }
+    }
+    const bodyHtmlFinal = linkBlocks.length > 0
+      ? `${bodyHtml}\n<p>Attached files (download links):</p>\n<ul>${linkBlocks.join("")}</ul>`
+      : bodyHtml
+
     const accessToken = await getAppAccessToken(tenantId!, clientId!, clientSecret!)
     const graphRes = await fetch(
       `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox.obm_address)}/sendMail`,
@@ -283,10 +408,16 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           message: {
             subject,
-            body: { contentType: "HTML", content: bodyHtml },
+            body: { contentType: "HTML", content: bodyHtmlFinal },
+            attachments: graphAttachments,
             toRecipients:  [toGraphRecipient(body.to)],
             ccRecipients:  (body.cc  || []).map(toGraphRecipient),
             bccRecipients: (body.bcc || []).map(toGraphRecipient),
+            // Replies must come back to the plus-addressed alias so the
+            // inbound webhook's tier-1 token match can thread them. Graph
+            // sends From the mailbox's primary address regardless, so
+            // replyTo is the only way the token survives the round trip.
+            replyTo: [{ emailAddress: { address: fromAddressWithToken, name: mailbox.obm_display_name || mailbox.obm_address } }],
             // Custom header carries the conversation token as a fallback for
             // clients that strip the plus address. Graph rejects setting
             // Message-ID directly, so we use an X- header here.
@@ -373,21 +504,48 @@ function validateRequest(b: ReqBody): string | null {
   if (hasTemplate && !UUID_RE.test(b.email_template_id!)) return "email_template_id must be a UUID"
   if (b.outbound_mailbox_id && !UUID_RE.test(b.outbound_mailbox_id)) return "outbound_mailbox_id must be a UUID"
   if (b.contact_id && !UUID_RE.test(b.contact_id)) return "contact_id must be a UUID"
+  if (b.conversation_id && !UUID_RE.test(b.conversation_id)) return "conversation_id must be a UUID"
+  if (b.attachments) {
+    if (!Array.isArray(b.attachments)) return "attachments must be an array"
+    for (const a of b.attachments) {
+      if (!a || typeof a.storage_path !== "string" || !a.storage_path) return "attachments[].storage_path required"
+      if (typeof a.file_name !== "string" || !a.file_name) return "attachments[].file_name required"
+      if (typeof a.size_bytes !== "number" || a.size_bytes < 0) return "attachments[].size_bytes required"
+      if (a.storage_path.includes("..")) return "attachments[].storage_path invalid"
+    }
+  }
 
   if (b.cc && !Array.isArray(b.cc))   return "cc must be an array"
   if (b.bcc && !Array.isArray(b.bcc)) return "bcc must be an array"
   return null
 }
 
-async function resolveCallerUserId(admin: SupabaseClient, authHeader: string): Promise<string | null> {
+async function resolveCallerUserId(admin: SupabaseClient, authHeader: string, onBehalfOfUserId?: string): Promise<string | null> {
   if (!authHeader.startsWith("Bearer ")) return null
   const jwt = authHeader.slice(7)
+
+  // Service-role callers (the self-test harness) carry no auth user; they
+  // act on behalf of an explicit, existing app user. Full-trust key, so this
+  // adds no privilege a service-role caller doesn't already have. Compared
+  // directly against the env var because newer projects issue non-JWT
+  // sb_secret keys that can't be decoded below.
+  if (jwt === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
+    if (!onBehalfOfUserId || !UUID_RE.test(onBehalfOfUserId)) return null
+    const { data: obo } = await admin.from("users").select("id").eq("id", onBehalfOfUserId).maybeSingle()
+    return obo?.id || null
+  }
+
   // Decode the JWT to extract auth.uid (sub claim) without verifying — the
   // gateway already verified the JWT before invoking this function.
   try {
     const parts = jwt.split(".")
     if (parts.length !== 3) return null
     const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")))
+    if (payload.role === "service_role") {
+      if (!onBehalfOfUserId || !UUID_RE.test(onBehalfOfUserId)) return null
+      const { data: obo } = await admin.from("users").select("id").eq("id", onBehalfOfUserId).maybeSingle()
+      return obo?.id || null
+    }
     const authUserId = payload.sub as string
     if (!authUserId) return null
     const { data: u } = await admin
@@ -504,13 +662,65 @@ async function resolveRowForMerge(admin: SupabaseClient, row: Record<string, any
   return out
 }
 
-async function buildMergeDict(admin: SupabaseClient, anchorObject: string, anchorRecordId: string, templateName: string): Promise<Record<string, any>> {
+// Which related-parent records each anchor object can pull merge fields
+// from: dict root ← [table, FK column on the anchor row]. This is what makes
+// {{property.property_name}} resolve when sending from an opportunity —
+// cross-object merge fields, the Salesforce behavior users expect.
+const RELATED_MERGE_ROOTS: Record<string, Array<[string, string, string]>> = {
+  opportunities: [
+    ["property", "properties", "property_id"],
+    ["building", "buildings", "building_id"],
+    ["account", "accounts", "opportunity_account_id"],
+  ],
+  projects: [
+    ["property", "properties", "property_id"],
+    ["building", "buildings", "building_id"],
+    ["account", "accounts", "project_account_id"],
+    ["opportunity", "opportunities", "opportunity_id"],
+  ],
+  properties: [
+    ["account", "accounts", "property_account_id"],
+  ],
+  buildings: [
+    ["property", "properties", "property_id"],
+  ],
+  work_orders: [
+    ["property", "properties", "property_id"],
+    ["project", "projects", "project_id"],
+  ],
+  assessments: [
+    ["property", "properties", "property_id"],
+    ["building", "buildings", "building_id"],
+    ["project", "projects", "project_id"],
+  ],
+  contacts: [
+    ["account", "accounts", "contact_account_id"],
+  ],
+}
+
+async function buildMergeDict(admin: SupabaseClient, anchorObject: string, anchorRecordId: string, templateName: string, contactId?: string | null): Promise<Record<string, any>> {
   const dict: Record<string, any> = {}
   const { data: parentRow, error } = await admin.from(anchorObject).select("*").eq("id", anchorRecordId).maybeSingle()
   if (error)      throw new Error(`Anchor record lookup failed: ${error.message}`)
   if (!parentRow) throw new Error("Anchor record not found")
   const root = singularize(anchorObject)
   dict[root] = await resolveRowForMerge(admin, parentRow)
+
+  // Hydrate related parents so {{property.*}}, {{building.*}}, {{account.*}},
+  // etc. resolve from any anchor that links to them.
+  for (const [dictKey, table, fkCol] of (RELATED_MERGE_ROOTS[anchorObject] || [])) {
+    const fkVal = parentRow[fkCol]
+    if (!fkVal || dict[dictKey]) continue
+    const { data: relRow } = await admin.from(table).select("*").eq("id", fkVal).maybeSingle()
+    if (relRow) dict[dictKey] = await resolveRowForMerge(admin, relRow)
+  }
+
+  // The contact the email is being sent to, when the composer picked one.
+  if (contactId && !dict.contact) {
+    const { data: contactRow } = await admin.from("contacts").select("*").eq("id", contactId).maybeSingle()
+    if (contactRow) dict.contact = await resolveRowForMerge(admin, contactRow)
+  }
+
   const now = new Date()
   dict.today = {
     iso:   now.toISOString().slice(0, 10),
@@ -523,7 +733,9 @@ async function buildMergeDict(admin: SupabaseClient, anchorObject: string, ancho
 
 function substituteTokens(input: string, dict: Record<string, any>): string {
   return input.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_full, path) => {
-    const segs = String(path).split(".")
+    // The composer's related-record picker emits paths like
+    // building.first.building_name — 'first' is a UI artifact, skip it.
+    const segs = String(path).split(".").filter((s: string) => s !== "first")
     let cur: any = dict
     for (const s of segs) {
       if (cur == null || typeof cur !== "object") return `[unknown: {{${path}}}]`
@@ -532,6 +744,21 @@ function substituteTokens(input: string, dict: Record<string, any>): string {
     if (cur === null || cur === undefined) return "—"
     return String(cur)
   })
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+// Chunked base64 — String.fromCharCode(...bytes) overflows the arg limit on
+// large files; 32 KB chunks keep it safe.
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ""
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(binary)
 }
 
 function assembleFromLockedRegions(
@@ -552,6 +779,13 @@ function assembleFromLockedRegions(
     }
   }
   return parts.join("\n\n")
+}
+
+// Strip the TipTap composer's merge-chip wrappers, leaving the bare {{token}}
+// for substituteTokens. Chips are our own generated markup with a fixed
+// data-merge-field attribute, so this targeted regex is safe here.
+function unwrapMergeChips(html: string): string {
+  return html.replace(/<span[^>]*\bdata-merge-field=(?:"[^"]*"|'[^']*')[^>]*>([\s\S]*?)<\/span>/gi, "$1")
 }
 
 function plusAddress(address: string, token: string): string {

@@ -698,7 +698,12 @@ export async function fetchRelatedRecords(config, parentRecordId) {
 
   let query = supabase
     .from(table)
-    .select(selectParts.join(', '))
+    // count:'exact' returns the TRUE total in the same round-trip (in the
+    // Content-Range header), independent of the .limit(25) display cap below,
+    // so related-list widgets can show an accurate "N" even when more rows
+    // exist than are loaded. The count is over one parent's children (FK-
+    // filtered), so it's cheap and RLS-respecting.
+    .select(selectParts.join(', '), { count: 'exact' })
     .eq(fk, parentRecordId)
 
   if (is_deleted_col) {
@@ -711,7 +716,7 @@ export async function fetchRelatedRecords(config, parentRecordId) {
 
   query = query.limit(25)
 
-  const { data, error } = await query
+  const { data, error, count } = await query
   if (error) throw error
 
   // Flatten embedded lookup objects to their display string so the cell
@@ -728,6 +733,9 @@ export async function fetchRelatedRecords(config, parentRecordId) {
       }
     }
   }
+  // Stash the true total on the array (non-index property; iteration/map are
+  // unaffected). Related-list widgets read it to show the count.
+  rows._total = (typeof count === 'number') ? count : rows.length
   return rows
 }
 

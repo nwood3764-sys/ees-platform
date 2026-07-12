@@ -22,6 +22,7 @@ const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkO
 const SendForSignatureModal               = lazy(() => import('./SendForSignatureModal'))
 const AccountMergeModal                    = lazy(() => import('./AccountMergeModal'))
 const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
+const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
 
 import { useToast } from './Toast'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
@@ -29,10 +30,12 @@ import { getTableListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
+import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
 import ConversationPanelWidget from './ConversationPanel'
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
+import PropertyMapWidget from './PropertyMapWidget'
 import StatusTransitionsBar from './StatusTransitionsBar'
 import TopbarActions from './TopbarActions'
 import { ACTION_KEYS } from '../data/recordActions'
@@ -3379,6 +3382,9 @@ function RelatedListWidget({
   // Read-only mode keeps the Salesforce-style truncated card.
   const shownRows = editable ? localRows : localRows.slice(0, RELATED_LIST_MAX_ROWS)
   const hiddenCount = editable ? 0 : Math.max(0, localRows.length - shownRows.length)
+  // True total for the header count, accurate beyond the 25-row fetch cap
+  // (fetchRelatedRecords attaches _total via PostgREST count:'exact').
+  const totalCount = (typeof allRows._total === 'number') ? allRows._total : localRows.length
 
   // hide_when_empty: opt-in widget_config flag for related lists that
   // should disappear entirely when no rows exist (rather than rendering
@@ -3589,6 +3595,19 @@ function RelatedListWidget({
             <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {title}
             </span>
+            {totalCount > 0 && (
+              <span
+                title={`${totalCount.toLocaleString()} total`}
+                style={{
+                  fontSize: 11, fontWeight: 600, color: C.textMuted,
+                  background: '#eef2f7', borderRadius: 10,
+                  padding: '1px 8px', flexShrink: 0,
+                  fontFamily: 'JetBrains Mono, monospace',
+                }}
+              >
+                {totalCount.toLocaleString()}
+              </span>
+            )}
             {editable && (
               <span style={{
                 background: 'rgba(62,207,142,0.14)', color: '#2aab72',
@@ -4431,7 +4450,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   // section_config_editor, filter_config_editor, and merge_field_reference.
   // Related lists, file galleries, prtsn history, and the activity timeline
   // render as their own standalone cards outside sections.
-  const inSectionTypes = new Set(['field_group', 'section_config_editor', 'filter_config_editor', 'merge_field_reference'])
+  const inSectionTypes = new Set(['field_group', 'section_config_editor', 'filter_config_editor', 'merge_field_reference', 'map'])
   // hiddenWidgetTypes is a Set of widget_type values to suppress at render
   // time — used by the parent to hide context-dependent widgets (e.g.
   // merge_field_reference is only relevant when document_templates is in
@@ -4442,7 +4461,21 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
     if (hiddenWidgetTypes && hiddenWidgetTypes.has(w.widget_type)) return false
     return true
   })
-  if (sectionWidgets.length === 0) return null
+  // Blank sections still render — the record page stays consistent with the
+  // page layout editor: every section in the layout shows its header, with a
+  // muted empty state in place of content. The one exception is a section
+  // whose widgets were ALL deliberately suppressed via hiddenWidgetTypes
+  // (context-dependent hides like docx-only widgets) — rendering an empty
+  // shell there would defeat the suppression.
+  const allSectionWidgets = section.widgets || []
+  const allSuppressed = allSectionWidgets.length > 0 && hiddenWidgetTypes &&
+    allSectionWidgets.every(w => hiddenWidgetTypes.has(w.widget_type))
+  if (sectionWidgets.length === 0 && allSuppressed) return null
+  // Cards (related lists, galleries, conversations, reports, publish history)
+  // render on the Related tab, not inside their section — when a section holds
+  // ONLY cards, say where its content went instead of looking broken.
+  const relatedTabCardCount = allSectionWidgets.filter(w =>
+    ['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'].includes(w.widget_type)).length
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
       <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
@@ -4450,6 +4483,13 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
         <span style={{ fontSize: isMobile ? 14 : 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
         {section.section_is_collapsible && <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={14} color={C.textMuted} />}
       </div>
+      {!collapsed && sectionWidgets.length === 0 && (
+        <div style={{ padding: isMobile ? '14px 14px' : '16px 18px', fontSize: 12.5, color: C.textMuted, fontStyle: 'italic' }}>
+          {relatedTabCardCount > 0
+            ? `This section's ${relatedTabCardCount === 1 ? 'card appears' : 'cards appear'} on the Related tab.`
+            : 'No fields in this section yet — add some in the page layout editor.'}
+        </div>
+      )}
       {!collapsed && sectionWidgets.map(w => {
         if (w.widget_type === 'field_group') {
           return <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
@@ -4467,6 +4507,9 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
         }
         if (w.widget_type === 'merge_field_reference') {
           return <MergeFieldReferenceWidget key={w.id} widget={w} />
+        }
+        if (w.widget_type === 'map') {
+          return <PropertyMapWidget key={w.id} widget={w} record={record} tableName={tableName} embedded />
         }
         return null
       })}
@@ -4541,6 +4584,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showReportModal, setShowReportModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
+  const [showLogCall, setShowLogCall] = useState(false)
+  // Bumped when a call is logged from the header action so the Activity tab's
+  // timeline remounts and shows the new entry.
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0)
   // Project Scheduler wizard (only used when tableName === 'projects').
   // Bulk-schedules unscheduled work orders for the project to a Team Lead.
   // After a successful commit, the tick is bumped so the related-records area
@@ -5831,6 +5878,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RESTORE]:                handleRestore,
     [ACTION_KEYS.MERGE_ACCOUNT]:          () => setShowMergeModal(true),
     [ACTION_KEYS.ADD_TO_PORTAL]:          () => setShowPortalModal(true),
+    [ACTION_KEYS.LOG_ACTIVITY]:           () => setShowLogCall(true),
   }
 
   // Per-action pending flag — drives the disabled+wait-cursor+ellipsis label
@@ -6235,6 +6283,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           <IncomeQualificationPanel enrollmentId={recordId} />
         )}
 
+        {/* Property Owner Research — finds the decision makers (CEO, asset
+            manager, facilities director — not site property-management staff)
+            behind this owner-group account or property. Tiered by cost: free
+            AI web research → Lusha prospecting search (no credits) →
+            per-person contact reveal (paid credits). Candidates promote to
+            real Contacts. Only on accounts and properties, Related tab. */}
+        {!isInsertMode && activeTab === 'Related' && (tableName === 'properties' || tableName === 'accounts') && (
+          <PropertyOwnerResearchPanel tableName={tableName} recordId={recordId} />
+        )}
+
         {/* Conversation panel — Service Cloud Messaging-style split-pane
             (thread list left, active thread + composer right). Self-contained:
             loads its own conversations + messages, marks threads read on
@@ -6285,7 +6343,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             changes and record-level actions (create, soft-delete, restore).
             Hidden on new records since there's no history yet. */}
         {!isInsertMode && activeTab === 'Activity' && (
-          <ActivityTimeline tableName={tableName} recordId={recordId} />
+          <ActivityTimeline key={activityRefreshKey} tableName={tableName} recordId={recordId} />
         )}
           </div>
 
@@ -6584,6 +6642,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               setShowPortalModal(false)
               if (message) window.alert(message)
               setReloadTick(t => t + 1)
+            }}
+          />
+        )}
+        {showLogCall && (
+          <LogActivityModal
+            tableName={tableName}
+            recordId={recordId}
+            onClose={() => setShowLogCall(false)}
+            onLogged={() => {
+              setShowLogCall(false)
+              // Refresh the timeline and jump the user to the Activity tab so
+              // the call they just logged is immediately visible.
+              setActivityRefreshKey(k => k + 1)
+              setActiveTab('Activity')
             }}
           />
         )}

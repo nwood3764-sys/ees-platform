@@ -1,11 +1,8 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { C } from '../../../data/constants'
-import { Icon } from '../../../components/UI'
-import { useToast } from '../../../components/Toast'
 import { useIsMobile } from '../../../lib/useMediaQuery'
 import { describeObject, describeIncomingFKs } from '../../../data/adminService'
-import { updateWidget } from '../../../data/pageLayoutBuilderService'
-import { deriveEesFieldType, humanizeColumnName } from './eesFieldTypes'
+import { humanizeColumnName } from './eesFieldTypes'
 import {
   FormField,
   inputStyle,
@@ -14,18 +11,22 @@ import {
 } from '../adminStyles'
 
 // ---------------------------------------------------------------------------
-// WidgetEditorRelatedList — modal for editing a related_list widget.
+// RelatedListCanvasModal — configure a related_list widget for the canvas
+// page-layout builder (LayoutCanvasEditor). Purely local: collects
+// { title, config } and hands it back via onApply — nothing is written to
+// the database until the admin saves the whole layout.
 //
-// User flow:
-//   1. Pick a target table from describeIncomingFKs (tables with a FK
-//      pointing at the object this widget lives on).
-//   2. Pick the specific FK column to join on (filtered to FKs from the
-//      chosen target table).
-//   3. Pick the target columns to display (from describeObject on the target).
-//   4. Optional: sort field + direction, is_deleted column name, widget title.
+// Emits config.columns in the shape the live renderer (RecordDetail's
+// RelatedListWidget + fetchRelatedRecords) expects: an array of
+// { name, type, label } entries, where FK columns become
+//   type 'picklist' when they reference picklist_values, or
+//   type 'lookup' with { fk_column, lookup_table, lookup_field } so the
+//   list shows the referenced record's display name instead of a UUID.
+// The lookup_field is resolved from the referenced table's columns (first
+// *_name column, else falls back to a plain text cell).
 //
-// Writes widget_config = { table, fk, columns, sort_field, sort_dir,
-// is_deleted_col } via updateWidget.
+// The DB trigger trg_validate_page_layout_widget_config re-validates
+// table / fk / columns on insert, so a stale schema can't slip through.
 // ---------------------------------------------------------------------------
 
 const SORT_DIRECTIONS = [
@@ -33,42 +34,61 @@ const SORT_DIRECTIONS = [
   { value: 'desc', label: 'Descending' },
 ]
 
-// Columns we hide from the target-columns picker — system plumbing.
+// System plumbing columns hidden from the display-columns picker.
 const HIDDEN_TARGET_COLUMNS = new Set([
   'created_at', 'updated_at',
   'created_by', 'updated_by',
-  'deletion_reason',
+  'is_deleted', 'deleted_at', 'deleted_by', 'deletion_reason',
 ])
 
-export default function WidgetEditorRelatedList({
-  widget, objectName, onClose, onSaved,
+// Renderer-facing type for a describeObject column row (related-list cells).
+function relatedColumnType(col) {
+  const dt = col.data_type || ''
+  if (col.is_foreign_key && dt === 'uuid') {
+    return col.references_table === 'picklist_values' ? 'picklist' : 'lookup'
+  }
+  if (dt === 'date') return 'date'
+  if (dt === 'timestamp with time zone' || dt === 'timestamp without time zone') return 'datetime'
+  if (dt === 'boolean') return 'boolean'
+  if (['integer', 'bigint', 'smallint', 'numeric', 'real', 'double precision'].includes(dt)) return 'number'
+  return 'text'
+}
+
+// Pick the display column on a lookup's referenced table: prefer the first
+// *_name column, then a literal `name`, else null (caller degrades to text).
+function pickDisplayField(columns) {
+  const named = columns.find(c => /_name$/.test(c.column_name))
+  if (named) return named.column_name
+  const plain = columns.find(c => c.column_name === 'name')
+  return plain ? plain.column_name : null
+}
+
+export default function RelatedListCanvasModal({
+  objectName,           // parent object the layout belongs to
+  initial,              // { title, config } when editing, null when adding
+  onClose,
+  onApply,              // ({ title, config }) => void
 }) {
-  const toast = useToast()
   const isMobile = useIsMobile()
+  const cfg = initial?.config || {}
 
-  const cfg = widget.widget_config || {}
-
-  // Form state
-  const [title, setTitle]         = useState(widget.widget_title || '')
+  const [title, setTitle]             = useState(initial?.title || '')
   const [targetTable, setTargetTable] = useState(cfg.table || '')
-  const [fkColumn, setFkColumn]   = useState(cfg.fk || '')
+  const [fkColumn, setFkColumn]       = useState(cfg.fk || '')
   const [selectedCols, setSelectedCols] = useState(
-    Array.isArray(cfg.columns) ? cfg.columns : [],
+    Array.isArray(cfg.columns) ? cfg.columns.map(c => c.name).filter(Boolean) : [],
   )
   const [sortField, setSortField] = useState(cfg.sort_field || '')
   const [sortDir, setSortDir]     = useState(cfg.sort_dir || 'asc')
-  const [isDeletedCol, setIsDeletedCol] = useState(cfg.is_deleted_col ?? 'is_deleted')
 
-  // Lookup data
-  const [incomingFKs, setIncomingFKs] = useState([])
-  const [loadingFKs, setLoadingFKs]   = useState(true)
+  const [incomingFKs, setIncomingFKs]     = useState([])
+  const [loadingFKs, setLoadingFKs]       = useState(true)
   const [targetColumns, setTargetColumns] = useState([])
   const [loadingTarget, setLoadingTarget] = useState(false)
 
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy]   = useState(false)
   const [error, setError] = useState(null)
 
-  // Load all FKs pointing at this object
   useEffect(() => {
     let cancelled = false
     setLoadingFKs(true)
@@ -79,13 +99,8 @@ export default function WidgetEditorRelatedList({
     return () => { cancelled = true }
   }, [objectName])
 
-  // When the target table changes, load its columns and reset downstream
-  // selections that no longer make sense.
   useEffect(() => {
-    if (!targetTable) {
-      setTargetColumns([])
-      return
-    }
+    if (!targetTable) { setTargetColumns([]); return }
     let cancelled = false
     setLoadingTarget(true)
     describeObject(targetTable)
@@ -95,98 +110,107 @@ export default function WidgetEditorRelatedList({
     return () => { cancelled = true }
   }, [targetTable])
 
-  // ESC → cancel
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape' && !busy) onClose() }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose, busy])
 
-  // Distinct target tables from incoming FKs
   const targetTables = useMemo(() => {
-    const seen = new Map()
-    for (const fk of incomingFKs) {
-      if (!seen.has(fk.referencing_table)) seen.set(fk.referencing_table, [])
-      seen.get(fk.referencing_table).push(fk)
-    }
-    return Array.from(seen.entries())
-      .map(([table, fks]) => ({ table, fks }))
-      .sort((a, b) => a.table.localeCompare(b.table))
+    const seen = new Set()
+    for (const fk of incomingFKs) seen.add(fk.referencing_table)
+    return [...seen].sort((a, b) => a.localeCompare(b))
   }, [incomingFKs])
 
-  // FKs available for the currently selected target
   const fkChoices = useMemo(
     () => incomingFKs.filter(fk => fk.referencing_table === targetTable),
     [incomingFKs, targetTable],
   )
 
-  // Auto-pick the FK if only one option
+  // Auto-pick the FK when the target has exactly one; clear a stale pick.
   useEffect(() => {
     if (targetTable && fkChoices.length === 1 && !fkColumn) {
       setFkColumn(fkChoices[0].referencing_column)
     }
-    // If current fkColumn doesn't exist on the new target, clear it
-    if (fkColumn && !fkChoices.some(fk => fk.referencing_column === fkColumn)) {
+    if (fkColumn && fkChoices.length > 0 && !fkChoices.some(fk => fk.referencing_column === fkColumn)) {
       setFkColumn('')
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetTable, fkChoices])
 
-  // Selectable columns on the target table (filtering out system columns and
-  // columns that definitely shouldn't be shown).
-  const selectableTargetColumns = useMemo(() => {
-    return targetColumns
+  const selectableTargetColumns = useMemo(() => (
+    targetColumns
       .filter(c => !HIDDEN_TARGET_COLUMNS.has(c.column_name) && !c.is_primary_key)
       .sort((a, b) => a.column_name.localeCompare(b.column_name))
-  }, [targetColumns])
+  ), [targetColumns])
 
   function toggleColumn(name) {
     setSelectedCols(prev =>
-      prev.includes(name)
-        ? prev.filter(c => c !== name)
-        : [...prev, name],
+      prev.includes(name) ? prev.filter(c => c !== name) : [...prev, name],
     )
   }
 
-  // Columns available as sort fields — same pool as selectable target columns
-  // plus created_at / updated_at (common sort keys).
-  const sortableColumns = useMemo(() => {
-    const commonSort = targetColumns
-      .filter(c => ['created_at', 'updated_at'].includes(c.column_name))
-    return [
-      ...selectableTargetColumns,
-      ...commonSort,
-    ]
-  }, [selectableTargetColumns, targetColumns])
-
   function validate() {
-    if (!title.trim()) return 'Widget title is required'
+    if (!title.trim()) return 'Title is required'
     if (!targetTable) return 'Pick a target table'
-    if (!fkColumn) return 'Pick the FK column that joins to this object'
+    if (!fkColumn) return 'Pick the foreign key column that joins to this object'
     if (selectedCols.length === 0) return 'Pick at least one column to display'
     return null
   }
 
-  async function save() {
+  async function apply() {
     const err = validate()
     if (err) { setError(err); return }
     setBusy(true)
     setError(null)
     try {
-      const config = {
-        table: targetTable,
-        fk: fkColumn,
-        columns: selectedCols,
-      }
-      if (sortField)  config.sort_field = sortField
-      if (sortField)  config.sort_dir = sortDir
-      if (isDeletedCol && isDeletedCol.trim()) config.is_deleted_col = isDeletedCol.trim()
-      await updateWidget(widget.id, {
-        title: title.trim(),
-        config,
+      const byName = new Map(targetColumns.map(c => [c.column_name, c]))
+
+      // Resolve display fields for lookup columns up front (cached RPC).
+      const lookupTables = [...new Set(
+        selectedCols
+          .map(n => byName.get(n))
+          .filter(c => c && relatedColumnType(c) === 'lookup')
+          .map(c => c.references_table),
+      )]
+      const displayFieldByTable = {}
+      await Promise.all(lookupTables.map(async (t) => {
+        const cols = await describeObject(t).catch(() => [])
+        displayFieldByTable[t] = pickDisplayField(cols || [])
+      }))
+
+      // Preserve prior column entries verbatim (they may carry hand-authored
+      // labels or lookup wiring); build fresh entries for new picks.
+      const priorByName = new Map(
+        (Array.isArray(cfg.columns) ? cfg.columns : []).map(c => [c.name, c]),
+      )
+      const columns = selectedCols.map(name => {
+        const prior = priorByName.get(name)
+        if (prior && cfg.table === targetTable) return prior
+        const col = byName.get(name)
+        const type = col ? relatedColumnType(col) : 'text'
+        const entry = { name, type, label: humanizeColumnName(name) }
+        if (type === 'lookup') {
+          const lookupField = displayFieldByTable[col.references_table]
+          if (lookupField) {
+            entry.fk_column    = name
+            entry.lookup_table = col.references_table
+            entry.lookup_field = lookupField
+          } else {
+            entry.type = 'text' // no display column to embed — show raw value
+          }
+        }
+        return entry
       })
-      toast.success('Widget saved')
-      onSaved()
+
+      // Carry forward any extra config keys (editable, picker, order_field,
+      // hide_when_empty, …) the layout may already have on this widget.
+      const config = { ...cfg, table: targetTable, fk: fkColumn, columns }
+      if (sortField) { config.sort_field = sortField; config.sort_dir = sortDir }
+      else { delete config.sort_field; delete config.sort_dir }
+      if (config.is_deleted_col === undefined) config.is_deleted_col = 'is_deleted'
+
+      onApply({ title: title.trim(), config })
     } catch (e) {
       setError(e.message || String(e))
       setBusy(false)
@@ -203,7 +227,7 @@ export default function WidgetEditorRelatedList({
       }}
     >
       <div
-        role="dialog" aria-modal="true" aria-label="Edit related list"
+        role="dialog" aria-modal="true" aria-label={initial ? 'Edit related list' : 'Add related list'}
         style={{
           background: C.card,
           borderRadius: isMobile ? '12px 12px 0 0' : 10,
@@ -215,29 +239,29 @@ export default function WidgetEditorRelatedList({
           overflow: 'hidden',
         }}
       >
-        {/* Header */}
         <div style={{ padding: '16px 20px 12px', borderBottom: `1px solid ${C.border}` }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary }}>Edit Related List</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary }}>
+              {initial ? 'Edit Related List' : 'Add Related List'}
+            </div>
             <span style={{
               background: '#e8f3fb', color: '#1a5a8a',
               fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 3,
               textTransform: 'uppercase', letterSpacing: '0.04em',
             }}>related_list</span>
-            <span style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>
-              {widget.page_layout_widget_record_number}
-            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 4 }}>
+            Changes apply to the canvas — save the layout to make them live.
           </div>
         </div>
 
-        {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
-          <FormField label="Widget Title" required>
+          <FormField label="Title" hint="Displayed as the card heading on the record page's Related tab." required>
             <input
               value={title}
               onChange={e => setTitle(e.target.value)}
               disabled={busy}
-              placeholder="Related Buildings"
+              placeholder="e.g. Related Buildings"
               style={inputStyle}
             />
           </FormField>
@@ -247,17 +271,17 @@ export default function WidgetEditorRelatedList({
               value={targetTable}
               onChange={e => setTargetTable(e.target.value)}
               disabled={busy || loadingFKs}
-              style={{ ...inputStyle, cursor: 'pointer' }}
+              style={{ ...inputStyle, cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5 }}
             >
               <option value="">— Select a table —</option>
               {targetTables.map(t => (
-                <option key={t.table} value={t.table}>{t.table}</option>
+                <option key={t} value={t}>{t}</option>
               ))}
             </select>
             {!loadingFKs && targetTables.length === 0 && (
               <div style={{ ...hintBoxStyle, marginTop: 6, marginBottom: 0 }}>
                 No tables have foreign keys pointing at <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{objectName}</code>,
-                so there's nothing a related list can show. Add a FK on another table first.
+                so there is nothing a related list can show.
               </div>
             )}
           </FormField>
@@ -289,7 +313,7 @@ export default function WidgetEditorRelatedList({
           {targetTable && (
             <FormField
               label="Columns to Display"
-              hint={`${selectedCols.length} selected · click to toggle`}
+              hint={`${selectedCols.length} selected · click to toggle · shown in selection order`}
               required
             >
               <div style={{
@@ -338,7 +362,7 @@ export default function WidgetEditorRelatedList({
                           padding: '1px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.04em',
                           border: `1px solid ${C.border}`, flexShrink: 0,
                         }}>
-                          {deriveEesFieldType(c)}
+                          {relatedColumnType(c)}
                         </span>
                       </label>
                     )
@@ -348,7 +372,6 @@ export default function WidgetEditorRelatedList({
             </FormField>
           )}
 
-          {/* Sort */}
           {targetTable && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 12 }}>
               <FormField label="Sort Field" hint="Optional — pick a column to sort by.">
@@ -359,9 +382,11 @@ export default function WidgetEditorRelatedList({
                   style={{ ...inputStyle, cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5 }}
                 >
                   <option value="">— No sort —</option>
-                  {sortableColumns.map(c => (
-                    <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
-                  ))}
+                  {targetColumns
+                    .filter(c => !c.is_primary_key)
+                    .map(c => (
+                      <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
+                    ))}
                 </select>
               </FormField>
               <FormField label="Direction">
@@ -378,24 +403,8 @@ export default function WidgetEditorRelatedList({
               </FormField>
             </div>
           )}
-
-          {targetTable && (
-            <FormField
-              label="Soft-delete Column"
-              hint="Column on the target to filter out deleted rows. Leave blank if the target has no soft-delete."
-            >
-              <input
-                value={isDeletedCol}
-                onChange={e => setIsDeletedCol(e.target.value)}
-                disabled={busy}
-                placeholder="is_deleted"
-                style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5 }}
-              />
-            </FormField>
-          )}
         </div>
 
-        {/* Footer */}
         <div style={{
           padding: '12px 20px',
           borderTop: `1px solid ${C.border}`,
@@ -407,8 +416,8 @@ export default function WidgetEditorRelatedList({
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={onClose} disabled={busy} style={buttonSecondaryStyle}>Cancel</button>
-            <button onClick={save} disabled={busy} style={buttonPrimaryStyle}>
-              {busy ? 'Saving…' : 'Save Widget'}
+            <button onClick={apply} disabled={busy} style={buttonPrimaryStyle}>
+              {busy ? 'Applying…' : initial ? 'Apply Changes' : 'Add to Section'}
             </button>
           </div>
         </div>

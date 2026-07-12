@@ -36,7 +36,8 @@ import {
   sendTemplateEmail,
   fetchActiveEmailTemplates,
   fetchEmailTemplate,
-  uploadAttachmentForMessage,
+  uploadAttachmentToStorage,
+  registerAttachmentRows,
   validateAttachmentFile,
   formatBytes,
 } from '../data/conversationsService'
@@ -310,6 +311,10 @@ export default function ComposeEmailModal({
     // editor body to be non-empty.
     const editorEmpty = editorRef.current?.isEmpty?.() ?? true
     const regions = editorRef.current?.getEditableRegions?.() || {}
+    // Snapshot the body NOW — the first await below yields to React, and any
+    // editor remount (e.g. the disabled toggle) would wipe the typed content
+    // before a later getHtml() call could read it.
+    const bodyHtmlSnapshot = editorRef.current?.getHtml?.() || ''
     if (mode === 'free-form' && editorEmpty) {
       toast.error('Message body is empty.')
       return
@@ -326,6 +331,15 @@ export default function ComposeEmailModal({
 
     setSubmitting(true)
     try {
+      // Upload staged attachments BEFORE the send so the actual files ride the
+      // outgoing email (the old post-send upload meant the email left without
+      // them). An upload failure aborts the send — never send an email missing
+      // a file the user attached.
+      const uploads = []
+      for (const sf of stagedFiles) {
+        uploads.push(await uploadAttachmentToStorage(sf.file))
+      }
+
       let result
       if (mode === 'template') {
         result = await sendTemplateEmail({
@@ -337,6 +351,7 @@ export default function ComposeEmailModal({
           outboundMailboxId: mailboxId,
           contactId:         defaultContactId || undefined,
           subjectOverride:   subject.trim(),
+          attachments:       uploads,
         })
       } else {
         result = await sendNewEmailHtml({
@@ -344,39 +359,27 @@ export default function ComposeEmailModal({
           anchorRecordId,
           to: { email: toEmail.trim(), name: toName.trim() || undefined },
           subject: subject.trim(),
-          bodyHtml: editorRef.current?.getHtml?.() || '',
+          bodyHtml: bodyHtmlSnapshot,
           outboundMailboxId: mailboxId,
           contactId: defaultContactId || undefined,
+          attachments: uploads,
         })
       }
       setLastResult(result)
       const isMock = result?.mode === 'mock'
 
-      // Upload staged attachments now that we know the message id. Sequential
-      // rather than parallel — mock-mode storage uploads are fast enough and
-      // it keeps the error path cleanly attributable to one file.
-      const attachmentResults = []
-      const successfulFiles = []
-      for (const sf of stagedFiles) {
+      // Link the pre-uploaded files to the new message so they show on the
+      // thread. The email already carried them; this is record-keeping, so a
+      // failure here only warns.
+      if (uploads.length > 0) {
         try {
-          const row = await uploadAttachmentForMessage({
-            messageId:      result.message_id,
-            conversationId: result.conversation_id,
-            file:           sf.file,
-          })
-          attachmentResults.push({ ok: true, name: sf.file.name, row })
-          successfulFiles.push(sf.file.name)
+          await registerAttachmentRows({ messageId: result.message_id, uploads })
         } catch (e) {
-          attachmentResults.push({ ok: false, name: sf.file.name, error: e.message || String(e) })
+          toast.error(`Email sent with attachments, but recording them on the thread failed: ${e.message || e}`)
         }
       }
-      const failedAttachments = attachmentResults.filter(r => !r.ok)
-      if (failedAttachments.length > 0) {
-        // Don't roll back the email — it sent. Just warn about the partial
-        // failure and leave the toast visible long enough to read.
-        toast.error(`Email sent but ${failedAttachments.length} of ${stagedFiles.length} attachment${stagedFiles.length === 1 ? '' : 's'} failed to upload: ${failedAttachments[0].error}`)
-      } else if (successfulFiles.length > 0) {
-        toast.success(`${isMock ? 'Email queued (mock mode)' : 'Email sent'} with ${successfulFiles.length} attachment${successfulFiles.length === 1 ? '' : 's'}.`)
+      if (uploads.length > 0) {
+        toast.success(`${isMock ? 'Email queued (mock mode)' : 'Email sent'} with ${uploads.length} attachment${uploads.length === 1 ? '' : 's'}.`)
       } else {
         toast.success(isMock
           ? 'Email queued in mock mode — Graph credentials not yet configured. Row written to messages.'
@@ -673,7 +676,7 @@ export default function ComposeEmailModal({
               Attach file{stagedFiles.length > 0 ? 's' : ''}…
             </button>
             <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-              Files ≤25 MB ride along as normal email attachments. Files &gt;25 MB ship as a 30-day signed download link. Virus scan is pending — `ma_virus_scan_status` flips to clean/infected once the ClamAV hook lands.
+              Files ≤25 MB ride along as normal email attachments. Files &gt;25 MB ship as a 30-day signed download link. Every attachment is virus-scanned within 5 minutes; flagged files are blocked from download.
             </div>
             {stagedFiles.length > 0 && (
               <div style={{

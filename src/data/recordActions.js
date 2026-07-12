@@ -50,6 +50,7 @@ export const ACTION_KEYS = Object.freeze({
   EDIT:                    'edit',
   CLONE:                   'clone',
   DELETE:                  'delete',
+  LOG_ACTIVITY:            'log_activity',
   ADVANCE_TO_OPPORTUNITY:  'advance_to_opportunity',
   RUN_INCOME_QUALIFICATION:'run_income_qualification',
   GENERATE_REPORT:         'generate_report',
@@ -135,6 +136,22 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultTier:         'primary',
     defaultSortOrder:    15,
     isAvailable: ({ tableName, editing }) => !editing && tableName === 'properties',
+  },
+
+  // ── Activity logging — outreach objects ────────────────────────────────
+  // Surfaces "Log Activity" in the record header so it's reachable from any
+  // tab (the same composer also lives in the Activity timeline). Opens the
+  // LogActivityModal, which logs a call/email/meeting/site visit/event/note
+  // via the log_activity RPC.
+  log_activity: {
+    key:                 ACTION_KEYS.LOG_ACTIVITY,
+    label:               'Log Activity',
+    icon:                'M12 5v14M5 12h14',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['opportunities', 'properties', 'contacts', 'accounts'],
+    defaultTier:         'primary',
+    defaultSortOrder:    12,
+    isAvailable: ({ editing }) => !editing,
   },
 
   edit: {

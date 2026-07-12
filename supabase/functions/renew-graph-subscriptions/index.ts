@@ -52,7 +52,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors })
   if (req.method !== "POST")    return json({ error: "POST only" }, 405)
 
+  // Shared-secret gate. GRAPH_RENEWAL_CRON_SECRET wins if set; otherwise fall
+  // back to GRAPH_WEBHOOK_CLIENT_STATE so the whole Graph pipeline (webhook
+  // validation, subscription creation, renewal cron) runs off ONE configured
+  // secret instead of requiring a second one that's easy to forget.
   const expectedSecret  = Deno.env.get("GRAPH_RENEWAL_CRON_SECRET")
+                       || Deno.env.get("GRAPH_WEBHOOK_CLIENT_STATE")
   const presentedSecret = req.headers.get("x-graph-renewal-secret") || ""
 
   const clientId     = Deno.env.get("OUTLOOK_CLIENT_ID")
@@ -78,10 +83,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const admin = createClient(supabaseUrl, serviceKey)
       await logRun(admin, {
         mode: "real", phase: "auth",
-        error: "GRAPH_RENEWAL_CRON_SECRET env var not configured; refusing to serve in real mode",
+        error: "Neither GRAPH_RENEWAL_CRON_SECRET nor GRAPH_WEBHOOK_CLIENT_STATE configured; refusing to serve in real mode",
       })
       return json({
-        error: "Server misconfigured: GRAPH_RENEWAL_CRON_SECRET env var missing. Set it in Supabase project env vars to match the cron job's x-graph-renewal-secret header.",
+        error: "Server misconfigured: neither GRAPH_RENEWAL_CRON_SECRET nor GRAPH_WEBHOOK_CLIENT_STATE is set. Configure one in Supabase edge function secrets to match the cron job's x-graph-renewal-secret header.",
       }, 500)
     }
     if (presentedSecret !== expectedSecret) {

@@ -732,11 +732,32 @@ export async function fetchServiceTerritories() {
 // Object Manager fetchers — schema introspection via RPC and related queries
 // ---------------------------------------------------------------------------
 
-// Describe an object's columns (fields & relationships)
-export async function describeObject(tableName) {
-  const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
-  if (error) throw error
-  return data || []
+// Describe an object's columns (fields & relationships).
+//
+// Promise-memoized per table for the session: the schema is static within a
+// session except when an admin adds a custom field, and a single list-view load
+// calls this several times (catalog + fetch + one per FK parent), plus report/
+// layout builders. Mirrors the loadPicklists memo pattern (clear the entry on
+// rejection so a transient failure doesn't poison it). addCustomField() calls
+// invalidateObjectSchema() so a newly added field shows up without a reload.
+const _describeObjectCache = new Map()
+
+export function invalidateObjectSchema(tableName) {
+  if (tableName) _describeObjectCache.delete(tableName)
+  else _describeObjectCache.clear()
+}
+
+export function describeObject(tableName) {
+  const cached = _describeObjectCache.get(tableName)
+  if (cached) return cached
+  const promise = (async () => {
+    const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
+    if (error) throw error
+    return data || []
+  })()
+  promise.catch(() => { _describeObjectCache.delete(tableName) })
+  _describeObjectCache.set(tableName, promise)
+  return promise
 }
 
 // Describe incoming FKs — which other tables reference this one (for Related Lookups)
@@ -1141,6 +1162,9 @@ export async function addCustomField(params) {
     p_fk_table: params.fkTable || null,
   })
   if (error) throw error
+  // The object's column set changed — drop its cached schema so the next
+  // describeObject() reflects the new field.
+  invalidateObjectSchema(params.object)
   return data
 }
 

@@ -270,6 +270,9 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
       body_html: textToMinimalHtml(trimmed),
       outbound_mailbox_id: outboundMailboxId || undefined,
       contact_id: conversation.contact_id || undefined,
+      // Keep the reply on THIS thread — without it, send-email-v1 starts a
+      // fresh conversation for every send (the new-email behavior).
+      conversation_id: conversation.id,
     }
     const { data, error } = await supabase.functions.invoke('send-email-v1', {
       body: payload,
@@ -770,6 +773,84 @@ export async function uploadAttachmentForMessage({ messageId, conversationId, fi
 }
 
 /**
+ * Upload a staged attachment to storage BEFORE the email is sent, so the
+ * send function can put the actual file on the outgoing Graph message.
+ * Returns the meta the send payload needs; pass the same meta to
+ * registerAttachmentRows() after the send succeeds so the file shows on the
+ * message in LEAP.
+ */
+export async function uploadAttachmentToStorage(file) {
+  validateAttachmentFile(file)
+  const uniquePrefix = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  const safeName = file.name.replace(/[^\w.\-]+/g, '_')
+  const storagePath = `staged/${uniquePrefix}-${safeName}`
+
+  const { error: upErr } = await supabase.storage
+    .from(ATTACHMENT_BUCKET)
+    .upload(storagePath, file, {
+      contentType: file.type || 'application/octet-stream',
+      upsert: false,
+    })
+  if (upErr) throw new Error(`Upload failed for ${file.name}: ${upErr.message}`)
+
+  return {
+    storagePath,
+    fileName:  file.name,
+    mimeType:  file.type || null,
+    sizeBytes: file.size,
+  }
+}
+
+/**
+ * After a send succeeds, link the pre-uploaded files to the new message so
+ * they render in the thread (paperclip row). Mirrors what
+ * uploadAttachmentForMessage writes, minus the upload (already done).
+ */
+export async function registerAttachmentRows({ messageId, uploads }) {
+  if (!messageId) throw new Error('messageId required')
+  if (!Array.isArray(uploads) || uploads.length === 0) return []
+
+  const { data: { user: authUser } } = await supabase.auth.getUser()
+  let callerUserId = null
+  if (authUser?.id) {
+    const { data: u } = await supabase
+      .from('users').select('id').eq('auth_user_id', authUser.id).maybeSingle()
+    callerUserId = u?.id || null
+  }
+
+  const rows = uploads.map(u => ({
+    ma_message_id:      messageId,
+    ma_storage_path:    u.storagePath,
+    ma_file_name:       u.fileName,
+    ma_file_size_bytes: u.sizeBytes,
+    ma_mime_type:       u.mimeType,
+    ma_delivery_method: u.sizeBytes > ATTACHMENT_MAX_INLINE_BYTES ? 'signed_link' : 'inline',
+    ma_virus_scan_status: 'pending',
+    ma_signed_link_expires_at: u.sizeBytes > ATTACHMENT_MAX_INLINE_BYTES
+      ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+      : null,
+    ma_created_by: callerUserId,
+    ma_updated_by: callerUserId,
+  }))
+  const { data, error } = await supabase.from('message_attachments').insert(rows).select('*')
+  if (error) throw new Error(`Attachment row insert failed: ${error.message}`)
+  return data || []
+}
+
+// Shape pre-uploaded metas into the send-email-v1 payload field.
+function toAttachmentPayload(uploads) {
+  if (!Array.isArray(uploads) || uploads.length === 0) return undefined
+  return uploads.map(u => ({
+    storage_path: u.storagePath,
+    file_name:    u.fileName,
+    mime_type:    u.mimeType || undefined,
+    size_bytes:   u.sizeBytes,
+  }))
+}
+
+/**
  * List attachments for one or many messages. Used by the timeline renderer
  * to show paperclip + filename + size below the body bubble. Returns
  * { [messageId]: [attachmentRow, ...] } for efficient batch fetching.
@@ -778,7 +859,7 @@ export async function fetchAttachmentsForMessages(messageIds) {
   if (!Array.isArray(messageIds) || messageIds.length === 0) return {}
   const { data, error } = await supabase
     .from('message_attachments')
-    .select('id, ma_message_id, ma_storage_path, ma_file_name, ma_file_size_bytes, ma_mime_type, ma_delivery_method, ma_virus_scan_status, ma_signed_link_expires_at, ma_created_at')
+    .select('id, ma_message_id, ma_storage_path, ma_file_name, ma_file_size_bytes, ma_mime_type, ma_delivery_method, ma_virus_scan_status, ma_virus_scan_detail, ma_signed_link_expires_at, ma_created_at')
     .in('ma_message_id', messageIds)
     .eq('ma_is_deleted', false)
     .order('ma_created_at', { ascending: true })
@@ -934,6 +1015,7 @@ export async function sendTemplateEmail({
   outboundMailboxId,   // optional — template's default wins if omitted
   contactId,
   subjectOverride,     // optional — user-edited subject line
+  attachments,         // optional — pre-uploaded metas from uploadAttachmentToStorage
 }) {
   if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
   if (!emailTemplateId)                  throw new Error('emailTemplateId required')
@@ -950,6 +1032,7 @@ export async function sendTemplateEmail({
     subject:           subjectOverride || undefined,
     outbound_mailbox_id: outboundMailboxId || undefined,
     contact_id:          contactId || undefined,
+    attachments:         toAttachmentPayload(attachments),
   }
   const { data, error } = await supabase.functions.invoke('send-email-v1', { body: payload })
   if (error) throw new Error(error.message || 'Send failed at the network layer')
@@ -975,6 +1058,7 @@ export async function sendNewEmailHtml({
   bodyHtml,
   outboundMailboxId,
   contactId,
+  attachments,         // optional — pre-uploaded metas from uploadAttachmentToStorage
 }) {
   if (!anchorObject || !anchorRecordId) throw new Error('anchor record required')
   if (!to?.email) throw new Error('Recipient email required')
@@ -995,6 +1079,7 @@ export async function sendNewEmailHtml({
     body_html:           bodyHtml,
     outbound_mailbox_id: outboundMailboxId,
     contact_id:          contactId || undefined,
+    attachments:         toAttachmentPayload(attachments),
   }
   const { data, error } = await supabase.functions.invoke('send-email-v1', { body: payload })
   if (error) throw new Error(error.message || 'Send failed at the network layer')

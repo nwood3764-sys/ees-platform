@@ -6,6 +6,7 @@
 <title>Audit Template Builder</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <!-- Runner endpoint config (set per-deploy in config.js). Loaded before the app
      so the .osm upload branch can read window.AUDIT_RUNNER_URL. -->
 <script src="config.js"></script>
@@ -140,11 +141,13 @@
   </div>
 
   <div class="bar">
+    <button class="btn" id="aiExtract" disabled>🧠 AI Extract &amp; Map</button>
     <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
     <button class="btn" id="buildBase" disabled>↓ Baseline Audit Template</button>
     <button class="btn" id="buildImp" disabled>↓ Improved Audit Template</button>
     <button class="btn ghost" id="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
     <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
+    <button class="btn" id="packet" disabled>📦 Download Energy Model Packet</button>
     <span class="status" id="finalStatus"></span>
   </div>
   <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
@@ -501,6 +504,8 @@ function refresh(){
   document.getElementById('utilBase').disabled=!have;
   document.getElementById('utilImp').disabled=!have;
   document.getElementById('smartReview').disabled=!have;
+  document.getElementById('aiExtract').disabled=!have;
+  document.getElementById('packet').disabled=!have;
   if(!have){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
   // monthly shape, so the resulting EUI matches the Asset Score PDF. Runs once per refresh.
@@ -997,6 +1002,16 @@ async function build50121XML(which){
     const cap=cs.getElementsByTagNameNS(NS_AUC,'Capacity')[0];
     if(cap&&as.coolTons!=null)cap.textContent=Number(as.coolTons*12).toFixed(1);
   }
+  // Enum/type labels (from the AI extractor; only set when present, and it only
+  // ever returns a valid BuildingSync enum value).
+  if(boiler){
+    const bt=boiler.getElementsByTagNameNS(NS_AUC,'BoilerType')[0]; if(bt&&as.boilerType)bt.textContent=as.boilerType;
+    const dt=boiler.getElementsByTagNameNS(NS_AUC,'DraftType')[0]; if(dt&&as.boilerDraft)dt.textContent=as.boilerDraft;
+    const bq=boiler.getElementsByTagNameNS(NS_AUC,'Quantity')[0]; if(bq&&as.boilerQuantity!=null)bq.textContent=String(as.boilerQuantity);
+  }
+  if(hp&&as.boilerFuel){const pf=hp.getElementsByTagNameNS(NS_AUC,'PrimaryFuel')[0]; if(pf)pf.textContent=as.boilerFuel;}
+  _setFirst(doc,'FenestrationFrameMaterial', as.windowFrame);
+  _setFirst(doc,'FenestrationGlassLayers', as.windowGlassLayers);
   // Space-function section floor areas -> scale the template's split to THIS
   // building's multifamily use-type area (from "Building Use Types"), preserving
   // the internal conditioned/common/tenant proportions.
@@ -1017,6 +1032,33 @@ async function build50121XML(which){
         break;
       }
       break;
+    }
+  }
+
+  // Measures: reflect THIS building's upgrades (parsed from the Improved report's
+  // "Selected Upgrade Opportunities") rather than the template's. Set each
+  // Measure's description; if the building has fewer measures than the template,
+  // remove the surplus Measure nodes and their PackageOfMeasures references.
+  const parsedMeasures=(asI&&Array.isArray(asI.measures))?asI.measures.filter(Boolean):[];
+  if(parsedMeasures.length){
+    const measures=[..._q(doc,'Measure')];
+    measures.forEach((m,idx)=>{
+      if(idx<parsedMeasures.length){
+        const ld=m.getElementsByTagNameNS(NS_AUC,'LongDescription')[0];
+        if(ld)ld.textContent=parsedMeasures[idx];
+        const cm=m.getElementsByTagNameNS(NS_AUC,'CustomMeasureName')[0];
+        if(cm)cm.textContent=parsedMeasures[idx];
+      }
+    });
+    if(parsedMeasures.length<measures.length){
+      const removed=[];
+      for(let idx=parsedMeasures.length; idx<measures.length; idx++){
+        const id=measures[idx].getAttribute('ID'); if(id)removed.push(id);
+        measures[idx].parentNode.removeChild(measures[idx]);
+      }
+      for(const mid of [..._q(doc,'MeasureID')]){
+        if(removed.includes(mid.getAttribute('IDref'))) mid.parentNode.removeChild(mid);
+      }
     }
   }
 
@@ -1115,6 +1157,35 @@ function buildMappedForReview(){
   };
 })();
 
+/* ---------- Intelligent extraction: Claude reads the reports and returns the
+   enum-correct field set, which we merge over the regex parse before building. */
+(function(){
+  const btn=document.getElementById('aiExtract'); if(!btn)return;
+  const fs=()=>document.getElementById('finalStatus');
+  btn.onclick=async ()=>{
+    const s=fs(); s.className='status'; s.textContent='AI reading your reports…'; btn.disabled=true;
+    try{
+      const resp=await fetch('/.netlify/functions/extract',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({reports:{baseline:rawDocs.asBase,improved:rawDocs.asImp,
+          openStudio:(rawDocs.osBase||'').slice(0,30000)}})});
+      const r=await resp.json().catch(()=>({error:'Bad response'}));
+      if(!resp.ok||r.error){s.className='status err';s.textContent='AI extract: '+(r.error||('Error '+resp.status))+(r.detail?(' — '+r.detail):'');return;}
+      // Merge AI values over the regex parse (AI wins for any field it returned).
+      const merge=(target,src)=>{if(!target||!src)return;for(const k in src){if(src[k]!==null&&src[k]!==undefined&&src[k]!=='')target[k]=src[k];}};
+      // Map extractor keys onto the field names build50121XML reads.
+      const remap=(o)=>{ if(!o)return o; const m=Object.assign({},o);
+        if(o.coolingCOP!=null)m.coolCop=o.coolingCOP; if(o.coolingTons!=null)m.coolTons=o.coolingTons;
+        if(o.boilerCapacity_kBtu_hr!=null)m.heatCap=o.boilerCapacity_kBtu_hr;
+        if(o.waterHeaterEt!=null)m.whe=o.waterHeaterEt; return m; };
+      merge(data.asBase, remap(r.baseline)); merge(data.asImp, remap(r.improved));
+      refresh();
+      s.className='status ok';
+      s.textContent='AI extraction complete — fields updated from your reports'+(r.notes&&r.notes.length?(' ('+r.notes.length+' note(s) — run Smart Review)'):'')+'.';
+    }catch(err){s.className='status err';s.textContent='AI extract failed: '+err.message;}
+    finally{btn.disabled=false;}
+  };
+})();
+
 /* ---- Utility usage xlsx (Portfolio Manager "Energy Use By Calendar Month" format) ---- */
 /* Metered Energy Year Start Date (yyyy-mm-dd): first day of the import window =
    12 months back from the month prior to the score date. */
@@ -1193,6 +1264,44 @@ function downloadUtility(which){
 }
 document.getElementById('utilBase').onclick=()=>downloadUtility('baseline');
 document.getElementById('utilImp').onclick=()=>downloadUtility('improved');
+
+/* ---- Energy Model Packet: one zip with the source reports + everything the
+   tool generated (both XMLs + both utility files), named for the building. ---- */
+async function downloadPacket(){
+  const fs=document.getElementById('finalStatus');
+  if(typeof JSZip==='undefined'){fs.className='status err';fs.textContent='Zip library not loaded — check your connection and retry.';return;}
+  fs.className='status'; fs.textContent='Assembling energy model packet…';
+  try{
+    const asB=data.asBase, base=cleanName((data.asImp||asB).name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'');
+    const zip=new JSZip();
+    // 1) the original uploaded reports (raw File objects kept in `files`)
+    const srcNames={asBase:'AssetScore_Baseline',asImp:'AssetScore_Improved',
+                    osBase:'OpenStudio_Baseline',osImp:'OpenStudio_Improved'};
+    const src=zip.folder('1_Source_Reports');
+    for(const k of ['asBase','asImp','osBase','osImp']){
+      const f=files[k]; if(f){const ext=(f.name.match(/\.[^.]+$/)||[''])[0]; src.file(srcNames[k]+ext, f);}
+    }
+    // 2) generated 50121 Audit Template XML (baseline + improved)
+    const xf=zip.folder('2_Audit_Template_XML');
+    xf.file(base+'_Baseline_50121_AuditTemplate.xml', await build50121XML('baseline'));
+    xf.file(base+'_Improved_50121_AuditTemplate.xml', await build50121XML('improved'));
+    // 3) generated utility spreadsheets (baseline + improved)
+    const uf=zip.folder('3_Utility_Data');
+    uf.file(base+'_Baseline_Utility.xlsx', XLSX.write(buildUtilityXLSX('baseline'),{type:'array',bookType:'xlsx'}));
+    uf.file(base+'_Improved_Utility.xlsx', XLSX.write(buildUtilityXLSX('improved'),{type:'array',bookType:'xlsx'}));
+    // manifest for future reference
+    zip.file('README.txt',
+      'Energy Model Packet — '+cleanName((data.asImp||asB).name)+'\nGenerated '+todayStamp()+
+      ' by the EES Audit Template Builder.\n\n1_Source_Reports/  the uploaded Asset Score + OpenStudio files\n'+
+      '2_Audit_Template_XML/  the 50121 BuildingSync files (import under Building -> Import buildings)\n'+
+      '3_Utility_Data/  the Portfolio Manager utility spreadsheets (upload under Utility Data and Benchmarking)\n');
+    const blob=await zip.generateAsync({type:'blob'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=base+'_Energy_Model_Packet.zip'; a.click();
+    fs.className='status ok'; fs.textContent='Energy Model Packet downloaded.';
+  }catch(err){fs.className='status err';fs.textContent='Packet error: '+err.message;}
+}
+document.getElementById('packet').onclick=downloadPacket;
 </script>
 
 <!-- ================= In-app energy-auditing assistant ================= -->

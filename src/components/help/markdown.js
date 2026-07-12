@@ -29,9 +29,14 @@ function applyInline(html) {
   html = html.replace(/`([^`]+)`/g, (_, code) =>
     `<code style="font-family:'JetBrains Mono',monospace;font-size:0.9em;background:#f0f3f8;padding:1px 5px;border-radius:3px;">${code}</code>`)
 
-  // Links
+  // Links. Only allow http(s)/mailto/relative URLs — reject javascript:, data:,
+  // and other script-bearing schemes so a help article can't smuggle in an
+  // executable href. Rejected URLs render as plain text.
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
-    const safe = url.replace(/"/g, '&quot;')
+    const trimmed = url.trim()
+    const isSafe = /^(https?:|mailto:)/i.test(trimmed) || trimmed.startsWith('/') || trimmed.startsWith('#')
+    if (!isSafe) return text
+    const safe = trimmed.replace(/"/g, '&quot;')
     return `<a href="${safe}" target="_blank" rel="noopener" style="color:#2aab72;text-decoration:underline;">${text}</a>`
   })
 

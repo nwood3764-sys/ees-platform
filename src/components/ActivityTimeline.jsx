@@ -14,8 +14,11 @@
 // -----------------------------------------------------------------------------
 
 import { useState, useEffect } from 'react'
+import DOMPurify from 'dompurify'
 import { C } from '../data/constants'
 import { fetchActivityTimeline } from '../data/activityService'
+import { fetchActivitiesForRecord } from '../data/callActivityService'
+import LogActivityModal from './LogActivityModal'
 import { supabase } from '../lib/supabase'
 
 // Relative time: "just now", "5 min ago", "2 hr ago", "yesterday", or full date
@@ -52,6 +55,11 @@ const KIND_STYLES = {
   hard_delete:  { label: 'Hard Deleted', bg: '#e8f1fb', color: '#1e466b', dot: C.danger },
   email:        { label: 'Email Sent',   bg: '#eef4fc', color: '#2557a7', dot: '#2557a7' },
   email_failed: { label: 'Email Failed', bg: '#e8f1fb', color: '#1e466b', dot: C.danger },
+  // Manually-logged activities (activities table). 'call' is the primary case
+  // (green); any other logged activity_type renders with the generic 'activity'
+  // style. The actual type (Meeting, Site Visit, …) is shown via entry.badgeLabel.
+  call:         { label: 'Call',         bg: '#e8f8f2', color: '#1a7a4e', dot: C.emeraldMid },
+  activity:     { label: 'Activity',     bg: '#eef4fc', color: '#2557a7', dot: C.sky },
   // Envelope lifecycle entries — populated by list_envelope_events_for_record().
   // Created/Sent are envelope-scoped (no recipient); Opened/Viewed/ConsentGranted/
   // Signed/Declined are recipient-scoped; Completed/Voided are envelope-scoped
@@ -122,6 +130,32 @@ function toEnvelopeEventEntry(row) {
       event_type:    row.event_type,
       recipient_email: row.recipient_email,
       event_record_number: row.event_record_number,
+    },
+  }
+}
+
+// Convert a row from list_activities_for_record() into a TimelineEntry. A
+// Call maps to kind='call'; any other logged activity_type falls back to the
+// generic 'activity' style. The activity-specific detail (direction, duration,
+// linked contact, comments) is stashed on entry.activity for ActivityEntryBody.
+function toActivityEntry(row) {
+  const isCall = row.activity_type === 'Call'
+  return {
+    id: `activity_${row.id}`,
+    timestamp: row.performed_at,
+    kind: isCall ? 'call' : 'activity',
+    // Badge shows the actual type (Call, Meeting, Site Visit, Email, …) so the
+    // one generic 'activity' style scales as admins add new picklist types.
+    badgeLabel: row.activity_type || 'Activity',
+    actorName: row.performed_by_name || 'System',
+    changes: [],
+    activity: {
+      type: row.activity_type,
+      subject: row.subject,
+      body: row.body,
+      direction: row.direction,
+      duration_seconds: row.duration_seconds,
+      contact_name: row.contact_name,
     },
   }
 }
@@ -209,7 +243,7 @@ function TimelineEntry({ entry, isLast }) {
             background: kindStyle.bg, color: kindStyle.color,
             fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10,
             textTransform: 'uppercase', letterSpacing: 0.3,
-          }}>{kindStyle.label}</span>
+          }}>{entry.badgeLabel || kindStyle.label}</span>
           <span
             title={fullTimestamp(entry.timestamp)}
             style={{ fontSize: 11, color: C.textMuted, marginLeft: 'auto' }}
@@ -229,6 +263,7 @@ function TimelineEntry({ entry, isLast }) {
 
         {entry.email && <EmailEntryBody email={entry.email} />}
         {entry.envelope && <EnvelopeEntryBody envelope={entry.envelope} />}
+        {entry.activity && <ActivityEntryBody activity={entry.activity} />}
       </div>
     </div>
   )
@@ -280,8 +315,10 @@ function EmailEntryBody({ email }) {
           border: `1px solid ${C.border}`, borderRadius: 4,
           maxHeight: 400, overflow: 'auto', fontSize: 13,
         }}>
+          {/* Inbound email bodies are attacker-controlled; sanitize before
+              injecting (same pattern as ConversationPanel). */}
           {/* eslint-disable-next-line react/no-danger */}
-          <div dangerouslySetInnerHTML={{ __html: email.body_html }} />
+          <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.body_html) }} />
         </div>
       )}
     </div>
@@ -312,6 +349,54 @@ function EnvelopeEntryBody({ envelope }) {
   )
 }
 
+// Renders the detail block for a manually-logged activity (call/note/etc).
+// Shows a small meta row (direction · duration · linked contact) followed by
+// the free-text comments, so a logged call reads as a complete record inline.
+function ActivityEntryBody({ activity }) {
+  const meta = []
+  if (activity.direction) meta.push(activity.direction)
+  if (activity.duration_seconds != null) {
+    const mins = Math.round(activity.duration_seconds / 60)
+    meta.push(mins <= 0 ? '<1 min' : `${mins} min`)
+  }
+  if (activity.contact_name) meta.push(activity.contact_name)
+
+  const showSubject = activity.subject && activity.subject !== activity.type
+  const hasDetail = showSubject || meta.length > 0 || activity.body
+  if (!hasDetail) return null
+
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
+      padding: '8px 12px',
+    }}>
+      {showSubject && (
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, marginBottom: meta.length || activity.body ? 4 : 0 }}>
+          {activity.subject}
+        </div>
+      )}
+      {meta.length > 0 && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'baseline',
+          fontSize: 12, color: C.textSecondary, marginBottom: activity.body ? 6 : 0,
+        }}>
+          {meta.map((m, i) => (
+            <span key={i} style={{ display: 'inline-flex', gap: 6, alignItems: 'baseline' }}>
+              {i > 0 && <span style={{ color: C.textMuted }}>·</span>}
+              <span>{m}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      {activity.body && (
+        <div style={{ fontSize: 13, color: C.textSecondary, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+          {activity.body}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // -----------------------------------------------------------------------------
 // ActivityTimeline — public component
 // -----------------------------------------------------------------------------
@@ -332,12 +417,42 @@ const FILTERS = [
     test: (e) => e.kind === 'update' && e.changes.length > 0,
   },
   {
+    id: 'logged',
+    label: 'Logged activity',
+    test: (e) => e.kind === 'call' || e.kind === 'activity',
+  },
+  {
     id: 'create_delete',
     label: 'Created / Deleted',
     test: (e) => e.kind === 'create' || e.kind === 'soft_delete'
               || e.kind === 'restore' || e.kind === 'hard_delete',
   },
 ]
+
+// Small emerald "Log Activity" action button (icon + label). Shown in the
+// timeline header and the empty state so logging an activity is always one
+// click away from the record's Activity tab.
+function LogActivityButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        background: C.emerald, color: '#fff', border: 'none',
+        borderRadius: 6, padding: '7px 12px', fontSize: 12, fontWeight: 600,
+        cursor: 'pointer', transition: 'background 0.15s',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = C.emeraldMid }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = C.emerald }}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+      Log Activity
+    </button>
+  )
+}
 
 function FilterChips({ active, onChange, disabled }) {
   return (
@@ -379,12 +494,17 @@ export default function ActivityTimeline({ tableName, recordId }) {
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState(null)
   const [filterId, setFilterId] = useState('all')
+  const [showLogCall, setShowLogCall] = useState(false)
+  // Bumped after a call is logged to force a re-fetch of the feed.
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // Initial load — also resets everything when the record changes.
-  // Fetches activity timeline and email sends in parallel, then merges them
-  // by timestamp. Email entries come from the email_sends table (every email
-  // Energy Efficiency Services sent through Outlook on behalf of any user, threaded onto the
-  // parent record); they sit alongside field-history entries in one feed.
+  // Fetches the audit/field-history timeline, email sends, envelope events and
+  // manually-logged activities (calls/notes) in parallel, then merges them by
+  // timestamp into one feed. Email entries come from the email_sends table
+  // (every email Energy Efficiency Services sent through Outlook on behalf of
+  // any user, threaded onto the parent record); logged calls come from the
+  // activities table.
   useEffect(() => {
     let cancelled = false
     setEntries(null)
@@ -401,19 +521,21 @@ export default function ActivityTimeline({ tableName, recordId }) {
         p_parent_object: tableName,
         p_parent_record_id: recordId,
       }).then(({ data, error: rpcErr }) => rpcErr ? [] : (data || [])),
+      fetchActivitiesForRecord(tableName, recordId).catch(() => []),
     ])
-      .then(([{ entries: activityEntries, hasMore }, emailRows, envEventRows]) => {
+      .then(([{ entries: activityEntries, hasMore }, emailRows, envEventRows, activityRows]) => {
         if (cancelled) return
         const emailEntries = emailRows.map(toEmailEntry)
         const envEventEntries = envEventRows.map(toEnvelopeEventEntry).filter(Boolean)
-        const merged = [...activityEntries, ...emailEntries, ...envEventEntries]
+        const loggedEntries = activityRows.map(toActivityEntry)
+        const merged = [...activityEntries, ...emailEntries, ...envEventEntries, ...loggedEntries]
           .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         setEntries(merged)
         setHasMore(hasMore)
       })
       .catch(err => { if (!cancelled) setError(err.message || String(err)) })
     return () => { cancelled = true }
-  }, [tableName, recordId])
+  }, [tableName, recordId, refreshKey])
 
   // Load-more handler — paginate using the oldest timestamp currently loaded
   // as the cursor. New entries are appended; hasMore is recomputed from the
@@ -466,15 +588,26 @@ export default function ActivityTimeline({ tableName, recordId }) {
 
   if (entries.length === 0) {
     return (
-      <div style={{
-        background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-        padding: '32px 20px', color: C.textMuted, fontSize: 13, textAlign: 'center',
-      }}>
-        <div style={{ fontWeight: 500, color: C.textSecondary, marginBottom: 4 }}>
-          No activity yet
+      <>
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: '32px 20px', color: C.textMuted, fontSize: 13, textAlign: 'center',
+        }}>
+          <div style={{ fontWeight: 500, color: C.textSecondary, marginBottom: 4 }}>
+            No activity yet
+          </div>
+          <div style={{ marginBottom: 16 }}>Log an activity, or changes to tracked fields will appear here.</div>
+          <LogActivityButton onClick={() => setShowLogCall(true)} />
         </div>
-        <div>Changes to tracked fields will appear here.</div>
-      </div>
+        {showLogCall && (
+          <LogActivityModal
+            tableName={tableName}
+            recordId={recordId}
+            onClose={() => setShowLogCall(false)}
+            onLogged={() => { setShowLogCall(false); setRefreshKey(k => k + 1) }}
+          />
+        )}
+      </>
     )
   }
 
@@ -496,12 +629,24 @@ export default function ActivityTimeline({ tableName, recordId }) {
         }}>
           Activity Timeline
         </div>
-        <div style={{ fontSize: 11, color: C.textMuted }}>
-          {visible.length === entries.length
-            ? `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`
-            : `${visible.length} of ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 11, color: C.textMuted }}>
+            {visible.length === entries.length
+              ? `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`
+              : `${visible.length} of ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`}
+          </span>
+          <LogActivityButton onClick={() => setShowLogCall(true)} />
         </div>
       </div>
+
+      {showLogCall && (
+        <LogActivityModal
+          tableName={tableName}
+          recordId={recordId}
+          onClose={() => setShowLogCall(false)}
+          onLogged={() => { setShowLogCall(false); setRefreshKey(k => k + 1) }}
+        />
+      )}
 
       <FilterChips active={filterId} onChange={setFilterId} disabled={loadingMore} />
 
