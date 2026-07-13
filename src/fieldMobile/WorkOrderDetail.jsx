@@ -24,7 +24,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import MobileShell from './MobileShell'
 import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
-  captureStepPhoto, captureStepVideo, markUnableToComplete,
+  captureStepPhoto, captureStepVideo, photoGpsMissing, markUnableToComplete,
   markWorkStepNotApplicable, signedPhotoUrl,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
@@ -530,17 +530,15 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkN
     setUploading(true)
     try {
       const row = await captureStepPhoto({ file, workStepId: step.work_step_id, photoType: leg })
-      if (row?._gpsMissing) {
-        // Photo IS saved and counts toward the step — but evidence photos
-        // are expected to carry GPS. Tell the technician so they can turn
-        // Location Services on for the camera and retake if required.
-        onPhotoUploaded(
-          'Photo saved, but it has NO location data. Turn on Location Services for your camera, then retake this photo.',
-          'error',
-        )
-      } else {
-        onPhotoUploaded(`Photo captured (${leg}) · ${step.name}`)
-      }
+      // Screen updates immediately — the photo is saved and counts. The GPS
+      // check rides the server's EXIF processing (a few seconds) and warns
+      // AFTER the fact, so capture never feels slow.
+      onPhotoUploaded(`Photo captured (${leg}) · ${step.name}`)
+      photoGpsMissing(row).then((missing) => {
+        if (missing) {
+          onPhotoError('Photo saved, but it has NO location data. Turn on Location Services for your camera, then retake this photo.')
+        }
+      })
     } catch (err) {
       onPhotoError(err.message || 'Photo upload failed.')
     } finally {
