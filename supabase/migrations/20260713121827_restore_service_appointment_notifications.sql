@@ -235,7 +235,13 @@ DROP TRIGGER IF EXISTS trg_sa_after_update_lifecycle ON public.service_appointme
 CREATE TRIGGER trg_sa_after_insert_booking_confirmation AFTER INSERT ON public.service_appointments FOR EACH ROW EXECUTE FUNCTION trg_sa_fire_booking_confirmation();
 CREATE TRIGGER trg_sa_after_update_lifecycle AFTER UPDATE ON public.service_appointments FOR EACH ROW EXECUTE FUNCTION trg_sa_fire_status_or_reschedule();
 
--- Grants (verbatim from baseline) -----------------------------------------------
+-- Grants (verbatim from baseline). CREATE FUNCTION defaults to EXECUTE for
+-- PUBLIC, so explicitly strip PUBLIC/anon (and authenticated from the pure
+-- trigger functions) to match the baseline ACLs exactly.
+REVOKE ALL ON FUNCTION public.enqueue_notification(uuid, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.dispatch_due_reminders() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.trg_sa_fire_booking_confirmation() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.trg_sa_fire_status_or_reschedule() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.dispatch_due_reminders() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.dispatch_due_reminders() TO postgres;
 GRANT EXECUTE ON FUNCTION public.dispatch_due_reminders() TO service_role;
