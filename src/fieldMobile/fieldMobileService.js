@@ -267,8 +267,9 @@ export async function createBuildingAccessWorkOrder(sourceWorkOrderId) {
   return assertOutcome(unwrapRpcRow(data), 'Could not create the building access work order.')
 }
 
-// Active users for the Technicians On-Site multi-select. Lightweight list;
-// RLS scopes what is readable.
+// Active users for the Technicians On-Site multi-select. All active users —
+// no role filter, so Project Site Leads / auditors doing a solo visit are
+// selectable. RLS scopes what is readable.
 export async function fetchActiveUsers() {
   const { data, error } = await supabase
     .from('users')
@@ -276,6 +277,27 @@ export async function fetchActiveUsers() {
     .eq('user_is_active', true)
     .eq('user_is_deleted', false)
     .order('user_name')
+  if (error) throw error
+  return data || []
+}
+
+// Contacts on the work order's account, for the key_source Person picker
+// (e.g. the property manager handing over keys). Returns [] when the work
+// order has no account or the account has no contacts.
+export async function fetchAccountContactsForWorkOrder(woId) {
+  const { data: wo, error: woErr } = await supabase
+    .from('work_orders')
+    .select('work_order_account_id')
+    .eq('id', woId)
+    .maybeSingle()
+  if (woErr) throw woErr
+  if (!wo?.work_order_account_id) return []
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('id, contact_name')
+    .eq('contact_account_id', wo.work_order_account_id)
+    .eq('contact_is_deleted', false)
+    .order('contact_name')
   if (error) throw error
   return data || []
 }

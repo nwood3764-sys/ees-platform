@@ -26,7 +26,7 @@ import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
   captureStepPhoto, captureStepVideo, photoGpsMissing, markUnableToComplete,
   markWorkStepNotApplicable, saveWorkStepFieldValue, signedPhotoUrl,
-  createBuildingAccessWorkOrder, fetchActiveUsers,
+  createBuildingAccessWorkOrder, fetchActiveUsers, fetchAccountContactsForWorkOrder,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
@@ -276,6 +276,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
           <StepCard
             key={step.work_step_id}
             step={step}
+            woId={woId}
             index={i}
             locked={i > actionableIdx && actionableIdx !== -1 && !isStepCorrections(step)}
             isActionable={(i === actionableIdx || isStepCorrections(step)) && !isStepDone(step)}
@@ -522,7 +523,7 @@ function UnableModal({ busy, onCancel, onSubmit }) {
 }
 
 // ─── StepCard ────────────────────────────────────────────────────────────────
-function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkNotApplicable, onPhotoUploaded, onPhotoError }) {
+function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, onMarkNotApplicable, onPhotoUploaded, onPhotoError }) {
   const fileRef  = useRef(null)
   const videoRef = useRef(null)
   const legRef   = useRef('general')  // synchronous — no state race with the picker
@@ -664,6 +665,16 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkN
                 onSaved={onPhotoUploaded}
                 onError={onPhotoError}
               />
+            ) : f.type === 'key_source' ? (
+              <StepKeySource
+                key={f.field_id}
+                field={f}
+                stepId={step.work_step_id}
+                woId={woId}
+                disabled={busy || uploading}
+                onSaved={onPhotoUploaded}
+                onError={onPhotoError}
+              />
             ) : (
               <StepFieldInput
                 key={f.field_id}
@@ -777,6 +788,126 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkN
           Complete the previous step first.
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── StepKeySource ───────────────────────────────────────────────────────────
+// The 'key_source' field type (Checked Out From / Returned To on key custody
+// steps). Keys come from a lockbox OR from a person — a contact on the work
+// order's account (property manager etc.), with a free-text fallback for
+// someone not yet in CRM. Stored as readable text: "Lockbox" or
+// "Person: <name>".
+function StepKeySource({ field, stepId, woId, disabled, onSaved, onError }) {
+  const saved = field.text_value || ''
+  const savedIsPerson = saved.startsWith('Person: ')
+  const [mode, setMode] = useState(saved ? (savedIsPerson ? 'person' : 'lockbox') : null)
+  const [person, setPerson] = useState(savedIsPerson ? saved.slice(8) : '')
+  const [otherName, setOtherName] = useState('')
+  const [contacts, setContacts] = useState(null)  // null = loading
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchAccountContactsForWorkOrder(woId)
+      .then((rows) => { if (!cancelled) setContacts(rows) })
+      .catch(() => { if (!cancelled) setContacts([]) })
+    return () => { cancelled = true }
+  }, [woId])
+
+  const effectivePerson = person === '__other__' ? otherName.trim() : person
+  const currentValue = mode === 'lockbox' ? 'Lockbox'
+    : mode === 'person' && effectivePerson ? `Person: ${effectivePerson}` : ''
+  const dirty = currentValue !== '' && currentValue !== saved
+
+  const save = async () => {
+    if (!currentValue) {
+      onError(mode === 'person'
+        ? `Select or enter who the keys came from for "${field.label}".`
+        : `Choose Lockbox or Person for "${field.label}".`)
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await saveWorkStepFieldValue(stepId, field.field_id, currentValue)
+      onSaved(res.message || `${field.label} saved`)
+    } catch (e) {
+      onError(e.message || 'Could not save.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const chip = (key, label) => (
+    <button key={key} onClick={() => setMode(key)} disabled={disabled || saving}
+      style={{
+        appearance: 'none', cursor: 'pointer', flex: 1,
+        border: `1px solid ${mode === key ? C.emerald : C.borderDark}`,
+        background: mode === key ? '#e8f8f0' : C.card,
+        color: C.textPrimary, fontFamily: FONT, fontSize: 14, fontWeight: 600,
+        borderRadius: 8, padding: '10px 12px', minHeight: 44,
+      }}>
+      {label}
+    </button>
+  )
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+        {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+        {saved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ {saved}</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        {chip('lockbox', 'Lockbox')}
+        {chip('person', 'Person')}
+      </div>
+
+      {mode === 'person' && (
+        contacts === null ? (
+          <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 8 }}>Loading contacts…</div>
+        ) : (
+          <div style={{ marginBottom: 8 }}>
+            <select
+              value={person}
+              onChange={(e) => setPerson(e.target.value)}
+              disabled={disabled || saving}
+              style={{
+                width: '100%', boxSizing: 'border-box', minHeight: 44,
+                fontFamily: FONT, fontSize: 15, color: C.textPrimary,
+                border: `1px solid ${C.borderDark}`, borderRadius: 8, padding: '10px 12px',
+                background: C.card, marginBottom: person === '__other__' ? 8 : 0,
+              }}>
+              <option value="">Who provided the keys?</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.contact_name}>{c.contact_name}</option>
+              ))}
+              <option value="__other__">Someone else (type name)</option>
+            </select>
+            {person === '__other__' && (
+              <input
+                type="text" value={otherName} onChange={(e) => setOtherName(e.target.value)}
+                placeholder="Full name"
+                disabled={disabled || saving}
+                style={{
+                  width: '100%', boxSizing: 'border-box', minHeight: 44,
+                  fontFamily: FONT, fontSize: 15, color: C.textPrimary,
+                  border: `1px solid ${C.borderDark}`, borderRadius: 8, padding: '10px 12px',
+                }}
+              />
+            )}
+          </div>
+        )
+      )}
+
+      <button
+        onClick={save}
+        disabled={disabled || saving || !dirty}
+        style={(disabled || saving || !dirty)
+          ? { ...btnDisabled, minHeight: 44 }
+          : { ...btnPrimary, minHeight: 44 }}
+      >
+        {saving ? 'Saving…' : 'Save'}
+      </button>
     </div>
   )
 }
