@@ -108,6 +108,18 @@ export async function completeWorkStep(stepId) {
   return assertOutcome(unwrapRpcRow(data), 'Step could not be completed.')
 }
 
+// Save a measurement/field value on a step (e.g. Square Feet Removed).
+// Server validates the field belongs to the step, numbers parse and are
+// >= 0, and the step isn't already closed. Required fields hard-gate step
+// completion via _work_step_evidence_gap, same as photos and videos.
+export async function saveWorkStepFieldValue(stepId, templateFieldId, value) {
+  const { data, error } = await supabase.rpc('save_work_step_field_value', {
+    p_step_id: stepId, p_template_field_id: templateFieldId, p_value: value,
+  })
+  if (error) throw error
+  return assertOutcome(unwrapRpcRow(data), 'Could not save the value.')
+}
+
 // A step that doesn't apply on this site (e.g. "photograph can lights" in an
 // attic with no can lights) is closed as Not Applicable WITH a reason — the
 // reason is mandatory server-side and shows to the verifier. Distinct from

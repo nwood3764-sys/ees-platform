@@ -25,7 +25,7 @@ import MobileShell from './MobileShell'
 import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
   captureStepPhoto, captureStepVideo, photoGpsMissing, markUnableToComplete,
-  markWorkStepNotApplicable, signedPhotoUrl,
+  markWorkStepNotApplicable, saveWorkStepFieldValue, signedPhotoUrl,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
@@ -607,6 +607,39 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkN
         <VideoStrip videos={step.videos} />
       )}
 
+      {/* Measurement / field values. Editable on the actionable step; saved
+          values shown read-only once the step is closed. */}
+      {Array.isArray(step.fields) && step.fields.length > 0 && (
+        done || !isActionable ? (
+          <div style={{ marginBottom: 8 }}>
+            {step.fields.map((f) => {
+              const val = f.numeric_value ?? f.text_value
+              return (
+                <div key={f.field_id} style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
+                  <strong style={{ color: C.textPrimary }}>{f.label}:</strong>{' '}
+                  {val != null && val !== ''
+                    ? <span style={{ fontFamily: MONO }}>{val}{f.unit ? ` ${f.unit}` : ''}</span>
+                    : <span style={{ color: C.textMuted }}>not entered</span>}
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div style={{ marginBottom: 8 }}>
+            {step.fields.map((f) => (
+              <StepFieldInput
+                key={f.field_id}
+                field={f}
+                stepId={step.work_step_id}
+                disabled={busy || uploading}
+                onSaved={onPhotoUploaded}
+                onError={onPhotoError}
+              />
+            ))}
+          </div>
+        )
+      )}
+
       {/* Not Applicable reason — the documented why, visible to everyone. */}
       {notApplicable && step.not_applicable_reason && (
         <div style={{
@@ -706,6 +739,78 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkN
           Complete the previous step first.
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── StepFieldInput ──────────────────────────────────────────────────────────
+// One measurement/field entry on the actionable step (e.g. "Square Feet
+// Removed by 10:00 AM"). Saves via save_work_step_field_value; required
+// fields hard-gate step completion server-side, so onSaved reloads the
+// detail to refresh the gap state and enable Complete Step.
+function StepFieldInput({ field, stepId, disabled, onSaved, onError }) {
+  const savedVal = field.numeric_value ?? field.text_value ?? ''
+  const [value, setValue] = useState(String(savedVal))
+  const [saving, setSaving] = useState(false)
+  const isNumber = field.type === 'number'
+  const dirty = value.trim() !== String(savedVal).trim()
+  const hasSaved = savedVal !== '' && savedVal != null
+
+  const save = async () => {
+    if (!value.trim()) { onError(`Enter a value for "${field.label}".`); return }
+    setSaving(true)
+    try {
+      const res = await saveWorkStepFieldValue(stepId, field.field_id, value.trim())
+      onSaved(res.message || `${field.label} saved`)
+    } catch (e) {
+      onError(e.message || 'Could not save the value.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+        {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+        {hasSaved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ position: 'relative', flex: 1 }}>
+          <input
+            type="text"
+            inputMode={isNumber ? 'decimal' : 'text'}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={isNumber ? '0' : ''}
+            disabled={disabled || saving}
+            style={{
+              width: '100%', boxSizing: 'border-box', minHeight: 44,
+              fontFamily: isNumber ? MONO : FONT, fontSize: 16,
+              border: `1px solid ${hasSaved && !dirty ? C.emerald : C.borderDark}`,
+              borderRadius: 8, padding: field.unit ? '10px 64px 10px 12px' : '10px 12px',
+              color: C.textPrimary,
+            }}
+          />
+          {field.unit && (
+            <span style={{
+              position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+              fontSize: 13, color: C.textMuted, pointerEvents: 'none',
+            }}>
+              {field.unit}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={save}
+          disabled={disabled || saving || !dirty}
+          style={(disabled || saving || !dirty)
+            ? { ...btnDisabled, flex: '0 0 auto', minHeight: 44, padding: '0 18px' }
+            : { ...btnPrimary, flex: '0 0 auto', minHeight: 44, padding: '0 18px' }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
     </div>
   )
 }
