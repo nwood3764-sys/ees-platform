@@ -118,9 +118,17 @@ Then set the **CURRENT BUILD STATE → Active workstream** line to point at the 
 
 ---
 
-## CURRENT BUILD STATE (as of 2026-07-07)
+## CURRENT BUILD STATE (as of 2026-07-13)
 
 Active workstream: **Builder rearchitecture — WYSIWYG drag-and-drop builders (Salesforce parity).** Full handoff + per-phase status: `docs/leap-builder-rearchitecture.md`. Goal: one three-pane canvas (palette / live canvas / inspector) + a per-surface component registry, replacing the form-driven builders.
+
+**Shipped 2026-07-13 — Insulation Removal - Attic work plan + video evidence + step-level Not Applicable (branch `claude/insulation-removal-work-order-yqr75j`; DB live on prod):**
+The first work plan built to spec by Nicholas, plus two generic work-step capabilities:
+- **Work plan template WPT-00004 "Insulation Removal - Attic - Standard"** — 21 purpose-built step templates (WST-00027–00047, never shared with another plan): start-of-day building/hatch/containment photos + 5 existing-attic photos + attic 360 video → timed checkpoints at 10 AM / 12 PM / 2 PM (containment photo + Square Feet Removed measurement field each) → end-of-day insulation-removed photo sets (pipes / wires / top plates / exhaust fans / light boxes-can lights / eaves wide angle, 4 each) + closing 360 video → hatch closed & cleanup photo → closing building number photo. Every step owned by **Lead Technician**, verified by **Project Site Lead** (there is no "Field Technician" role). Wired as WT-00041's default template: 480 min / 8 hr, 0.096 min per sq ft (5,000 sq ft per crew-day basis).
+- **Video evidence type (new, hard-gated):** picklist value on `wst_required_evidence_type_id`; `_work_step_evidence_gap` blocks step completion until a `documents` row with `mime_type video/%` exists on the step ("360 video" = full-circle phone pan, per Nicholas — no special camera). LEAP Pad: Record Video button + inline playback (`VideoStrip`); step-scoped documents now bucket-route to `work-evidence` (`storageService`).
+- **Step-level Not Applicable with required reason** (Nicholas's chosen flow for e.g. "no can lights present"): status reactivated, `work_steps.work_step_not_applicable_reason` column, `mark_work_step_not_applicable(p_step_id, p_reason)` RPC, N/A modal in LEAP Pad; `rollup_work_plan_status` excludes N/A steps from the applicable totals. N/A ≠ Unable to Complete — Unable stays reserved for real blockers and still forces the plan Unable. `work_order_detail_for_technician` now returns `video_count` / `videos` / `not_applicable_reason` per step. Migration `20260713113959_work_step_video_evidence_and_not_applicable.sql` (in repo + applied to prod). Advisor baseline still ~174 (the new RPC carries the standard authenticated-executable lint like every technician RPC).
+- **First work order in LEAP: WO-00055** on seed property PROP-23706 (new Building 1 → opportunity on WI-IRA-MF-HOMES Phase 6 → project "Insulation Removal - Attic - Seed Property", MF-INS-AIR record type) — the `instantiate_work_plan` trigger auto-created **WP-00007** with all 21 steps; photo + both video evidence gates verified live (correct blocking messages). Whole chain `is_seed_data=true`.
+- Also fixed: `statusChip` matched 'complete' before 'unable', so "Unable to Complete" chips rendered green. Help article **HA-00123** (`insulation-removal-attic-work-plan`).
 
 **Shipped 2026-07-07 — Page layout section + related-list customization (PRs #99/#100/#101/#103, live on master/prod, tested by Nicholas):**
 `LayoutCanvasEditor` full section/related-list control, no schema change (persists through the existing bulk soft-delete + recreate adapter):

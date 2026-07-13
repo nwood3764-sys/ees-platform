@@ -34,12 +34,13 @@ export const MONO = "'JetBrains Mono', ui-monospace, monospace"
 export function statusChip(status) {
   const s = (status || '').toLowerCase()
   if (s.includes('correction')) return { bg: '#e8f0fb', color: '#2a5a8a', dot: C.sky }
+  // 'unable' must precede 'complete' — "Unable to Complete" contains both.
+  if (s.includes('unable'))     return { bg: '#eceff4', color: '#4a5e7a', dot: C.textSecondary }
   if (s.includes('verified'))   return { bg: '#e8f8f0', color: '#1a7a4f', dot: C.emerald }
   if (s.includes('complete'))   return { bg: '#e8f8f0', color: '#1a7a4f', dot: C.emerald }
   if (s.includes('in progress'))return { bg: '#e8f3fb', color: '#1a5a8a', dot: C.sky }
   if (s.includes('to be verif'))return { bg: '#e8f0fb', color: '#2a5a8a', dot: C.sky }
   if (s.includes('submitted'))  return { bg: '#e8f0fb', color: '#2a5a8a', dot: C.sky }
-  if (s.includes('unable'))     return { bg: '#eceff4', color: '#4a5e7a', dot: C.textSecondary }
   if (s.includes('scheduled'))  return { bg: '#e8f3fb', color: '#1a5a8a', dot: C.sky }
   if (s.includes('assigned'))   return { bg: '#e8f3fb', color: '#1a5a8a', dot: C.sky }
   return { bg: C.page, color: C.textSecondary, dot: C.textMuted }

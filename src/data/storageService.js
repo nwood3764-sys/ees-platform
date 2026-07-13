@@ -59,6 +59,10 @@ export function defaultPhotoBucket(relatedObject) {
 // application or a portal-originated upload.
 const DOCUMENT_BUCKET_BY_OBJECT = {
   incentive_applications: 'program-applications',
+  // Step-scoped files (evidence videos, required document uploads) are
+  // field evidence — they belong with the step's photos, not in the
+  // property paperwork bucket.
+  work_steps: 'work-evidence',
   // Everything else falls through to property-documents.
 }
 
