@@ -281,7 +281,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
             busy={busy === step.work_step_id}
             onComplete={() => handleComplete(step)}
             onMarkNotApplicable={() => setNaStep(step)}
-            onPhotoUploaded={async (msg) => { flash(msg); await load() }}
+            onPhotoUploaded={async (msg, tone) => { flash(msg, tone); await load() }}
             onPhotoError={(msg) => flash(msg, 'error')}
           />
         ))}
@@ -529,8 +529,18 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkN
     const leg = legRef.current
     setUploading(true)
     try {
-      await captureStepPhoto({ file, workStepId: step.work_step_id, photoType: leg })
-      onPhotoUploaded(`Photo captured (${leg}) · ${step.name}`)
+      const row = await captureStepPhoto({ file, workStepId: step.work_step_id, photoType: leg })
+      if (row?._gpsMissing) {
+        // Photo IS saved and counts toward the step — but evidence photos
+        // are expected to carry GPS. Tell the technician so they can turn
+        // Location Services on for the camera and retake if required.
+        onPhotoUploaded(
+          'Photo saved, but it has NO location data. Turn on Location Services for your camera, then retake this photo.',
+          'error',
+        )
+      } else {
+        onPhotoUploaded(`Photo captured (${leg}) · ${step.name}`)
+      }
     } catch (err) {
       onPhotoError(err.message || 'Photo upload failed.')
     } finally {
