@@ -190,7 +190,7 @@ export async function captureStepPhoto({ file, workStepId, photoType }) {
   if (!['before', 'after', 'general'].includes(photoType)) {
     throw new Error(`captureStepPhoto: photoType must be before|after|general, got "${photoType}".`)
   }
-  return uploadPhoto({
+  const row = await uploadPhoto({
     file,
     relatedObject: 'work_steps',
     relatedId:     workStepId,
@@ -198,6 +198,22 @@ export async function captureStepPhoto({ file, workStepId, photoType }) {
     photoType,
     applyWatermark: true,
   })
+
+  // Await the EXIF result (bounded) so the technician can be warned when
+  // the photo carries no GPS coordinates — evidence photos are expected to
+  // be geolocated. If processing hasn't answered within the window, we
+  // can't tell either way, so no warning (_gpsMissing stays false).
+  let gpsMissing = false
+  if (row?._processing) {
+    const result = await Promise.race([
+      row._processing,
+      new Promise((resolve) => setTimeout(resolve, 15000, undefined)),
+    ])
+    if (result?.ok && result.latitude == null && result.longitude == null) {
+      gpsMissing = true
+    }
+  }
+  return { ...row, _gpsMissing: gpsMissing }
 }
 
 // ───────────────────────────────────────────────────────────────────────────

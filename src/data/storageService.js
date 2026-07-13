@@ -246,14 +246,20 @@ export async function uploadPhoto({
   }
 
   // 3. Trigger the edge function to extract EXIF and (optionally) watermark.
-  //    Fire-and-forget: the row is already created and visible. If the
-  //    function errors, watermark_status will be set to 'error' and
-  //    watermark_error will hold the message — the gallery can show that.
-  supabase.functions
+  //    Fire-and-forget for most callers: the row is already created and
+  //    visible. If the function errors, watermark_status will be set to
+  //    'error' and watermark_error will hold the message — the gallery can
+  //    show that. The invocation promise is exposed on the returned row as
+  //    `_processing` (resolves to the function's result, or null on failure)
+  //    so evidence-capture surfaces can await the EXIF outcome — e.g. LEAP
+  //    Pad warns the technician when a photo carries no GPS coordinates.
+  photoRow._processing = supabase.functions
     .invoke('process-photo', { body: { photo_id: photoRow.id } })
+    .then(({ data, error }) => (error ? null : data))
     .catch((e) => {
       // eslint-disable-next-line no-console
       console.warn('process-photo invocation failed (non-fatal):', e?.message || e)
+      return null
     })
 
   return photoRow
