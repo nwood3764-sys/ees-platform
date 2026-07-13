@@ -26,6 +26,7 @@ import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
   captureStepPhoto, captureStepVideo, photoGpsMissing, markUnableToComplete,
   markWorkStepNotApplicable, saveWorkStepFieldValue, signedPhotoUrl,
+  createBuildingAccessWorkOrder, fetchActiveUsers,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
@@ -317,6 +318,34 @@ export default function WorkOrderDetail({ woId, navigate }) {
           </button>
         )}
       </div>
+
+      {/* Log Building Access — the technician creates the chain-of-custody
+          access work order themselves, on the same project/building chain.
+          Hidden on access work orders (no recursion). */}
+      {header.work_type_name !== 'Building Access - Unlock and Lock' && (
+        <div style={{ marginTop: 10 }}>
+          <button
+            onClick={async () => {
+              setBusy('access')
+              try {
+                const res = await createBuildingAccessWorkOrder(woId)
+                flash(res.message || 'Building access work order created')
+                navigate(`/field/wo/${res.work_order_id}`)
+              } catch (e) {
+                flash(e.message || 'Could not create the building access work order.', 'error')
+              } finally { setBusy(null) }
+            }}
+            disabled={busy === 'access'}
+            style={{ ...btnSecondary, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+            </svg>
+            {busy === 'access' ? 'Creating…' : 'Log Building Access (unlock / lock)'}
+          </button>
+        </div>
+      )}
 
       {/* Unable to Complete — available whenever the WO is actively In Progress
           (or Corrections). Always reachable so a technician can report a
@@ -626,7 +655,16 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkN
           </div>
         ) : (
           <div style={{ marginBottom: 8 }}>
-            {step.fields.map((f) => (
+            {step.fields.map((f) => f.type === 'user_multiselect' ? (
+              <StepUserMultiselect
+                key={f.field_id}
+                field={f}
+                stepId={step.work_step_id}
+                disabled={busy || uploading}
+                onSaved={onPhotoUploaded}
+                onError={onPhotoError}
+              />
+            ) : (
               <StepFieldInput
                 key={f.field_id}
                 field={f}
@@ -739,6 +777,103 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkN
           Complete the previous step first.
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── StepUserMultiselect ─────────────────────────────────────────────────────
+// The 'user_multiselect' field type (e.g. "Technicians On-Site" on building
+// access steps): a checkbox list of active users, saved as comma-separated
+// names so the value reads plainly everywhere (step card, desktop record,
+// verifier view).
+function StepUserMultiselect({ field, stepId, disabled, onSaved, onError }) {
+  const savedNames = (field.text_value || '').split(',').map((s) => s.trim()).filter(Boolean)
+  const [users, setUsers] = useState(null)   // null = loading
+  const [selected, setSelected] = useState(new Set(savedNames))
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchActiveUsers()
+      .then((rows) => { if (!cancelled) setUsers(rows) })
+      .catch(() => { if (!cancelled) setUsers([]) })
+    return () => { cancelled = true }
+  }, [])
+
+  const toggle = (name) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name); else next.add(name)
+      return next
+    })
+  }
+
+  const currentValue = Array.from(selected).sort().join(', ')
+  const dirty = currentValue !== savedNames.slice().sort().join(', ')
+
+  const save = async () => {
+    if (selected.size === 0) { onError(`Select at least one person for "${field.label}".`); return }
+    setSaving(true)
+    try {
+      const res = await saveWorkStepFieldValue(stepId, field.field_id, currentValue)
+      onSaved(res.message || `${field.label} saved`)
+    } catch (e) {
+      onError(e.message || 'Could not save the selection.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+        {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+        {savedNames.length > 0 && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
+      </div>
+      {users === null ? (
+        <div style={{ fontSize: 13, color: C.textMuted }}>Loading people…</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {users.map((u) => {
+            const on = selected.has(u.user_name)
+            return (
+              <button key={u.id} onClick={() => toggle(u.user_name)} disabled={disabled || saving}
+                style={{
+                  appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  border: `1px solid ${on ? C.emerald : C.borderDark}`,
+                  background: on ? '#e8f8f0' : C.card,
+                  color: C.textPrimary, fontFamily: FONT, fontSize: 14, fontWeight: 600,
+                  borderRadius: 8, padding: '10px 12px', minHeight: 44,
+                }}>
+                <span style={{
+                  width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                  border: `2px solid ${on ? C.emerald : C.borderDark}`,
+                  background: on ? C.emerald : 'transparent',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {on && (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff"
+                      strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </span>
+                {u.user_name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <button
+        onClick={save}
+        disabled={disabled || saving || !dirty}
+        style={(disabled || saving || !dirty)
+          ? { ...btnDisabled, minHeight: 44 }
+          : { ...btnPrimary, minHeight: 44 }}
+      >
+        {saving ? 'Saving…' : `Save (${selected.size} selected)`}
+      </button>
     </div>
   )
 }
