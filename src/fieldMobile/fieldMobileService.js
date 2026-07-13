@@ -190,7 +190,7 @@ export async function captureStepPhoto({ file, workStepId, photoType }) {
   if (!['before', 'after', 'general'].includes(photoType)) {
     throw new Error(`captureStepPhoto: photoType must be before|after|general, got "${photoType}".`)
   }
-  const row = await uploadPhoto({
+  return uploadPhoto({
     file,
     relatedObject: 'work_steps',
     relatedId:     workStepId,
@@ -198,22 +198,21 @@ export async function captureStepPhoto({ file, workStepId, photoType }) {
     photoType,
     applyWatermark: true,
   })
+}
 
-  // Await the EXIF result (bounded) so the technician can be warned when
-  // the photo carries no GPS coordinates — evidence photos are expected to
-  // be geolocated. If processing hasn't answered within the window, we
-  // can't tell either way, so no warning (_gpsMissing stays false).
-  let gpsMissing = false
-  if (row?._processing) {
-    const result = await Promise.race([
-      row._processing,
-      new Promise((resolve) => setTimeout(resolve, 15000, undefined)),
-    ])
-    if (result?.ok && result.latitude == null && result.longitude == null) {
-      gpsMissing = true
-    }
-  }
-  return { ...row, _gpsMissing: gpsMissing }
+// Resolves true when the captured photo carries no GPS coordinates —
+// evidence photos are expected to be geolocated, so the screen warns the
+// technician. Deliberately NOT awaited before the UI updates: EXIF
+// processing takes a few seconds server-side, and the capture flow must
+// feel instant. If processing hasn't answered within the window we can't
+// tell either way, so no warning (resolves false).
+export async function photoGpsMissing(photoRow, { timeoutMs = 15000 } = {}) {
+  if (!photoRow?._processing) return false
+  const result = await Promise.race([
+    photoRow._processing,
+    new Promise((resolve) => setTimeout(resolve, timeoutMs, undefined)),
+  ])
+  return !!(result?.ok && result.latitude == null && result.longitude == null)
 }
 
 // ───────────────────────────────────────────────────────────────────────────
