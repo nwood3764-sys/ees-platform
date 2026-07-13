@@ -423,6 +423,7 @@ const SectionCard = memo(function SectionCard({
   const others = (section.widgets || []).filter(w => w.type !== 'field_group')
   const cols = section.columns || 2
   const tab = section.tab || 'Details'
+  const placement = section.placement || 'main'
   const tabOptions = SECTION_TABS.includes(tab) ? SECTION_TABS : [...SECTION_TABS, tab]
 
   // The whole card is sortable; only the ⠿ handle activates the drag so the
@@ -442,13 +443,24 @@ const SectionCard = memo(function SectionCard({
         <input value={section.label} onChange={e => onPatch(section.key, { label: e.target.value })}
           style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.textPrimary, border: 'none', background: 'transparent', outline: 'none' }} />
         <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
-          Tab
-          <select value={tab} onChange={e => onPatch(section.key, { tab: e.target.value })}
-            title="Which record-page tab this section's fields render on"
+          Placement
+          <select value={placement} onChange={e => onPatch(section.key, { placement: e.target.value })}
+            title="Main content column, or the always-visible right sidebar (Salesforce-style utility rail)"
             style={{ ...inputStyle(), width: 'auto', padding: '3px 6px', fontSize: 12 }}>
-            {tabOptions.map(t => <option key={t} value={t}>{t}</option>)}
+            <option value="main">Main</option>
+            <option value="right">Right sidebar</option>
           </select>
         </label>
+        {placement !== 'right' && (
+          <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
+            Tab
+            <select value={tab} onChange={e => onPatch(section.key, { tab: e.target.value })}
+              title="Which record-page tab this section's fields render on"
+              style={{ ...inputStyle(), width: 'auto', padding: '3px 6px', fontSize: 12 }}>
+              {tabOptions.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+        )}
         <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
           Columns
           <select value={cols} onChange={e => onPatch(section.key, { columns: Number(e.target.value) })}
@@ -470,6 +482,7 @@ const SectionCard = memo(function SectionCard({
         ) : null}
         <WidgetZone
           sectionKey={section.key}
+          placement={placement}
           widgets={others}
           onPatchWidget={onPatchWidget}
           onRemoveWidget={onRemoveWidget}
@@ -485,7 +498,7 @@ const SectionCard = memo(function SectionCard({
 // ("wzone::<sectionKey>") so a related-list card can be dragged within its
 // section or into another one — the resulting array order persists as
 // widget_position, which is exactly the order the Related tab renders cards.
-function WidgetZone({ sectionKey, widgets, onPatchWidget, onRemoveWidget, onOpenRelatedModal }) {
+function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWidget, onOpenRelatedModal }) {
   const { setNodeRef, isOver } = useDroppable({ id: `wzone::${sectionKey}` })
   return (
     <div ref={setNodeRef} style={{
@@ -495,7 +508,7 @@ function WidgetZone({ sectionKey, widgets, onPatchWidget, onRemoveWidget, onOpen
     }}>
       <SortableContext items={widgets.map(w => `wgt::${w.key}`)} strategy={verticalListSortingStrategy}>
         {widgets.map(w => (
-          <WidgetTile key={w.key} widget={w} sectionKey={sectionKey}
+          <WidgetTile key={w.key} widget={w} sectionKey={sectionKey} placement={placement}
             onPatch={onPatchWidget} onRemove={onRemoveWidget} onOpenRelatedModal={onOpenRelatedModal} />
         ))}
       </SortableContext>
@@ -508,8 +521,13 @@ function WidgetZone({ sectionKey, widgets, onPatchWidget, onRemoveWidget, onOpen
   )
 }
 
-function WidgetTile({ widget, sectionKey, onPatch, onRemove, onOpenRelatedModal }) {
+function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenRelatedModal }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `wgt::${widget.key}` })
+  // Where this card actually renders on the record page: cards in a
+  // right-sidebar section render inside the rail (always visible); cards in
+  // a main section render on the Related tab.
+  const isCard = RELATED_TAB_WIDGET_TYPES.has(widget.type)
+  const renderHint = !isCard ? null : placement === 'right' ? 'Right sidebar' : 'Related tab'
   return (
     <div ref={setNodeRef} style={{
       transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1,
@@ -527,12 +545,12 @@ function WidgetTile({ widget, sectionKey, onPatch, onRemove, onOpenRelatedModal 
           border: 'none', background: 'transparent', outline: 'none' }}
       />
       <span
-        title={RELATED_TAB_WIDGET_TYPES.has(widget.type)
-          ? "This card always renders on the record's Related tab — its section here only controls card order."
-          : undefined}
+        title={!renderHint ? undefined : renderHint === 'Right sidebar'
+          ? "This card renders in the record page's always-visible right sidebar."
+          : "This card renders on the record's Related tab — its section here only controls card order."}
         style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, flexShrink: 0 }}>
         {WIDGET_LABELS[widget.type] || widget.type}
-        {RELATED_TAB_WIDGET_TYPES.has(widget.type) && <span style={{ color: C.sky }}> · Related tab</span>}
+        {renderHint && <span style={{ color: C.sky }}> · {renderHint}</span>}
       </span>
       {widget.type === 'related_list' && (
         <button onClick={() => onOpenRelatedModal(sectionKey, widget.key)} title="Configure table, FK, and columns"
