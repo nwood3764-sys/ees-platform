@@ -251,6 +251,36 @@ export async function captureStepVideo({ file, workStepId, stepName = null }) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Building access (chain of custody)
+//
+// A technician on-site creates the access work order themselves from the
+// work order they are working: same project/opportunity/building chain,
+// owned by and assigned to the technician, on their Today view. The
+// instantiate trigger builds the 5-step access plan (key checkout →
+// technicians on-site → unlocked → locked → key check-in).
+// ───────────────────────────────────────────────────────────────────────────
+export async function createBuildingAccessWorkOrder(sourceWorkOrderId) {
+  const { data, error } = await supabase.rpc('create_building_access_work_order', {
+    p_source_work_order_id: sourceWorkOrderId,
+  })
+  if (error) throw error
+  return assertOutcome(unwrapRpcRow(data), 'Could not create the building access work order.')
+}
+
+// Active users for the Technicians On-Site multi-select. Lightweight list;
+// RLS scopes what is readable.
+export async function fetchActiveUsers() {
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, user_name')
+    .eq('user_is_active', true)
+    .eq('user_is_deleted', false)
+    .order('user_name')
+  if (error) throw error
+  return data || []
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Session / identity
 // ───────────────────────────────────────────────────────────────────────────
 export async function getSession() {
