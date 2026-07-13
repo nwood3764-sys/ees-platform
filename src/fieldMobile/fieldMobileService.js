@@ -8,12 +8,13 @@
 //   my_service_appointments(p_date)                → today's stops
 //   work_order_detail_for_technician(p_wo_id)       → header + steps + gap state
 //   complete_work_step(p_step_id)                   → evidence-gated step close
+//   mark_work_step_not_applicable(p_step_id, p_reason) → step N/A w/ required reason
 //   submit_work_order_for_verification(p_wo_id)     → In Progress → To Be Verified
 //   clock_in_work_order / clock_out_work_order      → time entries w/ GPS + odo
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { supabase } from '../lib/supabase'
-import { uploadPhoto } from '../data/storageService'
+import { uploadPhoto, uploadDocument } from '../data/storageService'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Geolocation
@@ -107,6 +108,18 @@ export async function completeWorkStep(stepId) {
   return assertOutcome(unwrapRpcRow(data), 'Step could not be completed.')
 }
 
+// A step that doesn't apply on this site (e.g. "photograph can lights" in an
+// attic with no can lights) is closed as Not Applicable WITH a reason — the
+// reason is mandatory server-side and shows to the verifier. Distinct from
+// the work-order-level Unable to Complete, which is for real blockers.
+export async function markWorkStepNotApplicable(stepId, reason) {
+  const { data, error } = await supabase.rpc('mark_work_step_not_applicable', {
+    p_step_id: stepId, p_reason: reason,
+  })
+  if (error) throw error
+  return assertOutcome(unwrapRpcRow(data), 'Could not mark step Not Applicable.')
+}
+
 export async function submitWorkOrder(woId) {
   const { data, error } = await supabase.rpc('submit_work_order_for_verification', { p_wo_id: woId })
   if (error) throw error
@@ -184,6 +197,29 @@ export async function captureStepPhoto({ file, workStepId, photoType }) {
     workStepId,
     photoType,
     applyWatermark: true,
+  })
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Video capture
+//
+// Video-evidence steps (e.g. the attic 360 pan) store the recording as a
+// documents row on the step with its video/* mime type — that mime type is
+// exactly what the server evidence gate counts, so a step cannot be
+// completed until the video row exists. Bucket-routed to work-evidence via
+// DOCUMENT_BUCKET_BY_OBJECT.work_steps.
+// ───────────────────────────────────────────────────────────────────────────
+export async function captureStepVideo({ file, workStepId, stepName = null }) {
+  if (!file) throw new Error('captureStepVideo: file is required')
+  if (!(file.type || '').toLowerCase().startsWith('video/')) {
+    throw new Error('That file is not a video. Record a video and try again.')
+  }
+  return uploadDocument({
+    file,
+    relatedObject: 'work_steps',
+    relatedId:     workStepId,
+    documentType:  'video',
+    name:          stepName ? `${stepName} — video` : (file.name || 'Step video'),
   })
 }
 

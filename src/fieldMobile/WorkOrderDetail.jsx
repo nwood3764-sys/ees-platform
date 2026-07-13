@@ -24,7 +24,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import MobileShell from './MobileShell'
 import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
-  captureStepPhoto, markUnableToComplete, signedPhotoUrl,
+  captureStepPhoto, captureStepVideo, markUnableToComplete,
+  markWorkStepNotApplicable, signedPhotoUrl,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
@@ -74,6 +75,15 @@ function CameraIcon() {
     </svg>
   )
 }
+function VideoIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="23 7 16 12 23 17 23 7" />
+      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+    </svg>
+  )
+}
 function CheckIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -91,6 +101,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
   const [toast, setToast]     = useState(null)
   const [success, setSuccess] = useState(null)   // success overlay message, or null
   const [unableOpen, setUnableOpen] = useState(false)
+  const [naStep, setNaStep] = useState(null)     // step being marked Not Applicable, or null
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -140,6 +151,19 @@ export default function WorkOrderDetail({ woId, navigate }) {
       setSuccess('Submitted for verification')
     } catch (e) {
       flash(e.message || 'Submission failed.', 'error')
+    } finally { setBusy(null) }
+  }
+
+  const handleMarkNotApplicable = async (reason) => {
+    if (!naStep) return
+    setBusy(naStep.work_step_id)
+    try {
+      await markWorkStepNotApplicable(naStep.work_step_id, reason)
+      flash(`Step marked Not Applicable: ${naStep.name}`)
+      setNaStep(null)
+      await load()
+    } catch (e) {
+      flash(e.message || 'Could not mark step Not Applicable.', 'error')
     } finally { setBusy(null) }
   }
 
@@ -256,6 +280,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
             isActionable={(i === actionableIdx || isStepCorrections(step)) && !isStepDone(step)}
             busy={busy === step.work_step_id}
             onComplete={() => handleComplete(step)}
+            onMarkNotApplicable={() => setNaStep(step)}
             onPhotoUploaded={async (msg) => { flash(msg); await load() }}
             onPhotoError={(msg) => flash(msg, 'error')}
           />
@@ -315,6 +340,15 @@ export default function WorkOrderDetail({ woId, navigate }) {
           busy={busy === 'unable'}
           onCancel={() => setUnableOpen(false)}
           onSubmit={handleUnable}
+        />
+      )}
+
+      {naStep && (
+        <NotApplicableModal
+          stepName={naStep.name}
+          busy={busy === naStep.work_step_id}
+          onCancel={() => setNaStep(null)}
+          onSubmit={handleMarkNotApplicable}
         />
       )}
 
@@ -459,9 +493,10 @@ function UnableModal({ busy, onCancel, onSubmit }) {
 }
 
 // ─── StepCard ────────────────────────────────────────────────────────────────
-function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhotoUploaded, onPhotoError }) {
-  const fileRef = useRef(null)
-  const legRef  = useRef('general')   // synchronous — no state race with the picker
+function StepCard({ step, index, locked, isActionable, busy, onComplete, onMarkNotApplicable, onPhotoUploaded, onPhotoError }) {
+  const fileRef  = useRef(null)
+  const videoRef = useRef(null)
+  const legRef   = useRef('general')  // synchronous — no state race with the picker
   const [uploading, setUploading] = useState(false)
 
   const done = isStepDone(step)
@@ -472,6 +507,9 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
   const needsBefore = step.photo_before_required
   const needsAfter  = step.photo_after_required
   const reqCount    = step.photos_required_count || 0
+  const isVideoStep = step.evidence_type === 'Video'
+  const videoCount  = step.video_count || 0
+  const notApplicable = (step.status || '').toLowerCase() === 'not applicable'
 
   // Open the picker SYNCHRONOUSLY inside the tap handler. Mobile browsers
   // (iOS Safari, Android Chrome) only honor a programmatic file-input click
@@ -495,6 +533,21 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
       onPhotoUploaded(`Photo captured (${leg}) · ${step.name}`)
     } catch (err) {
       onPhotoError(err.message || 'Photo upload failed.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const onVideoFile = async (e) => {
+    const file = e.target.files && e.target.files[0]
+    e.target.value = '' // allow re-selecting the same file
+    if (!file) return
+    setUploading(true)
+    try {
+      await captureStepVideo({ file, workStepId: step.work_step_id, stepName: step.name })
+      onPhotoUploaded(`Video attached · ${step.name}`)
+    } catch (err) {
+      onPhotoError(err.message || 'Video upload failed.')
     } finally {
       setUploading(false)
     }
@@ -541,6 +594,21 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
         <PhotoStrip photos={step.photos} />
       )}
 
+      {/* Attached videos — playable inline, including on completed steps. */}
+      {Array.isArray(step.videos) && step.videos.length > 0 && (
+        <VideoStrip videos={step.videos} />
+      )}
+
+      {/* Not Applicable reason — the documented why, visible to everyone. */}
+      {notApplicable && step.not_applicable_reason && (
+        <div style={{
+          background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: '8px 10px', marginBottom: 8, fontSize: 12.5, color: C.textSecondary,
+        }}>
+          <strong>Not Applicable:</strong> {step.not_applicable_reason}
+        </div>
+      )}
+
       {/* Corrections comment */}
       {corrections && (step.pc_comment || step.psl_comment) && (
         <div style={{
@@ -552,11 +620,12 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
       )}
 
       {/* Evidence requirements summary */}
-      {!done && (reqCount > 0 || needsBefore || needsAfter || step.evidence_type === 'Document Upload') && (
+      {!done && (reqCount > 0 || needsBefore || needsAfter || isVideoStep || step.evidence_type === 'Document Upload') && (
         <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>
           {reqCount > 0 && <span>Photos: {step.photo_count}/{reqCount}  </span>}
           {needsBefore && <span style={{ color: step.before_count > 0 ? C.emeraldMid : C.amber }}>Before {step.before_count > 0 ? '✓' : '—'}  </span>}
           {needsAfter && <span style={{ color: step.after_count > 0 ? C.emeraldMid : C.amber }}>After {step.after_count > 0 ? '✓' : '—'}</span>}
+          {isVideoStep && <span style={{ color: videoCount > 0 ? C.emeraldMid : C.amber }}>Video {videoCount > 0 ? '✓' : 'required'}</span>}
           {step.evidence_type === 'Document Upload' && <span>Document upload required</span>}
         </div>
       )}
@@ -568,21 +637,31 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
             ref={fileRef} type="file" accept="image/*" capture="environment"
             onChange={onFile} style={{ display: 'none' }}
           />
+          <input
+            ref={videoRef} type="file" accept="video/*" capture="environment"
+            onChange={onVideoFile} style={{ display: 'none' }}
+          />
           <div style={{ display: 'flex', gap: 8, marginBottom: gap ? 8 : 0, flexWrap: 'wrap' }}>
-            {needsBefore && (
-              <CaptureBtn label="Before" onClick={() => triggerCapture('before')} disabled={uploading || busy} done={step.before_count > 0} />
-            )}
-            {needsAfter && (
-              <CaptureBtn label="After" onClick={() => triggerCapture('after')} disabled={uploading || busy} done={step.after_count > 0} />
-            )}
-            {/* General capture when the step needs a count but no specific leg,
-                or to add beyond before/after toward the required count. */}
-            {(reqCount > 0 || (!needsBefore && !needsAfter)) && (
-              <CaptureBtn label="Photo" onClick={() => triggerCapture('general')} disabled={uploading || busy} />
+            {isVideoStep ? (
+              <CaptureBtn label="Record Video" icon="video" onClick={() => videoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />
+            ) : (
+              <>
+                {needsBefore && (
+                  <CaptureBtn label="Before" onClick={() => triggerCapture('before')} disabled={uploading || busy} done={step.before_count > 0} />
+                )}
+                {needsAfter && (
+                  <CaptureBtn label="After" onClick={() => triggerCapture('after')} disabled={uploading || busy} done={step.after_count > 0} />
+                )}
+                {/* General capture when the step needs a count but no specific leg,
+                    or to add beyond before/after toward the required count. */}
+                {(reqCount > 0 || (!needsBefore && !needsAfter)) && (
+                  <CaptureBtn label="Photo" onClick={() => triggerCapture('general')} disabled={uploading || busy} />
+                )}
+              </>
             )}
           </div>
 
-          {uploading && <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>Uploading photo…</div>}
+          {uploading && <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>{isVideoStep ? 'Uploading video…' : 'Uploading photo…'}</div>}
 
           <button
             onClick={onComplete}
@@ -596,6 +675,21 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
           {gap && (
             <div style={{ fontSize: 12, color: C.amber, marginTop: 6 }}>{gap}</div>
           )}
+
+          {/* Escape hatch for steps that don't exist on this site (e.g. no can
+              lights in the attic). Requires a reason; the verifier sees it. */}
+          <button
+            onClick={onMarkNotApplicable}
+            disabled={busy || uploading}
+            style={{
+              appearance: 'none', background: 'none', border: 'none', cursor: 'pointer',
+              display: 'block', margin: '10px auto 0', padding: 6,
+              fontFamily: FONT, fontSize: 12.5, fontWeight: 600, color: C.textMuted,
+              textDecoration: 'underline',
+            }}
+          >
+            This step doesn’t apply here — mark Not Applicable
+          </button>
         </>
       )}
 
@@ -608,7 +702,7 @@ function StepCard({ step, index, locked, isActionable, busy, onComplete, onPhoto
   )
 }
 
-function CaptureBtn({ label, onClick, disabled, done }) {
+function CaptureBtn({ label, icon = 'camera', onClick, disabled, done }) {
   return (
     <button
       onClick={onClick} disabled={disabled}
@@ -623,8 +717,110 @@ function CaptureBtn({ label, onClick, disabled, done }) {
         justifyContent: 'center',
       }}
     >
-      <CameraIcon /> {label}{done ? ' ✓' : ''}
+      {icon === 'video' ? <VideoIcon /> : <CameraIcon />} {label}{done ? ' ✓' : ''}
     </button>
+  )
+}
+
+// ─── VideoStrip ──────────────────────────────────────────────────────────────
+// Renders a step's attached evidence videos (private work-evidence bucket →
+// short-lived signed URLs) as inline players. Always shown, including on
+// completed steps, so the technician can review what they recorded.
+function VideoStrip({ videos }) {
+  const [urls, setUrls] = useState({}) // video.id -> signedUrl
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const entries = await Promise.all(
+        videos.map(async (v) => [v.id, await signedPhotoUrl(v.bucket, v.path)])
+      )
+      if (!cancelled) setUrls(Object.fromEntries(entries.filter(([, u]) => u)))
+    })()
+    return () => { cancelled = true }
+  }, [videos])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+      {videos.map((v) => {
+        const url = urls[v.id]
+        return url ? (
+          <video
+            key={v.id} src={url} controls preload="metadata" playsInline
+            style={{
+              width: '100%', maxHeight: 220, borderRadius: 8,
+              border: `1px solid ${C.border}`, background: '#07111f',
+            }}
+          />
+        ) : (
+          <div key={v.id} style={{
+            fontSize: 12, color: C.textMuted, border: `1px solid ${C.border}`,
+            borderRadius: 8, padding: '10px 12px', background: C.cardSecondary,
+          }}>
+            Loading video…
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── NotApplicableModal ──────────────────────────────────────────────────────
+// Closes a step that doesn't exist on this site (e.g. "photograph can lights"
+// in an attic with none). The reason is required — the server refuses without
+// one — and it shows on the step for the verifier.
+function NotApplicableModal({ stepName, busy, onCancel, onSubmit }) {
+  const [reason, setReason] = useState('')
+  const canSubmit = reason.trim().length > 0 && !busy
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,17,31,0.55)',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: C.card, width: '100%', maxWidth: 520,
+        borderTopLeftRadius: 16, borderTopRightRadius: 16,
+        padding: 20, paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)',
+        maxHeight: '88dvh', overflowY: 'auto',
+      }}>
+        <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 18, color: C.textPrimary, marginBottom: 4 }}>
+          Mark Not Applicable
+        </div>
+        <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16 }}>
+          {stepName}
+        </div>
+
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 8 }}>
+          Why doesn’t this step apply? <span style={{ color: C.danger }}>*</span>
+        </div>
+        <textarea
+          value={reason} onChange={(e) => setReason(e.target.value)}
+          placeholder='e.g. "No can lights present in the attic"'
+          rows={3}
+          style={{
+            width: '100%', boxSizing: 'border-box', fontFamily: FONT, fontSize: 14,
+            border: `1px solid ${C.borderDark}`, borderRadius: 8, padding: 12,
+            marginBottom: 16, resize: 'vertical', color: C.textPrimary,
+          }}
+        />
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel} disabled={busy}
+            style={{ ...btnSecondary, flex: 1 }}>
+            Cancel
+          </button>
+          <button
+            onClick={() => onSubmit(reason.trim())}
+            disabled={!canSubmit}
+            style={!canSubmit
+              ? { ...btnDisabled, flex: 1 }
+              : { ...btnPrimary, flex: 1, background: C.sidebar, color: '#fff' }}>
+            {busy ? 'Saving…' : 'Mark Not Applicable'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
