@@ -251,20 +251,35 @@ export async function captureStepVideo({ file, workStepId, stepName = null }) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Building access (chain of custody)
+// Technician-created work orders
 //
-// A technician on-site creates the access work order themselves from the
-// work order they are working: same project/opportunity/building chain,
-// owned by and assigned to the technician, on their Today view. The
-// instantiate trigger builds the 5-step access plan (key checkout →
-// technicians on-site → unlocked → locked → key check-in).
+// Certain work order types are created by the technician in the field —
+// Building Access, and the growing family behind it (Post Notice of Entry,
+// Incident Report, Vehicle Inspection, Damaged Equipment, Material
+// Delivery, ...). The list is DATA: work types flagged
+// work_type_is_technician_creatable in LEAP Admin. Creation clones the
+// project/opportunity/building chain from the work order the tech is
+// on-site for, is owned by and assigned to the technician, and lands on
+// their Today view; the instantiate trigger builds the plan.
 // ───────────────────────────────────────────────────────────────────────────
-export async function createBuildingAccessWorkOrder(sourceWorkOrderId) {
-  const { data, error } = await supabase.rpc('create_building_access_work_order', {
-    p_source_work_order_id: sourceWorkOrderId,
+export async function fetchTechnicianCreatableWorkTypes() {
+  const { data, error } = await supabase
+    .from('work_types')
+    .select('id, work_type_name, work_type_description')
+    .eq('work_type_is_technician_creatable', true)
+    .eq('work_type_is_active', true)
+    .eq('work_type_is_deleted', false)
+    .order('work_type_name')
+  if (error) throw error
+  return data || []
+}
+
+export async function createTechnicianWorkOrder(sourceWorkOrderId, workTypeId) {
+  const { data, error } = await supabase.rpc('create_technician_work_order', {
+    p_source_work_order_id: sourceWorkOrderId, p_work_type_id: workTypeId,
   })
   if (error) throw error
-  return assertOutcome(unwrapRpcRow(data), 'Could not create the building access work order.')
+  return assertOutcome(unwrapRpcRow(data), 'Could not create the work order.')
 }
 
 // Active users for the Technicians On-Site multi-select. All active users —
