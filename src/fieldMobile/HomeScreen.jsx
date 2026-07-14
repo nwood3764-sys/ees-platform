@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import AppChrome, { PullIndicator } from './AppChrome'
 import { usePullToRefresh } from './usePullToRefresh'
-import { fetchTodaySchedule, chicagoToday, createBuildingAccessWorkOrder } from './fieldMobileService'
+import { fetchTodaySchedule, chicagoToday, fetchTechnicianCreatableWorkTypes, createTechnicianWorkOrder } from './fieldMobileService'
 import { C, FONT, MONO, card, btnSecondary, statusChip } from './styles'
 
 function greeting() {
@@ -64,9 +64,11 @@ export default function HomeScreen({ navigate }) {
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
   const [name, setName]       = useState('')
-  const [accessOpen, setAccessOpen] = useState(false)
-  const [accessBusy, setAccessBusy] = useState(false)
-  const [accessError, setAccessError] = useState(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createTypes, setCreateTypes] = useState(null)   // null = loading
+  const [createType, setCreateType] = useState(null)     // chosen work type, or null (phase 1)
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -204,15 +206,21 @@ export default function HomeScreen({ navigate }) {
 
       {/* Quick links */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <QuickLink label="Log building access" sub="Key checkout / check-in — chain of custody" onClick={() => { setAccessError(null); setAccessOpen(true) }} />
+        <QuickLink label="Create work order" sub="Building access, and other field-created records" onClick={() => {
+          setCreateError(null); setCreateType(null); setCreateOpen(true)
+          if (createTypes === null) {
+            fetchTechnicianCreatableWorkTypes().then(setCreateTypes).catch(() => setCreateTypes([]))
+          }
+        }} />
         <QuickLink label="View full schedule" sub="All of today’s stops in order" onClick={() => navigate('/field/schedule')} />
         <QuickLink label="Open map" sub="Navigate and route your stops" onClick={() => navigate('/field/map')} />
       </div>
 
-      {/* Building access — pick which of today's stops the access log belongs
-          to (it clones that work order's project/building chain). Access work
-          orders themselves are excluded. */}
-      {accessOpen && (
+      {/* Create Work Order — phase 1: pick the type (data-driven from work
+          types flagged technician-creatable in LEAP Admin); phase 2: pick
+          which of today's stops it belongs to (the new work order clones
+          that stop's project/building chain). */}
+      {createOpen && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,17,31,0.55)',
           display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
@@ -224,68 +232,108 @@ export default function HomeScreen({ navigate }) {
             maxHeight: '88dvh', overflowY: 'auto',
           }}>
             <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 18, color: C.textPrimary, marginBottom: 4 }}>
-              Log Building Access
+              {createType ? createType.work_type_name : 'Create Work Order'}
             </div>
             <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16 }}>
-              Which job is this access for? The log is created on the same property and building.
+              {createType
+                ? 'Which job is this for? The new work order is created on the same property and building.'
+                : 'What are you creating?'}
             </div>
 
-            {(() => {
-              const seen = new Set()
-              const candidates = rows.filter((r) => {
-                if (!r.work_order_id || seen.has(r.work_order_id)) return false
-                if (r.work_type_name === 'Building Access - Unlock and Lock') return false
-                seen.add(r.work_order_id)
-                return true
-              })
-              return candidates.length === 0 ? (
+            {!createType ? (
+              createTypes === null ? (
+                <div style={{ fontSize: 14, color: C.textMuted, marginBottom: 16 }}>Loading…</div>
+              ) : createTypes.length === 0 ? (
                 <div style={{ fontSize: 14, color: C.textSecondary, marginBottom: 16 }}>
-                  No stops on today’s schedule to attach the access log to. Open the work
-                  order you are on-site for and use its Log Building Access button instead.
+                  No field-creatable work order types are configured yet.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                  {candidates.map((r) => (
-                    <button key={r.work_order_id} disabled={accessBusy}
-                      onClick={async () => {
-                        setAccessBusy(true)
-                        setAccessError(null)
-                        try {
-                          const res = await createBuildingAccessWorkOrder(r.work_order_id)
-                          setAccessOpen(false)
-                          navigate(`/field/wo/${res.work_order_id}`)
-                        } catch (e) {
-                          setAccessError(e.message || 'Could not create the access log.')
-                        } finally { setAccessBusy(false) }
-                      }}
+                  {createTypes.map((t) => (
+                    <button key={t.id} disabled={createBusy} onClick={() => setCreateType(t)}
                       style={{
                         appearance: 'none', cursor: 'pointer', textAlign: 'left',
                         border: `1px solid ${C.borderDark}`, background: C.card,
                         borderRadius: 8, padding: '12px 14px', minHeight: 44,
                       }}>
                       <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
-                        {r.property_name || r.work_order_name || 'Work Order'}
+                        {t.work_type_name}
                       </span>
-                      <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
-                        {[r.work_order_record_number, r.building && `Bldg ${r.building}`, r.work_type_name].filter(Boolean).join(' · ')}
-                      </span>
+                      {t.work_type_description && (
+                        <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
+                          {t.work_type_description}
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>
               )
-            })()}
-
-            {accessError && (
-              <div style={{ fontSize: 13, color: C.danger, marginBottom: 12 }}>{accessError}</div>
+            ) : (
+              (() => {
+                const seen = new Set()
+                const candidates = rows.filter((r) => {
+                  if (!r.work_order_id || seen.has(r.work_order_id)) return false
+                  if (r.work_type_name === createType.work_type_name) return false
+                  seen.add(r.work_order_id)
+                  return true
+                })
+                return candidates.length === 0 ? (
+                  <div style={{ fontSize: 14, color: C.textSecondary, marginBottom: 16 }}>
+                    No stops on today’s schedule to attach this to. Open the work order
+                    you are on-site for and use its Create Work Order button instead.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                    {candidates.map((r) => (
+                      <button key={r.work_order_id} disabled={createBusy}
+                        onClick={async () => {
+                          setCreateBusy(true)
+                          setCreateError(null)
+                          try {
+                            const res = await createTechnicianWorkOrder(r.work_order_id, createType.id)
+                            setCreateOpen(false)
+                            navigate(`/field/wo/${res.work_order_id}`)
+                          } catch (e) {
+                            setCreateError(e.message || 'Could not create the work order.')
+                          } finally { setCreateBusy(false) }
+                        }}
+                        style={{
+                          appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                          border: `1px solid ${C.borderDark}`, background: C.card,
+                          borderRadius: 8, padding: '12px 14px', minHeight: 44,
+                        }}>
+                        <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
+                          {r.property_name || r.work_order_name || 'Work Order'}
+                        </span>
+                        <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
+                          {[r.work_order_record_number, r.building && `Bldg ${r.building}`, r.work_type_name].filter(Boolean).join(' · ')}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )
+              })()
             )}
-            {accessBusy && (
-              <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 12 }}>Creating access log…</div>
+
+            {createError && (
+              <div style={{ fontSize: 13, color: C.danger, marginBottom: 12 }}>{createError}</div>
+            )}
+            {createBusy && (
+              <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 12 }}>Creating…</div>
             )}
 
-            <button onClick={() => setAccessOpen(false)} disabled={accessBusy}
-              style={{ ...btnSecondary, width: '100%' }}>
-              Cancel
-            </button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              {createType && (
+                <button onClick={() => { setCreateType(null); setCreateError(null) }} disabled={createBusy}
+                  style={{ ...btnSecondary, flex: 1 }}>
+                  Back
+                </button>
+              )}
+              <button onClick={() => setCreateOpen(false)} disabled={createBusy}
+                style={{ ...btnSecondary, flex: 1 }}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

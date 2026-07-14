@@ -26,7 +26,8 @@ import {
   fetchWorkOrderDetail, completeWorkStep, submitWorkOrder,
   captureStepPhoto, captureStepVideo, photoGpsMissing, markUnableToComplete,
   markWorkStepNotApplicable, saveWorkStepFieldValue, signedPhotoUrl,
-  createBuildingAccessWorkOrder, fetchActiveUsers, fetchAccountContactsForWorkOrder,
+  fetchTechnicianCreatableWorkTypes, createTechnicianWorkOrder,
+  fetchActiveUsers, fetchAccountContactsForWorkOrder,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
@@ -103,6 +104,8 @@ export default function WorkOrderDetail({ woId, navigate }) {
   const [success, setSuccess] = useState(null)   // success overlay message, or null
   const [unableOpen, setUnableOpen] = useState(false)
   const [naStep, setNaStep] = useState(null)     // step being marked Not Applicable, or null
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createTypes, setCreateTypes] = useState(null)  // null = loading
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -320,31 +323,89 @@ export default function WorkOrderDetail({ woId, navigate }) {
         )}
       </div>
 
-      {/* Log Building Access — the technician creates the chain-of-custody
-          access work order themselves, on the same project/building chain.
-          Hidden on access work orders (no recursion). */}
-      {header.work_type_name !== 'Building Access - Unlock and Lock' && (
-        <div style={{ marginTop: 10 }}>
-          <button
-            onClick={async () => {
-              setBusy('access')
-              try {
-                const res = await createBuildingAccessWorkOrder(woId)
-                flash(res.message || 'Building access work order created')
-                navigate(`/field/wo/${res.work_order_id}`)
-              } catch (e) {
-                flash(e.message || 'Could not create the building access work order.', 'error')
-              } finally { setBusy(null) }
-            }}
-            disabled={busy === 'access'}
-            style={{ ...btnSecondary, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-            </svg>
-            {busy === 'access' ? 'Creating…' : 'Log Building Access (unlock / lock)'}
-          </button>
+      {/* Create Work Order — field-created records (building access, incident
+          reports, ...) on this work order's project/building chain. The type
+          list is data-driven: work types flagged technician-creatable. */}
+      <div style={{ marginTop: 10 }}>
+        <button
+          onClick={() => {
+            setCreateOpen(true)
+            if (createTypes === null) {
+              fetchTechnicianCreatableWorkTypes().then(setCreateTypes).catch(() => setCreateTypes([]))
+            }
+          }}
+          disabled={busy === 'create'}
+          style={{ ...btnSecondary, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" />
+          </svg>
+          Create Work Order
+        </button>
+      </div>
+
+      {createOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,17,31,0.55)',
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: C.card, width: '100%', maxWidth: 520,
+            borderTopLeftRadius: 16, borderTopRightRadius: 16,
+            padding: 20, paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)',
+            maxHeight: '88dvh', overflowY: 'auto',
+          }}>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 18, color: C.textPrimary, marginBottom: 4 }}>
+              Create Work Order
+            </div>
+            <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16 }}>
+              Created here, on this job’s property and building, assigned to you.
+            </div>
+            {createTypes === null ? (
+              <div style={{ fontSize: 14, color: C.textMuted, marginBottom: 16 }}>Loading…</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                {createTypes.filter((t) => t.work_type_name !== header.work_type_name).map((t) => (
+                  <button key={t.id} disabled={busy === 'create'}
+                    onClick={async () => {
+                      setBusy('create')
+                      try {
+                        const res = await createTechnicianWorkOrder(woId, t.id)
+                        setCreateOpen(false)
+                        flash(res.message || `${t.work_type_name} created`)
+                        navigate(`/field/wo/${res.work_order_id}`)
+                      } catch (e) {
+                        flash(e.message || 'Could not create the work order.', 'error')
+                      } finally { setBusy(null) }
+                    }}
+                    style={{
+                      appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                      border: `1px solid ${C.borderDark}`, background: C.card,
+                      borderRadius: 8, padding: '12px 14px', minHeight: 44,
+                    }}>
+                    <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
+                      {t.work_type_name}
+                    </span>
+                    {t.work_type_description && (
+                      <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
+                        {t.work_type_description}
+                      </span>
+                    )}
+                  </button>
+                ))}
+                {createTypes.filter((t) => t.work_type_name !== header.work_type_name).length === 0 && (
+                  <div style={{ fontSize: 14, color: C.textSecondary }}>
+                    No field-creatable work order types are configured yet.
+                  </div>
+                )}
+              </div>
+            )}
+            <button onClick={() => setCreateOpen(false)} disabled={busy === 'create'}
+              style={{ ...btnSecondary, width: '100%' }}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
