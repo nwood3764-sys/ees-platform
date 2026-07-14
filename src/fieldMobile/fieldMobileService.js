@@ -282,6 +282,34 @@ export async function createTechnicianWorkOrder(sourceWorkOrderId, workTypeId) {
   return assertOutcome(unwrapRpcRow(data), 'Could not create the work order.')
 }
 
+// Ad hoc path — the event happened at a property with no stop on today's
+// schedule. Attaches to the property's most recent project; the server
+// refuses with a clear message when the property has no project (field
+// technicians do not fabricate CRM chains).
+export async function createTechnicianWorkOrderForProperty(propertyId, workTypeId) {
+  const { data, error } = await supabase.rpc('create_technician_work_order_for_property', {
+    p_property_id: propertyId, p_work_type_id: workTypeId,
+  })
+  if (error) throw error
+  return assertOutcome(unwrapRpcRow(data), 'Could not create the work order.')
+}
+
+// Property search for the ad hoc path. Name/street match, small page.
+export async function searchProperties(q) {
+  const term = (q || '').trim()
+  if (term.length < 2) return []
+  const like = `%${term.replace(/[%_]/g, '')}%`
+  const { data, error } = await supabase
+    .from('properties')
+    .select('id, property_name, property_street, property_city, property_state')
+    .or(`property_name.ilike.${like},property_street.ilike.${like}`)
+    .eq('property_is_deleted', false)
+    .order('property_name')
+    .limit(15)
+  if (error) throw error
+  return data || []
+}
+
 // Active users for the Technicians On-Site multi-select. All active users —
 // no role filter, so Project Site Leads / auditors doing a solo visit are
 // selectable. RLS scopes what is readable.

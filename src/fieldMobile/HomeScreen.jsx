@@ -14,7 +14,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import AppChrome, { PullIndicator } from './AppChrome'
 import { usePullToRefresh } from './usePullToRefresh'
-import { fetchTodaySchedule, chicagoToday, fetchTechnicianCreatableWorkTypes, createTechnicianWorkOrder } from './fieldMobileService'
+import {
+  fetchTodaySchedule, chicagoToday, fetchTechnicianCreatableWorkTypes,
+  createTechnicianWorkOrder, createTechnicianWorkOrderForProperty, searchProperties,
+} from './fieldMobileService'
 import { C, FONT, MONO, card, btnSecondary, statusChip } from './styles'
 
 function greeting() {
@@ -69,6 +72,9 @@ export default function HomeScreen({ navigate }) {
   const [createType, setCreateType] = useState(null)     // chosen work type, or null (phase 1)
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState(null)
+  const [propSearch, setPropSearch] = useState(null)     // null = stops phase; '' or text = property-search phase
+  const [propResults, setPropResults] = useState([])
+  const [propSearching, setPropSearching] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -207,7 +213,7 @@ export default function HomeScreen({ navigate }) {
       {/* Quick links */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <QuickLink label="Create work order" sub="Building access, and other field-created records" onClick={() => {
-          setCreateError(null); setCreateType(null); setCreateOpen(true)
+          setCreateError(null); setCreateType(null); setPropSearch(null); setPropResults([]); setCreateOpen(true)
           if (createTypes === null) {
             fetchTechnicianCreatableWorkTypes().then(setCreateTypes).catch(() => setCreateTypes([]))
           }
@@ -236,7 +242,9 @@ export default function HomeScreen({ navigate }) {
             </div>
             <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16 }}>
               {createType
-                ? 'Which job is this for? The new work order is created on the same property and building.'
+                ? (propSearch !== null
+                    ? 'Search for the property this happened at. It attaches to the property’s current project.'
+                    : 'Which job is this for? The new work order is created on the same property and building.')
                 : 'What are you creating?'}
             </div>
 
@@ -268,6 +276,65 @@ export default function HomeScreen({ navigate }) {
                   ))}
                 </div>
               )
+            ) : propSearch !== null ? (
+              <div style={{ marginBottom: 16 }}>
+                <input
+                  type="text" value={propSearch} autoFocus
+                  onChange={(e) => {
+                    const q = e.target.value
+                    setPropSearch(q)
+                    if (q.trim().length >= 2) {
+                      setPropSearching(true)
+                      searchProperties(q)
+                        .then(setPropResults)
+                        .catch(() => setPropResults([]))
+                        .finally(() => setPropSearching(false))
+                    } else {
+                      setPropResults([])
+                    }
+                  }}
+                  placeholder="Property name or street address"
+                  disabled={createBusy}
+                  style={{
+                    width: '100%', boxSizing: 'border-box', minHeight: 44,
+                    fontFamily: FONT, fontSize: 15, color: C.textPrimary,
+                    border: `1px solid ${C.borderDark}`, borderRadius: 8, padding: '10px 12px',
+                    marginBottom: 10,
+                  }}
+                />
+                {propSearching && <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 8 }}>Searching…</div>}
+                {!propSearching && propSearch.trim().length >= 2 && propResults.length === 0 && (
+                  <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 8 }}>No properties match.</div>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {propResults.map((p) => (
+                    <button key={p.id} disabled={createBusy}
+                      onClick={async () => {
+                        setCreateBusy(true)
+                        setCreateError(null)
+                        try {
+                          const res = await createTechnicianWorkOrderForProperty(p.id, createType.id)
+                          setCreateOpen(false)
+                          navigate(`/field/wo/${res.work_order_id}`)
+                        } catch (e) {
+                          setCreateError(e.message || 'Could not create the work order.')
+                        } finally { setCreateBusy(false) }
+                      }}
+                      style={{
+                        appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                        border: `1px solid ${C.borderDark}`, background: C.card,
+                        borderRadius: 8, padding: '12px 14px', minHeight: 44,
+                      }}>
+                      <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
+                        {p.property_name || 'Property'}
+                      </span>
+                      <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
+                        {[p.property_street, p.property_city, p.property_state].filter(Boolean).join(', ')}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             ) : (
               (() => {
                 const seen = new Set()
@@ -277,13 +344,13 @@ export default function HomeScreen({ navigate }) {
                   seen.add(r.work_order_id)
                   return true
                 })
-                return candidates.length === 0 ? (
-                  <div style={{ fontSize: 14, color: C.textSecondary, marginBottom: 16 }}>
-                    No stops on today’s schedule to attach this to. Open the work order
-                    you are on-site for and use its Create Work Order button instead.
-                  </div>
-                ) : (
+                return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                    {candidates.length === 0 && (
+                      <div style={{ fontSize: 14, color: C.textSecondary }}>
+                        No stops on today’s schedule — pick the property below.
+                      </div>
+                    )}
                     {candidates.map((r) => (
                       <button key={r.work_order_id} disabled={createBusy}
                         onClick={async () => {
@@ -310,6 +377,20 @@ export default function HomeScreen({ navigate }) {
                         </span>
                       </button>
                     ))}
+                    <button disabled={createBusy}
+                      onClick={() => { setPropSearch(''); setPropResults([]); setCreateError(null) }}
+                      style={{
+                        appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                        border: `1px dashed ${C.borderDark}`, background: C.cardSecondary,
+                        borderRadius: 8, padding: '12px 14px', minHeight: 44,
+                      }}>
+                      <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
+                        Property is not in this list
+                      </span>
+                      <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
+                        Ad hoc — search any property, outside today’s schedule
+                      </span>
+                    </button>
                   </div>
                 )
               })()
@@ -324,7 +405,13 @@ export default function HomeScreen({ navigate }) {
 
             <div style={{ display: 'flex', gap: 10 }}>
               {createType && (
-                <button onClick={() => { setCreateType(null); setCreateError(null) }} disabled={createBusy}
+                <button
+                  onClick={() => {
+                    if (propSearch !== null) { setPropSearch(null); setPropResults([]) }
+                    else setCreateType(null)
+                    setCreateError(null)
+                  }}
+                  disabled={createBusy}
                   style={{ ...btnSecondary, flex: 1 }}>
                   Back
                 </button>
