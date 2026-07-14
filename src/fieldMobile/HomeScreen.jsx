@@ -14,8 +14,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import AppChrome, { PullIndicator } from './AppChrome'
 import { usePullToRefresh } from './usePullToRefresh'
-import { fetchTodaySchedule, chicagoToday } from './fieldMobileService'
-import { C, FONT, MONO, card, statusChip } from './styles'
+import { fetchTodaySchedule, chicagoToday, createBuildingAccessWorkOrder } from './fieldMobileService'
+import { C, FONT, MONO, card, btnSecondary, statusChip } from './styles'
 
 function greeting() {
   const h = Number(new Intl.DateTimeFormat('en-US', {
@@ -64,6 +64,9 @@ export default function HomeScreen({ navigate }) {
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
   const [name, setName]       = useState('')
+  const [accessOpen, setAccessOpen] = useState(false)
+  const [accessBusy, setAccessBusy] = useState(false)
+  const [accessError, setAccessError] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -201,9 +204,91 @@ export default function HomeScreen({ navigate }) {
 
       {/* Quick links */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <QuickLink label="Log building access" sub="Key checkout / check-in — chain of custody" onClick={() => { setAccessError(null); setAccessOpen(true) }} />
         <QuickLink label="View full schedule" sub="All of today’s stops in order" onClick={() => navigate('/field/schedule')} />
         <QuickLink label="Open map" sub="Navigate and route your stops" onClick={() => navigate('/field/map')} />
       </div>
+
+      {/* Building access — pick which of today's stops the access log belongs
+          to (it clones that work order's project/building chain). Access work
+          orders themselves are excluded. */}
+      {accessOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,17,31,0.55)',
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: C.card, width: '100%', maxWidth: 520,
+            borderTopLeftRadius: 16, borderTopRightRadius: 16,
+            padding: 20, paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)',
+            maxHeight: '88dvh', overflowY: 'auto',
+          }}>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 18, color: C.textPrimary, marginBottom: 4 }}>
+              Log Building Access
+            </div>
+            <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16 }}>
+              Which job is this access for? The log is created on the same property and building.
+            </div>
+
+            {(() => {
+              const seen = new Set()
+              const candidates = rows.filter((r) => {
+                if (!r.work_order_id || seen.has(r.work_order_id)) return false
+                if (r.work_type_name === 'Building Access - Unlock and Lock') return false
+                seen.add(r.work_order_id)
+                return true
+              })
+              return candidates.length === 0 ? (
+                <div style={{ fontSize: 14, color: C.textSecondary, marginBottom: 16 }}>
+                  No stops on today’s schedule to attach the access log to. Open the work
+                  order you are on-site for and use its Log Building Access button instead.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                  {candidates.map((r) => (
+                    <button key={r.work_order_id} disabled={accessBusy}
+                      onClick={async () => {
+                        setAccessBusy(true)
+                        setAccessError(null)
+                        try {
+                          const res = await createBuildingAccessWorkOrder(r.work_order_id)
+                          setAccessOpen(false)
+                          navigate(`/field/wo/${res.work_order_id}`)
+                        } catch (e) {
+                          setAccessError(e.message || 'Could not create the access log.')
+                        } finally { setAccessBusy(false) }
+                      }}
+                      style={{
+                        appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                        border: `1px solid ${C.borderDark}`, background: C.card,
+                        borderRadius: 8, padding: '12px 14px', minHeight: 44,
+                      }}>
+                      <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
+                        {r.property_name || r.work_order_name || 'Work Order'}
+                      </span>
+                      <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
+                        {[r.work_order_record_number, r.building && `Bldg ${r.building}`, r.work_type_name].filter(Boolean).join(' · ')}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )
+            })()}
+
+            {accessError && (
+              <div style={{ fontSize: 13, color: C.danger, marginBottom: 12 }}>{accessError}</div>
+            )}
+            {accessBusy && (
+              <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 12 }}>Creating access log…</div>
+            )}
+
+            <button onClick={() => setAccessOpen(false)} disabled={accessBusy}
+              style={{ ...btnSecondary, width: '100%' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </AppChrome>
   )
 }
