@@ -7,6 +7,8 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
 import HelpIcon from '../components/help/HelpIcon'
+import WorkOrderReviewQueue from '../components/WorkOrderReviewQueue'
+import WorkOrderReviewScreen from '../components/WorkOrderReviewScreen'
 import { fetchProjects, fetchWorkOrders, fetchSchedule, fetchUpcomingServiceAppointments } from '../data/fieldService'
 import { fetchPaymentRequests } from '../data/incentivesService'
 import { fetchTechnicians, fetchCertifications, fetchTimeSheets, fetchUpcomingAbsences } from '../data/peopleService'
@@ -17,6 +19,7 @@ const CODE_SECTIONS = [
   { id:'service_appointments', label:'Service Appointments'},
   { id:'projects',             label:'Projects'            },
   { id:'workorders',           label:'Work Orders'         },
+  { id:'reviews',              label:'Verification Reviews'},
   { id:'schedule',             label:'Schedule'            },
   { id:'absences',             label:'Out of Office'       },
   { id:'technicians',          label:'Technicians'         },
@@ -707,6 +710,10 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
     setSecLocal(s)  // keep local mirror so the home tab's setSec() side-paths still work
   }
 
+  // Which work order the Verification Reviews section has open in the
+  // review screen. Local state — the queue is the entry point.
+  const [reviewWorkOrder, setReviewWorkOrder] = useState(null)
+
   const [selectedRecordLocal, setSelectedRecordLocal] = useState(null)
   const selectedRecord = urlDriven ? navSelectedRecord : selectedRecordLocal
   const setSelectedRecord = (rec) => {
@@ -872,7 +879,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); setReviewWorkOrder(null); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
@@ -889,6 +896,12 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
         )}
         {sec==='home'                 && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
         {sec==='service_appointments' && <ServiceAppointmentsInbox onOpenRecord={openRecord} />}
+        {sec==='reviews' && (reviewWorkOrder
+          ? <WorkOrderReviewScreen
+              workOrderId={reviewWorkOrder.id}
+              onBack={() => setReviewWorkOrder(null)}
+              onOpenRecord={(r) => setSelectedRecord({ table: r.table, id: r.id, mode: 'view', name: r.name })} />
+          : <WorkOrderReviewQueue onOpenReview={(r) => setReviewWorkOrder(r)} />)}
         {sec==='schedule'   && <ScheduleView
           crews={schedule}
           loading={scheduleLoading}
