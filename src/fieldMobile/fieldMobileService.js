@@ -282,16 +282,59 @@ export async function createTechnicianWorkOrder(sourceWorkOrderId, workTypeId) {
   return assertOutcome(unwrapRpcRow(data), 'Could not create the work order.')
 }
 
-// Ad hoc path — the event happened at a property with no stop on today's
-// schedule. Attaches to the property's most recent project; the server
-// refuses with a clear message when the property has no project (field
-// technicians do not fabricate CRM chains).
-export async function createTechnicianWorkOrderForProperty(propertyId, workTypeId) {
+// Ad hoc path — the event happened outside today's schedule. The technician
+// selects everything explicitly: property, building, unit (always required —
+// pick or type a new one), and project (pick, or Create New Project → a
+// Field Documentation project under the property's Field Operations
+// opportunity). Documentation is never blocked.
+export async function createTechnicianWorkOrderForProperty({
+  workTypeId, propertyId, buildingId = null, unitId = null, newUnitName = null,
+  projectId = null, createProject = false,
+}) {
   const { data, error } = await supabase.rpc('create_technician_work_order_for_property', {
-    p_property_id: propertyId, p_work_type_id: workTypeId,
+    p_work_type_id: workTypeId,
+    p_property_id: propertyId,
+    p_building_id: buildingId,
+    p_unit_id: unitId,
+    p_new_unit_name: newUnitName,
+    p_project_id: projectId,
+    p_create_project: createProject,
   })
   if (error) throw error
   return assertOutcome(unwrapRpcRow(data), 'Could not create the work order.')
+}
+
+export async function fetchBuildingsForProperty(propertyId) {
+  const { data, error } = await supabase
+    .from('buildings')
+    .select('id, building_number_or_name, building_name')
+    .eq('property_id', propertyId)
+    .eq('building_is_deleted', false)
+    .order('building_number_or_name')
+  if (error) throw error
+  return data || []
+}
+
+export async function fetchUnitsForBuilding(buildingId) {
+  const { data, error } = await supabase
+    .from('units')
+    .select('id, unit_number')
+    .eq('building_id', buildingId)
+    .eq('unit_is_deleted', false)
+    .order('unit_number')
+  if (error) throw error
+  return data || []
+}
+
+export async function fetchProjectsForProperty(propertyId) {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, project_record_number, project_name')
+    .eq('property_id', propertyId)
+    .eq('project_is_deleted', false)
+    .order('project_created_at', { ascending: false })
+  if (error) throw error
+  return data || []
 }
 
 // Property search for the ad hoc path. Name/street match, small page.

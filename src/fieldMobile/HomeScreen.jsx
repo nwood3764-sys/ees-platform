@@ -17,6 +17,7 @@ import { usePullToRefresh } from './usePullToRefresh'
 import {
   fetchTodaySchedule, chicagoToday, fetchTechnicianCreatableWorkTypes,
   createTechnicianWorkOrder, createTechnicianWorkOrderForProperty, searchProperties,
+  fetchBuildingsForProperty, fetchUnitsForBuilding, fetchProjectsForProperty,
 } from './fieldMobileService'
 import { C, FONT, MONO, card, btnSecondary, statusChip } from './styles'
 
@@ -72,9 +73,22 @@ export default function HomeScreen({ navigate }) {
   const [createType, setCreateType] = useState(null)     // chosen work type, or null (phase 1)
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState(null)
-  const [propSearch, setPropSearch] = useState(null)     // null = stops phase; '' or text = property-search phase
+  const [propSearch, setPropSearch] = useState(null)     // null = stops phase; '' or text = ad hoc flow
   const [propResults, setPropResults] = useState([])
   const [propSearching, setPropSearching] = useState(false)
+  // Ad hoc explicit selection — the technician picks everything.
+  const [adhocProp, setAdhocProp] = useState(null)
+  const [adhocBuildings, setAdhocBuildings] = useState(null)
+  const [adhocBuilding, setAdhocBuilding] = useState(null)
+  const [adhocUnits, setAdhocUnits] = useState(null)
+  const [adhocUnit, setAdhocUnit] = useState(null)        // {id} or {newName}
+  const [adhocNewUnit, setAdhocNewUnit] = useState('')
+  const [adhocProjects, setAdhocProjects] = useState(null)
+
+  const resetAdhoc = () => {
+    setAdhocProp(null); setAdhocBuildings(null); setAdhocBuilding(null)
+    setAdhocUnits(null); setAdhocUnit(null); setAdhocNewUnit(''); setAdhocProjects(null)
+  }
 
   const load = useCallback(async () => {
     try {
@@ -213,7 +227,7 @@ export default function HomeScreen({ navigate }) {
       {/* Quick links */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <QuickLink label="Create work order" sub="Building access, and other field-created records" onClick={() => {
-          setCreateError(null); setCreateType(null); setPropSearch(null); setPropResults([]); setCreateOpen(true)
+          setCreateError(null); setCreateType(null); setPropSearch(null); setPropResults([]); resetAdhoc(); setCreateOpen(true)
           if (createTypes === null) {
             fetchTechnicianCreatableWorkTypes().then(setCreateTypes).catch(() => setCreateTypes([]))
           }
@@ -243,7 +257,10 @@ export default function HomeScreen({ navigate }) {
             <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16 }}>
               {createType
                 ? (propSearch !== null
-                    ? 'Search for the property this happened at. It attaches to the property’s current project.'
+                    ? (adhocProjects !== null ? 'Select the project (or create one).'
+                       : adhocUnits !== null ? 'Select the unit, or type a new one.'
+                       : adhocBuildings !== null ? 'Select the building.'
+                       : 'Search for the property this happened at.')
                     : 'Which job is this for? The new work order is created on the same property and building.')
                 : 'What are you creating?'}
             </div>
@@ -277,43 +294,20 @@ export default function HomeScreen({ navigate }) {
                 </div>
               )
             ) : propSearch !== null ? (
-              <div style={{ marginBottom: 16 }}>
-                <input
-                  type="text" value={propSearch} autoFocus
-                  onChange={(e) => {
-                    const q = e.target.value
-                    setPropSearch(q)
-                    if (q.trim().length >= 2) {
-                      setPropSearching(true)
-                      searchProperties(q)
-                        .then(setPropResults)
-                        .catch(() => setPropResults([]))
-                        .finally(() => setPropSearching(false))
-                    } else {
-                      setPropResults([])
-                    }
-                  }}
-                  placeholder="Property name or street address"
-                  disabled={createBusy}
-                  style={{
-                    width: '100%', boxSizing: 'border-box', minHeight: 44,
-                    fontFamily: FONT, fontSize: 15, color: C.textPrimary,
-                    border: `1px solid ${C.borderDark}`, borderRadius: 8, padding: '10px 12px',
-                    marginBottom: 10,
-                  }}
-                />
-                {propSearching && <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 8 }}>Searching…</div>}
-                {!propSearching && propSearch.trim().length >= 2 && propResults.length === 0 && (
-                  <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 8 }}>No properties match.</div>
-                )}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {propResults.map((p) => (
+              adhocProjects !== null ? (
+                /* Phase: project — pick one, or create a Field Documentation project */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                  {adhocProjects.map((p) => (
                     <button key={p.id} disabled={createBusy}
                       onClick={async () => {
-                        setCreateBusy(true)
-                        setCreateError(null)
+                        setCreateBusy(true); setCreateError(null)
                         try {
-                          const res = await createTechnicianWorkOrderForProperty(p.id, createType.id)
+                          const res = await createTechnicianWorkOrderForProperty({
+                            workTypeId: createType.id, propertyId: adhocProp.id,
+                            buildingId: adhocBuilding?.id || null,
+                            unitId: adhocUnit?.id || null, newUnitName: adhocUnit?.newName || null,
+                            projectId: p.id,
+                          })
                           setCreateOpen(false)
                           navigate(`/field/wo/${res.work_order_id}`)
                         } catch (e) {
@@ -326,15 +320,174 @@ export default function HomeScreen({ navigate }) {
                         borderRadius: 8, padding: '12px 14px', minHeight: 44,
                       }}>
                       <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
-                        {p.property_name || 'Property'}
+                        {p.project_name || p.project_record_number}
                       </span>
-                      <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
-                        {[p.property_street, p.property_city, p.property_state].filter(Boolean).join(', ')}
+                      <span style={{ display: 'block', fontFamily: MONO, fontSize: 12, color: C.textMuted, marginTop: 1 }}>
+                        {p.project_record_number}
                       </span>
                     </button>
                   ))}
+                  <button disabled={createBusy}
+                    onClick={async () => {
+                      setCreateBusy(true); setCreateError(null)
+                      try {
+                        const res = await createTechnicianWorkOrderForProperty({
+                          workTypeId: createType.id, propertyId: adhocProp.id,
+                          buildingId: adhocBuilding?.id || null,
+                          unitId: adhocUnit?.id || null, newUnitName: adhocUnit?.newName || null,
+                          createProject: true,
+                        })
+                        setCreateOpen(false)
+                        navigate(`/field/wo/${res.work_order_id}`)
+                      } catch (e) {
+                        setCreateError(e.message || 'Could not create the work order.')
+                      } finally { setCreateBusy(false) }
+                    }}
+                    style={{
+                      appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                      border: `1px dashed ${C.borderDark}`, background: C.cardSecondary,
+                      borderRadius: 8, padding: '12px 14px', minHeight: 44,
+                    }}>
+                    <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
+                      Create New Project
+                    </span>
+                    <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
+                      {adhocProjects.length === 0 ? 'No projects on this property yet — ' : ''}a Field Documentation project is created for this record
+                    </span>
+                  </button>
                 </div>
-              </div>
+              ) : adhocUnits !== null ? (
+                /* Phase: unit — required on every work order; pick or type new */
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                    {adhocUnits.map((u) => (
+                      <button key={u.id} disabled={createBusy}
+                        onClick={() => {
+                          setAdhocUnit({ id: u.id })
+                          fetchProjectsForProperty(adhocProp.id).then(setAdhocProjects).catch(() => setAdhocProjects([]))
+                        }}
+                        style={{
+                          appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                          border: `1px solid ${C.borderDark}`, background: C.card,
+                          borderRadius: 8, padding: '12px 14px', minHeight: 44,
+                          fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary,
+                        }}>
+                        {u.unit_number}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ fontFamily: FONT, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+                    {adhocUnits.length === 0 ? 'No units on this building yet — enter the unit:' : 'Unit not listed? Enter it:'}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type="text" value={adhocNewUnit}
+                      onChange={(e) => setAdhocNewUnit(e.target.value)}
+                      placeholder="e.g. Attic, 4, Laundry Room"
+                      disabled={createBusy}
+                      style={{
+                        flex: 1, boxSizing: 'border-box', minHeight: 44,
+                        fontFamily: FONT, fontSize: 15, color: C.textPrimary,
+                        border: `1px solid ${C.borderDark}`, borderRadius: 8, padding: '10px 12px',
+                      }}
+                    />
+                    <button disabled={createBusy || !adhocNewUnit.trim()}
+                      onClick={() => {
+                        setAdhocUnit({ newName: adhocNewUnit.trim() })
+                        fetchProjectsForProperty(adhocProp.id).then(setAdhocProjects).catch(() => setAdhocProjects([]))
+                      }}
+                      style={(createBusy || !adhocNewUnit.trim())
+                        ? { ...btnSecondary, flex: '0 0 auto', minHeight: 44, opacity: 0.5 }
+                        : { ...btnSecondary, flex: '0 0 auto', minHeight: 44 }}>
+                      Use
+                    </button>
+                  </div>
+                </div>
+              ) : adhocBuildings !== null ? (
+                /* Phase: building */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                  {adhocBuildings.map((b) => (
+                    <button key={b.id} disabled={createBusy}
+                      onClick={() => {
+                        setAdhocBuilding(b)
+                        fetchUnitsForBuilding(b.id).then(setAdhocUnits).catch(() => setAdhocUnits([]))
+                      }}
+                      style={{
+                        appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                        border: `1px solid ${C.borderDark}`, background: C.card,
+                        borderRadius: 8, padding: '12px 14px', minHeight: 44,
+                        fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary,
+                      }}>
+                      {b.building_name || b.building_number_or_name}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                /* Phase: property search */
+                <div style={{ marginBottom: 16 }}>
+                  <input
+                    type="text" value={propSearch} autoFocus
+                    onChange={(e) => {
+                      const q = e.target.value
+                      setPropSearch(q)
+                      if (q.trim().length >= 2) {
+                        setPropSearching(true)
+                        searchProperties(q)
+                          .then(setPropResults)
+                          .catch(() => setPropResults([]))
+                          .finally(() => setPropSearching(false))
+                      } else {
+                        setPropResults([])
+                      }
+                    }}
+                    placeholder="Property name or street address"
+                    disabled={createBusy}
+                    style={{
+                      width: '100%', boxSizing: 'border-box', minHeight: 44,
+                      fontFamily: FONT, fontSize: 15, color: C.textPrimary,
+                      border: `1px solid ${C.borderDark}`, borderRadius: 8, padding: '10px 12px',
+                      marginBottom: 10,
+                    }}
+                  />
+                  {propSearching && <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 8 }}>Searching…</div>}
+                  {!propSearching && propSearch.trim().length >= 2 && propResults.length === 0 && (
+                    <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 8 }}>No properties match.</div>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {propResults.map((p) => (
+                      <button key={p.id} disabled={createBusy}
+                        onClick={() => {
+                          setAdhocProp(p)
+                          fetchBuildingsForProperty(p.id)
+                            .then((blds) => {
+                              if (blds.length === 0) {
+                                // Property has no buildings — one is created from the
+                                // street address on save; go straight to the unit.
+                                setAdhocBuildings([])
+                                setAdhocBuilding(null)
+                                setAdhocUnits([])
+                              } else {
+                                setAdhocBuildings(blds)
+                              }
+                            })
+                            .catch(() => setAdhocBuildings([]))
+                        }}
+                        style={{
+                          appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                          border: `1px solid ${C.borderDark}`, background: C.card,
+                          borderRadius: 8, padding: '12px 14px', minHeight: 44,
+                        }}>
+                        <span style={{ display: 'block', fontFamily: FONT, fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
+                          {p.property_name || 'Property'}
+                        </span>
+                        <span style={{ display: 'block', fontFamily: FONT, fontSize: 12.5, color: C.textMuted, marginTop: 1 }}>
+                          {[p.property_street, p.property_city, p.property_state].filter(Boolean).join(', ')}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
             ) : (
               (() => {
                 const seen = new Set()
@@ -407,9 +560,17 @@ export default function HomeScreen({ navigate }) {
               {createType && (
                 <button
                   onClick={() => {
-                    if (propSearch !== null) { setPropSearch(null); setPropResults([]) }
-                    else setCreateType(null)
                     setCreateError(null)
+                    if (adhocProjects !== null) { setAdhocProjects(null); setAdhocUnit(null) }
+                    else if (adhocUnits !== null) {
+                      // Back from unit: to buildings when there were any, else to search.
+                      setAdhocUnits(null); setAdhocUnit(null); setAdhocNewUnit('')
+                      if (!adhocBuildings || adhocBuildings.length === 0) { setAdhocBuildings(null); setAdhocProp(null) }
+                      else setAdhocBuilding(null)
+                    }
+                    else if (adhocBuildings !== null) { setAdhocBuildings(null); setAdhocProp(null) }
+                    else if (propSearch !== null) { setPropSearch(null); setPropResults([]); resetAdhoc() }
+                    else setCreateType(null)
                   }}
                   disabled={createBusy}
                   style={{ ...btnSecondary, flex: 1 }}>
