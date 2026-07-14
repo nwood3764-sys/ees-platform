@@ -232,6 +232,9 @@ function LayoutRow({ layout, onOpen, onDelete }) {
       </div>
       <div style={{ color: C.emerald, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {layout.name}
+        {layout.type === 'review' && (
+          <span style={{ background: '#e8f1fb', color: '#1e466b', border: '1px solid #bcd9f2', fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 3, marginLeft: 6, verticalAlign: 'middle' }}>Review</span>
+        )}
       </div>
       <div style={{ color: C.textSecondary, fontSize: 12, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {layout.recordTypeLabel || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Master</span>}
@@ -270,6 +273,9 @@ function NewLayoutModal({
   const firstInputRef = useRef(null)
 
   const [mode, setMode] = useState('blank') // 'blank' | 'clone'
+  // 'record_detail' (record pages) or 'review' (fields shown to a reviewer on
+  // the verification review screen — Salesforce approval-page-layout parity).
+  const [layoutType, setLayoutType] = useState('record_detail')
   const [sourceLayoutId, setSourceLayoutId] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -309,9 +315,15 @@ function NewLayoutModal({
   }
 
   // Warn if a default already exists in the same scope — they'll be demoted.
+  // Scope includes the layout type: a review layout never conflicts with a
+  // record-page layout.
+  const effectiveType = mode === 'clone'
+    ? (existingLayouts.find(l => l._id === sourceLayoutId)?.type || 'record_detail')
+    : layoutType
   const conflictingDefault = isDefault
     ? existingLayouts.find(l =>
         l.isDefault === 'Yes' &&
+        (l.type || 'record_detail') === effectiveType &&
         (l.roleId || null) === (roleId || null) &&
         (l.recordTypeId || null) === (recordTypeId || null),
       )
@@ -327,6 +339,7 @@ function NewLayoutModal({
       if (mode === 'blank') {
         newId = await createPageLayout({
           object: objectName,
+          type: layoutType,
           name: name.trim(),
           description: description.trim() || null,
           roleId: roleId || null,
@@ -414,6 +427,21 @@ function NewLayoutModal({
                   {l.recordTypeLabel ? ` · ${l.recordTypeLabel}` : ''}
                 </option>
               ))}
+            </select>
+          </FormField>
+        )}
+
+        {/* Layout type (blank mode only — clones inherit the source's type) */}
+        {mode === 'blank' && (
+          <FormField label="Layout type" hint="Record Page drives the record detail view. Review Page controls which fields a reviewer sees on the verification review screen.">
+            <select
+              value={layoutType}
+              onChange={e => setLayoutType(e.target.value)}
+              disabled={busy}
+              style={{ ...inputStyle, cursor: 'pointer' }}
+            >
+              <option value="record_detail">Record Page</option>
+              <option value="review">Review Page</option>
             </select>
           </FormField>
         )}
