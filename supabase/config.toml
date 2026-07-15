@@ -12,3 +12,10 @@ verify_jwt = false
 
 [functions.signing-portal-submit]
 verify_jwt = false
+
+# request-password-reset-sms is the login screen's "text me a reset link"
+# flow — the requester by definition has no session. It leaks nothing
+# (constant response), texts only the number on file, and rate-limits per
+# phone + per IP via password_reset_sms_requests.
+[functions.request-password-reset-sms]
+verify_jwt = false

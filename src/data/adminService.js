@@ -1310,21 +1310,25 @@ async function callInviteFunction(payload) {
   return data
 }
 
-export async function inviteUser({ email, firstName, lastName, roleId, title, phone }) {
+// `sendSms: true` additionally texts a one-time sign-in link to the phone
+// number on the invite (requires a phone; the invite email still goes out).
+export async function inviteUser({ email, firstName, lastName, roleId, title, phone, sendSms }) {
   return callInviteFunction({
     email, first_name: firstName, last_name: lastName,
     role_id: roleId,
     title: title || undefined,
     phone: phone || undefined,
+    send_sms: sendSms === true || undefined,
   })
 }
 
-export async function relinkUser({ existingUserId, roleId, title, phone } = {}) {
+export async function relinkUser({ existingUserId, roleId, title, phone, sendSms } = {}) {
   return callInviteFunction({
     existing_user_id: existingUserId,
     role_id: roleId || undefined,
     title: title || undefined,
     phone: phone || undefined,
+    send_sms: sendSms === true || undefined,
   })
 }
 

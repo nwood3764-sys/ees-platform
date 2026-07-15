@@ -54,6 +54,13 @@ export default function InviteUserModal({
   const [busy, setBusy]           = useState(false)
   const [error, setError]         = useState(null)
 
+  // When a phone number is present, the admin can additionally text the new
+  // user a one-time sign-in link (the invite email always goes out). The
+  // checkbox disables itself when the phone field is emptied.
+  const [sendSms, setSendSms]     = useState(false)
+  const phoneDigits = phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '')
+  const smsAvailable = phoneDigits.length === 10
+
   // Load roles on mount. We filter to active and present alphabetically.
   // Roles are critical to the invite — without one selected we can't
   // submit, so we surface a load error explicitly rather than letting the
@@ -115,6 +122,7 @@ export default function InviteUserModal({
           roleId,
           title: title.trim() || null,
           phone: phone.trim() || null,
+          sendSms: sendSms && smsAvailable,
         })
       } else {
         result = await inviteUser({
@@ -124,10 +132,14 @@ export default function InviteUserModal({
           roleId,
           title: title.trim() || undefined,
           phone: phone.trim() || undefined,
+          sendSms: sendSms && smsAvailable,
         })
       }
       const sentTo = result?.email || email.trim()
-      toast.success(`Invite sent to ${sentTo}`)
+      const smsNote = result?.sms_sent
+        ? ' and texted a sign-in link'
+        : (sendSms && smsAvailable && result?.sms_detail ? ` (text failed: ${result.sms_detail})` : '')
+      toast.success(`Invite sent to ${sentTo}${smsNote}`)
       onInvited?.(result)
       onClose()
     } catch (err) {
@@ -270,6 +282,32 @@ export default function InviteUserModal({
               />
             </FormField>
           </div>
+
+          {/* SMS delivery — only actionable once a 10-digit phone is present. */}
+          <label
+            style={{
+              display: 'flex', alignItems: 'flex-start', gap: 8,
+              margin: '2px 0 14px',
+              fontSize: 12.5, color: smsAvailable ? C.textPrimary : C.textMuted,
+              cursor: smsAvailable ? 'pointer' : 'default',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={sendSms && smsAvailable}
+              onChange={e => setSendSms(e.target.checked)}
+              disabled={busy || !smsAvailable}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              Also text a one-time sign-in link to this phone
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+                {smsAvailable
+                  ? 'The invite email still goes out; the text carries its own link so the user can start from either.'
+                  : 'Enter a 10-digit US mobile number above to enable this.'}
+              </div>
+            </span>
+          </label>
 
           {error && (
             <div style={{

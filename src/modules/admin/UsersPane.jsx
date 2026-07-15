@@ -68,13 +68,16 @@ export default function UsersPane({ onOpenRecord }) {
   // the HTTP status as the error message. Our edge function returns
   // detailed JSON like { error: "Reset email send failed: <msg>" } on
   // 500; we need to read that to diagnose anything.
-  const sendReset = async (user) => {
-    setResetModal({ phase: 'sending', user })
+  // `channel` is 'email' (GoTrue sends its standard recovery email),
+  // 'sms' (the link is texted to the user's mobile via Twilio), or
+  // 'link' (the URL comes back for the admin to copy/share manually).
+  const sendReset = async (user, channel = 'email') => {
+    setResetModal({ phase: 'sending', user, channel })
     try {
       // Get the current session JWT to send as the bearer token.
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.access_token) {
-        setResetModal({ phase: 'error', user, message: 'Not signed in.' })
+        setResetModal({ phase: 'error', user, channel, message: 'Not signed in.' })
         return
       }
 
@@ -86,7 +89,7 @@ export default function UsersPane({ onOpenRecord }) {
           'Authorization': `Bearer ${session.access_token}`,
           'apikey':        import.meta.env.VITE_SUPABASE_ANON_KEY,
         },
-        body: JSON.stringify({ user_id: user._id }),
+        body: JSON.stringify({ user_id: user._id, channel }),
       })
 
       // Always try to parse the body, even on 5xx. The edge function
@@ -98,21 +101,24 @@ export default function UsersPane({ onOpenRecord }) {
         const detail = payload?.error
           || payload?.message
           || `HTTP ${resp.status} ${resp.statusText}`
-        setResetModal({ phase: 'error', user, message: detail })
+        setResetModal({ phase: 'error', user, channel, message: detail })
         return
       }
       if (!payload?.ok) {
-        setResetModal({ phase: 'error', user, message: payload?.error || 'Reset failed.' })
+        setResetModal({ phase: 'error', user, channel, message: payload?.error || 'Reset failed.' })
         return
       }
       setResetModal({
         phase: 'done',
         user,
+        channel,
         email: payload.email || user.email,
         recovery_url: payload.recovery_url || null,
+        phone_last4: payload.phone_last4 || null,
+        sms_detail: payload.sms_detail || null,
       })
     } catch (e) {
-      setResetModal({ phase: 'error', user, message: e?.message || 'Unexpected error.' })
+      setResetModal({ phase: 'error', user, channel, message: e?.message || 'Unexpected error.' })
     }
   }
 
@@ -235,7 +241,7 @@ export default function UsersPane({ onOpenRecord }) {
       {resetModal && (
         <ResetPasswordModal
           state={resetModal}
-          onConfirm={() => sendReset(resetModal.user)}
+          onConfirm={(channel) => sendReset(resetModal.user, channel || resetModal.channel || 'email')}
           onClose={() => setResetModal(null)}
         />
       )}
@@ -245,18 +251,37 @@ export default function UsersPane({ onOpenRecord }) {
 
 // ─── ResetPasswordModal ─────────────────────────────────────────────────────
 // Four phases driven by the parent's resetModal state:
-//   confirm — "send a password-reset email to <email>?" with Send + Cancel
+//   confirm — delivery choice (email / text / manual link) + Send + Cancel
 //   sending — disabled state while the edge function call is in flight
-//   done    — success confirmation ("Email sent to <address>")
+//   done    — channel-appropriate confirmation, or the copyable link when
+//             the admin chose manual delivery
 //   error   — failure with the server message + Try again
 function ResetPasswordModal({ state, onConfirm, onClose }) {
   const { phase, user } = state
   const email = state.email || user?.email || '(no email)'
+  const hasPhone = !!(user?.phone && String(user.phone).replace(/\D/g, '').length >= 10)
+
+  // The channel picked in the confirm phase. Kept local so the radios work
+  // before any request fires; once a call is in flight the parent's
+  // state.channel records the channel actually used (for done/retry copy).
+  const [channel, setChannel] = useState(state.channel || 'email')
 
   const heading =
-    phase === 'done'    ? 'Recovery link ready' :
+    phase === 'done'    ? (state.channel === 'link' ? 'Recovery link ready' : 'Reset link sent') :
     phase === 'error'   ? 'Reset failed'        :
                           'Reset this user\u2019s password?'
+
+  const channelOptions = [
+    { id: 'email', label: `Email the link to ${email}`, disabled: false },
+    {
+      id: 'sms',
+      label: hasPhone
+        ? `Text the link to ${user.phone}`
+        : 'Text the link (no phone on file)',
+      disabled: !hasPhone,
+    },
+    { id: 'link', label: 'Generate the link for me to copy/share manually', disabled: false },
+  ]
 
   return (
     <div style={modalBackdrop} onClick={phase === 'sending' ? undefined : onClose}>
@@ -273,40 +298,88 @@ function ResetPasswordModal({ state, onConfirm, onClose }) {
           <>
             <div style={modalBody}>
               A one-time password-reset link will be generated for <strong>{email}</strong>.
-              The link expires in 1 hour. You'll get the link in the next screen — send
-              it to the user via email, text, or whatever channel works. They click it,
-              set a new password, and sign in.
+              The link expires in 1 hour and can only be used once. Choose how to deliver it:
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+              {channelOptions.map(opt => (
+                <label
+                  key={opt.id}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 8,
+                    fontSize: 12.5,
+                    color: opt.disabled ? C.textMuted : C.textPrimary,
+                    cursor: opt.disabled ? 'default' : 'pointer',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="reset-channel"
+                    checked={channel === opt.id}
+                    disabled={opt.disabled}
+                    onChange={() => setChannel(opt.id)}
+                    style={{ marginTop: 2 }}
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
             </div>
             <div style={modalActions}>
               <button type="button" onClick={onClose} style={btnGhost}>Cancel</button>
-              <button type="button" onClick={onConfirm} style={btnPrimary}>Generate link</button>
+              <button type="button" onClick={() => onConfirm(channel)} style={btnPrimary}>
+                {channel === 'email' ? 'Send reset email' : channel === 'sms' ? 'Send reset text' : 'Generate link'}
+              </button>
             </div>
           </>
         )}
 
         {phase === 'sending' && (
           <>
-            <div style={modalBody}>Generating recovery link for <strong>{email}</strong>…</div>
+            <div style={modalBody}>Working on the reset for <strong>{email}</strong>…</div>
             <div style={modalActions}>
               <button type="button" disabled style={{ ...btnPrimary, opacity: 0.6, cursor: 'default' }}>
-                Generating…
+                Sending…
               </button>
             </div>
           </>
         )}
 
-        {phase === 'done' && (
+        {phase === 'done' && state.channel === 'link' && (
           <DonePhase email={email} url={state.recovery_url} onClose={onClose} />
+        )}
+
+        {phase === 'done' && state.channel !== 'link' && (
+          <>
+            <div style={modalBody}>
+              {state.channel === 'sms' ? (
+                <>
+                  A password-reset link was texted to the mobile number ending
+                  in <strong>{state.phone_last4 || '????'}</strong>.
+                  {state.sms_detail && state.sms_detail.startsWith('mock') && (
+                    <span style={{ display: 'block', marginTop: 6, color: C.textMuted, fontSize: 12 }}>
+                      Note: Twilio isn't configured yet, so this send was recorded but no
+                      real text went out. Configure the Twilio credentials to go live.
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>A password-reset email was sent to <strong>{email}</strong>.</>
+              )}
+              {' '}The link expires in 1 hour.
+            </div>
+            <div style={modalActions}>
+              <button type="button" onClick={onClose} style={btnPrimary}>Done</button>
+            </div>
+          </>
         )}
 
         {phase === 'error' && (
           <>
             <div style={{ ...modalBody, color: '#1e466b' }}>
-              {state.message || 'The reset email could not be sent.'}
+              {state.message || 'The reset could not be sent.'}
             </div>
             <div style={modalActions}>
               <button type="button" onClick={onClose}   style={btnGhost}>Close</button>
-              <button type="button" onClick={onConfirm} style={btnPrimary}>Try again</button>
+              <button type="button" onClick={() => onConfirm(channel)} style={btnPrimary}>Try again</button>
             </div>
           </>
         )}
