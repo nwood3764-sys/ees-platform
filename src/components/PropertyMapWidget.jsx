@@ -199,7 +199,9 @@ export default function PropertyMapWidget({ widget, record, tableName, embedded 
   )
 
   const body = hasCoords ? (
-    <div ref={containerRef} style={{ width: '100%', height, background: C.page }} />
+    // position:relative + isolation contain Leaflet's z-indexes (up to 1000)
+    // so tiles never paint over app overlays like the LEAP Assistant panel.
+    <div ref={containerRef} style={{ width: '100%', height, background: C.page, position: 'relative', zIndex: 0, isolation: 'isolate' }} />
   ) : (
     <div style={{ padding: '20px 16px', fontSize: 12.5, color: C.textSecondary, lineHeight: 1.6 }}>
       <div style={{ color: C.textMuted, marginBottom: address ? 6 : 0 }}>

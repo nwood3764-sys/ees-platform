@@ -283,7 +283,11 @@ export function OutreachMap({ properties, onOpenProperty, onBoundsChange }) {
           Map failed to load: {error.message}
         </div>
       )}
-      <div ref={containerRef} style={{ flex:1, minHeight:300, background:C.page }} />
+      {/* position:relative + isolation:isolate contain Leaflet's internal
+          z-indexes (panes 200–700, controls 1000) inside this element's own
+          stacking context — without it the tiles paint OVER app overlays
+          like the LEAP Assistant panel (zIndex 60). */}
+      <div ref={containerRef} style={{ flex:1, minHeight:300, background:C.page, position:'relative', zIndex:0, isolation:'isolate' }} />
       <div style={{ padding:'6px 16px', background:C.card, borderTop:`1px solid ${C.border}`, fontSize:11, color:C.textSecondary, display:'flex', gap:14 }}>
         <span><b>{placed.toLocaleString()}</b> placed</span>
         {missing > 0 && <span><b>{missing.toLocaleString()}</b> missing coordinates</span>}
