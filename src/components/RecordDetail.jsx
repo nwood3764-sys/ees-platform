@@ -4439,7 +4439,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 // Section
 // ---------------------------------------------------------------------------
 
-function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes, onNavigateToRecord, requiredFields }) {
+function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes, onNavigateToRecord, requiredFields, activeTab }) {
   const isMobile = useIsMobile()
   // Standing rule: every record-detail section opens EXPANDED. We intentionally
   // ignore section_is_collapsed_by_default for the initial state (the user can
@@ -4476,6 +4476,16 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   // ONLY cards, say where its content went instead of looking broken.
   const relatedTabCardCount = allSectionWidgets.filter(w =>
     ['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'].includes(w.widget_type)).length
+  // On the Related tab, a section whose only content is Related-tab cards
+  // (related lists, galleries, conversations, reports, publish history) renders
+  // NOTHING here — those cards already render as their own standalone cards
+  // right below. Drawing an empty section shell would (a) duplicate the card,
+  // producing a second, empty "Buildings"/"Documents" block, and (b) show the
+  // self-referential note "this section's card appears on the Related tab"
+  // while the user is already on the Related tab. The shell only makes sense on
+  // the Details tab, where it tells the user their content lives over on
+  // Related. So suppress the card-only shell here.
+  if (sectionWidgets.length === 0 && relatedTabCardCount > 0 && activeTab === 'Related') return null
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
       <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
@@ -6206,7 +6216,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
                 fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes}
                 onNavigateToRecord={onNavigateToRecord}
-                requiredFields={requiredFields} />
+                requiredFields={requiredFields} activeTab={activeTab} />
             )
           })}
 
