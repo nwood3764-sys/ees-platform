@@ -1055,17 +1055,34 @@ function ViewSelector({
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  // One unified, de-duplicated "List Views" list. The selector used to split
-  // views into "System Views" and "Saved Views", but ObjectListSection passes
-  // the saved views in as `systemViews` AND ListView loads them again as
-  // `personalViews`, so the same rows landed in both buckets and showed twice.
-  // Merge both sources, drop a system base that a saved override supersedes,
-  // and de-dupe by id so each view appears exactly once.
+  // One unified, de-duplicated "List Views" list, built from two sources:
+  //
+  //   • systemViews — the prop. For most callers these are in-code system view
+  //     constants (never `_persisted`). ObjectListSection additionally passes
+  //     the object's persisted saved views here, but that prop is loaded once
+  //     by the parent and is NOT refreshed when the user deletes/renames/sets-
+  //     default on a view from inside this selector.
+  //   • personalViews — loaded and re-loaded HERE in ListView after every
+  //     create/edit/delete/set-default, so it is always the live copy of the
+  //     user's persisted saved views.
+  //
+  // Because a persisted view can appear in BOTH, an earlier version merged them
+  // and de-duped by id — but that let the stale `systemViews` copy win, so a
+  // deleted view kept reappearing ("can't delete list views") and a rename
+  // showed the old name until a full reload. Fix: take persisted views ONLY
+  // from the live personalViews; use the systemViews prop solely for genuine
+  // in-code system views (those are never `_persisted`). In-code system views
+  // list first (e.g. "All"), then the user's saved views.
   const overriddenBaseIds = new Set(personalViews.map(v => v.systemBase).filter(Boolean));
   const listViews = [];
   const seenViewIds = new Set();
-  for (const v of [...systemViews, ...personalViews]) {
-    if (!v || overriddenBaseIds.has(v.id) || seenViewIds.has(v.id)) continue;
+  for (const v of systemViews) {
+    if (!v || v._persisted || overriddenBaseIds.has(v.id) || seenViewIds.has(v.id)) continue;
+    seenViewIds.add(v.id);
+    listViews.push(v);
+  }
+  for (const v of personalViews) {
+    if (!v || seenViewIds.has(v.id)) continue;
     seenViewIds.add(v.id);
     listViews.push(v);
   }
