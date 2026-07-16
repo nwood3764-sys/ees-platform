@@ -68,6 +68,37 @@ async function getOrCreateAdhocFlowId() {
   return data
 }
 
+// ─── Persistent conversation memory ──────────────────────────────────────────
+// The assistant no longer starts blank every day. Each turn (the user's
+// message, the assistant's reply, and the system "created records" notes) is
+// persisted per user via save_assistant_message; on open the panel reloads the
+// recent window via load_assistant_messages so both the visible thread and the
+// context sent to the model carry across sessions and days. Both RPCs are
+// SECURITY DEFINER and owner-scoped — a user only ever sees their own history.
+
+// Persist one turn. role is 'user' or 'assistant'; context is optional JSON
+// (the current-record context). Fire-and-forget at call sites — a failed save
+// must never break the chat, so callers swallow errors.
+export async function saveAssistantMessage({ role, content, context = null }) {
+  const text = (content || '').trim()
+  if (!text) return null
+  const { data, error } = await supabase.rpc('save_assistant_message', {
+    p_role: role, p_content: text, p_context: context || null,
+  })
+  if (error) throw error
+  return data // new message id
+}
+
+// Load the current user's recent assistant history (default last 2 days),
+// oldest-first, for replay into the panel and the model.
+export async function loadAssistantMessages({ days = 2, limit = 60 } = {}) {
+  const { data, error } = await supabase.rpc('load_assistant_messages', {
+    p_days: days, p_limit: limit,
+  })
+  if (error) throw error
+  return data || [] // [{ id, role, content, context, created_at }]
+}
+
 // ─── Saved tasks (guided screen flows) ───────────────────────────────────────
 // A saved task captures a confirmed assistant action as a reusable, shareable
 // guided flow: optional question steps (yes/no, single-select, free text) plus

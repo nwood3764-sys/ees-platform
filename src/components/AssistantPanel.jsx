@@ -23,6 +23,7 @@ import { useToast } from './Toast'
 import {
   sendAssistantMessage, commitAssistantActions,
   saveAssistantTask, listAssistantTasks, getAssistantTask, runAssistantTask,
+  saveAssistantMessage, loadAssistantMessages,
 } from '../data/assistantService'
 
 // Map the app's selected-record shape to the edge function's context shape.
@@ -264,12 +265,37 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
   const [saveTarget, setSaveTarget] = useState(null) // action being saved
   const [runTask, setRunTask] = useState(null)        // { task, snapshot }
   const scrollRef = useRef(null)
+  const memoryLoadedRef = useRef(false)  // guards the one-time history reload
 
   const objForContext = currentObject(selectedRecord, listTable)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [turns, open])
+
+  // Persistent memory: the first time the panel opens, reload this user's
+  // recent conversation (last ~2 days) so the assistant never starts blank.
+  // Loaded rows seed BOTH the visible thread (turns) and the opaque continuity
+  // fed to the edge function (history). System notes (the "[system: Created …]"
+  // lines) are kept in history — so a follow-up like "give me that building's
+  // link" still works across days — but hidden from the visible thread. Runs
+  // once per mounted panel; new turns append to the persisted store as usual.
+  useEffect(() => {
+    if (!open || memoryLoadedRef.current) return
+    memoryLoadedRef.current = true
+    let cancelled = false
+    loadAssistantMessages({ days: 2 })
+      .then(rows => {
+        if (cancelled || !rows.length) return
+        const isSystem = (c) => typeof c === 'string' && c.startsWith('[system:')
+        setTurns(t => (t.length ? t : rows
+          .filter(r => !isSystem(r.content))
+          .map(r => ({ role: r.role, text: r.content }))))
+        setHistory(h => (h.length ? h : rows.map(r => ({ role: r.role, content: r.content }))))
+      })
+      .catch(() => { /* memory is best-effort — never block the chat */ })
+    return () => { cancelled = true }
+  }, [open])
 
   // Load frequently-used tasks for the current object whenever the panel opens
   // or the object context changes.
@@ -304,6 +330,11 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
           { role: 'user', content: message },
           { role: 'assistant', content: res.reply || '' },
         ])
+        // Persist this turn so it survives refresh / a new day. Best-effort:
+        // never let a memory write break the conversation.
+        const ctxJson = ctx ? { object: ctx.object || null, record_id: ctx.record_id || null } : null
+        saveAssistantMessage({ role: 'user', content: message, context: ctxJson }).catch(() => {})
+        if (res.reply) saveAssistantMessage({ role: 'assistant', content: res.reply }).catch(() => {})
       }
     } catch (e) {
       toast.error(e.message || 'Assistant request failed')
@@ -354,7 +385,12 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
         if (links.length) {
           const note = 'Created — these records now exist and each has a real shareable URL: ' +
             links.map(l => `${l.table} ${l.id} (${recordUrl(l.table, l.id)})`).join('; ') + '.'
-          setHistory(h => [...h, { role: 'user', content: `[system: ${note}]` }])
+          const sysContent = `[system: ${note}]`
+          setHistory(h => [...h, { role: 'user', content: sysContent }])
+          // Persist the created-records note (hidden from the visible thread on
+          // reload, but kept in context) so a follow-up like "give me that
+          // building's link" works on a later day. Best-effort.
+          saveAssistantMessage({ role: 'user', content: sysContent }).catch(() => {})
         }
       } else {
         const msg = result?.results?.find(r => r.outcome === 'error')?.message || 'Action was refused'
