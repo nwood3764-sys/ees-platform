@@ -1759,6 +1759,31 @@ export function ListView({
         : c
     })
   }, [columnCatalog, columnByField])
+  // Map a DB column name to the row-object key it renders under, so a saved
+  // view or filter that stored the underlying columnName (e.g. property_state)
+  // still resolves against rows keyed by the display field (e.g. state).
+  // Curated lists like Outreach Properties define columns as
+  // { field:'state', columnName:'property_state' } and shape their rows with
+  // the friendly `field` key; a saved filter authored with the DB column name
+  // otherwise reads `undefined` on every row and silently hides everything.
+  // Only added when the columnName can't collide with a real field key, so
+  // lists whose fields already equal their DB columns are unaffected.
+  const fieldAlias = useMemo(() => {
+    const fieldSet = new Set();
+    for (const c of columns) fieldSet.add(c.field);
+    for (const c of columnCatalog) fieldSet.add(c.field);
+    const m = new Map();
+    const add = (c) => {
+      if (c.columnName && c.columnName !== c.field && !fieldSet.has(c.columnName)) {
+        m.set(c.columnName, c.field);
+      }
+    };
+    for (const c of columns) add(c);
+    for (const c of columnCatalog) add(c);
+    return m;
+  }, [columns, columnCatalog]);
+  const rowKeyFor = (field) => fieldAlias.get(field) || field;
+
   // Columns that can never be hidden: the primary 'name' (the row's click
   // target / label) and 'id' (record number, the leading identity column).
   const ALWAYS_ON_COLS = ['id', 'name'];
@@ -2156,8 +2181,9 @@ export function ListView({
       // directly and stay as their own row.
       const scalarEquals = fs.filter(f => f.op === 'equals' && !Array.isArray(f.value)).map(f => f.value);
       const otherRows = fs.filter(f => !(f.op === 'equals' && !Array.isArray(f.value)));
+      const rk = rowKeyFor(field);
       d = d.filter(r => {
-        const raw = r[field];
+        const raw = r[rk];
         if (scalarEquals.length) {
           if (!matchFilter(raw, { op: 'equals', value: scalarEquals })) return false;
         }
@@ -2168,13 +2194,14 @@ export function ListView({
       });
     }
     if (sortField) {
+      const sk = rowKeyFor(sortField);
       d.sort((a, b) => {
-        const av = String(a[sortField] || ''), bv = String(b[sortField] || '');
+        const av = String(a[sk] || ''), bv = String(b[sk] || '');
         return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
       });
     }
     return d;
-  }, [activeFilters, sortField, sortDir, globalSearch, data]);
+  }, [activeFilters, sortField, sortDir, globalSearch, data, fieldAlias]);
 
   // Render-time row cap. Filtering + sorting still run across the full
   // dataset above, but only the first `renderLimit` rows actually mount.
