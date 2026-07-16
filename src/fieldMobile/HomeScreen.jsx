@@ -182,6 +182,13 @@ export default function HomeScreen({ navigate }) {
               <div style={{ fontFamily: FONT, fontSize: 16, fontWeight: 700, color: C.textPrimary }}>
                 {nextStop.property_name || nextStop.work_order_name || 'Work Order'}
               </div>
+              {/* Work type — the differentiator when several stops share one
+                  property (e.g. Building Access vs Machine Setup vs Removal). */}
+              {nextStop.work_type_name && (
+                <div style={{ fontFamily: FONT, fontSize: 13.5, fontWeight: 600, color: C.emeraldMid, marginTop: 2 }}>
+                  {nextStop.work_type_name}
+                </div>
+              )}
               {nextStop.property_address && (
                 <div style={{ fontFamily: FONT, fontSize: 13, color: C.textSecondary, marginTop: 2 }}>
                   {nextStop.property_address}
