@@ -8,8 +8,11 @@ import PasswordInput from './PasswordInput'
  *
  * Two view modes via the local `view` state:
  *   • 'signin'  — the standard email/password form
- *   • 'forgot'  — a single email input that calls
- *                 supabase.auth.resetPasswordForEmail(...)
+ *   • 'forgot'  — reset-link request, deliverable two ways: an email input
+ *                 that calls supabase.auth.resetPasswordForEmail(...), or a
+ *                 mobile-number input that hits the public
+ *                 request-password-reset-sms edge function (texts the same
+ *                 kind of recovery link via Twilio).
  *
  * Why both live in this file (not separate routes):
  *   AuthGate selects between LoginScreen / SetPasswordScreen / the app
@@ -44,12 +47,19 @@ export default function LoginScreen() {
   // Distinct from `error` so we can show a success state in the same
   // place. Null until the recovery email has been requested.
   const [recoveryMessage, setRecoveryMessage] = useState(null)
+  // Delivery method for the forgot flow. 'email' sends the standard
+  // Supabase recovery email; 'phone' texts a one-time reset link to the
+  // mobile number on the user's LEAP profile via the
+  // request-password-reset-sms edge function.
+  const [forgotMethod, setForgotMethod] = useState('email') // 'email' | 'phone'
+  const [phone, setPhone]           = useState('')
 
   const goTo = (next) => {
     setView(next)
     setError(null)
     setRecoveryMessage(null)
     setPassword('')
+    setForgotMethod('email')
   }
 
   const handleSignIn = async (e) => {
@@ -72,10 +82,54 @@ export default function LoginScreen() {
     // On success the AuthGate picks up the new session and re-renders.
   }
 
+  // Phone path: POST the number to request-password-reset-sms. The endpoint
+  // is deliberately constant-response (no account enumeration), so the
+  // confirmation copy mirrors the email path's "if an account exists" shape.
+  const handleForgotByPhone = async () => {
+    const digits = phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '')
+    if (digits.length !== 10) {
+      setError('Enter the 10-digit US mobile number on your account.')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    setRecoveryMessage(null)
+    try {
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/request-password-reset-sms`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ phone: digits }),
+        },
+      )
+      const payload = await resp.json().catch(() => null)
+      setSubmitting(false)
+      if (!resp.ok || !payload?.ok) {
+        setError(payload?.error || 'Unable to send the reset text. Try the email option instead.')
+        return
+      }
+      setRecoveryMessage(
+        'If an account exists for that mobile number, a password-reset link has been texted to it. ' +
+        'The link expires in 1 hour. No text? Double-check the number or use the email option.'
+      )
+    } catch {
+      setSubmitting(false)
+      setError('Unable to send the reset text. Try the email option instead.')
+    }
+  }
+
   const handleForgot = async (e) => {
     e.preventDefault()
     if (!hasSupabaseConfig) {
       setError('Site is not configured. Missing Supabase environment variables.')
+      return
+    }
+    if (forgotMethod === 'phone') {
+      await handleForgotByPhone()
       return
     }
     const trimmed = email.trim()
@@ -182,41 +236,128 @@ export default function LoginScreen() {
         </div>
 
         <form onSubmit={isForgot ? handleForgot : handleSignIn}>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 11,
-              fontWeight: 600,
-              color: C.textSecondary,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              marginBottom: 5,
-            }}
-          >
-            Email
-          </label>
-          <input
-            type="email"
-            autoComplete="email"
-            required
-            autoFocus
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@EES-WI.org"
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              fontSize: 13,
-              fontFamily: 'inherit',
-              color: C.textPrimary,
-              background: C.page,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-              outline: 'none',
-              marginBottom: 14,
-              boxSizing: 'border-box',
-            }}
-          />
+          {/* Delivery-method toggle, forgot view only. Email is the default;
+              the phone option texts the reset link to the mobile number on
+              the user's LEAP profile. */}
+          {isForgot && (
+            <div
+              role="tablist"
+              aria-label="How should we send your reset link?"
+              style={{
+                display: 'flex',
+                border: `1px solid ${C.border}`,
+                borderRadius: 6,
+                overflow: 'hidden',
+                marginBottom: 14,
+              }}
+            >
+              {[
+                { id: 'email', label: 'Email me a link' },
+                { id: 'phone', label: 'Text me a link' },
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={forgotMethod === opt.id}
+                  onClick={() => { setForgotMethod(opt.id); setError(null); setRecoveryMessage(null) }}
+                  style={{
+                    flex: 1,
+                    padding: '8px 10px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: 'inherit',
+                    cursor: 'pointer',
+                    border: 'none',
+                    background: forgotMethod === opt.id ? '#eafaf2' : C.card,
+                    color: forgotMethod === opt.id ? '#1a6e44' : C.textSecondary,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {(!isForgot || forgotMethod === 'email') && (
+            <>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: C.textSecondary,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: 5,
+                }}
+              >
+                Email
+              </label>
+              <input
+                type="email"
+                autoComplete="email"
+                required
+                autoFocus
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@EES-WI.org"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  fontSize: 13,
+                  fontFamily: 'inherit',
+                  color: C.textPrimary,
+                  background: C.page,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                  outline: 'none',
+                  marginBottom: 14,
+                  boxSizing: 'border-box',
+                }}
+              />
+            </>
+          )}
+
+          {isForgot && forgotMethod === 'phone' && (
+            <>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: C.textSecondary,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: 5,
+                }}
+              >
+                Mobile Number
+              </label>
+              <input
+                type="tel"
+                autoComplete="tel"
+                required
+                autoFocus
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="(555) 555-1234"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  fontSize: 13,
+                  fontFamily: 'inherit',
+                  color: C.textPrimary,
+                  background: C.page,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                  outline: 'none',
+                  marginBottom: 14,
+                  boxSizing: 'border-box',
+                }}
+              />
+            </>
+          )}
 
           {!isForgot && (
             <>
@@ -306,7 +447,9 @@ export default function LoginScreen() {
           >
             {submitting
               ? (isForgot ? 'Sending…' : 'Signing in…')
-              : (isForgot ? 'Send reset link' : 'Sign In')
+              : (isForgot
+                  ? (forgotMethod === 'phone' ? 'Text reset link' : 'Send reset link')
+                  : 'Sign In')
             }
           </button>
         </form>

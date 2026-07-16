@@ -1,7 +1,15 @@
 // ─── TodaySchedule.jsx ───────────────────────────────────────────────────────
-// Home screen of the technician PWA. Lists the signed-in technician's
-// assigned service appointments for the selected day, in scheduled order,
-// via my_service_appointments(p_date). One tap opens the work order detail.
+// Home screen of the technician PWA. Lists the signed-in user's service
+// appointments for the selected day, in scheduled order, via
+// my_service_appointments(p_date). One tap opens the work order detail.
+//
+// Two ways a stop lands on your schedule (my_role from the RPC):
+//   'Assigned'     — you are assigned crew on the appointment.
+//   'Coordinating' — you are the Project Coordinator on the work order or
+//                    its project. Coordinator stops show at every status,
+//                    regardless of work-step completion, and carry a
+//                    "Coordinating" badge so they read differently from
+//                    your own crew stops.
 //
 // Schedule is pushed (Director of Field Services / Project Coordinator); the
 // technician does not self-assign — this screen is read-only over the day.
@@ -122,6 +130,15 @@ export default function TodaySchedule({ navigate }) {
                 <span style={{ fontFamily: MONO, fontSize: 11, color: C.textMuted }}>
                   {r.work_order_record_number || r.sa_record_number}
                 </span>
+                {r.my_role === 'Coordinating' && (
+                  <span style={{
+                    fontFamily: FONT, fontSize: 10.5, fontWeight: 700,
+                    color: '#1e466b', background: '#e8f1fb',
+                    borderRadius: 20, padding: '2px 8px',
+                  }}>
+                    Coordinating
+                  </span>
+                )}
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: C.textMuted }}>
                   #{i + 1}
                 </span>

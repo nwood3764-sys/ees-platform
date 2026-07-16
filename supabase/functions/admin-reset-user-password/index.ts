@@ -2,16 +2,20 @@
 // admin-reset-user-password
 //
 // Admin-triggered password reset. The caller (must be Admin) supplies a
-// public.users.id; the function sends a Supabase Auth recovery email to
-// that user's email address. The user clicks the link, lands on the
+// public.users.id and a delivery channel; the function gets the user a
+// Supabase Auth recovery link. The user opens the link, lands on the
 // app with #type=recovery in the URL hash, and the existing AuthGate +
 // SetPasswordScreen flow takes over from there.
 //
-// Same mechanism as the public "Forgot password?" button on the login
-// screen — just triggered server-side by an authenticated admin so a
-// user who has lost access (or never finished the original invite)
-// gets a fresh link sent without needing to type their own email
-// into the login form.
+// Delivery channels (v8):
+//   'email' (default) — GoTrue sends its standard recovery email, exactly
+//                       as before.
+//   'sms'             — generateLink({type:'recovery'}) and text the link
+//                       to the user's mobile through send-notification-sms
+//                       (Twilio). Requires a phone on the public.users row.
+//   'link'            — generateLink and return the URL to the admin UI so
+//                       they can hand it over on any channel themselves.
+//                       (The Users pane's reset modal renders + copies it.)
 //
 // Why server-side and not just calling supabase.auth.resetPasswordForEmail
 // from the admin browser:
@@ -26,10 +30,10 @@
 //     so the admin picks the user by row, never types the email.
 //
 // Request body:
-//   { "user_id": "<public.users.id uuid>" }
+//   { "user_id": "<public.users.id uuid>", "channel": "email" | "sms" | "link" }
 //
 // Responses:
-//   200 { ok: true,  email: "<the email we sent to>" }
+//   200 { ok: true, email, channel, recovery_url?, sms_sent?, sms_detail?, phone_last4? }
 //   400 { ok: false, error: "<validation message>" }
 //   401 { ok: false, error: "Caller is not a registered LEAP user" }
 //   403 { ok: false, error: "Caller is not an Admin" }
@@ -48,6 +52,7 @@ const cors = {
 
 interface ReqBody {
   user_id: string
+  channel?: "email" | "sms" | "link"
 }
 
 function json(payload: unknown, status = 200): Response {
@@ -103,6 +108,10 @@ Deno.serve(async (req) => {
   if (!body?.user_id || typeof body.user_id !== "string") {
     return json({ ok: false, error: "user_id is required" }, 400)
   }
+  const channel = body.channel || "email"
+  if (!["email", "sms", "link"].includes(channel)) {
+    return json({ ok: false, error: "channel must be 'email', 'sms', or 'link'" }, 400)
+  }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")
   const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -128,12 +137,12 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Caller is not an Admin" }, 403)
   }
 
-  // Step 2 — look up the target user's email from public.users.
+  // Step 2 — look up the target user's email + phone from public.users.
   // Admin picks by row in the UI, so the user_id is trusted to be a
   // valid public.users.id. We still defensively check.
   const { data: target, error: lookupErr } = await admin
     .from("users")
-    .select("id, user_email, user_is_deleted")
+    .select("id, user_email, user_phone, user_first_name, user_is_deleted")
     .eq("id", body.user_id)
     .maybeSingle()
 
@@ -149,26 +158,78 @@ Deno.serve(async (req) => {
   if (!target.user_email) {
     return json({ ok: false, error: "User has no email on file; add one before resetting" }, 400)
   }
-
-  // Step 3 — send the recovery email via Supabase Auth Admin API.
-  // `generateLink({ type: 'recovery' })` would return us a one-time URL
-  // we could surface in-app, but the explicit ask is to send an email,
-  // so we use `resetPasswordForEmail` (sends the email) rather than
-  // generateLink (returns the URL). Both produce equivalent links;
-  // the difference is who delivers them.
-  //
-  // The standard supabase.auth.resetPasswordForEmail is exposed on the
-  // admin client too; using the service-role key bypasses the per-IP
-  // rate limit that the public flow hits, so admins can fire several
-  // resets without being throttled.
-  const { error: resetErr } = await admin.auth.resetPasswordForEmail(
-    target.user_email,
-    { redirectTo: siteUrl },
-  )
-
-  if (resetErr) {
-    return json({ ok: false, error: `Reset email send failed: ${resetErr.message}` }, 500)
+  if (channel === "sms" && !target.user_phone) {
+    return json({ ok: false, error: "User has no phone number on file; add one or use the email channel" }, 400)
   }
 
-  return json({ ok: true, email: target.user_email })
+  // Step 3 — deliver by the requested channel.
+  //
+  // email: GoTrue sends its own recovery email (resetPasswordForEmail). The
+  //   service-role client bypasses the public flow's per-IP rate limit, so
+  //   admins can fire several resets without being throttled.
+  //
+  // sms / link: generateLink({type:'recovery'}) returns the one-time URL
+  //   without sending anything; we then text it (sms) or hand it back to the
+  //   admin UI (link). NOTE each new recovery link supersedes the previous
+  //   one — that's also why 'email' doesn't additionally return a URL: the
+  //   emailed link is the only live one.
+  if (channel === "email") {
+    const { error: resetErr } = await admin.auth.resetPasswordForEmail(
+      target.user_email,
+      { redirectTo: siteUrl },
+    )
+    if (resetErr) {
+      return json({ ok: false, error: `Reset email send failed: ${resetErr.message}` }, 500)
+    }
+    return json({ ok: true, email: target.user_email, channel })
+  }
+
+  const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+    type: "recovery",
+    email: target.user_email,
+    options: { redirectTo: siteUrl },
+  })
+  const recoveryUrl = linkData?.properties?.action_link
+  if (linkErr || !recoveryUrl) {
+    return json({ ok: false, error: `Recovery link generation failed: ${linkErr?.message || "no link returned"}` }, 500)
+  }
+
+  if (channel === "link") {
+    return json({ ok: true, email: target.user_email, channel, recovery_url: recoveryUrl })
+  }
+
+  // channel === 'sms'
+  const phoneE164 = `+1${target.user_phone}`
+  const bodyText =
+    `EES LEAP: ${target.user_first_name || "Hi"}, here is your one-time password reset link: ${recoveryUrl} ` +
+    `It expires in 1 hour. If you didn't request this, you can ignore this message.`
+  try {
+    const resp = await fetch(`${supabaseUrl}/functions/v1/send-notification-sms`, {
+      method: "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({
+        trigger_event:   "password_reset_link",
+        recipient_phone: phoneE164,
+        body_text:       bodyText,
+      }),
+    })
+    const payload = await resp.json().catch(() => null)
+    if (!resp.ok || payload?.status === "error" || payload?.status === "failed") {
+      const detail = payload?.failure_reason || payload?.error || payload?.message || `HTTP ${resp.status}`
+      return json({ ok: false, error: `SMS send failed: ${detail}` }, 500)
+    }
+    return json({
+      ok: true,
+      email: target.user_email,
+      channel,
+      sms_sent: true,
+      sms_detail: payload?.mode === "mock" ? "mock (Twilio not configured yet)" : "sent",
+      phone_last4: target.user_phone.slice(-4),
+    })
+  } catch (e) {
+    return json({ ok: false, error: `SMS dispatch threw: ${(e as Error).message}` }, 500)
+  }
 })
