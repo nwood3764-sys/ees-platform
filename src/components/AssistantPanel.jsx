@@ -44,6 +44,14 @@ function currentObject(selectedRecord, listTable) {
   return selectedRecord?.table || selectedRecord?.object || listTable || null
 }
 
+// Full, shareable URL for a record, matching the app's /<table>/<id> scheme
+// (see src/lib/urlNav.js). A coworker who opens this lands on the same record
+// after signing in.
+function recordUrl(table, id) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${origin}/${table}/${id}`
+}
+
 function verbFor(type) {
   return type === 'record_create' ? 'Create'
     : type === 'record_update' ? 'Update'
@@ -339,11 +347,13 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
           const createdLinks = [...(tn.createdLinks || []), ...links]
           return { ...tn, committed, createdLinks }
         }))
-        // Feed created ids back so a follow-up ("give me the link", "add a
-        // contact to it") has the real ids and never goes blind.
+        // Feed created ids AND their real URLs back so a follow-up ("give me
+        // the link", "add a contact to it") has everything and never goes blind
+        // or invents an id. The assistant only treats a record as real once it
+        // sees one of these system notes.
         if (links.length) {
-          const note = 'Created (the user can open each from its link): ' +
-            links.map(l => `${l.table} ${l.id}`).join('; ') + '.'
+          const note = 'Created — these records now exist and each has a real shareable URL: ' +
+            links.map(l => `${l.table} ${l.id} (${recordUrl(l.table, l.id)})`).join('; ') + '.'
           setHistory(h => [...h, { role: 'user', content: `[system: ${note}]` }])
         }
       } else {
@@ -567,28 +577,64 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
                     onSave={() => setSaveTarget(action)}
                   />
                 ))}
-                {/* Links to every record created from this turn. */}
+                {/* Links to every record created from this turn: an in-app Open
+                    button plus the full, copyable shareable URL. */}
                 {(turn.createdLinks || []).length > 0 && (
-                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {turn.createdLinks.map((lnk, li) => (
-                      <button
-                        key={li}
-                        type="button"
-                        onClick={() => onNavigateToRecord?.({ table: lnk.table, id: lnk.id, mode: 'view' })}
-                        title={`/${lnk.table}/${lnk.id}`}
-                        style={{
-                          textAlign: 'left', border: `1px solid ${C.border}`, borderRadius: 8,
-                          background: C.card, padding: '8px 12px', cursor: 'pointer',
-                          fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 8,
-                        }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.emeraldMid} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                        </svg>
-                        <span style={{ fontSize: 13, color: C.emeraldMid, fontWeight: 600 }}>Open {lnk.label}</span>
-                      </button>
-                    ))}
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {turn.createdLinks.map((lnk, li) => {
+                      const url = recordUrl(lnk.table, lnk.id)
+                      return (
+                        <div
+                          key={li}
+                          style={{
+                            border: `1px solid ${C.border}`, borderRadius: 8,
+                            background: C.card, padding: '8px 12px',
+                            display: 'flex', flexDirection: 'column', gap: 6,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => onNavigateToRecord?.({ table: lnk.table, id: lnk.id, mode: 'view' })}
+                            style={{
+                              textAlign: 'left', border: 'none', background: 'none', padding: 0,
+                              cursor: 'pointer', fontFamily: 'inherit',
+                              display: 'flex', alignItems: 'center', gap: 8,
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.emeraldMid} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                            </svg>
+                            <span style={{ fontSize: 13, color: C.emeraldMid, fontWeight: 600 }}>Open {lnk.label}</span>
+                          </button>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span
+                              title={url}
+                              style={{
+                                flex: 1, minWidth: 0, fontSize: 11, fontFamily: 'monospace',
+                                color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                              }}
+                            >{url}</span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(url)
+                                  toast.success('Link copied')
+                                } catch {
+                                  toast.error('Could not copy — select the link to copy it manually')
+                                }
+                              }}
+                              style={{
+                                flexShrink: 0, height: 26, padding: '0 10px', border: `1px solid ${C.border}`,
+                                borderRadius: 6, cursor: 'pointer', background: C.cardSecondary || '#f7f9fc',
+                                color: C.textSecondary, fontSize: 12, fontFamily: 'inherit',
+                              }}
+                            >Copy link</button>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
