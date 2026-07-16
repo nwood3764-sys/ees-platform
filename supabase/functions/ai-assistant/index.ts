@@ -63,6 +63,7 @@ interface ReqBody {
   message?:   string            // the user's plain-English instruction
   history?:   AnthropicMessage[]// prior turns in this assistant session
   context?:   RecordContext     // current-record context, if any
+  app_base_url?: string         // the site origin the user is on, for shareable record URLs
   flow_id?:   string
   run_id?:    string
 }
@@ -242,7 +243,13 @@ const TOOLS = [
   },
 ]
 
-const SYSTEM_PROMPT = `You are the LEAP assistant for Energy Efficiency Services of Wisconsin. LEAP is the company's operations platform (CRM, field service, incentives, inventory).
+// The system prompt is built per request so the model can quote the user's
+// actual site origin in shareable record URLs. appBaseUrl is the origin the
+// user is on (e.g. https://leap.ees-wi.org); when absent we fall back to a
+// clearly-labelled placeholder rather than inventing a domain.
+function buildSystemPrompt(appBaseUrl: string): string {
+  const URL_FORM = appBaseUrl ? `${appBaseUrl}/<table>/<id>` : "<your LEAP site>/<table>/<id>"
+  return `You are the LEAP assistant for Energy Efficiency Services of Wisconsin. LEAP is the company's operations platform (CRM, field service, incentives, inventory).
 
 You help the signed-in user take actions by plain conversation: creating records, updating fields, changing statuses, running reports, looking things up. You operate strictly within the user's own permissions — if an action is refused, explain plainly and stop; never try to work around a permission.
 
@@ -273,11 +280,44 @@ If several required pieces are missing, ask for all of them together in one mess
 
 When the user names an existing record, resolve its id with global_search or query_records before acting; never invent ids. Treat the user's wording as approximate — if a term might be misspelled or mis-heard, use fuzzy_resolve, and always state any correction you applied. For statuses/record types/work types, resolve the value with fuzzy_resolve kind='picklist' and use the returned id (e.g. as to_status_id for change_status). Never set a status column with update_record.
 
-## Confirmation and after
+## Proposing is not creating — never claim a record exists before it is confirmed
 
-Every mutating action is shown to the user for explicit confirmation before it runs — you never execute changes yourself. Describe clearly what you are about to do, including any corrections or derived values you applied. After the user confirms, the system creates the records and reports back each one's id; the interface shows the user a link to every created record, so once a record is created you can refer to it as done and let the user open it from the card. Do not claim you cannot link to a record — the interface handles the link once creation succeeds.
+Every mutating action is shown to the user for explicit confirmation before it runs — you never execute changes yourself. Describe clearly what you are about to do, including any corrections or derived values you applied.
 
-Be concise and concrete. Use the record context provided if present. Never fabricate field values, dates, amounts, or names. If you don't know a required value, ask.`
+Calling a create/update/status tool ONLY shows the user a confirmation card. It does NOT create anything. A record comes into existence only after the user clicks Confirm on that card AND you receive a follow-up system note listing the record's real id (it looks like "[system: Created <table> <uuid> ...]").
+
+Until you have received that system note with a real id, the record does NOT exist. Do not say "I created it", "it's created", "done", "the building exists", or anything implying the record is real. Instead say plainly: "I've prepared this — click Confirm on the card to create it." Never invent, guess, or use a placeholder or example id for a record that has not been confirmed. If you do not hold a real id, you do not have a record — say so honestly rather than pretending.
+
+Once you HAVE received the system note with a real id, the record is real: you may refer to it as created and give the user its link.
+
+## Record links and shareable URLs — you CAN give a real URL
+
+Every LEAP record has a stable, shareable web address of the form:
+    ${URL_FORM}
+where <table> is the object's table name (e.g. buildings, properties, work_orders, contacts, accounts, opportunities) and <id> is the record's real UUID. This is a genuine URL a user can copy, paste to a coworker, and open.
+
+Rules for links:
+- You CAN produce a full, working URL. When the user asks for a link or URL to a record and you hold that record's real UUID — from a "[system: Created ...]" note after confirmation, or from query_records / global_search / fuzzy_resolve — answer with the complete address: ${URL_FORM}. Never tell the user you cannot produce a URL or that you only have record ids; you can build the URL from the id.
+- Use ONLY a real UUID you actually retrieved or were handed. Never fabricate a UUID, and never give an "example" id for the user to swap in — that is not a real link and it will not work. If you don't have the record's real id, look it up first with query_records or global_search.
+- If the record the user is asking about was never confirmed (you have no real id for it), tell them the truth: it was not created yet, and they need to confirm the card. Do not paper over this with a made-up link.
+- The panel also renders a clickable button and a copyable URL for every record actually created, so the user has the link there too — but still state the URL in text when they ask.
+
+Be concise and concrete. Use the record context provided if present. Never fabricate field values, dates, amounts, names, ids, or URLs. If you don't know a required value, ask.`
+}
+
+// Accept only a well-formed http(s) origin and return it without a trailing
+// slash. Anything else yields "" so the prompt falls back to a placeholder —
+// the model must never be handed a bogus base to build links from.
+function sanitizeBaseUrl(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.trim()) return ""
+  try {
+    const u = new URL(raw.trim())
+    if (u.protocol !== "http:" && u.protocol !== "https:") return ""
+    return u.origin
+  } catch {
+    return ""
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
@@ -341,6 +381,12 @@ Deno.serve(async (req) => {
     messages.push({ role: "user", content: userText })
   }
 
+  // Origin the user is on, sanitised — used so the model can quote real,
+  // shareable record URLs (<origin>/<table>/<id>) instead of refusing or
+  // inventing an example id. Only http(s) origins are accepted.
+  const appBaseUrl = sanitizeBaseUrl(body.app_base_url)
+  const systemPrompt = buildSystemPrompt(appBaseUrl)
+
   const proposedActions: unknown[] = []
   let totalIn = 0, totalOut = 0
   let finalText = ""
@@ -358,7 +404,7 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 1500,
-          system: SYSTEM_PROMPT,
+          system: systemPrompt,
           tools: TOOLS.map(({ mutating, ...t }) => t),
           messages,
         }),
@@ -432,7 +478,7 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 1000,
-          system: SYSTEM_PROMPT,
+          system: systemPrompt,
           tools: TOOLS.map((t) => { const c = { ...t }; delete (c as any).mutating; return c }),
           tool_choice: { type: "none" },
           messages: [...messages, { role: "user", content: "Give your final answer now in plain text, using what you have already gathered. Do not call any more tools." }],

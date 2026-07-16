@@ -19,8 +19,11 @@ import { supabase } from '../lib/supabase'
 // returns are opaque to us; we only append our own user text and the prior
 // assistant reply text for continuity). Returns the parsed response.
 export async function sendAssistantMessage({ message, history = [], context = null }) {
+  // The site origin so the assistant can quote real, shareable record URLs
+  // (<origin>/<table>/<id>) instead of refusing or inventing an example id.
+  const appBaseUrl = typeof window !== 'undefined' ? window.location.origin : ''
   const { data, error } = await supabase.functions.invoke('ai-assistant', {
-    body: { message, history, context },
+    body: { message, history, context, app_base_url: appBaseUrl },
   })
   if (error) {
     // Edge function returned non-2xx. Surface a usable message.
