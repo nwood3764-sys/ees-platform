@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
+import { compressPhotoForUpload } from '../lib/photoCompression'
 
 // ---------------------------------------------------------------------------
 // storageService.js — uploads, downloads, deletes, and signed URLs for the
@@ -193,6 +194,14 @@ export async function uploadPhoto({
   if (!file) throw new Error('uploadPhoto: file is required')
   if (!relatedObject) throw new Error('uploadPhoto: relatedObject is required')
   if (!relatedId)     throw new Error('uploadPhoto: relatedId is required')
+
+  // Shrink large JPEGs on-device before they cross the (often cellular)
+  // uplink — the dominant cost of a slow photo capture in the field. The
+  // original EXIF block (GPS, timestamps, camera) is spliced into the
+  // compressed file verbatim, and on any doubt the original is uploaded
+  // unchanged, so process-photo's EXIF extraction sees the same data
+  // either way.
+  file = await compressPhotoForUpload(file)
 
   const bucket = defaultPhotoBucket(relatedObject) // throws if not allowed
   const photoId = newId()
