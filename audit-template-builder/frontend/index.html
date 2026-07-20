@@ -24,6 +24,11 @@
     text-transform:uppercase;color:var(--moss)}
   h1{font:700 32px/1.08 Georgia,"Times New Roman",serif;margin:10px 0 6px}
   .sub{color:var(--mut);font-size:15px;max-width:60ch;margin:0}
+  .tabs{display:flex;gap:6px;margin:20px 0 0;border-bottom:2px solid var(--line)}
+  .tabBtn{appearance:none;border:1px solid var(--line);border-bottom:0;background:#f3f2ec;color:var(--mut);
+    font:700 13.5px/1 inherit;padding:11px 24px;border-radius:10px 10px 0 0;cursor:pointer}
+  .tabBtn.active{background:#fff;color:var(--ink);border-color:var(--moss);position:relative;top:1px}
+  .tabPane{display:none;padding-top:6px}.tabPane.active{display:block}
   .slots{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:28px}
   @media(max-width:640px){.slots{grid-template-columns:1fr}}
   .slot{border:1.5px dashed var(--line);border-radius:10px;background:var(--card);
@@ -114,11 +119,17 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 41 — optional DOE Audit Template uploads (report PDFs + exported XMLs) feed the deliverable buttons and packet</div>
+    Last updated 2026-07-20 · build 42 — two tabs: Energy Modeling (uploads, review, model exports) and Project Paperwork (form, DOE docs, deliverable stages)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
 
+  <div class="tabs">
+    <button class="tabBtn active" data-tab="Model">⚡ Energy Modeling</button>
+    <button class="tabBtn" data-tab="Paper">🧾 Project Paperwork</button>
+  </div>
+
+  <div id="tabModel" class="tabPane active">
   <div class="slots">
     <div class="slot" data-key="asBase"><span class="tag">PDF</span>
       <div class="role">Baseline Asset Score Report</div>
@@ -142,29 +153,6 @@
       <input type="file" accept=".html,.htm,.osm"></div>
   </div>
 
-  <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Optional — DOE Audit Template documents</div>
-  <div style="font-size:12px;color:var(--mut);margin-top:3px">After importing the XML into DOE, attach the DOE-generated report PDFs and exported XMLs here — the deliverable buttons and the packet then use these official versions instead of the local ones.</div>
-  <div class="slots" style="margin-top:10px">
-    <div class="slot" data-atkey="basePdf"><span class="tag">PDF</span>
-      <div class="role">Baseline Audit Template Report</div>
-      <div class="hint">DOE-generated report for the baseline building</div>
-      <div class="got"></div><input type="file" accept=".pdf"></div>
-    <div class="slot" data-atkey="impPdf"><span class="tag">PDF</span>
-      <div class="role">Improved Audit Template Report</div>
-      <div class="hint">DOE-generated report for the improved building</div>
-      <div class="got"></div><input type="file" accept=".pdf"></div>
-    <div class="slot" data-atkey="baseXml"><span class="tag">XML</span>
-      <div class="role">Baseline Audit Template Export</div>
-      <div class="hint">XML exported from DOE for the baseline building</div>
-      <div class="got"></div><input type="file" accept=".xml"></div>
-    <div class="slot" data-atkey="impXml"><span class="tag">XML</span>
-      <div class="role">Improved Audit Template Export</div>
-      <div class="hint">XML exported from DOE for the improved building</div>
-      <div class="got"></div><input type="file" accept=".xml"></div>
-  </div>
-
-  <div class="status" id="status" style="margin-top:14px"></div>
-
   <div class="review" id="review">
     <h2 id="rTitle">Review</h2>
     <div class="band">
@@ -186,6 +174,45 @@
   </div>
   <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and bedrooms per unit to enable exports.</div>
 
+    <div class="expSect sectReview">
+  <div class="expHdr">Review tools</div>
+  <div class="bar">
+    <button class="btn" id="aiExtract" disabled>🧠 AI Extract &amp; Map</button>
+    <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
+  </div>
+  </div>
+
+  <div class="expSect sectEnergy">
+  <div class="expHdr">Energy modeling</div>
+  <div class="bar">
+    <button class="btn ghost" data-act="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
+    <button class="btn ghost" data-act="utilImp" disabled>↓ Improved Utility (xlsx)</button>
+    <button class="btn" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
+    <button class="btn" data-act="xmlImp" disabled>↓ Improved Audit Template (XML)</button>
+    <button class="btn" data-act="packet" disabled>📦 Energy Model Packet (zip)</button>
+  </div>
+  </div>
+
+  <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <strong style="font:700 15px/1.2 Georgia,serif">AI pre-export review</strong>
+      <span class="copyhint" id="reviewStatus"></span>
+    </div>
+    <div id="reviewSummary" style="margin:8px 0;font-size:13.5px"></div>
+    <div id="reviewFindings"></div>
+  </div>
+  <p class="note" style="font-size:12.5px;color:var(--mut);margin-top:10px">
+    <strong>50121 files:</strong> built from a known-good 50121 export so they import + submit.
+    <strong>Live-mapped from your Asset Score report:</strong> name, address, year, gross &amp;
+    use-type floor areas, window-to-wall ratio, wall area, conditioned floors, envelope R-values,
+    boiler (capacity/efficiency/year), water heater, headline EUIs, and the 50121 whole-building
+    savings %. Occupancy is computed from the units &amp; bedrooms above (2 in the master + 1 per
+    additional bedroom). Monthly energy loads from the utility spreadsheet (DOE loads that
+    separately). HVAC delivery/measures detail is the remaining refinement pass.
+  </p>
+  </div>
+
+  <div id="tabPaper" class="tabPane">
   <div id="pjRow" style="margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
     <strong style="font-size:13.5px">Project &amp; invoice details</strong>
     <span class="copyhint">— fills the paperwork; property fields prefill from the reports, everything editable; saved in this browser per property</span>
@@ -211,24 +238,28 @@
     </div>
   </div>
 
-    <div class="expSect sectReview">
-  <div class="expHdr">Review tools</div>
-  <div class="bar">
-    <button class="btn" id="aiExtract" disabled>🧠 AI Extract &amp; Map</button>
-    <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
-  </div>
+  <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Optional — DOE Audit Template documents</div>
+  <div style="font-size:12px;color:var(--mut);margin-top:3px">After importing the XML into DOE, attach the DOE-generated report PDFs and exported XMLs here — the deliverable buttons and the packet then use these official versions instead of the local ones.</div>
+  <div class="slots" style="margin-top:10px">
+    <div class="slot" data-atkey="basePdf"><span class="tag">PDF</span>
+      <div class="role">Baseline Audit Template Report</div>
+      <div class="hint">DOE-generated report for the baseline building</div>
+      <div class="got"></div><input type="file" accept=".pdf"></div>
+    <div class="slot" data-atkey="impPdf"><span class="tag">PDF</span>
+      <div class="role">Improved Audit Template Report</div>
+      <div class="hint">DOE-generated report for the improved building</div>
+      <div class="got"></div><input type="file" accept=".pdf"></div>
+    <div class="slot" data-atkey="baseXml"><span class="tag">XML</span>
+      <div class="role">Baseline Audit Template Export</div>
+      <div class="hint">XML exported from DOE for the baseline building</div>
+      <div class="got"></div><input type="file" accept=".xml"></div>
+    <div class="slot" data-atkey="impXml"><span class="tag">XML</span>
+      <div class="role">Improved Audit Template Export</div>
+      <div class="hint">XML exported from DOE for the improved building</div>
+      <div class="got"></div><input type="file" accept=".xml"></div>
   </div>
 
-  <div class="expSect sectEnergy">
-  <div class="expHdr">Energy modeling</div>
-  <div class="bar">
-    <button class="btn ghost" data-act="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
-    <button class="btn ghost" data-act="utilImp" disabled>↓ Improved Utility (xlsx)</button>
-    <button class="btn" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
-    <button class="btn" data-act="xmlImp" disabled>↓ Improved Audit Template (XML)</button>
-    <button class="btn" data-act="packet" disabled>📦 Energy Model Packet (zip)</button>
-  </div>
-  </div>
+  <div class="status" id="status" style="margin-top:14px"></div>
 
   <div class="expSect sectAudit">
   <div class="expHdr">Audit Rebate Deliverables</div>
@@ -270,24 +301,11 @@
   </div>
   </div>
 
-  <div class="bar"><span class="status" id="finalStatus"></span></div>
-  <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <strong style="font:700 15px/1.2 Georgia,serif">AI pre-export review</strong>
-      <span class="copyhint" id="reviewStatus"></span>
-    </div>
-    <div id="reviewSummary" style="margin:8px 0;font-size:13.5px"></div>
-    <div id="reviewFindings"></div>
+
   </div>
-  <p class="note" style="font-size:12.5px;color:var(--mut);margin-top:10px">
-    <strong>50121 files:</strong> built from a known-good 50121 export so they import + submit.
-    <strong>Live-mapped from your Asset Score report:</strong> name, address, year, gross &amp;
-    use-type floor areas, window-to-wall ratio, wall area, conditioned floors, envelope R-values,
-    boiler (capacity/efficiency/year), water heater, headline EUIs, and the 50121 whole-building
-    savings %. Occupancy is computed from the units &amp; bedrooms above (2 in the master + 1 per
-    additional bedroom). Monthly energy loads from the utility spreadsheet (DOE loads that
-    separately). HVAC delivery/measures detail is the remaining refinement pass.
-  </p>
+
+  <div class="bar"><span class="status" id="finalStatus"></span></div>
+
 </div>
 
 <script>
@@ -2331,6 +2349,19 @@ function autoCheckGate(){
     +fails.slice(0,8).map(f=>'• '+f.name+(f.detail?' ('+f.detail+')':'')).join('\n')
     +(fails.length>8?'\n…':'')+'\n\nExport anyway?');
 }
+
+/* ---------- Tabs: Energy Modeling | Project Paperwork ---------- */
+(function(){
+  const btns=[...document.querySelectorAll('.tabBtn')];
+  function show(tab){
+    btns.forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
+    document.querySelectorAll('.tabPane').forEach(pn=>pn.classList.toggle('active',pn.id==='tab'+tab));
+    try{localStorage.setItem('atb_tab',tab);}catch(e){}
+  }
+  btns.forEach(b=>b.onclick=()=>show(b.dataset.tab));
+  let saved=null; try{saved=localStorage.getItem('atb_tab');}catch(e){}
+  if(saved==='Paper')show('Paper');
+})();
 
 /* ---------- Stale-build detection ---------- */
 // A long-open tab keeps running old JavaScript even after new builds deploy —
