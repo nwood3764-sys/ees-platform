@@ -30,6 +30,7 @@ import {
   fetchActiveUsers, fetchAccountContactsForWorkOrder,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
+import { supabase } from '../lib/supabase'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
 
 const DONE_STATUSES = ['completed', 'verified', 'not applicable']
@@ -736,6 +737,15 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
                 onSaved={onPhotoUploaded}
                 onError={onPhotoError}
               />
+            ) : f.type === 'select' ? (
+              <StepSelectField
+                key={f.field_id}
+                field={f}
+                stepId={step.work_step_id}
+                disabled={busy || uploading}
+                onSaved={onPhotoUploaded}
+                onError={onPhotoError}
+              />
             ) : (
               <StepFieldInput
                 key={f.field_id}
@@ -1075,6 +1085,87 @@ function StepUserMultiselect({ field, stepId, disabled, onSaved, onError }) {
 // Removed by 10:00 AM"). Saves via save_work_step_field_value; required
 // fields hard-gate step completion server-side, so onSaved reloads the
 // detail to refresh the gap state and enable Complete Step.
+// The 'select' field type (e.g. "Material Delivered" on Material Delivery).
+// Options are admin-managed picklist values under picklist_object
+// 'work_step_fields', picklist_field = the field's name — the server rejects
+// anything outside the list, so this stays a pure dropdown with no free text.
+function StepSelectField({ field, stepId, disabled, onSaved, onError }) {
+  const savedVal = field.text_value ?? ''
+  const [value, setValue] = useState(String(savedVal))
+  const [options, setOptions] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const dirty = value !== String(savedVal)
+  const hasSaved = savedVal !== '' && savedVal != null
+
+  useEffect(() => {
+    let cancelled = false
+    supabase
+      .from('picklist_values')
+      .select('picklist_value, picklist_label, picklist_sort_order')
+      .eq('picklist_object', 'work_step_fields')
+      .eq('picklist_field', field.name)
+      .eq('picklist_is_active', true)
+      .order('picklist_sort_order', { ascending: true })
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) { setOptions([]); onError(`Could not load options for "${field.label}".`) }
+        else setOptions(data || [])
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [field.name])
+
+  const save = async () => {
+    if (!value) { onError(`Pick a value for "${field.label}".`); return }
+    setSaving(true)
+    try {
+      const res = await saveWorkStepFieldValue(stepId, field.field_id, value)
+      onSaved(res.message || `${field.label} saved`)
+    } catch (e) {
+      onError(e.message || 'Could not save the value.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+        {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+        {hasSaved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <select
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          disabled={disabled || saving || options === null}
+          style={{
+            flex: 1, boxSizing: 'border-box', minHeight: 44,
+            fontFamily: FONT, fontSize: 16,
+            border: `1px solid ${hasSaved && !dirty ? C.emerald : C.borderDark}`,
+            borderRadius: 8, padding: '10px 12px',
+            color: value ? C.textPrimary : C.textMuted, background: C.card,
+          }}
+        >
+          <option value="">{options === null ? 'Loading…' : `Select ${field.label}…`}</option>
+          {(options || []).map((o) => (
+            <option key={o.picklist_value} value={o.picklist_value}>{o.picklist_label || o.picklist_value}</option>
+          ))}
+        </select>
+        <button
+          onClick={save}
+          disabled={disabled || saving || !dirty || !value}
+          style={(disabled || saving || !dirty || !value)
+            ? { ...btnDisabled, flex: '0 0 auto', minHeight: 44, padding: '0 18px' }
+            : { ...btnPrimary, flex: '0 0 auto', minHeight: 44, padding: '0 18px' }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function StepFieldInput({ field, stepId, disabled, onSaved, onError }) {
   const savedVal = field.numeric_value ?? field.text_value ?? ''
   const [value, setValue] = useState(String(savedVal))
