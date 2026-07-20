@@ -7,7 +7,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
 <!-- Runner endpoint config (set per-deploy in config.js). Loaded before the app
      so the .osm upload branch can read window.AUDIT_RUNNER_URL. -->
@@ -121,7 +120,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 46 — invoice PDF polish: page breaks land on row boundaries; tighter typography and tables</div>
+    Last updated 2026-07-20 · build 47 — true vector PDFs: crisp selectable text at any zoom, compact multi-column measure descriptions</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2841,203 +2840,335 @@ async function buildInvoiceWorkbook(){
   return await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
 
-/* -- EES-branded documents (print-ready HTML matching the workbook layout) --
-   kind: 'audit' (Energy Audit Invoice) | 'proposal' (HOMES Proposal-Contract /
-   project reservation) | 'invoice' (HOMES Project Invoice / final payment). */
-function eesDocHtml(kind){
-  const m=invoiceModel(), F=m.fields, esc=_xesc;
-  const money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const money0=v=>'$'+Number(v).toLocaleString('en-US');
-  const qfmt=q=>q!=null?Number(q).toLocaleString('en-US'):'';
+/* ===== Vector PDF builders =====================================================
+   True PDFs drawn with jsPDF text/vector calls — crisp at any zoom, selectable
+   text, small files. No HTML capture, no rasterization. Content and math come
+   from invoiceModel(); layout mirrors the EES workbook and the Sealed docs. */
+function _pdfNew(){
+  const {jsPDF}=window.jspdf;
+  const d=new jsPDF({unit:'pt',format:'letter'});
+  const W=612,H=792,M=40,CW=W-2*M;
+  const C={navy:[28,61,94],teal:[29,120,116],tealD:[21,94,91],soft:[251,246,234],obrd:[224,196,140],
+    line:[217,224,232],green:[241,247,242],ink:[34,43,53],mut:[122,135,152],
+    blueBg:[234,242,250],blueBr:[185,211,234],blueTx:[31,78,121],accent:[91,127,166],red:[192,57,43],
+    sealBlue:[47,128,214],zebra:[242,247,253]};
+  const st={y:M};
+  const font=(sz,style)=>{d.setFont('helvetica',style||'normal');d.setFontSize(sz);};
+  const t=(x,yy,txt,o)=>d.text(String(txt),x,yy,o||{});
+  const wrap=(txt,w)=>d.splitTextToSize(String(txt),w);
+  const need=h=>{if(st.y+h>H-M-16){d.addPage();st.y=M;}};
+  return {d,W,H,M,CW,C,st,font,t,wrap,need,
+    fill:c=>d.setFillColor(c[0],c[1],c[2]), stroke:c=>d.setDrawColor(c[0],c[1],c[2]),
+    tc:c=>d.setTextColor(c[0],c[1],c[2])};
+}
+function _money(v){return '$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function _qty(q){return q!=null?Number(q).toLocaleString('en-US'):'';}
+
+function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 'invoice'
+  const m=invoiceModel(), F=m.fields;
   const isAudit=kind==='audit', isInv=kind==='invoice';
-  const title=isAudit?'Energy Audit Invoice':(isInv?'HOMES Project Invoice':'HOMES Proposal');
+  const P=_pdfNew(); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
+  const LH=11;
+  /* header bands (page 1) */
+  fill(C.navy); d.rect(0,0,W,44,'F');
+  tc([255,255,255]); font(16,'bold'); t(W/2,28,'ENERGY EFFICIENCY SERVICES  of WISCONSIN',{align:'center'});
+  fill(C.teal); d.rect(0,44,W,20,'F');
+  font(9.5,'bold'); t(W/2,57.5,'112 Owen Rd. PO Box 6141  |  Monona, WI 53716  |  608-460-7419',{align:'center'});
+  st.y=64+20;
+  /* soft input box */
+  const box=(x,yy,w,h,val,align)=>{fill(C.soft);stroke(C.obrd);d.setLineWidth(.75);
+    d.rect(x,yy,w,h,'FD'); if(val!=null&&val!==''){tc(C.ink);font(9);
+      const lines=wrap(val,w-12);
+      lines.forEach((ln,i)=>t(align==='right'?x+w-6:x+6,yy+11+i*10.5,ln,align==='right'?{align:'right'}:{}));}};
+  const boxH=(val,w)=>Math.max(16,wrap(val||' ',w-12).length*10.5+6);
+  /* meta row */
+  const noLbl=isAudit||isInv?'Invoice No.:':'Proposal No.:';
+  const dateLbl=isAudit||isInv?'Invoice Date:':'Date:';
+  const termLbl=isAudit||isInv?'Due Date:':'Valid for:';
   const docNo=isAudit?(F.pjInvNo||'INV-WI-'):(isInv?(F.pjProjInvNo||''):(F.pjPropNo||'HOMES-MF-'));
-  const noLbl=isAudit||isInv?'Invoice No.':'Proposal No.';
-  const dateLbl=isAudit||isInv?'Invoice Date':'Date';
-  const termLbl=isAudit||isInv?'Due Date':'Valid for';
-  const term=isAudit?'Net 30':'30 days';
-  const gross=isAudit?2000:m.total, foeAmt=isAudit?0:m.foeAmt, iraAmt=isAudit?2000:m.homesAmt;
-  const totalReb=foeAmt+iraAmt;
-  // measure/service rows
-  let svcRows='';
-  if(isAudit){
-    svcRows=[['1','Whole-Building Energy Audit — Multifamily','','1','Building','$2,000','$2,000'],
-      ['2','Per-Unit Blower Door and Diagnostic Testing','','','Unit','included','included'],
-      ['3','Common Area and Building Envelope Assessment','','1','Lump Sum','included','included'],
-      ['4','Mechanical Systems Survey','','1','Lump Sum','included','included']]
-      .map(r=>`<tr><td class="num">${r[0]}</td><td colspan="2">${esc(r[1])}</td><td class="q">${r[3]}</td><td>${r[4]}</td><td class="r">${r[5]}</td><td class="r">${r[6]}</td></tr>`).join('');
-  }else{
-    svcRows=m.rows.map((r,i)=>`<tr><td class="num">${i+1}</td><td>${esc(r.name)}</td><td class="desc">${esc(r.desc).replace(/\n/g,'<br>')}</td><td class="q">${qfmt(r.qty)}</td><td>${esc(r.unit)}</td><td class="r"></td><td class="r">${money(r.cost)}</td></tr>`).join('');
+  tc(C.navy); font(9.5,'bold');
+  t(M,st.y+11,noLbl); box(M+68,st.y,130,16,docNo);
+  t(W-M-210,st.y+11,dateLbl,{align:'right'}); box(W-M-140,st.y,140,16,F.pjInvDate,'right');
+  t(W-M-210,st.y+31,termLbl,{align:'right'}); box(W-M-140,st.y+20,140,16,isAudit?'Net 30':'30 days','right');
+  st.y+=48;
+  /* section heading */
+  const head=txt=>{need(30); st.y+=12; tc(C.navy); font(10,'bold');
+    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke(C.navy); d.setLineWidth(1.4);
+    d.line(M,st.y,W-M,st.y); st.y+=8;};
+  /* customer block */
+  head('Customer & Property Installation Information');
+  const half=CW/2-8, lblW=92, bw=half-lblW-6;
+  const L=[['Property Owner:',F.pjOwner],['Owner Address:',F.pjOwnerAddr],['City, State Zip',F.pjOwnerCsz],
+    ['Contact Name:',F.pjContact],['Email:',F.pjEmail],['Phone:',F.pjPhone]];
+  const R=[['Property Name:',F.pjPropName],['Installation Address:',F.pjInstallAddr],['City, State Zip:',F.pjCsz],
+    ['Property Type:','Multifamily'],['IQ Number:',F.pjIQ]];
+  let yl=st.y, yr=st.y;
+  const kv=(x,yy,lbl,val)=>{const h=boxH(val,bw); tc([60,76,94]); font(8.5,'bold');
+    t(x+lblW,yy+11,lbl,{align:'right'}); box(x+lblW+6,yy,bw,h,val); return h+4;};
+  for(const [lb,v] of L) yl+=kv(M,yl,lb,v);
+  for(const [lb,v] of R) yr+=kv(M+half+16,yr,lb,v);
+  st.y=Math.max(yl,yr);
+  /* scope heading + dates + contractor */
+  head(isAudit?'Audit Services':(isInv?'Installed Scope of Work - HOMES PROJECT':'Proposed Scope of Work - HOMES PROJECT'));
+  if(!isAudit){
+    tc([60,76,94]); font(8.5,'bold');
+    t(M+118,st.y+11,isInv?'Start Date:':'Estimated Start Date:',{align:'right'});
+    box(M+124,st.y,110,16,isInv?F.pjStart:F.pjEstStart);
+    t(M+430,st.y+11,isInv?'Completion Date:':'Estimated Completion Date:',{align:'right'});
+    box(M+436,st.y,96,16,isInv?F.pjEnd:F.pjEstEnd);
+    st.y+=22;
   }
-  const scopeTitle=isAudit?'Audit Services':(isInv?'Installed Scope of Work - HOMES PROJECT':'Proposed Scope of Work - HOMES PROJECT');
-  const dates=isAudit?'' :
-    `<tr><td class="lbl">${isInv?'Start Date:':'Estimated Start Date:'}</td><td class="inp">${esc(isInv?F.pjStart:F.pjEstStart)}</td>
-     <td class="lbl">${isInv?'Completion Date:':'Estimated Completion Date:'}</td><td class="inp">${esc(isInv?F.pjEnd:F.pjEstEnd)}</td></tr>`;
-  const deliverables=isAudit?`<h3>Deliverables</h3>
-    <table class="svc"><tr class="hd"><th style="width:24px">#</th><th>Deliverable</th><th style="width:80px">Start Date</th><th style="width:80px">End Date</th><th style="width:120px">Notes</th></tr>
-    <tr><td class="num">1</td><td>Whole-Building Energy Audit Report (ASHRAE Level II equivalent)</td><td class="inp"></td><td class="inp"></td><td></td></tr>
-    <tr><td class="num">2</td><td>HPXML v4/Building Sync File from Asset Score</td><td class="inp"></td><td class="inp"></td><td></td></tr>
-    <tr><td class="num">3</td><td>Customer Report / Building Assessment Tool Report</td><td class="inp"></td><td class="inp"></td><td></td></tr></table>`:'';
+  tc([60,76,94]); font(8.5,'bold'); t(M+118,st.y+11,'Registered Contractor Name:',{align:'right'});
+  box(M+124,st.y,240,16,'Energy Efficiency Services of Wisconsin');
+  st.y+=24;
+  /* items table */
+  const th=(cols)=>{need(20); fill(C.navy); d.rect(M,st.y,CW,17,'F');
+    tc([255,255,255]); font(8,'bold');
+    for(const c of cols) t(c.x+(c.align==='right'?c.w-5:5),st.y+11.5,c.lbl.toUpperCase(),c.align==='right'?{align:'right'}:{});
+    st.y+=17;};
+  if(isAudit){
+    const X=M, cols=[
+      {lbl:'#',x:X,w:20},{lbl:'Service Description',x:X+20,w:246},{lbl:'Qty',x:X+266,w:40,align:'right'},
+      {lbl:'Unit',x:X+306,w:70},{lbl:'Unit Rate ($)',x:X+376,w:78,align:'right'},{lbl:'Total',x:X+454,w:78,align:'right'}];
+    th(cols);
+    const rows=[['1','Whole-Building Energy Audit — Multifamily','1','Building','$2,000','$2,000'],
+      ['2','Per-Unit Blower Door and Diagnostic Testing','','Unit','included','included'],
+      ['3','Common Area and Building Envelope Assessment','1','Lump Sum','included','included'],
+      ['4','Mechanical Systems Survey','1','Lump Sum','included','included']];
+    rows.forEach((r,i)=>{need(18);
+      if(i%2===0){fill(C.green); d.rect(M,st.y,CW,17,'F');}
+      if(r[2]!==''){fill(C.soft);stroke(C.obrd);d.setLineWidth(.6);d.rect(cols[2].x+8,st.y+2,30,13,'FD');}
+      tc(C.mut); font(9); t(cols[0].x+5,st.y+11.5,r[0]);
+      tc(C.ink); t(cols[1].x+5,st.y+11.5,r[1]);
+      if(r[2]!=='')t(cols[2].x+23,st.y+11.5,r[2],{align:'center'});
+      t(cols[3].x+5,st.y+11.5,r[3]);
+      t(cols[4].x+cols[4].w-5,st.y+11.5,r[4],{align:'right'});
+      t(cols[5].x+cols[5].w-5,st.y+11.5,r[5],{align:'right'});
+      stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+17,W-M,st.y+17);
+      st.y+=17;});
+  }else{
+    const X=M, cols=[
+      {lbl:'#',x:X,w:20},{lbl:'Measure Line Item',x:X+20,w:280},{lbl:'Qty',x:X+300,w:64,align:'right'},
+      {lbl:'Unit',x:X+364,w:60},{lbl:'',x:X+424,w:30},{lbl:'Cost',x:X+454,w:78,align:'right'}];
+    th(cols);
+    const colW=(CW-24)/2;
+    m.rows.forEach((r,i)=>{
+      const single=wrap(r.desc,CW-50);
+      const twoCol=single.length>3;
+      const lines=twoCol?wrap(r.desc,colW):single;
+      const n1=twoCol?Math.ceil(lines.length/2):lines.length;
+      const c1=lines.slice(0,n1), c2=lines.slice(n1);
+      const descH=n1*9.5+6, headH=18;
+      need(headH+Math.min(descH,240));
+      /* name line */
+      tc(C.mut); font(9); t(X+5,st.y+12,String(i+1));
+      tc(C.navy); font(10,'bold'); t(X+25,st.y+12,r.name);
+      fill(C.soft);stroke(C.obrd);d.setLineWidth(.6);d.rect(cols[2].x+6,st.y+1,52,14,'FD');
+      tc(C.ink); font(9); t(cols[2].x+32,st.y+11.5,_qty(r.qty),{align:'center'});
+      t(cols[3].x+5,st.y+11.5,r.unit);
+      font(9.5,'bold'); t(cols[5].x+cols[5].w-5,st.y+11.5,_money(r.cost),{align:'right'});
+      st.y+=headH;
+      /* description: two columns, page-break aware */
+      let i1=0,i2=0; font(7.5); tc([57,67,77]);
+      while(i1<c1.length||i2<c2.length){
+        const fit=Math.max(1,Math.floor((H-M-16-st.y)/9.5));
+        const take1=Math.min(fit,c1.length-i1), take2=Math.min(fit,c2.length-i2);
+        for(let k=0;k<take1;k++)t(X+25,st.y+8+k*9.5,c1[i1+k]);
+        for(let k=0;k<take2;k++)t(X+25+colW+22,st.y+8+k*9.5,c2[i2+k]);
+        i1+=take1;i2+=take2;
+        const used=Math.max(take1,take2)*9.5+4;
+        st.y+=used;
+        if(i1<c1.length||i2<c2.length){d.addPage();st.y=M;font(7.5);tc([57,67,77]);}
+      }
+      stroke(C.line); d.setLineWidth(1); d.line(M,st.y+3,W-M,st.y+3); st.y+=8;
+    });
+  }
+  /* totals block — right aligned like the workbook */
+  const gross=isAudit?2000:m.total, foeAmt=isAudit?0:m.foeAmt, iraAmt=isAudit?2000:m.homesAmt;
+  const totRows=[['Gross Total',_money(gross),C.navy],
+    ['Non-IRA Rebates*',foeAmt?_money(foeAmt):'-',C.tealD],
+    ['IRA Rebates*',_money(iraAmt),C.tealD],
+    ['Total Rebates','('+_money(foeAmt+iraAmt)+')',C.tealD],
+    ['TOTAL DUE',Math.abs(gross-foeAmt-iraAmt)<0.005?'-':_money(gross-foeAmt-iraAmt),C.navy]];
+  need(totRows.length*17+6);
+  const TX=W-M-300;
+  for(const [lbl,val,col] of totRows){
+    fill(col); d.rect(TX,st.y,300,16,'F');
+    tc([255,255,255]); font(9,'bold');
+    t(TX+190,st.y+11,lbl,{align:'right'}); t(TX+294,st.y+11,val,{align:'right'});
+    st.y+=16.5;
+  }
+  /* deliverables (audit only) */
+  if(isAudit){
+    head('Deliverables');
+    need(80); fill(C.navy); d.rect(M,st.y,CW,17,'F'); tc([255,255,255]); font(8,'bold');
+    t(M+5,st.y+11.5,'#'); t(M+25,st.y+11.5,'DELIVERABLE'); t(M+250,st.y+11.5,'START DATE');
+    t(M+345,st.y+11.5,'END DATE'); t(M+440,st.y+11.5,'NOTES');
+    st.y+=17;
+    const dels=['Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
+      'HPXML v4/Building Sync File from Asset Score','Customer Report / Building Assessment Tool Report'];
+    dels.forEach((dl,i)=>{const lines=wrap(dl,215), h=Math.max(20,lines.length*9.5+8); need(h);
+      if(i%2===1){fill(C.green); d.rect(M,st.y,CW,h,'F');}
+      tc(C.mut); font(9); t(M+5,st.y+12,String(i+1));
+      tc(C.ink); font(8.5); lines.forEach((ln,k)=>t(M+25,st.y+11+k*9.5,ln));
+      fill(C.soft);stroke(C.obrd);d.setLineWidth(.6);
+      d.rect(M+248,st.y+2,88,h-5,'FD'); d.rect(M+343,st.y+2,88,h-5,'FD');
+      stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+h,W-M,st.y+h);
+      st.y+=h;});
+  }
+  /* rebates & incentives */
+  head(isAudit?'*Rebates & Incentives':'Applicable Rebates & Incentives');
+  need(24); fill(C.navy); d.rect(M,st.y,CW,17,'F'); tc([255,255,255]); font(8,'bold');
+  t(M+40,st.y+11.5,'PROGRAM'); t(M+200,st.y+11.5,'INCENTIVE DESCIPTION');
+  t(M+452,st.y+11.5,'AMOUNT',{align:'right'}); t(M+462,st.y+11.5,'NOTES');
+  st.y+=17;
+  const foeDesc=(!isAudit&&m.foe)?m.foe.desc:'', foeNote=(!isAudit&&m.foe)?m.foe.note:'';
   const iraDesc=isAudit?'IQ MF Audit Rebate/Building':(m.tier?m.tier.desc:'');
   const iraNote=isAudit?'':(m.tier?m.tier.note:'');
-  const foeDesc=(!isAudit&&m.foe)?m.foe.desc:'', foeNote=(!isAudit&&m.foe)?m.foe.note:'';
-  const notice=isInv||isAudit
+  const rrows=[['NON-IRA','Focus on Energy - Instant Discount',foeDesc,foeAmt?_money(foeAmt):'',foeNote],
+    ['','Focus on Energy - Other','','',''],
+    ['','Utility Rebate - '+(isAudit?'Midstream Instant Discount':'Instant Discount'),'','',''],
+    ['','Utility Rebate - Other','','',''],
+    ['IRA','IRA HOMES '+(isAudit?'Incentive ':'')+'- Instant Discount',iraDesc,_money(iraAmt),iraNote],
+    ['','IRA HOMES '+(isAudit?'Incentive ':'')+'- Other','','','']];
+  rrows.forEach((r,i)=>{
+    const pl=wrap(r[1],150), dl=wrap(r[2],160), nl=wrap(r[4],86);
+    const h=Math.max(16,Math.max(pl.length,dl.length,nl.length)*9.5+7); need(h);
+    if(i%2===1){fill(C.green); d.rect(M,st.y,CW,h,'F');}
+    if(r[0]){tc(C.navy); font(7.5,'bold'); t(M+5,st.y+11,r[0]);}
+    tc(C.ink); font(8.5); pl.forEach((ln,k)=>t(M+40,st.y+11+k*9.5,ln));
+    dl.forEach((ln,k)=>t(M+200,st.y+11+k*9.5,ln));
+    if(r[3])t(M+452,st.y+11,r[3],{align:'right'});
+    font(7.5,'italic'); nl.forEach((ln,k)=>t(M+462,st.y+11+k*9.5,ln));
+    stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+h,W-M,st.y+h);
+    st.y+=h;});
+  /* rebate assignment notice */
+  const notice=(isAudit||isInv)
     ?'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above has been assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce this invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.'
     :'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above will be assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce the future invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.';
-  const ack=isAudit||isInv
+  {font(8,'bolditalic'); const nl2=wrap(notice,CW-34), h=nl2.length*10+16; need(h+14); st.y+=10;
+   fill(C.blueBg); stroke(C.blueBr); d.setLineWidth(.75); d.rect(M,st.y,CW,h,'FD');
+   fill(C.accent); d.rect(M,st.y,3,h,'F');
+   tc(C.blueTx); font(8,'bolditalic'); nl2.forEach((ln,k)=>t(M+14,st.y+13+k*10,ln));
+   st.y+=h;}
+  /* additional notes */
+  need(40); st.y+=14; tc([60,76,94]); font(8.5,'bold');
+  t(M+118,st.y+12,'Additional Notes:',{align:'right'}); box(M+124,st.y,CW-124,26,'');
+  st.y+=32;
+  /* acknowledgment */
+  head('Acknowledgment & Acceptance');
+  const ack=(isAudit||isInv)
     ?'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes EES-WI to submit for and receive the corresponding program incentive on their behalf.'
     :'Signed receipt of this proposal constitutes acceptance of the proposed scope of work. The property owner authorizes EES-WI to submit the project for rebate/incentive program preapproval and to begin project planning activities.';
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)} — ${esc(F.pjPropName)}</title>
-<style>
- :root{--navy:#1C3D5E;--teal:#1D7874;--tealD:#155E5B;--orange:#FDF3E3;--obrd:#EFC584;--green:#E7F2E4;--line:#c9d4e0}
- body{font:12.5px/1.4 Calibri,Arial,sans-serif;color:#1a1a1a;margin:0;padding:0 0 16px;width:778px}
- .page{width:722px;margin:0;padding:20px 28px}
- .hdr{background:var(--navy);color:#fff;text-align:center;font:700 20px Calibri,Arial;padding:10px 0}
- .hdr2{background:var(--teal);color:#fff;text-align:center;font:600 13.5px Calibri,Arial;padding:6px 0}
- .meta{display:flex;justify-content:space-between;margin:14px 0 4px}
- .meta b{margin-right:6px}
- .inpbox{background:var(--orange);border:1px solid var(--obrd);padding:2px 8px;display:inline-block;min-width:150px}
- h3{color:var(--navy);border-bottom:2px solid var(--navy);font-size:14px;letter-spacing:.02em;margin:24px 0 8px;padding-bottom:3px}
- table.kv2{width:100%;border-collapse:collapse}
- table.kv2 td{padding:2.5px 4px;font-size:12.5px}
- td.lbl{text-align:right;font-weight:700;width:150px;white-space:nowrap}
- td.inp{background:var(--orange);border:1px solid var(--obrd);min-width:170px}
- table.svc{width:100%;border-collapse:collapse;margin-top:4px}
- table.svc th{background:var(--navy);color:#fff;text-align:left;padding:7px 9px;font-size:11.5px;letter-spacing:.02em}
- table.svc td{padding:8px 9px;border-bottom:1px solid var(--line);vertical-align:top}
- table.svc td:nth-child(5){white-space:nowrap}
- table.svc tr:nth-child(odd) td{background:var(--green)}
- table.svc tr.hd th{background:var(--navy)}
- td.num{width:24px;color:#5a6b7d}td.q{text-align:center;width:52px;background:var(--orange)!important;border:1px solid var(--obrd)}
- td.r{text-align:right;white-space:nowrap}
- td.desc{font-size:11px;line-height:1.45}
- .totals{background:var(--tealD);color:#fff}
- table.tot2{width:100%;border-collapse:collapse;margin-top:0}
- table.tot2 td{padding:6.5px 9px;font-weight:700;font-size:12.5px}
- tr.grand td{background:var(--navy);color:#fff}
- tr.mid td{background:var(--tealD);color:#fff}
- .notice{background:#DDEBF7;border:1px solid #9DC3E6;font-style:italic;font-weight:600;font-size:11px;line-height:1.55;padding:10px 12px;margin-top:20px;color:#1F4E79;border-radius:2px}
- .sig{margin-top:56px;display:flex;gap:60px}
- .sig div{border-top:1.5px solid var(--navy);flex:2;padding-top:4px;color:#8a97a8;font-size:12px}
- .sig div:last-child{flex:1}
- .foot{color:#8a97a8;text-align:center;font-style:italic;margin-top:40px;font-size:11.5px;border-top:1px solid var(--line);padding-top:10px}
- @media print{body{width:auto}}
-</style></head><body>
-<div class="hdr">ENERGY EFFICIENCY SERVICES&nbsp; of WISCONSIN</div>
-<div class="hdr2">112 Owen Rd. PO Box 6141&nbsp; |&nbsp; Monona, WI 53716&nbsp; |&nbsp; 608-460-7419</div>
-<div class="page">
-<div class="meta"><div><b>${noLbl}:</b><span class="inpbox">${esc(docNo)}</span></div>
-<div style="text-align:right"><div><b>${dateLbl}:</b><span class="inpbox">${esc(F.pjInvDate)}</span></div>
-<div style="margin-top:3px"><b>${termLbl}:</b><span class="inpbox">${term}</span></div></div></div>
-<h3>Customer &amp; Property Installation Information</h3>
-<table class="kv2"><tr>
- <td class="lbl">Property Owner:</td><td class="inp">${esc(F.pjOwner)}</td>
- <td class="lbl">Property Name:</td><td class="inp">${esc(F.pjPropName)}</td></tr>
-<tr><td class="lbl">Owner Address:</td><td class="inp">${esc(F.pjOwnerAddr)}</td>
- <td class="lbl">Installation Address:</td><td class="inp">${esc(F.pjInstallAddr)}</td></tr>
-<tr><td class="lbl">City, State Zip</td><td class="inp">${esc(F.pjOwnerCsz)}</td>
- <td class="lbl">City, State Zip:</td><td class="inp">${esc(F.pjCsz)}</td></tr>
-<tr><td class="lbl">Contact Name:</td><td class="inp">${esc(F.pjContact)}</td>
- <td class="lbl">Property Type:</td><td class="inp">Multifamily</td></tr>
-<tr><td class="lbl">Email:</td><td class="inp">${esc(F.pjEmail)}</td>
- <td class="lbl">IQ Number:</td><td class="inp">${esc(F.pjIQ)}</td></tr>
-<tr><td class="lbl">Phone:</td><td class="inp">${esc(F.pjPhone)}</td><td></td><td></td></tr></table>
-<h3>${esc(scopeTitle)}</h3>
-<table class="kv2">${dates}
-<tr><td class="lbl">Registered Contractor Name:</td><td class="inp">Energy Efficiency Services of Wisconsin</td><td></td><td></td></tr></table>
-<table class="svc"><tr class="hd"><th style="width:24px">#</th><th style="width:${isAudit?'auto':'170px'}">${isAudit?'Service Description':'Measure Line Item'}</th><th>${isAudit?'':'Measure Description'}</th><th style="width:60px">Qty</th><th style="width:70px">Unit</th><th style="width:80px;text-align:right">${isAudit?'Unit Rate ($)':''}</th><th style="width:95px;text-align:right">${isAudit?'Total':'Cost'}</th></tr>
-${svcRows}</table>
-<table class="tot2">
-<tr class="grand"><td></td><td class="r" style="text-align:right;width:170px">Gross Total</td><td class="r" style="text-align:right;width:110px">${money(gross)}</td></tr>
-<tr class="mid"><td></td><td style="text-align:right">Non-IRA Rebates*</td><td style="text-align:right">${foeAmt?money(foeAmt):'-'}</td></tr>
-<tr class="mid"><td></td><td style="text-align:right">IRA Rebates*</td><td style="text-align:right">${money(iraAmt)}</td></tr>
-<tr class="mid"><td></td><td style="text-align:right">Total Rebates</td><td style="text-align:right">(${money(totalReb)})</td></tr>
-<tr class="grand"><td></td><td style="text-align:right">TOTAL DUE</td><td style="text-align:right">${Math.abs(gross-totalReb)<0.005?'-':money(gross-totalReb)}</td></tr>
-</table>
-${deliverables}
-<h3>${isAudit?'*Rebates &amp; Incentives':'Applicable Rebates &amp; Incentives'}</h3>
-<table class="svc"><tr class="hd"><th style="width:34px"></th><th>Program</th><th>Incentive Desciption</th><th style="width:95px;text-align:right">Amount</th><th style="width:130px">Notes</th></tr>
-<tr><td rowspan="4" style="text-align:center;font-weight:700;font-size:10px">NON-<br>IRA</td>
- <td>Focus on Energy - Instant Discount</td><td>${esc(foeDesc)}</td><td class="r">${foeAmt?money(foeAmt):''}</td><td style="font-style:italic;font-size:11px">${esc(foeNote)}</td></tr>
-<tr><td>Focus on Energy - Other</td><td></td><td></td><td></td></tr>
-<tr><td>Utility Rebate - ${isAudit?'Midstream Instant Discount':'Instant Discount'}</td><td></td><td></td><td></td></tr>
-<tr><td>Utility Rebate - Other</td><td></td><td></td><td></td></tr>
-<tr><td rowspan="2" style="text-align:center;font-weight:700;font-size:10px">IRA</td>
- <td>IRA HOMES ${isAudit?'Incentive ':''}- Instant Discount</td><td>${esc(iraDesc)}</td><td class="r">${money(iraAmt)}</td><td style="font-style:italic;font-size:11px">${esc(iraNote)}</td></tr>
-<tr><td>IRA HOMES ${isAudit?'Incentive ':''}- Other</td><td></td><td></td><td></td></tr></table>
-<div class="notice">${esc(notice)}</div>
-<table class="kv2" style="margin-top:16px"><tr><td class="lbl">Additional Notes:</td><td class="inp" style="height:34px"></td></tr></table>
-<h3>Acknowledgment &amp; Acceptance</h3>
-<p style="font-size:12.5px">${esc(ack)}</p>
-<div class="sig"><div>Property Owner / Authorized Representative</div><div>Date</div></div>
-<div class="foot">Questions? Contact EES-WI&nbsp; |&nbsp; ira@ees-wi.org |&nbsp; 608-460-7419</div>
-</div></body></html>`;
+  {const al=wrap(ack,CW); need(al.length*11+8); tc(C.ink); font(9.5);
+   al.forEach((ln,k)=>t(M,st.y+10+k*11,ln)); st.y+=al.length*11+6;}
+  /* signature */
+  need(70); st.y+=42; stroke([68,88,110]); d.setLineWidth(1);
+  d.line(M,st.y,M+300,st.y); d.line(W-M-160,st.y,W-M,st.y);
+  tc(C.mut); font(8.5); t(M,st.y+11,'Property Owner / Authorized Representative');
+  t(W-M-160,st.y+11,'Date');
+  st.y+=20;
+  /* footer */
+  need(30); st.y+=16; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y);
+  tc(C.mut); font(8.5,'italic'); t(W/2,st.y+13,'Questions? Contact EES-WI  |  ira@ees-wi.org  |  608-460-7419',{align:'center'});
+  return d.output('blob');
 }
 
-/* -- Sealed-style documents (print-ready HTML, matching the Sealed layout) -- */
-function sealedHtml(kind){   // 'proposal' | 'invoice'
-  const m=invoiceModel(), F=m.fields, esc=_xesc;
-  const money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const qfmt=q=>q!=null?Number(q).toLocaleString('en-US'):'';
+function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
+  const m=invoiceModel(), F=m.fields;
   const isInv=kind==='invoice';
-  const details=isInv
-    ?[['Invoice No.',F.pjProjInvNo],['Invoice Date',F.pjInvDate],['Due Date','30 days'],['IQ Number',F.pjIQ],['Start Date',F.pjStart],['Completion Date',F.pjEnd]]
-    :[['Date',F.pjInvDate],['Valid for','30 days'],['IQ Number',F.pjIQ],['Estimated Start Date',F.pjEstStart],['Estimated Completion Date',F.pjEstEnd]];
-  const rowsHtml=m.rows.map(r=>`<tr>
-    <td class="c">Energy Efficiency Services of Wisconsin</td><td class="n">${esc(r.name)}</td>
-    <td class="d"><strong>Qty: ${qfmt(r.qty)} ${esc(r.unit==='Sq Ft'?'Sq Ft.':'Units')}.</strong> ${esc(r.desc).replace(/\n/g,'<br>')}</td>
-    <td class="t">${money(r.cost)}</td></tr>`).join('');
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${isInv?'Invoice':'Proposal'} — ${esc(F.pjPropName)}</title>
-<style>
- body{font:13px/1.45 Arial,Helvetica,sans-serif;color:#222;margin:0;padding:12px 10px;width:760px}
- h2.doc{color:#2f80d6;font-size:34px;margin:26px 0 10px}
- .blocks{display:flex;justify-content:space-between;gap:40px}.blocks>div{flex:1}
- h4{color:#2f80d6;font-size:12.5px;letter-spacing:.03em;margin:18px 0 6px;border-bottom:0}
- .blk p{margin:2px 0}
- table.items{width:100%;border-collapse:collapse;margin-top:6px}
- table.items th{color:#2f80d6;text-align:left;font-size:11.5px;border-bottom:2px solid #bcd6f2;padding:6px 8px}
- table.items td{vertical-align:top;padding:10px 8px;border-bottom:1px solid #e3edf8;font-size:12px}
- table.items tr:nth-child(even) td{background:#f2f7fd}
- td.c{width:120px}td.n{width:120px}td.t{text-align:right;white-space:nowrap;width:90px}
- .reb td{padding:8px}.amt{color:#c0392b;font-weight:700;text-align:right}
- table.tot{width:100%;border-collapse:collapse;margin-top:8px}
- table.tot td{padding:6px 8px;border-bottom:1px solid #e3edf8}
- td.r{text-align:right}
- .sig{margin-top:48px;display:flex;gap:60px}
- .sig div{border-top:1px solid #444;flex:2;padding-top:4px;font-size:11.5px}
- .sig div:last-child{flex:1}
- @media print{body{margin:0;padding:0}}
-</style></head><body>
-<div class="blocks"><div class="blk">
- <h4>PRIMARY CONTRACTOR:</h4>
- <p>Sealed, Inc.</p><p>200 E Verona Ave</p><p>Verona, WI 53593</p><p>(949) 832-6798</p>
- <h4>BILL TO:</h4>
- <p>${esc(F.pjOwner)}</p><p>${esc(F.pjContact)}</p><p>${esc(F.pjOwnerAddr)}</p><p>${esc(F.pjOwnerCsz)}</p><p>${esc(F.pjPhone)}</p><p>${esc(F.pjEmail)}</p>
-</div><div class="blk">
- <h4>${isInv?'INVOICE DETAILS:':'PROJECT DETAILS:'}</h4>
- ${details.map(([k,v])=>`<p>${k}: ${esc(v||'')}</p>`).join('')}
- <h4>PROJECT ADDRESS:</h4>
- <p>${esc(F.pjPropName)}</p><p>${esc(F.pjInstallAddr)}</p><p>${esc(F.pjCsz)}</p><p>Multifamily</p>${isInv?'':`<p>${esc(F.pjIQ)}</p>`}
-</div></div>
-<h2 class="doc">${isInv?'Invoice':'Proposal'}</h2>
-<table class="items"><tr><th>CONTRACTOR</th><th>NAME</th><th>DESCRIPTION</th><th style="text-align:right">TOTAL</th></tr>${rowsHtml}</table>
-<h4>IRA REBATES</h4>
-<table class="items reb"><tr><td class="d">Incentive Description: ${esc(m.tier?m.tier.desc:'')}. Notes: ${esc(m.tier?m.tier.note:'')}.</td>
-<td class="n">IRA HOMES ${isInv?'Incentive ':''}- Instant Discount</td><td class="amt">${money(m.homesAmt)}</td></tr></table>
-${m.foe?`<h4>OTHER NON-IRA REBATES</h4>
-<table class="items reb"><tr><td class="d">Incentive Description: ${esc(m.foe.desc)}. Notes: ${esc(m.foe.note)}.</td>
-<td class="n">Focus on Energy - Instant Discount</td><td class="amt">${money(m.foeAmt)}</td></tr></table>`:''}
-<h4>TOTALS</h4>
-<table class="tot">
-<tr><td>Total Cost</td><td class="r">${money(m.total)}</td></tr>
-<tr><td>Total Rebates</td><td class="r">${money(m.total)}</td></tr>
-<tr><td>Total Deposits</td><td class="r">$0.00</td></tr>
-<tr><td><strong>${isInv?'Total Due':'Total Final'}</strong></td><td class="r"><strong>$0.00</strong></td></tr>
-</table>
-<div class="sig"><div>Customer Signature</div><div>Date</div></div>
-</body></html>`;
+  const P=_pdfNew(); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
+  const bh=(txt,x,yy)=>{tc(C.sealBlue); font(9.5,'bold'); t(x,yy,txt.toUpperCase());};
+  const lines9=(arr,x,yy)=>{tc(C.ink); font(9); arr.filter(v=>v).forEach((ln,k)=>t(x,yy+k*11.5,String(ln))); return yy+arr.filter(v=>v).length*11.5;};
+  st.y=M+14;
+  bh('Primary Contractor:',M,st.y);
+  let yA=lines9(['Sealed, Inc.','200 E Verona Ave','Verona, WI 53593','(949) 832-6798'],M,st.y+15);
+  const RX=W/2+20;
+  bh(isInv?'Invoice Details:':'Project Details:',RX,st.y);
+  const det=isInv
+    ?['Invoice No.: '+(F.pjProjInvNo||''),'Invoice Date: '+(F.pjInvDate||''),'Due Date: 30 days','IQ Number: '+(F.pjIQ||''),'Start Date: '+(F.pjStart||''),'Completion Date: '+(F.pjEnd||'')]
+    :['Date: '+(F.pjInvDate||''),'Valid for: 30 days','IQ Number: '+(F.pjIQ||''),'Estimated Start Date: '+(F.pjEstStart||''),'Estimated Completion Date: '+(F.pjEstEnd||'')];
+  let yB=lines9(det,RX,st.y+15);
+  st.y=Math.max(yA,yB)+18;
+  bh('Bill To:',M,st.y);
+  yA=lines9([F.pjOwner,F.pjContact,F.pjOwnerAddr,F.pjOwnerCsz,F.pjPhone,F.pjEmail],M,st.y+15);
+  bh('Project Address:',RX,st.y);
+  yB=lines9([F.pjPropName,F.pjInstallAddr,F.pjCsz,'Multifamily',isInv?'':F.pjIQ],RX,st.y+15);
+  st.y=Math.max(yA,yB)+16;
+  tc(C.sealBlue); font(24,'bold'); t(M,st.y+16,isInv?'Invoice':'Proposal'); st.y+=26;
+  /* items table */
+  stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+  tc(C.sealBlue); font(8,'bold');
+  t(M,st.y+13,'CONTRACTOR'); t(M+92,st.y+13,'NAME'); t(M+185,st.y+13,'DESCRIPTION'); t(W-M,st.y+13,'TOTAL',{align:'right'});
+  st.y+=17; stroke([188,214,242]); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
+  const descW=CW-185-80;
+  m.rows.forEach((r,i)=>{
+    const desc='Qty: '+_qty(r.qty)+' '+(r.unit==='Sq Ft'?'Sq Ft.':'Units.')+' '+r.desc.replace(/\n/g,' ');
+    const dl=wrap(desc,descW), cl=wrap('Energy Efficiency Services of Wisconsin',82), nml=wrap(r.name,85);
+    let i0=0, firstSeg=true;
+    while(i0<dl.length){
+      const fit=Math.max(3,Math.floor((H-M-20-st.y)/9.5));
+      const seg=dl.slice(i0,i0+fit);
+      const h=Math.max(seg.length,firstSeg?Math.max(cl.length,nml.length):0)*9.5+8;
+      if(st.y+h>H-M-16&&!firstSeg){d.addPage();st.y=M;}
+      if(i%2===1){fill(C.zebra); d.rect(M,st.y,CW,h,'F');}
+      tc(C.ink); font(8);
+      if(firstSeg){cl.forEach((ln,k)=>t(M,st.y+10+k*9.5,ln)); nml.forEach((ln,k)=>t(M+92,st.y+10+k*9.5,ln));
+        font(8,'bold'); t(W-M,st.y+10,_money(r.cost),{align:'right'}); font(8);}
+      seg.forEach((ln,k)=>{if(firstSeg&&i0+ (k===0)&&i0===0&&k===0){font(8,'bold');t(M+185,st.y+10,ln);font(8);}
+        else t(M+185,st.y+10+k*9.5,ln);});
+      st.y+=h; i0+=fit; firstSeg=false;
+      if(i0<dl.length){d.addPage();st.y=M;}
+    }
+    stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=2;
+  });
+  /* rebate sections */
+  const sect=(title,desc,name,amt)=>{need(46); st.y+=12; bh(title,M,st.y);
+    st.y+=5; stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    const dl=wrap(desc,270), h=Math.max(dl.length*9.5,19)+10; need(h);
+    tc(C.ink); font(8); dl.forEach((ln,k)=>t(M,st.y+12+k*9.5,ln));
+    wrap(name,150).forEach((ln,k)=>t(M+300,st.y+12+k*9.5,ln));
+    tc(C.red); font(9,'bold'); t(W-M,st.y+12,_money(amt),{align:'right'});
+    st.y+=h; stroke([188,214,242]); d.line(M,st.y,W-M,st.y);};
+  sect('IRA Rebates','Incentive Description: '+(m.tier?m.tier.desc:'')+'. Notes: '+(m.tier?m.tier.note:'')+'.',
+    'IRA HOMES '+(isInv?'Incentive ':'')+'- Instant Discount',m.homesAmt);
+  if(m.foe) sect('Other Non-IRA Rebates','Incentive Description: '+m.foe.desc+'. Notes: '+m.foe.note+'.',
+    'Focus on Energy - Instant Discount',m.foeAmt);
+  /* totals */
+  need(90); st.y+=12; bh('Totals',M,st.y); st.y+=5;
+  stroke([188,214,242]); d.setLineWidth(1); d.line(M,st.y,W-M,st.y); st.y+=4;
+  const trows=[['Total Cost',_money(m.total),false],['Total Rebates',_money(m.total),false],
+    ['Total Deposits','$0.00',false],[isInv?'Total Due':'Total Final','$0.00',true]];
+  for(const [lbl,val,strong] of trows){
+    tc(C.ink); font(9,strong?'bold':'normal');
+    t(M,st.y+12,lbl); t(W-M,st.y+12,val,{align:'right'});
+    stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+17,W-M,st.y+17); st.y+=18;}
+  /* signature */
+  need(64); st.y+=40; stroke([68,68,68]); d.setLineWidth(1);
+  d.line(M,st.y,M+300,st.y); d.line(W-M-160,st.y,W-M,st.y);
+  tc(C.mut); font(8.5); t(M,st.y+11,'Customer Signature'); t(W-M-160,st.y+11,'Date');
+  return d.output('blob');
 }
 
+async function makeDocPdfBlob(which){
+  // which: 'audit' | 'proposal' | 'invoice' | 'sealedProposal' | 'sealedInvoice'
+  if(typeof window.jspdf==='undefined')throw new Error('PDF engine not loaded');
+  if(which==='sealedProposal')return buildSealedPdfBlob('proposal');
+  if(which==='sealedInvoice')return buildSealedPdfBlob('invoice');
+  return buildEesPdfBlob(which);
+}
+async function downloadDoc(which,pdfName){
+  const fs=document.getElementById('finalStatus');
+  fs.className='status'; fs.textContent='Building '+pdfName+'…';
+  try{
+    const blob=await makeDocPdfBlob(which);
+    _serveFile(blob,pdfName);
+    fs.className='status ok'; fs.textContent=pdfName+' downloaded.';
+  }catch(e){
+    fs.className='status err';
+    fs.textContent='PDF generation failed: '+e.message+' — refresh the page and retry (the PDF engine loads from the CDN).';
+  }
+}
 /* -- wiring: downloads + packet -- */
 async function downloadInvoiceWorkbook(){
   const fs=document.getElementById('finalStatus');
@@ -3054,73 +3185,7 @@ async function downloadInvoiceWorkbook(){
 // Render a print-ready HTML document to a real PDF and DOWNLOAD it — no tabs,
 // no print dialog. Falls back to downloading the print-ready HTML file if the
 // PDF engine isn't available (open it and print to PDF from there).
-async function makeDocPdfBlob(html){
-  // Deterministic pipeline: scope the doc's CSS to a container rendered in a
-  // hidden zero-height wrapper, capture it with html2canvas, and paginate the
-  // canvas onto letter pages with jsPDF ourselves.
-  const doc=new DOMParser().parseFromString(html,'text/html');
-  let css=[...doc.querySelectorAll('style')].map(st=>st.textContent).join('\n');
-  css=css.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g,'');
-  css=css.replace(/(^|\})([^{}@]+)\{/g,(m,brace,sel)=>brace+sel.split(',').map(x=>{
-    x=x.trim(); if(!x)return x;
-    if(x===':root'||x==='body')return '#pdfCap';
-    return '#pdfCap '+x.replace(/^body\s+/,'');
-  }).join(',')+'{');
-  const wrap=document.createElement('div');
-  wrap.style.cssText='position:absolute;left:0;top:0;width:820px;height:0;overflow:hidden;z-index:-1';
-  wrap.innerHTML='<style>'+css+'</style><div id="pdfCap" style="width:778px;background:#fff">'+doc.body.innerHTML+'</div>';
-  document.body.appendChild(wrap);
-  try{
-    await new Promise(r=>setTimeout(r,150));   // layout settle
-    const target=wrap.querySelector('#pdfCap');
-    const canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',windowWidth:820,logging:false});
-    const {jsPDF}=window.jspdf;
-    const pdf=new jsPDF({unit:'pt',format:'letter',orientation:'portrait'});
-    const M=30;                                  // page margin (pt)
-    const pageW=612-2*M, pageH=792-2*M;
-    const pxPerPt=canvas.width/pageW;
-    const slicePx=Math.floor(pageH*pxPerPt);
-    // Candidate cut lines = bottoms of rows/paragraphs/blocks, so a page break
-    // never slices through a line of text or a table row.
-    const scaleF=canvas.width/target.offsetWidth;
-    const topRef=target.getBoundingClientRect().top;
-    const cuts=[...target.querySelectorAll('tr,p,h3,h4,table,.notice,.sig,.blocks,div')]
-      .map(el2=>Math.round((el2.getBoundingClientRect().bottom-topRef)*scaleF))
-      .filter(v=>v>0&&v<canvas.height).sort((a2,b2)=>a2-b2);
-    let y=0, first=true;
-    while(y<canvas.height){
-      let h=Math.min(slicePx,canvas.height-y);
-      if(y+h<canvas.height){
-        const floor=y+Math.floor(slicePx*0.55);
-        let best=-1;
-        for(const c of cuts){ if(c>floor&&c<=y+slicePx)best=c; if(c>y+slicePx)break; }
-        if(best>0)h=best-y;
-      }
-      const part=document.createElement('canvas');
-      part.width=canvas.width; part.height=h;
-      const ctx=part.getContext('2d');
-      ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,part.width,part.height);
-      ctx.drawImage(canvas,0,y,canvas.width,h,0,0,canvas.width,h);
-      if(!first)pdf.addPage();
-      pdf.addImage(part.toDataURL('image/jpeg',0.97),'JPEG',M,M,pageW,h/pxPerPt);
-      first=false; y+=h;
-    }
-    return pdf.output('blob');
-  }finally{wrap.remove();}
-}
-async function downloadDoc(html,pdfName){
-  const fs=document.getElementById('finalStatus');
-  fs.className='status'; fs.textContent='Building '+pdfName+'…';
-  try{
-    if(typeof html2canvas==='undefined'||typeof window.jspdf==='undefined')throw new Error('PDF engine not loaded');
-    const blob=await makeDocPdfBlob(html);
-    _serveFile(blob,pdfName);
-    fs.className='status ok'; fs.textContent=pdfName+' downloaded.';
-  }catch(e){
-    fs.className='status err';
-    fs.textContent='PDF generation failed: '+e.message+' — refresh the page and retry (the PDF engine loads from the CDN).';
-  }
-}
+
 // Every export button carries data-act; sections may repeat the same action
 // (each deliverable stage lists everything that submission needs).
 function _serveFile(f,name){const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=name;a.click();}
@@ -3150,11 +3215,11 @@ document.addEventListener('click',e=>{
     dlvXmlBase:()=>downloadDeliverableXml('baseline'), dlvXmlImp:()=>downloadDeliverableXml('improved'),
     utilBase:()=>downloadUtility('baseline'), utilImp:()=>downloadUtility('improved'),
     packet:()=>downloadPacket(), workbook:()=>downloadInvoiceWorkbook(),
-    auditDoc:()=>downloadDoc(eesDocHtml('audit'),_docBase()+'_Audit_Invoice.pdf'),
-    propDoc:()=>downloadDoc(eesDocHtml('proposal'),_docBase()+'_HOMES_Proposal.pdf'),
-    invDoc:()=>downloadDoc(eesDocHtml('invoice'),_docBase()+'_HOMES_Project_Invoice.pdf'),
-    sealedProp:()=>downloadDoc(sealedHtml('proposal'),_docBase()+'_Sealed_Proposal.pdf'),
-    sealedInv:()=>downloadDoc(sealedHtml('invoice'),_docBase()+'_Sealed_Invoice.pdf'),
+    auditDoc:()=>downloadDoc('audit',_docBase()+'_Audit_Invoice.pdf'),
+    propDoc:()=>downloadDoc('proposal',_docBase()+'_HOMES_Proposal.pdf'),
+    invDoc:()=>downloadDoc('invoice',_docBase()+'_HOMES_Project_Invoice.pdf'),
+    sealedProp:()=>downloadDoc('sealedProposal',_docBase()+'_Sealed_Proposal.pdf'),
+    sealedInv:()=>downloadDoc('sealedInvoice',_docBase()+'_Sealed_Invoice.pdf'),
     reportBase:()=>downloadSourceReport('asBase'), reportImp:()=>downloadSourceReport('asImp')};
   if(A[b.dataset.act])A[b.dataset.act]();
 });
@@ -3264,12 +3329,12 @@ async function downloadPacket(){
     // 4) invoices & proposals: the filled paperwork workbook + the Sealed docs
     const inv=zip.folder('4_Invoices');
     inv.file(base+'_Project_Paperwork.xlsx', await buildInvoiceWorkbook());
-    if(typeof html2canvas==='undefined'||typeof window.jspdf==='undefined')
+    if(typeof window.jspdf==='undefined')
       throw new Error('PDF engine not loaded — refresh the page and retry');
-    for(const [nm,html] of [['Audit_Invoice',eesDocHtml('audit')],['HOMES_Proposal',eesDocHtml('proposal')],
-      ['HOMES_Project_Invoice',eesDocHtml('invoice')],['Sealed_Proposal',sealedHtml('proposal')],
-      ['Sealed_Invoice',sealedHtml('invoice')]])
-      inv.file(base+'_'+nm+'.pdf', await makeDocPdfBlob(html));
+    for(const [nm,which] of [['Audit_Invoice','audit'],['HOMES_Proposal','proposal'],
+      ['HOMES_Project_Invoice','invoice'],['Sealed_Proposal','sealedProposal'],
+      ['Sealed_Invoice','sealedInvoice']])
+      inv.file(base+'_'+nm+'.pdf', await makeDocPdfBlob(which));
     // 5) DOE Audit Template documents, when attached
     if(atDocs.basePdf||atDocs.impPdf||atDocs.baseXml||atDocs.impXml){
       const at=zip.folder('5_Audit_Template_Documents');
