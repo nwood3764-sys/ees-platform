@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 57 — PROPERTY, BILL TO, and invoice details all top-justified on one line</div>
+    Last updated 2026-07-20 · build 58 — rebate assignment notice removed everywhere; uniform font scale across all headers</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2883,8 +2883,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
   /* ---- header ---- */
   const docTitle=(isAudit||isInv)?'INVOICE':'PROPOSAL';
-  tc(C.navy); font(12.5,'bold'); t(M,st.y+16,'ENERGY EFFICIENCY SERVICES of WISCONSIN');
-  tc([150,160,174]); font(14); t(W-M,st.y+16,docTitle,{align:'right'});
+  tc(C.navy); font(11,'bold'); t(M,st.y+16,'ENERGY EFFICIENCY SERVICES of WISCONSIN');
+  tc([150,160,174]); font(11,'bold'); t(W-M,st.y+16,docTitle,{align:'right'});
   st.y+=23; stroke([150,160,174]); d.setLineWidth(.75); d.line(M,st.y,W-M,st.y); st.y+=12;
   /* ---- meta: one line ---- */
   const noLbl=(isAudit||isInv)?'Invoice No.:':'Proposal No.:';
@@ -3028,8 +3028,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
    rows.forEach(([lbl,val,strong],i)=>{const h=hh[i];
      if(strong){fill(HB); d.rect(TX,yy,TW,h,'F');}
      stroke(GL); d.setLineWidth(.6); d.rect(TX,yy,TW,h);
-     tc(strong?C.ink:[60,76,94]); font(strong?10:8.5,'bold'); t(TX+8,yy+h-5.5,lbl);
-     tc(C.ink); font(strong?10:9,strong?'bold':'normal'); t(AMT,yy+h-5.5,val,{align:'right'});
+     tc(strong?C.ink:[60,76,94]); font(strong?9.5:8.5,'bold'); t(TX+8,yy+h-5.5,lbl);
+     tc(C.ink); font(strong?9.5:9,strong?'bold':'normal'); t(AMT,yy+h-5.5,val,{align:'right'});
      yy+=h;});
    st.y=yy;}
   /* ---- deliverables (audit only) ---- */
@@ -3040,14 +3040,6 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      'Customer Report / Building Assessment Tool Report'].forEach(dl2=>{
       need(12); tc(C.ink); font(8.5); t(M+5,st.y+9,'\u2013  '+dl2); st.y+=12;});
   }
-  /* ---- rebate assignment notice ---- */
-  const notice=(isAudit||isInv)
-    ?'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above has been assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce this invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.'
-    :'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above will be assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce the future invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.';
-  {font(7.5,'italic'); const nl2=wrap(notice,CW-24), h=nl2.length*9+12; need(h+8); st.y+=8;
-   stroke(GL); d.setLineWidth(.6); d.rect(M,st.y,CW,h);
-   tc([90,102,118]); font(7.5,'italic'); nl2.forEach((ln,k)=>t(M+10,st.y+10+k*9,ln));
-   st.y+=h;}
   /* ---- acknowledgment + signature ---- */
   head('Acknowledgment & Acceptance',10);
   const ack=(isAudit||isInv)
