@@ -7,6 +7,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
 <!-- Runner endpoint config (set per-deploy in config.js). Loaded before the app
      so the .osm upload branch can read window.AUDIT_RUNNER_URL. -->
 <script src="config.js"></script>
@@ -119,7 +121,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 42 — two tabs: Energy Modeling (uploads, review, model exports) and Project Paperwork (form, DOE docs, deliverable stages)</div>
+    Last updated 2026-07-20 · build 43 — every document button DOWNLOADS a real PDF (no tabs, no print dialog); packet carries PDFs too</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2856,8 +2858,8 @@ function eesDocHtml(kind){
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)} — ${esc(F.pjPropName)}</title>
 <style>
  :root{--navy:#1C3D5E;--teal:#1D7874;--tealD:#155E5B;--orange:#FDF3E3;--obrd:#EFC584;--green:#E7F2E4;--line:#c9d4e0}
- body{font:12.5px/1.4 Calibri,Arial,sans-serif;color:#1a1a1a;margin:0;padding:0 0 30px}
- .page{max-width:960px;margin:0 auto;padding:26px 34px}
+ body{font:12.5px/1.4 Calibri,Arial,sans-serif;color:#1a1a1a;margin:0;padding:0 0 16px;width:778px}
+ .page{width:722px;margin:0;padding:20px 28px}
  .hdr{background:var(--navy);color:#fff;text-align:center;font:700 20px Calibri,Arial;padding:10px 0}
  .hdr2{background:var(--teal);color:#fff;text-align:center;font:600 13.5px Calibri,Arial;padding:6px 0}
  .meta{display:flex;justify-content:space-between;margin:14px 0 4px}
@@ -2886,7 +2888,7 @@ function eesDocHtml(kind){
  .sig div{border-top:1.5px solid var(--navy);flex:2;padding-top:4px;color:#8a97a8;font-size:12px}
  .sig div:last-child{flex:1}
  .foot{color:#8a97a8;text-align:center;font-style:italic;margin-top:34px;font-size:12px}
- @media print{.page{padding:8mm 10mm}}
+ @media print{body{width:auto}}
 </style></head><body>
 <div class="hdr">ENERGY EFFICIENCY SERVICES&nbsp; of WISCONSIN</div>
 <div class="hdr2">112 Owen Rd. PO Box 6141&nbsp; |&nbsp; Monona, WI 53716&nbsp; |&nbsp; 608-460-7419</div>
@@ -2922,12 +2924,12 @@ ${svcRows}</table>
 ${deliverables}
 <h3>${isAudit?'*Rebates &amp; Incentives':'Applicable Rebates &amp; Incentives'}</h3>
 <table class="svc"><tr class="hd"><th style="width:34px"></th><th>Program</th><th>Incentive Desciption</th><th style="width:95px;text-align:right">Amount</th><th style="width:130px">Notes</th></tr>
-<tr><td rowspan="4" style="writing-mode:vertical-rl;transform:rotate(180deg);text-align:center;font-weight:700">NON-IRA</td>
+<tr><td rowspan="4" style="text-align:center;font-weight:700;font-size:10px">NON-<br>IRA</td>
  <td>Focus on Energy - Instant Discount</td><td>${esc(foeDesc)}</td><td class="r">${foeAmt?money(foeAmt):''}</td><td style="font-style:italic;font-size:11px">${esc(foeNote)}</td></tr>
 <tr><td>Focus on Energy - Other</td><td></td><td></td><td></td></tr>
 <tr><td>Utility Rebate - ${isAudit?'Midstream Instant Discount':'Instant Discount'}</td><td></td><td></td><td></td></tr>
 <tr><td>Utility Rebate - Other</td><td></td><td></td><td></td></tr>
-<tr><td rowspan="2" style="writing-mode:vertical-rl;transform:rotate(180deg);text-align:center;font-weight:700">IRA</td>
+<tr><td rowspan="2" style="text-align:center;font-weight:700;font-size:10px">IRA</td>
  <td>IRA HOMES ${isAudit?'Incentive ':''}- Instant Discount</td><td>${esc(iraDesc)}</td><td class="r">${money(iraAmt)}</td><td style="font-style:italic;font-size:11px">${esc(iraNote)}</td></tr>
 <tr><td>IRA HOMES ${isAudit?'Incentive ':''}- Other</td><td></td><td></td><td></td></tr></table>
 <div class="notice">${esc(notice)}</div>
@@ -2954,7 +2956,7 @@ function sealedHtml(kind){   // 'proposal' | 'invoice'
     <td class="t">${money(r.cost)}</td></tr>`).join('');
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${isInv?'Invoice':'Proposal'} — ${esc(F.pjPropName)}</title>
 <style>
- body{font:13px/1.45 Arial,Helvetica,sans-serif;color:#222;margin:40px 48px;max-width:900px}
+ body{font:13px/1.45 Arial,Helvetica,sans-serif;color:#222;margin:0;padding:12px 10px;width:760px}
  h2.doc{color:#2f80d6;font-size:34px;margin:26px 0 10px}
  .blocks{display:flex;justify-content:space-between;gap:40px}.blocks>div{flex:1}
  h4{color:#2f80d6;font-size:12.5px;letter-spacing:.03em;margin:18px 0 6px;border-bottom:0}
@@ -2971,7 +2973,7 @@ function sealedHtml(kind){   // 'proposal' | 'invoice'
  .sig{margin-top:48px;display:flex;gap:60px}
  .sig div{border-top:1px solid #444;flex:2;padding-top:4px;font-size:11.5px}
  .sig div:last-child{flex:1}
- @media print{body{margin:14mm}}
+ @media print{body{margin:0;padding:0}}
 </style></head><body>
 <div class="blocks"><div class="blk">
  <h4>PRIMARY CONTRACTOR:</h4>
@@ -3016,14 +3018,67 @@ async function downloadInvoiceWorkbook(){
     fs.className='status ok'; fs.textContent='Paperwork workbook downloaded (Audit Invoice · HOMES Proposal · HOMES Project Invoice).';
   }catch(e){fs.className='status err';fs.textContent='Workbook error: '+e.message;}
 }
-// Open a print-ready document in a new tab (print → Save as PDF).
-function openDoc(html){
-  const w=window.open('','_blank'); if(!w)return;
-  w.document.write(html); w.document.close();
+// Render a print-ready HTML document to a real PDF and DOWNLOAD it — no tabs,
+// no print dialog. Falls back to downloading the print-ready HTML file if the
+// PDF engine isn't available (open it and print to PDF from there).
+async function makeDocPdfBlob(html){
+  // Deterministic pipeline: scope the doc's CSS to a container rendered in a
+  // hidden zero-height wrapper, capture it with html2canvas, and paginate the
+  // canvas onto letter pages with jsPDF ourselves.
+  const doc=new DOMParser().parseFromString(html,'text/html');
+  let css=[...doc.querySelectorAll('style')].map(st=>st.textContent).join('\n');
+  css=css.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g,'');
+  css=css.replace(/(^|\})([^{}@]+)\{/g,(m,brace,sel)=>brace+sel.split(',').map(x=>{
+    x=x.trim(); if(!x)return x;
+    if(x===':root'||x==='body')return '#pdfCap';
+    return '#pdfCap '+x.replace(/^body\s+/,'');
+  }).join(',')+'{');
+  const wrap=document.createElement('div');
+  wrap.style.cssText='position:absolute;left:0;top:0;width:820px;height:0;overflow:hidden;z-index:-1';
+  wrap.innerHTML='<style>'+css+'</style><div id="pdfCap" style="width:778px;background:#fff">'+doc.body.innerHTML+'</div>';
+  document.body.appendChild(wrap);
+  try{
+    await new Promise(r=>setTimeout(r,150));   // layout settle
+    const target=wrap.querySelector('#pdfCap');
+    const canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',windowWidth:820,logging:false});
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({unit:'pt',format:'letter',orientation:'portrait'});
+    const M=26;                                  // page margin (pt)
+    const pageW=612-2*M, pageH=792-2*M;
+    const pxPerPt=canvas.width/pageW;
+    const slicePx=Math.floor(pageH*pxPerPt);
+    let y=0, first=true;
+    while(y<canvas.height){
+      const h=Math.min(slicePx,canvas.height-y);
+      const part=document.createElement('canvas');
+      part.width=canvas.width; part.height=h;
+      part.getContext('2d').drawImage(canvas,0,y,canvas.width,h,0,0,canvas.width,h);
+      if(!first)pdf.addPage();
+      pdf.addImage(part.toDataURL('image/jpeg',0.95),'JPEG',M,M,pageW,h/pxPerPt);
+      first=false; y+=h;
+    }
+    return pdf.output('blob');
+  }finally{wrap.remove();}
+}
+async function downloadDoc(html,pdfName){
+  const fs=document.getElementById('finalStatus');
+  fs.className='status'; fs.textContent='Building '+pdfName+'…';
+  try{
+    if(typeof html2canvas==='undefined'||typeof window.jspdf==='undefined')throw new Error('PDF engine not loaded');
+    const blob=await makeDocPdfBlob(html);
+    _serveFile(blob,pdfName);
+    fs.className='status ok'; fs.textContent=pdfName+' downloaded.';
+  }catch(e){
+    const blob=new Blob([html],{type:'text/html'});
+    _serveFile(blob,pdfName.replace(/\.pdf$/i,'.html'));
+    fs.className='status ok';
+    fs.textContent='PDF engine unavailable ('+e.message+') — downloaded the print-ready HTML instead; open it and print to PDF.';
+  }
 }
 // Every export button carries data-act; sections may repeat the same action
 // (each deliverable stage lists everything that submission needs).
 function _serveFile(f,name){const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=name;a.click();}
+function _docBase(){const as=data.asImp||data.asBase;return fileBase(as?as.name:'Building');}
 function downloadSourceReport(key){
   const as=data.asImp||data.asBase, base=fileBase(as?as.name:'Building');
   // Prefer the uploaded DOE Audit Template report; fall back to the Asset Score report.
@@ -3046,9 +3101,11 @@ document.addEventListener('click',e=>{
     dlvXmlBase:()=>downloadDeliverableXml('baseline'), dlvXmlImp:()=>downloadDeliverableXml('improved'),
     utilBase:()=>downloadUtility('baseline'), utilImp:()=>downloadUtility('improved'),
     packet:()=>downloadPacket(), workbook:()=>downloadInvoiceWorkbook(),
-    auditDoc:()=>openDoc(eesDocHtml('audit')), propDoc:()=>openDoc(eesDocHtml('proposal')),
-    invDoc:()=>openDoc(eesDocHtml('invoice')), sealedProp:()=>openDoc(sealedHtml('proposal')),
-    sealedInv:()=>openDoc(sealedHtml('invoice')),
+    auditDoc:()=>downloadDoc(eesDocHtml('audit'),_docBase()+'_Audit_Invoice.pdf'),
+    propDoc:()=>downloadDoc(eesDocHtml('proposal'),_docBase()+'_HOMES_Proposal.pdf'),
+    invDoc:()=>downloadDoc(eesDocHtml('invoice'),_docBase()+'_HOMES_Project_Invoice.pdf'),
+    sealedProp:()=>downloadDoc(sealedHtml('proposal'),_docBase()+'_Sealed_Proposal.pdf'),
+    sealedInv:()=>downloadDoc(sealedHtml('invoice'),_docBase()+'_Sealed_Invoice.pdf'),
     reportBase:()=>downloadSourceReport('asBase'), reportImp:()=>downloadSourceReport('asImp')};
   if(A[b.dataset.act])A[b.dataset.act]();
 });
@@ -3158,11 +3215,13 @@ async function downloadPacket(){
     // 4) invoices & proposals: the filled paperwork workbook + the Sealed docs
     const inv=zip.folder('4_Invoices');
     inv.file(base+'_Project_Paperwork.xlsx', await buildInvoiceWorkbook());
-    inv.file(base+'_Audit_Invoice.html', eesDocHtml('audit'));
-    inv.file(base+'_HOMES_Proposal.html', eesDocHtml('proposal'));
-    inv.file(base+'_HOMES_Project_Invoice.html', eesDocHtml('invoice'));
-    inv.file(base+'_Sealed_Proposal.html', sealedHtml('proposal'));
-    inv.file(base+'_Sealed_Invoice.html', sealedHtml('invoice'));
+    for(const [nm,html] of [['Audit_Invoice',eesDocHtml('audit')],['HOMES_Proposal',eesDocHtml('proposal')],
+      ['HOMES_Project_Invoice',eesDocHtml('invoice')],['Sealed_Proposal',sealedHtml('proposal')],
+      ['Sealed_Invoice',sealedHtml('invoice')]]){
+      try{ if(typeof html2canvas==='undefined'||typeof window.jspdf==='undefined')throw 0;
+        inv.file(base+'_'+nm+'.pdf', await makeDocPdfBlob(html)); }
+      catch(e){ inv.file(base+'_'+nm+'.html', html); }
+    }
     // 5) DOE Audit Template documents, when attached
     if(atDocs.basePdf||atDocs.impPdf||atDocs.baseXml||atDocs.impXml){
       const at=zip.folder('5_Audit_Template_Documents');
