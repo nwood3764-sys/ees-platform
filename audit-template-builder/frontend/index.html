@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 52 — professional document styling: quiet headers, hairline rules, no color bands; Sealed header tightened; emoji removed from buttons</div>
+    Last updated 2026-07-20 · build 53 — Paper tab reorganized: project details first, one combined Uploaded Documents section</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -223,21 +223,7 @@
   </div>
 
   <div id="tabPaper" class="tabPane">
-  <div style="margin-top:6px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Audit reports (required)</div>
-  <div style="font-size:12px;color:var(--mut);margin-top:3px">The two Asset Score reports drive every number on the paperwork — savings tier, attic quantities, rebate math. Uploading here is the same as uploading on the Energy Modeling tab.</div>
-  <div class="slots" style="margin-top:10px">
-    <div class="slot" data-key="asBase"><span class="tag">PDF</span>
-      <div class="role">Baseline Asset Score Report</div>
-      <div class="hint">The as-is building report</div>
-      <div class="got"></div>
-      <input type="file" accept=".pdf"></div>
-    <div class="slot" data-key="asImp"><span class="tag">PDF</span>
-      <div class="role">Improved Asset Score Report</div>
-      <div class="hint">The recommended/upgraded building report</div>
-      <div class="got"></div>
-      <input type="file" accept=".pdf"></div>
-  </div>
-  <div id="pjRow" style="margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
+  <div id="pjRow" style="margin-top:6px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
     <strong style="font-size:13.5px">Project &amp; invoice details</strong>
     <span class="copyhint">— fills the paperwork; property fields prefill from the reports, everything editable; saved in this browser per property</span>
     <div class="pjgrid">
@@ -262,23 +248,33 @@
     </div>
   </div>
 
-  <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">DOE Audit Template documents (required)</div>
-  <div style="font-size:12px;color:var(--mut);margin-top:3px">Attach the exact XML files that were imported into DOE (or DOE’s own exports) and the DOE-generated report PDFs — paperwork must match what actually went to DOE, and nothing is ever regenerated on this tab. The <b>Audit Invoice</b> unlocks with the baseline pair (report PDF + XML); <b>Project Reservation</b> and <b>Project Payment</b> paperwork need all four documents.</div>
+  <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Uploaded documents</div>
+  <div style="font-size:12px;color:var(--mut);margin-top:3px">The Asset Score reports drive the paperwork math; the Audit Template reports and XMLs are the exact files that went to DOE — nothing is ever regenerated on this tab. The <b>Audit Invoice</b> unlocks with the baseline Audit Template report + XML; <b>Project Reservation</b> and <b>Project Payment</b> paperwork need all of them.</div>
   <div class="slots" style="margin-top:10px">
+    <div class="slot" data-key="asBase"><span class="tag">PDF</span>
+      <div class="role">Asset Score Report — Baseline</div>
+      <div class="hint">The as-is building report</div>
+      <div class="got"></div>
+      <input type="file" accept=".pdf"></div>
+    <div class="slot" data-key="asImp"><span class="tag">PDF</span>
+      <div class="role">Asset Score Report — Improved</div>
+      <div class="hint">The recommended/upgraded building report</div>
+      <div class="got"></div>
+      <input type="file" accept=".pdf"></div>
     <div class="slot" data-atkey="basePdf"><span class="tag">PDF</span>
-      <div class="role">Baseline Audit Template Report</div>
+      <div class="role">Audit Template Report — Baseline</div>
       <div class="hint">DOE-generated report for the baseline building</div>
       <div class="got"></div><input type="file" accept=".pdf"></div>
     <div class="slot" data-atkey="impPdf"><span class="tag">PDF</span>
-      <div class="role">Improved Audit Template Report</div>
+      <div class="role">Audit Template Report — Improved</div>
       <div class="hint">DOE-generated report for the improved building</div>
       <div class="got"></div><input type="file" accept=".pdf"></div>
     <div class="slot" data-atkey="baseXml"><span class="tag">XML</span>
-      <div class="role">Baseline Audit Template Export</div>
+      <div class="role">Audit Template XML — Baseline</div>
       <div class="hint">XML exported from DOE for the baseline building</div>
       <div class="got"></div><input type="file" accept=".xml"></div>
     <div class="slot" data-atkey="impXml"><span class="tag">XML</span>
-      <div class="role">Improved Audit Template Export</div>
+      <div class="role">Audit Template XML — Improved</div>
       <div class="hint">XML exported from DOE for the improved building</div>
       <div class="got"></div><input type="file" accept=".xml"></div>
   </div>
