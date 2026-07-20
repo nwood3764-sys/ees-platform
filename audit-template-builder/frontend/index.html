@@ -74,6 +74,19 @@
   .btn.ghost{background:#fff;color:var(--moss-d);border:1px solid var(--moss)}
   .btn.ghost:hover{background:#eef4ed}
   .btn.ghost[disabled]{background:#f3f2ec;color:#aaa;border-color:#d8d4c6}
+  /* Deliverable-stage section cards: each stage gets its own accent color
+     (blues/greens/violets only — no reds/oranges). Buttons inside run at 90%. */
+  .expSect{border:2px solid;border-radius:12px;padding:12px 16px 14px;margin:16px 0;background:#fff}
+  .expSect .expHdr{font:800 12.5px/1 inherit;letter-spacing:.07em;text-transform:uppercase;
+    display:inline-block;padding:5px 12px;border-radius:999px;color:#fff;margin-bottom:2px}
+  .expSect .bar{position:static;margin-top:2px;padding:8px 0 2px}
+  .expSect .btn{font:600 14.4px/1 inherit;padding:12.6px 21.6px}
+  .expSect .expSub{font:700 11.5px/1 inherit;letter-spacing:.05em;text-transform:uppercase;margin:8px 0 0 6px}
+  .sectReview {border-color:#5b7fa6;background:#f5f9fd}.sectReview .expHdr{background:#5b7fa6}.sectReview .expSub{color:#35618f}
+  .sectEnergy {border-color:#1D7874;background:#edf7f6}.sectEnergy .expHdr{background:#1D7874}.sectEnergy .expSub{color:#155E5B}
+  .sectAudit  {border-color:#3e7d4f;background:#f0f7f1}.sectAudit  .expHdr{background:#3e7d4f}.sectAudit .expSub{color:#2f6540}
+  .sectResv   {border-color:#6b5fa6;background:#f5f3fb}.sectResv   .expHdr{background:#6b5fa6}.sectResv .expSub{color:#544a8a}
+  .sectPay    {border-color:#1C3D5E;background:#eef2f8}.sectPay    .expHdr{background:#1C3D5E}.sectPay .expSub{color:#1C3D5E}
   .status{font-size:13px;color:var(--mut)}
   .status.err{color:var(--warn)}
   .status.ok{color:var(--moss-d)}
@@ -101,7 +114,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 38 — deliverable sections: Energy modeling · Audit Rebate · Project Reservation · Project Payment, each with its full file set</div>
+    Last updated 2026-07-20 · build 39 — color-coded section cards per deliverable stage; buttons at 90%</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -177,13 +190,16 @@
     </div>
   </div>
 
-  <div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Review tools</div>
+    <div class="expSect sectReview">
+  <div class="expHdr">Review tools</div>
   <div class="bar">
     <button class="btn" id="aiExtract" disabled>🧠 AI Extract &amp; Map</button>
     <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
   </div>
+  </div>
 
-<div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Energy modeling</div>
+  <div class="expSect sectEnergy">
+  <div class="expHdr">Energy modeling</div>
   <div class="bar">
     <button class="btn ghost" data-act="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
     <button class="btn ghost" data-act="utilImp" disabled>↓ Improved Utility (xlsx)</button>
@@ -191,15 +207,19 @@
     <button class="btn" data-act="xmlImp" disabled>↓ Improved Audit Template (XML)</button>
     <button class="btn" data-act="packet" disabled>📦 Energy Model Packet (zip)</button>
   </div>
+  </div>
 
-<div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Audit Rebate Deliverables</div>
+  <div class="expSect sectAudit">
+  <div class="expHdr">Audit Rebate Deliverables</div>
   <div class="bar">
     <button class="btn ghost" data-act="reportBase" disabled>📄 Baseline Audit Report (PDF)</button>
     <button class="btn ghost" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
     <button class="btn ghost" data-act="auditDoc" disabled>🧾 Audit Invoice (PDF)</button>
   </div>
+  </div>
 
-<div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Project Reservation Deliverables</div>
+  <div class="expSect sectResv">
+  <div class="expHdr">Project Reservation Deliverables</div>
   <div class="bar">
     <button class="btn ghost" data-act="reportBase" disabled>📄 Baseline Audit Report (PDF)</button>
     <button class="btn ghost" data-act="reportImp" disabled>📄 Improved Audit Report (PDF)</button>
@@ -208,12 +228,14 @@
     <button class="btn ghost" data-act="propDoc" disabled>🧾 HOMES Proposal (PDF)</button>
     <button class="btn ghost" data-act="workbook" disabled>🧾 Paperwork Workbook (xlsx)</button>
   </div>
-  <div style="font:600 12px Inter,system-ui,sans-serif;color:var(--mut);margin:6px 0 2px 12px">Sealed</div>
+  <div class="expSub">Sealed</div>
   <div class="bar" style="margin-left:12px">
     <button class="btn ghost" data-act="sealedProp" disabled>🧾 Sealed Proposal (PDF)</button>
   </div>
+  </div>
 
-<div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Project Payment Deliverables</div>
+  <div class="expSect sectPay">
+  <div class="expHdr">Project Payment Deliverables</div>
   <div class="bar">
     <button class="btn ghost" data-act="invDoc" disabled>🧾 Final Invoice — HOMES Project Invoice (PDF)</button>
     <button class="btn ghost" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
@@ -221,10 +243,12 @@
     <button class="btn ghost" data-act="reportBase" disabled>📄 Baseline Audit Report (PDF)</button>
     <button class="btn ghost" data-act="reportImp" disabled>📄 Improved Audit Report (PDF)</button>
   </div>
-  <div style="font:600 12px Inter,system-ui,sans-serif;color:var(--mut);margin:6px 0 2px 12px">Sealed</div>
+  <div class="expSub">Sealed</div>
   <div class="bar" style="margin-left:12px">
     <button class="btn ghost" data-act="sealedInv" disabled>🧾 Sealed Invoice (PDF)</button>
   </div>
+  </div>
+
   <div class="bar"><span class="status" id="finalStatus"></span></div>
   <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
     <div style="display:flex;justify-content:space-between;align-items:center">
