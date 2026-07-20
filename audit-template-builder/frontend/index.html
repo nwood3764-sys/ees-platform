@@ -120,7 +120,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 47 — true vector PDFs: crisp selectable text at any zoom, compact multi-column measure descriptions</div>
+    Last updated 2026-07-20 · build 48 — professional invoice restyle: no form boxes, clean typographic header, address in footer</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2869,28 +2869,25 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const isAudit=kind==='audit', isInv=kind==='invoice';
   const P=_pdfNew(); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
   const LH=11;
-  /* header bands (page 1) */
-  fill(C.navy); d.rect(0,0,W,44,'F');
-  tc([255,255,255]); font(16,'bold'); t(W/2,28,'ENERGY EFFICIENCY SERVICES  of WISCONSIN',{align:'center'});
-  fill(C.teal); d.rect(0,44,W,20,'F');
-  font(9.5,'bold'); t(W/2,57.5,'112 Owen Rd. PO Box 6141  |  Monona, WI 53716  |  608-460-7419',{align:'center'});
-  st.y=64+20;
-  /* soft input box */
-  const box=(x,yy,w,h,val,align)=>{fill(C.soft);stroke(C.obrd);d.setLineWidth(.75);
-    d.rect(x,yy,w,h,'FD'); if(val!=null&&val!==''){tc(C.ink);font(9);
-      const lines=wrap(val,w-12);
-      lines.forEach((ln,i)=>t(align==='right'?x+w-6:x+6,yy+11+i*10.5,ln,align==='right'?{align:'right'}:{}));}};
-  const boxH=(val,w)=>Math.max(16,wrap(val||' ',w-12).length*10.5+6);
-  /* meta row */
+  /* header (page 1) — clean typographic, no bands */
+  const docTitle=(isAudit||isInv)?'INVOICE':'PROPOSAL';
+  tc(C.navy); font(14.5,'bold'); t(M,st.y+18,'ENERGY EFFICIENCY SERVICES of WISCONSIN');
+  tc([178,190,204]); font(21,'bold'); t(W-M,st.y+19,docTitle,{align:'right'});
+  st.y+=28; stroke(C.navy); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=14;
+  /* plain-text value (replaces the old fillable-form boxes) */
+  const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'—';
+  /* meta rows */
   const noLbl=isAudit||isInv?'Invoice No.:':'Proposal No.:';
   const dateLbl=isAudit||isInv?'Invoice Date:':'Date:';
   const termLbl=isAudit||isInv?'Due Date:':'Valid for:';
   const docNo=isAudit?(F.pjInvNo||'INV-WI-'):(isInv?(F.pjProjInvNo||''):(F.pjPropNo||'HOMES-MF-'));
-  tc(C.navy); font(9.5,'bold');
-  t(M,st.y+11,noLbl); box(M+68,st.y,130,16,docNo);
-  t(W-M-210,st.y+11,dateLbl,{align:'right'}); box(W-M-140,st.y,140,16,F.pjInvDate,'right');
-  t(W-M-210,st.y+31,termLbl,{align:'right'}); box(W-M-140,st.y+20,140,16,isAudit?'Net 30':'30 days','right');
-  st.y+=48;
+  tc([60,76,94]); font(8.5,'bold'); t(M,st.y+9,noLbl);
+  tc(C.ink); font(9.5); t(M+70,st.y+9,pv(docNo));
+  tc([60,76,94]); font(8.5,'bold'); t(W-M-150,st.y+9,dateLbl,{align:'right'});
+  tc(C.ink); font(9.5); t(W-M,st.y+9,pv(F.pjInvDate),{align:'right'});
+  tc([60,76,94]); font(8.5,'bold'); t(W-M-150,st.y+23,termLbl,{align:'right'});
+  tc(C.ink); font(9.5); t(W-M,st.y+23,isAudit?'Net 30':'30 days',{align:'right'});
+  st.y+=32;
   /* section heading */
   const head=txt=>{need(30); st.y+=12; tc(C.navy); font(10,'bold');
     t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke(C.navy); d.setLineWidth(1.4);
@@ -2903,8 +2900,10 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const R=[['Property Name:',F.pjPropName],['Installation Address:',F.pjInstallAddr],['City, State Zip:',F.pjCsz],
     ['Property Type:','Multifamily'],['IQ Number:',F.pjIQ]];
   let yl=st.y, yr=st.y;
-  const kv=(x,yy,lbl,val)=>{const h=boxH(val,bw); tc([60,76,94]); font(8.5,'bold');
-    t(x+lblW,yy+11,lbl,{align:'right'}); box(x+lblW+6,yy,bw,h,val); return h+4;};
+  const kv=(x,yy,lbl,val)=>{const lines=wrap(pv(val),bw);
+    tc([60,76,94]); font(8.5,'bold'); t(x+lblW,yy+9,lbl,{align:'right'});
+    tc(C.ink); font(9.5); lines.forEach((ln,i)=>t(x+lblW+8,yy+9+i*11,ln));
+    return Math.max(1,lines.length)*11+4;};
   for(const [lb,v] of L) yl+=kv(M,yl,lb,v);
   for(const [lb,v] of R) yr+=kv(M+half+16,yr,lb,v);
   st.y=Math.max(yl,yr);
@@ -2912,15 +2911,15 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   head(isAudit?'Audit Services':(isInv?'Installed Scope of Work - HOMES PROJECT':'Proposed Scope of Work - HOMES PROJECT'));
   if(!isAudit){
     tc([60,76,94]); font(8.5,'bold');
-    t(M+118,st.y+11,isInv?'Start Date:':'Estimated Start Date:',{align:'right'});
-    box(M+124,st.y,110,16,isInv?F.pjStart:F.pjEstStart);
-    t(M+430,st.y+11,isInv?'Completion Date:':'Estimated Completion Date:',{align:'right'});
-    box(M+436,st.y,96,16,isInv?F.pjEnd:F.pjEstEnd);
-    st.y+=22;
+    t(M+118,st.y+9,isInv?'Start Date:':'Estimated Start Date:',{align:'right'});
+    tc(C.ink); font(9.5); t(M+126,st.y+9,pv(isInv?F.pjStart:F.pjEstStart));
+    tc([60,76,94]); font(8.5,'bold'); t(M+430,st.y+9,isInv?'Completion Date:':'Estimated Completion Date:',{align:'right'});
+    tc(C.ink); font(9.5); t(M+438,st.y+9,pv(isInv?F.pjEnd:F.pjEstEnd));
+    st.y+=16;
   }
-  tc([60,76,94]); font(8.5,'bold'); t(M+118,st.y+11,'Registered Contractor Name:',{align:'right'});
-  box(M+124,st.y,240,16,'Energy Efficiency Services of Wisconsin');
-  st.y+=24;
+  tc([60,76,94]); font(8.5,'bold'); t(M+118,st.y+9,'Registered Contractor Name:',{align:'right'});
+  tc(C.ink); font(9.5); t(M+126,st.y+9,'Energy Efficiency Services of Wisconsin');
+  st.y+=18;
   /* items table */
   const th=(cols)=>{need(20); fill(C.navy); d.rect(M,st.y,CW,17,'F');
     tc([255,255,255]); font(8,'bold');
@@ -2937,10 +2936,9 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       ['4','Mechanical Systems Survey','1','Lump Sum','included','included']];
     rows.forEach((r,i)=>{need(18);
       if(i%2===0){fill(C.green); d.rect(M,st.y,CW,17,'F');}
-      if(r[2]!==''){fill(C.soft);stroke(C.obrd);d.setLineWidth(.6);d.rect(cols[2].x+8,st.y+2,30,13,'FD');}
       tc(C.mut); font(9); t(cols[0].x+5,st.y+11.5,r[0]);
       tc(C.ink); t(cols[1].x+5,st.y+11.5,r[1]);
-      if(r[2]!=='')t(cols[2].x+23,st.y+11.5,r[2],{align:'center'});
+      if(r[2]!=='')t(cols[2].x+cols[2].w-5,st.y+11.5,r[2],{align:'right'});
       t(cols[3].x+5,st.y+11.5,r[3]);
       t(cols[4].x+cols[4].w-5,st.y+11.5,r[4],{align:'right'});
       t(cols[5].x+cols[5].w-5,st.y+11.5,r[5],{align:'right'});
@@ -2963,8 +2961,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       /* name line */
       tc(C.mut); font(9); t(X+5,st.y+12,String(i+1));
       tc(C.navy); font(10,'bold'); t(X+25,st.y+12,r.name);
-      fill(C.soft);stroke(C.obrd);d.setLineWidth(.6);d.rect(cols[2].x+6,st.y+1,52,14,'FD');
-      tc(C.ink); font(9); t(cols[2].x+32,st.y+11.5,_qty(r.qty),{align:'center'});
+      tc(C.ink); font(9); t(cols[2].x+cols[2].w-6,st.y+11.5,_qty(r.qty),{align:'right'});
       t(cols[3].x+5,st.y+11.5,r.unit);
       font(9.5,'bold'); t(cols[5].x+cols[5].w-5,st.y+11.5,_money(r.cost),{align:'right'});
       st.y+=headH;
@@ -2985,19 +2982,26 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   }
   /* totals block — right aligned like the workbook */
   const gross=isAudit?2000:m.total, foeAmt=isAudit?0:m.foeAmt, iraAmt=isAudit?2000:m.homesAmt;
-  const totRows=[['Gross Total',_money(gross),C.navy],
-    ['Non-IRA Rebates*',foeAmt?_money(foeAmt):'-',C.tealD],
-    ['IRA Rebates*',_money(iraAmt),C.tealD],
-    ['Total Rebates','('+_money(foeAmt+iraAmt)+')',C.tealD],
-    ['TOTAL DUE',Math.abs(gross-foeAmt-iraAmt)<0.005?'-':_money(gross-foeAmt-iraAmt),C.navy]];
-  need(totRows.length*17+6);
-  const TX=W-M-300;
-  for(const [lbl,val,col] of totRows){
-    fill(col); d.rect(TX,st.y,300,16,'F');
-    tc([255,255,255]); font(9,'bold');
-    t(TX+190,st.y+11,lbl,{align:'right'}); t(TX+294,st.y+11,val,{align:'right'});
-    st.y+=16.5;
-  }
+  const totRows=[['Gross Total',_money(gross)],
+    ['Non-IRA Rebates*',foeAmt?_money(foeAmt):'-'],
+    ['IRA Rebates*',_money(iraAmt)],
+    ['Total Rebates','('+_money(foeAmt+iraAmt)+')'],
+    ['TOTAL DUE',Math.abs(gross-foeAmt-iraAmt)<0.005?'-':_money(gross-foeAmt-iraAmt)]];
+  need(totRows.length*18+12); st.y+=6;
+  const TX=W-M-280;
+  totRows.forEach(([lbl,val],i)=>{
+    const last=i===totRows.length-1;
+    if(last){fill(C.navy); d.rect(TX,st.y,280,19,'F');
+      tc([255,255,255]); font(9.5,'bold');
+      t(TX+170,st.y+13,lbl,{align:'right'}); t(TX+274,st.y+13,val,{align:'right'});
+      st.y+=19;
+    }else{
+      tc([60,76,94]); font(9,'bold'); t(TX+170,st.y+12,lbl,{align:'right'});
+      tc(C.ink); font(9); t(TX+274,st.y+12,val,{align:'right'});
+      stroke(C.line); d.setLineWidth(.5); d.line(TX,st.y+16.5,TX+280,st.y+16.5);
+      st.y+=17.5;
+    }
+  });
   /* deliverables (audit only) */
   if(isAudit){
     head('Deliverables');
@@ -3011,8 +3015,6 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       if(i%2===1){fill(C.green); d.rect(M,st.y,CW,h,'F');}
       tc(C.mut); font(9); t(M+5,st.y+12,String(i+1));
       tc(C.ink); font(8.5); lines.forEach((ln,k)=>t(M+25,st.y+11+k*9.5,ln));
-      fill(C.soft);stroke(C.obrd);d.setLineWidth(.6);
-      d.rect(M+248,st.y+2,88,h-5,'FD'); d.rect(M+343,st.y+2,88,h-5,'FD');
       stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+h,W-M,st.y+h);
       st.y+=h;});
   }
@@ -3053,8 +3055,10 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
    st.y+=h;}
   /* additional notes */
   need(40); st.y+=14; tc([60,76,94]); font(8.5,'bold');
-  t(M+118,st.y+12,'Additional Notes:',{align:'right'}); box(M+124,st.y,CW-124,26,'');
-  st.y+=32;
+  t(M,st.y+10,'Additional Notes:');
+  stroke(C.line); d.setLineWidth(.5);
+  d.line(M+92,st.y+12,W-M,st.y+12); d.line(M,st.y+27,W-M,st.y+27);
+  st.y+=34;
   /* acknowledgment */
   head('Acknowledgment & Acceptance');
   const ack=(isAudit||isInv)
@@ -3068,9 +3072,11 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   tc(C.mut); font(8.5); t(M,st.y+11,'Property Owner / Authorized Representative');
   t(W-M-160,st.y+11,'Date');
   st.y+=20;
-  /* footer */
-  need(30); st.y+=16; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y);
-  tc(C.mut); font(8.5,'italic'); t(W/2,st.y+13,'Questions? Contact EES-WI  |  ira@ees-wi.org  |  608-460-7419',{align:'center'});
+  /* footer — company address lives here, not the header */
+  need(42); st.y+=16; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y);
+  tc(C.mut); font(8.5);
+  t(W/2,st.y+13,'Energy Efficiency Services of Wisconsin  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
+  font(8,'italic'); t(W/2,st.y+25,'Questions?  ira@ees-wi.org  |  608-460-7419',{align:'center'});
   return d.output('blob');
 }
 
