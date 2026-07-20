@@ -115,17 +115,30 @@ export default function FieldMobileRoot() {
   // the cache entirely. On finding a new version, activate it immediately and
   // reload once so the technician picks up the latest build without a manual
   // reinstall. Fire-and-forget — failure must not block the app.
+  //
+  // Update checks fire on mount AND on every return-to-foreground plus a slow
+  // periodic timer. Mount-only checking was the stale-bundle trap: an
+  // installed PWA can live in the app switcher for days without ever
+  // re-mounting, so a deployed fix never reached the device until a manual
+  // pull-to-update. Resume is also the safest reload moment — the technician
+  // has just switched back and isn't mid-capture.
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
     let reloaded = false
+    let reg = null
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (reloaded) return
       reloaded = true
       window.location.reload()
     })
+    const checkForUpdate = () => { reg?.update?.().catch(() => undefined) }
+    const onVisible = () => { if (document.visibilityState === 'visible') checkForUpdate() }
+    const interval = setInterval(checkForUpdate, 30 * 60 * 1000)
+    document.addEventListener('visibilitychange', onVisible)
     navigator.serviceWorker
       .register('/sw.js', { scope: '/field' })
-      .then((reg) => {
+      .then((r) => {
+        reg = r
         // If an updated worker is waiting, tell it to take over now.
         if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING')
         reg.addEventListener('updatefound', () => {
@@ -141,6 +154,10 @@ export default function FieldMobileRoot() {
         reg.update?.()
       })
       .catch((err) => { console.warn('Field SW registration failed:', err?.message || err) })
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
   if (loading) return <Centered>Loading…</Centered>
