@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 28 — stale-tab banner; review tables match XML integers exactly; custom measures get Uncategorized/Other</div>
+    Last updated 2026-07-20 · build 29 — benchmark/target EUI writes only float32-clean decimals (no 88.0999… displays)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -1175,13 +1175,23 @@ function _setUDF(doc,name,val){
       if(v)v.textContent=String(val);return true;}}
   return false;
 }
+// DOE stores the benchmark/target EUI as a 32-bit float and prints the full
+// stored value: 54.5 is exactly representable ('54.5') but 88.1 is not
+// ('88.0999984741211'). Keep the tenths digit only when it displays clean;
+// otherwise write the whole number — the meter readings carry the full
+// precision, so the computed building EUI and savings % stay accurate.
+function _euiFieldValue(val){
+  const s1=String(+Number(val).toFixed(1));
+  if(!/\./.test(s1))return s1;                       // whole number: always clean
+  return String(Math.fround(parseFloat(s1)))===s1 ? s1 : String(Math.round(val));
+}
 function _setScenarioEUI(doc,scenarioName,val){
   if(val==null)return;
   for(const s of _q(doc,'Scenario')){
     const nm=s.getElementsByTagNameNS(NS_AUC,'ScenarioName')[0];
     if(nm&&nm.textContent.trim()===scenarioName){
       const eui=s.getElementsByTagNameNS(NS_AUC,'SiteEnergyUseIntensity')[0];
-      if(eui)eui.textContent=String(val);return;}}
+      if(eui)eui.textContent=_euiFieldValue(val);return;}}
 }
 // Site Energy Cost Intensity ($/ft²) lives in the scenario's AllResourceTotal
 // EnergyCost element, right beside SiteEnergyUseIntensity.
