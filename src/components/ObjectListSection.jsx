@@ -24,7 +24,7 @@ import { isUrlAddressableTable } from '../lib/urlNav'
 // re-run with those fields so the parent-join resolves their values.
 // ---------------------------------------------------------------------------
 
-export default function ObjectListSection({ objectTable, moduleId }) {
+export default function ObjectListSection({ objectTable, moduleId, initialFilters = null }) {
   // When the app shell provides navigation (the default in the running app),
   // open records by pushing a real record URL (`/<table>/<id>`) so every record
   // is shareable, bookmarkable, and visible to the topbar gear (Salesforce
@@ -177,6 +177,18 @@ export default function ObjectListSection({ objectTable, moduleId }) {
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} onRetry={load} />
 
+  // Drill-down scope: when a caller (e.g. a dashboard widget click) passes
+  // initialFilters, prepend a synthetic "Filtered" system view and default to
+  // it, so the list opens scoped to the clicked segment (Salesforce-style
+  // drill-down). ListView seeds its active filters from the default view, so no
+  // extra state is needed here — the parent remounts this component (via a
+  // filter-aware key) when the drill target changes. Each filter row is the
+  // standard { field, op, value } shape the list engine matches on.
+  const drillView = (Array.isArray(initialFilters) && initialFilters.length > 0)
+    ? { id: '__drill__', name: 'Filtered', filters: initialFilters, sortField: null, sortDir: 'asc' }
+    : null
+  const effectiveViews = drillView ? [drillView, ...views] : views
+
   return (
     <ListView
       data={data}
@@ -184,7 +196,8 @@ export default function ObjectListSection({ objectTable, moduleId }) {
       columnCatalog={catalog}
       columnGroups={groups}
       onActiveRelatedFieldsChange={handleActiveRelatedChange}
-      systemViews={views}
+      systemViews={effectiveViews}
+      defaultViewId={drillView ? '__drill__' : undefined}
       listObject={objectTable}
       listModule={moduleId}
       onRefresh={load}
