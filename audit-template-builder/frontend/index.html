@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 32 — automatic pre-export checks: the full rulebook runs on every change; failing files can't export silently</div>
+    Last updated 2026-07-20 · build 33 — invoices &amp; proposals: paperwork workbook (3 tabs) + Sealed proposal/invoice, tier + FOE automatic</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -152,6 +152,31 @@
   </div>
   <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and bedrooms per unit to enable exports.</div>
 
+  <div id="pjRow" style="margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
+    <strong style="font-size:13.5px">Project &amp; invoice details</strong>
+    <span class="copyhint">— fills the paperwork; property fields prefill from the reports, everything editable; saved in this browser per property</span>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-top:8px;font-size:12.5px">
+      <label>Property Owner<input id="pjOwner" placeholder="e.g. Lutheran Social Services of WI & Upper MI"></label>
+      <label>Owner Address<input id="pjOwnerAddr" placeholder="street"></label>
+      <label>Owner City, State Zip<input id="pjOwnerCsz" placeholder="City, ST 55555"></label>
+      <label>Contact Name<input id="pjContact"></label>
+      <label>Email<input id="pjEmail"></label>
+      <label>Phone<input id="pjPhone"></label>
+      <label>Property Name<input id="pjPropName"></label>
+      <label>Installation Address<input id="pjInstallAddr"></label>
+      <label>Install City, State Zip<input id="pjCsz"></label>
+      <label>IQ Number<input id="pjIQ" placeholder="LEA-…"></label>
+      <label>Audit Invoice No.<input id="pjInvNo" placeholder="INV-WI-…"></label>
+      <label>Proposal No.<input id="pjPropNo" placeholder="HOMES-MF-…"></label>
+      <label>Project Invoice No.<input id="pjProjInvNo" placeholder="e.g. 2026-2031"></label>
+      <label>Invoice/Proposal Date<input id="pjInvDate" placeholder="m/d/yyyy"></label>
+      <label>Est. Start Date<input id="pjEstStart" placeholder="m/d/yyyy"></label>
+      <label>Est. Completion Date<input id="pjEstEnd" placeholder="m/d/yyyy"></label>
+      <label>Actual Start Date<input id="pjStart" placeholder="m/d/yyyy"></label>
+      <label>Actual Completion Date<input id="pjEnd" placeholder="m/d/yyyy"></label>
+    </div>
+  </div>
+
   <div class="bar">
     <button class="btn" id="aiExtract" disabled>🧠 AI Extract &amp; Map</button>
     <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
@@ -161,6 +186,11 @@
     <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
     <button class="btn" id="packet" disabled>📦 Download Energy Model Packet</button>
     <span class="status" id="finalStatus"></span>
+  </div>
+  <div class="bar">
+    <button class="btn ghost" id="dlWorkbook" disabled>🧾 Paperwork Workbook (Audit Invoice · Proposal · Project Invoice)</button>
+    <button class="btn ghost" id="dlSealedProp" disabled>🧾 Sealed Proposal (print)</button>
+    <button class="btn ghost" id="dlSealedInv" disabled>🧾 Sealed Invoice (print)</button>
   </div>
   <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
     <div style="display:flex;justify-content:space-between;align-items:center">
@@ -697,6 +727,10 @@ function refresh(){
   document.getElementById('packet').disabled=!canExport;
   document.getElementById('smartReview').disabled=!filesReady;   // AI review doesn't export
   document.getElementById('aiExtract').disabled=!filesReady;
+  for(const id of ['dlWorkbook','dlSealedProp','dlSealedInv']){
+    const e=document.getElementById(id); if(e)e.disabled=!canExport;
+  }
+  if(filesReady)pjLoadAndPrefill();
   const occErr=document.getElementById('occErr'); if(occErr) occErr.style.display=occOk?'none':'';
   if(!filesReady){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
@@ -2156,6 +2190,24 @@ function evaluateAutoChecks(dg){
       ck('Savings meets the 20% 50121 tier',exp>=20,exp+'%');
     }
   }
+  // Invoice / proposal math (from the same model the paperwork generator uses)
+  try{
+    const iv=invoiceModel();
+    if(iv.savings!=null&&iv.tier)
+      ck('Paperwork: HOMES $/unit matches the modeled savings tier',
+        (iv.savings>=35&&iv.tier.perUnit===10000)||(iv.savings>=20&&iv.savings<35&&iv.tier.perUnit===5000)||(iv.savings<20&&iv.tier.perUnit===0),
+        iv.savings.toFixed(1)+'% → $'+iv.tier.perUnit+'/unit');
+    if(iv.savings!=null&&iv.savings<20)
+      ck('Paperwork: project meets the 20% HOMES floor',false,iv.savings.toFixed(1)+'%');
+    if(iv.rows.length){
+      const rowSum=Math.round(iv.rows.reduce((a2,r)=>a2+r.cost,0)*100)/100;
+      ck('Paperwork: measure costs sum exactly to total rebates',rowSum===iv.total,
+        '$'+rowSum+' vs $'+iv.total+' (TOTAL DUE must be $0)');
+    }
+    if(iv.foe) ck('Paperwork: FOE tier matches baseline attic R',
+      (iv.baseAtticR<11&&iv.foe.rate===1)||(iv.baseAtticR>=11&&iv.baseAtticR<=19&&iv.foe.rate===0.70)||(iv.baseAtticR>=20&&iv.baseAtticR<=38&&iv.foe.rate===0.55),
+      'R-'+iv.baseAtticR+' → $'+iv.foe.rate+'/sq ft × '+iv.roofSqFt+' = $'+iv.foeAmt);
+  }catch(e){ck('Paperwork: model computes',false,e.message);}
   if(dg.baseline&&dg.improved&&!dg.baseline.error&&!dg.improved.error){
     const strip=n=>String(n||'').replace(/\s*-\s*Audit Template\s*$/i,'').replace(/\s*-\s*(Baseline|Improved)\s*$/i,'');
     const a=dg.baseline.identity,b2=dg.improved.identity;
@@ -2442,6 +2494,294 @@ function buildMappedForReview(){
   };
 })();
 
+/* ================= Invoices & proposals (workbook fill + Sealed docs) =================
+   Source of truth: the EES Project Paperwork workbook (templates/invoice_workbook.xlsx,
+   styling preserved byte-for-byte; only data cells are rewritten inside the zip) and
+   the breakout/tier rules from that workbook + published program guidelines:
+   - HOMES rebate: units × $10,000 (35%+ modeled savings) or × $5,000 (20–34%), IQ <80% AMI
+   - Focus on Energy: attic sq ft × tier rate from the BASELINE attic R
+       <R-11 → $1.00 · R-12–19 → $0.70 · R-20–38 → $0.55 (no line when no attic work)
+   - Measure costs = breakout fractions × total rebate (attic ins .44, air seal .5483,
+     bath aerators .0033, kitchen aerators .0035, showerheads .0049), largest row absorbs
+     the rounding so Gross Total = Total Rebates exactly → TOTAL DUE $0.                    */
+const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone','pjPropName',
+  'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjPropNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd'];
+function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
+function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
+function pjSave(){const k=pjStorageKey();if(!k)return;
+  try{localStorage.setItem(k,JSON.stringify(Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))));}catch(e){}}
+function pjLoadAndPrefill(){
+  const as=data.asImp||data.asBase, asB=data.asBase; if(!as)return;
+  let saved={}; try{saved=JSON.parse(localStorage.getItem(pjStorageKey())||'{}');}catch(e){}
+  for(const f of PJ_FIELDS){const e=document.getElementById(f); if(e&&!e.value&&saved[f])e.value=saved[f];}
+  const set=(id,v)=>{const e=document.getElementById(id); if(e&&!e.value&&v)e.value=v;};
+  const strip=n=>cleanName(n||'').replace(/\s*-\s*(Baseline|Improved)\s*$/i,'');
+  set('pjPropName',strip((asB||as).name));
+  set('pjInstallAddr',(asB||as).street);
+  set('pjCsz',(asB||as).cityStateZip);
+  const t=new Date(); set('pjInvDate',(t.getMonth()+1)+'/'+t.getDate()+'/'+t.getFullYear());
+  set('pjInvNo','INV-WI-'); set('pjPropNo','HOMES-MF-');
+}
+(function(){for(const f of PJ_FIELDS){const e=document.getElementById(f); if(e)e.addEventListener('input',()=>{pjSave();});}})();
+
+// The Measure Description Bank (from the workbook), with R-value substitution slots.
+const BANK={
+  atticIns:b=>i=>[
+`Upgrade existing attic insulation levels from approximately R-${b} to R-${i} in accordance with applicable PNNL building science standards and program requirements to improve thermal performance, reduce energy consumption, and enhance occupant comfort. Work will include preparation of attic areas to support proper airflow, insulation depth consistency, and long-term system performance.`,
+`Install eave baffles with 48-inch extensions in each accessible attic bay to maintain ventilation pathways and allow full insulation coverage above exterior wall top plates.`,
+`Install insulation rulers in each attic bay on both sides to verify uniform insulation depth and ensure consistent installed R-values throughout the attic plane.`,
+`Install blown-in fiberglass insulation to achieve a minimum final attic insulation value of R-${i} across all accessible attic areas.`,
+`Custom build and install insulated attic access hatches including insulation damming, insulated access covers, and weatherstripping to minimize thermal bypass and air leakage.`,
+`All insulation materials and installation methods will comply with applicable code requirements, manufacturer specifications, and accepted energy efficiency best practices.`].join('\n\n'),
+  airSeal:b=>[
+`Perform attic air sealing to reduce uncontrolled air leakage between conditioned spaces and unconditioned attic areas in accordance with PNNL air barrier and weatherization best practices. Removal and disposal of existing R-${b} insulation material will prepare the attic space for proper air sealing. Air sealing work will be completed prior to insulation installation to maximize thermal effectiveness and moisture control performance.`,
+`Scope of work includes identification and sealing of accessible air leakage pathways including, but not limited to:`,
+`Plumbing penetrations\nElectrical penetrations\nTop plates\nMechanical and duct penetrations\nSoffits and open chases\nAttic access openings\nMiscellaneous bypasses and framing gaps\nFabricated isolation boxes for exhaust fans and recessed lights`,
+`Approved sealants, foam products, sheet materials, and weatherstripping will be utilized as appropriate for each application to improve building envelope tightness, reduce heating and cooling loads, and improve overall occupant comfort and building durability.`].join('\n\n'),
+  bath:'Installation of low flow faucet aerators in tenant bathrooms for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
+  kitchen:'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
+  shower:'Installation of low flow handheld showerheads in tenant bathrooms for water and energy savings. Model: Niagara Earth Handheld Showerhead N2945CH'
+};
+
+// Everything the paperwork needs, computed once from the reports + form.
+function invoiceModel(){
+  const asB=data.asBase, asI=data.asImp;
+  const units=parseInt((document.getElementById('occUnits')||{}).value,10)||null;
+  const roofSqFt=asB&&asB.roofArea!=null?Math.round(asB.roofArea):null;
+  const iMin=(asI&&asI.roofRs&&asI.roofRs.length)?Math.min(...asI.roofRs):49;
+  const bRs=(asB&&asB.roofRs)?asB.roofRs.filter(r=>r<iMin):[];
+  const baseAtticR=bRs.length?Math.min(...bRs):null;
+  const fmtR=r=>(r%1?r:Math.round(r));
+  const savings=(asB&&asI&&asB.euiCurrent&&asI.euiUpgraded!=null)
+    ?(asB.euiCurrent-asI.euiUpgraded)/asB.euiCurrent*100:null;
+  // HOMES tier (Wisconsin): 35%+ → $10k/unit ; 20–34% → $5k/unit ; <20% → not eligible
+  const tier=savings==null?null:(savings>=35?{perUnit:10000,desc:'IQ at <80% AMI and modeled energy savings of 35% or greater',note:'$10,000.00 per unit'}
+    :savings>=20?{perUnit:5000,desc:'IQ at <80% AMI and modeled energy savings of 20-34%',note:'$5,000.00 per unit'}
+    :{perUnit:0,desc:'Modeled savings below 20% — not HOMES eligible',note:''});
+  const homesAmt=(units&&tier)?units*tier.perUnit:0;
+  // FOE tier from the BASELINE attic R (published multifamily guidelines)
+  const hasAttic=(eemState||effectiveMeasures()).some(m=>/roof|attic|ceiling/i.test((m.title||'')+' '+(m.desc||'')));
+  let foe=null;
+  if(hasAttic&&roofSqFt&&baseAtticR!=null){
+    if(baseAtticR<11)      foe={rate:1.00,desc:'Air Sealing & Attic Insulation, Existing < R-11',  note:'$1.00 per Sq. Ft.'};
+    else if(baseAtticR<=19)foe={rate:0.70,desc:'Air Sealing & Attic Insulation, Existing R-12 to R-19',note:'$0.70 per Sq. Ft.'};
+    else if(baseAtticR<=38)foe={rate:0.55,desc:'Insulation & Air Sealing, Existing R20-R38',       note:'$0.55 per Sq. Ft.'};
+    if(foe)foe.amt=Math.round(roofSqFt*foe.rate*100)/100;
+  }
+  const foeAmt=foe?foe.amt:0;
+  const total=Math.round((homesAmt+foeAmt)*100)/100;
+  // Measure lines: breakout fractions × total, largest row absorbs the drift.
+  const rows=[];
+  const push=(name,frac,qty,unit,desc)=>rows.push({name,frac,qty,unit,desc,cost:Math.round(total*frac*100)/100});
+  if(hasAttic){
+    push('Attic Insulation',0.44,roofSqFt,'Sq Ft',BANK.atticIns(fmtR(baseAtticR!=null?baseAtticR:0))(fmtR(iMin)));
+    push('Attic Air Sealing',0.5483,roofSqFt,'Sq Ft',BANK.airSeal(fmtR(baseAtticR!=null?baseAtticR:0)));
+  }
+  push('Low Flow Devices: Bath Aerators',0.0033,units,'Unit',BANK.bath);
+  push('Low Flow Devices: Kitchen Aerators',0.0035,units,'Unit',BANK.kitchen);
+  push('Low Flow Devices: Showerheads',0.0049,units,'Unit',BANK.shower);
+  // renormalize when attic rows are absent, then reconcile to the exact total
+  const fracSum=rows.reduce((a,r)=>a+r.frac,0);
+  if(Math.abs(fracSum-1)>1e-6&&fracSum>0)rows.forEach(r=>{r.cost=Math.round(total*r.frac/fracSum*100)/100;});
+  const drift=Math.round((total-rows.reduce((a,r)=>a+r.cost,0))*100)/100;
+  if(drift&&rows.length){let mx=0;rows.forEach((r,i)=>{if(r.cost>rows[mx].cost)mx=i;});
+    rows[mx].cost=Math.round((rows[mx].cost+drift)*100)/100;}
+  return {units,roofSqFt,baseAtticR,iMin,savings,tier,homesAmt,foe,foeAmt,total,rows,
+    fields:Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))};
+}
+
+/* -- xlsx cell surgery: rewrite values inside the template zip, styles untouched -- */
+function _xesc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function _colOf(ref){return ref.match(/^[A-Z]+/)[0];}
+function _colNum(c){let n=0;for(const ch of c)n=n*26+ch.charCodeAt(0)-64;return n;}
+// Set a cell to a literal (string or number), preserving its style; insert if absent.
+function xlsSet(xml,ref,val){
+  const isNum=typeof val==='number'&&isFinite(val);
+  const inner=isNum?`<v>${val}</v>`:(val===''?'':`<is><t xml:space="preserve">${_xesc(val)}</t></is>`);
+  const tAttr=isNum?'':' t="inlineStr"';
+  const re=new RegExp(`<c r="${ref}"([^>/]*?)(/>|>.*?</c>)`);
+  if(re.test(xml))
+    return xml.replace(re,(m,attrs)=>{const s=(attrs.match(/ s="\d+"/)||[''])[0];
+      return `<c r="${ref}"${s}${tAttr}>${inner}</c>`;});
+  // cell absent: insert into its row in column order
+  const rowN=ref.match(/\d+$/)[0];
+  const rowRe=new RegExp(`(<row r="${rowN}"[^>]*>)([\\s\\S]*?)(</row>)`);
+  return xml.replace(rowRe,(m,open,cells,close)=>{
+    const target=_colNum(_colOf(ref)); let out='',done=false;
+    cells.replace(/<c r="([A-Z]+)\d+"[^>]*(?:\/>|>[\s\S]*?<\/c>)/g,x=>x); // noop to keep linter honest
+    const parts=cells.match(/<c r="[A-Z]+\d+"[^>]*(?:\/>|>[\s\S]*?<\/c>)/g)||[];
+    for(const p of parts){
+      const c=_colNum(p.match(/<c r="([A-Z]+)/)[1]);
+      if(!done&&c>target){out+=`<c r="${ref}"${tAttr}>${inner}</c>`;done=true;}
+      out+=p;
+    }
+    if(!done)out+=`<c r="${ref}"${tAttr}>${inner}</c>`;
+    return open+out+close;});
+}
+// Replace a formula cell's formula and cached value (style preserved).
+function xlsSetFormula(xml,ref,formula,cached){
+  const re=new RegExp(`<c r="${ref}"([^>/]*?)>.*?</c>`);
+  return xml.replace(re,(m,attrs)=>{const s=(attrs.match(/ s="\d+"/)||[''])[0];
+    return `<c r="${ref}"${s}><f>${_xesc(formula)}</f><v>${cached}</v></c>`;});
+}
+// Update only the cached <v> of an existing (possibly shared) formula cell.
+function xlsSetCached(xml,ref,cached){
+  const re=new RegExp(`(<c r="${ref}"[^>]*>)(.*?)(</c>)`);
+  return xml.replace(re,(m,open,body,close)=>{
+    const f=(body.match(/<f[\s\S]*?(?:\/>|<\/f>)/)||[''])[0];
+    return open+f+`<v>${cached}</v>`+close;});
+}
+
+async function buildInvoiceWorkbook(){
+  const m=invoiceModel(), F=m.fields;
+  const resp=await fetch('templates/invoice_workbook.xlsx');
+  if(!resp.ok)throw new Error('invoice template not found ('+resp.status+')');
+  const zip=await JSZip.loadAsync(await resp.arrayBuffer());
+  const get=async p=>await zip.file(p).async('string');
+  let s1=await get('xl/worksheets/sheet1.xml'),
+      s2=await get('xl/worksheets/sheet2.xml'),
+      s3=await get('xl/worksheets/sheet3.xml');
+  /* --- Sheet 1: Energy Audit Invoice --- */
+  s1=xlsSet(s1,'C4',F.pjInvNo||'INV-WI-');
+  s1=xlsSet(s1,'G4',F.pjInvDate||'');
+  s1=xlsSet(s1,'C11',F.pjOwner); s1=xlsSet(s1,'C12',F.pjOwnerAddr); s1=xlsSet(s1,'C13',F.pjOwnerCsz);
+  s1=xlsSet(s1,'C14',F.pjContact); s1=xlsSet(s1,'C15',F.pjEmail); s1=xlsSet(s1,'C16',F.pjPhone);
+  s1=xlsSet(s1,'I11',F.pjPropName); s1=xlsSet(s1,'I12',F.pjInstallAddr); s1=xlsSet(s1,'I13',F.pjCsz);
+  s1=xlsSet(s1,'I15',F.pjIQ);
+  /* --- Sheets 2 (Proposal) & 3 (Project Invoice): shared fill --- */
+  const fillScope=(x,{docNo,docDate,startRef,endRef,startVal,endVal})=>{
+    x=xlsSet(x,'C4',docNo); x=xlsSet(x,'G4',docDate);
+    x=xlsSet(x,startRef,startVal); x=xlsSet(x,endRef,endVal);
+    // customer block: literals (same text as the audit tab) — robust in previewers
+    for(const [ref,v] of [['C11',F.pjOwner],['C12',F.pjOwnerAddr],['C13',F.pjOwnerCsz],
+      ['C14',F.pjContact],['C15',F.pjEmail],['C16',F.pjPhone],
+      ['I11',F.pjPropName],['I12',F.pjInstallAddr],['I13',F.pjCsz],['I15',F.pjIQ]]) x=xlsSet(x,ref,v);
+    // helper block: units, tier formula, cached rebate math
+    x=xlsSet(x,'P17',m.units||0);
+    x=xlsSetFormula(x,'P18','P17*'+(m.tier?m.tier.perUnit:10000),m.homesAmt);
+    x=xlsSetCached(x,'P19',m.foeAmt); x=xlsSetCached(x,'P20',m.total);
+    // measure rows 22–29 (5 known lines; extras cleared)
+    const rowRefs=[22,23,24,25,26,27,28,29];
+    m.rows.forEach((r,i)=>{const n=rowRefs[i];
+      x=xlsSet(x,'B'+n,r.name); x=xlsSet(x,'D'+n,r.desc);
+      x=xlsSet(x,'I'+n,r.qty!=null?r.qty:''); x=xlsSet(x,'K'+n,r.unit);
+      x=xlsSetFormula(x,'L'+n,'P'+n,r.cost);
+      x=xlsSet(x,'O'+n,r.frac); x=xlsSetFormula(x,'P'+n,'$P$20*O'+n,r.cost);
+    });
+    for(let i=m.rows.length;i<rowRefs.length;i++){const n=rowRefs[i];
+      for(const col of ['B','D','I','K'])x=xlsSet(x,col+n,'');
+      x=xlsSet(x,'O'+n,0); x=xlsSetCached(x,'L'+n,0); x=xlsSetCached(x,'P'+n,0);
+    }
+    // FOE + HOMES rebate rows
+    if(m.foe){x=xlsSet(x,'J40',m.foeAmt); x=xlsSet(x,'D40',m.foe.desc); x=xlsSet(x,'K40',m.foe.note);}
+    else{x=xlsSet(x,'J40',''); x=xlsSet(x,'D40',''); x=xlsSet(x,'K40','');}
+    if(m.tier){x=xlsSet(x,'D44',m.tier.desc); x=xlsSet(x,'K44',m.tier.note);}
+    x=xlsSetCached(x,'J44',m.homesAmt);
+    // cached totals so any previewer shows the right numbers pre-recalc
+    x=xlsSetCached(x,'L30',m.total); x=xlsSetCached(x,'O30',1); x=xlsSetCached(x,'P30',m.total);
+    x=xlsSetCached(x,'K31',m.foeAmt); x=xlsSetCached(x,'K32',m.homesAmt);
+    x=xlsSetCached(x,'L33',-m.total); x=xlsSetCached(x,'L34',0);
+    return x;
+  };
+  s2=fillScope(s2,{docNo:F.pjPropNo||'HOMES-MF-',docDate:F.pjInvDate||'',
+    startRef:'C19',endRef:'I19',startVal:F.pjEstStart,endVal:F.pjEstEnd});
+  s3=fillScope(s3,{docNo:F.pjProjInvNo||'',docDate:F.pjInvDate||'',
+    startRef:'C19',endRef:'I19',startVal:F.pjStart,endVal:F.pjEnd});
+  zip.file('xl/worksheets/sheet1.xml',s1);
+  zip.file('xl/worksheets/sheet2.xml',s2);
+  zip.file('xl/worksheets/sheet3.xml',s3);
+  return await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+
+/* -- Sealed-style documents (print-ready HTML, matching the Sealed layout) -- */
+function sealedHtml(kind){   // 'proposal' | 'invoice'
+  const m=invoiceModel(), F=m.fields, esc=_xesc;
+  const money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const qfmt=q=>q!=null?Number(q).toLocaleString('en-US'):'';
+  const isInv=kind==='invoice';
+  const details=isInv
+    ?[['Invoice No.',F.pjProjInvNo],['Invoice Date',F.pjInvDate],['Due Date','30 days'],['IQ Number',F.pjIQ],['Start Date',F.pjStart],['Completion Date',F.pjEnd]]
+    :[['Date',F.pjInvDate],['Valid for','30 days'],['IQ Number',F.pjIQ],['Estimated Start Date',F.pjEstStart],['Estimated Completion Date',F.pjEstEnd]];
+  const rowsHtml=m.rows.map(r=>`<tr>
+    <td class="c">Energy Efficiency Services of Wisconsin</td><td class="n">${esc(r.name)}</td>
+    <td class="d"><strong>Qty: ${qfmt(r.qty)} ${esc(r.unit==='Sq Ft'?'Sq Ft.':'Units')}.</strong> ${esc(r.desc).replace(/\n/g,'<br>')}</td>
+    <td class="t">${money(r.cost)}</td></tr>`).join('');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${isInv?'Invoice':'Proposal'} — ${esc(F.pjPropName)}</title>
+<style>
+ body{font:13px/1.45 Arial,Helvetica,sans-serif;color:#222;margin:40px 48px;max-width:900px}
+ h2.doc{color:#2f80d6;font-size:34px;margin:26px 0 10px}
+ .blocks{display:flex;justify-content:space-between;gap:40px}.blocks>div{flex:1}
+ h4{color:#2f80d6;font-size:12.5px;letter-spacing:.03em;margin:18px 0 6px;border-bottom:0}
+ .blk p{margin:2px 0}
+ table.items{width:100%;border-collapse:collapse;margin-top:6px}
+ table.items th{color:#2f80d6;text-align:left;font-size:11.5px;border-bottom:2px solid #bcd6f2;padding:6px 8px}
+ table.items td{vertical-align:top;padding:10px 8px;border-bottom:1px solid #e3edf8;font-size:12px}
+ table.items tr:nth-child(even) td{background:#f2f7fd}
+ td.c{width:120px}td.n{width:120px}td.t{text-align:right;white-space:nowrap;width:90px}
+ .reb td{padding:8px}.amt{color:#c0392b;font-weight:700;text-align:right}
+ table.tot{width:100%;border-collapse:collapse;margin-top:8px}
+ table.tot td{padding:6px 8px;border-bottom:1px solid #e3edf8}
+ td.r{text-align:right}
+ .sig{margin-top:48px;display:flex;gap:60px}
+ .sig div{border-top:1px solid #444;flex:2;padding-top:4px;font-size:11.5px}
+ .sig div:last-child{flex:1}
+ @media print{body{margin:14mm}}
+</style></head><body>
+<div class="blocks"><div class="blk">
+ <h4>PRIMARY CONTRACTOR:</h4>
+ <p>Sealed, Inc.</p><p>200 E Verona Ave</p><p>Verona, WI 53593</p><p>(949) 832-6798</p>
+ <h4>BILL TO:</h4>
+ <p>${esc(F.pjOwner)}</p><p>${esc(F.pjContact)}</p><p>${esc(F.pjOwnerAddr)}</p><p>${esc(F.pjOwnerCsz)}</p><p>${esc(F.pjPhone)}</p><p>${esc(F.pjEmail)}</p>
+</div><div class="blk">
+ <h4>${isInv?'INVOICE DETAILS:':'PROJECT DETAILS:'}</h4>
+ ${details.map(([k,v])=>`<p>${k}: ${esc(v||'')}</p>`).join('')}
+ <h4>PROJECT ADDRESS:</h4>
+ <p>${esc(F.pjPropName)}</p><p>${esc(F.pjInstallAddr)}</p><p>${esc(F.pjCsz)}</p><p>Multifamily</p>${isInv?'':`<p>${esc(F.pjIQ)}</p>`}
+</div></div>
+<h2 class="doc">${isInv?'Invoice':'Proposal'}</h2>
+<table class="items"><tr><th>CONTRACTOR</th><th>NAME</th><th>DESCRIPTION</th><th style="text-align:right">TOTAL</th></tr>${rowsHtml}</table>
+<h4>IRA REBATES</h4>
+<table class="items reb"><tr><td class="d">Incentive Description: ${esc(m.tier?m.tier.desc:'')}. Notes: ${esc(m.tier?m.tier.note:'')}.</td>
+<td class="n">IRA HOMES ${isInv?'Incentive ':''}- Instant Discount</td><td class="amt">${money(m.homesAmt)}</td></tr></table>
+${m.foe?`<h4>OTHER NON-IRA REBATES</h4>
+<table class="items reb"><tr><td class="d">Incentive Description: ${esc(m.foe.desc)}. Notes: ${esc(m.foe.note)}.</td>
+<td class="n">Focus on Energy - Instant Discount</td><td class="amt">${money(m.foeAmt)}</td></tr></table>`:''}
+<h4>TOTALS</h4>
+<table class="tot">
+<tr><td>Total Cost</td><td class="r">${money(m.total)}</td></tr>
+<tr><td>Total Rebates</td><td class="r">${money(m.total)}</td></tr>
+<tr><td>Total Deposits</td><td class="r">$0.00</td></tr>
+<tr><td><strong>${isInv?'Total Due':'Total Final'}</strong></td><td class="r"><strong>$0.00</strong></td></tr>
+</table>
+<div class="sig"><div>Customer Signature</div><div>Date</div></div>
+</body></html>`;
+}
+
+/* -- wiring: downloads + packet -- */
+async function downloadInvoiceWorkbook(){
+  const fs=document.getElementById('finalStatus');
+  if(!autoCheckGate()){fs.className='status err';fs.textContent='Canceled — fix the failing pre-export checks first.';return;}
+  fs.className='status'; fs.textContent='Filling the paperwork workbook…';
+  try{
+    const blob=await buildInvoiceWorkbook();
+    const as=data.asImp||data.asBase;
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download=fileBase(as.name)+'_Project_Paperwork.xlsx'; a.click();
+    fs.className='status ok'; fs.textContent='Paperwork workbook downloaded (Audit Invoice · HOMES Proposal · HOMES Project Invoice).';
+  }catch(e){fs.className='status err';fs.textContent='Workbook error: '+e.message;}
+}
+function openSealed(kind){
+  const w=window.open('','_blank'); if(!w)return;
+  w.document.write(sealedHtml(kind)); w.document.close();
+}
+(function(){
+  const wbBtn=document.getElementById('dlWorkbook'),
+        spBtn=document.getElementById('dlSealedProp'), siBtn=document.getElementById('dlSealedInv');
+  if(wbBtn)wbBtn.onclick=downloadInvoiceWorkbook;
+  if(spBtn)spBtn.onclick=()=>openSealed('proposal');
+  if(siBtn)siBtn.onclick=()=>openSealed('invoice');
+})();
+
 /* ---- Utility usage xlsx (Portfolio Manager "Energy Use By Calendar Month" format) ---- */
 /* Metered Energy Year Start Date (yyyy-mm-dd): first day of the import window =
    12 months back from the month prior to the score date. */
@@ -2546,12 +2886,18 @@ async function downloadPacket(){
     const uf=zip.folder('3_Utility_Data');
     uf.file(base+'_Baseline_Utility.xlsx', XLSX.write(buildUtilityXLSX('baseline'),{type:'array',bookType:'xlsx'}));
     uf.file(base+'_Improved_Utility.xlsx', XLSX.write(buildUtilityXLSX('improved'),{type:'array',bookType:'xlsx'}));
+    // 4) invoices & proposals: the filled paperwork workbook + the Sealed docs
+    const inv=zip.folder('4_Invoices');
+    inv.file(base+'_Project_Paperwork.xlsx', await buildInvoiceWorkbook());
+    inv.file(base+'_Sealed_Proposal.html', sealedHtml('proposal'));
+    inv.file(base+'_Sealed_Invoice.html', sealedHtml('invoice'));
     // manifest for future reference
     zip.file('README.txt',
       'Energy Model Packet — '+cleanName((data.asImp||asB).name)+'\nGenerated '+todayStamp()+
       ' by the EES Audit Template Builder.\n\n1_Source_Reports/  the uploaded Asset Score + OpenStudio files\n'+
       '2_Audit_Template_XML/  the 50121 BuildingSync files (import under Building -> Import buildings)\n'+
-      '3_Utility_Data/  the Portfolio Manager utility spreadsheets (upload under Utility Data and Benchmarking)\n');
+      '3_Utility_Data/  the Portfolio Manager utility spreadsheets (upload under Utility Data and Benchmarking)\n'+
+      '4_Invoices/  the Project Paperwork workbook (Audit Invoice · HOMES Proposal · HOMES Project Invoice) and the Sealed-style proposal/invoice (open in a browser and print to PDF)\n');
     const blob=await zip.generateAsync({type:'blob'});
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob); a.download=base+'_Energy_Model_Packet.zip'; a.click();
