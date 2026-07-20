@@ -121,10 +121,20 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 44 — paperwork XML deliverables are upload-first; regeneration needs explicit confirmation</div>
+    Last updated 2026-07-20 · build 45 — tabs work independently: paperwork needs only the two Asset Score reports + units, not OpenStudio</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
+
+  <div id="occRow" style="margin-top:12px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+    <strong>Occupancy <span style="color:#7eb3e8">*</span></strong>
+    <label>Dwelling units
+      <input id="occUnits" type="number" min="1" placeholder="required" style="width:88px;margin-left:4px"></label>
+    <label>Bedrooms per unit
+      <input id="occBeds" type="number" min="0" placeholder="required" style="width:88px;margin-left:4px"></label>
+    <span class="copyhint" id="occCalc"></span>
+  </div>
+  <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and bedrooms per unit to enable exports.</div>
 
   <div class="tabs">
     <button class="tabBtn active" data-tab="Model">⚡ Energy Modeling</button>
@@ -166,15 +176,7 @@
     <div class="flag" id="rFlag" style="display:none"></div>
   </div>
 
-  <div id="occRow" style="margin-top:12px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-    <strong>Occupancy <span style="color:#7eb3e8">*</span></strong>
-    <label>Dwelling units
-      <input id="occUnits" type="number" min="1" placeholder="required" style="width:88px;margin-left:4px"></label>
-    <label>Bedrooms per unit
-      <input id="occBeds" type="number" min="0" placeholder="required" style="width:88px;margin-left:4px"></label>
-    <span class="copyhint" id="occCalc"></span>
-  </div>
-  <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and bedrooms per unit to enable exports.</div>
+
 
     <div class="expSect sectReview">
   <div class="expHdr">Review tools</div>
@@ -215,6 +217,20 @@
   </div>
 
   <div id="tabPaper" class="tabPane">
+  <div style="margin-top:6px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Audit reports (required)</div>
+  <div style="font-size:12px;color:var(--mut);margin-top:3px">The two Asset Score reports drive every number on the paperwork — savings tier, attic quantities, rebate math. Uploading here is the same as uploading on the Energy Modeling tab.</div>
+  <div class="slots" style="margin-top:10px">
+    <div class="slot" data-key="asBase"><span class="tag">PDF</span>
+      <div class="role">Baseline Asset Score Report</div>
+      <div class="hint">The as-is building report</div>
+      <div class="got"></div>
+      <input type="file" accept=".pdf"></div>
+    <div class="slot" data-key="asImp"><span class="tag">PDF</span>
+      <div class="role">Improved Asset Score Report</div>
+      <div class="hint">The recommended/upgraded building report</div>
+      <div class="got"></div>
+      <input type="file" accept=".pdf"></div>
+  </div>
   <div id="pjRow" style="margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
     <strong style="font-size:13.5px">Project &amp; invoice details</strong>
     <span class="copyhint">— fills the paperwork; property fields prefill from the reports, everything editable; saved in this browser per property</span>
@@ -241,7 +257,7 @@
   </div>
 
   <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Optional — DOE Audit Template documents</div>
-  <div style="font-size:12px;color:var(--mut);margin-top:3px">Attach the exact XML files that were imported into DOE (or DOE’s own exports) and the DOE-generated report PDFs. The deliverable buttons below serve THESE files — paperwork must match what actually went to DOE, so the XML buttons only regenerate after an explicit confirmation when nothing is uploaded here.</div>
+  <div style="font-size:12px;color:var(--mut);margin-top:3px">Attach the exact XML files that were imported into DOE (or DOE’s own exports) and the DOE-generated report PDFs. The deliverable XML buttons below serve ONLY these uploaded files — paperwork must match what actually went to DOE, so they stay disabled until the files are attached. Nothing is ever regenerated on this tab.</div>
   <div class="slots" style="margin-top:10px">
     <div class="slot" data-atkey="basePdf"><span class="tag">PDF</span>
       <div class="role">Baseline Audit Template Report</div>
@@ -706,7 +722,7 @@ document.querySelectorAll('.slot[data-atkey]').forEach(slot=>{
   slot.onclick=()=>inp.click();
   ['dragover','dragenter'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.add('hot');}));
   ['dragleave','drop'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.remove('hot');}));
-  const take=f=>{atDocs[key]=f;slot.classList.add('ok');slot.querySelector('.got').textContent='✓ '+f.name;};
+  const take=f=>{atDocs[key]=f;slot.classList.add('ok');slot.querySelector('.got').textContent='✓ '+f.name;refresh();};
   slot.addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])take(ev.dataTransfer.files[0]);});
   inp.addEventListener('change',()=>{if(inp.files[0])take(inp.files[0]);});
 });
@@ -761,8 +777,10 @@ document.querySelectorAll('.slot[data-key]').forEach(slot=>{
         rawDocs[key]=txt.slice(0,200000);
         data[key]=parseOpenStudio(txt);
       }
-      slot.classList.add('ok');
-      slot.querySelector('.got').textContent='✓ '+file.name;
+      document.querySelectorAll('.slot[data-key="'+key+'"]').forEach(sl=>{
+        sl.classList.add('ok');
+        sl.querySelector('.got').textContent='✓ '+file.name;
+      });
       setStatus('');
       refresh();
     }catch(err){
@@ -830,10 +848,24 @@ function refresh(){
   const filesReady=Object.values(data).every(Boolean);
   const occOk=occValid();
   const canExport=filesReady&&occOk;   // no export until occupancy is entered (no default)
-  for(const e of document.querySelectorAll('button[data-act]')) e.disabled=!canExport;
+  // Tab independence: paperwork needs only the two Asset Score reports + the
+  // unit count — never the OpenStudio results. Energy-modeling exports still
+  // need the full file set.
+  const _u2=parseInt((document.getElementById('occUnits')||{}).value,10);
+  const paperReady=!!(data.asBase&&data.asImp)&&Number.isFinite(_u2)&&_u2>=1;
+  const PAPER_ACTS=['auditDoc','propDoc','invDoc','workbook','sealedProp','sealedInv'];
+  for(const e of document.querySelectorAll('button[data-act]')){
+    const a=e.dataset.act;
+    if(PAPER_ACTS.indexOf(a)>=0) e.disabled=!paperReady;
+    else if(a==='reportBase') e.disabled=!(files.asBase||atDocs.basePdf);
+    else if(a==='reportImp') e.disabled=!(files.asImp||atDocs.impPdf);
+    else if(a==='dlvXmlBase') e.disabled=!atDocs.baseXml;
+    else if(a==='dlvXmlImp') e.disabled=!atDocs.impXml;
+    else e.disabled=!canExport;
+  }
   document.getElementById('smartReview').disabled=!filesReady;   // AI review doesn't export
   document.getElementById('aiExtract').disabled=!filesReady;
-  if(filesReady)pjLoadAndPrefill();
+  if(data.asBase||data.asImp)pjLoadAndPrefill();
   const occErr=document.getElementById('occErr'); if(occErr) occErr.style.display=occOk?'none':'';
   if(!filesReady){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
@@ -3093,14 +3125,9 @@ function downloadSourceReport(key){
 // the modeling; wrong when it happens later against a newer build).
 function downloadDeliverableXml(which){
   const at=which==='baseline'?atDocs.baseXml:atDocs.impXml;
-  if(at){const as=data.asImp||data.asBase;
-    return _serveFile(at, fileBase(as?as.name:'Building')+(which==='baseline'?'_Baseline':'_Improved')+'_Audit_Template.xml');}
-  if(!confirm('No uploaded '+which+' Audit Template XML for this project.\n\n'
-    +'Paperwork should carry the EXACT file that was imported into DOE — upload it in the '
-    +'"DOE Audit Template documents" slots on this tab.\n\n'
-    +'Only if the modeling was done just now in this session is a fresh copy identical. '
-    +'Generate a fresh copy from the current reports anyway?'))return;
-  downloadXML(which);
+  if(!at)return;   // button is disabled until the file is uploaded — never regenerate
+  const as=data.asImp||data.asBase;
+  _serveFile(at, fileBase(as?as.name:'Building')+(which==='baseline'?'_Baseline':'_Improved')+'_Audit_Template.xml');
 }
 document.addEventListener('click',e=>{
   const b=e.target.closest?e.target.closest('button[data-act]'):null;
