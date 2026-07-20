@@ -335,15 +335,22 @@ export async function listPhotos(relatedObject, relatedId, { workStepId = null }
 export async function listWorkOrderPhotos(workOrderId) {
   if (!workOrderId) return []
 
-  // 1. Steps for this work order (id → name map).
+  // 1. Steps for this work order (id → name + execution order).
   const { data: steps, error: stepErr } = await supabase
     .from('work_steps')
-    .select('id, work_step_name')
+    .select('id, work_step_name, work_step_execution_order, work_step_plan_execution_order')
     .eq('work_order_id', workOrderId)
   if (stepErr) throw new Error(`work order steps load failed: ${stepErr.message}`)
   if (!steps || steps.length === 0) return []
 
   const stepNameById = new Map(steps.map(s => [s.id, s.work_step_name]))
+  // Position map: the step's execution order in the work plan (what the work
+  // step list on the record shows as 1, 2, 3…). Fall back to the plan execution
+  // order, then to a large number so any unordered step sinks to the end.
+  const stepPosById = new Map(steps.map(s => [
+    s.id,
+    s.work_step_execution_order ?? s.work_step_plan_execution_order ?? Number.MAX_SAFE_INTEGER,
+  ]))
   const stepIds = steps.map(s => s.id)
 
   // 2. All live photos linked to any of those steps.
@@ -355,16 +362,18 @@ export async function listWorkOrderPhotos(workOrderId) {
     .order('taken_at', { ascending: true })
   if (photoErr) throw new Error(`work order photos load failed: ${photoErr.message}`)
 
-  // 3. Tag each photo with its step id/name; sort by step name then time.
+  // 3. Tag each photo with its step id/name/position; sort by the step's
+  // execution order (so photos read in work-step order — Opening, then each
+  // step, then Closing), then by capture time within a step.
   return (photos || [])
     .map(p => ({
       ...p,
       _work_step_id: p.work_step_id,
       _work_step_name: stepNameById.get(p.work_step_id) || 'Unassigned step',
+      _work_step_position: stepPosById.get(p.work_step_id) ?? Number.MAX_SAFE_INTEGER,
     }))
     .sort((a, b) => {
-      const n = (a._work_step_name || '').localeCompare(b._work_step_name || '')
-      if (n !== 0) return n
+      if (a._work_step_position !== b._work_step_position) return a._work_step_position - b._work_step_position
       return (a.taken_at || '').localeCompare(b.taken_at || '')
     })
 }
