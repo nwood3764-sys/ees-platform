@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 35 — paperwork buttons for all six documents; quantities come straight from the audit reports</div>
+    Last updated 2026-07-20 · build 36 — export buttons organized into sections: Review tools · Audit deliverables · Energy modeling · Project reservation &amp; invoicing (Sealed subsection)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -177,24 +177,38 @@
     </div>
   </div>
 
+  <div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Review tools</div>
   <div class="bar">
     <button class="btn" id="aiExtract" disabled>🧠 AI Extract &amp; Map</button>
     <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
-    <button class="btn" id="buildBase" disabled>↓ Baseline Audit Template</button>
-    <button class="btn" id="buildImp" disabled>↓ Improved Audit Template</button>
+  </div>
+
+  <div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Audit deliverables</div>
+  <div class="bar">
+    <button class="btn" id="buildBase" disabled>↓ Baseline Audit Template (XML)</button>
+    <button class="btn" id="buildImp" disabled>↓ Improved Audit Template (XML)</button>
+    <button class="btn ghost" id="dlAuditDoc" disabled>🧾 Audit Invoice (PDF)</button>
+  </div>
+
+  <div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Energy modeling</div>
+  <div class="bar">
     <button class="btn ghost" id="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
     <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
-    <button class="btn" id="packet" disabled>📦 Download Energy Model Packet</button>
-    <span class="status" id="finalStatus"></span>
+    <button class="btn" id="packet" disabled>📦 Energy Model Packet (zip)</button>
   </div>
+
+  <div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Project reservation &amp; invoicing</div>
   <div class="bar">
-    <button class="btn ghost" id="dlAuditDoc" disabled>🧾 Audit Invoice (PDF)</button>
     <button class="btn ghost" id="dlPropDoc" disabled>🧾 HOMES Proposal (PDF)</button>
     <button class="btn ghost" id="dlInvDoc" disabled>🧾 HOMES Project Invoice (PDF)</button>
     <button class="btn ghost" id="dlWorkbook" disabled>🧾 Paperwork Workbook (xlsx)</button>
+  </div>
+  <div style="font:600 12px Inter,system-ui,sans-serif;color:var(--mut);margin:6px 0 2px 12px">Sealed</div>
+  <div class="bar" style="margin-left:12px">
     <button class="btn ghost" id="dlSealedProp" disabled>🧾 Sealed Proposal (PDF)</button>
     <button class="btn ghost" id="dlSealedInv" disabled>🧾 Sealed Invoice (PDF)</button>
   </div>
+  <div class="bar"><span class="status" id="finalStatus"></span></div>
   <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <strong style="font:700 15px/1.2 Georgia,serif">AI pre-export review</strong>
