@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 37 — section order: Review tools · Energy modeling · Audit deliverables · Project reservation &amp; invoicing</div>
+    Last updated 2026-07-20 · build 38 — deliverable sections: Energy modeling · Audit Rebate · Project Reservation · Project Payment, each with its full file set</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -183,30 +183,47 @@
     <button class="btn" id="smartReview" disabled>🔎 Smart Review (AI)</button>
   </div>
 
-  <div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Energy modeling</div>
+<div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Energy modeling</div>
   <div class="bar">
-    <button class="btn ghost" id="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
-    <button class="btn ghost" id="utilImp" disabled>↓ Improved Utility (xlsx)</button>
-    <button class="btn" id="packet" disabled>📦 Energy Model Packet (zip)</button>
+    <button class="btn ghost" data-act="utilBase" disabled>↓ Baseline Utility (xlsx)</button>
+    <button class="btn ghost" data-act="utilImp" disabled>↓ Improved Utility (xlsx)</button>
+    <button class="btn" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
+    <button class="btn" data-act="xmlImp" disabled>↓ Improved Audit Template (XML)</button>
+    <button class="btn" data-act="packet" disabled>📦 Energy Model Packet (zip)</button>
   </div>
 
-  <div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Audit deliverables</div>
+<div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Audit Rebate Deliverables</div>
   <div class="bar">
-    <button class="btn" id="buildBase" disabled>↓ Baseline Audit Template (XML)</button>
-    <button class="btn" id="buildImp" disabled>↓ Improved Audit Template (XML)</button>
-    <button class="btn ghost" id="dlAuditDoc" disabled>🧾 Audit Invoice (PDF)</button>
+    <button class="btn ghost" data-act="reportBase" disabled>📄 Baseline Audit Report (PDF)</button>
+    <button class="btn ghost" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
+    <button class="btn ghost" data-act="auditDoc" disabled>🧾 Audit Invoice (PDF)</button>
   </div>
 
-  <div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Project reservation &amp; invoicing</div>
+<div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Project Reservation Deliverables</div>
   <div class="bar">
-    <button class="btn ghost" id="dlPropDoc" disabled>🧾 HOMES Proposal (PDF)</button>
-    <button class="btn ghost" id="dlInvDoc" disabled>🧾 HOMES Project Invoice (PDF)</button>
-    <button class="btn ghost" id="dlWorkbook" disabled>🧾 Paperwork Workbook (xlsx)</button>
+    <button class="btn ghost" data-act="reportBase" disabled>📄 Baseline Audit Report (PDF)</button>
+    <button class="btn ghost" data-act="reportImp" disabled>📄 Improved Audit Report (PDF)</button>
+    <button class="btn ghost" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
+    <button class="btn ghost" data-act="xmlImp" disabled>↓ Improved Audit Template (XML)</button>
+    <button class="btn ghost" data-act="propDoc" disabled>🧾 HOMES Proposal (PDF)</button>
+    <button class="btn ghost" data-act="workbook" disabled>🧾 Paperwork Workbook (xlsx)</button>
   </div>
   <div style="font:600 12px Inter,system-ui,sans-serif;color:var(--mut);margin:6px 0 2px 12px">Sealed</div>
   <div class="bar" style="margin-left:12px">
-    <button class="btn ghost" id="dlSealedProp" disabled>🧾 Sealed Proposal (PDF)</button>
-    <button class="btn ghost" id="dlSealedInv" disabled>🧾 Sealed Invoice (PDF)</button>
+    <button class="btn ghost" data-act="sealedProp" disabled>🧾 Sealed Proposal (PDF)</button>
+  </div>
+
+<div style="font:700 13px Inter,system-ui,sans-serif;color:var(--ink);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px">Project Payment Deliverables</div>
+  <div class="bar">
+    <button class="btn ghost" data-act="invDoc" disabled>🧾 Final Invoice — HOMES Project Invoice (PDF)</button>
+    <button class="btn ghost" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
+    <button class="btn ghost" data-act="xmlImp" disabled>↓ Improved Audit Template (XML)</button>
+    <button class="btn ghost" data-act="reportBase" disabled>📄 Baseline Audit Report (PDF)</button>
+    <button class="btn ghost" data-act="reportImp" disabled>📄 Improved Audit Report (PDF)</button>
+  </div>
+  <div style="font:600 12px Inter,system-ui,sans-serif;color:var(--mut);margin:6px 0 2px 12px">Sealed</div>
+  <div class="bar" style="margin-left:12px">
+    <button class="btn ghost" data-act="sealedInv" disabled>🧾 Sealed Invoice (PDF)</button>
   </div>
   <div class="bar"><span class="status" id="finalStatus"></span></div>
   <div id="reviewPanel" style="display:none;margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:16px">
@@ -737,16 +754,9 @@ function refresh(){
   const filesReady=Object.values(data).every(Boolean);
   const occOk=occValid();
   const canExport=filesReady&&occOk;   // no export until occupancy is entered (no default)
-  document.getElementById('buildBase').disabled=!canExport;
-  document.getElementById('buildImp').disabled=!canExport;
-  document.getElementById('utilBase').disabled=!canExport;
-  document.getElementById('utilImp').disabled=!canExport;
-  document.getElementById('packet').disabled=!canExport;
+  for(const e of document.querySelectorAll('button[data-act]')) e.disabled=!canExport;
   document.getElementById('smartReview').disabled=!filesReady;   // AI review doesn't export
   document.getElementById('aiExtract').disabled=!filesReady;
-  for(const id of ['dlWorkbook','dlAuditDoc','dlPropDoc','dlInvDoc','dlSealedProp','dlSealedInv']){
-    const e=document.getElementById(id); if(e)e.disabled=!canExport;
-  }
   if(filesReady)pjLoadAndPrefill();
   const occErr=document.getElementById('occErr'); if(occErr) occErr.style.display=occOk?'none':'';
   if(!filesReady){return;}
@@ -2105,8 +2115,6 @@ async function downloadXML(which){
     fs.textContent=tag+' 50121 file downloaded. Import under Building → Import buildings → Import BuildingSync XML.';
   }catch(err){fs.className='status err';fs.textContent='Build error: '+err.message;}
 }
-document.getElementById('buildBase').onclick=()=>downloadXML('baseline');
-document.getElementById('buildImp').onclick=()=>downloadXML('improved');
 // Live occupancy readout (units x (bedrooms+1)).
 (function(){
   const u=document.getElementById('occUnits'), bd=document.getElementById('occBeds'),
@@ -2926,15 +2934,27 @@ function openDoc(html){
   const w=window.open('','_blank'); if(!w)return;
   w.document.write(html); w.document.close();
 }
-(function(){
-  const wire=(id,fn)=>{const e=document.getElementById(id); if(e)e.onclick=fn;};
-  wire('dlWorkbook',downloadInvoiceWorkbook);
-  wire('dlAuditDoc',()=>openDoc(eesDocHtml('audit')));
-  wire('dlPropDoc', ()=>openDoc(eesDocHtml('proposal')));
-  wire('dlInvDoc',  ()=>openDoc(eesDocHtml('invoice')));
-  wire('dlSealedProp',()=>openDoc(sealedHtml('proposal')));
-  wire('dlSealedInv', ()=>openDoc(sealedHtml('invoice')));
-})();
+// Every export button carries data-act; sections may repeat the same action
+// (each deliverable stage lists everything that submission needs).
+function downloadSourceReport(key){
+  const f=files[key]; if(!f)return;
+  const as=data.asImp||data.asBase;
+  const a=document.createElement('a'); a.href=URL.createObjectURL(f);
+  a.download=fileBase(as?as.name:'Building')+(key==='asBase'?'_Baseline_Asset_Score_Report.pdf':'_Improved_Asset_Score_Report.pdf');
+  a.click();
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest?e.target.closest('button[data-act]'):null;
+  if(!b||b.disabled)return;
+  const A={xmlBase:()=>downloadXML('baseline'), xmlImp:()=>downloadXML('improved'),
+    utilBase:()=>downloadUtility('baseline'), utilImp:()=>downloadUtility('improved'),
+    packet:()=>downloadPacket(), workbook:()=>downloadInvoiceWorkbook(),
+    auditDoc:()=>openDoc(eesDocHtml('audit')), propDoc:()=>openDoc(eesDocHtml('proposal')),
+    invDoc:()=>openDoc(eesDocHtml('invoice')), sealedProp:()=>openDoc(sealedHtml('proposal')),
+    sealedInv:()=>openDoc(sealedHtml('invoice')),
+    reportBase:()=>downloadSourceReport('asBase'), reportImp:()=>downloadSourceReport('asImp')};
+  if(A[b.dataset.act])A[b.dataset.act]();
+});
 
 /* ---- Utility usage xlsx (Portfolio Manager "Energy Use By Calendar Month" format) ---- */
 /* Metered Energy Year Start Date (yyyy-mm-dd): first day of the import window =
@@ -3012,8 +3032,6 @@ function downloadUtility(which){
     fs.textContent=tag+' utility file downloaded. Import it under Utility Data and Benchmarking → Energy Reporting Years → Choose File.';
   }catch(err){fs.className='status err';fs.textContent='Utility build error: '+err.message;}
 }
-document.getElementById('utilBase').onclick=()=>downloadUtility('baseline');
-document.getElementById('utilImp').onclick=()=>downloadUtility('improved');
 
 /* ---- Energy Model Packet: one zip with the source reports + everything the
    tool generated (both XMLs + both utility files), named for the building. ---- */
@@ -3061,7 +3079,6 @@ async function downloadPacket(){
     fs.className='status ok'; fs.textContent='Energy Model Packet downloaded.';
   }catch(err){fs.className='status err';fs.textContent='Packet error: '+err.message;}
 }
-document.getElementById('packet').onclick=downloadPacket;
 </script>
 
 <!-- ================= In-app energy-auditing assistant ================= -->
