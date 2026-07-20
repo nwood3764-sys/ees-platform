@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 60 — proposal title on its own line; table values vertically centered in their cells</div>
+    Last updated 2026-07-20 · build 61 — table header repeats on page 2; one consistent type scale; narrower margins</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2853,10 +2853,10 @@ async function buildInvoiceWorkbook(){
    True PDFs drawn with jsPDF text/vector calls — crisp at any zoom, selectable
    text, small files. No HTML capture, no rasterization. Content and math come
    from invoiceModel(); layout mirrors the EES workbook and the Sealed docs. */
-function _pdfNew(){
+function _pdfNew(margin){
   const {jsPDF}=window.jspdf;
   const d=new jsPDF({unit:'pt',format:'letter'});
-  const W=612,H=792,M=40,CW=W-2*M;
+  const W=612,H=792,M=margin||40,CW=W-2*M;
   const C={navy:[28,61,94],teal:[29,120,116],tealD:[21,94,91],soft:[251,246,234],obrd:[224,196,140],
     line:[217,224,232],green:[241,247,242],ink:[34,43,53],mut:[122,135,152],
     blueBg:[234,242,250],blueBr:[185,211,234],blueTx:[31,78,121],accent:[91,127,166],red:[192,57,43],
@@ -2876,20 +2876,20 @@ function _qty(q){return q!=null?Number(q).toLocaleString('en-US'):'';}
 function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 'invoice'
   const m=invoiceModel(), F=m.fields;
   const isAudit=kind==='audit', isInv=kind==='invoice';
-  const P=_pdfNew(); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
+  const P=_pdfNew(34); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
   const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'\u2014';
   const GL=[203,210,219], HB=[240,243,247];           // grid line + header fill
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
   /* ---- header ---- */
-  tc(C.navy); font(11,'bold'); t(M,st.y+16,'ENERGY EFFICIENCY SERVICES of WISCONSIN');
+  tc(C.navy); font(10.5,'bold'); t(M,st.y+15,'ENERGY EFFICIENCY SERVICES of WISCONSIN');
   if(isAudit||isInv){
-    tc([150,160,174]); font(11,'bold'); t(W-M,st.y+16,'INVOICE',{align:'right'});
-    st.y+=23;
+    tc([150,160,174]); font(10.5,'bold'); t(W-M,st.y+15,'INVOICE',{align:'right'});
+    st.y+=21;
   }else{
-    st.y+=23;
-    tc([104,116,132]); font(11,'bold');
-    t(W/2,st.y+12,'Wisconsin Inflation Reduction Act HOMES Program Project Proposal',{align:'center'});
-    st.y+=18;
+    st.y+=21;
+    tc([104,116,132]); font(10.5,'bold');
+    t(W/2,st.y+11,'Wisconsin Inflation Reduction Act HOMES Program Project Proposal',{align:'center'});
+    st.y+=16;
   }
   stroke([150,160,174]); d.setLineWidth(.75); d.line(M,st.y,W-M,st.y); st.y+=12;
   /* ---- meta: one line ---- */
@@ -2981,21 +2981,22 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     gridHeader(CM);
     tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');
     const descW=DX-(M+28)-10;
+    const contHeader=()=>{gridHeader(CM); tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');};
     m.rows.forEach((r,i)=>{
-      font(9.5,'bold'); const nameLines=wrap(r.name,descW);
+      font(9,'bold'); const nameLines=wrap(r.name,descW);
       font(8); const dl=wrap(r.desc,descW);
-      const h=6+nameLines.length*12+(dl.length?dl.length*9.5+4:0)+5;
-      if(st.y+h>H-M-20){d.addPage();st.y=M;}   // a row never splits across pages
+      const h=5+nameLines.length*11+(dl.length?dl.length*9+4:0)+5;
+      if(st.y+h>H-M-20){d.addPage();st.y=M;contHeader();}  // rows never split; header repeats
       gridBorders(CM,h);
-      const vc=st.y+h/2+3.2;    // vertically centered baseline for the cell values
+      const vc=st.y+h/2+3;      // vertically centered baseline for the cell values
       tc(C.mut); font(8.5); t(M+5,vc,String(i+1));
-      tc(C.ink); font(9.5,'bold'); nameLines.forEach((ln,k)=>t(M+28,st.y+13+k*12,ln));
-      font(9); t(UX0-5,vc,_qty(r.qty),{align:'right'});
+      tc(C.ink); font(9,'bold'); nameLines.forEach((ln,k)=>t(M+28,st.y+12+k*11,ln));
+      font(8.5); t(UX0-5,vc,_qty(r.qty),{align:'right'});
       t(UX0+6,vc,r.unit);
-      font(9.5,'bold'); t(AMT,vc,_money(r.cost),{align:'right'});
+      font(9,'bold'); t(AMT,vc,_money(r.cost),{align:'right'});
       font(8); tc([57,67,77]);
-      const dy=st.y+13+nameLines.length*12+1;
-      dl.forEach((ln,k)=>t(M+28,dy+k*9.5,ln));
+      const dy=st.y+12+nameLines.length*11+1;
+      dl.forEach((ln,k)=>t(M+28,dy+k*9,ln));
       st.y+=h;
     });
   }
@@ -3030,15 +3031,15 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const reb=foeAmt+iraAmt, due=gross-reb;
   {const rows=[['Subtotal',_money(gross),0],['Total Rebates','('+_money(reb)+')',0],
      ['TOTAL DUE',_money(Math.abs(due)<0.005?0:due),1]];
-   const TX=W-M-250, TW=250, hh=[17,17,19];
+   const TX=W-M-250, TW=250, hh=[16,16,18];
    const boxH=hh.reduce((a,b)=>a+b,0);
    need(boxH+14); st.y+=8;
    let yy=st.y;
    rows.forEach(([lbl,val,strong],i)=>{const h=hh[i];
      if(strong){fill(HB); d.rect(TX,yy,TW,h,'F');}
      stroke(GL); d.setLineWidth(.6); d.rect(TX,yy,TW,h);
-     tc(strong?C.ink:[60,76,94]); font(strong?9.5:8.5,'bold'); t(TX+8,yy+h-5.5,lbl);
-     tc(C.ink); font(strong?9.5:9,strong?'bold':'normal'); t(AMT,yy+h-5.5,val,{align:'right'});
+     tc(strong?C.ink:[60,76,94]); font(strong?9:8.5,'bold'); t(TX+8,yy+h-5,lbl);
+     tc(C.ink); font(strong?9:8.5,strong?'bold':'normal'); t(AMT,yy+h-5,val,{align:'right'});
      yy+=h;});
    st.y=yy;}
   /* ---- deliverables (audit only) ---- */
