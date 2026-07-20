@@ -121,7 +121,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 43 — every document button DOWNLOADS a real PDF (no tabs, no print dialog); packet carries PDFs too</div>
+    Last updated 2026-07-20 · build 44 — paperwork XML deliverables are upload-first; regeneration needs explicit confirmation</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -241,7 +241,7 @@
   </div>
 
   <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Optional — DOE Audit Template documents</div>
-  <div style="font-size:12px;color:var(--mut);margin-top:3px">After importing the XML into DOE, attach the DOE-generated report PDFs and exported XMLs here — the deliverable buttons and the packet then use these official versions instead of the local ones.</div>
+  <div style="font-size:12px;color:var(--mut);margin-top:3px">Attach the exact XML files that were imported into DOE (or DOE’s own exports) and the DOE-generated report PDFs. The deliverable buttons below serve THESE files — paperwork must match what actually went to DOE, so the XML buttons only regenerate after an explicit confirmation when nothing is uploaded here.</div>
   <div class="slots" style="margin-top:10px">
     <div class="slot" data-atkey="basePdf"><span class="tag">PDF</span>
       <div class="role">Baseline Audit Template Report</div>
@@ -3087,11 +3087,19 @@ function downloadSourceReport(key){
   const f=files[key]; if(!f)return;
   _serveFile(f, base+(key==='asBase'?'_Baseline_Asset_Score_Report.pdf':'_Improved_Asset_Score_Report.pdf'));
 }
-// Deliverable XML: the DOE-exported XML when uploaded, else the generated file.
+// Deliverable XML: paperwork must carry the EXACT file that went to DOE, so
+// the uploaded XML is authoritative. Regeneration only happens after an
+// explicit confirmation (fine when paperwork is done in the same session as
+// the modeling; wrong when it happens later against a newer build).
 function downloadDeliverableXml(which){
   const at=which==='baseline'?atDocs.baseXml:atDocs.impXml;
   if(at){const as=data.asImp||data.asBase;
     return _serveFile(at, fileBase(as?as.name:'Building')+(which==='baseline'?'_Baseline':'_Improved')+'_Audit_Template.xml');}
+  if(!confirm('No uploaded '+which+' Audit Template XML for this project.\n\n'
+    +'Paperwork should carry the EXACT file that was imported into DOE — upload it in the '
+    +'"DOE Audit Template documents" slots on this tab.\n\n'
+    +'Only if the modeling was done just now in this session is a fresh copy identical. '
+    +'Generate a fresh copy from the current reports anyway?'))return;
   downloadXML(which);
 }
 document.addEventListener('click',e=>{
