@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 27 — EUI precision: per-fuel decimals (88.1 / 54.5) drive EUI, target, and savings %</div>
+    Last updated 2026-07-20 · build 28 — stale-tab banner; review tables match XML integers exactly; custom measures get Uncategorized/Other</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -886,7 +886,12 @@ function refresh(){
   // End-use breakdown — SCALED to the Asset-Score-pinned totals, so these tables
   // match the XML / DOE import exactly (raw OpenStudio values would disagree
   // with the metered totals above).
-  const euB=scaledEndUses(data.osBase), euI=scaledEndUses(data.osImp);
+  // Integer-reconciled per fuel so every total matches the XML meter/end-use
+  // values exactly (per-cell rounding used to drift a few units from the file).
+  const _intEU=os=>{const s=scaledEndUses(os);return{
+    elec:integerEndUses(s.elec, os.elec.reduce((a2,b2)=>a2+b2,0)),
+    gas: integerEndUses(s.gas,  os.gas.reduce((a2,b2)=>a2+b2,0))};};
+  const euB=_intEU(data.osBase), euI=_intEU(data.osImp);
   h+='<div class="sect"><h3>Electricity by end use (kWh)</h3>';
   h+=endUseTable(['Space Heating','Space Cooling','Lighting','Plug Loads','Other'],euB.elec,euI.elec);
   h+='</div>';
@@ -938,10 +943,30 @@ function cleanName(n){return (n||'Building').replace(/\s*–\s*/g,' – ');}
 // would otherwise download as "..._Improved_Improved_...".
 function fileBase(n){return (cleanName(n).replace(/\s*[-–—]?\s*(Baseline|Improved)\s*$/i,'')
   .replace(/[^\w]+/g,'_').replace(/^_+|_+$/g,''))||'Building';}
+// EXACTLY the integers the XML carries: each value rounded, with the rounding
+// drift absorbed into the largest entry so the total equals the rounded sum —
+// the same residual-correcting rule build50121XML applies to the meter
+// readings and end-use rows. The page and the export can never disagree.
+function integerSeries(arr){
+  const vals=(arr||[]).map(v=>Math.round(v||0));
+  const tgt=Math.round((arr||[]).reduce((a,b)=>a+b,0));
+  const drift=tgt-vals.reduce((a,b)=>a+b,0);
+  if(drift!==0&&vals.length){let mx=0;vals.forEach((v,i)=>{if(v>vals[mx])mx=i;});vals[mx]+=drift;}
+  return vals;
+}
+function integerEndUses(eu,targetTotal){
+  const keys=Object.keys(eu||{}).filter(k=>eu[k]>0);
+  const out={}; let sum=0;
+  keys.forEach(k=>{out[k]=Math.round(eu[k]); sum+=out[k];});
+  const drift=Math.round(targetTotal)-sum;
+  if(drift!==0&&keys.length){let mk=keys[0];keys.forEach(k=>{if(out[k]>out[mk])mk=k;});out[mk]+=drift;}
+  return out;
+}
 function monthTable(label,os){
+  const e=integerSeries(os.elec), g=integerSeries(os.gas);
   let h=`<table class="mo"><thead><tr><th>${label}</th>`+MONTHS.map(m=>`<th>${m}</th>`).join('')+'<th>Tot</th></tr></thead><tbody>';
-  h+='<tr><td>kWh</td>'+os.elec.map(v=>`<td>${fmt(v)}</td>`).join('')+`<td>${fmt(os.elec.reduce((a,b)=>a+b,0))}</td></tr>`;
-  h+='<tr><td>therms</td>'+os.gas.map(v=>`<td>${fmt(v,0)}</td>`).join('')+`<td>${fmt(os.gas.reduce((a,b)=>a+b,0),0)}</td></tr>`;
+  h+='<tr><td>kWh</td>'+e.map(v=>`<td>${fmt(v)}</td>`).join('')+`<td>${fmt(e.reduce((a,b)=>a+b,0))}</td></tr>`;
+  h+='<tr><td>therms</td>'+g.map(v=>`<td>${fmt(v,0)}</td>`).join('')+`<td>${fmt(g.reduce((a,b)=>a+b,0),0)}</td></tr>`;
   return h+'</tbody></table>';
 }
 function monthlyMatrixTable(matrix){
@@ -1819,10 +1844,25 @@ async function build50121XML(which){
         // 'Heat Recovery') were ITS choices — set from this measure. DOE shows
         // 'Domestic Hot Water' as "Service Hot Water".
         const sca=node.getElementsByTagNameNS(NS_AUC,'SystemCategoryAffected')[0];
+        const matchedSlot=/low.?flow|shower|faucet|hot water fixture|roof|attic|ceiling|seal|infiltrat/i.test(txt);
         if(sca){
           if(/low.?flow|shower|faucet|hot water fixture/i.test(txt)) sca.textContent='Domestic Hot Water';
           else if(/roof|attic|ceiling/i.test(txt)) sca.textContent='Ceiling';
           else if(/seal|infiltrat/i.test(txt)) sca.textContent='Other HVAC';
+          else sca.textContent='Other';
+        }
+        // A user-added measure that matches no known slot must not inherit the
+        // cloned prototype's technology classification (e.g. "Air seal
+        // envelope" showing beside a thermostat measure). DOE's generic slot:
+        // Uncategorized / Other.
+        if(!matchedSlot){
+          const tc=node.getElementsByTagNameNS(NS_AUC,'TechnologyCategory')[0];
+          if(tc){
+            while(tc.firstChild)tc.removeChild(tc.firstChild);
+            const un=doc.createElementNS(NS_AUC,'auc:Uncategorized');
+            const mn=doc.createElementNS(NS_AUC,'auc:MeasureName'); mn.textContent='Other';
+            un.appendChild(mn); tc.appendChild(un);
+          }
         }
         parent.appendChild(node); newIds.push(nid);
       });
@@ -1970,6 +2010,35 @@ document.getElementById('buildImp').onclick=()=>downloadXML('improved');
     refresh();   // re-evaluate export gating on every occupancy edit
   }
   if(u&&bd){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
+})();
+
+/* ---------- Stale-build detection ---------- */
+// A long-open tab keeps running old JavaScript even after new builds deploy —
+// that's how the Alden packet was generated with months-old code. Compare this
+// page's build number against the live site's (on load, on tab refocus, and
+// every 5 minutes) and show a banner the moment it's stale.
+(function(){
+  const my=+((document.getElementById('buildstamp')||{textContent:''}).textContent.match(/build (\d+)/)||[])[1];
+  if(!my)return;
+  let bar=null;
+  async function check(){
+    if(bar)return;
+    try{
+      const r=await fetch(location.pathname+'?_v='+Date.now(),{cache:'no-store'});
+      if(!r.ok)return;
+      const live=+((await r.text()).match(/build (\d+)/)||[])[1];
+      if(live&&live>my){
+        bar=document.createElement('div');
+        bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#0d1a2e;color:#fff;padding:10px 16px;font:600 14px Inter,system-ui,sans-serif;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(13,26,46,.35)';
+        bar.textContent='⟳ Build '+live+' is live — this tab is on build '+my+'. Click here to refresh before exporting anything.';
+        bar.onclick=()=>location.reload();
+        document.body.appendChild(bar);
+      }
+    }catch(e){/* offline / auth hiccup — try again next cycle */}
+  }
+  check();
+  setInterval(check,5*60*1000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();});
 })();
 
 /* ---------- Editable EEM section wiring (delegated — the review re-renders) ---------- */
