@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 34 — individual PDF exports: Audit Invoice, HOMES Proposal, HOMES Project Invoice (branded print pages)</div>
+    Last updated 2026-07-20 · build 35 — paperwork buttons for all six documents; quantities come straight from the audit reports</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -166,7 +166,6 @@
       <label>Installation Address<input id="pjInstallAddr"></label>
       <label>Install City, State Zip<input id="pjCsz"></label>
       <label>IQ Number<input id="pjIQ" placeholder="LEA-…"></label>
-      <label>Attic Sq Ft (measured)<input id="pjAtticSqFt" type="number" step="0.01" placeholder="prefills from report roof area"></label>
       <label>Audit Invoice No.<input id="pjInvNo" placeholder="INV-WI-…"></label>
       <label>Proposal No.<input id="pjPropNo" placeholder="HOMES-MF-…"></label>
       <label>Project Invoice No.<input id="pjProjInvNo" placeholder="e.g. 2026-2031"></label>
@@ -2509,7 +2508,7 @@ function buildMappedForReview(){
      bath aerators .0033, kitchen aerators .0035, showerheads .0049), largest row absorbs
      the rounding so Gross Total = Total Rebates exactly → TOTAL DUE $0.                    */
 const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone','pjPropName',
-  'pjInstallAddr','pjCsz','pjIQ','pjAtticSqFt','pjInvNo','pjPropNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd'];
+  'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjPropNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd'];
 function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
@@ -2523,9 +2522,6 @@ function pjLoadAndPrefill(){
   set('pjPropName',strip((asB||as).name));
   set('pjInstallAddr',(asB||as).street);
   set('pjCsz',(asB||as).cityStateZip);
-  // Attic sq ft: prefill from the Asset Score roof area, but Asset Score blocks
-  // are approximate — enter the MEASURED attic area here for accurate invoicing.
-  if(asB&&asB.roofArea!=null)set('pjAtticSqFt',String(Math.round(asB.roofArea)));
   const t=new Date(); set('pjInvDate',(t.getMonth()+1)+'/'+t.getDate()+'/'+t.getFullYear());
   set('pjInvNo','INV-WI-'); set('pjPropNo','HOMES-MF-');
 }
@@ -2554,11 +2550,9 @@ const BANK={
 function invoiceModel(){
   const asB=data.asBase, asI=data.asImp;
   const units=parseInt((document.getElementById('occUnits')||{}).value,10)||null;
-  // Attic sq ft: the MEASURED value from the form wins; the Asset Score roof
-  // area (approximate block geometry) is only the prefill/fallback.
-  const _msf=parseFloat(pj('pjAtticSqFt'));
-  const roofSqFt=(isFinite(_msf)&&_msf>0)?Math.round(_msf*100)/100
-    :(asB&&asB.roofArea!=null?Math.round(asB.roofArea):null);
+  // Attic sq ft: straight from the Asset Score report's roof area — the audit
+  // reports are the source of record for every quantity; no manual inputs.
+  const roofSqFt=asB&&asB.roofArea!=null?Math.round(asB.roofArea):null;
   const iMin=(asI&&asI.roofRs&&asI.roofRs.length)?Math.min(...asI.roofRs):49;
   const bRs=(asB&&asB.roofRs)?asB.roofRs.filter(r=>r<iMin):[];
   const baseAtticR=bRs.length?Math.min(...bRs):null;
