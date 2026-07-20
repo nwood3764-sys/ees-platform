@@ -7,7 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+<script src="lib/jspdf.umd.min.js"></script>
 <!-- Runner endpoint config (set per-deploy in config.js). Loaded before the app
      so the .osm upload branch can read window.AUDIT_RUNNER_URL. -->
 <script src="config.js"></script>
@@ -113,6 +113,13 @@
     font-size:13px;margin:14px 22px 20px;border-radius:0 6px 6px 0;color:#5c5230}
   .flag{border-left:3px solid var(--warn);background:#fbf0ee;padding:11px 15px;
     font-size:13px;margin:14px 22px 0;border-radius:0 6px 6px 0;color:#6a352c}
+  #pjRow .pjgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+    gap:12px 14px;margin-top:12px}
+  #pjRow .pjgrid label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;
+    font-weight:600;line-height:1.3;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)}
+  #pjRow .pjgrid input{width:100%;box-sizing:border-box;font-family:inherit;font-size:13px;
+    color:var(--ink);padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:#fcfbf7}
+  #pjRow .pjgrid input:focus{outline:none;border-color:var(--moss);background:#fff}
 </style>
 </head>
 <body>
@@ -120,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 48 — professional invoice restyle: no form boxes, clean typographic header, address in footer</div>
+    Last updated 2026-07-20 · build 49 — PDF engine bundled with the site (fixes "PDF engine not loaded"); readable project-details form; AT documents required per program stage</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -233,7 +240,7 @@
   <div id="pjRow" style="margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px">
     <strong style="font-size:13.5px">Project &amp; invoice details</strong>
     <span class="copyhint">— fills the paperwork; property fields prefill from the reports, everything editable; saved in this browser per property</span>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-top:8px;font-size:12.5px">
+    <div class="pjgrid">
       <label>Property Owner<input id="pjOwner" placeholder="e.g. Lutheran Social Services of WI & Upper MI"></label>
       <label>Owner Address<input id="pjOwnerAddr" placeholder="street"></label>
       <label>Owner City, State Zip<input id="pjOwnerCsz" placeholder="City, ST 55555"></label>
@@ -255,8 +262,8 @@
     </div>
   </div>
 
-  <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Optional — DOE Audit Template documents</div>
-  <div style="font-size:12px;color:var(--mut);margin-top:3px">Attach the exact XML files that were imported into DOE (or DOE’s own exports) and the DOE-generated report PDFs. The deliverable XML buttons below serve ONLY these uploaded files — paperwork must match what actually went to DOE, so they stay disabled until the files are attached. Nothing is ever regenerated on this tab.</div>
+  <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">DOE Audit Template documents (required)</div>
+  <div style="font-size:12px;color:var(--mut);margin-top:3px">Attach the exact XML files that were imported into DOE (or DOE’s own exports) and the DOE-generated report PDFs — paperwork must match what actually went to DOE, and nothing is ever regenerated on this tab. The <b>Audit Invoice</b> unlocks with the baseline pair (report PDF + XML); <b>Project Reservation</b> and <b>Project Payment</b> paperwork need all four documents.</div>
   <div class="slots" style="margin-top:10px">
     <div class="slot" data-atkey="basePdf"><span class="tag">PDF</span>
       <div class="role">Baseline Audit Template Report</div>
@@ -852,10 +859,17 @@ function refresh(){
   // need the full file set.
   const _u2=parseInt((document.getElementById('occUnits')||{}).value,10);
   const paperReady=!!(data.asBase&&data.asImp)&&Number.isFinite(_u2)&&_u2>=1;
-  const PAPER_ACTS=['auditDoc','propDoc','invDoc','workbook','sealedProp','sealedInv'];
+  // DOE Audit Template documents are REQUIRED uploads, staged by program step:
+  // the audit invoice needs the baseline pair (report PDF + XML); reservation
+  // and final-payment paperwork need all four AT documents.
+  const atAudit=!!(atDocs.basePdf&&atDocs.baseXml);
+  const atAll=!!(atDocs.basePdf&&atDocs.impPdf&&atDocs.baseXml&&atDocs.impXml);
+  const AUDIT_ACTS=['auditDoc'];
+  const FULL_ACTS=['propDoc','invDoc','workbook','sealedProp','sealedInv'];
   for(const e of document.querySelectorAll('button[data-act]')){
     const a=e.dataset.act;
-    if(PAPER_ACTS.indexOf(a)>=0) e.disabled=!paperReady;
+    if(AUDIT_ACTS.indexOf(a)>=0) e.disabled=!(paperReady&&atAudit);
+    else if(FULL_ACTS.indexOf(a)>=0) e.disabled=!(paperReady&&atAll);
     else if(a==='reportBase') e.disabled=!(files.asBase||atDocs.basePdf);
     else if(a==='reportImp') e.disabled=!(files.asImp||atDocs.impPdf);
     else if(a==='dlvXmlBase') e.disabled=!atDocs.baseXml;
@@ -3172,7 +3186,7 @@ async function downloadDoc(which,pdfName){
     fs.className='status ok'; fs.textContent=pdfName+' downloaded.';
   }catch(e){
     fs.className='status err';
-    fs.textContent='PDF generation failed: '+e.message+' — refresh the page and retry (the PDF engine loads from the CDN).';
+    fs.textContent='PDF generation failed: '+e.message+' — refresh the page and retry.';
   }
 }
 /* -- wiring: downloads + packet -- */
