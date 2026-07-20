@@ -239,6 +239,7 @@ export default function HomeScreen({ navigate }) {
             fetchTechnicianCreatableWorkTypes().then(setCreateTypes).catch(() => setCreateTypes([]))
           }
         }} />
+        <QuickLink label="Vehicle inspection" sub="Daily pre-trip and return checklist" onClick={() => navigate('/field/vehicles')} />
         <QuickLink label="View full schedule" sub="All of today’s stops in order" onClick={() => navigate('/field/schedule')} />
         <QuickLink label="Open map" sub="Navigate and route your stops" onClick={() => navigate('/field/map')} />
       </div>

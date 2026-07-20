@@ -41,14 +41,18 @@ const PHOTO_ALLOWED_OBJECTS = {
   work_orders:         'work-evidence',
   work_steps:          'work-evidence',
   vehicle_inspections: 'work-evidence',
+  // Daily Vehicle Inspection checklist items — fleet evidence lives in its
+  // own bucket, separate from job-site work evidence.
+  vehicle_activity_items: 'fleet-evidence',
 }
 
 export function defaultPhotoBucket(relatedObject) {
   const bucket = PHOTO_ALLOWED_OBJECTS[relatedObject]
   if (!bucket) {
     throw new Error(
-      `Photos are only supported on work_orders, work_steps, and ` +
-      `vehicle_inspections. Got related_object="${relatedObject}". ` +
+      `Photos are only supported on work_orders, work_steps, ` +
+      `vehicle_inspections, and vehicle_activity_items. ` +
+      `Got related_object="${relatedObject}". ` +
       `For other records, use a Documents widget instead.`
     )
   }
