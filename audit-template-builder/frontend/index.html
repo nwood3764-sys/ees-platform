@@ -114,7 +114,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 40 — section headers toned down (quiet accent text, softer card borders)</div>
+    Last updated 2026-07-20 · build 41 — optional DOE Audit Template uploads (report PDFs + exported XMLs) feed the deliverable buttons and packet</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -140,6 +140,27 @@
       <div class="hint">Results report (.html) for the improved model — or the raw .osm model if the EnergyPlus runner is configured</div>
       <div class="got"></div>
       <input type="file" accept=".html,.htm,.osm"></div>
+  </div>
+
+  <div style="margin-top:18px;font:700 12px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)">Optional — DOE Audit Template documents</div>
+  <div style="font-size:12px;color:var(--mut);margin-top:3px">After importing the XML into DOE, attach the DOE-generated report PDFs and exported XMLs here — the deliverable buttons and the packet then use these official versions instead of the local ones.</div>
+  <div class="slots" style="margin-top:10px">
+    <div class="slot" data-atkey="basePdf"><span class="tag">PDF</span>
+      <div class="role">Baseline Audit Template Report</div>
+      <div class="hint">DOE-generated report for the baseline building</div>
+      <div class="got"></div><input type="file" accept=".pdf"></div>
+    <div class="slot" data-atkey="impPdf"><span class="tag">PDF</span>
+      <div class="role">Improved Audit Template Report</div>
+      <div class="hint">DOE-generated report for the improved building</div>
+      <div class="got"></div><input type="file" accept=".pdf"></div>
+    <div class="slot" data-atkey="baseXml"><span class="tag">XML</span>
+      <div class="role">Baseline Audit Template Export</div>
+      <div class="hint">XML exported from DOE for the baseline building</div>
+      <div class="got"></div><input type="file" accept=".xml"></div>
+    <div class="slot" data-atkey="impXml"><span class="tag">XML</span>
+      <div class="role">Improved Audit Template Export</div>
+      <div class="hint">XML exported from DOE for the improved building</div>
+      <div class="got"></div><input type="file" accept=".xml"></div>
   </div>
 
   <div class="status" id="status" style="margin-top:14px"></div>
@@ -213,7 +234,7 @@
   <div class="expHdr">Audit Rebate Deliverables</div>
   <div class="bar">
     <button class="btn ghost" data-act="reportBase" disabled>📄 Baseline Audit Report (PDF)</button>
-    <button class="btn ghost" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
+    <button class="btn ghost" data-act="dlvXmlBase" disabled>↓ Baseline Audit Template (XML)</button>
     <button class="btn ghost" data-act="auditDoc" disabled>🧾 Audit Invoice (PDF)</button>
   </div>
   </div>
@@ -223,8 +244,8 @@
   <div class="bar">
     <button class="btn ghost" data-act="reportBase" disabled>📄 Baseline Audit Report (PDF)</button>
     <button class="btn ghost" data-act="reportImp" disabled>📄 Improved Audit Report (PDF)</button>
-    <button class="btn ghost" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
-    <button class="btn ghost" data-act="xmlImp" disabled>↓ Improved Audit Template (XML)</button>
+    <button class="btn ghost" data-act="dlvXmlBase" disabled>↓ Baseline Audit Template (XML)</button>
+    <button class="btn ghost" data-act="dlvXmlImp" disabled>↓ Improved Audit Template (XML)</button>
     <button class="btn ghost" data-act="propDoc" disabled>🧾 HOMES Proposal (PDF)</button>
     <button class="btn ghost" data-act="workbook" disabled>🧾 Paperwork Workbook (xlsx)</button>
   </div>
@@ -238,8 +259,8 @@
   <div class="expHdr">Project Payment Deliverables</div>
   <div class="bar">
     <button class="btn ghost" data-act="invDoc" disabled>🧾 Final Invoice — HOMES Project Invoice (PDF)</button>
-    <button class="btn ghost" data-act="xmlBase" disabled>↓ Baseline Audit Template (XML)</button>
-    <button class="btn ghost" data-act="xmlImp" disabled>↓ Improved Audit Template (XML)</button>
+    <button class="btn ghost" data-act="dlvXmlBase" disabled>↓ Baseline Audit Template (XML)</button>
+    <button class="btn ghost" data-act="dlvXmlImp" disabled>↓ Improved Audit Template (XML)</button>
     <button class="btn ghost" data-act="reportBase" disabled>📄 Baseline Audit Report (PDF)</button>
     <button class="btn ghost" data-act="reportImp" disabled>📄 Improved Audit Report (PDF)</button>
   </div>
@@ -658,7 +679,18 @@ function fuelScaleFactor(os,fuel){
 }
 
 /* ---------- file wiring ---------- */
-document.querySelectorAll('.slot').forEach(slot=>{
+// Optional DOE Audit Template documents (no parsing — deliverable pass-through)
+const atDocs={basePdf:null,impPdf:null,baseXml:null,impXml:null};
+document.querySelectorAll('.slot[data-atkey]').forEach(slot=>{
+  const key=slot.dataset.atkey, inp=slot.querySelector('input');
+  slot.onclick=()=>inp.click();
+  ['dragover','dragenter'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.add('hot');}));
+  ['dragleave','drop'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.remove('hot');}));
+  const take=f=>{atDocs[key]=f;slot.classList.add('ok');slot.querySelector('.got').textContent='✓ '+f.name;};
+  slot.addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])take(ev.dataTransfer.files[0]);});
+  inp.addEventListener('change',()=>{if(inp.files[0])take(inp.files[0]);});
+});
+document.querySelectorAll('.slot[data-key]').forEach(slot=>{
   const key=slot.dataset.key, inp=slot.querySelector('input');
   slot.onclick=()=>inp.click();
   ['dragover','dragenter'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.add('hot');}));
@@ -2960,17 +2992,27 @@ function openDoc(html){
 }
 // Every export button carries data-act; sections may repeat the same action
 // (each deliverable stage lists everything that submission needs).
+function _serveFile(f,name){const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=name;a.click();}
 function downloadSourceReport(key){
+  const as=data.asImp||data.asBase, base=fileBase(as?as.name:'Building');
+  // Prefer the uploaded DOE Audit Template report; fall back to the Asset Score report.
+  const at=key==='asBase'?atDocs.basePdf:atDocs.impPdf;
+  if(at)return _serveFile(at, base+(key==='asBase'?'_Baseline_Audit_Template_Report.pdf':'_Improved_Audit_Template_Report.pdf'));
   const f=files[key]; if(!f)return;
-  const as=data.asImp||data.asBase;
-  const a=document.createElement('a'); a.href=URL.createObjectURL(f);
-  a.download=fileBase(as?as.name:'Building')+(key==='asBase'?'_Baseline_Asset_Score_Report.pdf':'_Improved_Asset_Score_Report.pdf');
-  a.click();
+  _serveFile(f, base+(key==='asBase'?'_Baseline_Asset_Score_Report.pdf':'_Improved_Asset_Score_Report.pdf'));
+}
+// Deliverable XML: the DOE-exported XML when uploaded, else the generated file.
+function downloadDeliverableXml(which){
+  const at=which==='baseline'?atDocs.baseXml:atDocs.impXml;
+  if(at){const as=data.asImp||data.asBase;
+    return _serveFile(at, fileBase(as?as.name:'Building')+(which==='baseline'?'_Baseline':'_Improved')+'_Audit_Template.xml');}
+  downloadXML(which);
 }
 document.addEventListener('click',e=>{
   const b=e.target.closest?e.target.closest('button[data-act]'):null;
   if(!b||b.disabled)return;
   const A={xmlBase:()=>downloadXML('baseline'), xmlImp:()=>downloadXML('improved'),
+    dlvXmlBase:()=>downloadDeliverableXml('baseline'), dlvXmlImp:()=>downloadDeliverableXml('improved'),
     utilBase:()=>downloadUtility('baseline'), utilImp:()=>downloadUtility('improved'),
     packet:()=>downloadPacket(), workbook:()=>downloadInvoiceWorkbook(),
     auditDoc:()=>openDoc(eesDocHtml('audit')), propDoc:()=>openDoc(eesDocHtml('proposal')),
@@ -3090,6 +3132,14 @@ async function downloadPacket(){
     inv.file(base+'_HOMES_Project_Invoice.html', eesDocHtml('invoice'));
     inv.file(base+'_Sealed_Proposal.html', sealedHtml('proposal'));
     inv.file(base+'_Sealed_Invoice.html', sealedHtml('invoice'));
+    // 5) DOE Audit Template documents, when attached
+    if(atDocs.basePdf||atDocs.impPdf||atDocs.baseXml||atDocs.impXml){
+      const at=zip.folder('5_Audit_Template_Documents');
+      if(atDocs.basePdf)at.file(base+'_Baseline_Audit_Template_Report.pdf',atDocs.basePdf);
+      if(atDocs.impPdf) at.file(base+'_Improved_Audit_Template_Report.pdf',atDocs.impPdf);
+      if(atDocs.baseXml)at.file(base+'_Baseline_Audit_Template_Export.xml',atDocs.baseXml);
+      if(atDocs.impXml) at.file(base+'_Improved_Audit_Template_Export.xml',atDocs.impXml);
+    }
     // manifest for future reference
     zip.file('README.txt',
       'Energy Model Packet — '+cleanName((data.asImp||asB).name)+'\nGenerated '+todayStamp()+
