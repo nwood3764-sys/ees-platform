@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 53 — Paper tab reorganized: project details first, one combined Uploaded Documents section</div>
+    Last updated 2026-07-20 · build 54 — description column stops clear of QTY / UNIT / AMOUNT; property address top-left on EES documents</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2895,14 +2895,14 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   metaCol(M,noLbl,pv(docNo));
   metaCol(M+215,dateLbl,pv(F.pjInvDate));
   metaCol(M+405,termLbl,isAudit?'Net 30':'30 days');
-  st.y+=22;
-  /* ---- bill to / property (plain invoice blocks, no field labels) ---- */
+  st.y+=30;
+  /* ---- property (left) / bill to (right) — the property is the subject of the document ---- */
   const RX=W/2+14;
-  tc(C.navy); font(8.5,'bold'); t(M,st.y,'BILL TO'); t(RX,st.y,'PROPERTY / INSTALLATION');
-  const lLines=[F.pjOwner,F.pjOwnerAddr,F.pjOwnerCsz,F.pjContact,F.pjEmail,F.pjPhone]
-    .filter(v=>v&&String(v).trim());
-  const rLines=[F.pjPropName,F.pjInstallAddr,F.pjCsz,'Property Type: Multifamily',
+  tc(C.navy); font(8.5,'bold'); t(M,st.y,'PROPERTY / INSTALLATION'); t(RX,st.y,'BILL TO');
+  const lLines=[F.pjPropName,F.pjInstallAddr,F.pjCsz,'Property Type: Multifamily',
     F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
+  const rLines=[F.pjOwner,F.pjOwnerAddr,F.pjOwnerCsz,F.pjContact,F.pjEmail,F.pjPhone]
+    .filter(v=>v&&String(v).trim());
   let ly=st.y+13, ry=st.y+13; tc(C.ink); font(9);
   for(const v of lLines) for(const ln of wrap(v,RX-M-16)){t(M,ly,ln); ly+=11;}
   for(const v of rLines) for(const ln of wrap(v,W-M-RX)){t(RX,ry,ln); ry+=11;}
@@ -2940,19 +2940,21 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       t(AMT,st.y+10.5,r[5],{align:'right'});
       stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+h,W-M,st.y+h); st.y+=h;});
   }else{
-    th([{lbl:'#',x:M+5},{lbl:'MEASURE LINE ITEM',x:M+25},{lbl:'QTY',x:M+372,align:'right'},
-        {lbl:'UNIT',x:M+385},{lbl:'AMOUNT',x:AMT,align:'right'}]);
+    /* right-hand columns sized to their contents; description never crosses them */
+    const QX=W-M-112, UX=W-M-102, DW=QX-(M+25)-14;
+    th([{lbl:'#',x:M+5},{lbl:'MEASURE LINE ITEM',x:M+25},{lbl:'QTY',x:QX,align:'right'},
+        {lbl:'UNIT',x:UX},{lbl:'AMOUNT',x:AMT,align:'right'}]);
     m.rows.forEach((r,i)=>{
-      const lines=wrap(r.desc,CW-40);
+      const lines=wrap(r.desc,DW);
       const headH=17;
       need(headH+Math.min(lines.length*9.5+6,120));
       tc(C.mut); font(9); t(M+5,st.y+12,String(i+1));
       tc(C.ink); font(9.5,'bold'); t(M+25,st.y+12,r.name);
-      tc(C.ink); font(9); t(M+372,st.y+12,_qty(r.qty),{align:'right'});
-      t(M+385,st.y+12,r.unit);
+      tc(C.ink); font(9); t(QX,st.y+12,_qty(r.qty),{align:'right'});
+      t(UX,st.y+12,r.unit);
       font(9.5,'bold'); t(AMT,st.y+12,_money(r.cost),{align:'right'});
       st.y+=headH;
-      /* description: single full-width column, page-break aware */
+      /* description: single column, stops clear of the money columns */
       let li=0; font(8); tc([57,67,77]);
       while(li<lines.length){
         const fit=Math.max(1,Math.floor((H-M-16-st.y)/9.5));
@@ -3006,9 +3008,11 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       need(12); tc(C.ink); font(8.5); t(M+5,st.y+9,'\u2013  '+dl2); st.y+=12;});
   }
   /* ---- rebate assignment notice ---- */
-  const notice=(isAudit||isInv)
-    ?'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above has been assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce this invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.'
-    :'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above will be assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce the future invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.';
+  const notice=isAudit
+    ?'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above has been assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce this invoice. As an instant discount, the owner is not required to pay for the audit services.'
+    :(isInv
+    ?'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above has been assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce this invoice. As an instant discount, the owner is not required to pay the assigned rebate amount.'
+    :'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above will be assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce the future invoice. As an instant discount, the owner will not be required to pay the assigned rebate amount.');
   {font(7.5,'italic'); const nl2=wrap(notice,CW-24), h=nl2.length*9+12; need(h+8); st.y+=8;
    stroke(C.line); d.setLineWidth(.75); d.rect(M,st.y,CW,h);
    tc([90,102,118]); font(7.5,'italic'); nl2.forEach((ln,k)=>t(M+10,st.y+10+k*9,ln));
