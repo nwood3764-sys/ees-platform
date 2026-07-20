@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 58 — rebate assignment notice removed everywhere; uniform font scale across all headers</div>
+    Last updated 2026-07-20 · build 59 — Proposal No. removed (form, PDF, workbook)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -238,7 +238,6 @@
       <label>Install City, State Zip<input id="pjCsz"></label>
       <label>IQ Number<input id="pjIQ" placeholder="LEA-…"></label>
       <label>Audit Invoice No.<input id="pjInvNo" placeholder="INV-WI-…"></label>
-      <label>Proposal No.<input id="pjPropNo" placeholder="HOMES-MF-…"></label>
       <label>Project Invoice No.<input id="pjProjInvNo" placeholder="e.g. 2026-2031"></label>
       <label>Invoice/Proposal Date<input id="pjInvDate" placeholder="m/d/yyyy"></label>
       <label>Est. Start Date<input id="pjEstStart" placeholder="m/d/yyyy"></label>
@@ -2660,7 +2659,7 @@ function buildMappedForReview(){
      bath aerators .0033, kitchen aerators .0035, showerheads .0049), largest row absorbs
      the rounding so Gross Total = Total Rebates exactly → TOTAL DUE $0.                    */
 const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone','pjPropName',
-  'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjPropNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd'];
+  'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd'];
 function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
@@ -2675,7 +2674,7 @@ function pjLoadAndPrefill(){
   set('pjInstallAddr',(asB||as).street);
   set('pjCsz',(asB||as).cityStateZip);
   const t=new Date(); set('pjInvDate',(t.getMonth()+1)+'/'+t.getDate()+'/'+t.getFullYear());
-  set('pjInvNo','INV-WI-'); set('pjPropNo','HOMES-MF-');
+  set('pjInvNo','INV-WI-');
 }
 (function(){for(const f of PJ_FIELDS){const e=document.getElementById(f); if(e)e.addEventListener('input',()=>{pjSave();});}})();
 
@@ -2840,7 +2839,7 @@ async function buildInvoiceWorkbook(){
     x=xlsSetCached(x,'L33',-m.total); x=xlsSetCached(x,'L34',0);
     return x;
   };
-  s2=fillScope(s2,{docNo:F.pjPropNo||'HOMES-MF-',docDate:F.pjInvDate||'',
+  s2=fillScope(s2,{docNo:'',docDate:F.pjInvDate||'',
     startRef:'C19',endRef:'I19',startVal:F.pjEstStart,endVal:F.pjEstEnd});
   s3=fillScope(s3,{docNo:F.pjProjInvNo||'',docDate:F.pjInvDate||'',
     startRef:'C19',endRef:'I19',startVal:F.pjStart,endVal:F.pjEnd});
@@ -2882,18 +2881,23 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const GL=[203,210,219], HB=[240,243,247];           // grid line + header fill
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
   /* ---- header ---- */
-  const docTitle=(isAudit||isInv)?'INVOICE':'PROPOSAL';
+  const docTitle=(isAudit||isInv)?'INVOICE':'Wisconsin Inflation Reduction Act HOMES Program Project Proposal';
   tc(C.navy); font(11,'bold'); t(M,st.y+16,'ENERGY EFFICIENCY SERVICES of WISCONSIN');
-  tc([150,160,174]); font(11,'bold'); t(W-M,st.y+16,docTitle,{align:'right'});
-  st.y+=23; stroke([150,160,174]); d.setLineWidth(.75); d.line(M,st.y,W-M,st.y); st.y+=12;
+  tc([150,160,174]); font(11,'bold');
+  const _tl=wrap(docTitle,262);
+  _tl.forEach((ln,k)=>t(W-M,st.y+16+k*12,ln,{align:'right'}));
+  st.y+=23+(_tl.length-1)*12;
+  stroke([150,160,174]); d.setLineWidth(.75); d.line(M,st.y,W-M,st.y); st.y+=12;
   /* ---- meta: one line ---- */
   const noLbl=(isAudit||isInv)?'Invoice No.:':'Proposal No.:';
   const dateLbl=(isAudit||isInv)?'Invoice Date:':'Date:';
   const termLbl=(isAudit||isInv)?'Due Date:':'Valid for:';
-  const docNo=isAudit?(F.pjInvNo||'INV-WI-'):(isInv?(F.pjProjInvNo||''):(F.pjPropNo||'HOMES-MF-'));
+  const docNo=isAudit?(F.pjInvNo||'INV-WI-'):(isInv?(F.pjProjInvNo||''):'');
   /* number / date / due stacked top-right, then PROPERTY and BILL TO side by
      side on the same line. No "Valid for" anywhere. */
-  const metaRows=[[noLbl,pv(docNo)],[dateLbl,pv(F.pjInvDate)]];
+  const metaRows=[]; 
+  if(isAudit||isInv) metaRows.push([noLbl,pv(docNo)]);
+  metaRows.push([dateLbl,pv(F.pjInvDate)]);
   if(isAudit) metaRows.push([termLbl,'N/A']);
   else if(isInv) metaRows.push([termLbl,'Net 30']);
   if(!isAudit){
