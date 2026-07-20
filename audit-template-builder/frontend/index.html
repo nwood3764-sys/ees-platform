@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 56 — PROPERTY and BILL TO aligned side by side; contractor line removed from audit invoice</div>
+    Last updated 2026-07-20 · build 56 — columns sized to contents, no cell overflow, dates in the top-right stack, contractor line removed; standard rebate notice</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2896,6 +2896,11 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const metaRows=[[noLbl,pv(docNo)],[dateLbl,pv(F.pjInvDate)]];
   if(isAudit) metaRows.push([termLbl,'N/A']);
   else if(isInv) metaRows.push([termLbl,'Net 30']);
+  if(!isAudit){
+    const sD=isInv?F.pjStart:F.pjEstStart, eD=isInv?F.pjEnd:F.pjEstEnd;
+    if(sD) metaRows.push([isInv?'Start Date:':'Est. Start:',sD]);
+    if(eD) metaRows.push([isInv?'Completion Date:':'Est. Completion:',eD]);
+  }
   let my=st.y;
   for(const [lb,v] of metaRows){
     font(8.5,'bold'); tc([60,76,94]); t(W-M-95,my+9,lb,{align:'right'});
@@ -2916,15 +2921,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   let ly=st.y+22, ry=st.y+22; tc(C.ink); font(9);
   for(const v of lLines) for(const ln of wrap(v,RX-M-16)){t(M,ly,ln); ly+=11;}
   for(const v of rLines) for(const ln of wrap(v,W-M-RX)){t(RX,ry,ln); ry+=11;}
-  st.y=Math.max(ly,ry)+2;
-  /* project dates line (proposal / project invoice only — nothing on the audit invoice) */
-  if(!isAudit){
-    const sD=isInv?F.pjStart:F.pjEstStart, eD=isInv?F.pjEnd:F.pjEstEnd;
-    const bits=['Registered Contractor: Energy Efficiency Services of Wisconsin'];
-    if(sD) bits.push((isInv?'Start: ':'Est. Start: ')+sD);
-    if(eD) bits.push((isInv?'Completion: ':'Est. Completion: ')+eD);
-    tc([96,110,126]); font(8); t(M,st.y+7,bits.join('    \u00b7    ')); st.y+=14;
-  } else st.y+=2;
+  st.y=Math.max(ly,ry)+4;
   /* ---- section heading ---- */
   const head=(txt,gap)=>{need(24); st.y+=(gap!=null?gap:10); tc([104,116,132]); font(8.5,'bold');
     t(M,st.y+8,txt.toUpperCase()); st.y+=12;};
@@ -2965,21 +2962,26 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       t(AMT,st.y+11,r[5],{align:'right'});
       st.y+=h;});
   }else{
-    const DX=W-M-190, QW=50, UW=42;
-    const CM=[{x0:M+22,x1:DX,lbl:'MEASURE LINE ITEM'},{x0:DX,x1:DX+QW,lbl:'QTY',align:'right'},
-      {x0:DX+QW,x1:DX+QW+UW,lbl:'UNIT'},{x0:DX+QW+UW,x1:W-M,lbl:'AMOUNT',align:'right'}];
+    /* size QTY / UNIT / AMOUNT to their widest contents (plus padding) */
+    font(9); const qw=Math.max(24,...m.rows.map(r=>d.getTextWidth(_qty(r.qty))))+14;
+    const uw=Math.max(24,...m.rows.map(r=>d.getTextWidth(String(r.unit||''))))+14;
+    font(9.5,'bold'); const aw=Math.max(46,...m.rows.map(r=>d.getTextWidth(_money(r.cost))))+16;
+    const AX0=W-M-aw, UX0=AX0-uw, DX=UX0-qw;
+    const CM=[{x0:M+22,x1:DX,lbl:'MEASURE LINE ITEM'},{x0:DX,x1:UX0,lbl:'QTY',align:'right'},
+      {x0:UX0,x1:AX0,lbl:'UNIT'},{x0:AX0,x1:W-M,lbl:'AMOUNT',align:'right'}];
     gridHeader(CM);
     tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');
     const descW=DX-(M+28)-10;
     m.rows.forEach((r,i)=>{
-      const nameLines=wrap(r.name,descW), dl=wrap(r.desc,descW);
+      font(9.5,'bold'); const nameLines=wrap(r.name,descW);
+      font(8); const dl=wrap(r.desc,descW);
       const h=6+nameLines.length*12+(dl.length?dl.length*9.5+4:0)+5;
       if(st.y+h>H-M-20){d.addPage();st.y=M;}   // a row never splits across pages
       gridBorders(CM,h);
       tc(C.mut); font(8.5); t(M+5,st.y+13,String(i+1));
       tc(C.ink); font(9.5,'bold'); nameLines.forEach((ln,k)=>t(M+28,st.y+13+k*12,ln));
-      font(9); t(DX+QW-5,st.y+13,_qty(r.qty),{align:'right'});
-      t(DX+QW+5,st.y+13,r.unit);
+      font(9); t(UX0-5,st.y+13,_qty(r.qty),{align:'right'});
+      t(UX0+6,st.y+13,r.unit);
       font(9.5,'bold'); t(AMT,st.y+13,_money(r.cost),{align:'right'});
       font(8); tc([57,67,77]);
       const dy=st.y+13+nameLines.length*12+1;
@@ -2996,12 +2998,17 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+' ('+m.tier.note+')',iraAmt]);
   }
   head(isAudit?'Rebates & Incentives Applied':'Applicable Rebates & Incentives',10);
-  {const PX=M+185, AX=W-M-110;
+  {font(8.5,'bold');
+   const pw=Math.max(60,...credits.map(c=>d.getTextWidth(c[0])))+12;
+   font(9,'bold');
+   const aw2=Math.max(50,...credits.map(c=>d.getTextWidth('('+_money(c[2])+')')))+16;
+   const PX=Math.min(M+pw,M+240), AX=W-M-aw2;
    const CR=[{x0:PX,x1:AX,lbl:'INCENTIVE DESCRIPTION'},{x0:AX,x1:W-M,lbl:'AMOUNT',align:'right'}];
    gridHeader(CR);
    tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'PROGRAM');
    credits.forEach(([nm,desc,amt])=>{
-     const nl=wrap(nm,PX-M-10), dl=wrap(desc,AX-PX-10);
+     font(8.5,'bold'); const nl=wrap(nm,PX-M-12);
+     font(8.5);        const dl=wrap(desc,AX-PX-12);
      const h=Math.max(nl.length,dl.length)*9.5+8;
      if(st.y+h>H-M-20){d.addPage();st.y=M;}
      gridBorders(CR,h);
@@ -3033,11 +3040,9 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       need(12); tc(C.ink); font(8.5); t(M+5,st.y+9,'\u2013  '+dl2); st.y+=12;});
   }
   /* ---- rebate assignment notice ---- */
-  const notice=isAudit
-    ?'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above has been assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce this invoice. As an instant discount, the owner is not required to pay for the audit services.'
-    :(isInv
-    ?'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above has been assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce this invoice. As an instant discount, the owner is not required to pay the assigned rebate amount.'
-    :'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above will be assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce the future invoice. As an instant discount, the owner will not be required to pay the assigned rebate amount.');
+  const notice=(isAudit||isInv)
+    ?'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above has been assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce this invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.'
+    :'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above will be assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce the future invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.';
   {font(7.5,'italic'); const nl2=wrap(notice,CW-24), h=nl2.length*9+12; need(h+8); st.y+=8;
    stroke(GL); d.setLineWidth(.6); d.rect(M,st.y,CW,h);
    tc([90,102,118]); font(7.5,'italic'); nl2.forEach((ln,k)=>t(M+10,st.y+10+k*9,ln));
