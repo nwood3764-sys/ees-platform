@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 29 — benchmark/target EUI writes only float32-clean decimals (no 88.0999… displays)</div>
+    Last updated 2026-07-20 · build 30 — utility cost assumptions card + monthly $ rows (electric/gas meter charges visible)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -186,8 +186,15 @@ pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/p
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const KWH_KBTU=3.412, THERM_KBTU=100, MMBTU_THERM=10;
 // Wisconsin residential utility rates (EIA state averages, 2026).
-const RATE_ELEC=0.188;  // $ per kWh
-const RATE_GAS=0.97;    // $ per therm
+const RATE_ELEC=0.188;  // $ per kWh (EIA WI residential average — all-in)
+const RATE_GAS=0.97;    // $ per therm (EIA WI residential average — all-in)
+// Fixed meter/customer charges, $ per meter per month. Currently $0.00: the
+// EIA all-in average rates above already spread utility fixed charges across
+// usage, so itemizing them on top would double-count. Set real tariff values
+// here (and they flow into the monthly costs on the page AND in the XML) when
+// EES decides to itemize.
+const METER_CHARGE_ELEC=0.00;
+const METER_CHARGE_GAS =0.00;
 const files={asBase:null,asImp:null,osBase:null,osImp:null};
 const data={asBase:null,asImp:null,osBase:null,osImp:null};
 // Editable EEM section state — the SOURCE OF TRUTH for the export. Seeded from
@@ -844,7 +851,19 @@ function refresh(){
   env.forEach(r=>h+=`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`);
   h+='</table></div>';
 
-  h+='<div class="sect"><h3>Monthly energy (whole building)</h3>';
+  // Utility cost assumptions — visible on every review (read-only for now).
+  // These four values drive every $ figure on this page and the monthly
+  // EnergyCost values written into the 50121 XML.
+  h+='<div class="sect"><h3>Utility cost assumptions</h3><table class="kv">'
+    +`<tr><td>Cost per kWh</td><td>$${RATE_ELEC.toFixed(3)}</td></tr>`
+    +`<tr><td>Electric meter charge</td><td>$${METER_CHARGE_ELEC.toFixed(2)} / month</td></tr>`
+    +`<tr><td>Cost per therm</td><td>$${RATE_GAS.toFixed(2)}</td></tr>`
+    +`<tr><td>Gas meter charge</td><td>$${METER_CHARGE_GAS.toFixed(2)} / month</td></tr>`
+    +'</table><p class="hint">Wisconsin residential averages (EIA, 2026). The all-in $/kWh and $/therm '
+    +'rates already spread utility fixed/meter charges across usage, so the separate meter charges are '
+    +'$0.00 until real tariffs are itemized. These are read-only for now — they can be made editable later.</p></div>';
+
+  h+='<div class="sect"><h3>Monthly energy &amp; cost (whole building)</h3>';
   h+=monthTable('Baseline',data.osBase);
   h+=monthTable('Improved',data.osImp);
   h+='</div>';
@@ -964,9 +983,16 @@ function integerEndUses(eu,targetTotal){
 }
 function monthTable(label,os){
   const e=integerSeries(os.elec), g=integerSeries(os.gas);
+  // Monthly meter charges ($): the SAME formula that writes each meter
+  // reading's EnergyCost into the XML — integer kWh/therms × rate + fixed
+  // meter charge, rounded — so the page and the file always agree.
+  const eC=e.map(v=>Math.round(v*RATE_ELEC+METER_CHARGE_ELEC));
+  const gC=g.map(v=>Math.round(v*RATE_GAS +METER_CHARGE_GAS));
   let h=`<table class="mo"><thead><tr><th>${label}</th>`+MONTHS.map(m=>`<th>${m}</th>`).join('')+'<th>Tot</th></tr></thead><tbody>';
   h+='<tr><td>kWh</td>'+e.map(v=>`<td>${fmt(v)}</td>`).join('')+`<td>${fmt(e.reduce((a,b)=>a+b,0))}</td></tr>`;
+  h+='<tr><td>Electric $</td>'+eC.map(v=>`<td>${fmt(v,0)}</td>`).join('')+`<td>${fmt(eC.reduce((a,b)=>a+b,0),0)}</td></tr>`;
   h+='<tr><td>therms</td>'+g.map(v=>`<td>${fmt(v,0)}</td>`).join('')+`<td>${fmt(g.reduce((a,b)=>a+b,0),0)}</td></tr>`;
+  h+='<tr><td>Gas $</td>'+gC.map(v=>`<td>${fmt(v,0)}</td>`).join('')+`<td>${fmt(gC.reduce((a,b)=>a+b,0),0)}</td></tr>`;
   return h+'</tbody></table>';
 }
 function monthlyMatrixTable(matrix){
@@ -1365,7 +1391,8 @@ async function build50121XML(which){
         // Monthly $ cost per meter reading (reference file had 0.0 -> DOE showed
         // Site Energy Cost Intensity 0.00). WI rates: $/kWh, $/therm; integers.
         const rate=fuel==='Electricity'?RATE_ELEC:RATE_GAS;
-        [...sc.getElementsByTagNameNS(NS_AUC,'EnergyCost')].forEach((ec,i)=>{ if(i<12) ec.textContent=String(Math.round(vals[i]*rate)); });
+        const mchg=fuel==='Electricity'?METER_CHARGE_ELEC:METER_CHARGE_GAS;
+        [...sc.getElementsByTagNameNS(NS_AUC,'EnergyCost')].forEach((ec,i)=>{ if(i<12) ec.textContent=String(Math.round(vals[i]*rate+mchg)); });
         [...sc.getElementsByTagNameNS(NS_AUC,'TimeSeries')].forEach((ts,i)=>{
           if(i>=12)return; const {m,y}=seq[i]; const nm2=m===12?1:m+1, ny=m===12?y+1:y;
           const st=ts.getElementsByTagNameNS(NS_AUC,'StartTimestamp')[0];
