@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 30 — utility cost assumptions card + monthly $ rows (electric/gas meter charges visible)</div>
+    Last updated 2026-07-20 · build 31 — building name gets ' - Audit Template' suffix in the XML</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -1252,7 +1252,13 @@ async function build50121XML(which){
   const impEUI  = asI?asI.euiUpgraded:(asB?asB.euiUpgraded:null);
 
   // Identity
-  _setFirst(doc,'PremisesName', cleanName(as.name));
+  // Building name carries an " - Audit Template" suffix so the imported DOE
+  // record is distinguishable at a glance (EES naming standard).
+  {
+    let bn=cleanName(as.name);
+    if(!/audit template\s*$/i.test(bn)) bn+=' - Audit Template';
+    _setFirst(doc,'PremisesName', bn);
+  }
   _setFirst(doc,'StreetAddress', as.street||asB.street||'');
   _setFirst(doc,'City', as.city||asB.city||'');
   _setFirst(doc,'State', as.state||'WI');
