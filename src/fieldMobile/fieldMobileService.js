@@ -433,3 +433,80 @@ export async function fetchKnowledgeArticle(slug) {
   if (error) throw error
   return data || null
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Fleet — Daily Vehicle Inspections
+//
+// Vehicles are company-level records (no project/building/unit). The daily
+// inspection is a vehicle_activities record whose checklist items are
+// instantiated server-side from vehicle_inspection_item_templates per the
+// vehicle's type (box trucks get the 6-tire dual-rear set). Item photos go
+// through the canonical uploadPhoto (EXIF-preserving compression, watermark
+// pipeline) into the fleet-evidence bucket.
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function fetchFleetVehicles() {
+  const { data, error } = await supabase
+    .from('vehicles')
+    .select(`
+      id, vehicle_record_number, vehicle_name, vehicle_license_plate,
+      vehicle_current_odometer,
+      vehicle_type:picklist_values!vehicles_vehicle_type_fkey ( picklist_label )
+    `)
+    .eq('vehicle_is_deleted', false)
+    .order('vehicle_name', { ascending: true })
+  if (error) throw error
+  return (data || []).map(v => ({
+    id: v.id,
+    recordNumber: v.vehicle_record_number,
+    name: v.vehicle_name,
+    plate: v.vehicle_license_plate,
+    odometer: v.vehicle_current_odometer,
+    typeLabel: v.vehicle_type?.picklist_label || null,
+  }))
+}
+
+export async function startVehicleInspection(vehicleId) {
+  const { data, error } = await supabase.rpc('create_vehicle_daily_inspection', { p_vehicle_id: vehicleId })
+  if (error) throw error
+  return data
+}
+
+export async function fetchVehicleInspection(activityId) {
+  const { data, error } = await supabase.rpc('vehicle_inspection_detail', { p_activity_id: activityId })
+  if (error) throw error
+  return data
+}
+
+export async function saveVehicleInspectionLeg({ activityId, leg, odometer, gasLevel }) {
+  const { data, error } = await supabase.rpc('record_vehicle_inspection_leg', {
+    p_activity_id: activityId, p_leg: leg, p_odometer: odometer, p_gas_level: gasLevel,
+  })
+  if (error) throw error
+  return data
+}
+
+export async function saveVehicleInspectionItem({ itemId, condition, comment }) {
+  const { data, error } = await supabase.rpc('save_vehicle_inspection_item', {
+    p_item_id: itemId, p_condition: condition ?? null, p_comment: comment ?? null,
+  })
+  if (error) throw error
+  return data
+}
+
+export async function completeVehicleInspection({ activityId, notes }) {
+  const { data, error } = await supabase.rpc('complete_vehicle_inspection', {
+    p_activity_id: activityId, p_notes: notes ?? null,
+  })
+  if (error) throw error
+  return data
+}
+
+export async function captureInspectionPhoto({ file, itemId }) {
+  return uploadPhoto({
+    file,
+    relatedObject: 'vehicle_activity_items',
+    relatedId: itemId,
+    photoType: 'general',
+  })
+}

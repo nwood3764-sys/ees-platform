@@ -29,6 +29,7 @@ import TodaySchedule from './TodaySchedule'
 import MapView from './MapView'
 import KnowledgeScreen, { KnowledgeArticle } from './KnowledgeScreen'
 import WorkOrderDetail from './WorkOrderDetail'
+import VehicleInspection, { VehiclePicker } from './VehicleInspectionScreen'
 import { C, FONT } from './styles'
 
 // Lightweight client-side navigation. pushState + a popstate listener; every
@@ -166,6 +167,7 @@ export default function FieldMobileRoot() {
   // Path dispatch.
   // parts = ['field'] | ['field','schedule'] | ['field','map']
   //       | ['field','knowledge'] | ['field','wo','<id>']
+  //       | ['field','vehicles'] | ['field','vehicle-inspection','<id>']
   const parts = path.split('/').filter(Boolean)
 
   let screen
@@ -179,6 +181,10 @@ export default function FieldMobileRoot() {
     screen = <KnowledgeArticle slug={parts[2]} navigate={navigate} />
   } else if (parts[1] === 'knowledge') {
     screen = <KnowledgeScreen navigate={navigate} />
+  } else if (parts[1] === 'vehicles') {
+    screen = <VehiclePicker navigate={navigate} />
+  } else if (parts[1] === 'vehicle-inspection' && parts[2]) {
+    screen = <VehicleInspection activityId={parts[2]} navigate={navigate} />
   } else if (parts[1] === 'wo' && parts[2]) {
     screen = <WorkOrderDetail woId={parts[2]} navigate={navigate} />
   } else {
