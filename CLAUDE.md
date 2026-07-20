@@ -99,7 +99,9 @@ Security advisor baseline is ~179 known lints (mostly `auth_security_definer_fun
 
 ## Working style
 
-Drive the work; don't check in constantly. Surface only genuine binary decisions — state a recommendation first, then ask once, yes/no. Don't list options. Don't defer builds. No tangential commentary or unsolicited analysis. Verify a push actually reached the live bundle before reporting success.
+Drive the work to completion; don't check in constantly. Surface only genuine binary decisions — state a recommendation first, then ask once, yes/no. Don't list options. Don't defer builds. No tangential commentary or unsolicited analysis. Verify a push actually reached the live bundle before reporting success.
+
+**Standing authorization — fix and ship without waiting (Nicholas, 2026-07-20).** Do NOT stop to ask for permission to create a pull request, open/update a PR, push a fix, or otherwise follow through on work already in flight. When a change is built, verified (`npm run build:safe`), committed, and pushed, **open the PR as part of the same turn** — that is the default, not something to request. Bias toward *fixing* problems end-to-end over building new things and handing back a to-do. The only things still worth a one-line yes/no are genuine irreversible-or-ambiguous forks (deleting real data, a schema change that can't be rolled back, two equally valid product directions). Everything else: just do it and report what you did.
 
 ## Handoff standard
 
