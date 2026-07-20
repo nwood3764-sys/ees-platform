@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 59 — Proposal No. removed (form, PDF, workbook)</div>
+    Last updated 2026-07-20 · build 60 — proposal title on its own line; table values vertically centered in their cells</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2881,12 +2881,16 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const GL=[203,210,219], HB=[240,243,247];           // grid line + header fill
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
   /* ---- header ---- */
-  const docTitle=(isAudit||isInv)?'INVOICE':'Wisconsin Inflation Reduction Act HOMES Program Project Proposal';
   tc(C.navy); font(11,'bold'); t(M,st.y+16,'ENERGY EFFICIENCY SERVICES of WISCONSIN');
-  tc([150,160,174]); font(11,'bold');
-  const _tl=wrap(docTitle,262);
-  _tl.forEach((ln,k)=>t(W-M,st.y+16+k*12,ln,{align:'right'}));
-  st.y+=23+(_tl.length-1)*12;
+  if(isAudit||isInv){
+    tc([150,160,174]); font(11,'bold'); t(W-M,st.y+16,'INVOICE',{align:'right'});
+    st.y+=23;
+  }else{
+    st.y+=23;
+    tc([104,116,132]); font(11,'bold');
+    t(W/2,st.y+12,'Wisconsin Inflation Reduction Act HOMES Program Project Proposal',{align:'center'});
+    st.y+=18;
+  }
   stroke([150,160,174]); d.setLineWidth(.75); d.line(M,st.y,W-M,st.y); st.y+=12;
   /* ---- meta: one line ---- */
   const noLbl=(isAudit||isInv)?'Invoice No.:':'Proposal No.:';
@@ -2983,11 +2987,12 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       const h=6+nameLines.length*12+(dl.length?dl.length*9.5+4:0)+5;
       if(st.y+h>H-M-20){d.addPage();st.y=M;}   // a row never splits across pages
       gridBorders(CM,h);
-      tc(C.mut); font(8.5); t(M+5,st.y+13,String(i+1));
+      const vc=st.y+h/2+3.2;    // vertically centered baseline for the cell values
+      tc(C.mut); font(8.5); t(M+5,vc,String(i+1));
       tc(C.ink); font(9.5,'bold'); nameLines.forEach((ln,k)=>t(M+28,st.y+13+k*12,ln));
-      font(9); t(UX0-5,st.y+13,_qty(r.qty),{align:'right'});
-      t(UX0+6,st.y+13,r.unit);
-      font(9.5,'bold'); t(AMT,st.y+13,_money(r.cost),{align:'right'});
+      font(9); t(UX0-5,vc,_qty(r.qty),{align:'right'});
+      t(UX0+6,vc,r.unit);
+      font(9.5,'bold'); t(AMT,vc,_money(r.cost),{align:'right'});
       font(8); tc([57,67,77]);
       const dy=st.y+13+nameLines.length*12+1;
       dl.forEach((ln,k)=>t(M+28,dy+k*9.5,ln));
@@ -3019,7 +3024,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      gridBorders(CR,h);
      tc(C.ink); font(8.5,'bold'); nl.forEach((ln,k)=>t(M+5,st.y+11+k*9.5,ln));
      font(8.5); tc([70,82,98]); dl.forEach((ln,k)=>t(PX+5,st.y+11+k*9.5,ln));
-     tc(C.ink); font(9,'bold'); t(AMT,st.y+11,'('+_money(amt)+')',{align:'right'});
+     tc(C.ink); font(9,'bold'); t(AMT,st.y+h/2+3.2,'('+_money(amt)+')',{align:'right'});
      st.y+=h;});}
   /* ---- totals: bordered box, same money edge ---- */
   const reb=foeAmt+iraAmt, due=gross-reb;
