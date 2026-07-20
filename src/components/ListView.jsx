@@ -816,7 +816,8 @@ function MobileFilterSheet({
 }
 
 // ── Sortable Header ──────────────────────────────────────────────────────────
-function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilterApply, openFilterCol, setOpenFilterCol, onResizeStart, onResizeReset, currentWidth }) {
+function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilterApply, openFilterCol, setOpenFilterCol, onResizeStart, onResizeReset, currentWidth,
+  onColDragStart, onColDragOver, onColDrop, onColDragEnd, isColDragging, isColDragOver }) {
   const isFiltered = activeFilters.some(f => f.field === col.field);
   const isSorted = sortField === col.field;
   const isOpen = openFilterCol === col.field;
@@ -837,10 +838,27 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
   };
 
   return (
-    <th style={{ padding: 0, position: 'sticky', top: 0, zIndex: 3, background: C.card, userSelect: 'none', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+    <th
+      onDragOver={onColDragStart ? (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; onColDragOver?.(col.field); } : undefined}
+      onDrop={onColDragStart ? (e) => { e.preventDefault(); onColDrop?.(col.field); } : undefined}
+      style={{
+        padding: 0, position: 'sticky', top: 0, zIndex: 3, background: C.card, userSelect: 'none',
+        borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', overflow: 'hidden',
+        // Drag-reorder affordances: fade the column being dragged, and show a
+        // 2px emerald insertion bar on the header currently hovered as a target.
+        opacity: isColDragging ? 0.45 : 1,
+        boxShadow: isColDragOver ? `inset 2px 0 0 ${C.emerald}` : undefined,
+      }}>
       <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
         <div onClick={handleSort}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '10px 4px 10px 12px', cursor: col.sortable ? 'pointer' : 'default', flex: '1 1 auto', minWidth: 0 }}
+          draggable={!!onColDragStart}
+          onDragStart={onColDragStart ? (e) => {
+            if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', col.field); } catch { /* older browsers */ } }
+            onColDragStart(col.field);
+          } : undefined}
+          onDragEnd={onColDragStart ? () => onColDragEnd?.() : undefined}
+          title={onColDragStart ? 'Drag to reorder · click to sort' : undefined}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '10px 4px 10px 12px', cursor: col.sortable ? 'pointer' : (onColDragStart ? 'grab' : 'default'), flex: '1 1 auto', minWidth: 0 }}
           onMouseEnter={e => { if (col.sortable) e.currentTarget.style.background = C.page; }}
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
           <span style={{ fontSize: 11, fontWeight: 600, color: isSorted ? C.textPrimary : C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, maxWidth: 168 }} title={col.label}>
@@ -1857,6 +1875,39 @@ export function ListView({
     return ordered;
   }, [columns, columnByField, visibleColumns]);
 
+  // Sum of every column's width (its custom drag width, or its type-based
+  // default) plus the edit-mode checkbox column. Used as the table's minWidth so
+  // that when the columns don't fit the pane the table overflows and the
+  // horizontal scrollbar appears — reachable even before any column is resized.
+  const tableMinWidth = useMemo(() => {
+    const base = editMode ? 36 : 0;
+    return base + effectiveColumns.reduce((sum, col) => {
+      const w = colWidths[col.field];
+      return sum + (w != null ? w : defaultColWidth(col));
+    }, 0);
+  }, [effectiveColumns, colWidths, editMode]);
+
+  // ── Column drag-to-reorder ──────────────────────────────────────────────
+  // Native HTML5 drag on the header label moves a column left/right. Tracks the
+  // column being dragged (from) and the header hovered as the drop target (over)
+  // for the insertion-bar affordance.
+  const [colDrag, setColDrag] = useState({ from: null, over: null });
+  const reorderColumns = (fromField, toField) => {
+    if (!fromField || fromField === toField) return;
+    // Materialize the current rendered order (effectiveColumns already reflects
+    // any explicit selection AND the forced identity columns), move `from` to
+    // where `to` sits, and persist as the explicit column order.
+    const order = effectiveColumns.map(c => c.field);
+    const fromIdx = order.indexOf(fromField);
+    const toIdx   = order.indexOf(toField);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const next = [...order];
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, fromField);
+    setVisibleColumns(next);
+    setIsDirty(true);
+  };
+
   // Report active related (one-hop) fields to the parent so it can refetch with
   // the necessary parent joins. Own-column changes don't trigger this (their
   // data is already present). Fires only when the set actually changes.
@@ -2678,7 +2729,16 @@ export function ListView({
               AND the sticky <thead> has a proper scrollport to freeze against.
               (A wrapping overflow:hidden here previously defeated position:sticky.) */}
           <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: 'auto', flex: 1, minHeight: 0 }}>
-            <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: hasCustomWidths ? 'fixed' : 'auto' }}>
+            <table data-colfixed={hasCustomWidths ? '1' : '0'} style={{
+              // width:100% fills the pane when there's room; minWidth is the sum
+              // of each column's width (custom drag width or type-based default)
+              // so that with many columns the table overflows the pane and the
+              // container's horizontal scrollbar appears — instead of squeezing
+              // every column to fit and leaving off-screen columns unreachable.
+              width: '100%', minWidth: tableMinWidth,
+              borderCollapse: 'collapse', fontSize: 13,
+              tableLayout: hasCustomWidths ? 'fixed' : 'auto',
+            }}>
               <colgroup>
                 {editMode && <col style={{ width: 36 }} />}
                 {effectiveColumns.map(col => {
@@ -2716,7 +2776,13 @@ export function ListView({
                     <SortableHeader key={col.field} col={col} sortField={sortField} sortDir={sortDir} onSort={handleSort}
                       activeFilters={activeFilters} onFilterApply={handleFilterApply} openFilterCol={openFilterCol} setOpenFilterCol={setOpenFilterCol}
                       onResizeStart={onResizeStart} onResizeReset={resetColumn}
-                      currentWidth={colWidths[col.field] != null ? colWidths[col.field] : defaultColWidth(col)} />
+                      currentWidth={colWidths[col.field] != null ? colWidths[col.field] : defaultColWidth(col)}
+                      onColDragStart={(f) => setColDrag({ from: f, over: null })}
+                      onColDragOver={(f) => setColDrag(d => (d.from && d.over !== f ? { ...d, over: f } : d))}
+                      onColDrop={(f) => { reorderColumns(colDrag.from, f); setColDrag({ from: null, over: null }); }}
+                      onColDragEnd={() => setColDrag({ from: null, over: null })}
+                      isColDragging={colDrag.from === col.field}
+                      isColDragOver={!!colDrag.from && colDrag.over === col.field && colDrag.from !== col.field} />
                   ))}
                 </tr>
               </thead>
