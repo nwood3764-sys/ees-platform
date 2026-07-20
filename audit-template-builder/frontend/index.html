@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 26 — download filenames: model-name Baseline/Improved tag no longer duplicated</div>
+    Last updated 2026-07-20 · build 27 — EUI precision: per-fuel decimals (88.1 / 54.5) drive EUI, target, and savings %</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -270,6 +270,18 @@ function parseAssetScore(t){
   const eEui=t.match(/Electricity\s*\[\s*([\d.]+)\s*,\s*([\d.]+)\s*\]/i);
   d.gasEuiCur =gEui?parseFloat(gEui[1]):null; d.gasEuiUpg =gEui?parseFloat(gEui[2]):null;
   d.elecEuiCur=eEui?parseFloat(eEui[1]):null; d.elecEuiUpg=eEui?parseFloat(eEui[2]):null;
+  // Precision refinement: the page-1 headline prints the EUI as an INTEGER
+  // (88 / 54) while the per-fuel table keeps the decimal (88.1 / 54.5). When
+  // the per-fuel sum is the same number just rounded (within 1 kBtu/ft²), use
+  // its precision — the EUI, target EUI, and reported savings % all follow.
+  // When the two genuinely diverge (attic R-15 workaround reports — e.g.
+  // per-fuel 101.05 vs headline 115), the headline stays authoritative.
+  {
+    const pf=(e2,g2)=>((e2!=null||g2!=null)?((e2||0)+(g2||0)):null);
+    const refine=(head,sum)=>(head!=null&&sum!=null&&sum>0&&Math.abs(sum-head)<1)?+sum.toFixed(1):head;
+    d.euiCurrent =refine(d.euiCurrent ,pf(d.elecEuiCur,d.gasEuiCur));
+    d.euiUpgraded=refine(d.euiUpgraded,pf(d.elecEuiUpg,d.gasEuiUpg));
+  }
   d.savingsPct=num(/site energy savings:\s*([\d.]+)%/,t);
   d.occupants=num(/Number of Assumed Occupants\s+(\d+)/,t);
   // Footnote-tolerant: the summary prints superscript digits ("Wall Area 1 5709.0 ft2"),
