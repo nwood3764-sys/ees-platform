@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 31 — building name gets ' - Audit Template' suffix in the XML</div>
+    Last updated 2026-07-20 · build 32 — automatic pre-export checks: the full rulebook runs on every change; failing files can't export silently</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -731,6 +731,9 @@ function refresh(){
   // body: building + envelope + energy tables
   let h='';
 
+  // ---- Automatic pre-export checks (filled async by paintAutoChecks) ----
+  h+='<div class="sect"><h3>Automatic pre-export checks</h3><div id="autoChecksBody"><span class="hint">Generating both files and checking…</span></div></div>';
+
   // ---- Baseline vs Improved comparison summary ----
   h+='<div class="sect"><h3>Baseline vs improved</h3><table class="mo">';
   h+='<thead><tr><th>Metric</th><th>Baseline</th><th>Improved</th><th>Savings</th></tr></thead><tbody>';
@@ -941,6 +944,8 @@ function refresh(){
   h+=monthlyMatrixTable(sc(data.osImp.gasMonthly,fGi));
   h+='</div>';
   document.getElementById('rBody').innerHTML=h;
+  paintAutoChecks();       // repaint last results into the fresh DOM
+  scheduleAutoChecks();    // and re-verify against the current state
 
   document.getElementById('rNote').textContent=
     'EUI and headline savings come from the Asset Score Report (the document of record). '+
@@ -1858,6 +1863,14 @@ async function build50121XML(which){
   // user sees there (falls back to the report defaults if not yet seeded).
   const parsedMeasures=(eemState||effectiveMeasures())
     .filter(m=>m&&(((m.title||'').trim())||((m.desc||'').trim())));
+  if(!parsedMeasures.length){
+    // The EEM list is empty (user removed everything): export NO measures —
+    // never the reference building's. The pre-export check flags the absence.
+    for(const m of [..._q(doc,'Measure')]){const p=m.parentNode;p.removeChild(m);
+      if(p.localName==='Measures'&&!p.children.length)p.parentNode.removeChild(p);}
+    for(const r2 of [..._q(doc,'MeasureID')]){const p=r2.parentNode;p.removeChild(r2);
+      if(p.localName==='MeasureIDs'&&!p.children.length)p.parentNode.removeChild(p);}
+  }
   if(parsedMeasures.length){
     const measures=[..._q(doc,'Measure')];
     if(measures.length){
@@ -2026,6 +2039,7 @@ async function build50121XML(which){
 
 async function downloadXML(which){
   const fs=document.getElementById('finalStatus');
+  if(!autoCheckGate()){fs.className='status err';fs.textContent='Export canceled — fix the failing pre-export checks first.';return;}
   fs.className='status'; fs.textContent='Building 50121 file…';
   try{
     const as = which==='improved' ? (data.asImp||data.asBase) : data.asBase;
@@ -2054,6 +2068,136 @@ document.getElementById('buildImp').onclick=()=>downloadXML('improved');
   }
   if(u&&bd){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
 })();
+
+/* ---------- Automatic pre-export checks ---------- */
+// The deterministic rulebook, run against the ACTUAL generated XML on every
+// file load / occupancy entry / EEM edit — so problems surface here, not on
+// DOE's screens. No AI, no button: it just runs.
+let _autoChk={stamp:0,running:false,results:null};
+const _inList=(v,list)=>v==null||list.indexOf(v)>=0;   // null = field absent -> not this check's problem
+function _sysVal(sysArr,suffix){ // find a value by key suffix across a system dump array
+  for(const s of (sysArr||[])) for(const k in s) if(k===suffix||k.endsWith('/'+suffix)) return s[k];
+  return null;
+}
+function evaluateAutoChecks(dg){
+  const out=[]; const ck=(name,ok,detail)=>out.push({name,ok:!!ok,detail:detail||''});
+  const asB=data.asBase, asI=data.asImp;
+  const gfa=(asI&&asI.gfa)||(asB&&asB.gfa);
+  const udf=(f,n)=>{const u=(f.userDefinedFields||[]).find(x=>x.name===n);return u?u.value:null;};
+  for(const [L,f] of [['Baseline',dg.baseline],['Improved',dg.improved]]){
+    if(!f||f.error){ck(L+': XML generated',false,f&&f.error);continue;}
+    ck(L+': no values over 2 decimals',f.decimalViolations.length===0,f.decimalViolations.join(', '));
+    ck(L+': all IDs unique',f.duplicateIds.length===0,f.duplicateIds.join(', '));
+    ck(L+': all ID references resolve',(f.danglingRefs||[]).length===0,(f.danglingRefs||[]).join(', '));
+    let kbtu=0;
+    for(const fuel in f.meters){
+      const m=f.meters[fuel];
+      ck(L+': '+fuel+' has 12 meter months',m.monthlyValues.length===12,m.monthlyValues.length+' months');
+      kbtu+=m.annualTotal*(fuel==='Electricity'?KWH_KBTU:THERM_KBTU);
+      const rows=f.endUses.filter(r=>r.fuel===fuel);
+      const allRow=rows.find(r=>r.endUse==='All end uses');
+      const others=rows.filter(r=>r.endUse&&r.endUse!=='All end uses')
+        .reduce((a,r)=>a+(+r.annualNativeUnits||0),0);
+      if(allRow) ck(L+': '+fuel+' meter = end-use rows = total',
+        Math.abs(others-m.annualTotal)<1&&Math.abs((+allRow.annualNativeUnits)-m.annualTotal)<1,
+        'meter '+m.annualTotal+' · rows '+others+' · all-row '+allRow.annualNativeUnits);
+      const rate=fuel==='Electricity'?RATE_ELEC:RATE_GAS, chg=fuel==='Electricity'?METER_CHARGE_ELEC:METER_CHARGE_GAS;
+      ck(L+': '+fuel+' cost = rate × energy',Math.abs(m.monthlyCostTotal-(m.annualTotal*rate+12*chg))<=12,
+        '$'+m.monthlyCostTotal+' vs expected ~$'+Math.round(m.annualTotal*rate+12*chg));
+      // an absent-from-report fuel must be fully absent from the file
+    }
+    for(const fuel of ['Electricity','Natural gas']){
+      if(f.meters[fuel])continue;
+      const strays=f.endUses.filter(r=>r.fuel===fuel).length
+        +(((f.savingsPackage||{}).byFuel)||[]).filter(r=>r.fuel===fuel).length;
+      ck(L+': no '+fuel+' anywhere (fuel not in reports)',strays===0,strays+' stray row(s)');
+    }
+    if(gfa){
+      const eui=kbtu/gfa, tgt=parseFloat(L==='Baseline'?f.benchmark.siteEUI:f.target.siteEUI);
+      if(!isNaN(tgt)) ck(L+': metered EUI matches '+(L==='Baseline'?'benchmark':'target'),
+        Math.abs(eui-tgt)<0.6,'meters '+eui.toFixed(2)+' vs field '+tgt);
+    }
+    for(const v of [f.benchmark.siteEUI,f.target.siteEUI])
+      if(v!=null) ck(L+': EUI field displays clean in DOE',/^\d+(\.\d)?$/.test(v)&&
+        (!/\./.test(v)||String(Math.fround(parseFloat(v)))===v),v);
+    ck(L+': wall finish is a DOE value',_inList(_sysVal(f.systems.WallSystem,'ExteriorWallFinish'),['Brick','Metal panel','Other']),_sysVal(f.systems.WallSystem,'ExteriorWallFinish'));
+    ck(L+': wall construction is a DOE value',_inList(_sysVal(f.systems.WallSystem,'ExteriorWallConstruction'),['Masonry','Steel frame','Wood frame']),_sysVal(f.systems.WallSystem,'ExteriorWallConstruction'));
+    ck(L+': window frame is a DOE value',_inList(_sysVal(f.systems.FenestrationSystem,'FrameMaterial'),['Aluminum no thermal break','Aluminum thermal break','Other','Vinyl']),_sysVal(f.systems.FenestrationSystem,'FrameMaterial'));
+    const door=_sysVal(f.systems.Door,'ExteriorDoorType');
+    ck(L+': door type is a DOE value',_inList(door,['Hollow wood','Insulated metal','Other','Solid wood','Uninsulated metal']),door);
+    if(door==='Other') ck(L+': door "Other" has specify text',!!(udf(f,'Other Exterior Door Type')||'').trim(),String(udf(f,'Other Exterior Door Type')));
+    for(const sys of ['HeatingSource','CoolingSource','RoofSystem']){
+      const c=_sysVal(f.systems[sys],sys==='RoofSystem'?'RoofCondition':(sys.replace('Source','')+'SourceCondition'));
+      if(c!=null) ck(L+': '+sys+' condition is a DOE value',_inList(c,['Average','Excellent','Good','Poor']),c);
+    }
+    ck(L+': dwelling units 100% occupied',f.identity.unitsOccupiedPct==='100',f.identity.unitsOccupiedPct);
+    if(asB&&asB.heatingIsElectric){
+      const hs=(f.systems.HeatingSource||[])[0]||{};
+      ck(L+': electric heat efficiency is 1.0 Thermal',hs['AnnualHeatingEfficiencyValue']==='1.0'&&hs['AnnualHeatingEfficiencyUnits']==='Thermal Efficiency',hs['AnnualHeatingEfficiencyValue']+' '+hs['AnnualHeatingEfficiencyUnits']);
+      ck(L+': electric heat qty 1 / Interior / year set',hs['Quantity']==='1'&&hs['Location']==='Interior'&&!!hs['YearInstalled'],'qty '+hs['Quantity']+' · '+hs['Location']+' · '+hs['YearInstalled']);
+    }
+    if(asB&&asB.coolingIsWallAC){
+      ck(L+': wall-AC delivery encodes as Other',(f.deliveryZoneEquipment||[]).some(z=>z.length===1&&z[0]==='Other'),JSON.stringify(f.deliveryZoneEquipment));
+      ck(L+': wall-AC specify text set',!!(udf(f,'Other Distribution Equipment Type')||'').trim(),String(udf(f,'Other Distribution Equipment Type')));
+    }
+    const badCdt=(f.userDefinedFields||[]).filter(u=>u.name==='Central Distribution Type'
+      &&['None (unitized heating/cooling)','Refrigerant (VRF)'].indexOf(u.value)<0);
+    ck(L+': central distribution type per EES rule',badCdt.length===0,badCdt.map(u=>u.value).join(', '));
+  }
+  const im=dg.improved;
+  if(im&&!im.error){
+    ck('Improved: at least one measure',(im.measures||[]).length>0,(im.measures||[]).length+' measures');
+    const pkg=im.savingsPackage;
+    ck('Improved: savings package present',!!(pkg&&(pkg.byFuel||[]).length),pkg?pkg.name:'missing');
+    const sv=+((im.userDefinedFields||[]).find(u=>/Savings Percentage/.test(u.name||''))||{}).value;
+    if(asB&&asI&&asB.euiCurrent&&asI.euiUpgraded!=null){
+      const exp=Math.round((asB.euiCurrent-asI.euiUpgraded)/asB.euiCurrent*100);
+      ck('Improved: reported savings % = EUI delta',sv===exp,'file '+sv+' vs computed '+exp);
+      ck('Savings meets the 20% 50121 tier',exp>=20,exp+'%');
+    }
+  }
+  if(dg.baseline&&dg.improved&&!dg.baseline.error&&!dg.improved.error){
+    const strip=n=>String(n||'').replace(/\s*-\s*Audit Template\s*$/i,'').replace(/\s*-\s*(Baseline|Improved)\s*$/i,'');
+    const a=dg.baseline.identity,b2=dg.improved.identity;
+    ck('Baseline & improved describe the same building',
+      strip(a.name)===strip(b2.name)&&a.street===b2.street&&a.zip===b2.zip
+      &&a.yearBuilt===b2.yearBuilt&&a.windowToWallRatio===b2.windowToWallRatio
+      &&a.occupantQuantity===b2.occupantQuantity,
+      strip(a.name)+' vs '+strip(b2.name));
+  }
+  return out;
+}
+function paintAutoChecks(){
+  const el=document.getElementById('autoChecksBody'); if(!el)return;
+  if(_autoChk.running&&!_autoChk.results){el.innerHTML='<span class="hint">Generating both files and checking…</span>';return;}
+  const res=_autoChk.results; if(!res)return;
+  const fails=res.filter(c=>!c.ok);
+  if(!fails.length){
+    el.innerHTML='<div style="color:#2aab72;font-weight:700">✓ All '+res.length+' automatic checks passed — the generated files match the reports, DOE\'s accepted values, and the EES rules.</div>';
+  }else{
+    el.innerHTML='<div style="color:#2a4a6a;font-weight:700">⚠ '+fails.length+' of '+res.length+' checks FAILING — fix before importing to DOE:</div>'
+      +fails.map(f=>`<div style="padding:4px 0;border-top:1px solid var(--line)"><strong>${f.name}</strong>${f.detail?` — <span style="color:#4a5e7a">${f.detail}</span>`:''}</div>`).join('');
+  }
+}
+async function runAutoChecks(){
+  if(!Object.values(data).every(Boolean)||!occValid()){_autoChk.results=null;return;}
+  const my=++_autoChk.stamp; _autoChk.running=true; paintAutoChecks();
+  try{
+    const dg=await buildXmlDigest();
+    if(my!==_autoChk.stamp)return;
+    _autoChk.results=evaluateAutoChecks(dg);
+  }catch(e){ if(my!==_autoChk.stamp)return; _autoChk.results=[{name:'XML generation',ok:false,detail:e.message}]; }
+  _autoChk.running=false; paintAutoChecks();
+}
+const scheduleAutoChecks=(()=>{let t;return()=>{clearTimeout(t);t=setTimeout(runAutoChecks,700);};})();
+// Export gate: failing checks demand an explicit override.
+function autoCheckGate(){
+  const fails=(_autoChk.results||[]).filter(c=>!c.ok);
+  if(!fails.length)return true;
+  return confirm('⚠ '+fails.length+' automatic check(s) are FAILING:\n\n'
+    +fails.slice(0,8).map(f=>'• '+f.name+(f.detail?' ('+f.detail+')':'')).join('\n')
+    +(fails.length>8?'\n…':'')+'\n\nExport anyway?');
+}
 
 /* ---------- Stale-build detection ---------- */
 // A long-open tab keeps running old JavaScript even after new builds deploy —
@@ -2091,8 +2235,10 @@ document.getElementById('buildImp').onclick=()=>downloadXML('improved');
     const t=e.target; if(!t||!t.dataset)return;
     if(t.dataset.eem!==undefined&&eemState){
       const m=eemState[+t.dataset.eem]; if(m)m[t.dataset.f]=t.value;
+      scheduleAutoChecks();
     }else if(t.dataset.pkg&&eemPkg){
       eemPkg[t.dataset.pkg]=t.dataset.pkg==='name'?t.value:(t.value===''?null:parseFloat(t.value));
+      scheduleAutoChecks();
     }
   });
   rb.addEventListener('click',e=>{
@@ -2191,6 +2337,14 @@ async function buildXmlDigest(){
         d.decimalViolations.push(el.localName+'='+el.textContent.trim());
     }
     d.duplicateIds=dupIds;
+    // Dangling ID references (an IDref pointing at a removed node fails DOE's
+    // schema validation exactly like a duplicate ID does).
+    const idSet=new Set(),refList=[];
+    for(const el of Array.from(doc.getElementsByTagName('*'))){
+      if(el.getAttribute){const id=el.getAttribute('ID');if(id)idSet.add(id);
+        const rf=el.getAttribute('IDref');if(rf)refList.push(rf);}
+    }
+    d.danglingRefs=refList.filter(r2=>!idSet.has(r2)).slice(0,10);
     return d;
   }
   return{baseline:await digestOne('baseline'),improved:await digestOne('improved')};
@@ -2371,6 +2525,7 @@ document.getElementById('utilImp').onclick=()=>downloadUtility('improved');
    tool generated (both XMLs + both utility files), named for the building. ---- */
 async function downloadPacket(){
   const fs=document.getElementById('finalStatus');
+  if(!autoCheckGate()){fs.className='status err';fs.textContent='Packet canceled — fix the failing pre-export checks first.';return;}
   if(typeof JSZip==='undefined'){fs.className='status err';fs.textContent='Zip library not loaded — check your connection and retry.';return;}
   fs.className='status'; fs.textContent='Assembling energy model packet…';
   try{
