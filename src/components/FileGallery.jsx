@@ -132,15 +132,19 @@ export default function FileGalleryWidget({
   // in the loaded photos, with counts) and the filtered view.
   const stepOptions = useMemo(() => {
     if (!isWorkOrderPhotoGallery) return []
-    const counts = new Map() // step_id → { name, count }
+    const counts = new Map() // step_id → { name, count, position }
     for (const p of items) {
       const id = p._work_step_id || 'unassigned'
       const name = p._work_step_name || 'Unassigned step'
-      const cur = counts.get(id) || { id, name, count: 0 }
+      const position = p._work_step_position ?? Number.MAX_SAFE_INTEGER
+      const cur = counts.get(id) || { id, name, count: 0, position }
       cur.count += 1
       counts.set(id, cur)
     }
-    return Array.from(counts.values()).sort((a, b) => a.name.localeCompare(b.name))
+    // Order the chips by work-step execution order (matching the photo order and
+    // the step list on the record), name as a stable tiebreaker.
+    return Array.from(counts.values()).sort((a, b) =>
+      (a.position - b.position) || a.name.localeCompare(b.name))
   }, [items, isWorkOrderPhotoGallery])
 
   const visiblePhotos = useMemo(() => {
