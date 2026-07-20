@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 49 — PDF engine bundled with the site (fixes "PDF engine not loaded"); readable project-details form; AT documents required per program stage</div>
+    Last updated 2026-07-20 · build 50 — invoice-style EES documents: one money column, rebates as credit lines, no notes; audit invoice fits one page</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2882,87 +2882,71 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const m=invoiceModel(), F=m.fields;
   const isAudit=kind==='audit', isInv=kind==='invoice';
   const P=_pdfNew(); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
-  const LH=11;
-  /* header (page 1) — clean typographic, no bands */
+  const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'\u2014';
+  const AMT=W-M-5;                                    // every dollar figure shares this right edge
+  /* ---- header ---- */
   const docTitle=(isAudit||isInv)?'INVOICE':'PROPOSAL';
   tc(C.navy); font(14.5,'bold'); t(M,st.y+18,'ENERGY EFFICIENCY SERVICES of WISCONSIN');
   tc([178,190,204]); font(21,'bold'); t(W-M,st.y+19,docTitle,{align:'right'});
-  st.y+=28; stroke(C.navy); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=14;
-  /* plain-text value (replaces the old fillable-form boxes) */
-  const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'—';
-  /* meta rows */
-  const noLbl=isAudit||isInv?'Invoice No.:':'Proposal No.:';
-  const dateLbl=isAudit||isInv?'Invoice Date:':'Date:';
-  const termLbl=isAudit||isInv?'Due Date:':'Valid for:';
+  st.y+=28; stroke(C.navy); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=12;
+  /* ---- meta: one line ---- */
+  const noLbl=(isAudit||isInv)?'Invoice No.:':'Proposal No.:';
+  const dateLbl=(isAudit||isInv)?'Invoice Date:':'Date:';
+  const termLbl=(isAudit||isInv)?'Due Date:':'Valid for:';
   const docNo=isAudit?(F.pjInvNo||'INV-WI-'):(isInv?(F.pjProjInvNo||''):(F.pjPropNo||'HOMES-MF-'));
-  tc([60,76,94]); font(8.5,'bold'); t(M,st.y+9,noLbl);
-  tc(C.ink); font(9.5); t(M+70,st.y+9,pv(docNo));
-  tc([60,76,94]); font(8.5,'bold'); t(W-M-150,st.y+9,dateLbl,{align:'right'});
-  tc(C.ink); font(9.5); t(W-M,st.y+9,pv(F.pjInvDate),{align:'right'});
-  tc([60,76,94]); font(8.5,'bold'); t(W-M-150,st.y+23,termLbl,{align:'right'});
-  tc(C.ink); font(9.5); t(W-M,st.y+23,isAudit?'Net 30':'30 days',{align:'right'});
-  st.y+=32;
-  /* section heading */
-  const head=txt=>{need(30); st.y+=12; tc(C.navy); font(10,'bold');
-    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke(C.navy); d.setLineWidth(1.4);
-    d.line(M,st.y,W-M,st.y); st.y+=8;};
-  /* customer block */
-  head('Customer & Property Installation Information');
-  const half=CW/2-8, lblW=92, bw=half-lblW-6;
-  const L=[['Property Owner:',F.pjOwner],['Owner Address:',F.pjOwnerAddr],['City, State Zip',F.pjOwnerCsz],
-    ['Contact Name:',F.pjContact],['Email:',F.pjEmail],['Phone:',F.pjPhone]];
-  const R=[['Property Name:',F.pjPropName],['Installation Address:',F.pjInstallAddr],['City, State Zip:',F.pjCsz],
-    ['Property Type:','Multifamily'],['IQ Number:',F.pjIQ]];
-  let yl=st.y, yr=st.y;
-  const kv=(x,yy,lbl,val)=>{const lines=wrap(pv(val),bw);
-    tc([60,76,94]); font(8.5,'bold'); t(x+lblW,yy+9,lbl,{align:'right'});
-    tc(C.ink); font(9.5); lines.forEach((ln,i)=>t(x+lblW+8,yy+9+i*11,ln));
-    return Math.max(1,lines.length)*11+4;};
-  for(const [lb,v] of L) yl+=kv(M,yl,lb,v);
-  for(const [lb,v] of R) yr+=kv(M+half+16,yr,lb,v);
-  st.y=Math.max(yl,yr);
-  /* scope heading + dates + contractor */
-  head(isAudit?'Audit Services':(isInv?'Installed Scope of Work - HOMES PROJECT':'Proposed Scope of Work - HOMES PROJECT'));
-  if(!isAudit){
-    tc([60,76,94]); font(8.5,'bold');
-    t(M+118,st.y+9,isInv?'Start Date:':'Estimated Start Date:',{align:'right'});
-    tc(C.ink); font(9.5); t(M+126,st.y+9,pv(isInv?F.pjStart:F.pjEstStart));
-    tc([60,76,94]); font(8.5,'bold'); t(M+430,st.y+9,isInv?'Completion Date:':'Estimated Completion Date:',{align:'right'});
-    tc(C.ink); font(9.5); t(M+438,st.y+9,pv(isInv?F.pjEnd:F.pjEstEnd));
-    st.y+=16;
-  }
-  tc([60,76,94]); font(8.5,'bold'); t(M+118,st.y+9,'Registered Contractor Name:',{align:'right'});
-  tc(C.ink); font(9.5); t(M+126,st.y+9,'Energy Efficiency Services of Wisconsin');
-  st.y+=18;
-  /* items table */
-  const th=(cols)=>{need(20); fill(C.navy); d.rect(M,st.y,CW,17,'F');
-    tc([255,255,255]); font(8,'bold');
-    for(const c of cols) t(c.x+(c.align==='right'?c.w-5:5),st.y+11.5,c.lbl.toUpperCase(),c.align==='right'?{align:'right'}:{});
-    st.y+=17;};
+  const metaCol=(x,lbl,val)=>{font(8.5,'bold'); tc([60,76,94]); t(x,st.y+9,lbl);
+    const lw=d.getTextWidth(lbl); tc(C.ink); font(9.5); t(x+lw+5,st.y+9,String(val));};
+  metaCol(M,noLbl,pv(docNo));
+  metaCol(M+215,dateLbl,pv(F.pjInvDate));
+  metaCol(M+405,termLbl,isAudit?'Net 30':'30 days');
+  st.y+=22;
+  /* ---- bill to / property (plain invoice blocks, no field labels) ---- */
+  const RX=W/2+14;
+  tc(C.navy); font(8.5,'bold'); t(M,st.y,'BILL TO'); t(RX,st.y,'PROPERTY / INSTALLATION');
+  const lLines=[F.pjOwner,F.pjOwnerAddr,F.pjOwnerCsz,F.pjContact,F.pjEmail,F.pjPhone]
+    .filter(v=>v&&String(v).trim());
+  const rLines=[F.pjPropName,F.pjInstallAddr,F.pjCsz,'Property Type: Multifamily',
+    F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
+  let ly=st.y+13, ry=st.y+13; tc(C.ink); font(9);
+  for(const v of lLines) for(const ln of wrap(v,RX-M-16)){t(M,ly,ln); ly+=11;}
+  for(const v of rLines) for(const ln of wrap(v,W-M-RX)){t(RX,ry,ln); ry+=11;}
+  st.y=Math.max(ly,ry)+2;
+  /* contractor + project dates on one quiet line */
+  {const bits=['Registered Contractor: Energy Efficiency Services of Wisconsin'];
+   if(!isAudit){
+     const sD=isInv?F.pjStart:F.pjEstStart, eD=isInv?F.pjEnd:F.pjEstEnd;
+     if(sD) bits.push((isInv?'Start: ':'Est. Start: ')+sD);
+     if(eD) bits.push((isInv?'Completion: ':'Est. Completion: ')+eD);
+   }
+   tc([96,110,126]); font(8); t(M,st.y+7,bits.join('    \u00b7    ')); st.y+=14;}
+  /* ---- section heading ---- */
+  const head=(txt,gap)=>{need(26); st.y+=(gap!=null?gap:10); tc(C.navy); font(10,'bold');
+    t(M,st.y+9,txt.toUpperCase()); st.y+=13; stroke(C.navy); d.setLineWidth(1.2);
+    d.line(M,st.y,W-M,st.y); st.y+=6;};
+  const th=cols=>{need(20); fill(C.navy); d.rect(M,st.y,CW,16,'F'); tc([255,255,255]); font(7.5,'bold');
+    for(const c of cols) t(c.x,st.y+11,c.lbl,c.align==='right'?{align:'right'}:{});
+    st.y+=16;};
+  /* ---- line items ---- */
+  head(isAudit?'Audit Services':(isInv?'Installed Scope of Work \u2014 HOMES Project':'Proposed Scope of Work \u2014 HOMES Project'),12);
   if(isAudit){
-    const X=M, cols=[
-      {lbl:'#',x:X,w:20},{lbl:'Service Description',x:X+20,w:246},{lbl:'Qty',x:X+266,w:40,align:'right'},
-      {lbl:'Unit',x:X+306,w:70},{lbl:'Unit Rate ($)',x:X+376,w:78,align:'right'},{lbl:'Total',x:X+454,w:78,align:'right'}];
-    th(cols);
-    const rows=[['1','Whole-Building Energy Audit — Multifamily','1','Building','$2,000','$2,000'],
-      ['2','Per-Unit Blower Door and Diagnostic Testing','','Unit','included','included'],
-      ['3','Common Area and Building Envelope Assessment','1','Lump Sum','included','included'],
-      ['4','Mechanical Systems Survey','1','Lump Sum','included','included']];
-    rows.forEach((r,i)=>{need(18);
-      if(i%2===0){fill(C.green); d.rect(M,st.y,CW,17,'F');}
-      tc(C.mut); font(9); t(cols[0].x+5,st.y+11.5,r[0]);
-      tc(C.ink); t(cols[1].x+5,st.y+11.5,r[1]);
-      if(r[2]!=='')t(cols[2].x+cols[2].w-5,st.y+11.5,r[2],{align:'right'});
-      t(cols[3].x+5,st.y+11.5,r[3]);
-      t(cols[4].x+cols[4].w-5,st.y+11.5,r[4],{align:'right'});
-      t(cols[5].x+cols[5].w-5,st.y+11.5,r[5],{align:'right'});
-      stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+17,W-M,st.y+17);
-      st.y+=17;});
+    th([{lbl:'#',x:M+5},{lbl:'SERVICE DESCRIPTION',x:M+25},{lbl:'QTY',x:M+330,align:'right'},
+        {lbl:'UNIT',x:M+345},{lbl:'RATE',x:M+468,align:'right'},{lbl:'AMOUNT',x:AMT,align:'right'}]);
+    const rows=[['1','Whole-Building Energy Audit \u2014 Multifamily','1','Building','$2,000.00','$2,000.00'],
+      ['2','Per-Unit Blower Door and Diagnostic Testing','','Unit','','Included'],
+      ['3','Common Area and Building Envelope Assessment','1','Lump Sum','','Included'],
+      ['4','Mechanical Systems Survey','1','Lump Sum','','Included']];
+    rows.forEach((r,i)=>{const h=15; need(h);
+      if(i%2===1){fill(C.green); d.rect(M,st.y,CW,h,'F');}
+      tc(C.mut); font(8.5); t(M+5,st.y+10.5,r[0]);
+      tc(C.ink); t(M+25,st.y+10.5,r[1]);
+      if(r[2])t(M+330,st.y+10.5,r[2],{align:'right'});
+      t(M+345,st.y+10.5,r[3]);
+      if(r[4])t(M+468,st.y+10.5,r[4],{align:'right'});
+      t(AMT,st.y+10.5,r[5],{align:'right'});
+      stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+h,W-M,st.y+h); st.y+=h;});
   }else{
-    const X=M, cols=[
-      {lbl:'#',x:X,w:20},{lbl:'Measure Line Item',x:X+20,w:280},{lbl:'Qty',x:X+300,w:64,align:'right'},
-      {lbl:'Unit',x:X+364,w:60},{lbl:'',x:X+424,w:30},{lbl:'Cost',x:X+454,w:78,align:'right'}];
-    th(cols);
+    th([{lbl:'#',x:M+5},{lbl:'MEASURE LINE ITEM',x:M+25},{lbl:'QTY',x:M+372,align:'right'},
+        {lbl:'UNIT',x:M+385},{lbl:'AMOUNT',x:AMT,align:'right'}]);
     const colW=(CW-24)/2;
     m.rows.forEach((r,i)=>{
       const single=wrap(r.desc,CW-50);
@@ -2970,127 +2954,91 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       const lines=twoCol?wrap(r.desc,colW):single;
       const n1=twoCol?Math.ceil(lines.length/2):lines.length;
       const c1=lines.slice(0,n1), c2=lines.slice(n1);
-      const descH=n1*9.5+6, headH=18;
-      need(headH+Math.min(descH,240));
-      /* name line */
-      tc(C.mut); font(9); t(X+5,st.y+12,String(i+1));
-      tc(C.navy); font(10,'bold'); t(X+25,st.y+12,r.name);
-      tc(C.ink); font(9); t(cols[2].x+cols[2].w-6,st.y+11.5,_qty(r.qty),{align:'right'});
-      t(cols[3].x+5,st.y+11.5,r.unit);
-      font(9.5,'bold'); t(cols[5].x+cols[5].w-5,st.y+11.5,_money(r.cost),{align:'right'});
+      const headH=17;
+      need(headH+Math.min(n1*9.5+6,240));
+      tc(C.mut); font(9); t(M+5,st.y+12,String(i+1));
+      tc(C.navy); font(10,'bold'); t(M+25,st.y+12,r.name);
+      tc(C.ink); font(9); t(M+372,st.y+12,_qty(r.qty),{align:'right'});
+      t(M+385,st.y+12,r.unit);
+      font(9.5,'bold'); t(AMT,st.y+12,_money(r.cost),{align:'right'});
       st.y+=headH;
-      /* description: two columns, page-break aware */
       let i1=0,i2=0; font(7.5); tc([57,67,77]);
       while(i1<c1.length||i2<c2.length){
         const fit=Math.max(1,Math.floor((H-M-16-st.y)/9.5));
         const take1=Math.min(fit,c1.length-i1), take2=Math.min(fit,c2.length-i2);
-        for(let k=0;k<take1;k++)t(X+25,st.y+8+k*9.5,c1[i1+k]);
-        for(let k=0;k<take2;k++)t(X+25+colW+22,st.y+8+k*9.5,c2[i2+k]);
+        for(let k=0;k<take1;k++)t(M+25,st.y+8+k*9.5,c1[i1+k]);
+        for(let k=0;k<take2;k++)t(M+25+colW+22,st.y+8+k*9.5,c2[i2+k]);
         i1+=take1;i2+=take2;
-        const used=Math.max(take1,take2)*9.5+4;
-        st.y+=used;
+        st.y+=Math.max(take1,take2)*9.5+4;
         if(i1<c1.length||i2<c2.length){d.addPage();st.y=M;font(7.5);tc([57,67,77]);}
       }
-      stroke(C.line); d.setLineWidth(1); d.line(M,st.y+3,W-M,st.y+3); st.y+=8;
+      stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+2,W-M,st.y+2); st.y+=6;
     });
   }
-  /* totals block — right aligned like the workbook */
+  /* ---- rebates as credit lines: same money column, amounts in parentheses ---- */
   const gross=isAudit?2000:m.total, foeAmt=isAudit?0:m.foeAmt, iraAmt=isAudit?2000:m.homesAmt;
-  const totRows=[['Gross Total',_money(gross)],
-    ['Non-IRA Rebates*',foeAmt?_money(foeAmt):'-'],
-    ['IRA Rebates*',_money(iraAmt)],
-    ['Total Rebates','('+_money(foeAmt+iraAmt)+')'],
-    ['TOTAL DUE',Math.abs(gross-foeAmt-iraAmt)<0.005?'-':_money(gross-foeAmt-iraAmt)]];
-  need(totRows.length*18+12); st.y+=6;
-  const TX=W-M-280;
-  totRows.forEach(([lbl,val],i)=>{
-    const last=i===totRows.length-1;
-    if(last){fill(C.navy); d.rect(TX,st.y,280,19,'F');
-      tc([255,255,255]); font(9.5,'bold');
-      t(TX+170,st.y+13,lbl,{align:'right'}); t(TX+274,st.y+13,val,{align:'right'});
-      st.y+=19;
-    }else{
-      tc([60,76,94]); font(9,'bold'); t(TX+170,st.y+12,lbl,{align:'right'});
-      tc(C.ink); font(9); t(TX+274,st.y+12,val,{align:'right'});
-      stroke(C.line); d.setLineWidth(.5); d.line(TX,st.y+16.5,TX+280,st.y+16.5);
-      st.y+=17.5;
-    }
-  });
-  /* deliverables (audit only) */
-  if(isAudit){
-    head('Deliverables');
-    need(80); fill(C.navy); d.rect(M,st.y,CW,17,'F'); tc([255,255,255]); font(8,'bold');
-    t(M+5,st.y+11.5,'#'); t(M+25,st.y+11.5,'DELIVERABLE'); t(M+250,st.y+11.5,'START DATE');
-    t(M+345,st.y+11.5,'END DATE'); t(M+440,st.y+11.5,'NOTES');
-    st.y+=17;
-    const dels=['Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
-      'HPXML v4/Building Sync File from Asset Score','Customer Report / Building Assessment Tool Report'];
-    dels.forEach((dl,i)=>{const lines=wrap(dl,215), h=Math.max(20,lines.length*9.5+8); need(h);
-      if(i%2===1){fill(C.green); d.rect(M,st.y,CW,h,'F');}
-      tc(C.mut); font(9); t(M+5,st.y+12,String(i+1));
-      tc(C.ink); font(8.5); lines.forEach((ln,k)=>t(M+25,st.y+11+k*9.5,ln));
-      stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+h,W-M,st.y+h);
-      st.y+=h;});
+  const credits=[];
+  if(isAudit) credits.push(['IRA HOMES Incentive \u2014 Instant Discount','IQ MF Audit Rebate / Building',iraAmt]);
+  else{
+    if(m.foe&&foeAmt) credits.push(['Focus on Energy \u2014 Instant Discount',m.foe.desc+' ('+m.foe.note+')',foeAmt]);
+    if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+' ('+m.tier.note+')',iraAmt]);
   }
-  /* rebates & incentives */
-  head(isAudit?'*Rebates & Incentives':'Applicable Rebates & Incentives');
-  need(24); fill(C.navy); d.rect(M,st.y,CW,17,'F'); tc([255,255,255]); font(8,'bold');
-  t(M+40,st.y+11.5,'PROGRAM'); t(M+200,st.y+11.5,'INCENTIVE DESCIPTION');
-  t(M+452,st.y+11.5,'AMOUNT',{align:'right'}); t(M+462,st.y+11.5,'NOTES');
-  st.y+=17;
-  const foeDesc=(!isAudit&&m.foe)?m.foe.desc:'', foeNote=(!isAudit&&m.foe)?m.foe.note:'';
-  const iraDesc=isAudit?'IQ MF Audit Rebate/Building':(m.tier?m.tier.desc:'');
-  const iraNote=isAudit?'':(m.tier?m.tier.note:'');
-  const rrows=[['NON-IRA','Focus on Energy - Instant Discount',foeDesc,foeAmt?_money(foeAmt):'',foeNote],
-    ['','Focus on Energy - Other','','',''],
-    ['','Utility Rebate - '+(isAudit?'Midstream Instant Discount':'Instant Discount'),'','',''],
-    ['','Utility Rebate - Other','','',''],
-    ['IRA','IRA HOMES '+(isAudit?'Incentive ':'')+'- Instant Discount',iraDesc,_money(iraAmt),iraNote],
-    ['','IRA HOMES '+(isAudit?'Incentive ':'')+'- Other','','','']];
-  rrows.forEach((r,i)=>{
-    const pl=wrap(r[1],150), dl=wrap(r[2],160), nl=wrap(r[4],86);
-    const h=Math.max(16,Math.max(pl.length,dl.length,nl.length)*9.5+7); need(h);
-    if(i%2===1){fill(C.green); d.rect(M,st.y,CW,h,'F');}
-    if(r[0]){tc(C.navy); font(7.5,'bold'); t(M+5,st.y+11,r[0]);}
-    tc(C.ink); font(8.5); pl.forEach((ln,k)=>t(M+40,st.y+11+k*9.5,ln));
-    dl.forEach((ln,k)=>t(M+200,st.y+11+k*9.5,ln));
-    if(r[3])t(M+452,st.y+11,r[3],{align:'right'});
-    font(7.5,'italic'); nl.forEach((ln,k)=>t(M+462,st.y+11+k*9.5,ln));
-    stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+h,W-M,st.y+h);
-    st.y+=h;});
-  /* rebate assignment notice */
+  head(isAudit?'Rebates & Incentives Applied':'Applicable Rebates & Incentives',10);
+  credits.forEach(([nm,desc,amt])=>{
+    const dl=wrap(desc,CW-260);
+    const h=Math.max(13,dl.length*9.5)+7; need(h);
+    tc(C.ink); font(8.5,'bold'); t(M+5,st.y+10,nm);
+    font(8); tc([96,110,126]); dl.forEach((ln,k)=>t(M+230,st.y+10+k*9.5,ln));
+    tc(C.ink); font(9,'bold'); t(AMT,st.y+10,'('+_money(amt)+')',{align:'right'});
+    stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+h,W-M,st.y+h); st.y+=h;});
+  /* ---- totals: same right edge, so the money reads straight down ---- */
+  const reb=foeAmt+iraAmt, due=gross-reb;
+  need(62); st.y+=8;
+  const TX=W-M-250;
+  const trow=(lbl,val,band)=>{
+    if(band){fill(C.navy); d.rect(TX,st.y,250,18,'F'); tc([255,255,255]); font(9.5,'bold');
+      t(TX+10,st.y+12.5,lbl); t(AMT,st.y+12.5,val,{align:'right'}); st.y+=18;}
+    else{tc([60,76,94]); font(9,'bold'); t(TX+10,st.y+11,lbl);
+      tc(C.ink); font(9); t(AMT,st.y+11,val,{align:'right'});
+      stroke(C.line); d.setLineWidth(.5); d.line(TX,st.y+15,W-M,st.y+15); st.y+=16;}};
+  trow('Subtotal',_money(gross));
+  trow('Total Rebates','('+_money(reb)+')');
+  trow('TOTAL DUE',_money(Math.abs(due)<0.005?0:due),true);
+  /* ---- deliverables (audit only): compact list ---- */
+  if(isAudit){
+    head('Deliverables',10);
+    ['Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
+     'HPXML v4 / BuildingSync file from Asset Score',
+     'Customer Report / Building Assessment Tool Report'].forEach(dl2=>{
+      need(12); tc(C.ink); font(8.5); t(M+5,st.y+9,'\u2022  '+dl2); st.y+=12;});
+  }
+  /* ---- rebate assignment notice ---- */
   const notice=(isAudit||isInv)
     ?'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above has been assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce this invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.'
     :'REBATE ASSIGNMENT NOTICE: The Wisconsin IRA rebate reflected above will be assigned by the property owner to Energy Efficiency Services, Inc. (EES-WI) and will be applied directly to reduce the future invoice. Owner is not required to front or await reimbursement of the assigned rebate amount.';
-  {font(8,'bolditalic'); const nl2=wrap(notice,CW-34), h=nl2.length*10+16; need(h+14); st.y+=10;
+  {font(7.5,'bolditalic'); const nl2=wrap(notice,CW-30), h=nl2.length*9+12; need(h+8); st.y+=8;
    fill(C.blueBg); stroke(C.blueBr); d.setLineWidth(.75); d.rect(M,st.y,CW,h,'FD');
    fill(C.accent); d.rect(M,st.y,3,h,'F');
-   tc(C.blueTx); font(8,'bolditalic'); nl2.forEach((ln,k)=>t(M+14,st.y+13+k*10,ln));
+   tc(C.blueTx); font(7.5,'bolditalic'); nl2.forEach((ln,k)=>t(M+12,st.y+10+k*9,ln));
    st.y+=h;}
-  /* additional notes */
-  need(40); st.y+=14; tc([60,76,94]); font(8.5,'bold');
-  t(M,st.y+10,'Additional Notes:');
-  stroke(C.line); d.setLineWidth(.5);
-  d.line(M+92,st.y+12,W-M,st.y+12); d.line(M,st.y+27,W-M,st.y+27);
-  st.y+=34;
-  /* acknowledgment */
-  head('Acknowledgment & Acceptance');
+  /* ---- acknowledgment + signature ---- */
+  head('Acknowledgment & Acceptance',10);
   const ack=(isAudit||isInv)
     ?'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes EES-WI to submit for and receive the corresponding program incentive on their behalf.'
     :'Signed receipt of this proposal constitutes acceptance of the proposed scope of work. The property owner authorizes EES-WI to submit the project for rebate/incentive program preapproval and to begin project planning activities.';
-  {const al=wrap(ack,CW); need(al.length*11+8); tc(C.ink); font(9.5);
-   al.forEach((ln,k)=>t(M,st.y+10+k*11,ln)); st.y+=al.length*11+6;}
-  /* signature */
-  need(70); st.y+=42; stroke([68,88,110]); d.setLineWidth(1);
-  d.line(M,st.y,M+300,st.y); d.line(W-M-160,st.y,W-M,st.y);
-  tc(C.mut); font(8.5); t(M,st.y+11,'Property Owner / Authorized Representative');
-  t(W-M-160,st.y+11,'Date');
-  st.y+=20;
-  /* footer — company address lives here, not the header */
-  need(42); st.y+=16; stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y);
+  {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
+   al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
+  need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
+  d.line(M,st.y,M+280,st.y); d.line(W-M-150,st.y,W-M,st.y);
+  tc(C.mut); font(8.5); t(M,st.y+10,'Property Owner / Authorized Representative');
+  t(W-M-150,st.y+10,'Date');
+  /* ---- footer pinned to the bottom of the last page ---- */
+  const fy=H-44;
+  if(st.y>fy-10) d.addPage();
+  stroke(C.line); d.setLineWidth(.5); d.line(M,fy,W-M,fy);
   tc(C.mut); font(8.5);
-  t(W/2,st.y+13,'Energy Efficiency Services of Wisconsin  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
-  font(8,'italic'); t(W/2,st.y+25,'Questions?  ira@ees-wi.org  |  608-460-7419',{align:'center'});
+  t(W/2,fy+12,'Energy Efficiency Services of Wisconsin  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
+  font(8,'italic'); t(W/2,fy+23,'Questions?  ira@ees-wi.org  |  608-460-7419',{align:'center'});
   return d.output('blob');
 }
 
