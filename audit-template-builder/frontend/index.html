@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 50 — invoice-style EES documents: one money column, rebates as credit lines, no notes; audit invoice fits one page</div>
+    Last updated 2026-07-20 · build 51 — measure descriptions run full width in a single column (no more split columns)</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -2947,30 +2947,25 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   }else{
     th([{lbl:'#',x:M+5},{lbl:'MEASURE LINE ITEM',x:M+25},{lbl:'QTY',x:M+372,align:'right'},
         {lbl:'UNIT',x:M+385},{lbl:'AMOUNT',x:AMT,align:'right'}]);
-    const colW=(CW-24)/2;
     m.rows.forEach((r,i)=>{
-      const single=wrap(r.desc,CW-50);
-      const twoCol=single.length>3;
-      const lines=twoCol?wrap(r.desc,colW):single;
-      const n1=twoCol?Math.ceil(lines.length/2):lines.length;
-      const c1=lines.slice(0,n1), c2=lines.slice(n1);
+      const lines=wrap(r.desc,CW-40);
       const headH=17;
-      need(headH+Math.min(n1*9.5+6,240));
+      need(headH+Math.min(lines.length*9.5+6,120));
       tc(C.mut); font(9); t(M+5,st.y+12,String(i+1));
       tc(C.navy); font(10,'bold'); t(M+25,st.y+12,r.name);
       tc(C.ink); font(9); t(M+372,st.y+12,_qty(r.qty),{align:'right'});
       t(M+385,st.y+12,r.unit);
       font(9.5,'bold'); t(AMT,st.y+12,_money(r.cost),{align:'right'});
       st.y+=headH;
-      let i1=0,i2=0; font(7.5); tc([57,67,77]);
-      while(i1<c1.length||i2<c2.length){
+      /* description: single full-width column, page-break aware */
+      let li=0; font(8); tc([57,67,77]);
+      while(li<lines.length){
         const fit=Math.max(1,Math.floor((H-M-16-st.y)/9.5));
-        const take1=Math.min(fit,c1.length-i1), take2=Math.min(fit,c2.length-i2);
-        for(let k=0;k<take1;k++)t(M+25,st.y+8+k*9.5,c1[i1+k]);
-        for(let k=0;k<take2;k++)t(M+25+colW+22,st.y+8+k*9.5,c2[i2+k]);
-        i1+=take1;i2+=take2;
-        st.y+=Math.max(take1,take2)*9.5+4;
-        if(i1<c1.length||i2<c2.length){d.addPage();st.y=M;font(7.5);tc([57,67,77]);}
+        const take=Math.min(fit,lines.length-li);
+        for(let k=0;k<take;k++)t(M+25,st.y+8+k*9.5,lines[li+k]);
+        li+=take;
+        st.y+=take*9.5+4;
+        if(li<lines.length){d.addPage();st.y=M;font(8);tc([57,67,77]);}
       }
       stroke(C.line); d.setLineWidth(.5); d.line(M,st.y+2,W-M,st.y+2); st.y+=6;
     });
