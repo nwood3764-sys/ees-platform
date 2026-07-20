@@ -101,7 +101,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 25 — all-electric buildings: gas removed from the file entirely; electric water heater type; street fix</div>
+    Last updated 2026-07-20 · build 26 — download filenames: model-name Baseline/Improved tag no longer duplicated</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -921,6 +921,11 @@ function refresh(){
   if(flags.length){fl.style.display='block';fl.innerHTML='⚠ '+flags.join('<br>⚠ ');}else fl.style.display='none';
 }
 function cleanName(n){return (n||'Building').replace(/\s*–\s*/g,' – ');}
+// Filename stem: the model name minus any trailing "- Baseline"/"- Improved"
+// tag — the export appends its own tag, so a model named "... - Improved"
+// would otherwise download as "..._Improved_Improved_...".
+function fileBase(n){return (cleanName(n).replace(/\s*[-–—]?\s*(Baseline|Improved)\s*$/i,'')
+  .replace(/[^\w]+/g,'_').replace(/^_+|_+$/g,''))||'Building';}
 function monthTable(label,os){
   let h=`<table class="mo"><thead><tr><th>${label}</th>`+MONTHS.map(m=>`<th>${m}</th>`).join('')+'<th>Tot</th></tr></thead><tbody>';
   h+='<tr><td>kWh</td>'+os.elec.map(v=>`<td>${fmt(v)}</td>`).join('')+`<td>${fmt(os.elec.reduce((a,b)=>a+b,0))}</td></tr>`;
@@ -1934,7 +1939,7 @@ async function downloadXML(which){
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
     const tag = which==='improved' ? 'Improved' : 'Baseline';
-    a.download=cleanName(as.name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_'+tag+'_50121_AuditTemplate.xml';
+    a.download=fileBase(as.name)+'_'+tag+'_50121_AuditTemplate.xml';
     a.click();
     fs.className='status ok';
     fs.textContent=tag+' 50121 file downloaded. Import under Building → Import buildings → Import BuildingSync XML.';
@@ -2229,7 +2234,7 @@ function downloadUtility(which){
     const as = which==='improved' ? (data.asImp||data.asBase) : data.asBase;
     const wb=buildUtilityXLSX(which);
     const tag = which==='improved'?'Improved':'Baseline';
-    const fname=cleanName(as.name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_'+tag+'_Utility.xlsx';
+    const fname=fileBase(as.name)+'_'+tag+'_Utility.xlsx';
     XLSX.writeFile(wb,fname);
     fs.className='status ok';
     fs.textContent=tag+' utility file downloaded. Import it under Utility Data and Benchmarking → Energy Reporting Years → Choose File.';
@@ -2245,7 +2250,7 @@ async function downloadPacket(){
   if(typeof JSZip==='undefined'){fs.className='status err';fs.textContent='Zip library not loaded — check your connection and retry.';return;}
   fs.className='status'; fs.textContent='Assembling energy model packet…';
   try{
-    const asB=data.asBase, base=cleanName((data.asImp||asB).name).replace(/[^\w]+/g,'_').replace(/^_|_$/g,'');
+    const asB=data.asBase, base=fileBase((data.asImp||asB).name);
     const zip=new JSZip();
     // 1) the original uploaded reports (raw File objects kept in `files`)
     const srcNames={asBase:'AssetScore_Baseline',asImp:'AssetScore_Improved',
