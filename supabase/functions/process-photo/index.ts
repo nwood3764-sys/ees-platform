@@ -154,7 +154,12 @@ function binaryStringToU8(bs: string): Uint8Array {
 // input unchanged if the original carries no readable EXIF (e.g. non-JPEG).
 function embedOriginalExif(originalBytes: Uint8Array, watermarkedJpeg: Uint8Array, outW: number, outH: number): { bytes: Uint8Array; ok: boolean } {
   try {
-    const origBin = u8ToBinaryString(originalBytes)
+    // EXIF (APP1) lives in the JPEG header, so only the first chunk is needed.
+    // Converting the FULL multi-MB original to a string blew the worker memory
+    // limit on the largest photos; a 512 KB prefix comfortably covers EXIF +
+    // any embedded thumbnail while keeping peak memory small.
+    const HEADER = Math.min(originalBytes.length, 512 * 1024)
+    const origBin = u8ToBinaryString(originalBytes.subarray(0, HEADER))
     const exifObj = piexif.load(origBin)
     const hasAny = exifObj && (
       (exifObj["Exif"] && Object.keys(exifObj["Exif"]).length) ||
