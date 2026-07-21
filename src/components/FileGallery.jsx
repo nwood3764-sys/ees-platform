@@ -58,8 +58,12 @@ const ACCEPT_BY_MODE = {
 const THUMB_GAP = 8
 
 // ── Download helpers ────────────────────────────────────────────────────────
-// Photos download the watermarked (tagged) variant — that's the evidence
-// artifact — falling back to the original when no watermark exists.
+// Downloads deliver the ORIGINAL file — byte-for-byte as the device captured
+// it, with EXIF (capture timestamp + GPS) fully intact. We deliberately do NOT
+// download the watermarked variant: that copy is re-encoded to burn in the
+// tag, which strips EXIF. The original is the evidentiary source of truth and
+// is never modified. If the original URL can't be resolved we fail loudly
+// rather than silently substitute the EXIF-stripped watermarked copy.
 function triggerBlobDownload(blob, filename) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -77,31 +81,41 @@ async function fetchAsBlob(url) {
   return r.blob()
 }
 
-// Safe, human-readable filename from the photo's number + work-step tag.
+// The original file's extension (e.g. .jpg, .heic), so we don't relabel the
+// file or imply a re-encode.
+function originalExt(p) {
+  const path = p.storage_path_original || ''
+  const m = path.match(/\.([A-Za-z0-9]+)$/)
+  return m ? `.${m[1].toLowerCase()}` : '.jpg'
+}
+
+// Safe, human-readable filename from the photo's number + work-step tag,
+// keeping the original file's real extension.
 function photoFileName(p) {
   const parts = [p.photo_number, p._work_step_name].filter(Boolean)
   const base = (parts.join(' - ') || p.id || 'photo')
     .replace(/[^\w \-().]/g, '').trim().slice(0, 90) || 'photo'
-  return `${base}.jpg`
+  return `${base}${originalExt(p)}`
 }
 
 async function downloadSinglePhoto(p) {
-  const u = p._thumbUrl || p._originalUrl
-  if (!u) throw new Error('image not available')
+  const u = p._originalUrl
+  if (!u) throw new Error('original file not available')
   triggerBlobDownload(await fetchAsBlob(u), photoFileName(p))
 }
 
-// Zip N photos in-browser (jszip lazy-loaded so it stays off the main bundle).
+// Zip N originals in-browser (jszip lazy-loaded so it stays off the main
+// bundle). Each entry is the untouched original with EXIF intact.
 async function downloadPhotosZip(photos, zipName) {
   const JSZip = (await import('jszip')).default
   const zip = new JSZip()
   const used = new Set()
-  let added = 0
+  let added = 0, skipped = 0
   for (const p of photos) {
-    const u = p._thumbUrl || p._originalUrl
-    if (!u) continue
+    const u = p._originalUrl
+    if (!u) { skipped++; continue }
     let blob
-    try { blob = await fetchAsBlob(u) } catch { continue }
+    try { blob = await fetchAsBlob(u) } catch { skipped++; continue }
     let name = photoFileName(p)
     if (used.has(name)) {
       const dot = name.lastIndexOf('.')
@@ -114,9 +128,10 @@ async function downloadPhotosZip(photos, zipName) {
     zip.file(name, blob)
     added++
   }
-  if (added === 0) throw new Error('no images could be fetched')
+  if (added === 0) throw new Error('no original files could be fetched')
   const out = await zip.generateAsync({ type: 'blob' })
   triggerBlobDownload(out, zipName)
+  return { added, skipped }
 }
 
 export default function FileGalleryWidget({
@@ -821,6 +836,7 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, onEn
           <button
             onClick={onDownload}
             disabled={selectedCount === 0 || downloading}
+            title="Download original files with full EXIF (capture time + GPS)"
             style={btn({
               background: (selectedCount === 0 || downloading) ? C.border : C.emerald,
               color: (selectedCount === 0 || downloading) ? C.textMuted : '#fff',
@@ -1202,7 +1218,7 @@ function Lightbox({ photos, startIndex, onClose, onIndexChange }) {
               try { await downloadSinglePhoto(photo) }
               catch { /* surfaced by the browser; nothing to toast in the overlay */ }
             }}
-            title="Download this photo"
+            title="Download original (full EXIF)"
             style={{
               background: 'rgba(255,255,255,0.1)',
               border: '1px solid rgba(255,255,255,0.2)',
