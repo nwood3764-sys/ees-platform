@@ -57,6 +57,68 @@ const ACCEPT_BY_MODE = {
 // full-resolution image without cropping.
 const THUMB_GAP = 8
 
+// ── Download helpers ────────────────────────────────────────────────────────
+// Photos download the watermarked (tagged) variant — that's the evidence
+// artifact — falling back to the original when no watermark exists.
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1500)
+}
+
+async function fetchAsBlob(url) {
+  const r = await fetch(url)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return r.blob()
+}
+
+// Safe, human-readable filename from the photo's number + work-step tag.
+function photoFileName(p) {
+  const parts = [p.photo_number, p._work_step_name].filter(Boolean)
+  const base = (parts.join(' - ') || p.id || 'photo')
+    .replace(/[^\w \-().]/g, '').trim().slice(0, 90) || 'photo'
+  return `${base}.jpg`
+}
+
+async function downloadSinglePhoto(p) {
+  const u = p._thumbUrl || p._originalUrl
+  if (!u) throw new Error('image not available')
+  triggerBlobDownload(await fetchAsBlob(u), photoFileName(p))
+}
+
+// Zip N photos in-browser (jszip lazy-loaded so it stays off the main bundle).
+async function downloadPhotosZip(photos, zipName) {
+  const JSZip = (await import('jszip')).default
+  const zip = new JSZip()
+  const used = new Set()
+  let added = 0
+  for (const p of photos) {
+    const u = p._thumbUrl || p._originalUrl
+    if (!u) continue
+    let blob
+    try { blob = await fetchAsBlob(u) } catch { continue }
+    let name = photoFileName(p)
+    if (used.has(name)) {
+      const dot = name.lastIndexOf('.')
+      const b = name.slice(0, dot), e = name.slice(dot)
+      let i = 2
+      while (used.has(`${b} (${i})${e}`)) i++
+      name = `${b} (${i})${e}`
+    }
+    used.add(name)
+    zip.file(name, blob)
+    added++
+  }
+  if (added === 0) throw new Error('no images could be fetched')
+  const out = await zip.generateAsync({ type: 'blob' })
+  triggerBlobDownload(out, zipName)
+}
+
 export default function FileGalleryWidget({
   widget, parentTable, parentRecordId,
 }) {
@@ -86,6 +148,9 @@ export default function FileGalleryWidget({
   const [previewDoc, setPreviewDoc] = useState(null)   // documents only — modal preview
   const [confirmDelete, setConfirmDelete] = useState(null) // {id, name}
   const [stepFilter, setStepFilter] = useState('all')      // WO gallery: 'all' | work_step_id
+  const [selectMode, setSelectMode]   = useState(false)    // photos: multi-select for download
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [downloading, setDownloading] = useState(false)
 
   // Photos-only: detect a misconfigured widget (e.g. on a property) so we
   // can show a clear message instead of letting the user click Upload and
@@ -151,6 +216,42 @@ export default function FileGalleryWidget({
     if (!isWorkOrderPhotoGallery || stepFilter === 'all') return items
     return items.filter(p => (p._work_step_id || 'unassigned') === stepFilter)
   }, [items, stepFilter, isWorkOrderPhotoGallery])
+
+  // ── Photo selection + download ──────────────────────────────────────
+  // Drop selections that scroll out of the current step filter so the count
+  // always matches what's on screen.
+  useEffect(() => {
+    if (!selectMode) return
+    const visibleIds = new Set(visiblePhotos.map(p => p.id))
+    setSelectedIds(prev => {
+      const next = new Set([...prev].filter(id => visibleIds.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [visiblePhotos, selectMode])
+
+  const toggleSelect = (id) => setSelectedIds(prev => {
+    const n = new Set(prev)
+    n.has(id) ? n.delete(id) : n.add(id)
+    return n
+  })
+  const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()) }
+  const selectAllVisible = () => setSelectedIds(new Set(visiblePhotos.map(p => p.id)))
+
+  const handleDownloadSelected = async () => {
+    const chosen = visiblePhotos.filter(p => selectedIds.has(p.id))
+    if (chosen.length === 0) return
+    setDownloading(true)
+    try {
+      if (chosen.length === 1) await downloadSinglePhoto(chosen[0])
+      else await downloadPhotosZip(chosen, 'work-order-photos.zip')
+      toast.success(`Downloaded ${chosen.length} photo${chosen.length > 1 ? 's' : ''}`)
+      exitSelect()
+    } catch (e) {
+      toast.error(`Download failed: ${e.message || e}`)
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   // Photos with a 'pending' watermark won't have their watermarked URL on
   // first load. Poll lightly while any are pending so the UI catches up
@@ -432,10 +533,23 @@ export default function FileGalleryWidget({
                     onChange={setStepFilter}
                   />
                 )}
+                <PhotoToolbar
+                  selectMode={selectMode}
+                  selectedCount={selectedIds.size}
+                  totalCount={visiblePhotos.length}
+                  downloading={downloading}
+                  onEnterSelect={() => setSelectMode(true)}
+                  onCancel={exitSelect}
+                  onSelectAll={selectAllVisible}
+                  onDownload={handleDownloadSelected}
+                />
                 <PhotoGrid
                   photos={visiblePhotos}
                   isMobile={isMobile}
                   showStepTag={isWorkOrderPhotoGallery}
+                  selectMode={selectMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
                   onOpen={(idx) => setLightboxIdx(idx)}
                   onReprocess={handleReprocess}
                   onDelete={(p) => setConfirmDelete({ id: p.id, name: p.photo_number || 'photo' })}
@@ -679,7 +793,52 @@ function StepFilterBar({ options, total, value, onChange }) {
   )
 }
 
-function PhotoGrid({ photos, isMobile, showStepTag, onOpen, onReprocess, onDelete }) {
+// Toolbar above the grid: enter select mode, then Select-all / Download / Cancel.
+function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, onEnterSelect, onCancel, onSelectAll, onDownload }) {
+  if (totalCount === 0) return null
+  const btn = (extra = {}) => ({
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '5px 10px', fontSize: 12, fontWeight: 600,
+    borderRadius: 6, cursor: 'pointer', border: `1px solid ${C.border}`,
+    background: C.card, color: C.textSecondary, ...extra,
+  })
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 10 }}>
+      {!selectMode ? (
+        <button onClick={onEnterSelect} style={btn()}>
+          <Icon path="M9 11l3 3L22 4 M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" size={13} color={C.textSecondary} />
+          Select
+        </button>
+      ) : (
+        <>
+          <span style={{ fontSize: 12, color: C.textMuted, marginRight: 'auto' }}>
+            {selectedCount} selected
+          </span>
+          <button onClick={onSelectAll} style={btn()}>
+            {selectedCount === totalCount ? 'All selected' : `Select all (${totalCount})`}
+          </button>
+          <button onClick={onCancel} style={btn()}>Cancel</button>
+          <button
+            onClick={onDownload}
+            disabled={selectedCount === 0 || downloading}
+            style={btn({
+              background: (selectedCount === 0 || downloading) ? C.border : C.emerald,
+              color: (selectedCount === 0 || downloading) ? C.textMuted : '#fff',
+              border: 'none',
+              cursor: (selectedCount === 0 || downloading) ? 'default' : 'pointer',
+            })}
+          >
+            <Icon path="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+              size={13} color={(selectedCount === 0 || downloading) ? C.textMuted : '#fff'} />
+            {downloading ? 'Preparing…' : `Download${selectedCount ? ` (${selectedCount})` : ''}`}
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onToggleSelect, onOpen, onReprocess, onDelete }) {
   return (
     <div style={{
       display: 'grid',
@@ -691,6 +850,9 @@ function PhotoGrid({ photos, isMobile, showStepTag, onOpen, onReprocess, onDelet
           key={p.id}
           photo={p}
           showStepTag={showStepTag}
+          selectMode={selectMode}
+          selected={selectedIds?.has(p.id)}
+          onToggleSelect={() => onToggleSelect(p.id)}
           onOpen={() => onOpen(idx)}
           onReprocess={() => onReprocess(p.id)}
           onDelete={() => onDelete(p)}
@@ -700,7 +862,7 @@ function PhotoGrid({ photos, isMobile, showStepTag, onOpen, onReprocess, onDelet
   )
 }
 
-function PhotoTile({ photo, showStepTag, onOpen, onReprocess, onDelete }) {
+function PhotoTile({ photo, showStepTag, selectMode, selected, onToggleSelect, onOpen, onReprocess, onDelete }) {
   const status = photo.watermark_status
   const url = photo._thumbUrl
   const [hover, setHover] = useState(false)
@@ -714,11 +876,27 @@ function PhotoTile({ photo, showStepTag, onOpen, onReprocess, onDelete }) {
         background: '#0d1a2e',
         borderRadius: 6,
         overflow: 'hidden',
-        cursor: url ? 'pointer' : 'default',
-        border: `1px solid ${C.border}`,
+        cursor: (selectMode || url) ? 'pointer' : 'default',
+        border: selected ? `2px solid ${C.emerald}` : `1px solid ${C.border}`,
       }}
-      onClick={() => url && onOpen()}
+      onClick={() => { if (selectMode) onToggleSelect(); else if (url) onOpen() }}
     >
+      {/* Selection checkbox (select mode) */}
+      {selectMode && (
+        <div style={{
+          position: 'absolute', top: 6, left: 6, zIndex: 3,
+          width: 22, height: 22, borderRadius: '50%',
+          background: selected ? C.emerald : 'rgba(13,26,46,0.62)',
+          border: `2px solid ${selected ? C.emerald : 'rgba(255,255,255,0.85)'}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {selected && <Icon path="M5 13l4 4L19 7" size={12} color="#fff" />}
+        </div>
+      )}
+      {/* Dim unselected tiles slightly in select mode for scannability */}
+      {selectMode && !selected && (
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(7,17,31,0.28)', zIndex: 2, pointerEvents: 'none' }} />
+      )}
       {url ? (
         <img
           src={url}
@@ -770,24 +948,26 @@ function PhotoTile({ photo, showStepTag, onOpen, onReprocess, onDelete }) {
       )}
 
       {/* Hover/tap overlay with delete — visible on hover desktop, always
-          on mobile (tappable trash in corner). */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onDelete() }}
-        style={{
-          position: 'absolute', top: 6, right: 6,
-          width: 26, height: 26, borderRadius: '50%',
-          background: 'rgba(13,26,46,0.65)',
-          border: 'none',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer',
-          opacity: hover ? 1 : 0.55,
-          transition: 'opacity 0.15s',
-        }}
-        title="Delete"
-      >
-        <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"
-          size={12} color="#fff" />
-      </button>
+          on mobile (tappable trash in corner). Hidden while selecting. */}
+      {!selectMode && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          style={{
+            position: 'absolute', top: 6, right: 6,
+            width: 26, height: 26, borderRadius: '50%',
+            background: 'rgba(13,26,46,0.65)',
+            border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer',
+            opacity: hover ? 1 : 0.55,
+            transition: 'opacity 0.15s',
+          }}
+          title="Delete"
+        >
+          <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"
+            size={12} color="#fff" />
+        </button>
+      )}
 
       {/* Work-step tag + capture-type badge (work-order aggregate gallery).
           Bottom-anchored chips so the photo reads as evidence for a specific
@@ -976,10 +1156,10 @@ function Lightbox({ photos, startIndex, onClose, onIndexChange }) {
 
   const photo = photos[idx]
   if (!photo) return null
-  // Prefer the original (full-resolution) in the lightbox, with the
-  // watermarked variant as fallback for cases where the original signed
-  // URL didn't resolve (e.g. RLS quirk on a freshly inserted row).
-  const url = photo._originalUrl || photo._thumbUrl
+  // Show the watermarked (tagged) variant in the lightbox so the step /
+  // location / date / GPS stamp is visible — that's the evidence view. Fall
+  // back to the original if no watermark exists.
+  const url = photo._thumbUrl || photo._originalUrl
 
   const takenAt = photo.taken_at
     ? new Date(photo.taken_at).toLocaleString('en-US',
@@ -1016,25 +1196,45 @@ function Lightbox({ photos, startIndex, onClose, onIndexChange }) {
             {idx + 1} / {photos.length}
           </span>
         </div>
-        <button
-          onClick={onClose}
-          style={{
-            background: 'rgba(255,255,255,0.1)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: '#fff',
-            width: 36, height: 36, borderRadius: '50%',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
-          }}
-          aria-label="Close"
-        >
-          <Icon path="M6 18L18 6M6 6l12 12" size={16} color="#fff" />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            onClick={async () => {
+              try { await downloadSinglePhoto(photo) }
+              catch { /* surfaced by the browser; nothing to toast in the overlay */ }
+            }}
+            title="Download this photo"
+            style={{
+              background: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              color: '#fff',
+              width: 36, height: 36, borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+            aria-label="Download"
+          >
+            <Icon path="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" size={16} color="#fff" />
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              color: '#fff',
+              width: 36, height: 36, borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+            aria-label="Close"
+          >
+            <Icon path="M6 18L18 6M6 6l12 12" size={16} color="#fff" />
+          </button>
+        </div>
       </div>
 
       {/* Image */}
       <div style={{
-        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
         position: 'relative',
         padding: '0 50px',
       }}>

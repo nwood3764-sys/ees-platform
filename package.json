@@ -34,6 +34,7 @@
     "dompurify": "^3.4.2",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
+    "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
     "mathjs": "^12.4.3",
     "react": "^18.3.1",
