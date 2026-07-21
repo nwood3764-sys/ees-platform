@@ -14,7 +14,7 @@ import { useState, useMemo } from 'react'
 import { computeAvailability, createServiceAppointment, requestDispatcherFollowup } from './serviceAppointmentService'
 import {
   C, card, label, input, inputFocus, buttonPrimary, buttonSecondary,
-  errorBanner, RADIUS, formatChicagoSlot, formatChicagoTimeRange,
+  errorBanner, RADIUS, formatSlot, formatTimeRange,
 } from './styles'
 
 // ─── slug → display metadata + intake config ────────────────────────────────
@@ -23,6 +23,13 @@ import {
 // driven by the work_type record itself (intake_fields_json).
 
 const SLUG_META = {
+  'nc-energy-savers-site-visit': {
+    title:        'North Carolina Energy Savers — Site Visit',
+    durationLabel: 'About 30–45 minutes',
+    defaultState: 'NC',
+    intro:        "Congratulations on being pre-qualified for the North Carolina Energy Saver program. Pick a time below for your home energy site walk — we'll look at insulation, HVAC, and other areas that affect your energy use. Most visits take 30–45 minutes.",
+    intake:   [],
+  },
   'single-family-assessment': {
     title:    'Single-Family Energy Assessment',
     durationLabel: '90 minutes',
@@ -66,16 +73,30 @@ const US_STATES = ['WI','NC','CO','MI','IN','IL','MN','IA']
 export default function ServiceAppointmentFlow({ slug }) {
   const meta = SLUG_META[slug]
 
+  // Per-person invite links (and the generic public page) may prefill the
+  // homeowner's details via query params:
+  //   ?first=&last=&phone=&email=&street=&city=&state=&zip=
+  const params = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search) : new URLSearchParams()
+
   const [step,           setStep]           = useState('intake') // intake|loading|slots|confirming|scheduling|success
   const [customerInfo,   setCustomerInfo]   = useState({
-    firstName: '', lastName: '', phone: '', email: '',
-    street: '', city: '', state: 'WI', zip: '',
+    firstName: params.get('first')  || '',
+    lastName:  params.get('last')   || '',
+    phone:     params.get('phone')  || '',
+    email:     params.get('email')  || '',
+    street:    params.get('street') || '',
+    city:      params.get('city')   || '',
+    state:     (params.get('state') || meta?.defaultState || 'WI').toUpperCase(),
+    zip:       params.get('zip')    || '',
     intake: {},
   })
   const [availability,   setAvailability]   = useState(null)
   const [selectedSlot,   setSelectedSlot]   = useState(null)
   const [appointmentResult,  setAppointmentResult]  = useState(null)
   const [error,          setError]          = useState(null)
+  // Territory timezone for rendering slot times (NC = America/New_York).
+  const [timezone,       setTimezone]       = useState(meta?.defaultState === 'NC' ? 'America/New_York' : 'America/Chicago')
 
   if (!meta) {
     return (
@@ -158,6 +179,7 @@ export default function ServiceAppointmentFlow({ slug }) {
         setStep('intake')
         return
       }
+      if (result.territory?.timezone) setTimezone(result.territory.timezone)
       setAvailability(result)
       setStep('slots')
     } catch (err) {
@@ -228,6 +250,7 @@ export default function ServiceAppointmentFlow({ slug }) {
         slot={selectedSlot}
         customerInfo={customerInfo}
         result={appointmentResult}
+        timezone={timezone}
       />
     )
   }
@@ -242,6 +265,12 @@ export default function ServiceAppointmentFlow({ slug }) {
         {meta.durationLabel}
       </div>
 
+      {meta.intro && step === 'intake' && (
+        <div style={{ ...card, background: C.cardSecondary, marginBottom: 16, fontSize: 14, color: C.textSecondary, lineHeight: 1.5 }}>
+          {meta.intro}
+        </div>
+      )}
+
       {error && <div style={errorBanner}>{error}</div>}
 
       {step === 'intake' && (
@@ -255,6 +284,7 @@ export default function ServiceAppointmentFlow({ slug }) {
       {step === 'slots' && availability && (
         <SlotsStep
           availability={availability}
+          timezone={timezone}
           onSelect={handleSlotSelect}
           onBack={() => { setError(null); setStep('intake') }}
         />
@@ -264,6 +294,7 @@ export default function ServiceAppointmentFlow({ slug }) {
           meta={meta}
           slot={selectedSlot}
           customerInfo={customerInfo}
+          timezone={timezone}
           onConfirm={handleConfirm}
           onBack={() => { setError(null); setStep('slots') }}
         />
@@ -451,15 +482,15 @@ function labelFor(field) {
 
 // ─── SlotsStep ──────────────────────────────────────────────────────────────
 
-function SlotsStep({ availability, onSelect, onBack }) {
-  // Group slots by Chicago date; within each date, dedupe by start_iso
+function SlotsStep({ availability, timezone, onSelect, onBack }) {
+  // Group slots by local date; within each date, dedupe by start_iso
   // (multiple Techs at the same time collapse to one tappable button — the
   // edge function's day-fill ordering puts the preferred resource first).
   const byDay = useMemo(() => {
     const map = new Map()
     const seenInDay = new Map()
     for (const slot of availability.slots) {
-      const { date } = formatChicagoSlot(slot.start_iso)
+      const { date } = formatSlot(slot.start_iso, timezone)
       const dayKey = date
       if (!map.has(dayKey)) {
         map.set(dayKey, [])
@@ -470,7 +501,7 @@ function SlotsStep({ availability, onSelect, onBack }) {
       map.get(dayKey).push(slot)
     }
     return Array.from(map.entries())
-  }, [availability])
+  }, [availability, timezone])
 
   return (
     <div>
@@ -501,7 +532,7 @@ function SlotsStep({ availability, onSelect, onBack }) {
             gap: 8,
           }}>
             {slots.map((slot, i) => {
-              const { time } = formatChicagoSlot(slot.start_iso)
+              const { time } = formatSlot(slot.start_iso, timezone)
               return (
                 <button
                   key={`${slot.start_iso}-${i}`}
@@ -542,9 +573,9 @@ function SlotsStep({ availability, onSelect, onBack }) {
 
 // ─── ConfirmStep ────────────────────────────────────────────────────────────
 
-function ConfirmStep({ meta, slot, customerInfo, onConfirm, onBack }) {
-  const { date, time } = formatChicagoSlot(slot.start_iso)
-  const range = formatChicagoTimeRange(slot.start_iso, slot.end_iso)
+function ConfirmStep({ meta, slot, customerInfo, timezone, onConfirm, onBack }) {
+  const { date } = formatSlot(slot.start_iso, timezone)
+  const range = formatTimeRange(slot.start_iso, slot.end_iso, timezone)
 
   return (
     <div>
@@ -597,9 +628,9 @@ function SummaryRow({ label: text, value, highlight }) {
 
 // ─── SuccessStep ────────────────────────────────────────────────────────────
 
-function SuccessStep({ meta, slot, customerInfo, result }) {
-  const { date, time } = formatChicagoSlot(slot.start_iso)
-  const range = formatChicagoTimeRange(slot.start_iso, slot.end_iso)
+function SuccessStep({ meta, slot, customerInfo, result, timezone }) {
+  const { date } = formatSlot(slot.start_iso, timezone)
+  const range = formatTimeRange(slot.start_iso, slot.end_iso, timezone)
   const manageUrl = result.manage_url || `/sa/manage/${result.service_appointment_token}`
 
   return (
