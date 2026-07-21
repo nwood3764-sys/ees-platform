@@ -232,6 +232,13 @@ function guessPrefix(tableName) {
     resource_absences: 'ra',
     service_provider_applications: 'spa',
     service_provider_service_areas: 'spsa',
+    sp_payout_price_books: 'sppb',
+    sp_payout_price_book_entries: 'sppe',
+    service_provider_proposals: 'spro',
+    service_provider_proposal_lines: 'sprl',
+    service_provider_invoices: 'spi',
+    service_provider_invoice_line_items: 'spil',
+    service_provider_payments: 'spp',
   }
   return map[tableName] || null
 }
@@ -261,6 +268,13 @@ function guessNameColumn(tableName) {
     service_territories: 'service_territory_name',
     service_provider_applications: 'spa_name',
     service_provider_service_areas: 'spsa_name',
+    sp_payout_price_books: 'sppb_name',
+    sp_payout_price_book_entries: 'sppe_name',
+    service_provider_proposals: 'spro_name',
+    service_provider_proposal_lines: 'sprl_name',
+    service_provider_invoices: 'spi_name',
+    service_provider_invoice_line_items: 'spil_name',
+    service_provider_payments: 'spp_name',
   }
   return map[tableName] || null
 }
