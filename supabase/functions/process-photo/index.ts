@@ -404,7 +404,7 @@ async function processPhoto(admin: ReturnType<typeof createClient>, photoId: str
       const stripY = img.height - stripH
 
       const strip = new Image(img.width, stripH)
-      strip.fill(rgba(13, 26, 46, 0.80)) // dark navy 80%
+      strip.fill(rgba(13, 26, 46, 0.45)) // dark navy 45% — light enough to see the image through
       img.composite(strip, 0, stripY)
 
       let cy = stripY + padY
