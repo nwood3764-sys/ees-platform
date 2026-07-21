@@ -36,6 +36,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { Image } from "https://deno.land/x/imagescript@1.2.17/mod.ts"
 import exifr from "npm:exifr@7.1.3"
+import piexif from "npm:piexifjs@1.0.6"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -124,6 +125,57 @@ function rotate180(img: Image): Image {
     dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = src[si + 3]
   }
   return out
+}
+
+// ── EXIF preservation ───────────────────────────────────────────────────────
+// The watermarked variant is re-encoded (imagescript writes no EXIF), which
+// would drop the capture timestamp + GPS. Programs that accept these photos
+// need BOTH the visible watermark AND accurate EXIF, so we copy the ORIGINAL's
+// EXIF verbatim into the watermarked JPEG — no re-derivation, so the metadata
+// stays exactly what the camera recorded — changing only:
+//   • Orientation → 1 (the pixels are physically rotated upright now, so the
+//     original 6/8 flag would make a viewer double-rotate).
+//   • PixelXDimension/YDimension → the actual watermarked size (kept honest).
+// piexif works on binary strings (one char = one byte).
+function u8ToBinaryString(u8: Uint8Array): string {
+  let s = ""
+  const CHUNK = 0x8000
+  for (let i = 0; i < u8.length; i += CHUNK) {
+    s += String.fromCharCode.apply(null, Array.from(u8.subarray(i, i + CHUNK)))
+  }
+  return s
+}
+function binaryStringToU8(bs: string): Uint8Array {
+  const u8 = new Uint8Array(bs.length)
+  for (let i = 0; i < bs.length; i++) u8[i] = bs.charCodeAt(i) & 0xff
+  return u8
+}
+// Returns the watermarked bytes with the original's EXIF embedded, or the
+// input unchanged if the original carries no readable EXIF (e.g. non-JPEG).
+function embedOriginalExif(originalBytes: Uint8Array, watermarkedJpeg: Uint8Array, outW: number, outH: number): { bytes: Uint8Array; ok: boolean } {
+  try {
+    const origBin = u8ToBinaryString(originalBytes)
+    const exifObj = piexif.load(origBin)
+    const hasAny = exifObj && (
+      (exifObj["Exif"] && Object.keys(exifObj["Exif"]).length) ||
+      (exifObj["GPS"] && Object.keys(exifObj["GPS"]).length) ||
+      (exifObj["0th"] && Object.keys(exifObj["0th"]).length)
+    )
+    if (!hasAny) return { bytes: watermarkedJpeg, ok: false }
+    exifObj["0th"] = exifObj["0th"] || {}
+    exifObj["0th"][piexif.ImageIFD.Orientation] = 1
+    exifObj["Exif"] = exifObj["Exif"] || {}
+    exifObj["Exif"][piexif.ExifIFD.PixelXDimension] = outW
+    exifObj["Exif"][piexif.ExifIFD.PixelYDimension] = outH
+    // Thumbnail from the original is stale after re-encode; drop it.
+    exifObj["thumbnail"] = null
+    exifObj["1st"] = {}
+    const exifBytes = piexif.dump(exifObj)
+    const merged = piexif.insert(exifBytes, u8ToBinaryString(watermarkedJpeg))
+    return { bytes: binaryStringToU8(merged), ok: true }
+  } catch (_) {
+    return { bytes: watermarkedJpeg, ok: false }
+  }
 }
 
 // Leaf of a hierarchical LEAP name: "1837 Alden Rd - Janesville - 1837 - 11"
@@ -299,6 +351,7 @@ async function processPhoto(admin: ReturnType<typeof createClient>, photoId: str
   let watermarkPath: string | null = null
   let newStatus = "skipped"
   let renderError: string | null = null
+  let wmExifOk = false
 
   if (photo.apply_watermark) {
     try {
@@ -360,7 +413,13 @@ async function processPhoto(admin: ReturnType<typeof createClient>, photoId: str
         cy += im.height + lineGap
       }
 
-      const out = await img.encodeJPEG(85)
+      const encoded = await img.encodeJPEG(85)
+      // Copy the original camera EXIF (date + GPS) into the watermarked JPEG so
+      // the downloadable evidence file has BOTH the visible tag and accurate
+      // metadata. Falls back to the plain watermarked bytes if the original has
+      // no readable EXIF.
+      const { bytes: out, ok: exifOk } = embedOriginalExif(buffer, encoded, img.width, img.height)
+      wmExifOk = exifOk
 
       const origPath = photo.storage_path_original
       const baseName = origPath.split("/").pop() || "photo"
@@ -405,6 +464,7 @@ async function processPhoto(admin: ReturnType<typeof createClient>, photoId: str
     watermark_error: renderError,
     orientation: orient,
     location_line: locLine,
+    watermark_exif_embedded: wmExifOk,
     taken_at: takenAt instanceof Date ? takenAt.toISOString() : null,
   }
 }
