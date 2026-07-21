@@ -90,29 +90,38 @@ function normalizeOrientation(v: unknown): number | null {
   return null
 }
 
-// Explicit 90°/180° rotation via pixel remap. imagescript 1.2.17's own
-// rotate(90) resamples/transposes unreliably in this runtime (verified), so we
-// remap pixels directly — deterministic and correct-direction. imagescript is
-// 1-indexed. rotate90(cw=true): top→right, left→top (true clockwise).
+// Explicit 90°/180° rotation via a direct RGBA bitmap remap. imagescript
+// 1.2.17's own rotate(90) resamples/transposes unreliably in this runtime
+// (verified), and a getPixelAt/setPixelAt loop is too slow on multi-megapixel
+// images (the invocation dies mid-rotate). Operating on the raw Uint8Array is
+// ~10× faster and deterministic. Direction verified against the 1-indexed
+// reference: cw=true => top→right, left→top (true clockwise). Bitmap is
+// row-major RGBA; pixel (x,y) 0-indexed is at offset (y*w + x) * 4.
 function rotate90(img: Image, cw: boolean): Image {
   const w = img.width, h = img.height
-  const out = new Image(h, w)
-  for (let y = 1; y <= h; y++) {
-    for (let x = 1; x <= w; x++) {
-      const p = img.getPixelAt(x, y)
-      if (cw) out.setPixelAt(h - y + 1, x, p)
-      else out.setPixelAt(y, w - x + 1, p)
+  const src = img.bitmap
+  const out = new Image(h, w) // dimensions swap
+  const dst = out.bitmap
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const si = (y * w + x) * 4
+      const dx = cw ? (h - 1 - y) : y
+      const dy = cw ? x : (w - 1 - x)
+      const di = (dy * h + dx) * 4 // out width is h
+      dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = src[si + 3]
     }
   }
   return out
 }
 function rotate180(img: Image): Image {
   const w = img.width, h = img.height
+  const src = img.bitmap
   const out = new Image(w, h)
-  for (let y = 1; y <= h; y++) {
-    for (let x = 1; x <= w; x++) {
-      out.setPixelAt(w - x + 1, h - y + 1, img.getPixelAt(x, y))
-    }
+  const dst = out.bitmap
+  const n = w * h
+  for (let i = 0; i < n; i++) {
+    const si = i * 4, di = (n - 1 - i) * 4
+    dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = src[si + 3]
   }
   return out
 }
