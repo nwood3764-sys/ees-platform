@@ -230,6 +230,8 @@ function guessPrefix(tableName) {
     property_import_batches: 'pib',
     service_territory_members: 'stm',
     resource_absences: 'ra',
+    service_provider_applications: 'spa',
+    service_provider_service_areas: 'spsa',
   }
   return map[tableName] || null
 }
@@ -257,6 +259,8 @@ function guessNameColumn(tableName) {
     users: 'user_name',
     picklist_values: 'picklist_label',
     service_territories: 'service_territory_name',
+    service_provider_applications: 'spa_name',
+    service_provider_service_areas: 'spsa_name',
   }
   return map[tableName] || null
 }
