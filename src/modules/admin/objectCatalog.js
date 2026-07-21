@@ -23,6 +23,13 @@ export const OBJECT_CATALOG = [
   // ─── SERVICE PROVIDERS ─────────────────────────────────────────────────
   { table: 'service_provider_applications',  label: 'Service Provider Application', pluralLabel: 'Service Provider Applications', module: 'Service Providers',      description: 'Subcontractor / service-provider signup application with an approval stage lifecycle.' },
   { table: 'service_provider_service_areas', label: 'Service Provider Service Area',pluralLabel: 'Service Provider Service Areas',module: 'Service Providers',      description: 'ZIP-code area of operation for a service-provider account.' },
+  { table: 'sp_payout_price_books',          label: 'Payout Price Book',           pluralLabel: 'Payout Price Books',           module: 'Service Providers',      description: 'State-specific payout rate book; optional per-provider override book.' },
+  { table: 'sp_payout_price_book_entries',   label: 'Payout Price Book Entry',     pluralLabel: 'Payout Price Book Entries',    module: 'Service Providers',      description: 'Per-measure payout unit rate within a payout price book.' },
+  { table: 'service_provider_proposals',     label: 'Service Provider Proposal',   pluralLabel: 'Service Provider Proposals',   module: 'Service Providers',      description: 'Priced proposal issued to a provider for a work order / project; accepted or rejected.' },
+  { table: 'service_provider_proposal_lines',label: 'Proposal Line',               pluralLabel: 'Proposal Lines',              module: 'Service Providers',      description: 'Priced installed-measure line on a proposal (quantity x payout rate).' },
+  { table: 'service_provider_invoices',      label: 'Service Provider Invoice',    pluralLabel: 'Service Provider Invoices',    module: 'Service Providers',      description: 'Payable to a service provider, generated from an accepted proposal.' },
+  { table: 'service_provider_invoice_line_items', label: 'Invoice Line',           pluralLabel: 'Invoice Lines',               module: 'Service Providers',      description: 'Line item on a service-provider invoice.' },
+  { table: 'service_provider_payments',      label: 'Service Provider Payment',    pluralLabel: 'Service Provider Payments',    module: 'Service Providers',      description: 'Payment recorded against a service-provider invoice.' },
 
   // ─── QUALIFICATION ─────────────────────────────────────────────────────
   { table: 'assessments',                   label: 'Assessment',                  pluralLabel: 'Assessments',                  module: 'Qualification',         description: 'Energy audit / ASHRAE Level 2 assessment.' },
