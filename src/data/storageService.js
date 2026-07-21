@@ -397,6 +397,25 @@ export async function softDeletePhoto(photoId) {
   if (error) throw new Error(`photos soft-delete failed: ${error.message}`)
 }
 
+/**
+ * Mark (or unmark) a photo for inclusion in the final project report. This is
+ * an internal curation flag only — it never appears on the watermark. The RPC
+ * stamps who/when on set and clears it on unset.
+ *
+ * @param {string}  photoId
+ * @param {boolean} include
+ * @returns {Promise<boolean>} the new flag value
+ */
+export async function setPhotoReportInclusion(photoId, include) {
+  if (!photoId) throw new Error('setPhotoReportInclusion: photoId is required')
+  const { data, error } = await supabase.rpc('set_photo_report_inclusion', {
+    p_photo_id: photoId,
+    p_include: !!include,
+  })
+  if (error) throw new Error(`report inclusion update failed: ${error.message}`)
+  return data === true
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Documents
 // ───────────────────────────────────────────────────────────────────────────

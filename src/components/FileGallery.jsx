@@ -10,6 +10,7 @@ import {
   listWorkOrderPhotos,
   hydratePhotoUrls,
   softDeletePhoto,
+  setPhotoReportInclusion,
   reprocessPhoto,
   uploadDocument,
   listDocuments,
@@ -159,6 +160,7 @@ export default function FileGalleryWidget({
   const [selectMode, setSelectMode]   = useState(false)    // photos: multi-select for download
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [downloading, setDownloading] = useState(false)
+  const [showReportOnly, setShowReportOnly] = useState(false) // filter to report-flagged photos
 
   // Photos-only: detect a misconfigured widget (e.g. on a property) so we
   // can show a clear message instead of letting the user click Upload and
@@ -221,9 +223,12 @@ export default function FileGalleryWidget({
   }, [items, isWorkOrderPhotoGallery])
 
   const visiblePhotos = useMemo(() => {
-    if (!isWorkOrderPhotoGallery || stepFilter === 'all') return items
-    return items.filter(p => (p._work_step_id || 'unassigned') === stepFilter)
-  }, [items, stepFilter, isWorkOrderPhotoGallery])
+    let list = (!isWorkOrderPhotoGallery || stepFilter === 'all')
+      ? items
+      : items.filter(p => (p._work_step_id || 'unassigned') === stepFilter)
+    if (showReportOnly) list = list.filter(p => p.include_in_final_report)
+    return list
+  }, [items, stepFilter, isWorkOrderPhotoGallery, showReportOnly])
 
   // ── Photo selection + download ──────────────────────────────────────
   // Drop selections that scroll out of the current step filter so the count
@@ -260,6 +265,25 @@ export default function FileGalleryWidget({
       setDownloading(false)
     }
   }
+
+  // Toggle the internal "include in final report" flag. Optimistic — flips the
+  // local row immediately, reverts on failure. Not shown on the watermark.
+  const setLocalReportFlag = (photoId, val) =>
+    setItems(prev => prev.map(p => p.id === photoId ? { ...p, include_in_final_report: val } : p))
+  const handleToggleReport = async (photo) => {
+    const next = !photo.include_in_final_report
+    setLocalReportFlag(photo.id, next)
+    try {
+      await setPhotoReportInclusion(photo.id, next)
+    } catch (e) {
+      setLocalReportFlag(photo.id, !next) // revert
+      toast.error(e.message || 'Could not update report flag')
+    }
+  }
+  const reportCount = useMemo(
+    () => (target === 'photos' ? items.filter(p => p.include_in_final_report).length : 0),
+    [items, target]
+  )
 
   // Photos with a 'pending' watermark won't have their watermarked URL on
   // first load. Poll lightly while any are pending so the UI catches up
@@ -546,11 +570,19 @@ export default function FileGalleryWidget({
                   selectedCount={selectedIds.size}
                   totalCount={visiblePhotos.length}
                   downloading={downloading}
+                  reportCount={reportCount}
+                  showReportOnly={showReportOnly}
+                  onToggleReportFilter={() => setShowReportOnly(v => !v)}
                   onEnterSelect={() => setSelectMode(true)}
                   onCancel={exitSelect}
                   onSelectAll={selectAllVisible}
                   onDownload={handleDownloadSelected}
                 />
+                {showReportOnly && visiblePhotos.length === 0 ? (
+                  <div style={{ padding: '18px 4px', fontSize: 12.5, color: C.textMuted }}>
+                    No photos marked for the final report yet. Use the flag on a photo to include it.
+                  </div>
+                ) : (
                 <PhotoGrid
                   photos={visiblePhotos}
                   isMobile={isMobile}
@@ -558,10 +590,12 @@ export default function FileGalleryWidget({
                   selectMode={selectMode}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
+                  onToggleReport={handleToggleReport}
                   onOpen={(idx) => setLightboxIdx(idx)}
                   onReprocess={handleReprocess}
                   onDelete={(p) => setConfirmDelete({ id: p.id, name: p.photo_number || 'photo' })}
                 />
+                )}
               </>
             ) : (
               <DocumentList
@@ -582,6 +616,7 @@ export default function FileGalleryWidget({
           startIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
           onIndexChange={setLightboxIdx}
+          onToggleReport={handleToggleReport}
         />
       )}
 
@@ -801,9 +836,13 @@ function StepFilterBar({ options, total, value, onChange }) {
   )
 }
 
-// Toolbar above the grid: enter select mode, then Select-all / Download / Cancel.
-function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, onEnterSelect, onCancel, onSelectAll, onDownload }) {
-  if (totalCount === 0) return null
+// Bookmark/flag icon path — reused on the toolbar chip, tiles, and lightbox.
+const FLAG_ICON = 'M6 3h12a1 1 0 011 1v17l-7-4-7 4V4a1 1 0 011-1z'
+
+// Toolbar above the grid: report-filter chip, then enter select mode →
+// Select-all / Download / Cancel.
+function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, reportCount, showReportOnly, onToggleReportFilter, onEnterSelect, onCancel, onSelectAll, onDownload }) {
+  if (totalCount === 0 && !showReportOnly && !reportCount) return null
   const btn = (extra = {}) => ({
     display: 'inline-flex', alignItems: 'center', gap: 5,
     padding: '5px 10px', fontSize: 12, fontWeight: 600,
@@ -812,6 +851,16 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, onEn
   })
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 10 }}>
+      {!selectMode && (
+        <button
+          onClick={onToggleReportFilter}
+          title="Show only photos marked for the final report"
+          style={{ ...btn(showReportOnly ? { background: '#e8f8f2', borderColor: C.emerald, color: C.emeraldMid } : {}), marginRight: 'auto' }}
+        >
+          <Icon path={FLAG_ICON} size={12} color={showReportOnly ? C.emeraldMid : C.textMuted} />
+          In report{reportCount ? ` (${reportCount})` : ''}
+        </button>
+      )}
       {!selectMode ? (
         <button onClick={onEnterSelect} style={btn()}>
           <Icon path="M9 11l3 3L22 4 M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" size={13} color={C.textSecondary} />
@@ -847,7 +896,7 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, onEn
   )
 }
 
-function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onToggleSelect, onOpen, onReprocess, onDelete }) {
+function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
   return (
     <div style={{
       display: 'grid',
@@ -862,6 +911,7 @@ function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onT
           selectMode={selectMode}
           selected={selectedIds?.has(p.id)}
           onToggleSelect={() => onToggleSelect(p.id)}
+          onToggleReport={() => onToggleReport(p)}
           onOpen={() => onOpen(idx)}
           onReprocess={() => onReprocess(p.id)}
           onDelete={() => onDelete(p)}
@@ -871,7 +921,7 @@ function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onT
   )
 }
 
-function PhotoTile({ photo, showStepTag, selectMode, selected, onToggleSelect, onOpen, onReprocess, onDelete }) {
+function PhotoTile({ photo, showStepTag, selectMode, selected, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
   const status = photo.watermark_status
   const url = photo._thumbUrl
   const [hover, setHover] = useState(false)
@@ -956,19 +1006,39 @@ function PhotoTile({ photo, showStepTag, selectMode, selected, onToggleSelect, o
         </button>
       )}
 
-      {/* Hover/tap overlay with delete — visible on hover desktop, always
-          on mobile (tappable trash in corner). Hidden while selecting. */}
+      {/* Include-in-final-report flag — top-right, always visible so flagged
+          photos read at a glance. Filled emerald when included. Internal only;
+          never appears on the watermark. */}
+      {!selectMode && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleReport() }}
+          title={photo.include_in_final_report ? 'Included in final report — click to remove' : 'Include in final report'}
+          style={{
+            position: 'absolute', top: 6, right: 6,
+            width: 26, height: 26, borderRadius: '50%',
+            background: photo.include_in_final_report ? C.emerald : 'rgba(13,26,46,0.65)',
+            border: photo.include_in_final_report ? 'none' : '1px solid rgba(255,255,255,0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'background 0.15s',
+          }}
+        >
+          <Icon path={FLAG_ICON} size={12} color="#fff" />
+        </button>
+      )}
+
+      {/* Delete — hover-revealed, left of the flag. Hidden while selecting. */}
       {!selectMode && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete() }}
           style={{
-            position: 'absolute', top: 6, right: 6,
+            position: 'absolute', top: 6, right: 38,
             width: 26, height: 26, borderRadius: '50%',
             background: 'rgba(13,26,46,0.65)',
             border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer',
-            opacity: hover ? 1 : 0.55,
+            opacity: hover ? 1 : 0,
             transition: 'opacity 0.15s',
           }}
           title="Delete"
@@ -1132,7 +1202,7 @@ function formatBytes(n) {
 // Lightbox
 // ---------------------------------------------------------------------------
 
-function Lightbox({ photos, startIndex, onClose, onIndexChange }) {
+function Lightbox({ photos, startIndex, onClose, onIndexChange, onToggleReport }) {
   const [idx, setIdx] = useState(startIndex)
   // Keep parent in sync so it can close the lightbox if the photo is deleted.
   useEffect(() => { onIndexChange(idx) }, [idx, onIndexChange])
@@ -1206,6 +1276,22 @@ function Lightbox({ photos, startIndex, onClose, onIndexChange }) {
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {onToggleReport && (
+            <button
+              onClick={() => onToggleReport(photo)}
+              title={photo.include_in_final_report ? 'Included in final report — click to remove' : 'Include in final report'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                height: 36, padding: '0 14px', borderRadius: 18,
+                background: photo.include_in_final_report ? C.emerald : 'rgba(255,255,255,0.1)',
+                border: `1px solid ${photo.include_in_final_report ? C.emerald : 'rgba(255,255,255,0.2)'}`,
+                color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+            >
+              <Icon path={FLAG_ICON} size={15} color="#fff" />
+              {photo.include_in_final_report ? 'In final report' : 'Include in report'}
+            </button>
+          )}
           <button
             onClick={async () => {
               try { await downloadSinglePhoto(photo) }
