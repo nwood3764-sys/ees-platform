@@ -158,4 +158,7 @@ Add to `work_orders` (purpose-named, clean FK):
 ---
 
 ## 8. Progress log
-- **2026-07-21** — Workstream opened. Architecture mapped, D1–D8 decided. This doc written. Phase 1 build starting.
+- **2026-07-21** — Workstream opened. Architecture mapped, D1–D8 decided. This doc written.
+- **2026-07-21 — Phase 1 SHIPPED to branch `claude/service-provider-portal-intake-w9zkq1`** (migration `20260721120000_service_provider_identity_and_application.sql`, applied + verified on prod; `build:safe` green; no new security-advisor findings). Delivered: "Service Provider" account record type; trade + provider-status picklists; provider-profile columns on accounts (license, insurance, W-9 doc ref); `service_provider_applications` (SPA-) with stage lifecycle; `service_provider_service_areas` (SPSA-); RLS + role access; frontend metadata/object-catalog registration. Record-number trigger functionally verified (SPA-00001), test row purged, sequence reset to 1.
+  - Deferred within Phase 1: bespoke admin page layout + help article — intentionally bundled with the user-facing phases (intake/portal), since the object has no creation entry point until then. Generic RecordDetail/Object Manager render it today.
+  - Open Phase-2 decision to confirm before/at build: **AP invoice trigger + approval flow** (auto-create payable on WO verification vs. provider-submitted invoice from the portal). Recommendation: system auto-calculates the payout amount from installed measures when a work order is verified, staged as a draft payable for internal (Tier-2+) approval; the provider sees the resulting invoice/payment in the portal but does not self-invoice. **PENDING.**
