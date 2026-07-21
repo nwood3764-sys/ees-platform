@@ -20,6 +20,10 @@ export const OBJECT_CATALOG = [
   { table: 'opportunity_contact_roles',     label: 'Contact Role',    pluralLabel: 'Contact Roles',    module: 'CRM & Enrollment',        description: 'Stakeholder role on an opportunity.' },
   { table: 'opportunity_line_items',        label: 'Opportunity Line Item',       pluralLabel: 'Opportunity Line Items',       module: 'CRM & Enrollment',        description: 'Scope-of-work line on an opportunity.' },
 
+  // ─── SERVICE PROVIDERS ─────────────────────────────────────────────────
+  { table: 'service_provider_applications',  label: 'Service Provider Application', pluralLabel: 'Service Provider Applications', module: 'Service Providers',      description: 'Subcontractor / service-provider signup application with an approval stage lifecycle.' },
+  { table: 'service_provider_service_areas', label: 'Service Provider Service Area',pluralLabel: 'Service Provider Service Areas',module: 'Service Providers',      description: 'ZIP-code area of operation for a service-provider account.' },
+
   // ─── QUALIFICATION ─────────────────────────────────────────────────────
   { table: 'assessments',                   label: 'Assessment',                  pluralLabel: 'Assessments',                  module: 'Qualification',         description: 'Energy audit / ASHRAE Level 2 assessment.' },
   { table: 'diagnostic_tests',              label: 'Diagnostic Test',             pluralLabel: 'Diagnostic Tests',             module: 'Qualification',         description: 'Blower door, duct leakage, combustion safety test.' },
