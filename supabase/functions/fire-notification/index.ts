@@ -173,7 +173,7 @@ async function buildAppointmentContext(supabase: any, saId: string): Promise<any
     .select(`
       id, sa_record_number, work_type_id, contact_id, project_id, work_order_id,
       sa_scheduled_start_time, sa_scheduled_end_time, sa_status,
-      work_type:work_types!work_type_id ( id, work_type_name, work_type_customer_facing_description ),
+      work_type:work_types!work_type_id ( id, work_type_name, work_type_customer_facing_name, work_type_customer_facing_description ),
       contact:contacts!contact_id ( id, contact_first_name, contact_last_name, contact_name, contact_phone, contact_mobile_phone, contact_email ),
       project:projects!project_id (
         id,
@@ -253,6 +253,9 @@ async function buildAppointmentContext(supabase: any, saId: string): Promise<any
       start_at: sa.sa_scheduled_start_time, end_at: sa.sa_scheduled_end_time,
       start_date: startDate, start_time: startTime, end_time: endTime,
       work_type_name: wt?.work_type_name || "site visit",
+      // Friendly label for customer-facing copy; falls back to the internal
+      // name, then a generic phrase.
+      work_type_label: wt?.work_type_customer_facing_name || wt?.work_type_name || "home energy assessment",
       manage_url: manageUrl,
     },
     contact: {
