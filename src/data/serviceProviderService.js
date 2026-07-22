@@ -26,6 +26,39 @@ export async function fetchServiceProviderApplications() {
   return data || []
 }
 
+// Active service provider accounts (approved + activated) for the
+// "Issue to Provider" picker on a work order.
+export async function fetchActiveServiceProviders() {
+  const { data: rt } = await supabase
+    .from('picklist_values').select('id')
+    .eq('picklist_object', 'accounts').eq('picklist_field', 'record_type').eq('picklist_value', 'service_provider')
+    .maybeSingle()
+  let q = supabase
+    .from('accounts')
+    .select('id, account_name, account_service_provider_home_state, trade:account_service_provider_type(picklist_label)')
+    .eq('account_service_provider_is_active', true)
+    .eq('account_is_deleted', false)
+    .order('account_name')
+  if (rt?.id) q = q.eq('account_record_type', rt.id)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+// Issue a priced proposal for a work order to a provider. The RPC prices the
+// work order's installed measures via the state/per-provider payout book.
+export async function issueWorkOrderToProvider(providerAccountId, workOrderId, notes) {
+  const { data, error } = await supabase.rpc('generate_service_provider_proposal', {
+    p_provider_account_id: providerAccountId,
+    p_work_order_ids: [workOrderId],
+    p_state: null,
+    p_notes: notes || null,
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
 // ZIP areas of operation for an account.
 export async function fetchServiceAreas(accountId) {
   const { data, error } = await supabase

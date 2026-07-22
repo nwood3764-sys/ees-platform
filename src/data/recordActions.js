@@ -71,6 +71,7 @@ export const ACTION_KEYS = Object.freeze({
   RESTORE:                 'restore',
   MERGE_ACCOUNT:           'merge_account',
   ADD_TO_PORTAL:           'add_to_portal',
+  ISSUE_TO_PROVIDER:       'issue_to_provider',
 })
 
 // ---------------------------------------------------------------------------
@@ -218,6 +219,16 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultSortOrder:    20,
     isAvailable: ({ tableName, editing, statusLabel }) =>
       !editing && tableName === 'work_orders' && statusLabel === 'To Be Scheduled',
+  },
+  issue_to_provider: {
+    key:                 ACTION_KEYS.ISSUE_TO_PROVIDER,
+    label:               'Issue to Provider',
+    icon:                'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2 M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z M9 14l2 2 4-4',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['work_orders'],
+    defaultTier:         'menu',
+    defaultSortOrder:    25,
+    isAvailable: ({ tableName, editing }) => !editing && tableName === 'work_orders',
   },
 
   // ── Service appointments ────────────────────────────────────────────────
