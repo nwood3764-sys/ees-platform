@@ -177,6 +177,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
   const [naStep, setNaStep] = useState(null)     // step being marked Not Applicable, or null
   const [createOpen, setCreateOpen] = useState(false)
   const [createTypes, setCreateTypes] = useState(null)  // null = loading
+  const [flowStep, setFlowStep] = useState(null)        // screen-flow step being run, or null
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -205,6 +206,10 @@ export default function WorkOrderDetail({ woId, navigate }) {
   const allDone = orderedSteps.length > 0 && actionableIdx === -1
   const woStatus = (header.work_order_status || '').toLowerCase()
   const canSubmit = allDone && (woStatus.includes('in progress') || woStatus.includes('correction'))
+  // Some work plans (e.g. the Single-Family Energy Assessment) let sections be
+  // completed in any order — the auditor walks the house non-linearly. Order was
+  // never enforced server-side, so this only relaxes the client's step locking.
+  const anyOrder = !!header.allow_any_order
 
   // ── Step handlers ───────────────────────────────────────────────────────
   const handleComplete = async (step) => {
@@ -332,25 +337,39 @@ export default function WorkOrderDetail({ woId, navigate }) {
 
       {/* Steps */}
       <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 13, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, margin: '4px 2px 10px' }}>
-        Work Steps · complete in order
+        Work Steps · {anyOrder ? 'complete in any order' : 'complete in order'}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {orderedSteps.map((step, i) => (
-          <StepCard
-            key={step.work_step_id}
-            step={step}
-            woId={woId}
-            index={i}
-            locked={i > actionableIdx && actionableIdx !== -1 && !isStepCorrections(step)}
-            isActionable={(i === actionableIdx || isStepCorrections(step)) && !isStepDone(step)}
-            busy={busy === step.work_step_id}
-            onComplete={() => handleComplete(step)}
-            onMarkNotApplicable={() => setNaStep(step)}
-            onPhotoUploaded={async (msg, tone) => { flash(msg, tone); await load() }}
-            onPhotoError={(msg) => flash(msg, 'error')}
-          />
-        ))}
+        {orderedSteps.map((step, i) => {
+          const locked = !anyOrder && i > actionableIdx && actionableIdx !== -1 && !isStepCorrections(step)
+          const isActionable = !isStepDone(step) && (anyOrder || i === actionableIdx || isStepCorrections(step))
+          return step.is_screen_flow ? (
+            <ScreenFlowCard
+              key={step.work_step_id}
+              step={step}
+              index={i}
+              locked={locked}
+              isActionable={isActionable}
+              onOpen={() => setFlowStep(step)}
+              onMarkNotApplicable={() => setNaStep(step)}
+            />
+          ) : (
+            <StepCard
+              key={step.work_step_id}
+              step={step}
+              woId={woId}
+              index={i}
+              locked={locked}
+              isActionable={isActionable}
+              busy={busy === step.work_step_id}
+              onComplete={() => handleComplete(step)}
+              onMarkNotApplicable={() => setNaStep(step)}
+              onPhotoUploaded={async (msg, tone) => { flash(msg, tone); await load() }}
+              onPhotoError={(msg) => flash(msg, 'error')}
+            />
+          )
+        })}
       </div>
 
       {/* Submit / status-aware action area */}
@@ -501,6 +520,16 @@ export default function WorkOrderDetail({ woId, navigate }) {
           busy={busy === naStep.work_step_id}
           onCancel={() => setNaStep(null)}
           onSubmit={handleMarkNotApplicable}
+        />
+      )}
+
+      {flowStep && (
+        <ScreenFlowRunner
+          step={flowStep}
+          woId={woId}
+          onFlash={flash}
+          onClose={async () => { setFlowStep(null); await load({ silent: true }) }}
+          onCompleted={async () => { setFlowStep(null); await load(); flash('Section complete') }}
         />
       )}
 
@@ -1499,6 +1528,338 @@ function Empty({ children, tone }) {
       color: tone === 'error' ? C.danger : C.textMuted, fontFamily: FONT, fontSize: 14,
     }}>
       {children}
+    </div>
+  )
+}
+
+// ─── Screen-flow prompt copy ─────────────────────────────────────────────────
+// Turns a field into a plain one-line prompt for the guided flow (e.g. "Select
+// the fuel type." / "Enter the model number.").
+function fieldPrompt(field) {
+  const label = (field.label || 'this').trim()
+  const pick = field.type === 'select' || field.type === 'user_multiselect' || field.type === 'key_source'
+  return `${pick ? 'Select' : 'Enter'} the ${label.toLowerCase()}.`
+}
+
+// A field is answered when it holds a value (mirrors the server's required-field
+// evidence gate).
+function fieldHasValue(f) {
+  return (f.numeric_value != null) || (f.text_value != null && String(f.text_value).trim() !== '')
+}
+
+// ─── ScreenFlowCard ──────────────────────────────────────────────────────────
+// A screen-flow work step (e.g. Heating System on the Single-Family Energy
+// Assessment). Rather than inline capture, it renders a compact section card
+// that launches the full-screen guided flow. Completed sections show a
+// read-only summary of what was captured.
+function ScreenFlowCard({ step, index, locked, isActionable, onOpen, onMarkNotApplicable }) {
+  const done = isStepDone(step)
+  const corrections = isStepCorrections(step)
+  const chip = statusChip(step.status)
+  const notApplicable = (step.status || '').toLowerCase() === 'not applicable'
+
+  const photoNeeded = (step.photos_required_count || 0) > 0 || step.photo_before_required || step.photo_after_required
+  const fields = Array.isArray(step.fields) ? step.fields : []
+  const totalPrompts = (photoNeeded ? 1 : 0) + fields.length
+  const photoDone = !photoNeeded || (step.photo_count || 0) >= Math.max(1, step.photos_required_count || 1)
+  const donePrompts = (photoNeeded ? (photoDone ? 1 : 0) : 0) + fields.filter(fieldHasValue).length
+
+  return (
+    <div style={{
+      ...card, padding: 14,
+      opacity: locked ? 0.55 : 1,
+      borderColor: corrections ? C.danger : (isActionable ? C.emerald : C.border),
+      borderWidth: (corrections || isActionable) ? 1.5 : 1,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{
+          width: 24, height: 24, borderRadius: '50%',
+          background: done ? C.emerald : (corrections ? C.danger : C.page),
+          color: done || corrections ? '#fff' : C.textSecondary,
+          fontFamily: MONO, fontSize: 12, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          {done ? <CheckIcon /> : (step.execution_order ?? index + 1)}
+        </span>
+        <span style={{ flex: 1, fontFamily: FONT, fontWeight: 700, fontSize: 15, color: C.textPrimary }}>
+          {step.name}
+        </span>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          background: chip.bg, color: chip.color, borderRadius: 20,
+          padding: '3px 9px', fontSize: 11, fontWeight: 600, flexShrink: 0,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: chip.dot }} />
+          {step.status}
+        </span>
+      </div>
+
+      {step.description && (
+        <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 10, lineHeight: 1.45 }}>
+          {step.description}
+        </div>
+      )}
+
+      {done ? (
+        <div style={{ marginBottom: 2 }}>
+          {photoNeeded && (
+            <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
+              <strong style={{ color: C.textPrimary }}>Photo:</strong>{' '}
+              <span style={{ fontFamily: MONO }}>{step.photo_count || 0} captured</span>
+            </div>
+          )}
+          {fields.map((f) => {
+            const val = f.numeric_value ?? f.text_value
+            return (
+              <div key={f.field_id} style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
+                <strong style={{ color: C.textPrimary }}>{f.label}:</strong>{' '}
+                {val != null && val !== ''
+                  ? <span style={{ fontFamily: MONO }}>{val}{f.unit ? ` ${f.unit}` : ''}</span>
+                  : <span style={{ color: C.textMuted }}>not entered</span>}
+              </div>
+            )
+          })}
+        </div>
+      ) : locked ? (
+        <div style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic' }}>
+          Complete the previous step first.
+        </div>
+      ) : isActionable ? (
+        <>
+          <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>
+            {donePrompts}/{totalPrompts} answered · {photoNeeded ? 'photo + ' : ''}{fields.length} detail{fields.length === 1 ? '' : 's'}
+          </div>
+          <button onClick={onOpen} style={{ ...btnPrimary, minHeight: 46 }}>
+            {donePrompts > 0 ? 'Continue Section →' : 'Open Section →'}
+          </button>
+          <button
+            onClick={onMarkNotApplicable}
+            style={{
+              appearance: 'none', background: 'none', border: 'none', cursor: 'pointer',
+              display: 'block', margin: '10px auto 0', padding: 6,
+              fontFamily: FONT, fontSize: 12.5, fontWeight: 600, color: C.textMuted,
+              textDecoration: 'underline',
+            }}
+          >
+            This section doesn’t apply here — mark Not Applicable
+          </button>
+        </>
+      ) : null}
+
+      {notApplicable && step.not_applicable_reason && (
+        <div style={{
+          background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: '8px 10px', marginTop: 8, fontSize: 12.5, color: C.textSecondary,
+        }}>
+          <strong>Not Applicable:</strong> {step.not_applicable_reason}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── ScreenFlowRunner ────────────────────────────────────────────────────────
+// Full-screen guided capture for a screen-flow step. Walks the step's photo
+// requirement, then each field, one prompt per screen, and finishes by
+// completing the step. Reuses the standard capture + field-save RPCs and the
+// existing field editors; the server evidence gate is the final authority on
+// completion. Re-fetches the work order after each save so live values and the
+// gap stay authoritative.
+function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFlash }) {
+  const [live, setLive] = useState(initialStep)
+  const [idx, setIdx] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const d = await fetchWorkOrderDetail(woId)
+      const s = (d.steps || []).find((x) => x.work_step_id === initialStep.work_step_id)
+      if (s) setLive(s)
+      return s
+    } catch { return null }
+  }, [woId, initialStep.work_step_id])
+
+  const photoNeeded = (live.photos_required_count || 0) > 0 || live.photo_before_required || live.photo_after_required
+  const reqPhotos = photoNeeded ? Math.max(1, live.photos_required_count || 1) : 0
+  const fields = Array.isArray(live.fields) ? live.fields : []
+
+  // Screen list: [photo?] + one per field + review.
+  const screens = []
+  if (photoNeeded) screens.push({ kind: 'photo' })
+  fields.forEach((f) => screens.push({ kind: 'field', field: f }))
+  screens.push({ kind: 'review' })
+
+  const clampedIdx = Math.min(idx, screens.length - 1)
+  const screen = screens[clampedIdx]
+  const pct = screens.length > 1 ? Math.round((clampedIdx / (screens.length - 1)) * 100) : 100
+
+  const photoCount = live.photo_count || 0
+  const photoSatisfied = !photoNeeded || photoCount >= reqPhotos
+
+  const next = () => setIdx((i) => Math.min(i + 1, screens.length - 1))
+  const back = () => setIdx((i) => Math.max(i - 1, 0))
+
+  const onFile = async (e) => {
+    const file = e.target.files && e.target.files[0]
+    e.target.value = ''
+    if (!file) return
+    setUploading(true)
+    try {
+      const row = await captureStepPhoto({ file, workStepId: live.work_step_id, photoType: 'general' })
+      await refresh()
+      onFlash(`Photo captured · ${live.name}`)
+      photoGpsMissing(row).then((missing) => {
+        if (missing) onFlash('Photo saved, but it has NO location data. Turn on Location Services for your camera, then retake.', 'error')
+      })
+    } catch (err) {
+      onFlash(err.message || 'Photo upload failed.', 'error')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const finish = async () => {
+    setBusy(true)
+    try {
+      await completeWorkStep(live.work_step_id)
+      onCompleted()
+    } catch (e) {
+      onFlash(e.message || 'Could not complete the section.', 'error')
+      await refresh() // resurface the gap so the auditor can go back and fix it
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const continueDisabled =
+    (screen.kind === 'photo' && !photoSatisfied) ||
+    (screen.kind === 'field' && !fieldHasValue(screen.field))
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 95, background: C.page,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      {/* Top bar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: 'calc(env(safe-area-inset-top) + 10px) 14px 10px',
+        background: C.sidebar, color: '#fff', flexShrink: 0,
+      }}>
+        <button
+          onClick={onClose}
+          style={{ appearance: 'none', background: 'none', border: 'none', cursor: 'pointer', color: '#fff', padding: 4, fontSize: 20, lineHeight: 1 }}
+          aria-label="Close"
+        >×</button>
+        <div style={{ flex: 1, fontFamily: FONT, fontWeight: 700, fontSize: 16 }}>{live.name}</div>
+        <div style={{ fontFamily: MONO, fontSize: 12, color: 'rgba(255,255,255,0.72)' }}>
+          {clampedIdx + 1} / {screens.length}
+        </div>
+      </div>
+      {/* Progress bar */}
+      <div style={{ height: 4, background: C.borderDark, flexShrink: 0 }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: C.emerald, transition: 'width 220ms ease' }} />
+      </div>
+
+      {/* Screen body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 18 }}>
+        {screen.kind === 'photo' && (
+          <div>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 6 }}>
+              Take a picture of the {live.name.toLowerCase()}.
+            </div>
+            <div style={{ fontSize: 13.5, color: C.textSecondary, marginBottom: 16 }}>
+              {photoCount > 0
+                ? `${photoCount} photo${photoCount === 1 ? '' : 's'} captured. Add another or continue.`
+                : `${reqPhotos} photo${reqPhotos === 1 ? '' : 's'} required.`}
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
+            <CaptureBtn
+              label={photoCount > 0 ? 'Add / Retake Photo' : 'Take Photo'}
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              done={photoSatisfied}
+            />
+            {uploading && <div style={{ fontSize: 12, color: C.textMuted, marginTop: 8 }}>Uploading photo…</div>}
+          </div>
+        )}
+
+        {screen.kind === 'field' && (
+          <div>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 14 }}>
+              {fieldPrompt(screen.field)}
+            </div>
+            {screen.field.type === 'user_multiselect' ? (
+              <StepUserMultiselect field={screen.field} stepId={live.work_step_id} disabled={busy}
+                onSaved={async (msg) => { onFlash(msg); await refresh(); next() }} onError={(m) => onFlash(m, 'error')} />
+            ) : screen.field.type === 'key_source' ? (
+              <StepKeySource field={screen.field} stepId={live.work_step_id} woId={woId} disabled={busy}
+                onSaved={async (msg) => { onFlash(msg); await refresh(); next() }} onError={(m) => onFlash(m, 'error')} />
+            ) : screen.field.type === 'select' ? (
+              <StepSelectField field={screen.field} stepId={live.work_step_id} disabled={busy}
+                onSaved={async (msg) => { onFlash(msg); await refresh(); next() }} onError={(m) => onFlash(m, 'error')} />
+            ) : (
+              <StepFieldInput field={screen.field} stepId={live.work_step_id} disabled={busy}
+                onSaved={async (msg) => { onFlash(msg); await refresh(); next() }} onError={(m) => onFlash(m, 'error')} />
+            )}
+          </div>
+        )}
+
+        {screen.kind === 'review' && (
+          <div>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 14 }}>
+              Review &amp; save
+            </div>
+            {photoNeeded && (
+              <div style={{ ...card, padding: '10px 12px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                <span style={{ color: C.textSecondary }}>Photo</span>
+                <span style={{ fontFamily: MONO, fontWeight: 700, color: photoSatisfied ? C.emeraldMid : C.amber }}>
+                  {photoCount} captured{photoSatisfied ? ' ✓' : ''}
+                </span>
+              </div>
+            )}
+            {fields.map((f) => {
+              const val = f.numeric_value ?? f.text_value
+              const has = fieldHasValue(f)
+              return (
+                <div key={f.field_id} style={{ ...card, padding: '10px 12px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
+                  <span style={{ color: C.textSecondary }}>{f.label}</span>
+                  <span style={{ fontFamily: MONO, fontWeight: 700, textAlign: 'right', color: has ? C.textPrimary : C.amber }}>
+                    {has ? `${val}${f.unit ? ` ${f.unit}` : ''}` : 'missing'}
+                  </span>
+                </div>
+              )
+            })}
+            {live.evidence_gap && (
+              <div style={{ fontSize: 12.5, color: C.amber, marginTop: 6 }}>{live.evidence_gap}</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bottom nav */}
+      <div style={{
+        display: 'flex', gap: 10, padding: '12px 14px calc(env(safe-area-inset-bottom) + 12px)',
+        background: C.card, borderTop: `1px solid ${C.border}`, flexShrink: 0,
+      }}>
+        <button onClick={clampedIdx === 0 ? onClose : back} disabled={busy} style={{ ...btnSecondary, flex: '0 0 40%' }}>
+          {clampedIdx === 0 ? 'Close' : 'Back'}
+        </button>
+        {screen.kind === 'review' ? (
+          <button onClick={finish} disabled={busy || !!live.evidence_gap}
+            style={(busy || !!live.evidence_gap) ? { ...btnDisabled, flex: 1 } : { ...btnPrimary, flex: 1 }}
+            title={live.evidence_gap || undefined}>
+            {busy ? 'Saving…' : `Save ${live.name}`}
+          </button>
+        ) : (
+          <button onClick={next} disabled={continueDisabled}
+            style={continueDisabled ? { ...btnDisabled, flex: 1 } : { ...btnPrimary, flex: 1 }}>
+            Continue
+          </button>
+        )}
+      </div>
     </div>
   )
 }
