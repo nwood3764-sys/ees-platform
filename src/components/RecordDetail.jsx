@@ -19,6 +19,7 @@ const ProjectReportModal                  = lazy(() => import('./ProjectReportMo
 const ProjectSchedulerWizard              = lazy(() => import('./scheduler/ProjectSchedulerWizard'))
 const ServiceAppointmentRescheduleModal   = lazy(() => import('./scheduler/ServiceAppointmentRescheduleModal'))
 const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkOrderScheduleModal'))
+const IssueToProviderModal                = lazy(() => import('./IssueToProviderModal'))
 const SendForSignatureModal               = lazy(() => import('./SendForSignatureModal'))
 const AccountMergeModal                    = lazy(() => import('./AccountMergeModal'))
 const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
@@ -4610,6 +4611,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // with a one-element WO array plus a pinned placement at the chosen
   // start time, so the engine path is identical to the bulk wizard.
   const [showWoSchedule, setShowWoSchedule] = useState(false)
+  // Issue-to-Provider modal — opt-in via toolbar button on a Work Order.
+  // Generates a priced proposal (generate_service_provider_proposal) and
+  // issues it to a service provider account.
+  const [showIssueProvider, setShowIssueProvider] = useState(false)
   // Send-for-signature modal: shown on any record whose table has at least one
   // Active document template (document_templates.related_object = tableName).
   // The DocuSign / Conga model — gating is data-driven, not hardcoded. The
@@ -5874,6 +5879,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
+    [ACTION_KEYS.ISSUE_TO_PROVIDER]:      () => setShowIssueProvider(true),
     [ACTION_KEYS.RESCHEDULE_APPOINTMENT]: () => setShowSaReschedule(true),
     [ACTION_KEYS.SEND_FOR_SIGNATURE]:     () => setShowSendSignatureModal(true),
     [ACTION_KEYS.RESEND_SIGNING_EMAIL]:   handleResendEnvelope,
@@ -6616,6 +6622,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             workOrderId={recordId}
             onClose={() => setShowWoSchedule(false)}
             onScheduled={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
+
+        {/* Issue-to-Provider modal — opt-in via toolbar button on a Work Order.
+            Prices the WO's installed measures via the payout book and issues a
+            proposal to the chosen service provider; related lists refresh. */}
+        {showIssueProvider && tableName === 'work_orders' && (
+          <IssueToProviderModal
+            workOrderId={recordId}
+            onClose={() => setShowIssueProvider(false)}
+            onIssued={() => { setReloadTick(t => t + 1) }}
           />
         )}
 

@@ -254,3 +254,4 @@ Deep research is now a staged pipeline and findings flow through a review queue 
 | Session log 2026-07-01 (nav/list/layout/property fixes + verification) | `leap-session-2026-07-01.md` |
 | Activity + email layer (log activity, two-way Graph email, self-test harness) | `leap-activity-email-layer.md` |
 | Owner research → outreach workflow (staged research, review queue, approval) | `leap-owner-research-workflow.md` |
+| Service Provider portal + intake (subcontractor onboarding, payout book, proposals, AP) | `leap-service-provider-portal.md` |
