@@ -47,13 +47,24 @@ function fmtSchedule(iso) {
   } catch { return '' }
 }
 
-// Format a photo's capture time (EXIF taken_at) as e.g. "9:14 AM" in Chicago
-// time — shown under each work-step photo thumbnail.
+// Format a photo's capture time (EXIF taken_at) as e.g. "9:14 AM" — shown
+// under each work-step photo thumbnail.
+//
+// IMPORTANT — timezone: photos.taken_at holds the camera's LOCAL wall-clock
+// time, not a true UTC instant. exifr parses EXIF DateTimeOriginal ("9:44:51")
+// without applying OffsetTimeOriginal, so the local wall clock is stored
+// labelled UTC (e.g. 09:44:51Z for a 9:44 AM Central capture). Formatting in
+// UTC therefore reproduces exactly the time the technician's phone showed —
+// correct in every state EES works in (WI/NC/CO/MI/IN), because it echoes the
+// device clock rather than shifting it. This mirrors the burned-in watermark,
+// which also renders taken_at in UTC. (If the photo pipeline is ever changed
+// to store a true UTC instant, this formatter must switch to the site's local
+// timezone.)
 function fmtPhotoTime(iso) {
   if (!iso) return ''
   try {
     return new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
+      timeZone: 'UTC', hour: 'numeric', minute: '2-digit',
     }).format(new Date(iso))
   } catch { return '' }
 }
