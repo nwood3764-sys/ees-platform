@@ -24,7 +24,7 @@ import {
 import {
   C, card, RADIUS, FONT_MONO,
   buttonPrimary, buttonSecondary, errorBanner, label,
-  formatChicagoSlot, formatChicagoTimeRange,
+  formatSlot, formatTimeRange, tzForState,
 } from './styles'
 
 export default function ManagePage({ token }) {
@@ -221,8 +221,9 @@ function CenteredLoading({ label: text }) {
 // ─── AppointmentView (default) ──────────────────────────────────────────────────
 
 function AppointmentView({ appointment, slotsError, onReschedule, onCancel }) {
-  const { date } = formatChicagoSlot(appointment.sa_scheduled_start_iso)
-  const range = formatChicagoTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso)
+  const tz = tzForState(appointment.address?.state)
+  const { date } = formatSlot(appointment.sa_scheduled_start_iso, tz)
+  const range = formatTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso, tz)
 
   return (
     <div>
@@ -271,8 +272,9 @@ function AppointmentView({ appointment, slotsError, onReschedule, onCancel }) {
 // ─── ConfirmCancelView ──────────────────────────────────────────────────────
 
 function ConfirmCancelView({ appointment, onConfirm, onBack }) {
-  const { date } = formatChicagoSlot(appointment.sa_scheduled_start_iso)
-  const range = formatChicagoTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso)
+  const tz = tzForState(appointment.address?.state)
+  const { date } = formatSlot(appointment.sa_scheduled_start_iso, tz)
+  const range = formatTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso, tz)
 
   return (
     <div style={card}>
@@ -337,11 +339,12 @@ function CanceledView({ appointment }) {
 // ─── SlotsView (reschedule slot picker) ─────────────────────────────────────
 
 function SlotsView({ availability, slotsError, onSelect, onBack }) {
+  const tz = availability.territory?.timezone || 'America/Chicago'
   const byDay = useMemo(() => {
     const map = new Map()
     const seenInDay = new Map()
     for (const slot of availability.slots) {
-      const { date } = formatChicagoSlot(slot.start_iso)
+      const { date } = formatSlot(slot.start_iso, tz)
       if (!map.has(date)) {
         map.set(date, [])
         seenInDay.set(date, new Set())
@@ -351,7 +354,7 @@ function SlotsView({ availability, slotsError, onSelect, onBack }) {
       map.get(date).push(slot)
     }
     return Array.from(map.entries())
-  }, [availability])
+  }, [availability, tz])
 
   return (
     <div>
@@ -380,7 +383,7 @@ function SlotsView({ availability, slotsError, onSelect, onBack }) {
             gap: 8,
           }}>
             {slots.map((slot, i) => {
-              const { time } = formatChicagoSlot(slot.start_iso)
+              const { time } = formatSlot(slot.start_iso, tz)
               return (
                 <button
                   key={`${slot.start_iso}-${i}`}
@@ -422,10 +425,11 @@ function SlotsView({ availability, slotsError, onSelect, onBack }) {
 // ─── ConfirmRescheduleView ──────────────────────────────────────────────────
 
 function ConfirmRescheduleView({ appointment, slot, onConfirm, onBack }) {
-  const { date: oldDate } = formatChicagoSlot(appointment.sa_scheduled_start_iso)
-  const oldRange = formatChicagoTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso)
-  const { date: newDate } = formatChicagoSlot(slot.start_iso)
-  const newRange = formatChicagoTimeRange(slot.start_iso, slot.end_iso)
+  const tz = tzForState(appointment.address?.state)
+  const { date: oldDate } = formatSlot(appointment.sa_scheduled_start_iso, tz)
+  const oldRange = formatTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso, tz)
+  const { date: newDate } = formatSlot(slot.start_iso, tz)
+  const newRange = formatTimeRange(slot.start_iso, slot.end_iso, tz)
 
   return (
     <div>

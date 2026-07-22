@@ -269,10 +269,31 @@ async function validateAddress(a: ReqBody["address"]): Promise<CanonicalAddress>
   }
 }
 
-// Customer geocoding is delegated to compute-route-matrix (which resolves an
-// address to coordinates via ZIP centroid or Google). Returning null here is
-// fine — the matrix + ZIP-based territory resolution both accept an address.
-async function geocode(_addr: CanonicalAddress): Promise<LatLng | null> { return null }
+// Geocode the customer address to coordinates via the Google Geocoding API.
+// With a coordinate, territory resolution uses the polygon (statewide), not
+// just the seeded ZIP list, and routing uses the precise point. Without the
+// GOOGLE_MAPS_API_KEY it returns null and we fall back to ZIP-based territory
+// resolution + address-string routing — unchanged pre-key behavior.
+async function geocode(addr: CanonicalAddress): Promise<LatLng | null> {
+  const apiKey = Deno.env.get("GOOGLE_MAPS_API_KEY")
+  if (!apiKey) return null
+  const q = [addr.street, addr.city, addr.state, addr.zip].filter(Boolean).join(", ")
+  if (!q) return null
+  try {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&key=${apiKey}`
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const data = await res.json() as { results?: Array<{ geometry?: { location?: { lat?: number; lng?: number } } }> }
+    const loc = data?.results?.[0]?.geometry?.location
+    if (loc && typeof loc.lat === "number" && typeof loc.lng === "number") {
+      return { lat: loc.lat, lng: loc.lng }
+    }
+    return null
+  } catch (e) {
+    console.error("geocode failed; falling back to ZIP-based resolution", e)
+    return null
+  }
+}
 
 async function resolveTerritory(
   supabase: SupabaseClient,

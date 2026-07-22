@@ -211,6 +211,7 @@ export default function ServiceAppointmentFlow({ slug }) {
           state:  customerInfo.state,  zip:  customerInfo.zip,
         },
         intake: customerInfo.intake,
+        territory_id: availability?.territory?.id,
       })
       if (result.status === 'slot_taken') {
         // The slot was just taken by someone else — go back to fresh slots.

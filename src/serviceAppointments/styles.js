@@ -136,3 +136,15 @@ export const formatTimeRange = (startIso, endIso, tz = DEFAULT_TZ) => {
 // Backward-compatible Chicago-fixed helpers (kept for any other callers).
 export const formatChicagoSlot = (iso) => formatSlot(iso, 'America/Chicago')
 export const formatChicagoTimeRange = (startIso, endIso) => formatTimeRange(startIso, endIso, 'America/Chicago')
+
+// Map a US state code to its IANA timezone, mirroring the per-territory
+// timezones seeded in the database. Used where the territory row isn't on
+// hand (e.g. the manage page derives it from the appointment's address).
+const STATE_TZ = {
+  NC: 'America/New_York',
+  WI: 'America/Chicago',
+  CO: 'America/Denver',
+  MI: 'America/Detroit',
+  IN: 'America/Indiana/Indianapolis',
+}
+export const tzForState = (state) => STATE_TZ[String(state || '').toUpperCase()] || DEFAULT_TZ
