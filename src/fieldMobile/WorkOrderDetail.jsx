@@ -57,6 +57,65 @@ function fmtDuration(minutes) {
   const m = total % 60
   return m === 0 ? `${h}h` : `${h}h ${m}m`
 }
+// ─── TimeOnSite ──────────────────────────────────────────────────────────────
+// Evidence-bracketed duration for the whole work order.
+//   • Running (In Progress / Corrections): a live total that ticks from the
+//     first photo to now, so the crew can see time-on-site accruing.
+//   • Completed (submitted / verified): frozen total = first photo → last photo
+//     (server-computed duration_minutes).
+// Nothing renders until the first photo brackets the job.
+function TimeOnSite({ firstPhotoAt, durationMinutes, running }) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!running || !firstPhotoAt) return
+    const id = setInterval(() => setNow(Date.now()), 15000) // 15s keeps the minute fresh
+    return () => clearInterval(id)
+  }, [running, firstPhotoAt])
+
+  if (!firstPhotoAt && durationMinutes == null) return null
+
+  const isLive = running && !!firstPhotoAt
+  let value, label
+  if (isLive) {
+    value = fmtDuration((now - new Date(firstPhotoAt).getTime()) / 60000)
+    label = 'Time on site · running'
+  } else if (durationMinutes != null) {
+    value = fmtDuration(durationMinutes)
+    label = 'Total time on site'
+  } else {
+    // Completed with a single photo (no measurable span).
+    value = fmtDuration(0)
+    label = 'Total time on site'
+  }
+
+  return (
+    <div style={{
+      ...card, padding: '12px 14px', marginBottom: 14,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.textSecondary, fontSize: 13 }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" />
+        </svg>
+        {label}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {isLive && (
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%', background: C.emerald,
+            animation: 'tospulse 1.6s ease-in-out infinite',
+          }} />
+        )}
+        <span style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, color: C.textPrimary }}>
+          {value}
+        </span>
+      </div>
+      <style>{`@keyframes tospulse{0%,100%{opacity:1}50%{opacity:0.35}}`}</style>
+    </div>
+  )
+}
+
 function isStepDone(s) { return DONE_STATUSES.includes((s.status || '').toLowerCase()) }
 function isStepCorrections(s) { return (s.status || '').toLowerCase().includes('correction') }
 
@@ -250,25 +309,15 @@ export default function WorkOrderDetail({ woId, navigate }) {
         </span>
       </div>
 
-      {/* Time on site — derived from evidence (first photo → last photo). No
-          manual clock: every work order is bracketed by photos. */}
-      {(detail.first_photo_at || detail.duration_minutes != null) && (
-        <div style={{
-          ...card, padding: '12px 14px', marginBottom: 14,
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.textSecondary, fontSize: 13 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" />
-            </svg>
-            Time on site
-          </div>
-          <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, color: C.textPrimary }}>
-            {detail.duration_minutes != null ? fmtDuration(detail.duration_minutes)
-              : detail.first_photo_at ? 'In progress' : '—'}
-          </div>
-        </div>
-      )}
+      {/* Time on site — derived from evidence, bracketed by photos. No manual
+          clock. While the work order is still running the total ticks live from
+          the first photo to now; once it's submitted/verified it freezes at
+          first photo → last photo. */}
+      <TimeOnSite
+        firstPhotoAt={detail.first_photo_at}
+        durationMinutes={detail.duration_minutes}
+        running={woStatus.includes('in progress') || woStatus.includes('correction')}
+      />
 
       {/* Steps */}
       <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 13, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, margin: '4px 2px 10px' }}>
