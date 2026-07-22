@@ -47,6 +47,17 @@ function fmtSchedule(iso) {
   } catch { return '' }
 }
 
+// Format a photo's capture time (EXIF taken_at) as e.g. "9:14 AM" in Chicago
+// time — shown under each work-step photo thumbnail.
+function fmtPhotoTime(iso) {
+  if (!iso) return ''
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
+    }).format(new Date(iso))
+  } catch { return '' }
+}
+
 // Format an evidence-derived duration (minutes, from first→last photo) as a
 // compact "Xh Ym" / "Ym" string.
 function fmtDuration(minutes) {
@@ -1430,28 +1441,38 @@ function PhotoStrip({ photos }) {
         const legColor = (p.photo_type || '').toLowerCase() === 'before' ? C.sky
           : (p.photo_type || '').toLowerCase() === 'after' ? C.emeraldMid : C.textMuted
         return (
-          <div key={p.id} style={{ position: 'relative' }}>
-            <button
-              onClick={() => url && setZoom(url)}
-              style={{
-                width: 72, height: 72, borderRadius: 8, overflow: 'hidden',
-                border: `1px solid ${C.border}`, padding: 0, cursor: url ? 'pointer' : 'default',
-                background: C.cardSecondary, display: 'block',
-              }}
-            >
-              {url
-                ? <img src={url} alt={p.photo_type || 'photo'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                : <span style={{ fontSize: 10, color: C.textMuted }}>…</span>}
-            </button>
-            {p.photo_type && p.photo_type.toLowerCase() !== 'general' && (
-              <span style={{
-                position: 'absolute', bottom: 3, left: 3,
-                background: legColor, color: '#fff', fontSize: 9, fontWeight: 700,
-                borderRadius: 4, padding: '1px 4px', textTransform: 'capitalize',
-              }}>
-                {p.photo_type}
-              </span>
-            )}
+          <div key={p.id} style={{ width: 72 }}>
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => url && setZoom(url)}
+                style={{
+                  width: 72, height: 72, borderRadius: 8, overflow: 'hidden',
+                  border: `1px solid ${C.border}`, padding: 0, cursor: url ? 'pointer' : 'default',
+                  background: C.cardSecondary, display: 'block',
+                }}
+              >
+                {url
+                  ? <img src={url} alt={p.photo_type || 'photo'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : <span style={{ fontSize: 10, color: C.textMuted }}>…</span>}
+              </button>
+              {p.photo_type && p.photo_type.toLowerCase() !== 'general' && (
+                <span style={{
+                  position: 'absolute', bottom: 3, left: 3,
+                  background: legColor, color: '#fff', fontSize: 9, fontWeight: 700,
+                  borderRadius: 4, padding: '1px 4px', textTransform: 'capitalize',
+                }}>
+                  {p.photo_type}
+                </span>
+              )}
+            </div>
+            {/* When each photo was taken (from EXIF). Blank until the server
+                finishes processing; a dash means no timestamp was embedded. */}
+            <div style={{
+              fontFamily: MONO, fontSize: 10, color: p.taken_at ? C.textSecondary : C.textMuted,
+              textAlign: 'center', marginTop: 3, lineHeight: 1.2,
+            }}>
+              {p.taken_at ? fmtPhotoTime(p.taken_at) : '—'}
+            </div>
           </div>
         )
       })}
