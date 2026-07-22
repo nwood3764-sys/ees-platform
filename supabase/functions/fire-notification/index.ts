@@ -171,13 +171,21 @@ async function buildAppointmentContext(supabase: any, saId: string): Promise<any
   const { data: sa, error: saErr } = await supabase
     .from("service_appointments")
     .select(`
-      id, sa_record_number, work_type_id, contact_id, project_id,
+      id, sa_record_number, work_type_id, contact_id, project_id, work_order_id,
       sa_scheduled_start_time, sa_scheduled_end_time, sa_status,
       work_type:work_types!work_type_id ( id, work_type_name, work_type_customer_facing_description ),
       contact:contacts!contact_id ( id, contact_first_name, contact_last_name, contact_name, contact_phone, contact_mobile_phone, contact_email ),
       project:projects!project_id (
         id,
         property:properties!property_id ( id, property_name, property_street, property_city, property_state, property_zip )
+      ),
+      work_order:work_orders!work_order_id (
+        id,
+        property:properties!property_id ( id, property_name, property_street, property_city, property_state, property_zip ),
+        project:projects!project_id (
+          id,
+          property:properties!property_id ( id, property_name, property_street, property_city, property_state, property_zip )
+        )
       )
     `)
     .eq("id", saId)
@@ -214,7 +222,13 @@ async function buildAppointmentContext(supabase: any, saId: string): Promise<any
 
   const c    = sa.contact
   const wt   = sa.work_type
+  // Resolve the property through whichever parent this SA carries. Self-scheduled
+  // SAs anchor to a work order (no project_id); dispatcher/seed SAs anchor to a
+  // project. This mirrors resolve_outbound_mailbox_for_anchor so the email body's
+  // state branding + timezone always agree with the mailbox that sent it.
   const prop = sa.project?.property
+            || sa.work_order?.property
+            || sa.work_order?.project?.property
   const a    = assignment?.contact
 
   // Timezone + branding follow the property's state (fallback Central/generic).
