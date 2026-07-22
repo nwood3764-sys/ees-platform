@@ -46,6 +46,7 @@ const FleetModule         = lazy(() => import('./modules/FleetModule'))
 const ReportsModule       = lazy(() => import('./modules/ReportsModule'))
 const AdminModule         = lazy(() => import('./modules/admin'))
 const PortalModule        = lazy(() => import('./modules/PortalModule'))
+const ServiceProviderModule = lazy(() => import('./modules/ServiceProviderModule'))
 const SearchResultsPage   = lazy(() => import('./modules/SearchResultsPage'))
 const HelpCenterPage      = lazy(() => import('./pages/HelpCenterPage'))
 
@@ -361,6 +362,7 @@ function AuthedApp({ session }) {
       case 'reports':       return <ReportsModule {...navProps} />
       case 'admin':         return <AdminModule {...navProps} />
       case 'portal':        return <PortalModule {...navProps} />
+      case 'providers':     return <ServiceProviderModule {...navProps} />
       case 'search':        return (
         <SearchResultsPage
           searchQuery={searchQuery}

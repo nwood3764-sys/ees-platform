@@ -189,7 +189,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // all results" footer button or a shared link).
 const KNOWN_MODULES = new Set([
   'home', 'tasks', 'outreach', 'enrollment', 'qualification', 'field', 'planning', 'implementation', 'dispatch', 'incentives',
-  'stock', 'fleet', 'reports', 'admin', 'portal', 'search', 'help',
+  'stock', 'fleet', 'reports', 'admin', 'portal', 'providers', 'search', 'help',
 ])
 
 /**
