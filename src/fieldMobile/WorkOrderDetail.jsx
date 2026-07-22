@@ -1538,7 +1538,8 @@ function Empty({ children, tone }) {
 function fieldPrompt(field) {
   const label = (field.label || 'this').trim()
   const pick = field.type === 'select' || field.type === 'user_multiselect' || field.type === 'key_source'
-  return `${pick ? 'Select' : 'Enter'} the ${label.toLowerCase()}.`
+  // Keep the label as-authored so acronyms read right ("Enter the BTUs.").
+  return `${pick ? 'Select' : 'Enter'} the ${label}.`
 }
 
 // A field is answered when it holds a value (mirrors the server's required-field
