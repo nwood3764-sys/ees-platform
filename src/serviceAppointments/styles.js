@@ -109,21 +109,42 @@ export const formatPhoneDisplay = (raw) => {
   return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`
 }
 
-// Format an ISO instant as a human-friendly Chicago local time/date pair.
-// Returns { date: 'Thursday, May 14', time: '7:30 AM' }.
-export const formatChicagoSlot = (iso) => {
+// Format an ISO instant as a human-friendly local time/date pair IN A GIVEN
+// IANA timezone. compute-availability returns the territory's timezone
+// (e.g. America/New_York for NC), so slot times display in the customer's
+// local zone rather than a hardcoded one. Returns { date, time }.
+const DEFAULT_TZ = 'America/Chicago'
+
+export const formatSlot = (iso, tz = DEFAULT_TZ) => {
   const d = new Date(iso)
+  const zone = tz || DEFAULT_TZ
   const date = d.toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric', timeZone: 'America/Chicago',
+    weekday: 'long', month: 'long', day: 'numeric', timeZone: zone,
   })
   const time = d.toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago',
+    hour: 'numeric', minute: '2-digit', timeZone: zone,
   })
   return { date, time }
 }
 
-export const formatChicagoTimeRange = (startIso, endIso) => {
-  const s = formatChicagoSlot(startIso).time
-  const e = formatChicagoSlot(endIso).time
+export const formatTimeRange = (startIso, endIso, tz = DEFAULT_TZ) => {
+  const s = formatSlot(startIso, tz).time
+  const e = formatSlot(endIso, tz).time
   return `${s} – ${e}`
 }
+
+// Backward-compatible Chicago-fixed helpers (kept for any other callers).
+export const formatChicagoSlot = (iso) => formatSlot(iso, 'America/Chicago')
+export const formatChicagoTimeRange = (startIso, endIso) => formatTimeRange(startIso, endIso, 'America/Chicago')
+
+// Map a US state code to its IANA timezone, mirroring the per-territory
+// timezones seeded in the database. Used where the territory row isn't on
+// hand (e.g. the manage page derives it from the appointment's address).
+const STATE_TZ = {
+  NC: 'America/New_York',
+  WI: 'America/Chicago',
+  CO: 'America/Denver',
+  MI: 'America/Detroit',
+  IN: 'America/Indiana/Indianapolis',
+}
+export const tzForState = (state) => STATE_TZ[String(state || '').toUpperCase()] || DEFAULT_TZ
