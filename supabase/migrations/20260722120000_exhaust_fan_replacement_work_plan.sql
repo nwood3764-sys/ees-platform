@@ -1,8 +1,8 @@
 -- =============================================================================
 -- Exhaust Fan Replacement — In-Unit work plan (multi-family energy savings
 -- retrofit). Built to the exhaust-fan installation procedure + field checklist
--- + photo procedure, to the reviewed 28-step field list. Pure config on the
--- existing data-driven work-plan engine (work_types → work_plan_templates →
+-- + photo procedure, to the reviewed field list. Pure config on the existing
+-- data-driven work-plan engine (work_types → work_plan_templates →
 -- work_plan_template_entries → work_step_templates → work_step_template_fields);
 -- no schema change and no frontend change — LEAP Pad already renders Photo /
 -- number / select fields generically and hard-gates step completion through
@@ -14,16 +14,18 @@
 -- Insulation Removal plan (WPT-00004) was wired onto the pre-existing WT-00041.
 -- A duplicate work type is deliberately NOT created.
 --
--- One work order per unit (work orders never span units). 28 steps across 8
--- phases: Documentation, Dust Containment, Electrical Safety, Removal,
--- Electrical Installation, Ventilation, Fan Installation, Finish Work. Photo
--- steps carry a hard photo gate. "Validation" steps (drop cloth, verify power
--- off, test fit, wiring, etc.) are completable checkpoints — the Lead
--- Technician marks them done and the Project Site Lead verifies, no photo
--- required. Two steps capture hard-gated data fields: Configure Airflow (Fan
--- Location Type + Configured Airflow CFM) and Functional Test (Fan Operating).
+-- One work order per unit (work orders never span units). Because the work
+-- order is issued per unit, the plan is scoped and documented by the UNIT
+-- number — there is no building-number photo. 27 steps across 8 phases:
+-- Documentation, Dust Containment, Electrical Safety, Removal, Electrical
+-- Installation, Ventilation, Fan Installation, Finish Work. Photo steps carry a
+-- hard photo gate (14). "Validation" steps (drop cloth, verify power off, test
+-- fit, wiring, etc.) are completable checkpoints — the Lead Technician marks
+-- them done and the Project Site Lead verifies, no photo required (13). Two
+-- steps capture hard-gated data fields: Configure Airflow (Fan Location Type +
+-- Configured Airflow CFM) and Functional Test (Fan Operating).
 --
--- New work plan template (auto-numbered) + 28 purpose-built step templates
+-- New work plan template (auto-numbered) + 27 purpose-built step templates
 -- (never shared with another plan). Every step owned by Lead Technician,
 -- verified by Project Site Lead, plus a help article. All record numbers are
 -- assigned by their auto-number triggers at apply time.
@@ -57,10 +59,8 @@ DECLARE
   v_photo uuid := '16130b3e-e416-4d92-bf23-ec0f8aeee3e1'; -- Photo evidence type
   v_wpt   uuid;
   v_wt    uuid;
-  s uuid[] := array_fill(NULL::uuid, ARRAY[28]);
+  s uuid[] := array_fill(NULL::uuid, ARRAY[27]);
   v_id uuid;
-
-  -- (name, description, photos_required, is_photo_step)
   rec record;
 BEGIN
   SELECT id INTO v_wt FROM public.work_types
@@ -75,47 +75,42 @@ BEGIN
     RAISE EXCEPTION 'Exhaust Fan Replacement work plan already exists';
   END IF;
 
-  -- Work plan template ---------------------------------------------------------
   INSERT INTO public.work_plan_templates
     (wpt_record_number, wpt_name, wpt_description, wpt_is_active, wpt_owner, wpt_created_by)
   VALUES ('', 'Exhaust Fan Replacement - In-Unit - Standard',
-    'In-unit exhaust fan replacement (one work order per unit), 28 steps across 8 phases: Documentation, Dust Containment, Electrical Safety, Removal, Electrical Installation, Ventilation, Fan Installation, and Finish Work. Photo steps are hard-gated on a photo; "Validation" steps are completable checkpoints the Lead Technician marks done and the Project Site Lead verifies. Configure Airflow captures the fan location (Bathroom = 80 CFM target, Kitchen = 100 CFM target) and configured airflow; Functional Test captures whether the fan operates. Every step is owned by the Lead Technician and verified by the Project Site Lead.',
+    'In-unit exhaust fan replacement (one work order per unit), 27 steps across 8 phases: Documentation, Dust Containment, Electrical Safety, Removal, Electrical Installation, Ventilation, Fan Installation, and Finish Work. Because the work order is issued per unit, the plan is scoped and documented by the unit number (no building-number photo). Photo steps are hard-gated on a photo; "Validation" steps are completable checkpoints the Lead Technician marks done and the Project Site Lead verifies. Configure Airflow captures the fan location (Bathroom = 80 CFM target, Kitchen = 100 CFM target) and configured airflow; Functional Test captures whether the fan operates. Every step is owned by the Lead Technician and verified by the Project Site Lead.',
     true, v_nick, v_nick)
   RETURNING id INTO v_wpt;
 
-  -- Step templates (purpose-built, never shared) -------------------------------
-  -- Photo step => Photo evidence + 1 required photo. Checkpoint => no evidence
-  -- type, 0 photos (the technician completes it as the confirmation).
   FOR rec IN
     SELECT * FROM (VALUES
-      ( 1, 'Photo Building Number',                       'Photograph the building number on arrival. First photo in the chain of custody.',                                          1, true ),
-      ( 2, 'Photo Unit Number',                           'Photograph the unit number or door on arrival, identifying the exact unit this work order covers. One work order per unit.', 1, true ),
-      ( 3, 'Photo Work Area Before Setup',                'Photograph the bathroom or kitchen work area and the existing fan location before any setup or containment goes in.',        1, true ),
-      ( 4, 'Install Drop Cloth and Taping',               'Lay drop cloths and tape off the work area to protect the unit. Mark complete when done.',                                    0, false ),
-      ( 5, 'Install Dust Containment',                    'Install dust containment around the work area. Photograph the completed containment.',                                        1, true ),
-      ( 6, 'Verify Power Off',                            'Confirm power to the existing fan is off at the breaker before touching any wiring. Mark complete to confirm.',              0, false ),
-      ( 7, 'Photo Existing Fan',                          'Photograph the existing exhaust fan in place before removal.',                                                               1, true ),
-      ( 8, 'Remove Existing Fan',                         'Remove the existing fan. Photograph the opening with the fan removed.',                                                       1, true ),
-      ( 9, 'Modify Opening if Needed',                    'Modify the opening if needed to fit the new housing, and photograph it. If no modification was required, mark this step Not Applicable with a reason.', 1, true ),
-      (10, 'Connect Junction Box to Existing Conduit',    'Connect the junction box to the existing conduit. Mark complete when done.',                                                  0, false ),
-      (11, 'Test Fit Fan Housing',                        'Test-fit the new fan housing in the opening. Mark complete when it fits.',                                                    0, false ),
-      (12, 'Complete Wiring Connections',                 'Make all wiring connections to the fan. Mark complete when done.',                                                            0, false ),
-      (13, 'Photo Completed Wiring',                      'Photograph the completed wiring connections.',                                                                               1, true ),
-      (14, 'Mount Junction Box',                          'Mount and secure the junction box. Mark complete when done.',                                                                0, false ),
-      (15, 'Photo Mounted Junction Box',                  'Photograph the mounted junction box.',                                                                                       1, true ),
-      (16, 'Connect Ductwork',                            'Connect the ductwork so the fan exhausts to the exterior. Mark complete when done.',                                          0, false ),
-      (17, 'Photo Duct Connection',                       'Photograph the duct connection.',                                                                                            1, true ),
-      (18, 'Label Fan Housing',                           'Write the building number and unit number on the fan housing. A photo of the label is optional.',                            0, false ),
-      (19, 'Configure Airflow',                           'Select whether the fan serves a bathroom (target 80 CFM) or a kitchen (target 100 CFM) and record the configured airflow in CFM.', 0, false ),
-      (20, 'Install Fan Motor',                           'Install the fan motor into the housing. Mark complete when done.',                                                            0, false ),
-      (21, 'Functional Test',                             'Run the fan and confirm it operates and exhausts correctly. Record the result.',                                             0, false ),
-      (22, 'Photo Installed Fan',                         'Photograph the fully installed exhaust fan.',                                                                                1, true ),
-      (23, 'Install Beauty Cover',                        'Install the beauty cover / grille. Mark complete when done.',                                                                 0, false ),
-      (24, 'Photo Beauty Cover',                          'Photograph the installed beauty cover.',                                                                                     1, true ),
-      (25, 'Remove Containment',                          'Remove all dust containment from the work area. Mark complete when done.',                                                    0, false ),
-      (26, 'Clean Work Area',                             'Clean the work area. Photograph the cleaned area.',                                                                          1, true ),
-      (27, 'Photo Entry/Exit Area',                       'Photograph the entry/exit area on the way out to document the unit was left clean.',                                          1, true ),
-      (28, 'Photo Unit Number On Exit',                   'Photograph the unit number on exit, closing the chain of custody. Final photo of the work order.',                           1, true )
+      ( 1, 'Photo Unit Number',                           'Photograph the unit number or door on arrival, identifying the exact unit this work order covers. First photo in the chain of custody. One work order per unit.', 1, true ),
+      ( 2, 'Photo Work Area Before Setup',                'Photograph the bathroom or kitchen work area and the existing fan location before any setup or containment goes in.',        1, true ),
+      ( 3, 'Install Drop Cloth and Taping',               'Lay drop cloths and tape off the work area to protect the unit. Mark complete when done.',                                    0, false ),
+      ( 4, 'Install Dust Containment',                    'Install dust containment around the work area. Photograph the completed containment.',                                        1, true ),
+      ( 5, 'Verify Power Off',                            'Confirm power to the existing fan is off at the breaker before touching any wiring. Mark complete to confirm.',              0, false ),
+      ( 6, 'Photo Existing Fan',                          'Photograph the existing exhaust fan in place before removal.',                                                               1, true ),
+      ( 7, 'Remove Existing Fan',                         'Remove the existing fan. Photograph the opening with the fan removed.',                                                       1, true ),
+      ( 8, 'Modify Opening if Needed',                    'Modify the opening if needed to fit the new housing, and photograph it. If no modification was required, mark this step Not Applicable with a reason.', 1, true ),
+      ( 9, 'Connect Junction Box to Existing Conduit',    'Connect the junction box to the existing conduit. Mark complete when done.',                                                  0, false ),
+      (10, 'Test Fit Fan Housing',                        'Test-fit the new fan housing in the opening. Mark complete when it fits.',                                                    0, false ),
+      (11, 'Complete Wiring Connections',                 'Make all wiring connections to the fan. Mark complete when done.',                                                            0, false ),
+      (12, 'Photo Completed Wiring',                      'Photograph the completed wiring connections.',                                                                               1, true ),
+      (13, 'Mount Junction Box',                          'Mount and secure the junction box. Mark complete when done.',                                                                0, false ),
+      (14, 'Photo Mounted Junction Box',                  'Photograph the mounted junction box.',                                                                                       1, true ),
+      (15, 'Connect Ductwork',                            'Connect the ductwork so the fan exhausts to the exterior. Mark complete when done.',                                          0, false ),
+      (16, 'Photo Duct Connection',                       'Photograph the duct connection.',                                                                                            1, true ),
+      (17, 'Label Fan Housing',                           'Write the unit number on the fan housing. A photo of the label is optional.',                                                0, false ),
+      (18, 'Configure Airflow',                           'Select whether the fan serves a bathroom (target 80 CFM) or a kitchen (target 100 CFM) and record the configured airflow in CFM.', 0, false ),
+      (19, 'Install Fan Motor',                           'Install the fan motor into the housing. Mark complete when done.',                                                            0, false ),
+      (20, 'Functional Test',                             'Run the fan and confirm it operates and exhausts correctly. Record the result.',                                             0, false ),
+      (21, 'Photo Installed Fan',                         'Photograph the fully installed exhaust fan.',                                                                                1, true ),
+      (22, 'Install Beauty Cover',                        'Install the beauty cover / grille. Mark complete when done.',                                                                 0, false ),
+      (23, 'Photo Beauty Cover',                          'Photograph the installed beauty cover.',                                                                                     1, true ),
+      (24, 'Remove Containment',                          'Remove all dust containment from the work area. Mark complete when done.',                                                    0, false ),
+      (25, 'Clean Work Area',                             'Clean the work area. Photograph the cleaned area.',                                                                          1, true ),
+      (26, 'Photo Entry/Exit Area',                       'Photograph the entry/exit area on the way out to document the unit was left clean.',                                          1, true ),
+      (27, 'Photo Unit Number On Exit',                   'Photograph the unit number on exit, closing the chain of custody. Final photo of the work order.',                           1, true )
     ) AS t(pos, nm, descr, photos, is_photo)
     ORDER BY 1
   LOOP
@@ -139,18 +134,18 @@ BEGIN
     (wstf_record_number, work_step_template_id, wstf_field_label, wstf_field_name,
      wstf_field_type, wstf_is_required, wstf_unit, wstf_sort_order, wstf_owner, wstf_created_by)
   VALUES
-    -- Step 19 Configure Airflow
-    ('', s[19], 'Fan Location Type',       'fan_location_type',       'select', true, NULL,  1, v_nick, v_nick),
-    ('', s[19], 'Configured Airflow',      'configured_airflow_cfm',  'number', true, 'CFM', 2, v_nick, v_nick),
-    -- Step 21 Functional Test
-    ('', s[21], 'Fan Operating Correctly', 'fan_operating_correctly', 'select', true, NULL,  1, v_nick, v_nick);
+    -- Step 18 Configure Airflow
+    ('', s[18], 'Fan Location Type',       'fan_location_type',       'select', true, NULL,  1, v_nick, v_nick),
+    ('', s[18], 'Configured Airflow',      'configured_airflow_cfm',  'number', true, 'CFM', 2, v_nick, v_nick),
+    -- Step 20 Functional Test
+    ('', s[20], 'Fan Operating Correctly', 'fan_operating_correctly', 'select', true, NULL,  1, v_nick, v_nick);
 
   -- Wire the plan onto the existing work type ----------------------------------
   UPDATE public.work_types
      SET work_type_default_work_plan_template_id = v_wpt,
          work_type_duration_minutes = 90,
          work_type_estimated_duration = 1.5,
-         work_type_description = 'In-unit exhaust fan replacement — remove the existing fan and install a new one following the 28-step field procedure (documentation, dust containment, electrical safety, removal, electrical install, ventilation, fan install with airflow configuration and functional test, and finish work). One work order per unit.',
+         work_type_description = 'In-unit exhaust fan replacement — remove the existing fan and install a new one following the 27-step field procedure (documentation, dust containment, electrical safety, removal, electrical install, ventilation, fan install with airflow configuration and functional test, and finish work). One work order per unit.',
          work_type_updated_by = v_nick,
          work_type_updated_at = now()
    WHERE id = v_wt;
@@ -162,12 +157,12 @@ INSERT INTO public.help_articles
    ha_category, ha_audience, ha_is_published, ha_created_by, ha_updated_by)
 VALUES (
   '', 'exhaust-fan-replacement-work-plan', 'Exhaust Fan Replacement Work Plan',
-  'The in-unit Exhaust Fan Replacement work plan: 28 steps across 8 phases, hard-gated photos, completable checkpoints, and the Configure Airflow / Functional Test capture fields.',
+  'The in-unit Exhaust Fan Replacement work plan: 27 steps across 8 phases, hard-gated photos, completable checkpoints, and the Configure Airflow / Functional Test capture fields.',
 $md$# Exhaust Fan Replacement Work Plan
 
-The **Exhaust Fan Replacement** work type (WT-00024) now carries a standard work plan, **Exhaust Fan Replacement - In-Unit - Standard**. Every exhaust fan replacement work order created from this work type instantiates the same 28 steps in order.
+The **Exhaust Fan Replacement** work type (WT-00024) now carries a standard work plan, **Exhaust Fan Replacement - In-Unit - Standard**. Every exhaust fan replacement work order created from this work type instantiates the same 27 steps in order.
 
-**One work order per unit.** Exhaust fan work orders never span units — each unit gets its own work order.
+**One work order per unit.** Exhaust fan work orders never span units — each unit gets its own work order, so the plan is scoped and documented by the unit number (no building-number photo).
 
 ## Roles
 
@@ -179,58 +174,57 @@ The **Exhaust Fan Replacement** work type (WT-00024) now carries a standard work
 - **Photo steps** are hard-gated: the step cannot be marked **Completed** until the required photo is captured. LEAP Pad blocks it and says what is missing.
 - **Checkpoint steps** (the "Validation" items — drop cloth, verify power off, test fit, wiring, mount, etc.) have no photo. The technician marks them complete as the confirmation, and the Project Site Lead verifies.
 - **Capture-field steps** require data entry before they can complete.
-- Any step that genuinely does not apply can be marked **Not Applicable** with a reason (e.g. step 9 when no opening modification was needed).
+- Any step that genuinely does not apply can be marked **Not Applicable** with a reason (e.g. step 8 when no opening modification was needed).
 
-## The 28 steps
+## The 27 steps
 
 **Phase 1 — Documentation**
-1. Photo Building Number — *photo*
-2. Photo Unit Number — *photo*
+1. Photo Unit Number — *photo*
 
 **Phase 2 — Dust Containment**
-3. Photo Work Area Before Setup — *photo*
-4. Install Drop Cloth and Taping — *checkpoint*
-5. Install Dust Containment — *photo*
+2. Photo Work Area Before Setup — *photo*
+3. Install Drop Cloth and Taping — *checkpoint*
+4. Install Dust Containment — *photo*
 
 **Phase 3 — Electrical Safety**
-6. Verify Power Off — *checkpoint*
-7. Photo Existing Fan — *photo*
+5. Verify Power Off — *checkpoint*
+6. Photo Existing Fan — *photo*
 
 **Phase 4 — Removal**
-8. Remove Existing Fan — *photo*
-9. Modify Opening if Needed — *photo (N/A if none)*
+7. Remove Existing Fan — *photo*
+8. Modify Opening if Needed — *photo (N/A if none)*
 
 **Phase 5 — Electrical Installation**
-10. Connect Junction Box to Existing Conduit — *checkpoint*
-11. Test Fit Fan Housing — *checkpoint*
-12. Complete Wiring Connections — *checkpoint*
-13. Photo Completed Wiring — *photo*
-14. Mount Junction Box — *checkpoint*
-15. Photo Mounted Junction Box — *photo*
+9. Connect Junction Box to Existing Conduit — *checkpoint*
+10. Test Fit Fan Housing — *checkpoint*
+11. Complete Wiring Connections — *checkpoint*
+12. Photo Completed Wiring — *photo*
+13. Mount Junction Box — *checkpoint*
+14. Photo Mounted Junction Box — *photo*
 
 **Phase 6 — Ventilation**
-16. Connect Ductwork — *checkpoint*
-17. Photo Duct Connection — *photo*
+15. Connect Ductwork — *checkpoint*
+16. Photo Duct Connection — *photo*
 
 **Phase 7 — Fan Installation**
-18. Label Fan Housing (write building + unit number) — *checkpoint, photo optional*
-19. Configure Airflow — *fields: Fan Location Type + Configured Airflow (CFM)*
-20. Install Fan Motor — *checkpoint*
-21. Functional Test — *field: Fan Operating Correctly*
-22. Photo Installed Fan — *photo*
+17. Label Fan Housing (write unit number) — *checkpoint, photo optional*
+18. Configure Airflow — *fields: Fan Location Type + Configured Airflow (CFM)*
+19. Install Fan Motor — *checkpoint*
+20. Functional Test — *field: Fan Operating Correctly*
+21. Photo Installed Fan — *photo*
 
 **Phase 8 — Finish Work**
-23. Install Beauty Cover — *checkpoint*
-24. Photo Beauty Cover — *photo*
-25. Remove Containment — *checkpoint*
-26. Clean Work Area — *photo*
-27. Photo Entry/Exit Area — *photo*
-28. Photo Unit Number On Exit — *photo*
+22. Install Beauty Cover — *checkpoint*
+23. Photo Beauty Cover — *photo*
+24. Remove Containment — *checkpoint*
+25. Clean Work Area — *photo*
+26. Photo Entry/Exit Area — *photo*
+27. Photo Unit Number On Exit — *photo*
 
 ## Capture fields
 
-- **Step 19 — Fan Location Type** (Bathroom / Kitchen) and **Configured Airflow (CFM)**: bathrooms target **80 CFM**, kitchens target **100 CFM**.
-- **Step 21 — Fan Operating Correctly** (Yes / No): the functional-test result.
+- **Step 18 — Fan Location Type** (Bathroom / Kitchen) and **Configured Airflow (CFM)**: bathrooms target **80 CFM**, kitchens target **100 CFM**.
+- **Step 20 — Fan Operating Correctly** (Yes / No): the functional-test result.
 
 ## Configuration
 
