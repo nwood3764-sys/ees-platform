@@ -1,11 +1,11 @@
 -- =============================================================================
 -- Exhaust Fan Replacement — In-Unit work plan (multi-family energy savings
 -- retrofit). Built to the exhaust-fan installation procedure + field checklist
--- + photo procedure. Pure config on the existing data-driven work-plan engine
--- (work_types → work_plan_templates → work_plan_template_entries →
--- work_step_templates → work_step_template_fields); no schema change and no
--- frontend change — LEAP Pad already renders Photo / Measurement / number /
--- select fields generically and hard-gates step completion through
+-- + photo procedure, to the reviewed 28-step field list. Pure config on the
+-- existing data-driven work-plan engine (work_types → work_plan_templates →
+-- work_plan_template_entries → work_step_templates → work_step_template_fields);
+-- no schema change and no frontend change — LEAP Pad already renders Photo /
+-- number / select fields generically and hard-gates step completion through
 -- _work_step_evidence_gap.
 --
 -- Home work type: the existing WT-00024 "Exhaust Fan Replacement" (record type
@@ -14,17 +14,16 @@
 -- Insulation Removal plan (WPT-00004) was wired onto the pre-existing WT-00041.
 -- A duplicate work type is deliberately NOT created.
 --
--- One work order per unit (work orders never span units). The photo chain of
--- custody is bracketed by the UNIT NUMBER — photographed on entry (first step)
--- and again on exit (last step) — with the evidence-bearing installation steps
--- and the gated capture fields (fan location, configured airflow CFM, power-off
--- acknowledgement, functional-test result) in between. Pure "technician
--- confirmation" micro-actions from the written procedure (drop cloth, test-fit,
--- breaker off, etc.) are folded into the description of the artifact-bearing
--- step they support, so every step here produces a real evidence artifact —
--- the same discipline used by WPT-00004 and the Material Delivery plan.
+-- One work order per unit (work orders never span units). 28 steps across 8
+-- phases: Documentation, Dust Containment, Electrical Safety, Removal,
+-- Electrical Installation, Ventilation, Fan Installation, Finish Work. Photo
+-- steps carry a hard photo gate. "Validation" steps (drop cloth, verify power
+-- off, test fit, wiring, etc.) are completable checkpoints — the Lead
+-- Technician marks them done and the Project Site Lead verifies, no photo
+-- required. Two steps capture hard-gated data fields: Configure Airflow (Fan
+-- Location Type + Configured Airflow CFM) and Functional Test (Fan Operating).
 --
--- New work plan template (auto-numbered) + 15 purpose-built step templates
+-- New work plan template (auto-numbered) + 28 purpose-built step templates
 -- (never shared with another plan). Every step owned by Lead Technician,
 -- verified by Project Site Lead, plus a help article. All record numbers are
 -- assigned by their auto-number triggers at apply time.
@@ -39,10 +38,8 @@ SELECT v.picklist_object, v.picklist_field, v.picklist_value, v.picklist_label, 
 FROM (VALUES
   ('work_step_fields', 'fan_location_type',       'Bathroom', 'Bathroom', 10),
   ('work_step_fields', 'fan_location_type',       'Kitchen',  'Kitchen',  20),
-  ('work_step_fields', 'power_confirmed_off',     'Yes',      'Yes — power confirmed off at the breaker', 10),
-  ('work_step_fields', 'power_confirmed_off',     'No',       'No — power is still on',                   20),
-  ('work_step_fields', 'fan_operating_correctly', 'Yes',      'Yes — fan runs and exhausts correctly',    10),
-  ('work_step_fields', 'fan_operating_correctly', 'No',       'No — fan does not operate correctly',       20)
+  ('work_step_fields', 'fan_operating_correctly', 'Yes',      'Yes — fan runs and exhausts correctly', 10),
+  ('work_step_fields', 'fan_operating_correctly', 'No',       'No — fan does not operate correctly',    20)
 ) AS v(picklist_object, picklist_field, picklist_value, picklist_label, so)
 WHERE NOT EXISTS (
   SELECT 1 FROM public.picklist_values pv
@@ -60,8 +57,11 @@ DECLARE
   v_photo uuid := '16130b3e-e416-4d92-bf23-ec0f8aeee3e1'; -- Photo evidence type
   v_wpt   uuid;
   v_wt    uuid;
-  s01 uuid; s02 uuid; s03 uuid; s04 uuid; s05 uuid; s06 uuid; s07 uuid; s08 uuid;
-  s09 uuid; s10 uuid; s11 uuid; s12 uuid; s13 uuid; s14 uuid; s15 uuid;
+  s uuid[] := array_fill(NULL::uuid, ARRAY[28]);
+  v_id uuid;
+
+  -- (name, description, photos_required, is_photo_step)
+  rec record;
 BEGIN
   SELECT id INTO v_wt FROM public.work_types
    WHERE work_type_record_number = 'WT-00024' AND work_type_is_deleted IS NOT TRUE;
@@ -79,200 +79,78 @@ BEGIN
   INSERT INTO public.work_plan_templates
     (wpt_record_number, wpt_name, wpt_description, wpt_is_active, wpt_owner, wpt_created_by)
   VALUES ('', 'Exhaust Fan Replacement - In-Unit - Standard',
-    'In-unit exhaust fan replacement (one work order per unit). Photo chain of custody bracketed by the unit-number photo on entry and exit, with evidence-bearing steps through dust containment, existing-fan removal, wiring, junction box, ductwork, fan install and functional test, beauty cover, and work-area cleanup. Capture fields record the fan location (Bathroom = 80 CFM target, Kitchen = 100 CFM target), the configured airflow, the breaker power-off acknowledgement, and the functional-test result. Every step is owned by the Lead Technician and verified by the Project Site Lead.',
+    'In-unit exhaust fan replacement (one work order per unit), 28 steps across 8 phases: Documentation, Dust Containment, Electrical Safety, Removal, Electrical Installation, Ventilation, Fan Installation, and Finish Work. Photo steps are hard-gated on a photo; "Validation" steps are completable checkpoints the Lead Technician marks done and the Project Site Lead verifies. Configure Airflow captures the fan location (Bathroom = 80 CFM target, Kitchen = 100 CFM target) and configured airflow; Functional Test captures whether the fan operates. Every step is owned by the Lead Technician and verified by the Project Site Lead.',
     true, v_nick, v_nick)
   RETURNING id INTO v_wpt;
 
   -- Step templates (purpose-built, never shared) -------------------------------
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Unit Number Photo - Entry',
-     'Photograph the unit number or door on arrival, identifying the exact unit this work order covers. First photo in the chain of custody. One work order per unit.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s01;
+  -- Photo step => Photo evidence + 1 required photo. Checkpoint => no evidence
+  -- type, 0 photos (the technician completes it as the confirmation).
+  FOR rec IN
+    SELECT * FROM (VALUES
+      ( 1, 'Photo Building Number',                       'Photograph the building number on arrival. First photo in the chain of custody.',                                          1, true ),
+      ( 2, 'Photo Unit Number',                           'Photograph the unit number or door on arrival, identifying the exact unit this work order covers. One work order per unit.', 1, true ),
+      ( 3, 'Photo Work Area Before Setup',                'Photograph the bathroom or kitchen work area and the existing fan location before any setup or containment goes in.',        1, true ),
+      ( 4, 'Install Drop Cloth and Taping',               'Lay drop cloths and tape off the work area to protect the unit. Mark complete when done.',                                    0, false ),
+      ( 5, 'Install Dust Containment',                    'Install dust containment around the work area. Photograph the completed containment.',                                        1, true ),
+      ( 6, 'Verify Power Off',                            'Confirm power to the existing fan is off at the breaker before touching any wiring. Mark complete to confirm.',              0, false ),
+      ( 7, 'Photo Existing Fan',                          'Photograph the existing exhaust fan in place before removal.',                                                               1, true ),
+      ( 8, 'Remove Existing Fan',                         'Remove the existing fan. Photograph the opening with the fan removed.',                                                       1, true ),
+      ( 9, 'Modify Opening if Needed',                    'Modify the opening if needed to fit the new housing, and photograph it. If no modification was required, mark this step Not Applicable with a reason.', 1, true ),
+      (10, 'Connect Junction Box to Existing Conduit',    'Connect the junction box to the existing conduit. Mark complete when done.',                                                  0, false ),
+      (11, 'Test Fit Fan Housing',                        'Test-fit the new fan housing in the opening. Mark complete when it fits.',                                                    0, false ),
+      (12, 'Complete Wiring Connections',                 'Make all wiring connections to the fan. Mark complete when done.',                                                            0, false ),
+      (13, 'Photo Completed Wiring',                      'Photograph the completed wiring connections.',                                                                               1, true ),
+      (14, 'Mount Junction Box',                          'Mount and secure the junction box. Mark complete when done.',                                                                0, false ),
+      (15, 'Photo Mounted Junction Box',                  'Photograph the mounted junction box.',                                                                                       1, true ),
+      (16, 'Connect Ductwork',                            'Connect the ductwork so the fan exhausts to the exterior. Mark complete when done.',                                          0, false ),
+      (17, 'Photo Duct Connection',                       'Photograph the duct connection.',                                                                                            1, true ),
+      (18, 'Label Fan Housing',                           'Write the building number and unit number on the fan housing. A photo of the label is optional.',                            0, false ),
+      (19, 'Configure Airflow',                           'Select whether the fan serves a bathroom (target 80 CFM) or a kitchen (target 100 CFM) and record the configured airflow in CFM.', 0, false ),
+      (20, 'Install Fan Motor',                           'Install the fan motor into the housing. Mark complete when done.',                                                            0, false ),
+      (21, 'Functional Test',                             'Run the fan and confirm it operates and exhausts correctly. Record the result.',                                             0, false ),
+      (22, 'Photo Installed Fan',                         'Photograph the fully installed exhaust fan.',                                                                                1, true ),
+      (23, 'Install Beauty Cover',                        'Install the beauty cover / grille. Mark complete when done.',                                                                 0, false ),
+      (24, 'Photo Beauty Cover',                          'Photograph the installed beauty cover.',                                                                                     1, true ),
+      (25, 'Remove Containment',                          'Remove all dust containment from the work area. Mark complete when done.',                                                    0, false ),
+      (26, 'Clean Work Area',                             'Clean the work area. Photograph the cleaned area.',                                                                          1, true ),
+      (27, 'Photo Entry/Exit Area',                       'Photograph the entry/exit area on the way out to document the unit was left clean.',                                          1, true ),
+      (28, 'Photo Unit Number On Exit',                   'Photograph the unit number on exit, closing the chain of custody. Final photo of the work order.',                           1, true )
+    ) AS t(pos, nm, descr, photos, is_photo)
+    ORDER BY 1
+  LOOP
+    INSERT INTO public.work_step_templates
+      (wst_record_number, wst_name, wst_description, wst_is_active,
+       wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
+       wst_photos_required_count, wst_owner, wst_created_by)
+    VALUES ('', rec.nm, rec.descr, true, v_lead, v_psl,
+            CASE WHEN rec.is_photo THEN v_photo ELSE NULL END,
+            rec.photos, v_nick, v_nick)
+    RETURNING id INTO v_id;
+    s[rec.pos] := v_id;
 
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Work Area Photo - Before Setup',
-     'Photograph the bathroom or kitchen work area and the existing fan location before any setup begins.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s02;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Dust Containment Installed Photo',
-     'Lay drop cloths, tape off the area, and install dust containment to protect the unit. Photograph the completed containment.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s03;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Existing Exhaust Fan Photo - Power Confirmed Off',
-     'Confirm power is off at the breaker, then photograph the existing exhaust fan in place. Record the power-off acknowledgement before proceeding.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s04;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Existing Fan Removed Photo - Opening Exposed',
-     'Remove the existing fan and, if needed, modify the opening to fit the new housing. Photograph the exposed opening.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s05;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Wiring Connections Completed Photo',
-     'Connect the junction box to the existing conduit, test-fit the fan housing, and complete all wiring connections. Photograph the completed wiring.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s06;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Junction Box Mounted Photo',
-     'Mount the junction box securely. Photograph it mounted in place.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s07;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Ductwork Connected Photo',
-     'Connect the ductwork to the fan so it exhausts to the exterior. Photograph the duct connection.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s08;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Fan Housing Labeled Photo - Unit Number',
-     'Write the unit number on the fan housing. Photograph the label.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s09;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Airflow Configuration and Fan Location',
-     'Select whether the fan serves a bathroom (target 80 CFM) or a kitchen (target 100 CFM) and record the configured airflow in CFM.',
-     true, v_lead, v_psl, NULL, 0, v_nick, v_nick)
-  RETURNING id INTO s10;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Fan Functional Test Photo - Fan Running',
-     'Install the fan motor, run the functional test, and photograph the fan operating. Record whether the fan runs and exhausts correctly.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s11;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Installed Exhaust Fan Photo',
-     'Photograph the fully installed exhaust fan before the beauty cover goes on.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s12;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Beauty Cover Installed Photo',
-     'Install the beauty cover / grille. Photograph it installed.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s13;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Work Area Cleaned Photo',
-     'Remove all dust containment and clean the work area. Photograph the cleaned work area.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s14;
-
-  INSERT INTO public.work_step_templates
-    (wst_record_number, wst_name, wst_description, wst_is_active,
-     wst_assigned_owner_role_id, wst_verifier_role_id, wst_required_evidence_type_id,
-     wst_photos_required_count, wst_owner, wst_created_by)
-  VALUES
-    ('', 'Unit Number Photo - Exit',
-     'Photograph the unit number or door on exit, closing the chain of custody for the unit. Final photo of the work order.',
-     true, v_lead, v_psl, v_photo, 1, v_nick, v_nick)
-  RETURNING id INTO s15;
-
-  -- Plan entries (execution order) ---------------------------------------------
-  INSERT INTO public.work_plan_template_entries
-    (wpte_record_number, wpte_name, wpte_created_by, work_plan_template_id, work_step_template_id, wpte_execution_order)
-  VALUES
-    ('', 'Unit Number Photo - Entry',                       v_nick, v_wpt, s01, 1),
-    ('', 'Work Area Photo - Before Setup',                  v_nick, v_wpt, s02, 2),
-    ('', 'Dust Containment Installed Photo',                v_nick, v_wpt, s03, 3),
-    ('', 'Existing Exhaust Fan Photo - Power Confirmed Off', v_nick, v_wpt, s04, 4),
-    ('', 'Existing Fan Removed Photo - Opening Exposed',    v_nick, v_wpt, s05, 5),
-    ('', 'Wiring Connections Completed Photo',              v_nick, v_wpt, s06, 6),
-    ('', 'Junction Box Mounted Photo',                      v_nick, v_wpt, s07, 7),
-    ('', 'Ductwork Connected Photo',                        v_nick, v_wpt, s08, 8),
-    ('', 'Fan Housing Labeled Photo - Unit Number',         v_nick, v_wpt, s09, 9),
-    ('', 'Airflow Configuration and Fan Location',          v_nick, v_wpt, s10, 10),
-    ('', 'Fan Functional Test Photo - Fan Running',         v_nick, v_wpt, s11, 11),
-    ('', 'Installed Exhaust Fan Photo',                     v_nick, v_wpt, s12, 12),
-    ('', 'Beauty Cover Installed Photo',                    v_nick, v_wpt, s13, 13),
-    ('', 'Work Area Cleaned Photo',                         v_nick, v_wpt, s14, 14),
-    ('', 'Unit Number Photo - Exit',                       v_nick, v_wpt, s15, 15);
+    INSERT INTO public.work_plan_template_entries
+      (wpte_record_number, wpte_name, wpte_created_by, work_plan_template_id, work_step_template_id, wpte_execution_order)
+    VALUES ('', rec.nm, v_nick, v_wpt, v_id, rec.pos);
+  END LOOP;
 
   -- Capture fields (hard-gated: required fields must have a value to complete) --
   INSERT INTO public.work_step_template_fields
     (wstf_record_number, work_step_template_id, wstf_field_label, wstf_field_name,
      wstf_field_type, wstf_is_required, wstf_unit, wstf_sort_order, wstf_owner, wstf_created_by)
   VALUES
-    -- Existing Exhaust Fan Photo - Power Confirmed Off
-    ('', s04, 'Power Confirmed Off at Breaker', 'power_confirmed_off',     'select', true, NULL,  1, v_nick, v_nick),
-    -- Airflow Configuration and Fan Location
-    ('', s10, 'Fan Location Type',              'fan_location_type',       'select', true, NULL,  1, v_nick, v_nick),
-    ('', s10, 'Configured Airflow',             'configured_airflow_cfm',  'number', true, 'CFM', 2, v_nick, v_nick),
-    -- Fan Functional Test Photo - Fan Running
-    ('', s11, 'Fan Operating Correctly',        'fan_operating_correctly', 'select', true, NULL,  1, v_nick, v_nick);
+    -- Step 19 Configure Airflow
+    ('', s[19], 'Fan Location Type',       'fan_location_type',       'select', true, NULL,  1, v_nick, v_nick),
+    ('', s[19], 'Configured Airflow',      'configured_airflow_cfm',  'number', true, 'CFM', 2, v_nick, v_nick),
+    -- Step 21 Functional Test
+    ('', s[21], 'Fan Operating Correctly', 'fan_operating_correctly', 'select', true, NULL,  1, v_nick, v_nick);
 
   -- Wire the plan onto the existing work type ----------------------------------
   UPDATE public.work_types
      SET work_type_default_work_plan_template_id = v_wpt,
          work_type_duration_minutes = 90,
          work_type_estimated_duration = 1.5,
-         work_type_description = 'In-unit exhaust fan replacement — remove the existing fan and install a new one with a full photo chain of custody bracketed by the unit number, airflow configuration (Bathroom 80 CFM / Kitchen 100 CFM), functional test, and work-area cleanup. One work order per unit.',
+         work_type_description = 'In-unit exhaust fan replacement — remove the existing fan and install a new one following the 28-step field procedure (documentation, dust containment, electrical safety, removal, electrical install, ventilation, fan install with airflow configuration and functional test, and finish work). One work order per unit.',
          work_type_updated_by = v_nick,
          work_type_updated_at = now()
    WHERE id = v_wt;
@@ -284,51 +162,75 @@ INSERT INTO public.help_articles
    ha_category, ha_audience, ha_is_published, ha_created_by, ha_updated_by)
 VALUES (
   '', 'exhaust-fan-replacement-work-plan', 'Exhaust Fan Replacement Work Plan',
-  'The in-unit Exhaust Fan Replacement work plan: 15 evidence-bearing steps, the unit-number photo chain of custody, and the required capture fields (fan location, configured CFM, functional test).',
+  'The in-unit Exhaust Fan Replacement work plan: 28 steps across 8 phases, hard-gated photos, completable checkpoints, and the Configure Airflow / Functional Test capture fields.',
 $md$# Exhaust Fan Replacement Work Plan
 
-The **Exhaust Fan Replacement** work type (WT-00024) now carries a standard work plan, **Exhaust Fan Replacement - In-Unit - Standard**. Every exhaust fan replacement work order created from this work type instantiates the same 15 steps in order.
+The **Exhaust Fan Replacement** work type (WT-00024) now carries a standard work plan, **Exhaust Fan Replacement - In-Unit - Standard**. Every exhaust fan replacement work order created from this work type instantiates the same 28 steps in order.
 
-**One work order per unit.** Exhaust fan work orders never span units — each unit gets its own work order, bracketed by the unit-number photo on entry and exit.
+**One work order per unit.** Exhaust fan work orders never span units — each unit gets its own work order.
 
 ## Roles
 
 - **Owner of every step:** Lead Technician.
 - **Verifier of every step:** Project Site Lead.
 
-## The steps, in order
+## How the steps work
 
-| # | Step | Evidence |
-|---|------|----------|
-| 1 | Unit Number Photo - Entry | 1 photo |
-| 2 | Work Area Photo - Before Setup | 1 photo |
-| 3 | Dust Containment Installed Photo | 1 photo |
-| 4 | Existing Exhaust Fan Photo - Power Confirmed Off | 1 photo + power-off acknowledgement |
-| 5 | Existing Fan Removed Photo - Opening Exposed | 1 photo |
-| 6 | Wiring Connections Completed Photo | 1 photo |
-| 7 | Junction Box Mounted Photo | 1 photo |
-| 8 | Ductwork Connected Photo | 1 photo |
-| 9 | Fan Housing Labeled Photo - Unit Number | 1 photo |
-| 10 | Airflow Configuration and Fan Location | Fan Location Type + Configured Airflow (CFM) |
-| 11 | Fan Functional Test Photo - Fan Running | 1 photo + functional-test result |
-| 12 | Installed Exhaust Fan Photo | 1 photo |
-| 13 | Beauty Cover Installed Photo | 1 photo |
-| 14 | Work Area Cleaned Photo | 1 photo |
-| 15 | Unit Number Photo - Exit | 1 photo |
+- **Photo steps** are hard-gated: the step cannot be marked **Completed** until the required photo is captured. LEAP Pad blocks it and says what is missing.
+- **Checkpoint steps** (the "Validation" items — drop cloth, verify power off, test fit, wiring, mount, etc.) have no photo. The technician marks them complete as the confirmation, and the Project Site Lead verifies.
+- **Capture-field steps** require data entry before they can complete.
+- Any step that genuinely does not apply can be marked **Not Applicable** with a reason (e.g. step 9 when no opening modification was needed).
 
-## The photo chain of custody
+## The 28 steps
 
-The unit-number photo brackets the job — captured on arrival (step 1) and again on exit (step 15) — so every work order proves which unit the crew was in, start to finish. In between, each installation stage records its own evidence: existing fan, exposed opening, wiring, junction box, ductwork, installed fan, beauty cover, and the cleaned work area.
+**Phase 1 — Documentation**
+1. Photo Building Number — *photo*
+2. Photo Unit Number — *photo*
 
-## Capture fields (hard-gated)
+**Phase 2 — Dust Containment**
+3. Photo Work Area Before Setup — *photo*
+4. Install Drop Cloth and Taping — *checkpoint*
+5. Install Dust Containment — *photo*
 
-Three steps require data entry before they can be completed:
+**Phase 3 — Electrical Safety**
+6. Verify Power Off — *checkpoint*
+7. Photo Existing Fan — *photo*
 
-- **Step 4 — Power Confirmed Off at Breaker** (Yes / No): the technician acknowledges the breaker state before touching the existing fan.
-- **Step 10 — Fan Location Type** (Bathroom / Kitchen) and **Configured Airflow (CFM)**: bathrooms target **80 CFM**, kitchens target **100 CFM**. Record the airflow the fan was configured to.
-- **Step 11 — Fan Operating Correctly** (Yes / No): the functional-test result.
+**Phase 4 — Removal**
+8. Remove Existing Fan — *photo*
+9. Modify Opening if Needed — *photo (N/A if none)*
 
-A step that requires a photo or a field value cannot be marked **Completed** until that evidence is present — LEAP Pad blocks it and tells the technician exactly what is missing. If a step genuinely does not apply, mark it **Not Applicable** with a reason rather than leaving it open.
+**Phase 5 — Electrical Installation**
+10. Connect Junction Box to Existing Conduit — *checkpoint*
+11. Test Fit Fan Housing — *checkpoint*
+12. Complete Wiring Connections — *checkpoint*
+13. Photo Completed Wiring — *photo*
+14. Mount Junction Box — *checkpoint*
+15. Photo Mounted Junction Box — *photo*
+
+**Phase 6 — Ventilation**
+16. Connect Ductwork — *checkpoint*
+17. Photo Duct Connection — *photo*
+
+**Phase 7 — Fan Installation**
+18. Label Fan Housing (write building + unit number) — *checkpoint, photo optional*
+19. Configure Airflow — *fields: Fan Location Type + Configured Airflow (CFM)*
+20. Install Fan Motor — *checkpoint*
+21. Functional Test — *field: Fan Operating Correctly*
+22. Photo Installed Fan — *photo*
+
+**Phase 8 — Finish Work**
+23. Install Beauty Cover — *checkpoint*
+24. Photo Beauty Cover — *photo*
+25. Remove Containment — *checkpoint*
+26. Clean Work Area — *photo*
+27. Photo Entry/Exit Area — *photo*
+28. Photo Unit Number On Exit — *photo*
+
+## Capture fields
+
+- **Step 19 — Fan Location Type** (Bathroom / Kitchen) and **Configured Airflow (CFM)**: bathrooms target **80 CFM**, kitchens target **100 CFM**.
+- **Step 21 — Fan Operating Correctly** (Yes / No): the functional-test result.
 
 ## Configuration
 
