@@ -74,10 +74,15 @@ export function computeRouteMatrix({ origins, destinations, traffic_aware, depar
 export function createServiceAppointment({
   slug, start_iso, end_iso, resource_id,
   customer_first_name, customer_last_name, phone, email, address, intake,
+  territory_id,
 }) {
   return call('create-service-appointment', {
     slug, start_iso, end_iso, resource_id,
     customer_first_name, customer_last_name, phone, email, address, intake,
+    // territory_id is the one compute-availability already resolved (by polygon
+    // or ZIP); the booking RPC trusts it so a slot that was offered can always
+    // be booked, even for an address not in the seeded ZIP list.
+    territory_id,
   })
 }
 
