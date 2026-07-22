@@ -40,6 +40,7 @@ import DispatchFilterRail, { laneInScope } from '../components/dispatch/Dispatch
 import DispatchUnscheduledPalette from '../components/dispatch/DispatchUnscheduledPalette'
 import ResourceMatrix from '../components/dispatch/ResourceMatrix'
 import FollowupsQueue from '../components/dispatch/FollowupsQueue'
+import HomesIntakePanel from '../components/dispatch/HomesIntakePanel'
 
 // Working-hours window the board renders. Matches the scheduler default;
 // any SA whose times bleed outside this gets clipped at the edge with a
@@ -430,8 +431,12 @@ export default function DispatchModule({ onNavigateToRecord }) {
                 {' • '}{filteredLanes.filter(l => !l.isUnassigned).length} of {leads.length} Team Lead{leads.length === 1 ? '' : 's'}
                 {' • '}{unscheduledWOs.length} unscheduled WO{unscheduledWOs.length === 1 ? '' : 's'}
               </>
-            ) : (
+            ) : activeView === 'resources' ? (
               <>Skills &amp; certifications matrix for field staff</>
+            ) : activeView === 'followups' ? (
+              <>Dispatcher follow-up queue</>
+            ) : (
+              <>Create a NC single-family HOMES homeowner and send a scheduling link</>
             )}
           </div>
         </div>
@@ -449,6 +454,7 @@ export default function DispatchModule({ onNavigateToRecord }) {
             { value: 'console',   label: 'Console' },
             { value: 'resources', label: 'Resources' },
             { value: 'followups', label: 'Follow-ups' },
+            { value: 'intake',    label: 'HOMES Intake' },
           ].map(opt => {
             const active = activeView === opt.value
             return (
@@ -570,7 +576,7 @@ export default function DispatchModule({ onNavigateToRecord }) {
             onNavigateToRecord?.(target.table, target.id)
           }
         }} />
-      ) : (
+      ) : activeView === 'followups' ? (
         /* Follow-ups view — dispatcher_followup_requests queue. Open +
            In Progress DFRs oldest-first; inline Claim / Close actions
            and click-through to the record-detail page for the full
@@ -580,6 +586,11 @@ export default function DispatchModule({ onNavigateToRecord }) {
             onNavigateToRecord?.(target.table, target.id)
           }
         }} />
+      ) : (
+        /* HOMES Intake — staff create the CRM chain for a pre-qualified NC
+           single-family homeowner and email them a personalized scheduling
+           link. */
+        <HomesIntakePanel onNavigateToRecord={(table, id) => onNavigateToRecord?.(table, id)} />
       )}
     </div>
   )
