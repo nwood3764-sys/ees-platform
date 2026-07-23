@@ -1,7 +1,7 @@
 -- =====================================================================
 -- Single-Family Energy Assessment + work-step "screen flow" (Nicholas,
--- 2026-07-22). Rebuilds the old Salesforce "HES Assessment" field
--- workflow as a LEAP scheduled work order whose sections are GUIDED
+-- 2026-07-22). Rebuilds the legacy Salesforce single-family assessment
+-- field workflow as a LEAP scheduled work order whose sections are GUIDED
 -- SCREEN FLOWS: tapping a section opens a full-screen, one-prompt-at-a-
 -- time capture flow (photo -> field -> field -> ... -> save) instead of
 -- the flat inline step card.
@@ -30,7 +30,7 @@
 --     Number (text), all required and hard-gated by the evidence gate.
 --   * Admin-managed option lists for the three selects under
 --     picklist_object='work_step_fields'.
--- Remaining HES sections (Cooling, Water Heating, Attic, ...) are added
+-- Remaining assessment sections (Cooling, Water Heating, Attic, ...) are added
 -- as their field lists are provided.
 -- =====================================================================
 
@@ -237,7 +237,7 @@ BEGIN
 
   INSERT INTO public.work_plan_templates (wpt_record_number, wpt_name, wpt_description, wpt_is_active, wpt_allow_any_order, wpt_owner, wpt_created_by)
   VALUES ('', 'Single-Family Energy Assessment - Standard',
-          'Guided single-family home energy assessment. Each section is a photo-first screen flow the auditor completes in any order. First section: Heating System. Additional HES sections (Exterior, Cooling, Water Heating, Foundation, Kitchen, Lighting, Attic, Blower Door, Exhaust Fans, Gas Leak Test, Fire Protection, CAZ) are added as their field lists are defined.',
+          'Guided single-family home energy assessment. Each section is a photo-first screen flow the auditor completes in any order. First section: Heating System. Additional assessment sections (Exterior, Cooling, Water Heating, Foundation, Kitchen, Lighting, Attic, Blower Door, Exhaust Fans, Gas Leak Test, Fire Protection, CAZ) are added as their field lists are defined.',
           true, true, v_nick, v_nick)
   RETURNING id INTO v_wpt;
 
@@ -271,7 +271,7 @@ BEGIN
       work_type_duration_minutes, work_type_default_work_plan_template_id, work_type_default_work_order_record_type,
       work_type_is_technician_creatable, work_type_owner, work_type_created_by)
     VALUES ('', 'Single-Family Energy Assessment',
-            'Scheduled in-home single-family energy assessment (replaces the legacy HES Assessment). The auditor works through guided, photo-first screen-flow sections in LEAP Pad. Starts with the Heating System section.',
+            'Scheduled in-home single-family energy assessment. The auditor works through guided, photo-first screen-flow sections in LEAP Pad. Starts with the Heating System section.',
             true, 90, v_wpt, v_rt, false, v_nick, v_nick);
   ELSE
     UPDATE public.work_types
