@@ -1485,6 +1485,8 @@ function Empty({ children, tone }) {
 // Turns a field into a plain one-line prompt for the guided flow (e.g. "Select
 // the fuel type." / "Enter the model number.").
 function fieldPrompt(field) {
+  // A field can carry its own plain-language question (wstf_help_text).
+  if (field.help && String(field.help).trim()) return String(field.help).trim()
   const label = (field.label || 'this').trim()
   if (field.type === 'photo') {
     // "Total Equipment Photo" -> "Take a picture of the total equipment."
