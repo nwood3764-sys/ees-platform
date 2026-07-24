@@ -1486,6 +1486,11 @@ function Empty({ children, tone }) {
 // the fuel type." / "Enter the model number.").
 function fieldPrompt(field) {
   const label = (field.label || 'this').trim()
+  if (field.type === 'photo') {
+    // "Total Equipment Photo" -> "Take a picture of the total equipment."
+    const subject = label.replace(/\s*photo$/i, '')
+    return `Take a picture of the ${subject.toLowerCase()}.`
+  }
   const pick = field.type === 'select' || field.type === 'user_multiselect' || field.type === 'key_source'
   // Keep the label as-authored so acronyms read right ("Enter the BTUs.").
   return `${pick ? 'Select' : 'Enter'} the ${label}.`
@@ -1517,12 +1522,18 @@ function ScreenFlowCard({ step, index, locked, isActionable, onOpen, onMarkNotAp
 
   const photoNeeded = (step.photos_required_count || 0) > 0 || step.photo_before_required || step.photo_after_required
   const fields = Array.isArray(step.fields) ? step.fields : []
+  const stepPhotos = Array.isArray(step.photos) ? step.photos : []
+  // A prompt is "done" when it holds a value, or (for a 'photo' field) when a
+  // photo tagged with its name exists on the step.
+  const promptDone = (f) => f.type === 'photo'
+    ? stepPhotos.some((p) => (p.photo_type || '') === f.name)
+    : fieldHasValue(f)
   // Progress counts required prompts only — the SnuggPro detail fields are
   // optional, so they don't hold the section back.
   const reqFields = fields.filter((f) => f.required)
   const totalPrompts = (photoNeeded ? 1 : 0) + reqFields.length
   const photoDone = !photoNeeded || (step.photo_count || 0) >= Math.max(1, step.photos_required_count || 1)
-  const donePrompts = (photoNeeded ? (photoDone ? 1 : 0) : 0) + reqFields.filter(fieldHasValue).length
+  const donePrompts = (photoNeeded ? (photoDone ? 1 : 0) : 0) + reqFields.filter(promptDone).length
 
   return (
     <div style={{
@@ -1569,6 +1580,17 @@ function ScreenFlowCard({ step, index, locked, isActionable, onOpen, onMarkNotAp
             </div>
           )}
           {fields.map((f) => {
+            if (f.type === 'photo') {
+              const n = stepPhotos.filter((p) => (p.photo_type || '') === f.name).length
+              return (
+                <div key={f.field_id} style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
+                  <strong style={{ color: C.textPrimary }}>{f.label}:</strong>{' '}
+                  {n > 0
+                    ? <span style={{ fontFamily: MONO }}>{n} captured</span>
+                    : <span style={{ color: C.textMuted }}>none</span>}
+                </div>
+              )
+            }
             const val = f.numeric_value ?? f.text_value
             return (
               <div key={f.field_id} style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
@@ -1632,6 +1654,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const [uploading, setUploading] = useState(false)
   const [pending, setPending] = useState({}) // field_id -> current (unsaved) editor value
   const fileRef = useRef(null)
+  const photoTypeRef = useRef('general') // which photo_type the next capture tags
 
   const refresh = useCallback(async () => {
     try {
@@ -1645,11 +1668,14 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const photoNeeded = (live.photos_required_count || 0) > 0 || live.photo_before_required || live.photo_after_required
   const reqPhotos = photoNeeded ? Math.max(1, live.photos_required_count || 1) : 0
   const fields = Array.isArray(live.fields) ? live.fields : []
+  const stepPhotos = Array.isArray(live.photos) ? live.photos : []
+  const photosOfType = (name) => stepPhotos.filter((p) => (p.photo_type || '') === name)
 
-  // Screen list: [photo?] + one per field + review.
+  // Screen list: [generic photo?] + one per field (a 'photo' field becomes a
+  // photo-capture screen) + review.
   const screens = []
   if (photoNeeded) screens.push({ kind: 'photo' })
-  fields.forEach((f) => screens.push({ kind: 'field', field: f }))
+  fields.forEach((f) => screens.push({ kind: f.type === 'photo' ? 'photofield' : 'field', field: f }))
   screens.push({ kind: 'review' })
 
   const clampedIdx = Math.min(idx, screens.length - 1)
@@ -1662,13 +1688,15 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const next = () => setIdx((i) => Math.min(i + 1, screens.length - 1))
   const back = () => setIdx((i) => Math.max(i - 1, 0))
 
+  const triggerPhoto = (ptype) => { photoTypeRef.current = ptype || 'general'; fileRef.current?.click() }
+
   const onFile = async (e) => {
     const file = e.target.files && e.target.files[0]
     e.target.value = ''
     if (!file) return
     setUploading(true)
     try {
-      const row = await captureStepPhoto({ file, workStepId: live.work_step_id, photoType: 'general' })
+      const row = await captureStepPhoto({ file, workStepId: live.work_step_id, photoType: photoTypeRef.current })
       await refresh()
       onFlash(`Photo captured · ${live.name}`)
       photoGpsMissing(row).then((missing) => {
@@ -1694,18 +1722,22 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
     }
   }
 
-  const curField = screen.kind === 'field' ? screen.field : null
-  const curPending = curField
+  const curField = (screen.kind === 'field' || screen.kind === 'photofield') ? screen.field : null
+  const curPending = (screen.kind === 'field' && curField)
     ? (pending[curField.field_id] !== undefined ? pending[curField.field_id] : fieldSavedString(curField))
     : ''
   const curEmpty = String(curPending ?? '').trim() === ''
-  // Optional fields (the SnuggPro detail fields) can be skipped; required
-  // fields must be answered before Continue.
+  const curPhotoN = (screen.kind === 'photofield' && curField) ? photosOfType(curField.name).length : 0
+  // Optional fields/photos (the SnuggPro detail prompts) can be skipped;
+  // required ones must be satisfied before Continue.
   const continueDisabled =
     busy ||
     (screen.kind === 'photo' && !photoSatisfied) ||
-    (screen.kind === 'field' && curField.required && curEmpty)
-  const fieldSkippable = screen.kind === 'field' && !curField.required && curEmpty
+    (screen.kind === 'field' && curField.required && curEmpty) ||
+    (screen.kind === 'photofield' && curField.required && curPhotoN === 0)
+  const fieldSkippable =
+    (screen.kind === 'field' && !curField.required && curEmpty) ||
+    (screen.kind === 'photofield' && !curField.required && curPhotoN === 0)
 
   // Continue on a field screen: save the value (if changed) then advance; an
   // empty optional field is skipped. The bottom Continue is the single action.
@@ -1767,11 +1799,35 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
             <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
             <CaptureBtn
               label={photoCount > 0 ? 'Add / Retake Photo' : 'Take Photo'}
-              onClick={() => fileRef.current?.click()}
+              onClick={() => triggerPhoto('general')}
               disabled={uploading}
               done={photoSatisfied}
             />
             {uploading && <div style={{ fontSize: 12, color: C.textMuted, marginTop: 8 }}>Uploading photo…</div>}
+          </div>
+        )}
+
+        {screen.kind === 'photofield' && (
+          <div>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 6 }}>
+              {fieldPrompt(screen.field)}
+            </div>
+            <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 14 }}>
+              {screen.field.required ? 'Required' : 'Optional — skip if not applicable.'}
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
+            <CaptureBtn
+              label={curPhotoN > 0 ? 'Add / Retake Photo' : 'Take Photo'}
+              onClick={() => triggerPhoto(screen.field.name)}
+              disabled={uploading}
+              done={curPhotoN > 0}
+            />
+            {uploading && <div style={{ fontSize: 12, color: C.textMuted, marginTop: 8 }}>Uploading photo…</div>}
+            {photosOfType(screen.field.name).length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <PhotoStrip photos={photosOfType(screen.field.name)} />
+              </div>
+            )}
           </div>
         )}
 
@@ -1815,14 +1871,18 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
               </div>
             )}
             {fields.map((f) => {
+              const isPhoto = f.type === 'photo'
+              const n = isPhoto ? photosOfType(f.name).length : 0
+              const has = isPhoto ? n > 0 : fieldHasValue(f)
               const val = f.numeric_value ?? f.text_value
-              const has = fieldHasValue(f)
               const color = has ? C.textPrimary : (f.required ? C.amber : C.textMuted)
               return (
                 <div key={f.field_id} style={{ ...card, padding: '10px 12px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
                   <span style={{ color: C.textSecondary }}>{f.label}</span>
                   <span style={{ fontFamily: MONO, fontWeight: 700, textAlign: 'right', color }}>
-                    {has ? `${val}${f.unit ? ` ${f.unit}` : ''}` : (f.required ? 'required' : '—')}
+                    {has
+                      ? (isPhoto ? `${n} captured` : `${val}${f.unit ? ` ${f.unit}` : ''}`)
+                      : (f.required ? (isPhoto ? 'photo required' : 'required') : '—')}
                   </span>
                 </div>
               )

@@ -199,15 +199,15 @@ export async function clockOut(woId) {
 // the process-photo edge function).
 // ───────────────────────────────────────────────────────────────────────────
 export async function captureStepPhoto({ file, workStepId, photoType }) {
-  if (!['before', 'after', 'general'].includes(photoType)) {
-    throw new Error(`captureStepPhoto: photoType must be before|after|general, got "${photoType}".`)
-  }
+  // 'before' | 'after' | 'general' are the legacy legs; named photo prompts
+  // (the 'photo' field type) pass the field name as the photo_type tag.
+  const type = (photoType && String(photoType).trim()) || 'general'
   return uploadPhoto({
     file,
     relatedObject: 'work_steps',
     relatedId:     workStepId,
     workStepId,
-    photoType,
+    photoType:     type,
     applyWatermark: true,
   })
 }
