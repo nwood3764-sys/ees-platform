@@ -969,7 +969,7 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
 // order's account (property manager etc.), with a free-text fallback for
 // someone not yet in CRM. Stored as readable text: "Lockbox" or
 // "Person: <name>".
-function StepKeySource({ field, stepId, woId, disabled, onSaved, onError }) {
+function StepKeySource({ field, stepId, woId, disabled, onSaved, onError, embedded = false, onValue }) {
   const saved = field.text_value || ''
   const savedIsPerson = saved.startsWith('Person: ')
   const [mode, setMode] = useState(saved ? (savedIsPerson ? 'person' : 'lockbox') : null)
@@ -990,6 +990,8 @@ function StepKeySource({ field, stepId, woId, disabled, onSaved, onError }) {
   const currentValue = mode === 'lockbox' ? 'Lockbox'
     : mode === 'person' && effectivePerson ? `Person: ${effectivePerson}` : ''
   const dirty = currentValue !== '' && currentValue !== saved
+
+  useEffect(() => { if (embedded && onValue) onValue(currentValue) }, [currentValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     if (!currentValue) {
@@ -1023,11 +1025,13 @@ function StepKeySource({ field, stepId, woId, disabled, onSaved, onError }) {
   )
 
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
-        {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
-        {saved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ {saved}</span>}
-      </div>
+    <div style={{ marginBottom: embedded ? 0 : 10 }}>
+      {!embedded && (
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+          {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+          {saved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ {saved}</span>}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         {chip('lockbox', 'Lockbox')}
         {chip('person', 'Person')}
@@ -1070,15 +1074,17 @@ function StepKeySource({ field, stepId, woId, disabled, onSaved, onError }) {
         )
       )}
 
-      <button
-        onClick={save}
-        disabled={disabled || saving || !dirty}
-        style={(disabled || saving || !dirty)
-          ? { ...btnDisabled, minHeight: 44 }
-          : { ...btnPrimary, minHeight: 44 }}
-      >
-        {saving ? 'Saving…' : 'Save'}
-      </button>
+      {!embedded && (
+        <button
+          onClick={save}
+          disabled={disabled || saving || !dirty}
+          style={(disabled || saving || !dirty)
+            ? { ...btnDisabled, minHeight: 44 }
+            : { ...btnPrimary, minHeight: 44 }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      )}
     </div>
   )
 }
@@ -1088,7 +1094,7 @@ function StepKeySource({ field, stepId, woId, disabled, onSaved, onError }) {
 // access steps): a checkbox list of active users, saved as comma-separated
 // names so the value reads plainly everywhere (step card, desktop record,
 // verifier view).
-function StepUserMultiselect({ field, stepId, disabled, onSaved, onError }) {
+function StepUserMultiselect({ field, stepId, disabled, onSaved, onError, embedded = false, onValue }) {
   const savedNames = (field.text_value || '').split(',').map((s) => s.trim()).filter(Boolean)
   const [users, setUsers] = useState(null)   // null = loading
   const [selected, setSelected] = useState(new Set(savedNames))
@@ -1113,6 +1119,8 @@ function StepUserMultiselect({ field, stepId, disabled, onSaved, onError }) {
   const currentValue = Array.from(selected).sort().join(', ')
   const dirty = currentValue !== savedNames.slice().sort().join(', ')
 
+  useEffect(() => { if (embedded && onValue) onValue(currentValue) }, [currentValue]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const save = async () => {
     if (selected.size === 0) { onError(`Select at least one person for "${field.label}".`); return }
     setSaving(true)
@@ -1127,11 +1135,13 @@ function StepUserMultiselect({ field, stepId, disabled, onSaved, onError }) {
   }
 
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
-        {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
-        {savedNames.length > 0 && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
-      </div>
+    <div style={{ marginBottom: embedded ? 0 : 10 }}>
+      {!embedded && (
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+          {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+          {savedNames.length > 0 && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
+        </div>
+      )}
       {users === null ? (
         <div style={{ fontSize: 13, color: C.textMuted }}>Loading people…</div>
       ) : (
@@ -1167,15 +1177,17 @@ function StepUserMultiselect({ field, stepId, disabled, onSaved, onError }) {
           })}
         </div>
       )}
-      <button
-        onClick={save}
-        disabled={disabled || saving || !dirty}
-        style={(disabled || saving || !dirty)
-          ? { ...btnDisabled, minHeight: 44 }
-          : { ...btnPrimary, minHeight: 44 }}
-      >
-        {saving ? 'Saving…' : `Save (${selected.size} selected)`}
-      </button>
+      {!embedded && (
+        <button
+          onClick={save}
+          disabled={disabled || saving || !dirty}
+          style={(disabled || saving || !dirty)
+            ? { ...btnDisabled, minHeight: 44 }
+            : { ...btnPrimary, minHeight: 44 }}
+        >
+          {saving ? 'Saving…' : `Save (${selected.size} selected)`}
+        </button>
+      )}
     </div>
   )
 }
@@ -1189,13 +1201,17 @@ function StepUserMultiselect({ field, stepId, disabled, onSaved, onError }) {
 // Options are admin-managed picklist values under picklist_object
 // 'work_step_fields', picklist_field = the field's name — the server rejects
 // anything outside the list, so this stays a pure dropdown with no free text.
-function StepSelectField({ field, stepId, disabled, onSaved, onError }) {
+function StepSelectField({ field, stepId, disabled, onSaved, onError, embedded = false, onValue }) {
   const savedVal = field.text_value ?? ''
   const [value, setValue] = useState(String(savedVal))
   const [options, setOptions] = useState(null)
   const [saving, setSaving] = useState(false)
   const dirty = value !== String(savedVal)
   const hasSaved = savedVal !== '' && savedVal != null
+
+  // Embedded in the screen flow: report the value up (the flow's Continue
+  // button saves it); the inline label + Save button are hidden.
+  useEffect(() => { if (embedded && onValue) onValue(value) }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false
@@ -1229,18 +1245,20 @@ function StepSelectField({ field, stepId, disabled, onSaved, onError }) {
   }
 
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
-        {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
-        {hasSaved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
-      </div>
+    <div style={{ marginBottom: embedded ? 0 : 10 }}>
+      {!embedded && (
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+          {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+          {hasSaved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8 }}>
         <select
           value={value}
           onChange={(e) => setValue(e.target.value)}
           disabled={disabled || saving || options === null}
           style={{
-            flex: 1, boxSizing: 'border-box', minHeight: 44,
+            flex: 1, minWidth: 0, boxSizing: 'border-box', minHeight: 48,
             fontFamily: FONT, fontSize: 16,
             border: `1px solid ${hasSaved && !dirty ? C.emerald : C.borderDark}`,
             borderRadius: 8, padding: '10px 12px',
@@ -1252,27 +1270,32 @@ function StepSelectField({ field, stepId, disabled, onSaved, onError }) {
             <option key={o.picklist_value} value={o.picklist_value}>{o.picklist_label || o.picklist_value}</option>
           ))}
         </select>
-        <button
-          onClick={save}
-          disabled={disabled || saving || !dirty || !value}
-          style={(disabled || saving || !dirty || !value)
-            ? { ...btnDisabled, flex: '0 0 auto', minHeight: 44, padding: '0 18px' }
-            : { ...btnPrimary, flex: '0 0 auto', minHeight: 44, padding: '0 18px' }}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+        {!embedded && (
+          <button
+            onClick={save}
+            disabled={disabled || saving || !dirty || !value}
+            style={(disabled || saving || !dirty || !value)
+              ? { ...btnDisabled, flex: '0 0 auto', width: 'auto', minHeight: 44, padding: '0 18px' }
+              : { ...btnPrimary, flex: '0 0 auto', width: 'auto', minHeight: 44, padding: '0 18px' }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        )}
       </div>
     </div>
   )
 }
 
-function StepFieldInput({ field, stepId, disabled, onSaved, onError }) {
+function StepFieldInput({ field, stepId, disabled, onSaved, onError, embedded = false, onValue }) {
   const savedVal = field.numeric_value ?? field.text_value ?? ''
   const [value, setValue] = useState(String(savedVal))
   const [saving, setSaving] = useState(false)
   const isNumber = field.type === 'number'
   const dirty = value.trim() !== String(savedVal).trim()
   const hasSaved = savedVal !== '' && savedVal != null
+
+  // Embedded in the screen flow: report the value up; hide inline label + Save.
+  useEffect(() => { if (embedded && onValue) onValue(value) }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     if (!value.trim()) { onError(`Enter a value for "${field.label}".`); return }
@@ -1288,13 +1311,15 @@ function StepFieldInput({ field, stepId, disabled, onSaved, onError }) {
   }
 
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
-        {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
-        {hasSaved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
-      </div>
+    <div style={{ marginBottom: embedded ? 0 : 10 }}>
+      {!embedded && (
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: C.textSecondary, marginBottom: 6 }}>
+          {field.label}{field.required && <span style={{ color: C.danger }}> *</span>}
+          {hasSaved && !dirty && <span style={{ color: C.emeraldMid, fontWeight: 700 }}>  ✓ saved</span>}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8 }}>
-        <div style={{ position: 'relative', flex: 1 }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
           <input
             type="text"
             inputMode={isNumber ? 'decimal' : 'text'}
@@ -1303,7 +1328,7 @@ function StepFieldInput({ field, stepId, disabled, onSaved, onError }) {
             placeholder={isNumber ? '0' : ''}
             disabled={disabled || saving}
             style={{
-              width: '100%', boxSizing: 'border-box', minHeight: 44,
+              width: '100%', boxSizing: 'border-box', minHeight: 48,
               fontFamily: isNumber ? MONO : FONT, fontSize: 16,
               border: `1px solid ${hasSaved && !dirty ? C.emerald : C.borderDark}`,
               borderRadius: 8, padding: field.unit ? '10px 64px 10px 12px' : '10px 12px',
@@ -1319,15 +1344,17 @@ function StepFieldInput({ field, stepId, disabled, onSaved, onError }) {
             </span>
           )}
         </div>
-        <button
-          onClick={save}
-          disabled={disabled || saving || !dirty}
-          style={(disabled || saving || !dirty)
-            ? { ...btnDisabled, flex: '0 0 auto', minHeight: 44, padding: '0 18px' }
-            : { ...btnPrimary, flex: '0 0 auto', minHeight: 44, padding: '0 18px' }}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+        {!embedded && (
+          <button
+            onClick={save}
+            disabled={disabled || saving || !dirty}
+            style={(disabled || saving || !dirty)
+              ? { ...btnDisabled, flex: '0 0 auto', width: 'auto', minHeight: 44, padding: '0 18px' }
+              : { ...btnPrimary, flex: '0 0 auto', width: 'auto', minHeight: 44, padding: '0 18px' }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -1559,6 +1586,13 @@ function fieldHasValue(f) {
   return (f.numeric_value != null) || (f.text_value != null && String(f.text_value).trim() !== '')
 }
 
+// The saved value of a field as a plain string (for diffing against the flow's
+// pending editor value).
+function fieldSavedString(f) {
+  if (f.numeric_value != null) return String(f.numeric_value)
+  return f.text_value != null ? String(f.text_value) : ''
+}
+
 // ─── ScreenFlowCard ──────────────────────────────────────────────────────────
 // A screen-flow work step (e.g. Heating System on the Single-Family Energy
 // Assessment). Rather than inline capture, it renders a compact section card
@@ -1682,6 +1716,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const [idx, setIdx] = useState(0)
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [pending, setPending] = useState({}) // field_id -> current (unsaved) editor value
   const fileRef = useRef(null)
 
   const refresh = useCallback(async () => {
@@ -1745,9 +1780,33 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
     }
   }
 
+  const curField = screen.kind === 'field' ? screen.field : null
+  const curPending = curField
+    ? (pending[curField.field_id] !== undefined ? pending[curField.field_id] : fieldSavedString(curField))
+    : ''
   const continueDisabled =
+    busy ||
     (screen.kind === 'photo' && !photoSatisfied) ||
-    (screen.kind === 'field' && !fieldHasValue(screen.field))
+    (screen.kind === 'field' && String(curPending ?? '').trim() === '')
+
+  // Continue on a field screen: save the value (if changed) then advance. The
+  // bottom Continue is the single action — the editors have no inline Save.
+  const advanceField = async () => {
+    const f = screen.field
+    const cur = String(curPending ?? '').trim()
+    if (!cur) return
+    if (cur === String(fieldSavedString(f) ?? '').trim()) { next(); return }
+    setBusy(true)
+    try {
+      await saveWorkStepFieldValue(live.work_step_id, f.field_id, cur)
+      await refresh()
+      next()
+    } catch (e) {
+      onFlash(e.message || 'Could not save the value.', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div style={{
@@ -1803,19 +1862,21 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
             <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 14 }}>
               {fieldPrompt(screen.field)}
             </div>
-            {screen.field.type === 'user_multiselect' ? (
-              <StepUserMultiselect field={screen.field} stepId={live.work_step_id} disabled={busy}
-                onSaved={async (msg) => { onFlash(msg); await refresh(); next() }} onError={(m) => onFlash(m, 'error')} />
-            ) : screen.field.type === 'key_source' ? (
-              <StepKeySource field={screen.field} stepId={live.work_step_id} woId={woId} disabled={busy}
-                onSaved={async (msg) => { onFlash(msg); await refresh(); next() }} onError={(m) => onFlash(m, 'error')} />
-            ) : screen.field.type === 'select' ? (
-              <StepSelectField field={screen.field} stepId={live.work_step_id} disabled={busy}
-                onSaved={async (msg) => { onFlash(msg); await refresh(); next() }} onError={(m) => onFlash(m, 'error')} />
-            ) : (
-              <StepFieldInput field={screen.field} stepId={live.work_step_id} disabled={busy}
-                onSaved={async (msg) => { onFlash(msg); await refresh(); next() }} onError={(m) => onFlash(m, 'error')} />
-            )}
+            {(() => {
+              const common = {
+                key: screen.field.field_id,
+                field: screen.field,
+                stepId: live.work_step_id,
+                disabled: busy,
+                embedded: true,
+                onValue: (v) => setPending((p) => ({ ...p, [screen.field.field_id]: v })),
+                onError: (m) => onFlash(m, 'error'),
+              }
+              if (screen.field.type === 'user_multiselect') return <StepUserMultiselect {...common} />
+              if (screen.field.type === 'key_source') return <StepKeySource {...common} woId={woId} />
+              if (screen.field.type === 'select') return <StepSelectField {...common} />
+              return <StepFieldInput {...common} />
+            })()}
           </div>
         )}
 
@@ -1866,9 +1927,9 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
             {busy ? 'Saving…' : `Save ${live.name}`}
           </button>
         ) : (
-          <button onClick={next} disabled={continueDisabled}
+          <button onClick={screen.kind === 'field' ? advanceField : next} disabled={continueDisabled}
             style={continueDisabled ? { ...btnDisabled, flex: 1 } : { ...btnPrimary, flex: 1 }}>
-            Continue
+            {busy && screen.kind === 'field' ? 'Saving…' : 'Continue'}
           </button>
         )}
       </div>
