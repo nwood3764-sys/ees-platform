@@ -1517,9 +1517,12 @@ function ScreenFlowCard({ step, index, locked, isActionable, onOpen, onMarkNotAp
 
   const photoNeeded = (step.photos_required_count || 0) > 0 || step.photo_before_required || step.photo_after_required
   const fields = Array.isArray(step.fields) ? step.fields : []
-  const totalPrompts = (photoNeeded ? 1 : 0) + fields.length
+  // Progress counts required prompts only — the SnuggPro detail fields are
+  // optional, so they don't hold the section back.
+  const reqFields = fields.filter((f) => f.required)
+  const totalPrompts = (photoNeeded ? 1 : 0) + reqFields.length
   const photoDone = !photoNeeded || (step.photo_count || 0) >= Math.max(1, step.photos_required_count || 1)
-  const donePrompts = (photoNeeded ? (photoDone ? 1 : 0) : 0) + fields.filter(fieldHasValue).length
+  const donePrompts = (photoNeeded ? (photoDone ? 1 : 0) : 0) + reqFields.filter(fieldHasValue).length
 
   return (
     <div style={{
@@ -1695,17 +1698,21 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const curPending = curField
     ? (pending[curField.field_id] !== undefined ? pending[curField.field_id] : fieldSavedString(curField))
     : ''
+  const curEmpty = String(curPending ?? '').trim() === ''
+  // Optional fields (the SnuggPro detail fields) can be skipped; required
+  // fields must be answered before Continue.
   const continueDisabled =
     busy ||
     (screen.kind === 'photo' && !photoSatisfied) ||
-    (screen.kind === 'field' && String(curPending ?? '').trim() === '')
+    (screen.kind === 'field' && curField.required && curEmpty)
+  const fieldSkippable = screen.kind === 'field' && !curField.required && curEmpty
 
-  // Continue on a field screen: save the value (if changed) then advance. The
-  // bottom Continue is the single action — the editors have no inline Save.
+  // Continue on a field screen: save the value (if changed) then advance; an
+  // empty optional field is skipped. The bottom Continue is the single action.
   const advanceField = async () => {
     const f = screen.field
     const cur = String(curPending ?? '').trim()
-    if (!cur) return
+    if (!cur) { next(); return }
     if (cur === String(fieldSavedString(f) ?? '').trim()) { next(); return }
     setBusy(true)
     try {
@@ -1770,8 +1777,11 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
 
         {screen.kind === 'field' && (
           <div>
-            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 14 }}>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 6 }}>
               {fieldPrompt(screen.field)}
+            </div>
+            <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 14 }}>
+              {screen.field.required ? 'Required' : 'Optional — skip if not applicable.'}
             </div>
             {(() => {
               const common = {
@@ -1807,11 +1817,12 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
             {fields.map((f) => {
               const val = f.numeric_value ?? f.text_value
               const has = fieldHasValue(f)
+              const color = has ? C.textPrimary : (f.required ? C.amber : C.textMuted)
               return (
                 <div key={f.field_id} style={{ ...card, padding: '10px 12px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
                   <span style={{ color: C.textSecondary }}>{f.label}</span>
-                  <span style={{ fontFamily: MONO, fontWeight: 700, textAlign: 'right', color: has ? C.textPrimary : C.amber }}>
-                    {has ? `${val}${f.unit ? ` ${f.unit}` : ''}` : 'missing'}
+                  <span style={{ fontFamily: MONO, fontWeight: 700, textAlign: 'right', color }}>
+                    {has ? `${val}${f.unit ? ` ${f.unit}` : ''}` : (f.required ? 'required' : '—')}
                   </span>
                 </div>
               )
@@ -1840,7 +1851,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
         ) : (
           <button onClick={screen.kind === 'field' ? advanceField : next} disabled={continueDisabled}
             style={continueDisabled ? { ...btnDisabled, flex: 1 } : { ...btnPrimary, flex: 1 }}>
-            {busy && screen.kind === 'field' ? 'Saving…' : 'Continue'}
+            {busy && screen.kind === 'field' ? 'Saving…' : (fieldSkippable ? 'Skip' : 'Continue')}
           </button>
         )}
       </div>
