@@ -1,15 +1,16 @@
 // ─── NewAssessmentSheet.jsx ──────────────────────────────────────────────────
 // Self-service Single-Family Energy Assessment creation from LEAP Pad.
-// The auditor walks four short phases, selecting existing records or creating
-// what's missing:
-//   1. Owner   — the BUILDING OWNER account (owner-occupied or rental):
-//                search accounts, or type a new owner name.
-//   2. Property — search, or enter the address to create it under the owner.
+// PROPERTY-FIRST (Nicholas: "we typically always go by property address"):
+//   1. Property — search by address/name. Found → straight to the building
+//                 (the owner is already on the property). Not found → enter
+//                 the address, then:
+//   2. Account  — find-or-create the account the new property hangs on
+//                 (search existing accounts, or type a new name).
 //   3. Building — pick an existing building, or create one by choosing its
 //                 type: Single Family Detached (no units — the building IS
 //                 the home) or Single Family Attached (each home is a unit).
-//   4. Unit    — attached only: pick a unit or type a new one. Detached
-//                skips straight to creation.
+//   4. Unit     — attached only: pick a unit or type a new one. Detached
+//                 creates immediately.
 // create_assessment_work_order stands up whatever is missing (account →
 // property → building → unit → opportunity/project), creates the work order
 // + today's appointment assigned to the auditor, and routes a Field Data
@@ -59,45 +60,34 @@ function DashedButton({ label, onClick, disabled }) {
 }
 
 export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
-  // Phases: 'owner' → 'property' → 'building' → 'unit' → submit.
-  const [phase, setPhase] = useState('owner')
+  // Phases: 'property' → ('account' when the property is new) → 'building' → 'unit'.
+  const [phase, setPhase] = useState('property')
   const [busy, setBusy] = useState(false)
-
-  // Owner (account)
-  const [acctQuery, setAcctQuery] = useState('')
-  const [acctResults, setAcctResults] = useState(null)
-  const [acctSearching, setAcctSearching] = useState(false)
-  const [account, setAccount] = useState(null)        // {id, name} — existing
-  const [newAccountName, setNewAccountName] = useState('') // creating
 
   // Property
   const [propQuery, setPropQuery] = useState('')
   const [propResults, setPropResults] = useState(null)
   const [propSearching, setPropSearching] = useState(false)
-  const [property, setProperty] = useState(null)      // existing property row, or null
+  const [property, setProperty] = useState(null)      // existing property row, or null (creating)
   const [newAddr, setNewAddr] = useState({ street: '', city: '', state: '', zip: '' })
   const [addrOpen, setAddrOpen] = useState(false)
 
+  // Account (only when the property is new)
+  const [acctQuery, setAcctQuery] = useState('')
+  const [acctResults, setAcctResults] = useState(null)
+  const [acctSearching, setAcctSearching] = useState(false)
+  const [account, setAccount] = useState(null)        // {id, account_name} — existing
+  const [newAccountName, setNewAccountName] = useState('')
+
   // Building
   const [buildings, setBuildings] = useState(null)
-  const [building, setBuilding] = useState(null)      // existing building row, or null
+  const [building, setBuilding] = useState(null)
   const [newBuildingType, setNewBuildingType] = useState(null)  // 'single_family_detached' | 'single_family_attached'
 
   // Unit (attached only)
   const [units, setUnits] = useState(null)
-  const [unit, setUnit] = useState(null)              // {id, unit_number} or null
+  const [unit, setUnit] = useState(null)
   const [newUnitName, setNewUnitName] = useState('')
-
-  const ownerLabel = account ? account.account_name : (newAccountName.trim() || null)
-
-  const searchOwners = async (q) => {
-    setAcctQuery(q)
-    if (q.trim().length < 2) { setAcctResults(null); return }
-    setAcctSearching(true)
-    try { setAcctResults(await searchAccounts(q)) }
-    catch { setAcctResults([]) }
-    finally { setAcctSearching(false) }
-  }
 
   const searchProps = async (q) => {
     setPropQuery(q)
@@ -108,6 +98,16 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
     finally { setPropSearching(false) }
   }
 
+  const searchOwnersFn = async (q) => {
+    setAcctQuery(q)
+    if (q.trim().length < 2) { setAcctResults(null); return }
+    setAcctSearching(true)
+    try { setAcctResults(await searchAccounts(q)) }
+    catch { setAcctResults([]) }
+    finally { setAcctSearching(false) }
+  }
+
+  // Existing property: the account is already on it — go straight to buildings.
   const pickProperty = async (p) => {
     setProperty(p)
     setBusy(true)
@@ -152,8 +152,8 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
     setBusy(true)
     try {
       const res = await createAssessmentWorkOrder({
-        accountId: account?.id ?? null,
-        newAccountName: account ? null : (newAccountName.trim() || null),
+        accountId: property ? null : (account?.id ?? null),
+        newAccountName: (property || account) ? null : (newAccountName.trim() || null),
         propertyId: property?.id ?? null,
         newStreet: property ? null : newAddr.street.trim(),
         newCity: property ? null : newAddr.city.trim(),
@@ -170,13 +170,19 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
 
   const back = () => {
     if (phase === 'unit') { setUnit(null); setNewUnitName(''); setPhase('building'); return }
-    if (phase === 'building') { setBuilding(null); setNewBuildingType(null); setBuildings(null); setPhase('property'); return }
-    if (phase === 'property') { setProperty(null); setAddrOpen(false); setPhase('owner'); return }
+    if (phase === 'building') {
+      setBuilding(null); setNewBuildingType(null); setBuildings(null)
+      setPhase(property ? 'property' : 'account')
+      return
+    }
+    if (phase === 'account') { setAccount(null); setNewAccountName(''); setPhase('property'); return }
     onClose()
   }
 
-  const sub = phase === 'owner' ? 'Who owns this building? Owner-occupied or rental — select the owner, or add them.'
-    : phase === 'property' ? `Owner: ${ownerLabel || '—'} · Find the property, or enter the address.`
+  const addrComplete = newAddr.street.trim() && newAddr.city.trim() && newAddr.state.trim() && newAddr.zip.trim()
+
+  const sub = phase === 'property' ? 'Search by the property address. If it isn’t in LEAP, enter the address to create it.'
+    : phase === 'account' ? `New property: ${newAddr.street.trim()} · Which account does it belong to? Search, or create one.`
     : phase === 'building' ? 'Select the building, or create it by choosing its type.'
     : 'Each attached home is a unit — select it, or type a new one.'
 
@@ -196,45 +202,13 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
         </div>
         <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 16 }}>{sub}</div>
 
-        {/* ── Phase: owner ── */}
-        {phase === 'owner' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-            <input
-              type="text" value={acctQuery} placeholder="Search owners by name…"
-              onChange={(e) => searchOwners(e.target.value)} style={inputStyle}
-            />
-            {acctSearching && <div style={{ fontSize: 13, color: C.textMuted }}>Searching…</div>}
-            {(acctResults || []).map((a) => (
-              <ListButton key={a.id} title={a.account_name} sub={a.account_record_number}
-                onClick={() => { setAccount(a); setNewAccountName(''); setPhase('property') }} />
-            ))}
-            {acctResults !== null && acctResults.length === 0 && !acctSearching && (
-              <div style={{ fontSize: 13, color: C.textMuted }}>No matching owners.</div>
-            )}
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textMuted, textAlign: 'center', margin: '4px 0' }}>
-              — or add a new owner —
-            </div>
-            <input
-              type="text" value={newAccountName} placeholder="New owner name (person or company)"
-              onChange={(e) => { setNewAccountName(e.target.value); setAccount(null) }} style={inputStyle}
-            />
-            <button
-              onClick={() => setPhase('property')}
-              disabled={!newAccountName.trim()}
-              style={newAccountName.trim() ? { ...btnPrimary, minHeight: 46 } : { ...btnDisabled, minHeight: 46 }}
-            >
-              Continue with new owner
-            </button>
-          </div>
-        )}
-
-        {/* ── Phase: property ── */}
+        {/* ── Phase: property (start) ── */}
         {phase === 'property' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
             {!addrOpen && (
               <>
                 <input
-                  type="text" value={propQuery} placeholder="Search properties by name or street…"
+                  type="text" value={propQuery} placeholder="Search by address or property name…"
                   onChange={(e) => searchProps(e.target.value)} style={inputStyle}
                 />
                 {propSearching && <div style={{ fontSize: 13, color: C.textMuted }}>Searching…</div>}
@@ -248,7 +222,7 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
                 {propResults !== null && propResults.length === 0 && !propSearching && (
                   <div style={{ fontSize: 13, color: C.textMuted }}>No matching properties.</div>
                 )}
-                <DashedButton label="Property is not in the list — enter the address" onClick={() => setAddrOpen(true)} />
+                <DashedButton label="Property is not in LEAP — enter the address" onClick={() => setAddrOpen(true)} />
               </>
             )}
             {addrOpen && (
@@ -266,15 +240,47 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
                     style={{ ...inputStyle, flex: 1 }} />
                 </div>
                 <button
-                  onClick={() => { setProperty(null); setBuildings([]); setPhase('building') }}
-                  disabled={!(newAddr.street.trim() && newAddr.city.trim() && newAddr.state.trim() && newAddr.zip.trim())}
-                  style={(newAddr.street.trim() && newAddr.city.trim() && newAddr.state.trim() && newAddr.zip.trim())
-                    ? { ...btnPrimary, minHeight: 46 } : { ...btnDisabled, minHeight: 46 }}
+                  onClick={() => { setProperty(null); setPhase('account') }}
+                  disabled={!addrComplete}
+                  style={addrComplete ? { ...btnPrimary, minHeight: 46 } : { ...btnDisabled, minHeight: 46 }}
                 >
-                  Continue with this address
+                  Continue — find or create the account
                 </button>
+                <DashedButton label="Back to property search" onClick={() => setAddrOpen(false)} />
               </>
             )}
+          </div>
+        )}
+
+        {/* ── Phase: account (new property only) ── */}
+        {phase === 'account' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            <input
+              type="text" value={acctQuery} placeholder="Search accounts by name…"
+              onChange={(e) => searchOwnersFn(e.target.value)} style={inputStyle}
+            />
+            {acctSearching && <div style={{ fontSize: 13, color: C.textMuted }}>Searching…</div>}
+            {(acctResults || []).map((a) => (
+              <ListButton key={a.id} title={a.account_name} sub={a.account_record_number}
+                onClick={() => { setAccount(a); setNewAccountName(''); setBuildings([]); setPhase('building') }} />
+            ))}
+            {acctResults !== null && acctResults.length === 0 && !acctSearching && (
+              <div style={{ fontSize: 13, color: C.textMuted }}>No matching accounts.</div>
+            )}
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textMuted, textAlign: 'center', margin: '4px 0' }}>
+              — or create the account —
+            </div>
+            <input
+              type="text" value={newAccountName} placeholder="New account name (person or company)"
+              onChange={(e) => { setNewAccountName(e.target.value); setAccount(null) }} style={inputStyle}
+            />
+            <button
+              onClick={() => { setBuildings([]); setPhase('building') }}
+              disabled={!newAccountName.trim()}
+              style={newAccountName.trim() ? { ...btnPrimary, minHeight: 46 } : { ...btnDisabled, minHeight: 46 }}
+            >
+              Continue with new account
+            </button>
           </div>
         )}
 
@@ -331,7 +337,7 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
         )}
 
         <button onClick={back} disabled={busy} style={{ ...btnSecondary, width: '100%' }}>
-          {phase === 'owner' ? 'Cancel' : 'Back'}
+          {phase === 'property' ? 'Cancel' : 'Back'}
         </button>
       </div>
     </div>

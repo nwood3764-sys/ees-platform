@@ -236,7 +236,7 @@ export default function HomeScreen({ navigate }) {
 
       {/* Quick links */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <QuickLink label="New Assessment" sub="Start a single-family energy assessment — create the owner, property, and building as needed" onClick={() => {
+        <QuickLink label="New Assessment" sub="Search the property address — create the property, account, and building as needed" onClick={() => {
           setAssessMsg(null); setAssessOpen(true)
         }} />
         <QuickLink label="Create work order" sub="Building access, and other field-created records" onClick={() => {
