@@ -20,6 +20,7 @@ import {
   fetchBuildingsForProperty, fetchUnitsForBuilding, fetchProjectsForProperty,
 } from './fieldMobileService'
 import { C, FONT, MONO, card, btnSecondary, statusChip } from './styles'
+import NewAssessmentSheet from './NewAssessmentSheet'
 
 function greeting() {
   const h = Number(new Intl.DateTimeFormat('en-US', {
@@ -69,6 +70,8 @@ export default function HomeScreen({ navigate }) {
   const [error, setError]     = useState(null)
   const [name, setName]       = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [assessOpen, setAssessOpen] = useState(false)
+  const [assessMsg, setAssessMsg] = useState(null)   // transient error banner for the sheet
   const [createTypes, setCreateTypes] = useState(null)   // null = loading
   const [createType, setCreateType] = useState(null)     // chosen work type, or null (phase 1)
   const [createBusy, setCreateBusy] = useState(false)
@@ -233,6 +236,9 @@ export default function HomeScreen({ navigate }) {
 
       {/* Quick links */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <QuickLink label="New Assessment" sub="Start a single-family energy assessment — create the owner, property, and building as needed" onClick={() => {
+          setAssessMsg(null); setAssessOpen(true)
+        }} />
         <QuickLink label="Create work order" sub="Building access, and other field-created records" onClick={() => {
           setCreateError(null); setCreateType(null); setPropSearch(null); setPropResults([]); resetAdhoc(); setCreateOpen(true)
           if (createTypes === null) {
@@ -591,6 +597,31 @@ export default function HomeScreen({ navigate }) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* New Assessment — self-service single-family assessment creation. */}
+      {assessOpen && (
+        <NewAssessmentSheet
+          onClose={() => setAssessOpen(false)}
+          onCreated={(res) => {
+            setAssessOpen(false)
+            navigate(`/field/wo/${res.work_order_id}`)
+          }}
+          onError={(msg) => {
+            setAssessMsg(msg)
+            setTimeout(() => setAssessMsg(null), 4000)
+          }}
+        />
+      )}
+      {assessMsg && (
+        <div style={{
+          position: 'fixed', left: 12, right: 12, bottom: 'calc(env(safe-area-inset-bottom) + 12px)',
+          zIndex: 120, background: C.sidebar, color: '#fff', borderRadius: 10,
+          padding: '12px 16px', fontFamily: FONT, fontSize: 14, fontWeight: 600,
+          boxShadow: '0 6px 24px rgba(13,26,46,0.28)',
+        }}>
+          {assessMsg}
         </div>
       )}
     </AppChrome>

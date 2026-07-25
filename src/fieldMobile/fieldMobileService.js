@@ -337,6 +337,63 @@ export async function fetchProjectsForProperty(propertyId) {
   return data || []
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// New Assessment — self-service single-family assessment creation.
+// The auditor selects-or-creates the building OWNER account, the property,
+// the building (Single Family Detached = no units / Attached = unit per
+// home), and the unit when attached. create_assessment_work_order stands up
+// whatever is missing and returns the ready work order.
+// ───────────────────────────────────────────────────────────────────────────
+export async function searchAccounts(q) {
+  const term = (q || '').trim()
+  if (term.length < 2) return []
+  const like = `%${term.replace(/[%_]/g, '')}%`
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('id, account_record_number, account_name')
+    .ilike('account_name', like)
+    .eq('account_is_deleted', false)
+    .order('account_name')
+    .limit(15)
+  if (error) throw error
+  return data || []
+}
+
+// Buildings with their record-type value, so the sheet can apply the
+// detached (no unit) vs attached (unit required) rule.
+export async function fetchBuildingsForAssessment(propertyId) {
+  const [{ data: blds, error: bErr }, { data: types, error: tErr }] = await Promise.all([
+    supabase.from('buildings')
+      .select('id, building_number_or_name, building_name, building_record_type')
+      .eq('property_id', propertyId).eq('building_is_deleted', false)
+      .order('building_number_or_name'),
+    supabase.from('picklist_values')
+      .select('id, picklist_value')
+      .eq('picklist_object', 'buildings').eq('picklist_field', 'record_type'),
+  ])
+  if (bErr) throw bErr
+  if (tErr) throw tErr
+  const byId = Object.fromEntries((types || []).map((t) => [t.id, t.picklist_value]))
+  return (blds || []).map((b) => ({ ...b, record_type_value: byId[b.building_record_type] || null }))
+}
+
+export async function createAssessmentWorkOrder({
+  accountId = null, newAccountName = null,
+  propertyId = null, newStreet = null, newCity = null, newState = null, newZip = null,
+  buildingId = null, newBuildingType = null,
+  unitId = null, newUnitName = null,
+} = {}) {
+  const { data, error } = await supabase.rpc('create_assessment_work_order', {
+    p_account_id: accountId, p_new_account_name: newAccountName,
+    p_property_id: propertyId, p_new_street: newStreet, p_new_city: newCity,
+    p_new_state: newState, p_new_zip: newZip,
+    p_building_id: buildingId, p_new_building_type: newBuildingType,
+    p_unit_id: unitId, p_new_unit_name: newUnitName,
+  })
+  if (error) throw error
+  return assertOutcome(unwrapRpcRow(data), 'Could not create the assessment.')
+}
+
 // Property search for the ad hoc path. Name/street match, small page.
 export async function searchProperties(q) {
   const term = (q || '').trim()
