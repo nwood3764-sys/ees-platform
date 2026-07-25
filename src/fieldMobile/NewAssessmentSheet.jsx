@@ -289,10 +289,11 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
             {(buildings || []).map((b) => (
               <ListButton key={b.id}
-                title={b.building_number_or_name || b.building_name}
-                sub={b.record_type_value === 'single_family_detached' ? 'Single Family Detached — no units'
-                  : b.record_type_value === 'single_family_attached' ? 'Single Family Attached — pick the unit next'
-                  : (b.record_type_value || null)}
+                title={`${property?.property_street || property?.property_name || newAddr.street.trim()} — Building ${b.building_number_or_name || b.building_name}`}
+                sub={b.record_type_label
+                  ? `${b.record_type_label}${b.record_type_value === 'single_family_detached' ? ' — no units'
+                      : b.record_type_value === 'single_family_attached' ? ' — select the unit next' : ''}`
+                  : 'Building record type not set'}
                 disabled={busy}
                 onClick={() => pickBuilding(b)} />
             ))}

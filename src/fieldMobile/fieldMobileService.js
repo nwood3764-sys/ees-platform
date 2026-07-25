@@ -368,13 +368,17 @@ export async function fetchBuildingsForAssessment(propertyId) {
       .eq('property_id', propertyId).eq('building_is_deleted', false)
       .order('building_number_or_name'),
     supabase.from('picklist_values')
-      .select('id, picklist_value')
+      .select('id, picklist_value, picklist_label')
       .eq('picklist_object', 'buildings').eq('picklist_field', 'record_type'),
   ])
   if (bErr) throw bErr
   if (tErr) throw tErr
-  const byId = Object.fromEntries((types || []).map((t) => [t.id, t.picklist_value]))
-  return (blds || []).map((b) => ({ ...b, record_type_value: byId[b.building_record_type] || null }))
+  const byId = Object.fromEntries((types || []).map((t) => [t.id, t]))
+  return (blds || []).map((b) => ({
+    ...b,
+    record_type_value: byId[b.building_record_type]?.picklist_value || null,
+    record_type_label: byId[b.building_record_type]?.picklist_label || null,
+  }))
 }
 
 export async function createAssessmentWorkOrder({
