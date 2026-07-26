@@ -73,6 +73,22 @@ const LIMIT_FIELD = {
   key: 'limit', label: 'Max categories', type: 'number', min: 1, max: 100,
   help: 'Keeps charts legible. Extra categories are dropped after sorting.',
 }
+const NUMBER_FORMAT_FIELD = {
+  key: 'number_format', label: 'Number format', type: 'select',
+  options: [
+    { value: 'number',   label: 'Number' },
+    { value: 'currency', label: 'Currency (USD)' },
+    { value: 'percent',  label: 'Percent' },
+    { value: 'compact',  label: 'Compact (1.2K)' },
+  ],
+  help: 'Applied to data labels, tooltips, and axis values.',
+}
+const DECIMALS_FIELD = {
+  key: 'decimals', label: 'Decimal places', type: 'number', min: 0, max: 4,
+  dependsOn: { key: 'number_format', notEquals: 'compact' },
+}
+const DATA_LABELS_FIELD = { key: 'show_data_labels', label: 'Show data labels', type: 'boolean' }
+const LEGEND_FIELD      = { key: 'show_legend', label: 'Show legend', type: 'boolean' }
 
 // ─── Preview helpers (on-palette, no external chart lib on the canvas yet) ────
 function previewBox(children, opts = {}) {
@@ -123,8 +139,8 @@ export const COMPONENT_REGISTRY = [
     id: 'metric', label: 'Single Metric', category: 'Metrics & KPIs',
     icon: 'M3 3v18h18M7 14l3-3 4 4 5-6',
     dataSource: 'report', defaultSize: { w: 3, h: 2 }, minSize: { w: 2, h: 2 },
-    defaultConfig: { measure_type: 'count', label: 'records' },
-    configSchema: [MEASURE_FIELD, MEASURE_TARGET_FIELD, { key: 'label', label: 'Caption', type: 'text', placeholder: 'records' }],
+    defaultConfig: { measure_type: 'count', label: 'records', number_format: 'number' },
+    configSchema: [MEASURE_FIELD, MEASURE_TARGET_FIELD, { key: 'label', label: 'Caption', type: 'text', placeholder: 'records' }, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: ({ config }) => previewBox((<>
       <div style={{ fontSize: 38, fontWeight: 700, color: C.textPrimary, lineHeight: 1 }}>1,248</div>
       <div style={{ fontSize: 11, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>{config.label || 'records'}</div>
@@ -134,8 +150,8 @@ export const COMPONENT_REGISTRY = [
     id: 'gauge', label: 'Gauge', category: 'Goal & Progress',
     icon: 'M12 3a9 9 0 100 18 9 9 0 000-18zm0 4v5l3 2',
     dataSource: 'report', defaultSize: { w: 3, h: 3 }, minSize: { w: 2, h: 2 },
-    defaultConfig: { measure_type: 'count', target: 100 },
-    configSchema: [MEASURE_FIELD, MEASURE_TARGET_FIELD, { key: 'target', label: 'Target', type: 'number', min: 0 }],
+    defaultConfig: { measure_type: 'count', target: 100, number_format: 'number' },
+    configSchema: [MEASURE_FIELD, MEASURE_TARGET_FIELD, { key: 'target', label: 'Target', type: 'number', min: 0 }, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: ({ config }) => previewBox((<>
       <div style={{ fontSize: 26, fontWeight: 700, color: C.textPrimary }}>68 / {config.target ?? 100}</div>
       <div style={{ width: '80%', height: 10, borderRadius: 5, background: C.borderDark, overflow: 'hidden' }}>
@@ -149,14 +165,14 @@ export const COMPONENT_REGISTRY = [
     id: 'bar', label: 'Bar Chart', category: 'Charts',
     icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
     dataSource: 'report', defaultSize: { w: 6, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', sort_by: 'value_desc', limit: 20, orientation: 'horizontal' },
+    defaultConfig: { measure_type: 'count', sort_by: 'value_desc', limit: 20, orientation: 'horizontal', show_data_labels: true, number_format: 'number' },
     configSchema: [
       GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD,
       { key: 'orientation', label: 'Orientation', type: 'select', options: [
         { value: 'horizontal', label: 'Horizontal (ranked)' },
         { value: 'vertical',   label: 'Vertical' },
       ] },
-      SORT_FIELD, LIMIT_FIELD,
+      SORT_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD,
     ],
     Preview: ({ config }) => previewBox(fakeBars(config.orientation === 'vertical')),
   },
@@ -164,8 +180,8 @@ export const COMPONENT_REGISTRY = [
     id: 'line', label: 'Line Chart', category: 'Charts',
     icon: 'M3 17l5-6 4 3 6-8M3 21h18',
     dataSource: 'report', defaultSize: { w: 6, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', sort_by: 'name', limit: 20 },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, SORT_FIELD, LIMIT_FIELD],
+    defaultConfig: { measure_type: 'count', sort_by: 'name', limit: 20, show_data_labels: false, number_format: 'number' },
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, SORT_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox((
       <svg viewBox="0 0 100 60" preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
         <polyline points="0,50 20,30 40,38 60,15 80,25 100,8" fill="none" stroke={C.emerald} strokeWidth="2.5" />
@@ -176,24 +192,24 @@ export const COMPONENT_REGISTRY = [
     id: 'pie', label: 'Pie Chart', category: 'Charts',
     icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zM12 2v10l8 4',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', limit: 8 },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD],
+    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, number_format: 'number' },
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, LEGEND_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox(fakePie(false)),
   },
   {
     id: 'donut', label: 'Donut Chart', category: 'Charts',
     icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 6a4 4 0 100 8 4 4 0 000-8z',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', limit: 8 },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD],
+    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, show_legend: true, number_format: 'number' },
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, LEGEND_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox(fakePie(true)),
   },
   {
     id: 'funnel', label: 'Funnel', category: 'Charts',
     icon: 'M3 4h18l-7 8v6l-4 2v-8z',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', limit: 8 },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD],
+    defaultConfig: { measure_type: 'count', limit: 8, show_data_labels: true, number_format: 'number' },
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, DATA_LABELS_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox((
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, justifyContent: 'center', height: '100%' }}>
         {[100, 76, 52, 30].map((w, i) => (
@@ -226,8 +242,8 @@ export const COMPONENT_REGISTRY = [
     id: 'ranked_list', label: 'Ranked List', category: 'Tables & Lists',
     icon: 'M4 6h10M4 12h16M4 18h7M18 6l3 0M16 18l5 0',
     dataSource: 'report', defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 },
-    defaultConfig: { measure_type: 'count', sort_by: 'value_desc', limit: 20 },
-    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD],
+    defaultConfig: { measure_type: 'count', sort_by: 'value_desc', limit: 20, number_format: 'number' },
+    configSchema: [GROUP_BY_FIELD, MEASURE_FIELD, MEASURE_TARGET_FIELD, LIMIT_FIELD, NUMBER_FORMAT_FIELD, DECIMALS_FIELD],
     Preview: () => previewBox((
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 7 }}>
         {[['Dane', 90], ['Milwaukee', 64], ['Brown', 48], ['Rock', 30]].map(([n, w], i) => (

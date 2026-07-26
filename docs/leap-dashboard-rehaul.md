@@ -54,6 +54,7 @@ The LEAP dashboard builder should stand next to Power BI, Salesforce Lightning d
 
 **Phase A — Polish the 9 existing data widgets (the "cartoonish" fix; no new queries).**
 Chart kit (themed tooltip/legend/axes/palette/formatters) + fill-height + data labels toggle + axis titles + number format picker (number/currency/percent/compact, decimals) + legend toggle + metric conditional color thresholds + table column picker/sort/totals + funnel fixed (fill height, sorted stages, stage labels + values + % of first). Highest visible impact per hour.
+*Status 2026-07-26 — first increment SHIPPED on PR #220's branch:* `src/builder/chartKit/` (LEAP ECharts theme, lazy tree-shaken core in its own `vendor-echarts` Vite chunk — note the substring trap: match `/echarts/` path-delimited or it also captures `recharts` — `LeapEChart` component with ResizeObserver fill-height, `formatNumber`/`formatAxisTick`); bar/line/pie/donut/funnel/gauge ported to themed ECharts with data labels, legends, styled tooltips, drill-through clicks preserved; donut total-in-center; funnel minSize floor + outside stage labels; metric/ranked-list/table formatting + fill-height. New config keys (all additive jsonb): `show_data_labels`, `show_legend`, `number_format`, `decimals`. *Phase A remainder:* table column picker/sort/totals, metric conditional thresholds, axis titles/ranges, reference lines.
 
 **Phase B — Query shapes.**
 `report_aggregate_2d` (category + series pivot), `report_aggregate_time` (date grain param: day/week/month/quarter/year), single-aggregate fast path for metric/gauge/KPI, multi-measure per-entity for scatter. All RLS-respecting SECURITY INVOKER, verified with explicit SELECTs.
@@ -93,7 +94,7 @@ Sequencing: A alone answers "cartoonish." A+B+C(P1) answers "enterprise-class." 
 
 ## 7. Decisions
 
-1. **Charting library: adopt Apache ECharts as the engine (port the 9 existing widgets in Phase A) vs. extend Recharts.** Recommendation: **ECharts** — Recharts would leave us hand-building reference lines, conditional segment colors, gauges, heatmaps, and combo charts, i.e. the exact gap that triggered this rehaul; ECharts has them natively under Apache-2.0 with DB-storable JSON themes. Cost: a one-time port of 9 simple renderers behind the existing `WidgetBody` switch (runner + builder share it, so one port covers both). — *pending, Nicholas*
+1. **Charting library: Apache ECharts.** **DECIDED 2026-07-26 (Nicholas — "why aren't you just building"; build proceeded same session).** Engine adopted; chart-widget renderers ported behind `WidgetBody` (runner + builder share it). Recharts remains only for the 7 non-dashboard modules that still import `RechartsLazy` (Stock/Portal/ProjectImplementation/ProjectPlanning/Field/Fleet/Incentives) — port those opportunistically, then retire `vendor-recharts`.
 2. **Component breadth target: ship C(P1+P2) ≈ 27 types, hold P3 for demand.** Recommendation: yes. — *pending, Nicholas*
 3. **Slicer-style on-canvas filter widgets vs. keeping filters only in the header bar.** Recommendation: build filter *widgets* (Salesforce/Power BI both have them; the header bar stays for global filters). — *pending, Nicholas*
 
