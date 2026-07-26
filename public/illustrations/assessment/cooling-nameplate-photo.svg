@@ -1,78 +1,88 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif">
-  <!-- Cooling nameplate photo guide — colored illustrated style. The data plate
-       is on the condenser's side panel near the service valves. -->
+  <!-- Cooling nameplate photo guide — realistic style. The data plate is on the
+       condenser's side/corner panel near the service valves. -->
   <defs>
-    <filter id="pencil" x="-2%" y="-2%" width="104%" height="104%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="6" result="n"/>
-      <feDisplacementMap in="SourceGraphic" in2="n" scale="2"/>
+    <linearGradient id="cn_cab" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#9aa7ba"/><stop offset="0.2" stop-color="#dfe5ee"/>
+      <stop offset="0.55" stop-color="#f3f6fa"/><stop offset="1" stop-color="#a4b0c2"/>
+    </linearGradient>
+    <linearGradient id="cn_plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f8fd"/><stop offset="1" stop-color="#dfe9f5"/>
+    </linearGradient>
+    <filter id="cn_soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4"/>
     </filter>
   </defs>
 
-  <rect x="0" y="0" width="480" height="560" fill="#ffffff"/>
-  <rect x="0" y="0" width="480" height="560" fill="#eef4f0"/>
+  <rect x="0" y="0" width="480" height="560" fill="#ecf3ee"/>
 
-  <g filter="url(#pencil)">
-    <!-- condenser, small, upper-left -->
-    <rect x="34" y="58" width="140" height="180" rx="9" fill="#e3e9f3" stroke="#243b5e" stroke-width="3.5"/>
-    <circle cx="104" cy="112" r="32" fill="#f4f7fb" stroke="#41597e" stroke-width="2.5"/>
-    <g stroke="#7d92b3" stroke-width="2">
-      <line x1="104" y1="84" x2="104" y2="140"/>
-      <line x1="76" y1="112" x2="132" y2="112"/>
-      <line x1="84" y1="92" x2="124" y2="132"/>
-      <line x1="124" y1="92" x2="84" y2="132"/>
-    </g>
-    <g stroke="#7d92b3" stroke-width="2">
-      <line x1="46" y1="164" x2="162" y2="164"/>
-      <line x1="46" y1="180" x2="162" y2="180"/>
-      <line x1="46" y1="196" x2="162" y2="196"/>
-      <line x1="46" y1="212" x2="162" y2="212"/>
-    </g>
-    <!-- plate location on the side panel by the service valves -->
-    <rect x="140" y="140" width="42" height="30" rx="4" fill="#dcecfb" stroke="#2a6bb0" stroke-width="3.5"/>
-    <path d="M174 226 q18 -2 30 -2" stroke="#3a4d68" stroke-width="6" fill="none"/>
-
-    <!-- magnifier -->
-    <circle cx="206" cy="182" r="30" fill="none" stroke="#2a6bb0" stroke-width="5"/>
-    <line x1="228" y1="204" x2="258" y2="238" stroke="#2a6bb0" stroke-width="7"/>
-
-    <!-- zoomed data plate -->
-    <rect x="76" y="272" width="330" height="234" rx="10" fill="#eef3fa" stroke="#243b5e" stroke-width="4"/>
-    <rect x="76" y="272" width="330" height="44" rx="10" fill="#c9d8ec"/>
-    <line x1="98" y1="302" x2="250" y2="302" stroke="#243b5e" stroke-width="5"/>
-    <line x1="98" y1="346" x2="382" y2="346" stroke="#41597e" stroke-width="3.5"/>
-    <line x1="98" y1="374" x2="330" y2="374" stroke="#7d92b3" stroke-width="3"/>
-    <line x1="98" y1="402" x2="366" y2="402" stroke="#7d92b3" stroke-width="3"/>
-    <rect x="98" y="420" width="200" height="34" fill="#ffffff" stroke="#7d92b3" stroke-width="2"/>
-    <g stroke="#243b5e">
-      <line x1="322" y1="424" x2="322" y2="452" stroke-width="3"/>
-      <line x1="330" y1="424" x2="330" y2="452" stroke-width="1.6"/>
-      <line x1="336" y1="424" x2="336" y2="452" stroke-width="4"/>
-      <line x1="346" y1="424" x2="346" y2="452" stroke-width="1.6"/>
-      <line x1="352" y1="424" x2="352" y2="452" stroke-width="3"/>
-      <line x1="362" y1="424" x2="362" y2="452" stroke-width="1.6"/>
-      <line x1="368" y1="424" x2="368" y2="452" stroke-width="4"/>
-    </g>
-    <line x1="98" y1="478" x2="286" y2="478" stroke="#7d92b3" stroke-width="3"/>
+  <!-- condenser, upper-left -->
+  <ellipse cx="112" cy="252" rx="86" ry="8" fill="#5f7a5c" opacity="0.3" filter="url(#cn_soft)"/>
+  <rect x="34" y="54" width="152" height="196" rx="9" fill="url(#cn_cab)" stroke="#44526a" stroke-width="3"/>
+  <!-- top grille + fan -->
+  <ellipse cx="110" cy="112" rx="52" ry="36" fill="#2f3742"/>
+  <g stroke="#c9d1dd" stroke-width="2">
+    <ellipse cx="110" cy="112" rx="52" ry="36" fill="none"/>
+    <ellipse cx="110" cy="112" rx="34" ry="23" fill="none"/>
+    <line x1="58" y1="112" x2="162" y2="112"/><line x1="110" y1="76" x2="110" y2="148"/>
   </g>
+  <circle cx="110" cy="112" r="7" fill="#dde3ec" stroke="#8894a5" stroke-width="2"/>
+  <!-- coil fins -->
+  <rect x="42" y="166" width="136" height="76" fill="#8f9dad"/>
+  <g stroke="#77869a" stroke-width="1.8">
+    <line x1="50" y1="166" x2="50" y2="242"/><line x1="62" y1="166" x2="62" y2="242"/>
+    <line x1="74" y1="166" x2="74" y2="242"/><line x1="86" y1="166" x2="86" y2="242"/>
+    <line x1="98" y1="166" x2="98" y2="242"/><line x1="110" y1="166" x2="110" y2="242"/>
+    <line x1="122" y1="166" x2="122" y2="242"/><line x1="134" y1="166" x2="134" y2="242"/>
+    <line x1="146" y1="166" x2="146" y2="242"/><line x1="158" y1="166" x2="158" y2="242"/>
+  </g>
+  <!-- service corner panel with the plate, near the line connections -->
+  <rect x="148" y="120" width="38" height="88" rx="4" fill="#dde3ec" stroke="#8894a5" stroke-width="2"/>
+  <rect x="154" y="132" width="26" height="20" rx="2" fill="url(#cn_plate)" stroke="#2a6bb0" stroke-width="3"/>
+  <path d="M186 196 Q206 194 218 194" stroke="#2e3540" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M186 210 Q206 209 218 209" stroke="#b98a52" stroke-width="4" fill="none" stroke-linecap="round"/>
+
+  <!-- magnifier -->
+  <circle cx="216" cy="150" r="30" fill="#ffffff" opacity="0.35"/>
+  <circle cx="216" cy="150" r="30" fill="none" stroke="#2a6bb0" stroke-width="5"/>
+  <line x1="238" y1="172" x2="268" y2="204" stroke="#2a6bb0" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- zoomed data plate -->
+  <rect x="72" y="272" width="338" height="238" rx="10" fill="url(#cn_plate)" stroke="#44526a" stroke-width="3"/>
+  <circle cx="88" cy="288" r="4" fill="#aab6c8"/><circle cx="394" cy="288" r="4" fill="#aab6c8"/>
+  <circle cx="88" cy="494" r="4" fill="#aab6c8"/><circle cx="394" cy="494" r="4" fill="#aab6c8"/>
+  <rect x="86" y="284" width="180" height="24" rx="3" fill="#24478a"/>
+  <line x1="94" y1="342" x2="386" y2="342" stroke="#41597e" stroke-width="3.5"/>
+  <g stroke="#7d92b3" stroke-width="3">
+    <line x1="94" y1="370" x2="330" y2="370"/><line x1="94" y1="398" x2="366" y2="398"/>
+  </g>
+  <rect x="94" y="416" width="204" height="36" fill="#ffffff" stroke="#7d92b3" stroke-width="2"/>
+  <g stroke="#243b5e">
+    <line x1="322" y1="420" x2="322" y2="448" stroke-width="3"/><line x1="330" y1="420" x2="330" y2="448" stroke-width="1.6"/>
+    <line x1="336" y1="420" x2="336" y2="448" stroke-width="4"/><line x1="346" y1="420" x2="346" y2="448" stroke-width="1.6"/>
+    <line x1="352" y1="420" x2="352" y2="448" stroke-width="3"/><line x1="362" y1="420" x2="362" y2="448" stroke-width="1.6"/>
+    <line x1="368" y1="420" x2="368" y2="448" stroke-width="4"/>
+  </g>
+  <line x1="94" y1="476" x2="286" y2="476" stroke="#7d92b3" stroke-width="3"/>
 
   <!-- capture frame -->
-  <rect x="58" y="254" width="366" height="270" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/>
+  <rect x="54" y="254" width="374" height="274" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/>
 
-  <!-- labels -->
+  <!-- callouts -->
   <g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
-    <text x="26" y="34">The data plate is on the side panel</text>
-    <text x="212" y="120">Look near the pipe</text>
-    <text x="212" y="142">connections</text>
-    <text x="240" y="248">Get close — fill the frame</text>
-    <text x="96" y="548">Model and serial numbers must be readable</text>
+    <text x="24" y="32">The data plate is on the side panel</text>
+    <text x="222" y="96">Look near the pipe</text>
+    <text x="222" y="118">connections</text>
+    <text x="244" y="248">Get close — fill the frame</text>
+    <text x="94" y="548">Model and serial numbers must be readable</text>
   </g>
   <g stroke="#4a5e7a" stroke-width="2.5" fill="none">
-    <path d="M208 112 q-14 12 -22 24"/>
-    <path d="M120 42 q-20 8 -40 12"/>
+    <path d="M218 90 q-26 22 -40 42"/>
+    <path d="M118 40 q-24 8 -46 10"/>
   </g>
 
   <!-- camera badge -->
-  <g transform="translate(410,196)">
+  <g transform="translate(410,192)">
     <circle cx="26" cy="26" r="26" fill="#3ecf8e"/>
     <rect x="10" y="18" width="32" height="22" rx="4" fill="#ffffff"/>
     <circle cx="26" cy="29" r="7" fill="#3ecf8e"/>

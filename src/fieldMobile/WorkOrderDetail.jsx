@@ -1819,25 +1819,40 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
               {screen.field.required ? 'Required' : 'Optional — skip if not applicable.'}
             </div>
             {screen.field.illustration && (
-              <button
-                onClick={() => setExampleZoom(screen.field.illustration)}
-                style={{
-                  appearance: 'none', cursor: 'pointer', display: 'block', width: '100%',
-                  background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
-                  padding: 0, marginBottom: 14, overflow: 'hidden',
-                }}
-                aria-label="View example"
-              >
-                <img src={screen.field.illustration} alt={`Example — ${screen.field.label}`}
-                  style={{ display: 'block', width: '100%', maxHeight: '56dvh', objectFit: 'contain', background: '#ffffff' }} />
-                <span style={{
-                  display: 'block', padding: '7px 10px', borderTop: `1px solid ${C.border}`,
-                  fontFamily: FONT, fontSize: 12.5, fontWeight: 600, color: C.textSecondary,
-                  background: C.cardSecondary, textAlign: 'center',
-                }}>
-                  Example — what to include · tap to enlarge
-                </span>
-              </button>
+              <div style={{ marginBottom: 14 }}>
+                {/* Tapping the example opens the camera — same action as Take Photo. */}
+                <button
+                  onClick={() => triggerPhoto(screen.field.name)}
+                  disabled={uploading}
+                  style={{
+                    appearance: 'none', cursor: 'pointer', display: 'block', width: '100%',
+                    background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+                    padding: 0, overflow: 'hidden',
+                  }}
+                  aria-label="Take photo like this example"
+                >
+                  <img src={screen.field.illustration} alt={`Example — ${screen.field.label}`}
+                    style={{ display: 'block', width: '100%', maxHeight: '56dvh', objectFit: 'contain', background: '#ffffff' }} />
+                  <span style={{
+                    display: 'block', padding: '7px 10px', borderTop: `1px solid ${C.border}`,
+                    fontFamily: FONT, fontSize: 12.5, fontWeight: 600, color: C.textSecondary,
+                    background: C.cardSecondary, textAlign: 'center',
+                  }}>
+                    Example — take your photo like this · tap to open the camera
+                  </span>
+                </button>
+                <button
+                  onClick={() => setExampleZoom(screen.field.illustration)}
+                  style={{
+                    appearance: 'none', background: 'none', border: 'none', cursor: 'pointer',
+                    display: 'block', margin: '6px auto 0', padding: 4,
+                    fontFamily: FONT, fontSize: 12.5, fontWeight: 600, color: C.textMuted,
+                    textDecoration: 'underline',
+                  }}
+                >
+                  View example full screen
+                </button>
+              </div>
             )}
             <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
             <CaptureBtn

@@ -1,74 +1,92 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif">
-  <!-- Water Heating System — full equipment photo guide, colored illustrated style. -->
+  <!-- Water Heating System — full equipment photo guide. Realistic style:
+       cylindrical shading, true anatomy (draft hood, T&P, dielectric
+       connections, drain pan). Callouts preserved. -->
   <defs>
-    <filter id="pencil" x="-2%" y="-2%" width="104%" height="104%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="9" result="n"/>
-      <feDisplacementMap in="SourceGraphic" in2="n" scale="2.2"/>
+    <linearGradient id="wtank" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#9daaba"/><stop offset="0.22" stop-color="#e2e8f0"/>
+      <stop offset="0.5" stop-color="#f7f9fb"/><stop offset="0.8" stop-color="#d3dbe6"/>
+      <stop offset="1" stop-color="#a3afc0"/>
+    </linearGradient>
+    <linearGradient id="wflue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8e99a9"/><stop offset="0.45" stop-color="#e4e8ee"/>
+      <stop offset="1" stop-color="#98a3b3"/>
+    </linearGradient>
+    <linearGradient id="wwall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/>
+    </linearGradient>
+    <filter id="wsoft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5"/>
     </filter>
   </defs>
 
-  <rect x="0" y="0" width="480" height="560" fill="#ffffff"/>
-  <rect x="0" y="0" width="480" height="474" fill="#f2f0ea"/>
-  <rect x="0" y="474" width="480" height="86" fill="#e6e0d2"/>
-  <line x1="0" y1="474" x2="480" y2="474" stroke="#b9b09c" stroke-width="3" filter="url(#pencil)"/>
+  <!-- room -->
+  <rect x="0" y="0" width="480" height="560" fill="url(#wwall)"/>
+  <rect x="0" y="472" width="480" height="88" fill="#d9d2c1"/>
+  <rect x="0" y="472" width="480" height="8" fill="#c4bca7"/>
 
-  <g filter="url(#pencil)">
-    <!-- flue rising from the draft hood -->
-    <rect x="222" y="44" width="26" height="88" fill="#c2cbd8" stroke="#41597e" stroke-width="3"/>
-    <path d="M206 132 L264 132 L248 112 L222 112 Z" fill="#cfd9e9" stroke="#41597e" stroke-width="3"/>
+  <!-- shadow -->
+  <ellipse cx="236" cy="476" rx="140" ry="13" fill="#8d8468" opacity="0.35" filter="url(#wsoft)"/>
 
-    <!-- tank -->
-    <rect x="158" y="132" width="154" height="300" rx="42" fill="#e8edf5" stroke="#243b5e" stroke-width="4"/>
-    <rect x="158" y="132" width="42" height="300" rx="42" fill="#d4dcea"/>
-    <line x1="160" y1="190" x2="310" y2="190" stroke="#9db0ca" stroke-width="2.5"/>
-    <line x1="160" y1="382" x2="310" y2="382" stroke="#9db0ca" stroke-width="2.5"/>
+  <!-- flue with draft hood -->
+  <rect x="224" y="40" width="24" height="74" fill="url(#wflue)" stroke="#6a7788" stroke-width="2"/>
+  <path d="M204 138 L268 138 L250 112 L222 112 Z" fill="#cfd7e2" stroke="#6a7788" stroke-width="2"/>
 
-    <!-- cold in (sky) / hot out piping -->
-    <path d="M196 132 L196 84 L92 84" stroke="#7eb3e8" stroke-width="7" fill="none"/>
-    <circle cx="140" cy="84" r="10" fill="#f2c063" stroke="#8a6720" stroke-width="2.5"/>
-    <path d="M282 132 L282 66 L400 66" stroke="#b98a2e" stroke-width="7" fill="none"/>
+  <!-- tank: cylinder with domed top -->
+  <path d="M158 168 Q158 132 236 132 Q314 132 314 168 L314 428 Q314 444 236 444 Q158 444 158 428 Z"
+        fill="url(#wtank)" stroke="#44526a" stroke-width="3"/>
+  <path d="M158 168 Q236 188 314 168" fill="none" stroke="#aab6c6" stroke-width="2"/>
+  <path d="M158 420 Q236 440 314 420" fill="none" stroke="#aab6c6" stroke-width="2"/>
+  <!-- specular highlight -->
+  <path d="M196 150 Q188 290 196 420" stroke="#ffffff" stroke-width="10" opacity="0.5" stroke-linecap="round" fill="none"/>
 
-    <!-- T&P valve + discharge tube down the side -->
-    <path d="M312 218 L348 218" stroke="#5a6f8e" stroke-width="6"/>
-    <rect x="336" y="206" width="22" height="16" rx="3" fill="#f2c063" stroke="#8a6720" stroke-width="2"/>
-    <path d="M348 222 L348 440" stroke="#5a6f8e" stroke-width="6"/>
+  <!-- water connections: cold (sky) with shutoff, hot (brass) -->
+  <path d="M198 138 L198 84 L96 84" stroke="#7eb3e8" stroke-width="7" fill="none" stroke-linecap="round"/>
+  <rect x="132" y="74" width="20" height="20" rx="4" fill="#e8bf63" stroke="#9a7a2c" stroke-width="2"/>
+  <circle cx="142" cy="70" r="7" fill="#e8bf63" stroke="#9a7a2c" stroke-width="2"/>
+  <path d="M276 138 L276 64 L396 64" stroke="#c09a5e" stroke-width="7" fill="none" stroke-linecap="round"/>
 
-    <!-- burner door + flame glow, drain valve -->
-    <rect x="204" y="396" width="62" height="26" rx="5" fill="#f6dfae" stroke="#b98a2e" stroke-width="2.5"/>
-    <path d="M216 418 q4 -12 8 0 q4 -10 8 0 q4 -12 8 0 q4 -10 8 0" stroke="#e8a949" stroke-width="3" fill="none"/>
-    <circle cx="176" cy="440" r="8" fill="#cfd9e9" stroke="#41597e" stroke-width="2.5"/>
+  <!-- T&P valve + discharge to within 6" of floor -->
+  <path d="M314 214 L346 214" stroke="#8e99a9" stroke-width="7" stroke-linecap="round"/>
+  <rect x="336" y="200" width="24" height="18" rx="3" fill="#e8bf63" stroke="#9a7a2c" stroke-width="2"/>
+  <path d="M352 218 L352 448" stroke="#b7c1cf" stroke-width="7" stroke-linecap="round"/>
 
-    <!-- gas line + valve -->
-    <path d="M158 372 L104 372 L104 452" stroke="#5a6f8e" stroke-width="5" fill="none"/>
-    <circle cx="104" cy="404" r="9" fill="#f2c063" stroke="#8a6720" stroke-width="2.5"/>
+  <!-- control valve + burner door + pilot glow -->
+  <rect x="212" y="352" width="52" height="34" rx="5" fill="#dde3ec" stroke="#6a7788" stroke-width="2"/>
+  <circle cx="238" cy="369" r="9" fill="#eef1f6" stroke="#6a7788" stroke-width="2"/>
+  <rect x="220" y="400" width="36" height="22" rx="4" fill="#3a3f4a"/>
+  <ellipse cx="238" cy="412" rx="13" ry="6" fill="#f2b95b" opacity="0.9"/>
+  <!-- gas line to control valve -->
+  <path d="M212 372 L128 372 L128 456" stroke="#5f6c7f" stroke-width="5" fill="none"/>
+  <rect x="118" y="398" width="20" height="14" rx="3" fill="#e8bf63" stroke="#9a7a2c" stroke-width="1.8"/>
+  <!-- drain valve -->
+  <circle cx="184" cy="432" r="7" fill="#dde3ec" stroke="#6a7788" stroke-width="2"/>
 
-    <!-- drain pan + floor shadow -->
-    <path d="M146 452 L324 452 L332 470 L138 470 Z" fill="#d8d3c6" stroke="#9a927c" stroke-width="3"/>
-    <ellipse cx="236" cy="478" rx="130" ry="9" fill="#cfc6b2" opacity="0.7"/>
-  </g>
+  <!-- drain pan -->
+  <path d="M146 456 L328 456 L336 474 L138 474 Z" fill="#cfd7e2" stroke="#77869a" stroke-width="2"/>
 
   <!-- capture frame -->
-  <rect x="64" y="34" width="356" height="464" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/>
+  <rect x="64" y="30" width="356" height="470" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/>
 
-  <!-- labels -->
+  <!-- callouts -->
   <g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">
-    <text x="26" y="24">Fit the whole water heater in one shot</text>
-    <text x="292" y="46">Vent / flue</text>
-    <text x="26" y="126">Water pipes on top</text>
-    <text x="356" y="330">Relief valve</text>
-    <text x="30" y="512">Gas line</text>
-    <text x="230" y="540">Show the base, pan, and floor around it</text>
+    <text x="26" y="22">Fit the whole water heater in one shot</text>
+    <text x="292" y="44">Vent / flue</text>
+    <text x="24" y="122">Water pipes on top</text>
+    <text x="360" y="330">Relief valve</text>
+    <text x="28" y="512">Gas line</text>
+    <text x="228" y="540">Show the base, pan, and floor around it</text>
   </g>
   <g stroke="#4a5e7a" stroke-width="2.5" fill="none">
-    <path d="M290 40 q-24 8 -42 16"/>
-    <path d="M110 118 q26 -14 52 -22"/>
-    <path d="M380 318 q-16 -40 -28 -80"/>
-    <path d="M66 504 q16 -34 30 -66"/>
-    <path d="M262 532 q-24 -20 -40 -44"/>
+    <path d="M290 38 q-22 10 -38 20"/>
+    <path d="M108 114 q28 -16 54 -24"/>
+    <path d="M384 318 q-20 -44 -28 -86"/>
+    <path d="M64 504 q22 -36 38 -70"/>
+    <path d="M260 532 q-26 -20 -42 -44"/>
   </g>
 
   <!-- camera badge -->
-  <g transform="translate(398,506)">
+  <g transform="translate(400,506)">
     <circle cx="26" cy="26" r="26" fill="#3ecf8e"/>
     <rect x="10" y="18" width="32" height="22" rx="4" fill="#ffffff"/>
     <circle cx="26" cy="29" r="7" fill="#3ecf8e"/>
