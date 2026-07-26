@@ -796,13 +796,48 @@ export async function loadRecordDetailData(tableName, recordId) {
     return { record, layout: null, sections: [], picklists, lookups: new Map(), actionOverrides: [] }
   }
 
+  // Cross-object (related) fields — fields[] entries with
+  // type='related_field' and name '<fk_column>.<related_column>' show a
+  // read-only value from the record a lookup on THIS record points at
+  // (e.g. property HUD fields on an opportunity page). Group the entries
+  // by FK column, fetch each parent row ONCE with just the needed columns
+  // (RLS-respecting), and merge the values into the record under the
+  // dotted names — FieldGroupWidget then reads record[f.name] like any
+  // other field. Failures degrade to blank values, never a broken page.
+  const relatedFieldGroups = new Map()
+  for (const sec of layoutData.sections) {
+    for (const w of sec.widgets) {
+      if (w.widget_type !== 'field_group' || !w.widget_config?.fields) continue
+      for (const f of w.widget_config.fields) {
+        if (f.type !== 'related_field' || !f.related?.table || !f.related?.column) continue
+        const fk = f.related.fk_column || String(f.name).split('.')[0]
+        if (!fk) continue
+        if (!relatedFieldGroups.has(fk)) relatedFieldGroups.set(fk, { table: f.related.table, fields: [] })
+        relatedFieldGroups.get(fk).fields.push(f)
+      }
+    }
+  }
+  await Promise.all([...relatedFieldGroups.entries()].map(async ([fk, group]) => {
+    const parentId = record[fk]
+    if (!parentId) return
+    const cols = [...new Set(group.fields.map(f => f.related.column))].join(',')
+    try {
+      const { data: row, error } = await supabase.from(group.table).select(cols).eq('id', parentId).maybeSingle()
+      if (error || !row) return
+      for (const f of group.fields) record[f.name] = row[f.related.column]
+    } catch { /* leave the dotted keys unset — fields render as '—' */ }
+  }))
+
   // Collect lookup requests from all field_group widgets.
-  // Two flavors are gathered side-by-side:
+  // Three flavors are gathered side-by-side:
   //   • static lookups (type='lookup') — target table fixed in widget config
   //   • polymorphic lookups (type='polymorphic_lookup') — target table read
   //     from a sibling column on the record (e.g. env_parent_object names
   //     the table for env_parent_record_id). The sibling column is given
   //     by widget_config.fields[].object_field.
+  //   • related fields whose PARENT column is itself a lookup — the fetched
+  //     value is a UUID into another table; resolve its display name so the
+  //     cell shows e.g. the owner account's name, not a UUID.
   const lookupRequests = []
   const polyRequests = []
   for (const sec of layoutData.sections) {
@@ -818,6 +853,12 @@ export async function loadRecordDetailData(tableName, recordId) {
           } else if (f.type === 'polymorphic_lookup' && record[f.name] && f.object_field) {
             polyRequests.push({
               object_value: record[f.object_field],
+              value: record[f.name],
+            })
+          } else if (f.type === 'related_field' && record[f.name] && f.related?.column_type === 'lookup' && f.related?.lookup_table && f.related?.lookup_field) {
+            lookupRequests.push({
+              lookup_table: f.related.lookup_table,
+              lookup_field: f.related.lookup_field,
               value: record[f.name],
             })
           }

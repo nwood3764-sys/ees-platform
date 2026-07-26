@@ -3009,6 +3009,39 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // just confuses the user (and produced an incorrect 'Required fields
         // missing' error before the prefix-map fix landed).
         if (isCreate && isSystemField(f.name)) return null
+
+        // Cross-object (related) fields — read-only values pulled from the
+        // record a lookup on this record points at (loadRecordDetailData
+        // merges them into `record` under the dotted name). Always
+        // display-only: they belong to the parent record and are edited
+        // there. Hidden on the create form (no parent linked yet).
+        if (f.type === 'related_field') {
+          if (isCreate) return null
+          const rel = f.related || {}
+          const relRaw = record[f.name]
+          const relDisplay = formatFieldValue(relRaw, {
+            ...f, type: rel.column_type || 'text',
+            lookup_table: rel.lookup_table, lookup_field: rel.lookup_field,
+          }, picklists, lookups)
+          return (
+            <div key={f.name} style={{
+              padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}>
+              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                {f.label}
+                <span
+                  title={`Read-only — this value lives on the related ${rel.table || 'record'} and is edited there.`}
+                  style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, color: '#1a5a8a', background: '#e8f3fb', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em' }}>
+                  RELATED
+                </span>
+              </span>
+              <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>
+                {rel.column_type === 'picklist' && relRaw ? <Badge s={relDisplay} /> : relDisplay}
+              </span>
+            </div>
+          )
+        }
         const raw = editing ? draft[f.name] : record[f.name]
         const display = formatFieldValue(raw, f, picklists, lookups)
         const isLookupLike = f.type === 'lookup' || f.type === 'polymorphic_lookup'
@@ -5912,6 +5945,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     const changes = {}
     for (const [k, v] of Object.entries(draft)) if (v !== data.record[k]) changes[k] = v
     for (const sys of ['id','created_at','updated_at']) delete changes[sys]
+    // Cross-object (related) field values live under dotted keys — they are
+    // display-only copies of a parent record's columns, never writable here.
+    for (const k of Object.keys(changes)) if (k.includes('.')) delete changes[k]
     for (const k of Object.keys(changes)) {
       if (k.endsWith('_created_at') || k.endsWith('_created_by') || k.endsWith('_updated_at') || k.endsWith('_updated_by') || k.endsWith('_is_deleted')) delete changes[k]
     }
