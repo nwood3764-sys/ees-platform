@@ -16,7 +16,7 @@ import { formatNumber, formatAxisTick } from '../builder/chartKit/formatNumber'
 // row shape ({ dw_widget_type, dw_widget_config, dw_report_id, ... }) and
 // `result` is a runReport / runWidgetAggregate result.
 
-export function WidgetBody({ widget, result, canDrill, drillTo, drillWhole }) {
+export function WidgetBody({ widget, result, canDrill, drillTo, drillWhole, filterValue, onFilterChange }) {
   const type = widget.dw_widget_type || 'table'
   const cfg = widget.dw_widget_config || {}
 
@@ -39,6 +39,14 @@ export function WidgetBody({ widget, result, canDrill, drillTo, drillWhole }) {
     return cfg.image_url
       ? <img src={cfg.image_url} alt={widget.dw_title || 'Dashboard image'} style={{ width:'100%', height:'100%', objectFit: cfg.image_fit || 'contain' }} />
       : <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Set an image URL in the inspector.</div>
+  }
+  if (type === 'link') {
+    return <LinkWidget widget={widget} />
+  }
+
+  // Filter widgets carry no report rows — their "data" is the option list.
+  if (type === 'filter_picklist' || type === 'filter_toggle' || type === 'filter_date_range') {
+    return <FilterWidget type={type} widget={widget} result={result} value={filterValue} onChange={onFilterChange} />
   }
 
   const rows = result?.rows || []
@@ -66,6 +74,34 @@ export function WidgetBody({ widget, result, canDrill, drillTo, drillWhole }) {
       return <StatWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
     case 'bar':
       return <BarWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
+    case 'speedometer':
+      return <SpeedometerWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
+    case 'bullet':
+      return <BulletWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
+    case 'progress_ring':
+      return <ProgressRingWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
+    case 'pareto':
+      return <ParetoWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
+    case 'rose':
+      return <RoseWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
+    case 'radar':
+      return <RadarWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
+    case 'sunburst':
+      return <SunburstWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
+    case 'box_plot':
+      return <BoxPlotWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
+    case 'combo':
+      return <ComboWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
+    case 'matrix':
+      return <MatrixWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
+    case 'sankey':
+      return <SankeyWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
+    case 'calendar_heatmap':
+      return <CalendarHeatmapWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
+    case 'multi_row_card':
+      return <MultiRowCardWidget result={result} widget={widget} canDrill={canDrill} drillTo={drillTo} />
+    case 'rating':
+      return <RatingWidget result={result} widget={widget} canDrill={canDrill} drillWhole={drillWhole} />
     case 'stacked_bar':
       return <SeriesBarWidget result={result} widget={widget} mode="stacked" canDrill={canDrill} drillTo={drillTo} />
     case 'clustered_bar':
@@ -997,4 +1033,667 @@ function StatWidget({ result, widget, canDrill, drillWhole }) {
         : <div style={{ flex:1 }} />}
     </div>
   )
+}
+
+// ─── Round-2 widgets: combo, matrix, sankey, calendar, cards, filters ─────
+
+// Combo: primary measure as bars + secondary measure as a line, one grouping.
+// A second value axis is opt-in (combo_dual_axis) for measures on different
+// scales — Salesforce parity; single-axis remains the default.
+function ComboWidget({ result, widget, canDrill, drillTo }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const fmt2 = (v) => formatNumber(v, cfg.number2_format || cfg.number_format, cfg.decimals)
+  const data = buildChartData(result, widget)
+  const second = result.aggregatedSecondary || []
+  const secondByName = new Map(second.map(d => [d.name, d.value]))
+  const dual = cfg.combo_dual_axis === true && second.length > 0
+  const names = data.map(d => d.name)
+
+  const option = {
+    animationDuration: 250,
+    grid: { left: 8, right: dual ? 8 : 16, top: 30, bottom: 4, containLabel: true },
+    legend: cfg.show_legend !== false ? { top: 0, left: 0 } : { show: false },
+    tooltip: { ...TOOLTIP_AXIS, formatter: (ps) => {
+      const list = Array.isArray(ps) ? ps : [ps]
+      return `${list[0]?.name}<br/>` + list.map(p =>
+        `${p.seriesName}: <b>${p.seriesIndex === 0 ? fmt(p.value) : fmt2(p.value)}</b>`).join('<br/>')
+    } },
+    xAxis: { type: 'category', data: names, axisLabel: { interval: 0, overflow: 'truncate', width: 90, hideOverlap: true } },
+    yAxis: dual
+      ? [
+          { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
+          { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number2_format || cfg.number_format) }, splitLine: { show: false } },
+        ]
+      : { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
+    series: [
+      {
+        name: cfg.measure_label || 'Bars', type: 'bar', barMaxWidth: 26,
+        itemStyle: { color: C.emerald, borderRadius: [4, 4, 0, 0] },
+        data: data.map(d => d.value),
+        label: { show: cfg.show_data_labels === true, position: 'top', fontSize: 10, color: C.textPrimary, formatter: (p) => fmt(p.value) },
+        cursor: canDrill ? 'pointer' : 'default',
+      },
+      ...(second.length ? [{
+        name: cfg.measure2_label || 'Line', type: 'line',
+        yAxisIndex: dual ? 1 : 0,
+        data: names.map(n => secondByName.get(n) ?? 0),
+        lineStyle: { width: 2, color: C.navy || '#1e466b' },
+        itemStyle: { color: '#1e466b', borderColor: '#ffffff', borderWidth: 2 },
+        symbol: 'circle', symbolSize: 7,
+      }] : []),
+    ],
+  }
+  const onSeriesClick = canDrill ? (p) => drillTo?.(data[p.dataIndex]?.rawValue) : undefined
+  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
+}
+
+// Matrix / highlight table: rows × columns × measure with totals, cells
+// shaded by value (Tableau highlight-table behavior, on by default).
+function MatrixWidget({ result, widget, canDrill, drillTo }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const rows2d = result.aggregated2d || []
+  if (!rows2d.length) return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Set Group by and Series in the inspector.</div>
+  const { groups, seriesNames, get } = pivot2D(rows2d, cfg.limit || 30, 12)
+  const highlight = cfg.highlight_cells !== false
+  let maxCell = 0
+  groups.forEach(g => seriesNames.forEach(s => { const v = get(g, s)?.value || 0; if (v > maxCell) maxCell = v }))
+  const shade = (v) => {
+    if (!highlight || maxCell <= 0 || !v) return 'transparent'
+    const t = v / maxCell
+    if (t > 0.75) return '#bff0da'
+    if (t > 0.5)  return '#d9f6e9'
+    if (t > 0.25) return '#eefaf4'
+    return 'transparent'
+  }
+  const rowTotal = (g) => seriesNames.reduce((a, s) => a + (get(g, s)?.value || 0), 0)
+  const colTotal = (s) => groups.reduce((a, g) => a + (get(g, s)?.value || 0), 0)
+  const grand = groups.reduce((a, g) => a + rowTotal(g), 0)
+  const th = { padding:'5px 9px', fontSize:10, fontWeight:600, color:C.textSecondary, textTransform:'uppercase', whiteSpace:'nowrap', borderBottom:`1px solid ${C.border}`, textAlign:'right' }
+  const td = { padding:'5px 9px', fontSize:11.5, whiteSpace:'nowrap', textAlign:'right', fontFamily:'JetBrains Mono, monospace', borderBottom:`1px solid ${C.border}` }
+  return (
+    <div style={{ overflow:'auto', height:'100%' }}>
+      <table style={{ borderCollapse:'collapse', width:'100%' }}>
+        <thead style={{ position:'sticky', top:0, background:C.cardSecondary }}>
+          <tr>
+            <th style={{ ...th, textAlign:'left' }}></th>
+            {seriesNames.map(s => <th key={s} style={th}>{s}</th>)}
+            <th style={{ ...th, borderLeft:`2px solid ${C.borderDark}` }}>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map(g => (
+            <tr key={g}>
+              <td style={{ ...td, textAlign:'left', fontFamily:'inherit', color:C.textPrimary, fontWeight:500 }}>{g}</td>
+              {seriesNames.map(s => {
+                const cell = get(g, s)
+                const v = cell?.value || 0
+                return (
+                  <td key={s}
+                    onClick={canDrill && cell ? () => drillTo?.(cell.rawValue) : undefined}
+                    style={{ ...td, background: shade(v), cursor: canDrill && cell ? 'pointer' : 'default' }}>
+                    {v ? fmt(v) : '—'}
+                  </td>
+                )
+              })}
+              <td style={{ ...td, fontWeight:700, borderLeft:`2px solid ${C.borderDark}` }}>{fmt(rowTotal(g))}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr style={{ background:C.cardSecondary }}>
+            <td style={{ ...td, textAlign:'left', fontFamily:'inherit', fontWeight:700 }}>Total</td>
+            {seriesNames.map(s => <td key={s} style={{ ...td, fontWeight:700 }}>{fmt(colTotal(s))}</td>)}
+            <td style={{ ...td, fontWeight:700, borderLeft:`2px solid ${C.borderDark}` }}>{fmt(grand)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  )
+}
+
+// Sankey: flow volume from the group dimension to the series dimension.
+function SankeyWidget({ result, widget, canDrill, drillWhole }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const rows2d = result.aggregated2d || []
+  if (!rows2d.length) return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Set Group by and Series in the inspector.</div>
+  const { groups, seriesNames, get } = pivot2D(rows2d, cfg.limit || 12, 12)
+  // Node names must be unique across both sides; suffix the target side when
+  // a label appears in both dimensions.
+  const leftSet = new Set(groups)
+  const rightName = (s) => leftSet.has(s) ? `${s} ` : s
+  const nodes = [...groups.map(g => ({ name: g })), ...seriesNames.map(s => ({ name: rightName(s) }))]
+  const links = []
+  groups.forEach(g => seriesNames.forEach(s => {
+    const v = get(g, s)?.value || 0
+    if (v > 0) links.push({ source: g, target: rightName(s), value: v })
+  }))
+  const option = {
+    animationDuration: 250,
+    tooltip: { ...TOOLTIP_ITEM, formatter: (p) =>
+      p.dataType === 'edge'
+        ? `${p.data.source} → ${p.data.target}<br/><b>${fmt(p.data.value)}</b>`
+        : `${p.name}` },
+    series: [{
+      type: 'sankey', data: nodes, links,
+      left: 8, right: 90, top: 8, bottom: 8,
+      nodeWidth: 12, nodeGap: 10,
+      lineStyle: { color: 'gradient', opacity: 0.35, curveness: 0.5 },
+      itemStyle: { borderColor: '#ffffff', borderWidth: 1 },
+      label: { color: C.textSecondary, fontSize: 11 },
+      emphasis: { focus: 'adjacency' },
+      cursor: canDrill ? 'pointer' : 'default',
+    }],
+  }
+  return <LeapEChart option={option} onSeriesClick={canDrill ? () => drillWhole?.() : undefined} />
+}
+
+// Calendar heatmap: daily activity density on a real calendar.
+function CalendarHeatmapWidget({ result, widget, canDrill, drillWhole }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const rows = result.aggregatedTime || []
+  if (!rows.length) return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Set a Date field in the inspector.</div>
+  const byDay = new Map()
+  let max = 0
+  for (const r of rows) {
+    const day = String(r.bucket).slice(0, 10)
+    const v = (byDay.get(day) || 0) + r.value
+    byDay.set(day, v)
+    if (v > max) max = v
+  }
+  const days = [...byDay.keys()].sort()
+  const range = [days[0], days[days.length - 1]]
+  const option = {
+    animationDuration: 250,
+    tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.value[0]}<br/><b>${fmt(p.value[1])}</b>` },
+    visualMap: {
+      min: 0, max: Math.max(max, 1), orient: 'horizontal', left: 'center', bottom: 0,
+      itemWidth: 10, itemHeight: 70, text: ['More', ''],
+      textStyle: { color: C.textMuted, fontSize: 10 },
+      inRange: { color: ['#eefaf4', '#9fe8c9', C.emerald, '#2aab72'] },
+    },
+    calendar: {
+      range, left: 34, right: 10, top: 22, bottom: 34, cellSize: ['auto', 'auto'],
+      itemStyle: { color: C.cardSecondary, borderColor: '#ffffff', borderWidth: 2 },
+      splitLine: { lineStyle: { color: C.borderDark, width: 1 } },
+      dayLabel: { color: C.textMuted, fontSize: 9, firstDay: 1 },
+      monthLabel: { color: C.textSecondary, fontSize: 10 },
+      yearLabel: { show: false },
+    },
+    series: [{
+      type: 'heatmap', coordinateSystem: 'calendar',
+      data: days.map(d => [d, byDay.get(d)]),
+      cursor: canDrill ? 'pointer' : 'default',
+    }],
+  }
+  return <LeapEChart option={option} onSeriesClick={canDrill ? () => drillWhole?.() : undefined} />
+}
+
+// Multi-row card: one compact stat block per group value (Power BI pattern).
+function MultiRowCardWidget({ result, widget, canDrill, drillTo }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const data = buildChartData(result, widget)
+  if (!data.length) return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Set Group by in the inspector.</div>
+  return (
+    <div style={{
+      display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(130px, 1fr))',
+      gap:8, overflowY:'auto', height:'100%', alignContent:'start',
+    }}>
+      {data.map((d, i) => (
+        <div key={i}
+          onClick={canDrill ? () => drillTo?.(d.rawValue) : undefined}
+          style={{
+            background:C.cardSecondary, border:`1px solid ${C.border}`, borderRadius:6,
+            borderLeft:`3px solid ${C.emerald}`, padding:'8px 10px',
+            cursor: canDrill ? 'pointer' : 'default',
+          }}>
+          <div style={{ fontSize:17, fontWeight:700, color:C.textPrimary, fontFamily:'JetBrains Mono, monospace', lineHeight:1.1 }}>{fmt(d.value)}</div>
+          <div style={{ fontSize:10.5, color:C.textSecondary, marginTop:3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={d.name}>{d.name}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Rating: the aggregate rendered as filled stars out of a configurable max.
+function RatingWidget({ result, widget, canDrill, drillWhole }) {
+  const cfg = widget.dw_widget_config || {}
+  const value = typeof result.aggregatedSingle === 'number' ? result.aggregatedSingle : (result.rows || []).length
+  const maxStars = Math.max(1, Math.min(10, Number(cfg.rating_max) || 5))
+  const fill = Math.max(0, Math.min(maxStars, value))
+  const fmt = widgetFmt(cfg)
+  const star = (frac, i) => (
+    <svg key={i} width="26" height="26" viewBox="0 0 24 24">
+      <defs><linearGradient id={`rw-${widget.id || 'x'}-${i}`}><stop offset={`${frac * 100}%`} stopColor={C.emerald} /><stop offset={`${frac * 100}%`} stopColor={C.borderDark} /></linearGradient></defs>
+      <path fill={`url(#rw-${widget.id || 'x'}-${i})`} d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z" />
+    </svg>
+  )
+  return (
+    <div onClick={canDrill ? () => drillWhole?.() : undefined}
+      style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', gap:8, cursor: canDrill ? 'pointer' : 'default' }}>
+      <div style={{ display:'flex', gap:3 }}>
+        {Array.from({ length: maxStars }, (_, i) => star(Math.max(0, Math.min(1, fill - i)), i))}
+      </div>
+      <div style={{ fontSize:13, color:C.textSecondary }}>
+        <b style={{ color:C.textPrimary, fontFamily:'JetBrains Mono, monospace' }}>{fmt(value)}</b> of {maxStars}
+      </div>
+      {cfg.label && <div style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5 }}>{cfg.label}</div>}
+    </div>
+  )
+}
+
+// Link: a navigation card to a record, module, report, or external URL.
+function LinkWidget({ widget }) {
+  const cfg = widget.dw_widget_config || {}
+  const url = cfg.link_url || ''
+  const external = /^https?:\/\//i.test(url)
+  const body = (
+    <div style={{
+      display:'flex', alignItems:'center', gap:10, height:'100%',
+      padding:'0 4px', color:C.textPrimary,
+    }}>
+      <span style={{
+        width:34, height:34, borderRadius:8, background:'#eefaf4', border:`1px solid ${C.emerald}`,
+        display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
+      }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.emerald} strokeWidth="2">
+          <path d="M10 14L21 3M21 3h-6M21 3v6M9 3H4v17h17v-5" />
+        </svg>
+      </span>
+      <span style={{ minWidth:0 }}>
+        <span style={{ display:'block', fontSize:13.5, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+          {cfg.link_label || widget.dw_title || url || 'Set a link URL in the inspector'}
+        </span>
+        {cfg.link_description && (
+          <span style={{ display:'block', fontSize:11, color:C.textMuted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{cfg.link_description}</span>
+        )}
+      </span>
+    </div>
+  )
+  if (!url) return body
+  return (
+    <a href={url} target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}
+      style={{ textDecoration:'none', display:'block', height:'100%' }}>
+      {body}
+    </a>
+  )
+}
+
+// On-canvas filter widgets. Value state lives in DashboardRunner; the builder
+// renders them inert (no onChange wired). Picklist = dropdown, toggle =
+// button row, date range = from/to inputs producing {from, to}.
+function FilterWidget({ type, widget, result, value, onChange }) {
+  const cfg = widget.dw_widget_config || {}
+  const opts = result?.filterOptions || []
+  const disabled = !onChange
+  if (!cfg.filter_field) {
+    return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Pick a field in the inspector.</div>
+  }
+  const inputCss = {
+    padding:'7px 9px', fontSize:12.5, background:C.card, color:C.textPrimary,
+    border:`1px solid ${C.borderDark}`, borderRadius:6, font:'inherit', width:'100%', boxSizing:'border-box',
+  }
+
+  if (type === 'filter_date_range') {
+    const v = value || {}
+    const set = (patch) => onChange?.({ ...v, ...patch })
+    return (
+      <div style={{ display:'flex', gap:8, alignItems:'center', height:'100%' }}>
+        <input type="date" value={v.from || ''} disabled={disabled}
+          onChange={e => set({ from: e.target.value })} style={inputCss} />
+        <span style={{ color:C.textMuted, fontSize:12, flexShrink:0 }}>to</span>
+        <input type="date" value={v.to || ''} disabled={disabled}
+          onChange={e => set({ to: e.target.value })} style={inputCss} />
+      </div>
+    )
+  }
+
+  if (type === 'filter_toggle') {
+    const shown = opts.slice(0, Number(cfg.max_options) || 6)
+    return (
+      <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignContent:'center', height:'100%' }}>
+        <button disabled={disabled} onClick={() => onChange?.('')} style={toggleBtn(!value)}>All</button>
+        {shown.map(o => (
+          <button key={o.value} disabled={disabled}
+            onClick={() => onChange?.(String(value) === String(o.value) ? '' : o.value)}
+            style={toggleBtn(String(value) === String(o.value))}>{o.label}</button>
+        ))}
+        {!opts.length && <span style={{ fontSize:11, color:C.textMuted, fontStyle:'italic' }}>No values found.</span>}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display:'flex', alignItems:'center', height:'100%' }}>
+      <select value={value ?? ''} disabled={disabled}
+        onChange={e => onChange?.(e.target.value)} style={{ ...inputCss, cursor: disabled ? 'default' : 'pointer' }}>
+        <option value="">All</option>
+        {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  )
+}
+
+function toggleBtn(active) {
+  return {
+    padding:'6px 12px', fontSize:12, fontWeight:500, borderRadius:99, cursor:'pointer',
+    background: active ? '#eefaf4' : C.card,
+    color: active ? '#2aab72' : C.textSecondary,
+    border: `1px solid ${active ? C.emerald : C.borderDark}`,
+  }
+}
+
+// ─── Goal & progress family (single-aggregate shape) ──────────────────────
+
+// Shared value/target computation for the goal widgets.
+function goalNumbers(result, cfg) {
+  const value = typeof result.aggregatedSingle === 'number' ? result.aggregatedSingle : (result.rows || []).length
+  const target = Number(cfg.target) || 0
+  const max = Math.max(target, value, 1)
+  return { value, target, max }
+}
+
+// Speedometer ("gas gauge"): needle + colored segment bands. Segments come
+// from the conditional breakpoints (sky below low, amber between, emerald at
+// or above high); defaults to thirds of the scale when unset. No red — the
+// design system's attention colors are sky and amber.
+function SpeedometerWidget({ result, widget, canDrill, drillWhole }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const { value, target, max } = goalNumbers(result, cfg)
+  const lowRaw  = Number(cfg.cond_low)
+  const highRaw = Number(cfg.cond_high)
+  const low  = Number.isFinite(lowRaw)  && cfg.cond_low  !== '' && cfg.cond_low  != null ? lowRaw  : max / 3
+  const high = Number.isFinite(highRaw) && cfg.cond_high !== '' && cfg.cond_high != null ? highRaw : (max * 2) / 3
+  const stops = [
+    [Math.max(0.02, Math.min(1, low / max)),  C.sky],
+    [Math.max(0.04, Math.min(1, high / max)), '#e8a949'],
+    [1, C.emerald],
+  ]
+  const option = {
+    animationDuration: 250,
+    series: [{
+      type: 'gauge',
+      startAngle: 205, endAngle: -25,
+      min: 0, max,
+      axisLine: { lineStyle: { width: 16, color: stops } },
+      pointer: {
+        show: true, length: '58%', width: 5,
+        itemStyle: { color: '#1e466b' },
+      },
+      anchor: { show: true, size: 12, itemStyle: { color: '#1e466b', borderColor: '#ffffff', borderWidth: 2 } },
+      axisTick: { distance: -16, length: 4, lineStyle: { color: '#ffffff', width: 1 } },
+      splitLine: { distance: -16, length: 16, lineStyle: { color: '#ffffff', width: 2 } },
+      axisLabel: { distance: 22, color: C.textMuted, fontSize: 9, formatter: (v) => formatAxisTick(v, cfg.number_format) },
+      detail: {
+        valueAnimation: true, offsetCenter: [0, '62%'],
+        formatter: () => fmt(value),
+        color: C.textPrimary, fontSize: 22, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+      },
+      title: { offsetCenter: [0, '88%'], color: C.textMuted, fontSize: 10.5 },
+      data: [{ value, name: target > 0 ? `${Math.round((value / target) * 100)}% of ${fmt(target)}` : (cfg.label || '') }],
+    }],
+  }
+  return (
+    <div onClick={canDrill ? () => drillWhole?.() : undefined} style={{ height: '100%', cursor: canDrill ? 'pointer' : 'default' }}>
+      <LeapEChart option={option} minHeight={160} />
+    </div>
+  )
+}
+
+// Bullet / linear gauge: qualitative bands + measure bar + target tick
+// (Tableau bullet graph / Salesforce flat gauge). Pure DOM — crisper than a
+// canvas at this size.
+function BulletWidget({ result, widget, canDrill, drillWhole }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const { value, target, max } = goalNumbers(result, cfg)
+  const lowRaw  = Number(cfg.cond_low)
+  const highRaw = Number(cfg.cond_high)
+  const low  = Number.isFinite(lowRaw)  && cfg.cond_low  !== '' && cfg.cond_low  != null ? lowRaw  : max / 3
+  const high = Number.isFinite(highRaw) && cfg.cond_high !== '' && cfg.cond_high != null ? highRaw : (max * 2) / 3
+  const pct = (n) => `${Math.max(0, Math.min(100, (n / max) * 100))}%`
+  return (
+    <div onClick={canDrill ? () => drillWhole?.() : undefined}
+      style={{ display:'flex', flexDirection:'column', justifyContent:'center', height:'100%', gap:8, padding:'0 4px', cursor: canDrill ? 'pointer' : 'default' }}>
+      <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:8 }}>
+        <span style={{ fontSize:24, fontWeight:700, color:C.textPrimary, fontFamily:"'JetBrains Mono', monospace" }}>{fmt(value)}</span>
+        {target > 0 && <span style={{ fontSize:11, color:C.textMuted }}>target {fmt(target)}</span>}
+      </div>
+      <div style={{ position:'relative', height:18, borderRadius:4, overflow:'hidden', background:C.cardSecondary }}>
+        <div style={{ position:'absolute', inset:0, display:'flex' }}>
+          <div style={{ width:pct(low), background:'#dcebfa' }} />
+          <div style={{ width:`calc(${pct(high)} - ${pct(low)})`, background:'#f7e6c8' }} />
+          <div style={{ flex:1, background:'#d9f6e9' }} />
+        </div>
+        <div style={{ position:'absolute', left:0, top:5, height:8, width:pct(value), background:'#1e466b', borderRadius:'0 3px 3px 0' }} />
+        {target > 0 && (
+          <div style={{ position:'absolute', left:`calc(${pct(target)} - 1.5px)`, top:1, height:16, width:3, background:C.textPrimary, borderRadius:1 }} />
+        )}
+      </div>
+      {cfg.label && <div style={{ fontSize:10.5, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5 }}>{cfg.label}</div>}
+    </div>
+  )
+}
+
+// Progress ring: percent-to-goal as a donut ring with the % in the hole.
+function ProgressRingWidget({ result, widget, canDrill, drillWhole }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const { value, target } = goalNumbers(result, cfg)
+  const pct = target > 0 ? Math.min(100, Math.max(0, (value / target) * 100)) : 0
+  const option = {
+    animationDuration: 250,
+    tooltip: { show: false },
+    title: {
+      text: `${pct.toFixed(0)}%`,
+      subtext: target > 0 ? `${fmt(value)} of ${fmt(target)}` : fmt(value),
+      left: 'center', top: '36%',
+      textStyle: { fontSize: 24, fontWeight: 700, color: C.textPrimary, fontFamily: "'JetBrains Mono', monospace" },
+      subtextStyle: { fontSize: 10.5, color: C.textMuted },
+    },
+    series: [{
+      type: 'pie', radius: ['68%', '84%'], center: ['50%', '50%'],
+      startAngle: 90, silent: true,
+      label: { show: false }, labelLine: { show: false },
+      data: [
+        { value: pct, itemStyle: { color: pct >= 100 ? C.emerald : pct >= 50 ? C.emerald : C.sky, borderRadius: 8 } },
+        { value: 100 - pct, itemStyle: { color: '#e4e9f2' } },
+      ],
+    }],
+  }
+  return (
+    <div onClick={canDrill ? () => drillWhole?.() : undefined} style={{ height: '100%', cursor: canDrill ? 'pointer' : 'default' }}>
+      <LeapEChart option={option} minHeight={150} />
+    </div>
+  )
+}
+
+// ─── More chart forms ─────────────────────────────────────────────────────
+
+// Pareto: categories ranked descending + cumulative-percent line (the 80/20
+// view). The one chart where a second axis is standard: 0–100% cumulative.
+function ParetoWidget({ result, widget, canDrill, drillTo }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const data = [...buildChartData(result, widget)].sort((a, b) => b.value - a.value)
+  const total = data.reduce((a, d) => a + d.value, 0) || 1
+  let run = 0
+  const cum = data.map(d => { run += d.value; return Math.round((run / total) * 1000) / 10 })
+  const option = {
+    animationDuration: 250,
+    grid: { left: 8, right: 8, top: 14, bottom: 4, containLabel: true },
+    tooltip: { ...TOOLTIP_AXIS, formatter: (ps) => {
+      const list = Array.isArray(ps) ? ps : [ps]
+      const bar = list.find(p => p.seriesType === 'bar')
+      const ln  = list.find(p => p.seriesType === 'line')
+      return `${list[0]?.name}<br/><b>${fmt(bar?.value ?? 0)}</b>${ln ? ` · ${ln.value}% cumulative` : ''}`
+    } },
+    xAxis: { type: 'category', data: data.map(d => d.name), axisLabel: { interval: 0, overflow: 'truncate', width: 70, hideOverlap: true } },
+    yAxis: [
+      { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
+      { type: 'value', min: 0, max: 100, axisLabel: { formatter: (v) => `${v}%` }, splitLine: { show: false } },
+    ],
+    series: [
+      { type: 'bar', data: data.map(d => d.value), barMaxWidth: 26,
+        itemStyle: { color: C.emerald, borderRadius: [4, 4, 0, 0] },
+        cursor: canDrill ? 'pointer' : 'default' },
+      { type: 'line', yAxisIndex: 1, data: cum,
+        lineStyle: { width: 2, color: '#1e466b' },
+        itemStyle: { color: '#1e466b', borderColor: '#ffffff', borderWidth: 2 },
+        symbol: 'circle', symbolSize: 6 },
+    ],
+  }
+  const onSeriesClick = canDrill ? (p) => drillTo?.(data[p.dataIndex]?.rawValue) : undefined
+  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
+}
+
+// Rose (Nightingale): pie variant where slice radius encodes the value.
+function RoseWidget({ result, widget, canDrill, drillTo }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const data = buildChartData(result, widget)
+  const byName = Object.fromEntries(data.map(d => [d.name, d]))
+  const option = {
+    animationDuration: 250,
+    tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.name}<br/><b>${fmt(p.value)}</b> · ${p.percent}%` },
+    legend: cfg.show_legend !== false ? { type: 'scroll', bottom: 0, left: 'center' } : { show: false },
+    series: [{
+      type: 'pie', roseType: 'radius',
+      radius: ['16%', '72%'], center: ['50%', cfg.show_legend !== false ? '44%' : '50%'],
+      itemStyle: { borderColor: '#ffffff', borderWidth: 2, borderRadius: 4 },
+      label: { show: cfg.show_data_labels !== false, color: C.textSecondary, fontSize: 10.5, formatter: (p) => p.name },
+      labelLine: { length: 8, length2: 6, lineStyle: { color: C.borderDark } },
+      data: data.map(d => ({ name: d.name, value: d.value })),
+      cursor: canDrill ? 'pointer' : 'default',
+    }],
+  }
+  const onSeriesClick = canDrill ? (p) => drillTo?.(byName[p.name]?.rawValue) : undefined
+  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
+}
+
+// Radar: each series draws a polygon across the group-value axes.
+function RadarWidget({ result, widget, canDrill, drillWhole }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const rows2d = result.aggregated2d || []
+  if (!rows2d.length) return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Set Group by and Series in the inspector.</div>
+  const { groups, seriesNames, get } = pivot2D(rows2d, 8, 5)
+  let maxV = 1
+  groups.forEach(g => seriesNames.forEach(s => { const v = get(g, s)?.value || 0; if (v > maxV) maxV = v }))
+  const option = {
+    animationDuration: 250,
+    tooltip: { ...TOOLTIP_ITEM },
+    legend: cfg.show_legend !== false ? { type: 'scroll', bottom: 0, left: 'center' } : { show: false },
+    radar: {
+      indicator: groups.map(g => ({ name: g, max: maxV * 1.1 })),
+      center: ['50%', '46%'], radius: '62%',
+      axisName: { color: C.textSecondary, fontSize: 10.5 },
+      splitLine: { lineStyle: { color: '#e4e9f2' } },
+      splitArea: { areaStyle: { color: ['#ffffff', '#f7f9fc'] } },
+      axisLine: { lineStyle: { color: '#d0d8e8' } },
+    },
+    series: [{
+      type: 'radar',
+      data: seriesNames.map(s => ({
+        name: s,
+        value: groups.map(g => get(g, s)?.value || 0),
+        areaStyle: { opacity: 0.12 },
+        lineStyle: { width: 2 },
+        symbolSize: 5,
+      })),
+      tooltip: { formatter: (p) => `${p.name}<br/>` + groups.map((g, i) => `${g}: <b>${fmt(p.value[i])}</b>`).join('<br/>') },
+    }],
+  }
+  return <LeapEChart option={option} onSeriesClick={canDrill ? () => drillWhole?.() : undefined} />
+}
+
+// Sunburst: two-ring hierarchy — inner = group, outer = its series split.
+function SunburstWidget({ result, widget, canDrill, drillTo }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const rows2d = result.aggregated2d || []
+  if (!rows2d.length) return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Set Group by and Series in the inspector.</div>
+  const { groups, seriesNames, get } = pivot2D(rows2d, cfg.limit || 10, 10)
+  const rawByPath = new Map()
+  const data = groups.map(g => ({
+    name: g,
+    children: seriesNames
+      .map(s => {
+        const cell = get(g, s)
+        if (!cell || !cell.value) return null
+        rawByPath.set(`${g}>${s}`, cell.rawValue)
+        return { name: s, value: cell.value }
+      })
+      .filter(Boolean),
+  })).filter(n => n.children.length)
+  const option = {
+    animationDuration: 250,
+    tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.treePathInfo?.map(t => t.name).filter(Boolean).join(' · ') || p.name}<br/><b>${fmt(p.value)}</b>` },
+    series: [{
+      type: 'sunburst', data, radius: ['12%', '85%'],
+      itemStyle: { borderColor: '#ffffff', borderWidth: 2, borderRadius: 3 },
+      label: { color: C.textPrimary, fontSize: 10, minAngle: 12 },
+      nodeClick: false,
+      cursor: canDrill ? 'pointer' : 'default',
+    }],
+  }
+  const onSeriesClick = canDrill
+    ? (p) => {
+        const path = p.treePathInfo?.map(t => t.name).filter(Boolean) || []
+        drillTo?.(path.length === 2 ? rawByPath.get(`${path[0]}>${path[1]}`) : undefined)
+      }
+    : undefined
+  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
+}
+
+// Box plot: min / Q1 / median / Q3 / max of a numeric field per category,
+// computed client-side from the report rows.
+function BoxPlotWidget({ result, widget, canDrill, drillWhole }) {
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const valCol = (result.columns || []).find(c => c.name === cfg.value_field)
+  if (!valCol) return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>Set a Value field in the inspector.</div>
+  const groupCol = cfg.group_by ? (result.columns || []).find(c => c.name === cfg.group_by) : null
+
+  const byGroup = new Map()
+  for (const row of (result.rows || [])) {
+    const n = parseFloat(getRowValue(row, valCol, result))
+    if (!Number.isFinite(n)) continue
+    const g = groupCol ? String(getRowValue(row, groupCol, result) ?? '—') : 'All'
+    if (!byGroup.has(g)) byGroup.set(g, [])
+    byGroup.get(g).push(n)
+  }
+  if (!byGroup.size) return <div style={{ fontSize:12, color:C.textMuted, fontStyle:'italic' }}>No numeric values.</div>
+
+  const quartile = (sorted, q) => {
+    const pos = (sorted.length - 1) * q
+    const lo = Math.floor(pos), hi = Math.ceil(pos)
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo)
+  }
+  const cats = [...byGroup.keys()].slice(0, cfg.limit || 12)
+  const boxes = cats.map(g => {
+    const s = byGroup.get(g).sort((a, b) => a - b)
+    return [s[0], quartile(s, 0.25), quartile(s, 0.5), quartile(s, 0.75), s[s.length - 1]]
+  })
+  const option = {
+    animationDuration: 250,
+    grid: { left: 8, right: 14, top: 12, bottom: 4, containLabel: true },
+    tooltip: { ...TOOLTIP_ITEM, formatter: (p) => {
+      const b = boxes[p.dataIndex] || []
+      return `${cats[p.dataIndex]}<br/>max <b>${fmt(b[4])}</b><br/>Q3 <b>${fmt(b[3])}</b><br/>median <b>${fmt(b[2])}</b><br/>Q1 <b>${fmt(b[1])}</b><br/>min <b>${fmt(b[0])}</b>`
+    } },
+    xAxis: { type: 'category', data: cats, axisLabel: { interval: 0, overflow: 'truncate', width: 80, hideOverlap: true } },
+    yAxis: { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
+    series: [{
+      type: 'boxplot', data: boxes,
+      itemStyle: { color: '#d9f6e9', borderColor: '#2aab72', borderWidth: 1.5 },
+      cursor: canDrill ? 'pointer' : 'default',
+    }],
+  }
+  return <LeapEChart option={option} onSeriesClick={canDrill ? () => drillWhole?.() : undefined} />
 }
