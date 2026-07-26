@@ -19,6 +19,18 @@ function buildId() {
   return `${buildSha()} · ${date}Z`
 }
 
+// Pull-request number of the deployed build, e.g. "#207". master deploys are
+// squash merges titled "... (#NNN)", so the head commit subject carries the PR
+// number; extract it from git (works on Netlify's checkout and locally).
+// Empty string when the subject has no PR reference (direct commit / local dev).
+function buildPr() {
+  try {
+    const subject = execSync('git log -1 --pretty=%s').toString().trim()
+    const m = subject.match(/#(\d+)/)
+    return m ? `#${m[1]}` : ''
+  } catch { return '' }
+}
+
 // Emit sw.js with a per-build CACHE_VERSION so the file is byte-different on
 // every deploy. Without this the service worker source is identical across
 // builds: the browser's update check (reg.update()) sees no byte change,
@@ -59,6 +71,7 @@ export default defineConfig({
   define: {
     __BUILD_ID__: JSON.stringify(buildId()),
     __BUILD_SHA__: JSON.stringify(buildSha()),
+    __BUILD_PR__: JSON.stringify(buildPr()),
   },
   build: {
     // Silence the 500KB warning — our bundle is well-segmented now and the
