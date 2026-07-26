@@ -166,7 +166,11 @@ const TABLE_COLUMN_PREFIX = {
   occurrences:                       'occurrence',
   opportunities:                     'opportunity',
   opportunity_contact_roles:         'ocr',
+  opportunity_line_items:            'oli',
+  opportunity_record_type_price_books: 'ortpb',
   outbound_mailboxes:                'outbound_mailbox',
+  price_books:                       'price_book',
+  price_book_entries:                'price_book_entry',
   products:                          'product',
   projects:                          'project',
   project_payment_requests:          'ppr',
@@ -1039,6 +1043,10 @@ export function applyInsertDefaults(tableName, fields, userId) {
     enrollments:    'enrollment',
     equipment:      'equipment',   // already singular
     opportunities:  'opportunity',
+    opportunity_line_items:  'oli',
+    opportunity_record_type_price_books: 'ortpb',
+    price_books:             'price_book',
+    price_book_entries:      'price_book_entry',
     products:       'product',
     projects:       'project',
     properties:     'property',
@@ -1095,6 +1103,12 @@ export function applyInsertDefaults(tableName, fields, userId) {
     // NULL + findMissingRequired both pass; the trigger overwrites it.
     if (!fields.ocr_record_number) fields.ocr_record_number = 'NEW'
     if (!fields.ocr_created_by)    fields.ocr_created_by    = userId
+  } else if (tableName === 'opportunity_record_type_price_books') {
+    // ortpb_record_number is populated by trg_ortpb_rn (BEFORE INSERT); the
+    // placeholder just satisfies NOT NULL + findMissingRequired.
+    if (!fields.ortpb_record_number) fields.ortpb_record_number = 'NEW'
+    if (!fields.ortpb_owner)         fields.ortpb_owner         = userId
+    if (!fields.ortpb_created_by)    fields.ortpb_created_by    = userId
   } else if (tableName === 'contact_skills') {
     if (!fields.cs_record_number) fields.cs_record_number = 'NEW'
     if (!fields.cs_owner)         fields.cs_owner         = userId
@@ -1334,6 +1348,61 @@ export async function fetchDependentLookupOptions(field, record) {
       return (data || []).map(r => ({
         value: r.id,
         label: r.opportunity_name || r.id.slice(0, 8),
+      }))
+    }
+    case 'products_for_opportunity': {
+      // Line-item Product picker: only products with an active price book
+      // entry — scoped to the opportunity's price book when it has one,
+      // falling back to any active entry. Physical/equipment products with
+      // no entries never appear; pricing a product into a book is what makes
+      // it chargeable (Nicholas, 2026-07-26: line items are the things we
+      // charge for, not the install catalog).
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_products_for_opportunity', {
+        p_opportunity_ids: dependencyValues,
+        p_include_product_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.product_name || r.id.slice(0, 8),
+      }))
+    }
+    case 'price_book_entries_for_opportunity': {
+      // Mixed-type dependency (opportunity + product), so read the draft
+      // fields by name rather than relying on the positional values array.
+      const opportunityId = record?.opportunity_id ?? null
+      if (!opportunityId) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_price_book_entries_for_opportunity', {
+        p_opportunity_ids: [opportunityId],
+        p_product_id: record?.product_id ?? null,
+        p_include_entry_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.price_book_entry_name || r.id.slice(0, 8),
+      }))
+    }
+    case 'units_for_opportunity': {
+      // Units offered on a line item must live on the opportunity's property
+      // (via their building) — same parent-chain rule as
+      // opportunities_for_property.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_units_for_opportunity', {
+        p_opportunity_ids: dependencyValues,
+        p_include_unit_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.unit_name || r.id.slice(0, 8),
       }))
     }
     case 'opportunities_for_contact_account': {
