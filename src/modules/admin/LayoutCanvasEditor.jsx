@@ -587,10 +587,34 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
 // so they never belong to any one tab. Every pill is a drop target for a
 // section card's drag, which is how sections move between tabs. The muted
 // Activity note reminds that the record page adds that tab automatically.
+// File-folder tab styling. Hover needs a pseudo-class, so the tab shapes get
+// a small scoped stylesheet (lce- prefix) instead of pure inline styles —
+// colors are the design-system constants interpolated once at module load.
+const TAB_CSS = `
+.lce-tab { display:flex; align-items:center; gap:7px; padding:9px 14px 8px; white-space:nowrap; cursor:pointer;
+  position:relative; font-family:inherit; font-size:12.5px; font-weight:500; color:${C.textSecondary};
+  background:${C.border}; border:1px solid ${C.borderDark}; border-bottom:none;
+  border-radius:9px 9px 0 0; transition:background 200ms ease, color 200ms ease; }
+.lce-tab:hover:not(.lce-active) { background:#eef2f8; color:${C.textPrimary}; }
+.lce-tab.lce-active { background:${C.card}; color:${C.textPrimary}; font-weight:600;
+  border-top:3px solid ${C.emerald}; padding-top:7px; padding-bottom:9px; margin-bottom:-1px;
+  box-shadow:0 -2px 6px rgba(13,26,46,0.07); z-index:1; }
+.lce-tab.lce-drop { background:#f0faf5; box-shadow:inset 0 0 0 1px ${C.emerald}; color:${C.textPrimary}; }
+.lce-tab-ghost { display:flex; align-items:center; padding:9px 12px 8px; white-space:nowrap; cursor:default;
+  font-size:11.5px; color:${C.textMuted}; background:transparent;
+  border:1px dashed ${C.borderDark}; border-bottom:none; border-radius:9px 9px 0 0; }
+.lce-tab-new { display:flex; align-items:center; padding:9px 13px 8px; white-space:nowrap; cursor:pointer;
+  font-family:inherit; font-size:12.5px; font-weight:500; color:${C.emeraldMid}; background:transparent;
+  border:1px dashed ${C.borderDark}; border-bottom:none; border-radius:9px 9px 0 0;
+  transition:background 200ms ease; }
+.lce-tab-new:hover { background:#f0faf5; border-color:${C.emeraldMid}; }
+`
+
 function TabBar({ tabList, activeTab, tabSectionCount, rightCount, onSelect, onAdd, onRename, onRequestDelete }) {
   const [adding, setAdding] = useState(false)
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '0 16px', background: C.card, borderBottom: `1px solid ${C.border}`, flexShrink: 0, overflowX: 'auto' }}>
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, padding: '10px 16px 0', background: C.page, borderBottom: `1px solid ${C.borderDark}`, flexShrink: 0, overflowX: 'auto' }}>
+      <style>{TAB_CSS}</style>
       {tabList.map(t => (
         <TabPill key={t} name={t} label={t} count={tabSectionCount(t)} active={activeTab === t}
           standard={STANDARD_TABS.includes(t)}
@@ -598,15 +622,14 @@ function TabBar({ tabList, activeTab, tabSectionCount, rightCount, onSelect, onA
       ))}
       {adding
         ? <NewTabInput onCommit={(name) => { setAdding(false); if (name.trim()) onAdd(name) }} />
-        : <button onClick={() => setAdding(true)} title="Create a new record-page tab"
-            style={{ padding: '12px 12px', fontSize: 12.5, fontWeight: 500, color: C.emeraldMid, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        : <button onClick={() => setAdding(true)} title="Create a new record-page tab" className="lce-tab-new">
             + New Tab
           </button>}
       <span title="The record page adds the Activity tab automatically — it can't hold layout sections."
-        style={{ padding: '12px 10px', fontSize: 11.5, color: C.textMuted, whiteSpace: 'nowrap', cursor: 'default' }}>
+        className="lce-tab-ghost">
         Activity · automatic
       </span>
-      <div style={{ marginLeft: 'auto', paddingLeft: 12 }}>
+      <div style={{ marginLeft: 'auto', paddingLeft: 12, display: 'flex', alignItems: 'flex-end' }}>
         <TabPill name={RIGHT_TAB} label="Right Sidebar" count={rightCount} active={activeTab === RIGHT_TAB}
           standard onSelect={onSelect}
           hint="Sections here render in the always-visible right sidebar on every tab (Salesforce-style utility rail)." />
@@ -642,17 +665,12 @@ function TabPill({ name, label, count, active, standard, onSelect, onRename, onR
   return (
     <div ref={setNodeRef} onClick={() => onSelect(name)}
       title={hint || (standard ? undefined : 'Rename or delete this tab with the controls shown while it is active. Drop a section card here to move the section onto this tab.')}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 6, padding: '11px 13px', cursor: 'pointer', whiteSpace: 'nowrap',
-        fontSize: 12.5, fontWeight: active ? 600 : 500,
-        color: active ? C.textPrimary : C.textSecondary,
-        borderBottom: `2px solid ${active ? C.emerald : 'transparent'}`,
-        background: isOver ? '#f0faf5' : 'transparent',
-        boxShadow: isOver ? `inset 0 0 0 1px ${C.emerald}` : 'none',
-        borderRadius: isOver ? 6 : 0,
-      }}>
+      className={`lce-tab${active ? ' lce-active' : ''}${isOver ? ' lce-drop' : ''}`}>
       {label}
-      <span style={{ fontSize: 10.5, fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: active ? C.emeraldMid : C.textMuted, background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 9, padding: '1px 7px' }}>{count}</span>
+      <span style={{ fontSize: 10.5, fontWeight: 600, fontFamily: 'JetBrains Mono, monospace',
+        color: active ? C.emeraldMid : C.textMuted,
+        background: active ? '#e9f9f1' : C.cardSecondary,
+        border: `1px solid ${active ? '#bfe9d6' : C.border}`, borderRadius: 9, padding: '1px 7px' }}>{count}</span>
       {!standard && active && (
         <>
           <span onClick={e => { e.stopPropagation(); setDraft(label); setEditing(true) }} title="Rename tab"
