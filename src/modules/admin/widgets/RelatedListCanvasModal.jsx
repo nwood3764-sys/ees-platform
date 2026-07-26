@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { C } from '../../../data/constants'
 import { useIsMobile } from '../../../lib/useMediaQuery'
-import { describeObject, describeIncomingFKs } from '../../../data/adminService'
+import { describeObject, describeIncomingFKs, describeGrandchildFKs } from '../../../data/adminService'
 import { humanizeColumnName } from './eesFieldTypes'
 import {
   FormField,
@@ -75,6 +75,15 @@ export default function RelatedListCanvasModal({
   const [title, setTitle]             = useState(initial?.title || '')
   const [targetTable, setTargetTable] = useState(cfg.table || '')
   const [fkColumn, setFkColumn]       = useState(cfg.fk || '')
+  // Grandchild (two-hop) path: the target table has no FK to this object —
+  // it reaches it THROUGH a direct child ("via") table. { table, fk, targetFk }
+  // where fk is the via table's FK to this object and targetFk is the target
+  // table's FK to the via table (stored as config.fk). Null = direct child.
+  const [viaPath, setViaPath] = useState(
+    cfg.via && cfg.via.table && cfg.via.fk
+      ? { table: cfg.via.table, fk: cfg.via.fk, targetFk: cfg.fk || '' }
+      : null,
+  )
   const [selectedCols, setSelectedCols] = useState(
     Array.isArray(cfg.columns) ? cfg.columns.map(c => c.name).filter(Boolean) : [],
   )
@@ -82,6 +91,7 @@ export default function RelatedListCanvasModal({
   const [sortDir, setSortDir]     = useState(cfg.sort_dir || 'asc')
 
   const [incomingFKs, setIncomingFKs]     = useState([])
+  const [grandchildFKs, setGrandchildFKs] = useState([])
   const [loadingFKs, setLoadingFKs]       = useState(true)
   const [targetColumns, setTargetColumns] = useState([])
   const [loadingTarget, setLoadingTarget] = useState(false)
@@ -92,8 +102,15 @@ export default function RelatedListCanvasModal({
   useEffect(() => {
     let cancelled = false
     setLoadingFKs(true)
-    describeIncomingFKs(objectName)
-      .then(fks => { if (!cancelled) setIncomingFKs(fks || []) })
+    Promise.all([
+      describeIncomingFKs(objectName),
+      describeGrandchildFKs(objectName),
+    ])
+      .then(([fks, paths]) => {
+        if (cancelled) return
+        setIncomingFKs(fks || [])
+        setGrandchildFKs(paths || [])
+      })
       .catch(err => { if (!cancelled) setError(err.message || String(err)) })
       .finally(() => { if (!cancelled) setLoadingFKs(false) })
     return () => { cancelled = true }
@@ -122,13 +139,47 @@ export default function RelatedListCanvasModal({
     return [...seen].sort((a, b) => a.localeCompare(b))
   }, [incomingFKs])
 
+  // Grandchild paths, excluding targets that already reference this object
+  // directly — the direct FK is always the better list for those.
+  const viaOptions = useMemo(() => {
+    const direct = new Set(targetTables)
+    return grandchildFKs
+      .filter(p => !direct.has(p.target_table))
+      .map(p => ({
+        value: `via|${p.via_table}|${p.via_fk_column}|${p.target_table}|${p.target_fk_column}`,
+        table: p.target_table,
+        via: { table: p.via_table, fk: p.via_fk_column, targetFk: p.target_fk_column },
+        label: `${p.target_table} · via ${p.via_table}`,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [grandchildFKs, targetTables])
+
+  const targetSelectValue = viaPath
+    ? `via|${viaPath.table}|${viaPath.fk}|${targetTable}|${viaPath.targetFk}`
+    : targetTable
+
+  function handleTargetChange(value) {
+    if (value.startsWith('via|')) {
+      const [, viaTable, viaFk, target, targetFk] = value.split('|')
+      setViaPath({ table: viaTable, fk: viaFk, targetFk })
+      setTargetTable(target)
+      setFkColumn(targetFk)
+    } else {
+      setViaPath(null)
+      setTargetTable(value)
+      setFkColumn('')
+    }
+  }
+
   const fkChoices = useMemo(
     () => incomingFKs.filter(fk => fk.referencing_table === targetTable),
     [incomingFKs, targetTable],
   )
 
   // Auto-pick the FK when the target has exactly one; clear a stale pick.
+  // Via paths carry their FK in the path itself — leave those alone.
   useEffect(() => {
+    if (viaPath) return
     if (targetTable && fkChoices.length === 1 && !fkColumn) {
       setFkColumn(fkChoices[0].referencing_column)
     }
@@ -136,7 +187,18 @@ export default function RelatedListCanvasModal({
       setFkColumn('')
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetTable, fkChoices])
+  }, [targetTable, fkChoices, viaPath])
+
+  // When the target table's columns arrive, drop any selected display/sort
+  // columns that don't exist on it (stale picks from a previous target would
+  // otherwise fail the DB config validation on layout save).
+  useEffect(() => {
+    if (!targetTable || loadingTarget || targetColumns.length === 0) return
+    const valid = new Set(targetColumns.map(c => c.column_name))
+    setSelectedCols(prev => prev.filter(n => valid.has(n)))
+    setSortField(prev => (prev && !valid.has(prev) ? '' : prev))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetTable, loadingTarget, targetColumns])
 
   const selectableTargetColumns = useMemo(() => (
     targetColumns
@@ -206,9 +268,19 @@ export default function RelatedListCanvasModal({
       // Carry forward any extra config keys (editable, picker, order_field,
       // hide_when_empty, …) the layout may already have on this widget.
       const config = { ...cfg, table: targetTable, fk: fkColumn, columns }
+      if (viaPath) config.via = { table: viaPath.table, fk: viaPath.fk }
+      else delete config.via
       if (sortField) { config.sort_field = sortField; config.sort_dir = sortDir }
       else { delete config.sort_field; delete config.sort_dir }
-      if (config.is_deleted_col === undefined) config.is_deleted_col = 'is_deleted'
+      // Soft-delete filter column: detect the target's real column — audit
+      // columns are unprefixed on some tables (`is_deleted`) and prefixed on
+      // others (`unit_is_deleted`); a blanket 'is_deleted' 400s the fetch on
+      // prefixed tables. Re-detect whenever the target table changed.
+      if (config.is_deleted_col === undefined || cfg.table !== targetTable) {
+        const softDel = targetColumns.find(c => c.column_name === 'is_deleted')
+          || targetColumns.find(c => /_is_deleted$/.test(c.column_name))
+        config.is_deleted_col = softDel ? softDel.column_name : 'is_deleted'
+      }
 
       onApply({ title: title.trim(), config })
     } catch (e) {
@@ -266,19 +338,32 @@ export default function RelatedListCanvasModal({
             />
           </FormField>
 
-          <FormField label="Target Table" hint="Tables with a foreign key pointing at this object." required>
+          <FormField
+            label="Target Table"
+            hint="Direct children hold a foreign key to this object. Related-record paths reach one level deeper — records related to this object's children (e.g. units via buildings)."
+            required
+          >
             <select
-              value={targetTable}
-              onChange={e => setTargetTable(e.target.value)}
+              value={targetSelectValue}
+              onChange={e => handleTargetChange(e.target.value)}
               disabled={busy || loadingFKs}
               style={{ ...inputStyle, cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5 }}
             >
               <option value="">— Select a table —</option>
-              {targetTables.map(t => (
-                <option key={t} value={t}>{t}</option>
-              ))}
+              <optgroup label="Direct children">
+                {targetTables.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </optgroup>
+              {viaOptions.length > 0 && (
+                <optgroup label="Via a related record">
+                  {viaOptions.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
-            {!loadingFKs && targetTables.length === 0 && (
+            {!loadingFKs && targetTables.length === 0 && viaOptions.length === 0 && (
               <div style={{ ...hintBoxStyle, marginTop: 6, marginBottom: 0 }}>
                 No tables have foreign keys pointing at <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{objectName}</code>,
                 so there is nothing a related list can show.
@@ -286,7 +371,21 @@ export default function RelatedListCanvasModal({
             )}
           </FormField>
 
-          {targetTable && (
+          {targetTable && viaPath && (
+            <FormField
+              label="Join Path"
+              hint="This list shows records related through an intermediate record — the join is fixed by the path you picked."
+            >
+              <div style={{
+                ...hintBoxStyle, marginTop: 0, marginBottom: 0,
+                fontFamily: 'JetBrains Mono, monospace', fontSize: 12,
+              }}>
+                {targetTable}.{viaPath.targetFk} → {viaPath.table}.{viaPath.fk} → {objectName}
+              </div>
+            </FormField>
+          )}
+
+          {targetTable && !viaPath && (
             <FormField
               label="Foreign Key Column"
               hint={fkChoices.length > 1
