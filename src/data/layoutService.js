@@ -711,17 +711,27 @@ export async function fetchRelatedRecords(config, parentRecordId) {
     }
   }
 
-  // Grandchild (two-hop) related lists: config.via = { table, fk } names the
-  // intermediate table and ITS foreign key to the layout's object, while
-  // config.fk stays the target table's FK — which here points at the via
-  // table, not the parent (e.g. Units on a Property: table 'units',
-  // fk 'building_id', via { table: 'buildings', fk: 'property_id' }).
-  // Resolved as a PostgREST inner-join embed filtered on the via table's
-  // parent FK, so one round-trip returns all grandchildren across every
-  // intermediate row, RLS-respecting and count-accurate.
-  const isViaPath = !!(via && via.table && via.fk && fk)
+  // Related-record (multi-hop) lists: config.via holds the chain of
+  // intermediate tables between the target and the layout's object, ordered
+  // target-side first — each entry's fk is that table's FK to the NEXT entry
+  // (the last entry's fk points at the layout's object), while config.fk is
+  // the target table's FK to the first intermediate. Units on a Property:
+  //   { table: 'units', fk: 'building_id',
+  //     via: [{ table: 'buildings', fk: 'property_id' }] }
+  // Resolved as nested PostgREST inner-join embeds filtered on the parent id,
+  // so one round-trip returns all descendants across every intermediate row,
+  // RLS-respecting and count-accurate. (A legacy single-object via config is
+  // normalized to a one-entry chain.)
+  const viaChain = Array.isArray(via)
+    ? via.filter(v => v && v.table && v.fk)
+    : (via && via.table && via.fk ? [via] : [])
+  const isViaPath = viaChain.length > 0 && !!fk
   if (isViaPath) {
-    selectParts.push(`_via:${fk}!inner(${via.fk})`)
+    let embed = viaChain[viaChain.length - 1].fk
+    for (let i = viaChain.length - 2; i >= 0; i--) {
+      embed = `_v${i + 2}:${viaChain[i].fk}!inner(${embed})`
+    }
+    selectParts.push(`_v1:${fk}!inner(${embed})`)
   }
 
   let query = supabase
@@ -733,9 +743,12 @@ export async function fetchRelatedRecords(config, parentRecordId) {
     // filtered), so it's cheap and RLS-respecting.
     .select(selectParts.join(', '), { count: 'exact' })
 
-  query = isViaPath
-    ? query.eq(`_via.${via.fk}`, parentRecordId)
-    : query.eq(fk, parentRecordId)
+  if (isViaPath) {
+    const aliasPath = viaChain.map((_, i) => `_v${i + 1}`).join('.')
+    query = query.eq(`${aliasPath}.${viaChain[viaChain.length - 1].fk}`, parentRecordId)
+  } else {
+    query = query.eq(fk, parentRecordId)
+  }
 
   if (is_deleted_col) {
     query = query.eq(is_deleted_col, false)
@@ -757,7 +770,7 @@ export async function fetchRelatedRecords(config, parentRecordId) {
   // Drop the join-plumbing embed from via-path rows — the renderer only
   // knows the configured display columns.
   if (isViaPath) {
-    for (const row of rows) delete row._via
+    for (const row of rows) delete row._v1
   }
   if (lookupCols.length) {
     for (const row of rows) {
