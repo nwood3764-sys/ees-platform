@@ -54,6 +54,7 @@ export const ACTION_KEYS = Object.freeze({
   ADVANCE_TO_OPPORTUNITY:  'advance_to_opportunity',
   RUN_INCOME_QUALIFICATION:'run_income_qualification',
   GENERATE_REPORT:         'generate_report',
+  GENERATE_PAPERWORK:      'generate_paperwork',
   SCHEDULE_WORK_ORDERS:    'schedule_work_orders',
   RESCHEDULE_WORK_ORDERS:  'reschedule_work_orders',
   SCHEDULE_WORK_ORDER:     'schedule_work_order',
@@ -175,6 +176,18 @@ export const ACTION_REGISTRY = Object.freeze({
     applicableObjects:   ['projects'],
     defaultTier:         'primary',
     defaultSortOrder:    20,
+    isAvailable: ({ tableName, editing }) => !editing && tableName === 'projects',
+  },
+  // HOMES paperwork generation (Energy Audit Invoice, Project Proposal,
+  // Project Invoice, Sealed variants, Paperwork Workbook) — downloads only.
+  generate_paperwork: {
+    key:                 ACTION_KEYS.GENERATE_PAPERWORK,
+    label:               'Generate Paperwork',
+    icon:                'M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z M14 3v6h6 M9 13h6 M9 17h4',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['projects'],
+    defaultTier:         'menu',
+    defaultSortOrder:    25,
     isAvailable: ({ tableName, editing }) => !editing && tableName === 'projects',
   },
   run_income_qualification: {

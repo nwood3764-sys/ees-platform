@@ -16,6 +16,7 @@ import { Badge, Icon } from './UI'
 // preview code). A combined chunk would still be large; per-modal
 // splits give Vite the freedom to share only what's truly shared.
 const ProjectReportModal                  = lazy(() => import('./ProjectReportModal'))
+const ProjectPaperworkModal               = lazy(() => import('./ProjectPaperworkModal'))
 const ProjectSchedulerWizard              = lazy(() => import('./scheduler/ProjectSchedulerWizard'))
 const ServiceAppointmentRescheduleModal   = lazy(() => import('./scheduler/ServiceAppointmentRescheduleModal'))
 const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkOrderScheduleModal'))
@@ -4798,6 +4799,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
+  // HOMES paperwork generator (only used when tableName === 'projects').
+  const [showPaperworkModal, setShowPaperworkModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
   const [showLogCall, setShowLogCall] = useState(false)
@@ -6121,6 +6124,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: handleRunIncomeQualification,
     [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
+    [ACTION_KEYS.GENERATE_PAPERWORK]:     () => setShowPaperworkModal(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -6835,6 +6839,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             project={record}
             onClose={() => setShowReportModal(false)}
             onComplete={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
+
+        {/* HOMES paperwork generator (only mounted on projects, opt-in via toolbar action) */}
+        {showPaperworkModal && tableName === 'projects' && (
+          <ProjectPaperworkModal
+            projectId={recordId}
+            project={record}
+            onClose={() => setShowPaperworkModal(false)}
           />
         )}
 
