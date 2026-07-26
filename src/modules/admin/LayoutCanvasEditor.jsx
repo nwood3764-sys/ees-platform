@@ -821,7 +821,9 @@ function RightRail({ count, onAdd, children }) {
   const { setNodeRef, isOver } = useDroppable({ id: `tabdrop::${RIGHT_TAB}` })
   return (
     <div ref={setNodeRef} style={{
-      width: 316, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      // Matches the record page's rail width (480px) so the editor shows the
+      // real proportions — WYSIWYG.
+      width: 480, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden',
       borderLeft: `1px solid ${C.borderDark}`,
       background: isOver ? '#f0faf5' : '#eaeef6',
       boxShadow: isOver ? `inset 0 0 0 1px ${C.emerald}` : 'none',

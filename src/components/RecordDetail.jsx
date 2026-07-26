@@ -4765,8 +4765,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // main content on wide screens (>1024px). Below that, it stacks underneath
   // — keeps the main field groups readable when there's not enough width for
   // two columns. Salesforce's Lightning utility rail collapses at a similar
-  // breakpoint.
-  const isNarrow = useMediaQuery('(max-width: 1024px)')
+  // breakpoint. 1280 (not 1024) since the rail widened to 480px (Nicholas,
+  // 2026-07-26: related-list cards in a 320px rail truncated unreadably).
+  const isNarrow = useMediaQuery('(max-width: 1280px)')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -6623,7 +6624,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               doesn't exist yet. */}
           {!isInsertMode && sections.some(sec => (sec.section_placement || 'main') === 'right') && (
             <div style={{
-              width: isNarrow ? '100%' : 320,
+              width: isNarrow ? '100%' : 480,
               flexShrink: 0,
               display: 'flex',
               flexDirection: 'column',
