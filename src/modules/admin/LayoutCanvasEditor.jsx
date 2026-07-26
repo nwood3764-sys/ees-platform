@@ -68,11 +68,11 @@ const RESERVED_TAB_NAMES = new Set(['details', 'related', 'activity'])
 // always-visible rail beside the canvas (WYSIWYG) — never inside a tab.
 const RIGHT_TAB = '__right_sidebar__'
 
-// Card widgets the record renderer ALWAYS places on the Related tab, no
-// matter which section/tab holds them — the section only controls card order.
-// Everything else (field groups, maps, config editors) renders inside its
-// section on the section's own tab.
-const RELATED_TAB_WIDGET_TYPES = new Set(['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'])
+// Card widgets (related lists, galleries, conversation panels, reports,
+// publish history). Since 2026-07-26 they render exactly where they're
+// placed — inside their section, on that section's tab (or in the right
+// rail) — so the only render hint a tile needs is the right-sidebar one.
+const CARD_WIDGET_TYPES = new Set(['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'])
 
 function humanize(col, object) {
   let c = col
@@ -843,11 +843,10 @@ function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWid
 
 function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenRelatedModal }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `wgt::${widget.key}` })
-  // Where this card actually renders on the record page: cards in a
-  // right-sidebar section render inside the rail (always visible); cards in
-  // a main section render on the Related tab.
-  const isCard = RELATED_TAB_WIDGET_TYPES.has(widget.type)
-  const renderHint = !isCard ? null : placement === 'right' ? 'Right sidebar' : 'Related tab'
+  // Cards render exactly where they're placed — inside their section on its
+  // tab. The one placement worth calling out is the right rail.
+  const isCard = CARD_WIDGET_TYPES.has(widget.type)
+  const renderHint = isCard && placement === 'right' ? 'Right sidebar' : null
   return (
     <div ref={setNodeRef} style={{
       transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1,
@@ -865,9 +864,7 @@ function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenRe
           border: 'none', background: 'transparent', outline: 'none' }}
       />
       <span
-        title={!renderHint ? undefined : renderHint === 'Right sidebar'
-          ? "This card renders in the record page's always-visible right sidebar."
-          : "This card renders on the record's Related tab — its section here only controls card order."}
+        title={renderHint ? "This card renders in the record page's always-visible right sidebar." : undefined}
         style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, flexShrink: 0 }}>
         {WIDGET_LABELS[widget.type] || widget.type}
         {renderHint && <span style={{ color: C.sky }}> · {renderHint}</span>}
