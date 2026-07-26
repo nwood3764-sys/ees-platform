@@ -49,6 +49,7 @@ import { C } from '../../data/constants'
 import { LoadingState, ErrorState } from '../../components/UI'
 import { inputStyle } from '../../builder/inspectorControls'
 import { loadLayoutForCanvas, saveLayoutFromCanvas } from '../../builder/adapters/pageLayoutAdapter'
+import { describeObject } from '../../data/adminService'
 import RelatedListCanvasModal from './widgets/RelatedListCanvasModal'
 
 const WIDGET_LABELS = {
@@ -68,11 +69,11 @@ const RESERVED_TAB_NAMES = new Set(['details', 'related', 'activity'])
 // always-visible rail beside the canvas (WYSIWYG) — never inside a tab.
 const RIGHT_TAB = '__right_sidebar__'
 
-// Card widgets the record renderer ALWAYS places on the Related tab, no
-// matter which section/tab holds them — the section only controls card order.
-// Everything else (field groups, maps, config editors) renders inside its
-// section on the section's own tab.
-const RELATED_TAB_WIDGET_TYPES = new Set(['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'])
+// Card widgets (related lists, galleries, conversation panels, reports,
+// publish history). Since 2026-07-26 they render exactly where they're
+// placed — inside their section, on that section's tab (or in the right
+// rail) — so the only render hint a tile needs is the right-sidebar one.
+const CARD_WIDGET_TYPES = new Set(['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'])
 
 function humanize(col, object) {
   let c = col
@@ -80,6 +81,23 @@ function humanize(col, object) {
   c = c.replace(/_id$/, '').replace(/_/g, ' ').trim()
   return c.replace(/\b\w/g, m => m.toUpperCase())
 }
+
+// Renderer-facing type for a parent-table column (cross-object fields).
+// Mirrors RelatedListCanvasModal's relatedColumnType.
+function relatedFieldColumnType(col) {
+  const dt = col.data_type || ''
+  if (col.is_foreign_key && dt === 'uuid') {
+    return col.references_table === 'picklist_values' ? 'picklist' : 'lookup'
+  }
+  if (dt === 'date') return 'date'
+  if (dt === 'timestamp with time zone' || dt === 'timestamp without time zone') return 'datetime'
+  if (dt === 'boolean') return 'boolean'
+  if (['integer', 'bigint', 'smallint', 'numeric', 'real', 'double precision'].includes(dt)) return 'number'
+  return 'text'
+}
+
+// System plumbing columns hidden from the related-fields drill-down.
+const RELATED_HIDDEN_COLUMNS = /(^id$|^created_at$|^updated_at$|_created_at$|_updated_at$|_created_by$|_updated_by$|is_deleted|_deleted_at$|_deleted_by$|deletion_reason|^auth_user_id$)/
 
 // Ensure every field in a field group has a valid `column` (1..cols). Fields
 // loaded without one are distributed round-robin so they don't pile into col 1.
@@ -131,6 +149,14 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const [saveError, setSaveError] = useState(null)
   // { sectionKey, widgetKey|null } — related-list config modal target.
   const [relatedModal, setRelatedModal] = useState(null)
+  // Cross-object field drill-down (Salesforce-style): every FK on this
+  // object is a group the admin can expand to place READ-ONLY fields from
+  // the referenced record (e.g. property HUD fields on an opportunity).
+  // relatedFkGroups: [{ fk, table, label }]; parentCols: fk -> 'loading' |
+  // column rows; expandedFks: Set of expanded fk names.
+  const [relatedFkGroups, setRelatedFkGroups] = useState([])
+  const [parentCols, setParentCols] = useState({})
+  const [expandedFks, setExpandedFks] = useState(() => new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -151,6 +177,71 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
       .catch(err => { if (!cancelled) { setError(err); setLoading(false) } })
     return () => { cancelled = true }
   }, [layoutId])
+
+  // Outgoing FKs → the related-object groups in the palette. Picklist-value
+  // FKs are excluded (those are picklist fields, not drill-down parents).
+  useEffect(() => {
+    if (!meta?.object) return
+    let cancelled = false
+    describeObject(meta.object)
+      .then(cols => {
+        if (cancelled) return
+        setRelatedFkGroups((cols || [])
+          .filter(c => c.is_foreign_key && c.references_table && c.references_table !== 'picklist_values')
+          .filter(c => !/(_created_by|_updated_by|_deleted_by)$/.test(c.column_name))
+          .map(c => ({ fk: c.column_name, table: c.references_table, label: humanize(c.column_name, meta.object) }))
+          .sort((a, b) => a.label.localeCompare(b.label)))
+      })
+      .catch(() => { /* palette group just doesn't appear */ })
+    return () => { cancelled = true }
+  }, [meta?.object])
+
+  const toggleFkGroup = (fk, table) => {
+    setExpandedFks(prev => {
+      const next = new Set(prev)
+      if (next.has(fk)) { next.delete(fk); return next }
+      next.add(fk)
+      return next
+    })
+    if (!parentCols[fk]) {
+      setParentCols(prev => ({ ...prev, [fk]: 'loading' }))
+      describeObject(table)
+        .then(cols => setParentCols(prev => ({ ...prev, [fk]: cols || [] })))
+        .catch(() => setParentCols(prev => ({ ...prev, [fk]: [] })))
+    }
+  }
+
+  // Place a cross-object field: '<fk>.<column>', type related_field, always
+  // read-only on the record page. Lookup-typed parent columns get display
+  // wiring (lookup_table + its first *_name column) so cells show names,
+  // not UUIDs.
+  const addRelatedField = async (group, col) => {
+    if (!activeSection) return
+    const name = `${group.fk}.${col.column_name}`
+    const columnType = relatedFieldColumnType(col)
+    const related = { fk_column: group.fk, table: group.table, column: col.column_name, column_type: columnType }
+    if (columnType === 'lookup') {
+      const refCols = await describeObject(col.references_table).catch(() => [])
+      const displayField = (refCols || []).find(c => /_name$/.test(c.column_name))?.column_name
+        || (refCols || []).find(c => c.column_name === 'name')?.column_name
+      if (displayField) {
+        related.lookup_table = col.references_table
+        related.lookup_field = displayField
+      } else {
+        related.column_type = 'text'
+      }
+    }
+    const field = { name, type: 'related_field', label: `${group.label} · ${humanize(col.column_name, group.table)}`, column: 1, related }
+    setSections(s => s.map(sec => {
+      if (sec.key !== activeSection) return sec
+      const widgets = sec.widgets || []
+      const fg = widgets.find(w => w.type === 'field_group')
+      if (!fg) {
+        return { ...sec, widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [field] } }, ...widgets] }
+      }
+      return { ...sec, widgets: widgets.map(w => w === fg ? { ...w, config: { ...w.config, fields: [...(w.config?.fields || []), field] } } : w) }
+    }))
+  }
 
   // ── Stable section/field ops (so memoized SectionCards don't re-render all) ─
   const patchSection = useCallback((key, patch) => {
@@ -513,6 +604,65 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
                   <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace' }}>{c.name}</span>
                 </button>
               ))}
+
+            {/* Related-object drill-down — Salesforce-style cross-object
+                fields. Expand a lookup to place read-only fields from the
+                record it points at. */}
+            {relatedFkGroups.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, padding: '0 2px 6px' }}>
+                  Related Object Fields
+                </div>
+                <div style={{ fontSize: 10.5, color: C.textMuted, padding: '0 2px 8px', lineHeight: 1.45 }}>
+                  Read-only fields from records this object looks up to.
+                </div>
+                {relatedFkGroups.map(g => {
+                  const open = expandedFks.has(g.fk)
+                  const cols = parentCols[g.fk]
+                  const list = Array.isArray(cols)
+                    ? cols.filter(c =>
+                        !RELATED_HIDDEN_COLUMNS.test(c.column_name) && !c.is_primary_key &&
+                        !placedFieldNames.has(`${g.fk}.${c.column_name}`) &&
+                        (!fieldQuery ||
+                          c.column_name.toLowerCase().includes(fieldQuery) ||
+                          humanize(c.column_name, g.table).toLowerCase().includes(fieldQuery)))
+                    : null
+                  return (
+                    <div key={g.fk} style={{ marginBottom: 6 }}>
+                      <button onClick={() => toggleFkGroup(g.fk, g.table)}
+                        title={`Fields from the ${g.table} record referenced by ${g.fk}`}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left', padding: '7px 9px',
+                          fontSize: 12.5, fontWeight: 600, background: C.cardSecondary, border: `1px solid ${C.borderDark}`,
+                          borderRadius: 6, cursor: 'pointer', color: C.textPrimary }}>
+                        <span style={{ fontSize: 10, color: C.textMuted, width: 10, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.label}</span>
+                        <span style={{ fontSize: 9.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>{g.table}</span>
+                      </button>
+                      {open && (
+                        <div style={{ padding: '5px 0 2px 14px' }}>
+                          {cols === 'loading' && <div style={{ fontSize: 11.5, color: C.textMuted, padding: 4 }}>Loading fields…</div>}
+                          {Array.isArray(cols) && list.length === 0 && (
+                            <div style={{ fontSize: 11.5, color: C.textMuted, padding: 4 }}>
+                              {fieldQuery ? 'No fields match your search.' : 'All fields placed.'}
+                            </div>
+                          )}
+                          {Array.isArray(cols) && list.map(c => (
+                            <button key={c.column_name} onClick={() => addRelatedField(g, c)} disabled={!activeSection}
+                              title={activeSection ? `Add ${g.fk}.${c.column_name} (read-only)` : 'Select a section first'}
+                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', marginBottom: 4, fontSize: 12,
+                                background: C.card, border: `1px dashed ${C.border}`, borderRadius: 6,
+                                cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
+                              {humanize(c.column_name, g.table)}
+                              <span style={{ fontSize: 9.5, color: C.textMuted, marginLeft: 5, fontFamily: 'JetBrains Mono, monospace' }}>{c.column_name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -843,11 +993,10 @@ function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWid
 
 function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenRelatedModal }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `wgt::${widget.key}` })
-  // Where this card actually renders on the record page: cards in a
-  // right-sidebar section render inside the rail (always visible); cards in
-  // a main section render on the Related tab.
-  const isCard = RELATED_TAB_WIDGET_TYPES.has(widget.type)
-  const renderHint = !isCard ? null : placement === 'right' ? 'Right sidebar' : 'Related tab'
+  // Cards render exactly where they're placed — inside their section on its
+  // tab. The one placement worth calling out is the right rail.
+  const isCard = CARD_WIDGET_TYPES.has(widget.type)
+  const renderHint = isCard && placement === 'right' ? 'Right sidebar' : null
   return (
     <div ref={setNodeRef} style={{
       transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1,
@@ -865,9 +1014,7 @@ function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenRe
           border: 'none', background: 'transparent', outline: 'none' }}
       />
       <span
-        title={!renderHint ? undefined : renderHint === 'Right sidebar'
-          ? "This card renders in the record page's always-visible right sidebar."
-          : "This card renders on the record's Related tab — its section here only controls card order."}
+        title={renderHint ? "This card renders in the record page's always-visible right sidebar." : undefined}
         style={{ fontSize: 10.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, flexShrink: 0 }}>
         {WIDGET_LABELS[widget.type] || widget.type}
         {renderHint && <span style={{ color: C.sky }}> · {renderHint}</span>}
