@@ -1040,6 +1040,11 @@ function EmailTemplatePreviewModal({
 // unusable. This renders a button showing the current selection; clicking it
 // opens a panel with a search input and an ascending-sorted, filtered option
 // list. Selecting an option (or the leading blank row) calls onChange(value).
+// Lookup targets that must NEVER offer inline quick-create: identity objects
+// are provisioned through Admin flows (auth account, role, permissions) — an
+// inline insert would create a half-provisioned row that can't sign in.
+const QUICK_CREATE_EXCLUDED_TABLES = new Set(['users', 'portal_users'])
+
 // QuickCreateModal — inline "+ New" for a scalar lookup field. Opens the REAL
 // create path for the lookup's target table (same insertRecord +
 // applyInsertDefaults the full form uses), scoped to the table's required
@@ -1054,6 +1059,9 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
   const [fields, setFields] = useState([])      // [{name,label,type,required,lookup_table,lookup_field}]
   const [draft, setDraft] = useState({})
   const [picklistOpts, setPicklistOpts] = useState({})
+  // Options for required-FK lookup fields, keyed by column name. Loaded with
+  // the field list; refreshed per-field by server search as the user types.
+  const [fkLookupOpts, setFkLookupOpts] = useState({})
   const [recordTypes, setRecordTypes] = useState([])
   const rtColumn = useMemo(() => getRecordTypeColumn(table), [table])
 
@@ -1090,11 +1098,43 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         if (rtColumn) {
           fieldDefs.push({ name: rtColumn, label: 'Record Type', type: 'picklist', required: true })
         }
+        // Required FK columns render as real lookups, not raw text — resolve
+        // each against the created table's declared parents (TABLE_META), so
+        // e.g. a quick-created Opportunity asks for its Property with a
+        // searchable picker instead of a UUID box.
+        const parentFkTargets = {}
+        const createdMeta = TABLE_META[table]
+        if (createdMeta) {
+          ;(createdMeta.parents || []).forEach((fk, i) => {
+            const t = (createdMeta.parentTables || [])[i]
+            if (t && TABLE_META[t]?.nameColumn) parentFkTargets[fk] = t
+          })
+        }
         for (const col of required) {
           if (SYSTEM.test(col)) continue
           if (col === rtColumn) continue
           if (derivedCols.has(col)) continue              // trigger fills it
           if (seed && seed[col] != null) continue  // already known from the dependency — don't ask
+          const fkTable = parentFkTargets[col]
+          if (fkTable) {
+            // Keep the parent chain intact inside quick-create too: when the
+            // seed already pins a property, scope building/opportunity pickers
+            // to it via the same dependent-lookup RPCs the full form uses.
+            const scopedKind = seed?.property_id
+              ? (fkTable === 'buildings' ? 'buildings_for_property'
+                : fkTable === 'opportunities' ? 'opportunities_for_property' : null)
+              : null
+            fieldDefs.push({
+              name: col,
+              label: col.replace(/_id$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+              type: 'lookup',
+              lookup_table: fkTable,
+              lookup_field: TABLE_META[fkTable].nameColumn,
+              scopedKind,
+              required: true,
+            })
+            continue
+          }
           fieldDefs.push({
             name: col,
             label: col.replace(/^[a-z]+_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
@@ -1112,9 +1152,22 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         if (rtColumn) {
           rts = await fetchAvailableRecordTypes(table).catch(() => [])
         }
+        // First option page for each required-FK lookup field. Scoped fields
+        // load their full (small) scoped set; unscoped load the first page.
+        const fkOpts = {}
+        await Promise.all(fieldDefs.filter(f => f.type === 'lookup').map(async f => {
+          try {
+            fkOpts[f.name] = f.scopedKind
+              ? await fetchDependentLookupOptions(
+                  { name: f.name, lookup_dependency: { kind: f.scopedKind, depends_on: ['property_id'] } },
+                  seed || {})
+              : await fetchLookupOptions(f.lookup_table, f.lookup_field)
+          } catch { fkOpts[f.name] = [] }
+        }))
         if (cancelled) return
         setFields(fieldDefs)
         setRecordTypes(rts)
+        setFkLookupOpts(fkOpts)
         setLoading(false)
       } catch (err) {
         if (!cancelled) { toast.error(`Could not open create form — ${err.message || err}`); onCancel() }
@@ -1213,6 +1266,23 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                   value={draft[f.name] || ''}
                   options={recordTypes.map(rt => ({ value: rt.id, label: rt.label || rt.picklist_label }))}
                   onChange={(val) => setVal(f.name, val || null)}
+                  placeholder="— Select —"
+                />
+              ) : f.type === 'lookup' ? (
+                <SearchableLookup
+                  value={draft[f.name] || ''}
+                  options={fkLookupOpts[f.name] || []}
+                  onChange={(val) => setVal(f.name, val || null)}
+                  // Scoped pickers hold their complete set — local filtering
+                  // (onSearch null) keeps the parent scope airtight. Unscoped
+                  // pickers server-search the target table as the user types.
+                  onSearch={f.scopedKind ? null : async (term) => {
+                    try {
+                      const opts = await fetchLookupOptions(f.lookup_table, f.lookup_field, 50,
+                        term ? { search: term } : {})
+                      setFkLookupOpts(prev => ({ ...prev, [f.name]: opts }))
+                    } catch { /* keep the current page on a failed search */ }
+                  }}
                   placeholder="— Select —"
                 />
               ) : (
@@ -1547,7 +1617,9 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
 
   const objectLabel = useMemo(() => {
     if (field.create_object_label) return field.create_object_label
-    const t = (field.lookup_table || '').replace(/s$/, '').replace(/_/g, ' ')
+    // Singularize the table name: ies→y first (properties → property,
+    // opportunities → opportunity), then trailing s (accounts → account).
+    const t = (field.lookup_table || '').replace(/ies$/, 'y').replace(/s$/, '').replace(/_/g, ' ')
     return t ? t.replace(/\b\w/g, c => c.toUpperCase()) : 'record'
   }, [field])
 
@@ -1689,7 +1761,15 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
     case 'lookup': {
       const opts = lookupOpts || []
       const dep = field.lookup_dependency
-      const canCreate = field.allow_inline_create === true && !!field.lookup_table
+      // Inline "+ New" is ON BY DEFAULT for every lookup, system-wide
+      // (Nicholas, 2026-07-26): searching related records must always offer
+      // creating the record when it doesn't exist. A layout can still opt a
+      // field out with allow_inline_create: false. Identity objects are the
+      // one hard exclusion — platform/portal users are provisioned through
+      // Admin (auth account + role), never quick-created from a lookup.
+      const canCreate = field.allow_inline_create !== false
+        && !!field.lookup_table && !!field.lookup_field
+        && !QUICK_CREATE_EXCLUDED_TABLES.has(field.lookup_table)
       const canServerSearch = !!(field.lookup_table && field.lookup_field)
 
       // Dependent lookup (e.g. Site Contact scoped to the selected Account):
