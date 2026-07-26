@@ -211,6 +211,7 @@ const TABLE_META = {
   units:                     { module: 'Enrollment',       label: 'Units',                nameColumn: 'unit_name',              recordNumberColumn: 'unit_record_number',              statusColumn: 'unit_status',              parents: ['building_id', 'property_id'],                     parentTables: ['buildings', 'properties'] },
   opportunities:             { module: 'Enrollment',       label: 'Opportunities',        nameColumn: 'opportunity_name',       recordNumberColumn: 'opportunity_record_number',       statusColumn: 'opportunity_status',       parents: ['property_id', 'building_id', 'opportunity_account_id'],          parentTables: ['properties', 'buildings', 'accounts'] },
   opportunity_contact_roles: { module: 'Enrollment',       label: 'Contact Role',         nameColumn: 'ocr_name',               recordNumberColumn: 'ocr_record_number',               statusColumn: null,                       parents: ['opportunity_id', 'contact_id'],                   parentTables: ['opportunities', 'contacts'] },
+  opportunity_line_items:    { module: 'Enrollment',       label: 'Opportunity Line Items', nameColumn: 'oli_name',             recordNumberColumn: 'oli_record_number',               statusColumn: null,                       parents: ['opportunity_id'],                                 parentTables: ['opportunities'] },
   property_programs:         { module: 'Enrollment',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['property_id', 'opportunity_id'],                  parentTables: ['properties', 'opportunities'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
@@ -421,6 +422,7 @@ const TRIGGER_DERIVED_REQUIRED = {
   buildings: ['building_name'],
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],
+  opportunity_line_items: ['oli_name'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
 }
@@ -436,6 +438,7 @@ const DERIVED_READONLY = {
   buildings: ['building_name'],
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],
+  opportunity_line_items: ['oli_name'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
 }
