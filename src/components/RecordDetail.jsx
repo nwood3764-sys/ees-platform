@@ -3582,7 +3582,7 @@ function RelatedListWidget({
     onNavigateToRecord({ table: childTable, id: row.id, mode: 'view' })
   }
 
-  const handleNewClick = (e) => {
+  const handleNewClick = async (e) => {
     e.stopPropagation()
     if (!canCreate) return
 
@@ -3679,11 +3679,12 @@ function RelatedListWidget({
       copyFromProperty('property_category',                   'enrollment_property_category')
       copyFromProperty('property_number_of_buildings',        'enrollment_number_of_buildings')
       copyFromProperty('property_total_buildings',            'enrollment_number_of_buildings')
+      copyFromProperty('property_mf_property_category',       'enrollment_property_category')
+      copyFromProperty('property_mf_raw_property_category_name', 'enrollment_property_category')
       copyFromProperty('property_hud_owner_org',              'enrollment_owner_organization')
-      copyFromProperty('property_hud_owner_type',             'enrollment_owner_type')
-      copyFromProperty('property_hud_owner_address',          'enrollment_owner_address')
       copyFromProperty('property_hud_owner_phone',            'enrollment_owner_phone')
       copyFromProperty('property_hud_owner_email',            'enrollment_owner_email')
+      copyFromProperty('fein',                                'enrollment_owner_fein')
       copyFromProperty('property_hud_management_org',         'enrollment_management_agent')
       copyFromProperty('property_hud_management_phone',       'enrollment_management_phone')
       copyFromProperty('property_hud_management_email',       'enrollment_management_email')
@@ -3692,6 +3693,33 @@ function RelatedListWidget({
       copyFromProperty('property_primary_contract_expiration','enrollment_hud_contract_expiration')
       copyFromProperty('property_is_202_811',                 'enrollment_is_202_811')
       copyFromProperty('property_is_opportunity_zone',        'enrollment_is_opportunity_zone')
+      // Owner address is one text field on the enrollment; the property holds
+      // it in four parts — compose "street, city, ST zip".
+      const composeAddress = (street, city, state, zip) => {
+        const head = [street, city].map(v => String(v || '').trim()).filter(Boolean).join(', ')
+        const tail = [state, zip].map(v => String(v || '').trim()).filter(Boolean).join(' ')
+        return [head, tail].filter(Boolean).join(', ')
+      }
+      if (prefillObj.enrollment_owner_address == null || prefillObj.enrollment_owner_address === '') {
+        const composed = composeAddress(
+          parentRecord.property_hud_owner_address, parentRecord.property_hud_owner_city,
+          parentRecord.property_hud_owner_state, parentRecord.property_hud_owner_zip)
+        if (composed) prefillObj.enrollment_owner_address = composed
+      }
+      // HUD program: the MF raw program types when imported, else composed
+      // from the program-participation flags.
+      if (prefillObj.enrollment_hud_program == null || prefillObj.enrollment_hud_program === '') {
+        let programs = [parentRecord.property_mf_raw_program_type1, parentRecord.property_mf_raw_program_type2]
+          .map(v => String(v || '').trim()).filter(Boolean)
+        programs = [...new Set(programs)]
+        if (!programs.length) {
+          if (parentRecord.property_in_program_mf_assisted)    programs.push('Multifamily Assisted')
+          if (parentRecord.property_in_program_public_housing) programs.push('Public Housing')
+          if (parentRecord.property_in_program_lihtc)          programs.push('LIHTC')
+          if (parentRecord.property_in_program_usda_rd)        programs.push('USDA Rural Development')
+        }
+        if (programs.length) prefillObj.enrollment_hud_program = programs.join(' / ')
+      }
       // Subsidized share: not stored on the property — derive from the unit
       // counts when both are present so the form opens pre-computed.
       const totalUnits = prefillObj.enrollment_total_units
@@ -3700,6 +3728,107 @@ function RelatedListWidget({
           && Number(totalUnits) > 0 && assistedUnits != null) {
         prefillObj.enrollment_subsidized_share_pct =
           Math.round((Number(assistedUnits) / Number(totalUnits)) * 1000) / 10
+      }
+      // Occupancy: public-housing properties carry an occupied count; MF
+      // properties carry a percent-occupied — either way, seed occupied and
+      // derive unoccupied as total minus occupied.
+      if (prefillObj.enrollment_occupied_units == null) {
+        let occupied = parentRecord.property_ph_total_occupied
+        const pctRaw = parentRecord.property_mf_raw_pct_occupied ?? parentRecord.property_ph_pct_occupied
+        if (occupied == null && pctRaw != null && Number(totalUnits) > 0) {
+          const pct = Number(pctRaw)
+          if (Number.isFinite(pct) && pct > 0) occupied = Math.round(Number(totalUnits) * pct / 100)
+        }
+        if (occupied != null && Number.isFinite(Number(occupied))) {
+          prefillObj.enrollment_occupied_units = Number(occupied)
+          if (prefillObj.enrollment_unoccupied_units == null && Number(totalUnits) > 0) {
+            prefillObj.enrollment_unoccupied_units = Math.max(0, Number(totalUnits) - Number(occupied))
+          }
+        }
+      }
+      // Bedroom mix: USDA imports carry per-bedroom unit counts (5 and 6
+      // bedroom collapse into the enrollment's 5+ bucket).
+      const seedBr = (dst, ...srcs) => {
+        if (prefillObj[dst] != null) return
+        const total = srcs.reduce((sum, s) => {
+          const n = Number(parentRecord[s])
+          return Number.isFinite(n) ? (sum ?? 0) + n : sum
+        }, null)
+        if (total != null) prefillObj[dst] = total
+      }
+      seedBr('enrollment_br_1',     'property_usda_raw_total_1_bedroom_units')
+      seedBr('enrollment_br_2',     'property_usda_raw_total_2_bedroom_units')
+      seedBr('enrollment_br_3',     'property_usda_raw_total_3_bedroom_units')
+      seedBr('enrollment_br_4',     'property_usda_raw_total_4_bedroom_units')
+      seedBr('enrollment_br_5plus', 'property_usda_raw_total_5_bedroom_units', 'property_usda_raw_total_6_bedroom_units')
+      // Application contact + owner/management fallbacks live on related
+      // records the property links to (primary contact, owner account,
+      // management-company account). Fetch them so the form opens with the
+      // people fields filled too; any failure just leaves those blanks.
+      try {
+        const fetchRow = (table, id, cols, delCol) => id
+          ? supabase.from(table).select(cols).eq('id', id).eq(delCol, false).maybeSingle()
+          : Promise.resolve({ data: null })
+        const [contactRes, accountRes, mgmtRes] = await Promise.all([
+          fetchRow('contacts', parentRecord.property_primary_contact_id,
+            'contact_name, contact_title, contact_phone, contact_mobile_phone, contact_email', 'contact_is_deleted'),
+          fetchRow('accounts', parentRecord.property_account_id,
+            'account_name, account_phone, account_email, billing_street, billing_city, billing_state, billing_zip', 'account_is_deleted'),
+          fetchRow('accounts', parentRecord.property_management_company_id,
+            'account_name, account_phone, account_email', 'account_is_deleted'),
+        ])
+        const fill = (dst, v) => {
+          if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
+        }
+        const contact = contactRes?.data
+        if (contact) {
+          fill('enrollment_contact_name',  contact.contact_name)
+          fill('enrollment_contact_title', contact.contact_title)
+          fill('enrollment_contact_phone', contact.contact_phone || contact.contact_mobile_phone)
+          fill('enrollment_contact_email', contact.contact_email)
+        } else {
+          // No primary contact — the MF import's management contact person is
+          // the next-best application contact.
+          fill('enrollment_contact_name',  parentRecord.property_mf_raw_mgmt_contact_full_name)
+          fill('enrollment_contact_title', parentRecord.property_mf_raw_mgmt_contact_indv_title_text)
+          fill('enrollment_contact_phone', parentRecord.property_mf_raw_mgmt_contact_main_phn_nbr)
+          fill('enrollment_contact_email', parentRecord.property_mf_raw_mgmt_contact_email_text)
+        }
+        const account = accountRes?.data
+        if (account) {
+          // The property's account is the owner company (one account per
+          // company) — it backstops any owner field HUD didn't supply.
+          fill('enrollment_owner_organization', account.account_name)
+          fill('enrollment_owner_phone',        account.account_phone)
+          fill('enrollment_owner_email',        account.account_email)
+          fill('enrollment_owner_address', composeAddress(
+            account.billing_street, account.billing_city, account.billing_state, account.billing_zip))
+        }
+        const mgmt = mgmtRes?.data
+        if (mgmt) {
+          fill('enrollment_management_agent', mgmt.account_name)
+          fill('enrollment_management_phone', mgmt.account_phone)
+          fill('enrollment_management_email', mgmt.account_email)
+        }
+      } catch (err) {
+        console.warn('enrollment prefill: related-record fetch failed', err)
+      }
+      // Owner type is a two-value business field (Nicholas, 2026-07-26):
+      // Public Housing Authority or Private Ownership. HUD's raw taxonomy
+      // (Non-Profit / Profit Motivated / Limited Dividend / ...) collapses to
+      // Private Ownership; the public-housing program flag or a housing-
+      // authority / community-development-authority owner name means PHA.
+      // Runs after the account fallback so the account name counts as an
+      // owner-name signal too.
+      if (prefillObj.enrollment_owner_type == null || prefillObj.enrollment_owner_type === '') {
+        const ownerName = String(prefillObj.enrollment_owner_organization || '')
+        const rawType = String(parentRecord.property_hud_owner_type || '')
+        const isPha = parentRecord.property_in_program_public_housing === true
+          || /housing authority|community development authority|\bcda\b|\bpha\b/i.test(ownerName)
+          || /housing authority/i.test(rawType)
+        if (ownerName || rawType || parentRecord.property_account_id) {
+          prefillObj.enrollment_owner_type = isPha ? 'Public Housing Authority' : 'Private Ownership'
+        }
       }
       // Enrollment name composes "<property name> - <record type label>" once
       // the user picks a record type (same derived-name mechanism projects
@@ -5258,6 +5387,26 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       const city   = (name === 'property_city'   ? value : next.property_city)   || ''
       const derived = [street, city].filter(s => String(s || '').trim()).join(' - ')
       next.property_name = derived || ''
+    }
+    // Enrollments: subsidized share % is assisted/total — recompute whenever
+    // either unit count changes so the form never shows stale or blank math.
+    // Occupancy mirrors it: unoccupied = total - occupied.
+    if (tableName === 'enrollments'
+        && (name === 'enrollment_total_units' || name === 'enrollment_assisted_units')) {
+      const total = Number(next.enrollment_total_units)
+      const assisted = Number(next.enrollment_assisted_units)
+      next.enrollment_subsidized_share_pct =
+        (total > 0 && Number.isFinite(assisted))
+          ? Math.round((assisted / total) * 1000) / 10
+          : null
+    }
+    if (tableName === 'enrollments'
+        && (name === 'enrollment_total_units' || name === 'enrollment_occupied_units')) {
+      const total = Number(next.enrollment_total_units)
+      const occupied = Number(next.enrollment_occupied_units)
+      if (total > 0 && Number.isFinite(occupied)) {
+        next.enrollment_unoccupied_units = Math.max(0, total - occupied)
+      }
     }
     // Recompose the derived name when record type changes during create —
     // "<base> - <record type label>" (projects mirror trg_project_name with
