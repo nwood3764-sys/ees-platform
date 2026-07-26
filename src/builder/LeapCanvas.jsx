@@ -67,6 +67,12 @@ export default function LeapCanvas({
   // to one component.
   const handleInspectorChange = (id, patchOrArray) => {
     if (id === '__reorder__') { setComponents(patchOrArray); return }
+    // In-place type change: grow the tile to the new type's minimum size so a
+    // conversion (e.g. metric → bar chart) never leaves an illegally small tile.
+    if (patchOrArray.type) {
+      const min = registry.getComponent(patchOrArray.type)?.minSize
+      if (min) setLayout(prev => prev.map(l => l.i === id ? { ...l, w: Math.max(l.w, min.w), h: Math.max(l.h, min.h) } : l))
+    }
     setComponents(prev => prev.map(c => c.id === id ? { ...c, ...patchOrArray } : c))
   }
 

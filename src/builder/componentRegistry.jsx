@@ -315,6 +315,22 @@ export function defaultConfigFor(id) {
   return e ? JSON.parse(JSON.stringify(e.defaultConfig || {})) : {}
 }
 
+// Config carried across an in-place type change: start from the new type's
+// defaults, then keep the current value for every key the new type's schema
+// also declares — so report binding plus group-by / measure / sort / limit
+// survive a bar → pie → line conversion, while keys the new type doesn't
+// understand are dropped instead of lingering in dw_widget_config.
+export function convertConfigForType(config, newTypeId) {
+  const entry = BY_ID[newTypeId]
+  if (!entry) return { ...(config || {}) }
+  const next = JSON.parse(JSON.stringify(entry.defaultConfig || {}))
+  const keys = new Set((entry.configSchema || []).map(d => d.key))
+  for (const [k, v] of Object.entries(config || {})) {
+    if (keys.has(k) && v !== undefined && v !== null && v !== '') next[k] = v
+  }
+  return next
+}
+
 // Whether a field descriptor should render, given the current config (honors
 // `dependsOn`). Kept here so both the inspector and any validation share it.
 export function fieldVisible(descriptor, config) {
