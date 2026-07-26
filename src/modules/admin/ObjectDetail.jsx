@@ -125,7 +125,16 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
 
       <SectionTabs sections={SUB_TABS} active={sub} onChange={(id) => { setSub(id); setSelectedLayoutId(null); setSelectedField(null) }} counts={counts} />
 
-      <div style={{ flex: 1, overflow: 'auto', background: C.page }}>
+      {/* When the layout canvas editor is open it manages its own scrolling
+          (fixed header/palette/tab bar, only the section canvas scrolls), so
+          this wrapper must be a non-scrolling flex column — otherwise the
+          whole editor scrolls away as one block. Every other pane keeps the
+          plain scroll container. */}
+      <div style={
+        sub === 'layouts' && selectedLayoutId && !loading && !error
+          ? { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: C.page }
+          : { flex: 1, overflow: 'auto', background: C.page }
+      }>
         {loading && (
           <div style={{ padding: 40, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
             Loading schema for {obj.table}…
