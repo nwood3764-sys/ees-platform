@@ -1655,6 +1655,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [pending, setPending] = useState({}) // field_id -> current (unsaved) editor value
+  const [exampleZoom, setExampleZoom] = useState(null) // illustration URL viewed full-screen
   const fileRef = useRef(null)
   const photoTypeRef = useRef('general') // which photo_type the next capture tags
 
@@ -1817,6 +1818,27 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
             <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 14 }}>
               {screen.field.required ? 'Required' : 'Optional — skip if not applicable.'}
             </div>
+            {screen.field.illustration && (
+              <button
+                onClick={() => setExampleZoom(screen.field.illustration)}
+                style={{
+                  appearance: 'none', cursor: 'pointer', display: 'block', width: '100%',
+                  background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+                  padding: 0, marginBottom: 14, overflow: 'hidden',
+                }}
+                aria-label="View example"
+              >
+                <img src={screen.field.illustration} alt={`Example — ${screen.field.label}`}
+                  style={{ display: 'block', width: '100%', maxHeight: 210, objectFit: 'contain' }} />
+                <span style={{
+                  display: 'block', padding: '7px 10px', borderTop: `1px solid ${C.border}`,
+                  fontFamily: FONT, fontSize: 12.5, fontWeight: 600, color: C.textSecondary,
+                  background: C.cardSecondary, textAlign: 'center',
+                }}>
+                  Example — what to include · tap to enlarge
+                </span>
+              </button>
+            )}
             <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
             <CaptureBtn
               label={curPhotoN > 0 ? 'Add / Retake Photo' : 'Take Photo'}
@@ -1895,6 +1917,24 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
           </div>
         )}
       </div>
+
+      {/* Example illustration, enlarged */}
+      {exampleZoom && (
+        <div
+          onClick={() => setExampleZoom(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 110, background: 'rgba(7,17,31,0.92)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            padding: 16, gap: 14, cursor: 'pointer',
+          }}
+        >
+          <img src={exampleZoom} alt="Example"
+            style={{ width: '100%', maxWidth: 520, maxHeight: '78dvh', objectFit: 'contain', background: '#ffffff', borderRadius: 10 }} />
+          <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>
+            Tap anywhere to close
+          </span>
+        </div>
+      )}
 
       {/* Bottom nav */}
       <div style={{

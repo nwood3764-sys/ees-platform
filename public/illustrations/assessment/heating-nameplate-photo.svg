@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none">
+  <!-- Heating nameplate photo guide: the data plate is inside/behind the upper
+       front panel — zoom callout shows filling the frame with the label. -->
+  <rect x="0" y="0" width="400" height="300" fill="#ffffff"/>
+
+  <!-- furnace, small, at left -->
+  <rect x="46" y="70" width="78" height="160" rx="4" stroke="#0d1a2e" stroke-width="2.5"/>
+  <rect x="56" y="84" width="58" height="52" rx="3" stroke="#0d1a2e" stroke-width="2"/>
+  <rect x="56" y="150" width="58" height="66" rx="3" stroke="#0d1a2e" stroke-width="2"/>
+  <!-- nameplate location dot on the upper panel -->
+  <rect x="66" y="98" width="26" height="16" stroke="#7eb3e8" stroke-width="2.5"/>
+
+  <!-- callout lines from plate to zoom -->
+  <line x1="92" y1="98" x2="196" y2="52" stroke="#7eb3e8" stroke-width="2" stroke-dasharray="5 5"/>
+  <line x1="92" y1="114" x2="196" y2="248" stroke="#7eb3e8" stroke-width="2" stroke-dasharray="5 5"/>
+
+  <!-- zoomed nameplate filling the capture frame -->
+  <rect x="196" y="52" width="176" height="196" rx="6" stroke="#0d1a2e" stroke-width="3"/>
+  <!-- label rows: model / serial / ratings -->
+  <line x1="212" y1="84" x2="356" y2="84" stroke="#0d1a2e" stroke-width="2.5"/>
+  <line x1="212" y1="108" x2="332" y2="108" stroke="#0d1a2e" stroke-width="2"/>
+  <line x1="212" y1="132" x2="356" y2="132" stroke="#0d1a2e" stroke-width="2"/>
+  <line x1="212" y1="156" x2="320" y2="156" stroke="#0d1a2e" stroke-width="2"/>
+  <rect x="212" y="176" width="144" height="30" stroke="#0d1a2e" stroke-width="1.5"/>
+  <line x1="212" y1="222" x2="300" y2="222" stroke="#0d1a2e" stroke-width="2"/>
+
+  <!-- capture frame around the zoomed plate -->
+  <rect x="184" y="40" width="200" height="220" rx="10" stroke="#3ecf8e" stroke-width="3" stroke-dasharray="10 8"/>
+
+  <!-- camera glyph -->
+  <g transform="translate(196,218)">
+    <rect x="0" y="4" width="34" height="24" rx="4" stroke="#2aab72" stroke-width="2.5" fill="#ffffff"/>
+    <circle cx="17" cy="16" r="7" stroke="#2aab72" stroke-width="2.5"/>
+    <rect x="11" y="0" width="12" height="6" rx="2" stroke="#2aab72" stroke-width="2.5" fill="#ffffff"/>
+  </g>
+</svg>

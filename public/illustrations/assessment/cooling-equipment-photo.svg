@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none">
+  <!-- Cooling System — full equipment photo guide: condenser unit, refrigerant
+       lines, disconnect, and surrounding clearance. -->
+  <rect x="0" y="0" width="400" height="300" fill="#ffffff"/>
+
+  <!-- ground line + pad -->
+  <line x1="16" y1="262" x2="384" y2="262" stroke="#8fa0b8" stroke-width="2"/>
+  <rect x="108" y="248" width="164" height="14" stroke="#8fa0b8" stroke-width="2"/>
+
+  <!-- condenser cabinet -->
+  <rect x="120" y="108" width="140" height="140" rx="6" stroke="#0d1a2e" stroke-width="3"/>
+  <!-- fan grille -->
+  <circle cx="190" cy="146" r="26" stroke="#0d1a2e" stroke-width="2.5"/>
+  <line x1="190" y1="124" x2="190" y2="168" stroke="#0d1a2e" stroke-width="1.5"/>
+  <line x1="168" y1="146" x2="212" y2="146" stroke="#0d1a2e" stroke-width="1.5"/>
+  <line x1="175" y1="131" x2="205" y2="161" stroke="#0d1a2e" stroke-width="1.5"/>
+  <line x1="205" y1="131" x2="175" y2="161" stroke="#0d1a2e" stroke-width="1.5"/>
+  <!-- coil louvers -->
+  <line x1="132" y1="190" x2="248" y2="190" stroke="#0d1a2e" stroke-width="1.5"/>
+  <line x1="132" y1="202" x2="248" y2="202" stroke="#0d1a2e" stroke-width="1.5"/>
+  <line x1="132" y1="214" x2="248" y2="214" stroke="#0d1a2e" stroke-width="1.5"/>
+  <line x1="132" y1="226" x2="248" y2="226" stroke="#0d1a2e" stroke-width="1.5"/>
+
+  <!-- refrigerant lineset to the house wall -->
+  <line x1="260" y1="170" x2="330" y2="170" stroke="#0d1a2e" stroke-width="2.5"/>
+  <line x1="260" y1="182" x2="330" y2="182" stroke="#0d1a2e" stroke-width="2.5"/>
+  <!-- house wall + disconnect box -->
+  <line x1="330" y1="60" x2="330" y2="262" stroke="#8fa0b8" stroke-width="2.5"/>
+  <rect x="304" y="98" width="26" height="36" stroke="#0d1a2e" stroke-width="2"/>
+  <line x1="317" y1="134" x2="317" y2="170" stroke="#0d1a2e" stroke-width="1.5"/>
+
+  <!-- what to include -->
+  <rect x="28" y="52" width="344" height="228" rx="10" stroke="#3ecf8e" stroke-width="3" stroke-dasharray="10 8"/>
+
+  <!-- camera glyph -->
+  <g transform="translate(40,238)">
+    <rect x="0" y="4" width="34" height="24" rx="4" stroke="#2aab72" stroke-width="2.5" fill="#ffffff"/>
+    <circle cx="17" cy="16" r="7" stroke="#2aab72" stroke-width="2.5"/>
+    <rect x="11" y="0" width="12" height="6" rx="2" stroke="#2aab72" stroke-width="2.5" fill="#ffffff"/>
+  </g>
+</svg>

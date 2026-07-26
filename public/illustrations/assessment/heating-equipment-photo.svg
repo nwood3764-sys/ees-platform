@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none">
+  <!-- Heating System — full equipment photo guide: furnace, ductwork, flue, and
+       the surrounding area. Emerald dashed frame = what the photo must include. -->
+  <rect x="0" y="0" width="400" height="300" fill="#ffffff"/>
+
+  <!-- floor line -->
+  <line x1="16" y1="262" x2="384" y2="262" stroke="#8fa0b8" stroke-width="2"/>
+
+  <!-- return duct (left, drops into furnace side) -->
+  <rect x="88" y="120" width="34" height="118" stroke="#0d1a2e" stroke-width="2.5"/>
+  <line x1="88" y1="150" x2="122" y2="150" stroke="#0d1a2e" stroke-width="1.5"/>
+  <line x1="88" y1="180" x2="122" y2="180" stroke="#0d1a2e" stroke-width="1.5"/>
+
+  <!-- furnace cabinet -->
+  <rect x="150" y="128" width="88" height="134" rx="4" stroke="#0d1a2e" stroke-width="3"/>
+  <rect x="162" y="196" width="64" height="52" rx="3" stroke="#0d1a2e" stroke-width="2"/> <!-- burner/blower door -->
+  <rect x="162" y="142" width="64" height="40" rx="3" stroke="#0d1a2e" stroke-width="2"/> <!-- upper door -->
+  <circle cx="219" cy="222" r="4" stroke="#0d1a2e" stroke-width="2"/> <!-- handle -->
+
+  <!-- supply plenum + trunk duct with two branches -->
+  <rect x="156" y="92" width="76" height="36" stroke="#0d1a2e" stroke-width="2.5"/>
+  <rect x="120" y="62" width="220" height="30" stroke="#0d1a2e" stroke-width="2.5"/>
+  <line x1="150" y1="62" x2="150" y2="92" stroke="#0d1a2e" stroke-width="1.5"/>
+  <line x1="260" y1="62" x2="260" y2="92" stroke="#0d1a2e" stroke-width="1.5"/>
+  <rect x="300" y="92" width="30" height="42" stroke="#0d1a2e" stroke-width="2"/> <!-- branch takeoff -->
+
+  <!-- flue pipe -->
+  <line x1="252" y1="128" x2="252" y2="46" stroke="#0d1a2e" stroke-width="2.5"/>
+  <line x1="262" y1="128" x2="262" y2="46" stroke="#0d1a2e" stroke-width="2.5"/>
+  <line x1="248" y1="46" x2="266" y2="46" stroke="#0d1a2e" stroke-width="2.5"/>
+
+  <!-- gas line with valve -->
+  <line x1="150" y1="232" x2="112" y2="232" stroke="#0d1a2e" stroke-width="2"/>
+  <circle cx="112" cy="232" r="6" stroke="#0d1a2e" stroke-width="2"/>
+
+  <!-- surrounding-area hints: wall corner + clearance -->
+  <line x1="40" y1="40" x2="40" y2="262" stroke="#8fa0b8" stroke-width="2"/>
+  <line x1="352" y1="150" x2="352" y2="262" stroke="#8fa0b8" stroke-width="2"/>
+
+  <!-- what to include: emerald dashed capture frame -->
+  <rect x="28" y="30" width="344" height="246" rx="10" stroke="#3ecf8e" stroke-width="3" stroke-dasharray="10 8"/>
+
+  <!-- camera glyph -->
+  <g transform="translate(332,244)">
+    <rect x="0" y="4" width="34" height="24" rx="4" stroke="#2aab72" stroke-width="2.5" fill="#ffffff"/>
+    <circle cx="17" cy="16" r="7" stroke="#2aab72" stroke-width="2.5"/>
+    <rect x="11" y="0" width="12" height="6" rx="2" stroke="#2aab72" stroke-width="2.5" fill="#ffffff"/>
+  </g>
+</svg>
