@@ -1762,11 +1762,11 @@ export async function fetchFilterOptions(filter) {
  * primary object, and translates them into the RPC's {col, op, val}
  * filter shape. On any failure the caller falls back to runReport.
  */
-export async function runWidgetAggregate(widget, extraFilters = null, overrideFields = null) {
-  const cfg = widget.dw_widget_config || {}
-  const groupCol = cfg.group_by
-  if (!groupCol) throw new Error('Widget has no group_by; cannot aggregate')
-
+// Shared context for every aggregate fast path: resolves the widget's report
+// to its primary object and translates report + dashboard filters into the
+// RPC {col, op, val} shape (dashboard filter columns override same-column
+// report filters — see runReport for the rationale).
+async function buildWidgetAggregateContext(widget, extraFilters = null, overrideFields = null) {
   const loaded = await loadReport(widget.dw_report_id)
   if (!loaded) throw new Error('Report not found')
   const primaryObject = loaded.report.rpt_primary_object
@@ -1774,10 +1774,6 @@ export async function runWidgetAggregate(widget, extraFilters = null, overrideFi
   // Real columns on the primary object — used to drop filters that don't apply.
   const primaryCols = await describeColumns(primaryObject)
   const colNames = new Set(primaryCols.map(c => c.column_name))
-
-  // Columns the dashboard filter bar controls outright: its value (or
-  // "All" → nothing) replaces the report's own saved filter on that column,
-  // instead of being ANDed with it. See runReport for the full rationale.
   const ov = new Set(overrideFields || [])
 
   // Translate a report_filter / extraFilter operator into the RPC's op set.
@@ -1790,26 +1786,30 @@ export async function runWidgetAggregate(widget, extraFilters = null, overrideFi
   }
 
   const filters = []
-
-  // Report's own saved filters (e.g. the state runtime prompt default).
   for (const f of (loaded.report ? (loaded.filters || []) : [])) {
     if (f.rfilt_is_cross_filter) continue
     if (ov.has(f.rfilt_field_name)) continue   // dashboard controls this column
     if (!colNames.has(f.rfilt_field_name)) continue
     const op = opMap[f.rfilt_operator]
     if (!op) continue
-    // rfilt_value is jsonb; unwrap to a plain value.
     let val = f.rfilt_value
     if (val && typeof val === 'object' && 'value' in val) val = val.value
     filters.push({ col: f.rfilt_field_name, op, val })
   }
-
-  // Dashboard-level filters, applied only where the column exists.
   for (const ef of (extraFilters || [])) {
     if (!colNames.has(ef.field_name)) continue
     const op = opMap[ef.operator || 'equals'] || 'equals'
     filters.push({ col: ef.field_name, op, val: ef.value })
   }
+
+  return { primaryObject, filters, reportName: loaded.report.rpt_name }
+}
+
+export async function runWidgetAggregate(widget, extraFilters = null, overrideFields = null) {
+  const cfg = widget.dw_widget_config || {}
+  const groupCol = cfg.group_by
+  if (!groupCol) throw new Error('Widget has no group_by; cannot aggregate')
+  const { primaryObject, filters, reportName } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
 
   const { data, error } = await supabase.rpc('report_aggregate', {
     p_primary_object: primaryObject,
@@ -1831,7 +1831,128 @@ export async function runWidgetAggregate(widget, extraFilters = null, overrideFi
     groupCol,
   }))
 
-  return { aggregated, primaryObject, name: loaded.report.rpt_name }
+  return { aggregated, primaryObject, name: reportName }
+}
+
+// Category × series pivot (stacked / clustered / 100% bars, heatmap, matrix).
+export async function runWidgetAggregate2D(widget, extraFilters = null, overrideFields = null) {
+  const cfg = widget.dw_widget_config || {}
+  if (!cfg.group_by || !cfg.series_by) throw new Error('Widget needs group_by and series_by')
+  const { primaryObject, filters, reportName } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
+
+  const { data, error } = await supabase.rpc('report_aggregate_2d', {
+    p_primary_object: primaryObject,
+    p_group_col:      cfg.group_by,
+    p_series_col:     cfg.series_by,
+    p_measure_type:   cfg.measure_type || 'count',
+    p_measure_field:  cfg.measure_field || null,
+    p_filters:        filters,
+    p_limit:          500,
+  })
+  if (error) throw error
+  // Rows arrive ordered by group total desc. Keep raw rows; the renderer
+  // pivots them (group list order = first appearance).
+  const aggregated2d = (data || []).map(r => ({
+    name: r.label, series: r.series, value: Number(r.value) || 0,
+    rawValue: r.raw_value, rawSeries: r.raw_series,
+  }))
+  return { aggregated2d, groupCol: cfg.group_by, seriesCol: cfg.series_by, primaryObject, name: reportName }
+}
+
+// Time-bucketed aggregate (real time-axis line/area, sparklines).
+export async function runWidgetAggregateTime(widget, extraFilters = null, overrideFields = null) {
+  const cfg = widget.dw_widget_config || {}
+  if (!cfg.date_field) throw new Error('Widget needs date_field')
+  const { primaryObject, filters, reportName } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
+
+  const { data, error } = await supabase.rpc('report_aggregate_time', {
+    p_primary_object: primaryObject,
+    p_date_col:       cfg.date_field,
+    p_grain:          cfg.date_grain || 'month',
+    p_measure_type:   cfg.measure_type || 'count',
+    p_measure_field:  cfg.measure_field || null,
+    p_filters:        filters,
+    p_series_col:     cfg.series_by || null,
+    p_limit:          500,
+  })
+  if (error) throw error
+  const aggregatedTime = (data || []).map(r => ({
+    bucket: r.bucket, name: r.label, series: r.series,
+    value: Number(r.value) || 0, rawSeries: r.raw_series,
+  }))
+  return { aggregatedTime, dateCol: cfg.date_field, seriesCol: cfg.series_by || null, primaryObject, name: reportName }
+}
+
+// One aggregate, no grouping — metric/gauge/KPI without pulling every row.
+export async function runWidgetAggregateSingle(widget, extraFilters = null, overrideFields = null) {
+  const cfg = widget.dw_widget_config || {}
+  const { primaryObject, filters, reportName } = await buildWidgetAggregateContext(widget, extraFilters, overrideFields)
+
+  const { data, error } = await supabase.rpc('report_aggregate_single', {
+    p_primary_object: primaryObject,
+    p_measure_type:   cfg.measure_type || 'count',
+    p_measure_field:  cfg.measure_field || null,
+    p_filters:        filters,
+  })
+  if (error) throw error
+  return { aggregatedSingle: Number(data) || 0, primaryObject, name: reportName }
+}
+
+// The query shape each widget type wants. 'rows' (and anything unlisted)
+// means the full runReport row fetch. Kept here so DashboardRunner and
+// LiveWidgetPreview route identically.
+export const WIDGET_QUERY_SHAPES = {
+  bar: 'agg', line: 'agg', pie: 'agg', donut: 'agg', funnel: 'agg', pyramid: 'agg',
+  ranked_list: 'agg', treemap: 'agg', waterfall: 'agg',
+  stacked_bar: 'agg2d', clustered_bar: 'agg2d', stacked_bar_100: 'agg2d', heatmap: 'agg2d',
+  area: 'time', stat: 'stat',
+  metric: 'single', gauge: 'single', kpi: 'single',
+  table: 'rows', scatter: 'rows', histogram: 'rows',
+  heading: 'none', rich_text: 'none', spacer: 'none', image: 'none',
+}
+
+// Route a widget to its fast path, falling back to the full row fetch when the
+// shape's required config is missing or the fast path fails — a degraded-but-
+// correct result, never a blank widget.
+export async function runWidgetData(widget, extraFilters = null, overrideFields = null) {
+  const cfg = widget.dw_widget_config || {}
+  const shape = WIDGET_QUERY_SHAPES[widget.dw_widget_type] || 'rows'
+  // Content widgets (heading, rich text, spacer, image) carry no report at
+  // all — hand back a truthy stub so tiles render without a fetch.
+  if (shape === 'none') return { none: true }
+  const rows = () => runReport(widget.dw_report_id, null, extraFilters, overrideFields)
+  try {
+    switch (shape) {
+      case 'agg':
+        if (!cfg.group_by) return await rows()
+        return await runWidgetAggregate(widget, extraFilters, overrideFields)
+      case 'agg2d':
+        if (!cfg.group_by || !cfg.series_by) return await rows()
+        return await runWidgetAggregate2D(widget, extraFilters, overrideFields)
+      case 'time':
+        if (!cfg.date_field) return await rows()
+        return await runWidgetAggregateTime(widget, extraFilters, overrideFields)
+      case 'single':
+        // A metric scoped by group_by + filter_value keeps the row path (its
+        // scoping matches labels as well as raw values — client-side logic).
+        if (widget.dw_widget_type === 'metric' && cfg.group_by && cfg.filter_value) return await rows()
+        return await runWidgetAggregateSingle(widget, extraFilters, overrideFields)
+      case 'stat': {
+        // Big number + sparkline: single aggregate for the number, time
+        // buckets for the trend (when a date field is configured).
+        const single = await runWidgetAggregateSingle(widget, extraFilters, overrideFields)
+        if (!cfg.date_field) return single
+        try {
+          const t = await runWidgetAggregateTime(widget, extraFilters, overrideFields)
+          return { ...single, aggregatedTime: t.aggregatedTime }
+        } catch { return single }
+      }
+      default:
+        return await rows()
+    }
+  } catch {
+    return await rows()
+  }
 }
 
 export async function saveDashboard({ id, dashboard, widgets, filters }) {

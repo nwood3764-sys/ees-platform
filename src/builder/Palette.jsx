@@ -17,16 +17,13 @@ import { useState } from 'react'
 import { C } from '../data/constants'
 
 export default function Palette({ registry, onDragStart, onDragEnd, onAdd }) {
+  // A browsable scrolling list, grouped by category — no search box. Users
+  // discover components by scanning; they can't search for names they don't
+  // know yet (Nicholas, 2026-07-26).
   const categories = registry.getPaletteCategories()
   const [collapsed, setCollapsed] = useState({})
-  const [query, setQuery] = useState('')
-
-  const q = query.trim().toLowerCase()
-  const filtered = q
-    ? categories
-        .map(c => ({ ...c, components: c.components.filter(e => e.label.toLowerCase().includes(q)) }))
-        .filter(c => c.components.length)
-    : categories
+  const q = ''
+  const filtered = categories
 
   return (
     <div style={{
@@ -34,13 +31,8 @@ export default function Palette({ registry, onDragStart, onDragEnd, onAdd }) {
       background: C.card, display: 'flex', flexDirection: 'column', overflow: 'hidden',
     }}>
       <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}`, background: C.cardSecondary, flexShrink: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, marginBottom: 8 }}>Components</div>
-        <input type="text" value={query} placeholder="Search components…"
-          onChange={e => setQuery(e.target.value)}
-          style={{
-            width: '100%', padding: '6px 9px', fontSize: 12, boxSizing: 'border-box',
-            background: C.card, color: C.textPrimary, border: `1px solid ${C.border}`, borderRadius: 6, font: 'inherit',
-          }} />
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Components</div>
+        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Drag onto the canvas, or click to add.</div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
         {filtered.map(({ category, components }) => {
