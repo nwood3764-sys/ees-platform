@@ -767,6 +767,15 @@ export async function describeIncomingFKs(tableName) {
   return data || []
 }
 
+// Describe grandchild FK paths — tables reachable two hops away, through a
+// direct child ("via") table (e.g. units via buildings for properties). Feeds
+// the related-list builder's via-path target options.
+export async function describeGrandchildFKs(tableName) {
+  const { data, error } = await supabase.rpc('describe_object_grandchild_fks', { p_table: tableName })
+  if (error) throw error
+  return data || []
+}
+
 // Live record count for any public table. If the table has is_deleted, filter to not deleted.
 export async function fetchRecordCount(tableName, excludeDeleted = true) {
   try {

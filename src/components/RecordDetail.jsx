@@ -3411,6 +3411,11 @@ function RelatedListWidget({
   const childTable = config.table
   const fk = config.fk
   const canNavigate = !!onNavigateToRecord && !!childTable
+  // Grandchild (via-path) lists show records two hops away — their FK points
+  // at the intermediate table, not this record, so "New" can't seed a valid
+  // parent link (which intermediate record?). Create those from the
+  // intermediate record's own page instead; rows still navigate normally.
+  const canCreate = canNavigate && !config.via
 
   // Editable mode gates: config opt-in AND parent wired a refresh callback.
   // If either is missing we render the original read-only card.
@@ -3461,7 +3466,7 @@ function RelatedListWidget({
 
   const handleNewClick = (e) => {
     e.stopPropagation()
-    if (!canNavigate) return
+    if (!canCreate) return
 
     // Build a prefill that carries the FULL parent chain into the new child,
     // not just the direct FK. Example: creating an Opportunity from a Property
@@ -3757,7 +3762,7 @@ function RelatedListWidget({
                 <Icon path="M12 5v14M5 12h14" size={isMobile ? 13 : 11} color="#fff" />
                 {pickerCfg.add_button_label || 'Add'}
               </button>
-            ) : canNavigate ? (
+            ) : canCreate ? (
               <button
                 onClick={handleNewClick}
                 style={{
@@ -3810,7 +3815,7 @@ function RelatedListWidget({
                     {pickerCfg.add_button_label || 'Add one'}
                   </button>
                 )}
-                {!editable && canNavigate && (
+                {!editable && canCreate && (
                   <button
                     onClick={handleNewClick}
                     style={{
