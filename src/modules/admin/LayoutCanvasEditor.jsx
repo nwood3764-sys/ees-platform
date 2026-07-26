@@ -23,15 +23,17 @@
 //
 // TABS ARE FIRST-CLASS (Nicholas, 2026-07-26): the editor shows the record
 // page's tabs across the top of the canvas — Details, Related, any custom
-// tabs, plus the Right Sidebar rail — and the canvas shows ONLY the active
-// tab's sections, exactly like the live record page. Tabs can be created,
+// tabs — and the canvas shows ONLY the active tab's sections, exactly like
+// the live record page. Right-sidebar (placement='right') sections render in
+// a live always-visible rail beside the canvas (they show on every record
+// tab, so the editor mirrors that in real time). Tabs can be created,
 // renamed, and deleted (custom tabs only; Details/Related are standard).
-// A section moves between tabs by dragging its card onto a tab in the bar —
-// there is no per-section Tab dropdown anymore. Tabs persist through their
-// sections' `tab` value (no schema change), so a tab with no sections is
-// editor-local until a section is added to it. Custom tabs sort
-// alphabetically after Details/Related/Activity — same as the renderer
-// (buildOrderedTabs in RecordDetail).
+// A section moves between tabs by dragging its card onto a tab in the bar,
+// or into/out of the rail — there is no per-section Tab dropdown anymore.
+// Tabs persist through their sections' `tab` value (no schema change), so a
+// tab with no sections is editor-local until a section is added to it.
+// Custom tabs sort alphabetically after Details/Related/Activity — same as
+// the renderer (buildOrderedTabs in RecordDetail).
 //
 // Persists through the existing page-layout service (bulk soft-delete +
 // recreate). No schema change.
@@ -61,9 +63,9 @@ const WIDGET_LABELS = {
 const STANDARD_TABS = ['Details', 'Related']
 const RESERVED_TAB_NAMES = new Set(['details', 'related', 'activity'])
 
-// Pseudo-tab for the Salesforce-style utility rail: sections with
-// placement='right' render on EVERY tab, so the editor groups them under
-// their own pill instead of filtering them into any one tab.
+// Drop-target id for the Salesforce-style utility rail: sections with
+// placement='right' render on EVERY tab, so the editor shows them in a live
+// always-visible rail beside the canvas (WYSIWYG) — never inside a tab.
 const RIGHT_TAB = '__right_sidebar__'
 
 // Card widgets the record renderer ALWAYS places on the Related tab, no
@@ -186,8 +188,8 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   }, [])
 
   // ── Tab model ──────────────────────────────────────────────────────────────
-  // Does a section belong on tab `t`? Right-rail sections live on the
-  // RIGHT_TAB pseudo-tab only (the record page shows them on every tab).
+  // Does a section belong on tab `t`? Right-rail sections never belong to a
+  // tab — they render in the always-visible rail beside the canvas.
   const sectionInTab = (s, t) => t === RIGHT_TAB
     ? (s.placement || 'main') === 'right'
     : (s.placement || 'main') !== 'right' && (s.tab || 'Details') === t
@@ -268,16 +270,28 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
       )))
       return
     }
-    // Reorder within the active tab. Only this tab's sections are rendered,
-    // so map the visible drag positions back onto the FULL array — global
+    // Dropped on another section card — reorder, or move across containers
+    // (canvas ↔ rail). Only the active tab's sections + the rail are visible,
+    // so positions map straight onto the FULL array by global index — global
     // array order is what persists as section_order (and drives Related-tab
-    // card order), so other tabs' sections must keep their slots.
+    // card order), so other tabs' sections keep their slots. A cross-container
+    // drop adopts the target's placement (and tab, when landing in the main
+    // canvas) before the move.
     setSections(prev => {
-      const visible = prev.map((s, i) => ({ s, i })).filter(({ s }) => sectionInTab(s, activeTab))
-      const from = visible.find(v => `sec::${v.s.key}` === activeId)
-      const to   = visible.find(v => `sec::${v.s.key}` === overId)
-      if (!from || !to) return prev
-      return arrayMove(prev, from.i, to.i)
+      const srcIdx = prev.findIndex(s => `sec::${s.key}` === activeId)
+      const tgtIdx = prev.findIndex(s => `sec::${s.key}` === overId)
+      if (srcIdx < 0 || tgtIdx < 0) return prev
+      const src = prev[srcIdx], tgt = prev[tgtIdx]
+      const srcRight = (src.placement || 'main') === 'right'
+      const tgtRight = (tgt.placement || 'main') === 'right'
+      let arr = prev
+      if (srcRight !== tgtRight) {
+        const patched = tgtRight
+          ? { ...src, placement: 'right' }
+          : { ...src, placement: 'main', tab: tgt.tab || 'Details' }
+        arr = prev.map((s, i) => i === srcIdx ? patched : s)
+      }
+      return arrayMove(arr, srcIdx, tgtIdx)
     })
   }
 
@@ -375,16 +389,18 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   }
 
   // New sections land on the ACTIVE tab — 'start' before its first section,
-  // 'end' after its last. Insert positions are tab-local but resolved against
-  // the full array so other tabs' section_order is untouched.
+  // 'end' after its last — or in the right rail ('rail'). Insert positions
+  // are container-local but resolved against the full array so other tabs'
+  // section_order is untouched.
   const addSection = (position = 'end') => {
     const key = `sec-new-${Date.now()}`
-    const onRight = activeTab === RIGHT_TAB
-    const section = { key, label: 'New Section', columns: 2, tab: onRight ? 'Details' : activeTab,
-      isCollapsible: false, isCollapsedByDefault: false, placement: onRight ? 'right' : 'main',
+    const onRail = position === 'rail'
+    const container = onRail ? RIGHT_TAB : activeTab
+    const section = { key, label: 'New Section', columns: onRail ? 1 : 2, tab: onRail ? 'Details' : activeTab,
+      isCollapsible: false, isCollapsedByDefault: false, placement: onRail ? 'right' : 'main',
       widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [] } }] }
     setSections(prev => {
-      const idxs = prev.map((s, i) => sectionInTab(s, activeTab) ? i : -1).filter(i => i >= 0)
+      const idxs = prev.map((s, i) => sectionInTab(s, container) ? i : -1).filter(i => i >= 0)
       const insertAt = position === 'start'
         ? (idxs.length ? idxs[0] : prev.length)
         : (idxs.length ? idxs[idxs.length - 1] + 1 : prev.length)
@@ -452,7 +468,9 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
 
   // The canvas shows ONLY the active tab's sections — the whole point of the
   // tab bar: what you see is exactly what that tab renders on the record page.
+  // Right-rail sections render in the always-visible rail beside the canvas.
   const visibleSections = sections.filter(s => sectionInTab(s, activeTab))
+  const railSections = sections.filter(s => (s.placement || 'main') === 'right')
   const deleteTabSectionCount = deleteTab ? sections.filter(s => (s.tab || 'Details') === deleteTab).length : 0
 
   return (
@@ -504,44 +522,54 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
               tabList={tabList}
               activeTab={activeTab}
               tabSectionCount={tabSectionCount}
-              rightCount={tabSectionCount(RIGHT_TAB)}
               onSelect={selectTab}
               onAdd={addTab}
               onRename={renameTab}
               onRequestDelete={setDeleteTab}
             />
-            <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-              {visibleSections.length === 0 ? (
-                <div style={{ background: C.card, border: `1px dashed ${C.borderDark}`, borderRadius: 8, padding: '28px 20px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
-                    {activeTab === RIGHT_TAB ? 'No sections in the right sidebar yet.' : `No sections on the ${activeTab} tab yet.`}
+            {/* Main canvas (active tab) + the live right-sidebar rail. The rail
+                mirrors the record page: always visible, whatever tab is active. */}
+            <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+                {visibleSections.length === 0 ? (
+                  <div style={{ background: C.card, border: `1px dashed ${C.borderDark}`, borderRadius: 8, padding: '28px 20px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
+                      No sections on the {activeTab} tab yet.
+                    </div>
+                    <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 14 }}>
+                      Add a section here, or drag a section card from another tab onto this tab. A tab with no sections is not saved to the record page.
+                    </div>
+                    <button onClick={() => addSection('end')} style={{ ...addSectionBtn(), width: 'auto', padding: '10px 22px' }}>
+                      + Add Section
+                    </button>
                   </div>
-                  <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 14 }}>
-                    {activeTab === RIGHT_TAB
-                      ? 'Right-sidebar sections render beside the record on every tab.'
-                      : 'Add a section here, or drag a section card from another tab onto this tab. A tab with no sections is not saved to the record page.'}
-                  </div>
-                  <button onClick={() => addSection('end')} style={{ ...addSectionBtn(), width: 'auto', padding: '10px 22px' }}>
-                    + Add Section
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <button onClick={() => addSection('start')} style={{ ...addSectionBtn(), marginBottom: 14 }}>
-                    + Add Section
-                  </button>
-                  <SortableContext items={visibleSections.map(s => `sec::${s.key}`)} strategy={verticalListSortingStrategy}>
-                    {visibleSections.map(sec => (
-                      <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
-                        onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
-                        onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal} />
-                    ))}
-                  </SortableContext>
-                  <button onClick={() => addSection('end')} style={addSectionBtn()}>
-                    + Add Section
-                  </button>
-                </>
-              )}
+                ) : (
+                  <>
+                    <button onClick={() => addSection('start')} style={{ ...addSectionBtn(), marginBottom: 14 }}>
+                      + Add Section
+                    </button>
+                    <SortableContext items={visibleSections.map(s => `sec::${s.key}`)} strategy={verticalListSortingStrategy}>
+                      {visibleSections.map(sec => (
+                        <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
+                          onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
+                          onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal} />
+                      ))}
+                    </SortableContext>
+                    <button onClick={() => addSection('end')} style={addSectionBtn()}>
+                      + Add Section
+                    </button>
+                  </>
+                )}
+              </div>
+              <RightRail count={railSections.length} onAdd={() => addSection('rail')}>
+                <SortableContext items={railSections.map(s => `sec::${s.key}`)} strategy={verticalListSortingStrategy}>
+                  {railSections.map(sec => (
+                    <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
+                      onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
+                      onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal} />
+                  ))}
+                </SortableContext>
+              </RightRail>
             </div>
           </DndContext>
         </div>
@@ -610,7 +638,7 @@ const TAB_CSS = `
 .lce-tab-new:hover { background:#f0faf5; border-color:${C.emeraldMid}; }
 `
 
-function TabBar({ tabList, activeTab, tabSectionCount, rightCount, onSelect, onAdd, onRename, onRequestDelete }) {
+function TabBar({ tabList, activeTab, tabSectionCount, onSelect, onAdd, onRename, onRequestDelete }) {
   const [adding, setAdding] = useState(false)
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, padding: '10px 16px 0', background: C.page, borderBottom: `1px solid ${C.borderDark}`, flexShrink: 0, overflowX: 'auto' }}>
@@ -629,10 +657,39 @@ function TabBar({ tabList, activeTab, tabSectionCount, rightCount, onSelect, onA
         className="lce-tab-ghost">
         Activity · automatic
       </span>
-      <div style={{ marginLeft: 'auto', paddingLeft: 12, display: 'flex', alignItems: 'flex-end' }}>
-        <TabPill name={RIGHT_TAB} label="Right Sidebar" count={rightCount} active={activeTab === RIGHT_TAB}
-          standard onSelect={onSelect}
-          hint="Sections here render in the always-visible right sidebar on every tab (Salesforce-style utility rail)." />
+    </div>
+  )
+}
+
+// ─── Right-sidebar rail ──────────────────────────────────────────────────────
+// Live WYSIWYG stand-in for the record page's utility rail: always visible
+// beside the canvas (the record page shows these sections on every tab), and
+// a drop target for section drags — dropping a section card anywhere on the
+// rail moves it to placement='right'. Sections inside are the same editable
+// cards as the main canvas.
+function RightRail({ count, onAdd, children }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `tabdrop::${RIGHT_TAB}` })
+  return (
+    <div ref={setNodeRef} style={{
+      width: 316, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      borderLeft: `1px solid ${C.borderDark}`,
+      background: isOver ? '#f0faf5' : '#eaeef6',
+      boxShadow: isOver ? `inset 0 0 0 1px ${C.emerald}` : 'none',
+      transition: 'background 200ms ease',
+    }}>
+      <div style={{ padding: '11px 14px 8px', flexShrink: 0 }}>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>Right Sidebar</div>
+        <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 2 }}>Shows beside the record on every tab</div>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px' }}>
+        {children}
+        {count === 0 && (
+          <div style={{ fontSize: 11.5, color: C.textMuted, textAlign: 'center', lineHeight: 1.5, padding: '18px 10px', marginBottom: 10,
+            border: `1px dashed ${C.borderDark}`, borderRadius: 8, background: 'rgba(255,255,255,0.55)' }}>
+            Drag a section here to pin it to the always-visible right sidebar.
+          </div>
+        )}
+        <button onClick={onAdd} style={{ ...addSectionBtn(), padding: '8px', fontSize: 12 }}>+ Add Section</button>
       </div>
     </div>
   )
@@ -722,8 +779,8 @@ const SectionCard = memo(function SectionCard({
           style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none', fontSize: 14, lineHeight: 1, flexShrink: 0 }}>⠿</span>
         <input value={section.label} onChange={e => onPatch(section.key, { label: e.target.value })}
           style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.textPrimary, border: 'none', background: 'transparent', outline: 'none' }} />
-        <span title="Move this section to another tab (or the right sidebar) by dragging its ⠿ handle onto a tab above"
-          style={{ fontSize: 10.5, color: C.textMuted, flexShrink: 0 }}>drag ⠿ to a tab to move</span>
+        <span title="Move this section by dragging its ⠿ handle onto a tab above or into the right-sidebar rail"
+          style={{ fontSize: 10.5, color: C.textMuted, flexShrink: 0 }}>drag ⠿ to a tab or the sidebar</span>
         <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
           Columns
           <select value={cols} onChange={e => onPatch(section.key, { columns: Number(e.target.value) })}
