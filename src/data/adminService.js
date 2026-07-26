@@ -760,20 +760,22 @@ export function describeObject(tableName) {
   return promise
 }
 
-// Describe incoming FKs — which other tables reference this one (for Related Lookups)
-export async function describeIncomingFKs(tableName) {
-  const { data, error } = await supabase.rpc('describe_object_incoming_fks', { p_table: tableName })
-  if (error) throw error
-  return data || []
-}
-
-// Describe grandchild FK paths — tables reachable two hops away, through a
-// direct child ("via") table (e.g. units via buildings for properties). Feeds
-// the related-list builder's via-path target options.
-export async function describeGrandchildFKs(tableName) {
-  const { data, error } = await supabase.rpc('describe_object_grandchild_fks', { p_table: tableName })
-  if (error) throw error
-  return data || []
+// Describe incoming FKs — which other tables reference this one (for Related
+// Lookups and the related-list object browser, which calls this per drill-down
+// level). Cached per table like describeObject: the FK graph only changes with
+// schema migrations, and the browser re-requests the same tables constantly.
+const _incomingFKsCache = new Map()
+export function describeIncomingFKs(tableName) {
+  const cached = _incomingFKsCache.get(tableName)
+  if (cached) return cached
+  const promise = (async () => {
+    const { data, error } = await supabase.rpc('describe_object_incoming_fks', { p_table: tableName })
+    if (error) throw error
+    return data || []
+  })()
+  promise.catch(() => { _incomingFKsCache.delete(tableName) })
+  _incomingFKsCache.set(tableName, promise)
+  return promise
 }
 
 // Live record count for any public table. If the table has is_deleted, filter to not deleted.

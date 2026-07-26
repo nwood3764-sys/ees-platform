@@ -3491,11 +3491,13 @@ function RelatedListWidget({
   const childTable = config.table
   const fk = config.fk
   const canNavigate = !!onNavigateToRecord && !!childTable
-  // Grandchild (via-path) lists show records two hops away — their FK points
-  // at the intermediate table, not this record, so "New" can't seed a valid
-  // parent link (which intermediate record?). Create those from the
-  // intermediate record's own page instead; rows still navigate normally.
-  const canCreate = canNavigate && !config.via
+  // Related-record (via-path) lists show records that link to an intermediate
+  // record, not to this one — "New" can't seed a valid parent link (which
+  // intermediate record?). Create those from the intermediate record's own
+  // page instead; rows still navigate normally. via is a chain array (legacy
+  // single-object shape tolerated).
+  const hasViaPath = Array.isArray(config.via) ? config.via.length > 0 : !!config.via
+  const canCreate = canNavigate && !hasViaPath
 
   // Editable mode gates: config opt-in AND parent wired a refresh callback.
   // If either is missing we render the original read-only card.
