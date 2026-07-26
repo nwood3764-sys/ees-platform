@@ -16,7 +16,7 @@ import { Badge, Icon } from './UI'
 // preview code). A combined chunk would still be large; per-modal
 // splits give Vite the freedom to share only what's truly shared.
 const ProjectReportModal                  = lazy(() => import('./ProjectReportModal'))
-const ProjectPaperworkModal               = lazy(() => import('./ProjectPaperworkModal'))
+const ProjectSubmittalDocumentsModal      = lazy(() => import('./ProjectSubmittalDocumentsModal'))
 const ProjectSchedulerWizard              = lazy(() => import('./scheduler/ProjectSchedulerWizard'))
 const ServiceAppointmentRescheduleModal   = lazy(() => import('./scheduler/ServiceAppointmentRescheduleModal'))
 const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkOrderScheduleModal'))
@@ -41,6 +41,7 @@ import PropertyMapWidget from './PropertyMapWidget'
 import StatusTransitionsBar from './StatusTransitionsBar'
 import TopbarActions from './TopbarActions'
 import { ACTION_KEYS } from '../data/recordActions'
+import { SUBMITTAL_STAGES } from '../data/paperworkSubmittals'
 import { supabase } from '../lib/supabase'
 import DuplicateCheckPanel, { DUPLICATE_CHECK_TABLES, buildDuplicateProbe } from './DuplicateCheckPanel'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
@@ -4955,8 +4956,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
-  // HOMES paperwork generator (only used when tableName === 'projects').
-  const [showPaperworkModal, setShowPaperworkModal] = useState(false)
+  // Program submittal document generator (projects only). Holds WHICH
+  // submittal stage was requested — each program stage is its own filing.
+  const [submittalStage, setSubmittalStage] = useState(null)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
   const [showLogCall, setShowLogCall] = useState(false)
@@ -6303,7 +6305,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: handleRunIncomeQualification,
     [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
-    [ACTION_KEYS.GENERATE_PAPERWORK]:     () => setShowPaperworkModal(true),
+    [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_SUBMITTAL]:
+      () => setSubmittalStage(SUBMITTAL_STAGES.PROJECT_RESERVATION),
+    [ACTION_KEYS.GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL]:
+      () => setSubmittalStage(SUBMITTAL_STAGES.FINAL_PROJECT_PAYMENT_REQUEST),
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -6979,12 +6984,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           />
         )}
 
-        {/* HOMES paperwork generator (only mounted on projects, opt-in via toolbar action) */}
-        {showPaperworkModal && tableName === 'projects' && (
-          <ProjectPaperworkModal
+        {/* Program submittal documents (projects only). One modal, scoped to
+            the requested submittal stage — Project Reservation and Final
+            Project Payment Request are separate filings, months apart. */}
+        {submittalStage && tableName === 'projects' && (
+          <ProjectSubmittalDocumentsModal
             projectId={recordId}
             project={record}
-            onClose={() => setShowPaperworkModal(false)}
+            submittalStage={submittalStage}
+            onClose={() => setSubmittalStage(null)}
           />
         )}
 
