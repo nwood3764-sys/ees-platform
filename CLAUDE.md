@@ -86,6 +86,7 @@ Controlled at the database view level, not just UI. Stored in `field_permissions
 - Auto-number triggers exist on `reports` (`trg_reports_rn`) and `dashboards` (`trg_dashboards_rn`) — pass `''` for record-number columns and the trigger fills them.
 - `report_filters.rfilt_prompt_input_type` accepts `'select'`, not `'picklist'`. Verify check constraints with `pg_get_constraintdef` before authoring.
 - After any DROP/CREATE of a function: re-issue REVOKE/GRANT and `NOTIFY pgrst, 'reload schema'`.
+- **Migration filenames: stamp the actual UTC clock time (`YYYYMMDDHHMMSS`), never a round number like `…120000`/`…210000`.** Concurrent sessions picking round stamps produced 7 duplicate-version pairs on 2026-07-26 (renamed in PR #235); duplicate versions break Supabase branch-database replays. Before committing, check the prefix is unique: `ls supabase/migrations | cut -d_ -f1 | sort | uniq -d` must be empty.
 
 ## Vite hazards
 
