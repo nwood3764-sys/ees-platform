@@ -17,6 +17,7 @@ import {
   createSavedView,
   updateSavedView,
   deleteSavedView,
+  setDefaultViewForObject,
   getCurrentRoleId,
 } from '../data/listViewsService';
 
@@ -1703,6 +1704,12 @@ export function ListView({
   renderCell, renderDetail, onNew, onOpenRecord, onRefresh,
   tableName, onRecordsUpdated, storageKey,
   listObject, listModule,
+  // When true (the default), the user's persisted default view is applied on
+  // first load — its filters/sort/columns become the opening state, matching
+  // Salesforce pinned-list-view behavior. Callers that open with an explicit
+  // scope (e.g. a dashboard drill-down's synthetic Filtered view) pass false
+  // so the drill filters aren't stomped by the saved default.
+  applyDefaultViewOnLoad = true,
 }) {
   // ── Defensive defaults ─────────────────────────────────────────────────
   // The original signature treated systemViews and data as required arrays.
@@ -1935,7 +1942,11 @@ export function ListView({
   const persistEnabled = Boolean(persistObject);
   const [hasRole, setHasRole] = useState(false);
   const [editingView, setEditingView] = useState(null); // saved view being edited, or null
-  const [defaultViewOverride, setDefaultViewOverride] = useState(null); // persisted default id
+  // Guards for applying the persisted default view exactly once on load: never
+  // re-apply after the user has interacted (switched views, sorted, filtered),
+  // and never apply twice if the saved-views fetch resolves late.
+  const defaultAppliedRef = useRef(false);
+  const userInteractedRef = useRef(false);
   const [globalSearch, setGlobalSearch] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
@@ -1981,15 +1992,13 @@ export function ListView({
   useEffect(() => { if (editMode) setOverlay(new Map()); }, [data, editMode]);
 
   // Load persisted saved views for this object. Runs when persistObject is
-  // known. Applies a persisted default view on first load if one exists and
-  // the user hasn't already navigated/dirtied the view.
+  // known. Reloads after every create/edit/delete/set-default so the selector
+  // (and its per-user default star) is always live.
   const reloadSavedViews = async () => {
     if (!persistObject) return;
     try {
       const views = await fetchSavedViewsForObject(persistObject);
       setPersonalViews(views);
-      const def = views.find(v => v.isDefault);
-      if (def) setDefaultViewOverride(def.id);
       return views;
     } catch {
       // Non-fatal: a failure to load saved views must not blank the list or
@@ -2003,15 +2012,25 @@ export function ListView({
     (async () => {
       const views = await fetchSavedViewsForObject(persistObject).catch(() => []);
       if (cancelled) return;
-      // Strictly additive: populate the selector only. We deliberately do NOT
-      // auto-apply a default view's filters/sort on mount — doing so mutates
-      // the active filter/sort state during initial render, which risks
-      // interfering with the list's own data load. The default is surfaced as
-      // a star in the selector; the user applies it by clicking. This keeps the
-      // saved-views layer incapable of affecting which rows render on load.
       setPersonalViews(views);
+      // Apply the user's default view on first load — this is what makes "set
+      // as default" actually mean something across refreshes. Applied once,
+      // and only if the user hasn't already interacted (switched views,
+      // sorted, filtered) while the fetch was in flight. Filtering/sorting is
+      // client-side here, so this only changes which loaded rows render — the
+      // parent's data load is untouched. Default views that include related
+      // columns are pre-seeded by ObjectListSection (seedRelatedFromViews) so
+      // those columns resolve without a second fetch.
       const def = views.find(v => v.isDefault);
-      if (def) setDefaultViewOverride(def.id);
+      if (def && applyDefaultViewOnLoad && !defaultAppliedRef.current && !userInteractedRef.current) {
+        defaultAppliedRef.current = true;
+        setActiveViewId(def.id);
+        setActiveFilters([...(def.filters || [])]);
+        setSortField(def.sortField || null);
+        setSortDir(def.sortDir || 'asc');
+        setVisibleColumns(Array.isArray(def.visibleColumns) ? def.visibleColumns : null);
+        setIsDirty(false);
+      }
       getCurrentRoleId().then(rid => { if (!cancelled) setHasRole(Boolean(rid)); }).catch(() => {});
     })();
     return () => { cancelled = true; };
@@ -2099,7 +2118,9 @@ export function ListView({
   const handleSetDefault = async (v) => {
     if (!persistEnabled) return;
     if (v._persisted) {
-      await updateSavedView(v.id, { isDefault: true, object: persistObject });
+      // Pin directly: the default is a per-user pointer, not a view column, so
+      // pinning a shared view never edits the view row (or anyone else's pin).
+      await setDefaultViewForObject(persistObject, v.id);
     } else {
       // Setting a system view as default persists an override row for it.
       await createSavedView({
@@ -2114,6 +2135,7 @@ export function ListView({
   };
 
   const applyView = v => {
+    userInteractedRef.current = true;
     setActiveViewId(v.id);
     setActiveFilters(v.filters || []);
     setSortField(v.sortField || null);
@@ -2122,13 +2144,13 @@ export function ListView({
     setIsDirty(false);
   };
 
-  const handleSort = (f, d) => { setSortField(f); setSortDir(d); setIsDirty(true); };
+  const handleSort = (f, d) => { userInteractedRef.current = true; setSortField(f); setSortDir(d); setIsDirty(true); };
 
-  const handleFilterApply = nf => { setActiveFilters(nf); setIsDirty(true); setOpenFilterCol(null); };
+  const handleFilterApply = nf => { userInteractedRef.current = true; setActiveFilters(nf); setIsDirty(true); setOpenFilterCol(null); };
 
-  const removeFilter = i => { setActiveFilters(prev => prev.filter((_, j) => j !== i)); setIsDirty(true); };
+  const removeFilter = i => { userInteractedRef.current = true; setActiveFilters(prev => prev.filter((_, j) => j !== i)); setIsDirty(true); };
 
-  const clearAll = () => { setActiveFilters([]); setSortField(null); setSortDir('asc'); setIsDirty(false); setActiveViewId(defaultViewId); };
+  const clearAll = () => { userInteractedRef.current = true; setActiveFilters([]); setSortField(null); setSortDir('asc'); setIsDirty(false); setActiveViewId(defaultViewId); };
 
   // Toggle the view selector, capturing the trigger's screen rect so the
   // portal'd dropdown can anchor to it (escapes toolbar overflow clipping).
