@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { C, STATUS_CFG, NAV_MODULES } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
+import { getCurrentUserProfile } from '../data/layoutService';
 import UserMenu from './UserMenu';
 
 export function Badge({ s }) {
@@ -265,6 +266,49 @@ export function ErrorState({ error, onRetry }) {
 //                    The caller is responsible for the hamburger that opens it
 //                    (see MobileHeader below) and for maintaining `mobileOpen`.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─── SidebarBuildTag ─────────────────────────────────────────────────────────
+// Bottom-left build indicator for Admins: which merged pull request (and
+// commit + build time) is currently live, so Nicholas can confirm at a glance
+// that a deploy has landed without digging through Netlify. Values are baked
+// in at build time (vite.config.js define): __BUILD_PR__ is extracted from the
+// deployed commit's subject ("... (#207)" squash-merge titles), __BUILD_ID__
+// is "<short sha> · <UTC build time>". Hidden for non-admin roles and in the
+// collapsed desktop sidebar (no room for text).
+// ─────────────────────────────────────────────────────────────────────────────
+const BUILD_TAG_PR = typeof __BUILD_PR__ !== 'undefined' ? __BUILD_PR__ : ''
+const BUILD_TAG_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'dev'
+
+function SidebarBuildTag({ isCollapsed }) {
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentUserProfile()
+      .then(p => { if (!cancelled) setIsAdmin(p?.roleName === 'Admin'); })
+      .catch(() => { /* unresolved profile — stay hidden */ });
+    return () => { cancelled = true; };
+  }, []);
+  if (!isAdmin || isCollapsed) return null;
+  const label = BUILD_TAG_PR ? `${BUILD_TAG_PR} · ${BUILD_TAG_ID}` : BUILD_TAG_ID;
+  return (
+    <div
+      title="Active build — merged pull request · commit · UTC build time"
+      style={{
+        padding: '8px 14px 10px',
+        borderTop: '1px solid rgba(255,255,255,0.07)',
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: 10,
+        letterSpacing: '0.02em',
+        color: 'rgba(255,255,255,0.38)',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        userSelect: 'text',
+        flexShrink: 0,
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
 export function Sidebar({
   activeModule,
   onModuleChange,
@@ -406,6 +450,9 @@ export function Sidebar({
         isMobile={isMobile}
         isCollapsed={isCollapsed}
       />
+
+      {/* Admin-only active-build indicator (PR · sha · build time) */}
+      <SidebarBuildTag isCollapsed={isCollapsed} />
     </>
   );
 
