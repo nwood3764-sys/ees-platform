@@ -379,22 +379,12 @@ SET widget_config = jsonb_set(
         WHEN 'oli_record_number' THEN f || jsonb_build_object('label', 'Line Item Number')
         WHEN 'oli_name'          THEN f || jsonb_build_object('label', 'Line Item Name')
         WHEN 'opportunity_id'    THEN f || jsonb_build_object('label', 'Opportunity')
-        WHEN 'product_id'        THEN f || jsonb_build_object(
-                                        'label', 'Product',
-                                        'lookup_dependency', jsonb_build_object(
-                                          'kind', 'products_for_opportunity',
-                                          'depends_on', jsonb_build_array('opportunity_id')))
-        WHEN 'price_book_entry_id' THEN f || jsonb_build_object(
-                                        'label', 'Price Book Entry',
-                                        'lookup_dependency', jsonb_build_object(
-                                          'kind', 'price_book_entries_for_opportunity',
-                                          'depends_on', jsonb_build_array('opportunity_id', 'product_id'),
-                                          'create_seed', jsonb_build_object('product_id', 'product_id')))
-        WHEN 'unit_id'           THEN f || jsonb_build_object(
-                                        'label', 'Unit',
-                                        'lookup_dependency', jsonb_build_object(
-                                          'kind', 'units_for_opportunity',
-                                          'depends_on', jsonb_build_array('opportunity_id')))
+        -- The lookup_dependency keys that scope these three pickers live in
+        -- 20260726240000 — they depend on frontend code and must not land
+        -- before the matching bundle is deployed.
+        WHEN 'product_id'        THEN f || jsonb_build_object('label', 'Product')
+        WHEN 'price_book_entry_id' THEN f || jsonb_build_object('label', 'Price Book Entry')
+        WHEN 'unit_id'           THEN f || jsonb_build_object('label', 'Unit')
         WHEN 'oli_quantity'      THEN f || jsonb_build_object('label', 'Quantity')
         WHEN 'oli_unit_price'    THEN f || jsonb_build_object('label', 'Sales Price')
         WHEN 'oli_list_price'    THEN f || jsonb_build_object('label', 'List Price')

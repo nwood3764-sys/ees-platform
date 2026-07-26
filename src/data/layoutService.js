@@ -167,6 +167,7 @@ const TABLE_COLUMN_PREFIX = {
   opportunities:                     'opportunity',
   opportunity_contact_roles:         'ocr',
   opportunity_line_items:            'oli',
+  opportunity_record_type_price_books: 'ortpb',
   outbound_mailboxes:                'outbound_mailbox',
   price_books:                       'price_book',
   price_book_entries:                'price_book_entry',
@@ -1043,6 +1044,7 @@ export function applyInsertDefaults(tableName, fields, userId) {
     equipment:      'equipment',   // already singular
     opportunities:  'opportunity',
     opportunity_line_items:  'oli',
+    opportunity_record_type_price_books: 'ortpb',
     price_books:             'price_book',
     price_book_entries:      'price_book_entry',
     products:       'product',
@@ -1101,6 +1103,12 @@ export function applyInsertDefaults(tableName, fields, userId) {
     // NULL + findMissingRequired both pass; the trigger overwrites it.
     if (!fields.ocr_record_number) fields.ocr_record_number = 'NEW'
     if (!fields.ocr_created_by)    fields.ocr_created_by    = userId
+  } else if (tableName === 'opportunity_record_type_price_books') {
+    // ortpb_record_number is populated by trg_ortpb_rn (BEFORE INSERT); the
+    // placeholder just satisfies NOT NULL + findMissingRequired.
+    if (!fields.ortpb_record_number) fields.ortpb_record_number = 'NEW'
+    if (!fields.ortpb_owner)         fields.ortpb_owner         = userId
+    if (!fields.ortpb_created_by)    fields.ortpb_created_by    = userId
   } else if (tableName === 'contact_skills') {
     if (!fields.cs_record_number) fields.cs_record_number = 'NEW'
     if (!fields.cs_owner)         fields.cs_owner         = userId

@@ -214,6 +214,7 @@ const TABLE_META = {
   opportunity_line_items:    { module: 'Enrollment',       label: 'Opportunity Line Items', nameColumn: 'oli_name',             recordNumberColumn: 'oli_record_number',               statusColumn: null,                       parents: ['opportunity_id'],                                 parentTables: ['opportunities'] },
   price_books:               { module: 'Stock',            label: 'Price Books',          nameColumn: 'price_book_name',        recordNumberColumn: 'price_book_record_number',        statusColumn: null,                       parents: [],                                                 parentTables: [] },
   price_book_entries:        { module: 'Stock',            label: 'Price Book Entries',   nameColumn: 'price_book_entry_name',  recordNumberColumn: 'price_book_entry_record_number',  statusColumn: null,                       parents: ['price_book_id', 'product_id'],                    parentTables: ['price_books', 'products'] },
+  opportunity_record_type_price_books: { module: 'Admin',  label: 'Record Type Price Books', nameColumn: null,                  recordNumberColumn: 'ortpb_record_number',             statusColumn: null,                       parents: ['price_book_id'],                                  parentTables: ['price_books'] },
   property_programs:         { module: 'Enrollment',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['property_id', 'opportunity_id'],                  parentTables: ['properties', 'opportunities'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
@@ -436,7 +437,11 @@ const TRIGGER_DERIVED_REQUIRED = {
 // enforce the same contract.
 const DERIVED_READONLY = {
   contacts: ['contact_name'],
-  opportunities: ['opportunity_name'],
+  // price_book_id is derived from the opportunity record type by
+  // trg_opportunity_price_book, using the opportunity_record_type_price_books
+  // mapping — the record type dictates the price book and a user never picks
+  // one (Nicholas, 2026-07-26).
+  opportunities: ['opportunity_name', 'price_book_id'],
   buildings: ['building_name'],
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],

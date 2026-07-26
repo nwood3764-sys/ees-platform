@@ -206,6 +206,7 @@ export function guessPrefix(tableName) {
     opportunities: 'opportunity',
     opportunity_contact_roles: 'ocr',
     opportunity_line_items: 'oli',
+    opportunity_record_type_price_books: 'ortpb',
     price_books: 'price_book',
     price_book_entries: 'price_book_entry',
     buildings: 'building',
