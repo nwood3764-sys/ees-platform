@@ -3,6 +3,8 @@ import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
 import { runReport, getRowValue, getReportPrompts, cloneReport } from '../data/reportsService'
 import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } from '../lib/reportFormulaEval'
+import RecordLink from '../components/RecordLink'
+import { getEditableFieldsForTable, getPicklistOptions, bulkUpdateRecords } from '../data/fieldMetadataService'
 
 // ─── Report Runner ────────────────────────────────────────────────────────
 //
@@ -215,7 +217,7 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
 // ─── Tabular layout ───────────────────────────────────────────────────────
 
 export function TabularLayout({ result }) {
-  const { rows, columns, calculatedFields } = result
+  const { rows, columns, calculatedFields, primaryObject } = result
   // Row-scope calculated fields appear as additional columns alongside the
   // selected fields. Summary-scope calculated fields show on the totals
   // row in SummaryLayout — not relevant for tabular.
@@ -224,6 +226,49 @@ export function TabularLayout({ result }) {
     ...columns,
     ...rowCalcFields.map(c => ({ ...c, _calc: true, label: c.label || '(calc)' })),
   ]
+
+  // Inline editing: picklist columns on the primary object are editable
+  // directly in the report row (double-click). Saves go through the same
+  // bulk_update_records path the list views use; the new value lives in a
+  // local overlay so the report doesn't re-run after every cell save.
+  const [fieldMeta, setFieldMeta]     = useState(null)   // Map<columnName, meta>
+  const [editingCell, setEditingCell] = useState(null)   // { rowId, colName }
+  const [cellDraft, setCellDraft]     = useState(null)
+  const [overlay, setOverlay]         = useState(() => new Map()) // `${rowId}::${col}` → { value, label }
+  const [savingCell, setSavingCell]   = useState(null)
+  const [editError, setEditError]     = useState(null)   // { key, message }
+
+  useEffect(() => {
+    let cancelled = false
+    if (!primaryObject) { setFieldMeta(new Map()); return undefined }
+    getEditableFieldsForTable(primaryObject)
+      .then(list => { if (!cancelled) setFieldMeta(new Map((list || []).map(m => [m.columnName, m]))) })
+      .catch(() => { if (!cancelled) setFieldMeta(new Map()) })
+    return () => { cancelled = true }
+  }, [primaryObject])
+
+  const saveCell = async (rowId, colName, newValue, newLabel) => {
+    const key = `${rowId}::${colName}`
+    setSavingCell(key)
+    setEditError(null)
+    try {
+      const res = await bulkUpdateRecords(primaryObject, [rowId], { [colName]: newValue })
+      if (res?.records_errored > 0) {
+        setEditError({ key, message: res.errors?.[0]?.error || 'Update failed' })
+        return
+      }
+      setOverlay(prev => {
+        const next = new Map(prev)
+        next.set(key, { value: newValue, label: newLabel })
+        return next
+      })
+      setEditingCell(null)
+    } catch (e) {
+      setEditError({ key, message: e.message || String(e) })
+    } finally {
+      setSavingCell(null)
+    }
+  }
 
   if (allColumns.length === 0) {
     return <EmptyState message="No fields selected. Edit the report to add fields." />
@@ -265,10 +310,68 @@ export function TabularLayout({ result }) {
                     </td>
                   )
                 }
-                const v = getRowValue(row, c, result)
+
+                const cellKey = `${row.id}::${c.name}`
+                const ov = overlay.get(cellKey)
+                const meta = fieldMeta?.get(c.name)
+                const isDirect = !c.via_path || c.via_path.length === 0
+                const isEditablePicklist = !!(row.id && isDirect && meta?.isEditable && meta.editorType === 'picklist')
+                const isEditing = editingCell && editingCell.rowId === row.id && editingCell.colName === c.name
+                const display = ov
+                  ? (ov.label ?? '—')
+                  : formatCellValue(getRowValue(row, c, result), c.type)
+
+                if (isEditing) {
+                  return (
+                    <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
+                      <ReportPicklistCellEditor
+                        meta={meta}
+                        value={cellDraft}
+                        setValue={setCellDraft}
+                        busy={savingCell === cellKey}
+                        onCommit={(value, label) => saveCell(row.id, c.name, value, label)}
+                        onCancel={() => { setEditingCell(null); setEditError(null) }}
+                      />
+                      {editError?.key === cellKey && (
+                        <div style={{ fontSize:11, color:C.textSecondary, marginTop:2 }}>{editError.message}</div>
+                      )}
+                    </td>
+                  )
+                }
+
+                // First column links to the underlying record — real anchor,
+                // so new-tab / copy-link work like any record link.
+                if (idx === 0 && row.id && primaryObject) {
+                  return (
+                    <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
+                      <RecordLink
+                        table={primaryObject}
+                        id={row.id}
+                        title="Open record"
+                        onActivate={() => {
+                          window.history.pushState(null, '', `/${primaryObject}/${row.id}`)
+                          window.dispatchEvent(new PopStateEvent('popstate'))
+                        }}
+                        style={{ color:'#1a5a8a', fontWeight:600 }}
+                      >
+                        {display}
+                      </RecordLink>
+                    </td>
+                  )
+                }
+
                 return (
-                  <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
-                    {formatCellValue(v, c.type)}
+                  <td
+                    key={`r-${rowIdx}-${idx}`}
+                    style={{ ...cellStyle(), ...(isEditablePicklist ? { cursor:'cell' } : null) }}
+                    title={isEditablePicklist ? 'Double-click to edit' : undefined}
+                    onDoubleClick={isEditablePicklist ? () => {
+                      setEditError(null)
+                      setCellDraft(ov ? ov.value : (row[c.name] ?? null))
+                      setEditingCell({ rowId: row.id, colName: c.name })
+                    } : undefined}
+                  >
+                    {display}
                   </td>
                 )
               })}
@@ -277,6 +380,50 @@ export function TabularLayout({ result }) {
         </tbody>
       </table>
     </div>
+  )
+}
+
+// Inline picklist cell editor for tabular report rows. Loads the active
+// picklist options for the column's (object, field) pair and commits the
+// chosen value (with its label, for the local display overlay).
+function ReportPicklistCellEditor({ meta, value, setValue, busy, onCommit, onCancel }) {
+  const [options, setOptions] = useState([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    getPicklistOptions(meta.picklistObject, meta.picklistField)
+      .then(o => { if (!cancelled) { setOptions(o || []); setLoading(false) } })
+      .catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [meta.picklistObject, meta.picklistField])
+
+  const commit = () => {
+    if (busy) return
+    const chosen = options.find(o => o.id === value)
+    onCommit(value || null, chosen ? chosen.label : null)
+  }
+
+  return (
+    <select
+      autoFocus
+      value={value || ''}
+      disabled={busy}
+      onChange={(e) => setValue(e.target.value || null)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter')  { e.preventDefault(); commit() }
+        if (e.key === 'Escape') { e.preventDefault(); onCancel() }
+      }}
+      style={{
+        width:'100%', minWidth:140, fontSize:13, padding:'3px 6px',
+        border:`1px solid ${C.borderDark}`, borderRadius:6,
+        background:'#fff', color:C.textPrimary,
+      }}
+    >
+      <option value="">—</option>
+      {loading && <option disabled>Loading…</option>}
+      {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+    </select>
   )
 }
 

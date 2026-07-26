@@ -198,7 +198,7 @@ export async function resolveLookupLabel(tableName, id, { nameColumn = null } = 
 // ----- helpers -----
 
 // Column-prefix convention used across LEAP tables.
-function guessPrefix(tableName) {
+export function guessPrefix(tableName) {
   const map = {
     properties: 'property',
     accounts: 'account',
