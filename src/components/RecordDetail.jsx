@@ -211,6 +211,7 @@ const TABLE_META = {
   opportunities:             { module: 'Enrollment',       label: 'Opportunities',        nameColumn: 'opportunity_name',       recordNumberColumn: 'opportunity_record_number',       statusColumn: 'opportunity_status',       parents: ['property_id', 'building_id', 'opportunity_account_id'],          parentTables: ['properties', 'buildings', 'accounts'] },
   opportunity_contact_roles: { module: 'Enrollment',       label: 'Contact Role',         nameColumn: 'ocr_name',               recordNumberColumn: 'ocr_record_number',               statusColumn: null,                       parents: ['opportunity_id', 'contact_id'],                   parentTables: ['opportunities', 'contacts'] },
   property_programs:         { module: 'Enrollment',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
+  enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['property_id', 'opportunity_id'],                  parentTables: ['properties', 'opportunities'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
   projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id', 'building_id', 'project_account_id'],                     parentTables: ['properties', 'buildings', 'accounts'] },
   assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id'],                     parentTables: ['properties', 'buildings'] },
@@ -1506,7 +1507,13 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
   const [serverOpts, setServerOpts] = useState(null) // results from server search (null = not searched)
   const [selectedOption, setSelectedOption] = useState(null) // resolved label for current value
 
-  const canServerSearch = !!(field.lookup_table && field.lookup_field)
+  // Dependent lookups never server-search: fetchLookupOptions queries the
+  // whole table, which would leak records outside the dependency scope back
+  // into the list (e.g. every opportunity in the system on a property-scoped
+  // picker). The scoped RPCs return the full matching set, so SearchableLookup's
+  // local filtering (active when onSearch is null) covers typing.
+  const isDependent = !!field.lookup_dependency?.kind
+  const canServerSearch = !isDependent && !!(field.lookup_table && field.lookup_field)
 
   // Resolve the selected value's label up front so the field shows it even if
   // the record isn't in the initial option page (the carry-over case).
@@ -1575,6 +1582,10 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
     if (dep.kind === 'buildings_for_property') {
       const prop = dependencyValues.property_id
         || dependencyValues.opportunity_property_id
+      return prop ? { property_id: prop } : null
+    }
+    if (dep.kind === 'opportunities_for_property') {
+      const prop = dependencyValues.property_id
       return prop ? { property_id: prop } : null
     }
     return null
@@ -1701,7 +1712,12 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
           )
         }
         const dependsOn = Array.isArray(dep.depends_on) ? dep.depends_on : []
-        const hint = dependsOn.length > 0
+        // "Fill X first" only when the dependency really is unfilled; when the
+        // parent IS set and the scoped pool is just empty (e.g. a property
+        // with no opportunities yet), say so instead of a misleading prompt.
+        const depsFilled = dependsOn.length > 0
+          && dependsOn.some(k => field._dependencyValues?.[k] != null && field._dependencyValues?.[k] !== '')
+        const hint = dependsOn.length > 0 && !depsFilled
           ? `— Fill ${dependsOn.map(n => n.replace(/_id$/, '').replace(/_/g, ' ')).join(' or ')} first —`
           : '— No matching records —'
         return (
@@ -3515,6 +3531,61 @@ function RelatedListWidget({
       prefillObj.__derivedNameBase = parentRecord.project_name
     }
 
+    // An enrollment documents its property for a program application, so seed
+    // every enrollment field the property already knows — HUD property/site
+    // info, units, category, owner and management-agent contact data — the
+    // whole point is that the user never re-types data the system holds.
+    // enrollment_state also drives the record-type picker's state filter, so
+    // a Milwaukee property offers WI record types only. All values remain
+    // user-editable on the form. Only fill blanks; never clobber.
+    if (childTable === 'enrollments' && parentTable === 'properties' && parentRecord) {
+      const copyFromProperty = (src, dst) => {
+        const v = parentRecord[src]
+        if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
+      }
+      copyFromProperty('property_hud_property_id',            'enrollment_hud_property_id')
+      copyFromProperty('property_name',                       'enrollment_property_name')
+      copyFromProperty('property_street',                     'enrollment_site_address')
+      copyFromProperty('property_city',                       'enrollment_city')
+      copyFromProperty('property_state',                      'enrollment_state')
+      copyFromProperty('property_zip',                        'enrollment_zip')
+      copyFromProperty('property_county',                     'enrollment_county')
+      copyFromProperty('property_total_units',                'enrollment_total_units')
+      copyFromProperty('property_total_number_of_units',      'enrollment_total_units')
+      copyFromProperty('property_assisted_units',             'enrollment_assisted_units')
+      copyFromProperty('property_category',                   'enrollment_property_category')
+      copyFromProperty('property_number_of_buildings',        'enrollment_number_of_buildings')
+      copyFromProperty('property_total_buildings',            'enrollment_number_of_buildings')
+      copyFromProperty('property_hud_owner_org',              'enrollment_owner_organization')
+      copyFromProperty('property_hud_owner_type',             'enrollment_owner_type')
+      copyFromProperty('property_hud_owner_address',          'enrollment_owner_address')
+      copyFromProperty('property_hud_owner_phone',            'enrollment_owner_phone')
+      copyFromProperty('property_hud_owner_email',            'enrollment_owner_email')
+      copyFromProperty('property_hud_management_org',         'enrollment_management_agent')
+      copyFromProperty('property_hud_management_phone',       'enrollment_management_phone')
+      copyFromProperty('property_hud_management_email',       'enrollment_management_email')
+      copyFromProperty('property_primary_contract_number',    'enrollment_hud_contract_number')
+      copyFromProperty('property_primary_contract_tracs_status', 'enrollment_hud_tracs_status')
+      copyFromProperty('property_primary_contract_expiration','enrollment_hud_contract_expiration')
+      copyFromProperty('property_is_202_811',                 'enrollment_is_202_811')
+      copyFromProperty('property_is_opportunity_zone',        'enrollment_is_opportunity_zone')
+      // Subsidized share: not stored on the property — derive from the unit
+      // counts when both are present so the form opens pre-computed.
+      const totalUnits = prefillObj.enrollment_total_units
+      const assistedUnits = prefillObj.enrollment_assisted_units
+      if (prefillObj.enrollment_subsidized_share_pct == null
+          && Number(totalUnits) > 0 && assistedUnits != null) {
+        prefillObj.enrollment_subsidized_share_pct =
+          Math.round((Number(assistedUnits) / Number(totalUnits)) * 1000) / 10
+      }
+      // Enrollment name composes "<property name> - <record type label>" once
+      // the user picks a record type (same derived-name mechanism projects
+      // use). Transient hint — stripped before insert.
+      if (parentRecord.property_name) {
+        prefillObj.__derivedNameBase = parentRecord.property_name
+      }
+    }
+
     // A building sits at its property's address, so seed the new building's
     // address/location and year-built from the parent property — the user can
     // still edit (e.g. a multi-building property where buildings have distinct
@@ -5072,15 +5143,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       const derived = [street, city].filter(s => String(s || '').trim()).join(' - ')
       next.property_name = derived || ''
     }
-    // Projects: recompose the derived name when record type changes during
-    // create, mirroring trg_project_name (opportunity name + RT label). Only
-    // applies while a derived base is held (i.e. created from an opportunity).
-    if (tableName === 'projects' && name === getRecordTypeColumn('projects') && derivedNameBaseRef.current) {
+    // Recompose the derived name when record type changes during create —
+    // "<base> - <record type label>" (projects mirror trg_project_name with
+    // the opportunity name as base; enrollments use the property name). Only
+    // applies while a derived base is held (i.e. created from a parent whose
+    // related-list New seeded __derivedNameBase).
+    const derivedNameCol = TABLE_META[tableName]?.nameColumn
+    if (derivedNameCol && name === getRecordTypeColumn(tableName) && derivedNameBaseRef.current) {
       const opts = allPicklistOpts?.[name] || []
       const rtLabel = (opts.find(o => o.value === value)?.label) || ''
       const composed = [String(derivedNameBaseRef.current || '').trim(), String(rtLabel || '').trim()]
         .filter(Boolean).join(' - ').replace(/^[\s-]+|[\s-]+$/g, '')
-      next.project_name = composed || ''
+      next[derivedNameCol] = composed || ''
     }
     return next
   })
