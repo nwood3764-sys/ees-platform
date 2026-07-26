@@ -16,6 +16,7 @@ import { Badge, Icon } from './UI'
 // preview code). A combined chunk would still be large; per-modal
 // splits give Vite the freedom to share only what's truly shared.
 const ProjectReportModal                  = lazy(() => import('./ProjectReportModal'))
+const ProjectPaperworkModal               = lazy(() => import('./ProjectPaperworkModal'))
 const ProjectSchedulerWizard              = lazy(() => import('./scheduler/ProjectSchedulerWizard'))
 const ServiceAppointmentRescheduleModal   = lazy(() => import('./scheduler/ServiceAppointmentRescheduleModal'))
 const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkOrderScheduleModal'))
@@ -501,19 +502,18 @@ function validateBeforeSave(tableName, fields, evidenceLabelById) {
 }
 
 // Build the ordered list of tab names from the loaded sections.
-// Details first, Related second (if any section has related_list or
-// file_gallery widgets), Activity third (always shown on existing records),
-// then any custom tabs alphabetical after.
+// Details first, Related second, Activity third (always shown on existing
+// records), then any custom tabs alphabetical after. Tabs derive PURELY from
+// where sections sit — cards render inside their section on its tab
+// (sections behave identically on every tab; Nicholas, 2026-07-26), so
+// having card widgets no longer forces a Related tab into existence.
 function buildOrderedTabs(sections, { includeActivity = true } = {}) {
   const names = new Set()
-  let hasRelated = false
   for (const sec of sections || []) {
+    if ((sec.section_placement || 'main') !== 'main') continue
     names.add(sec.section_tab || 'Details')
-    if ((sec.widgets || []).some(w => w.widget_type === 'related_list' || w.widget_type === 'file_gallery' || w.widget_type === 'prtsn_history' || w.widget_type === 'report' || w.widget_type === 'conversation_panel')) {
-      hasRelated = true
-    }
   }
-  if (hasRelated) names.add('Related')
+  names.add('Details')
   if (includeActivity) names.add('Activity')
   const rank = (t) => t === 'Details' ? 0 : t === 'Related' ? 1 : t === 'Activity' ? 2 : 3
   return [...names].sort((a, b) => {
@@ -3010,6 +3010,39 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // just confuses the user (and produced an incorrect 'Required fields
         // missing' error before the prefix-map fix landed).
         if (isCreate && isSystemField(f.name)) return null
+
+        // Cross-object (related) fields — read-only values pulled from the
+        // record a lookup on this record points at (loadRecordDetailData
+        // merges them into `record` under the dotted name). Always
+        // display-only: they belong to the parent record and are edited
+        // there. Hidden on the create form (no parent linked yet).
+        if (f.type === 'related_field') {
+          if (isCreate) return null
+          const rel = f.related || {}
+          const relRaw = record[f.name]
+          const relDisplay = formatFieldValue(relRaw, {
+            ...f, type: rel.column_type || 'text',
+            lookup_table: rel.lookup_table, lookup_field: rel.lookup_field,
+          }, picklists, lookups)
+          return (
+            <div key={f.name} style={{
+              padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}>
+              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                {f.label}
+                <span
+                  title={`Read-only — this value lives on the related ${rel.table || 'record'} and is edited there.`}
+                  style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, color: '#1a5a8a', background: '#e8f3fb', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em' }}>
+                  RELATED
+                </span>
+              </span>
+              <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>
+                {rel.column_type === 'picklist' && relRaw ? <Badge s={relDisplay} /> : relDisplay}
+              </span>
+            </div>
+          )
+        }
         const raw = editing ? draft[f.name] : record[f.name]
         const display = formatFieldValue(raw, f, picklists, lookups)
         const isLookupLike = f.type === 'lookup' || f.type === 'polymorphic_lookup'
@@ -4662,29 +4695,22 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   })
   // Blank sections still render — the record page stays consistent with the
   // page layout editor: every section in the layout shows its header, with a
-  // muted empty state in place of content. The one exception is a section
-  // whose widgets were ALL deliberately suppressed via hiddenWidgetTypes
-  // (context-dependent hides like docx-only widgets) — rendering an empty
-  // shell there would defeat the suppression.
+  // muted empty state in place of content. Two exceptions return null:
+  // (1) a section whose widgets were ALL deliberately suppressed via
+  // hiddenWidgetTypes (context-dependent hides like docx-only widgets) —
+  // rendering an empty shell there would defeat the suppression; and
+  // (2) a section whose only content is card widgets (related lists,
+  // galleries, conversations, reports, publish history) — those cards render
+  // as their own standalone cards immediately after this shell's slot
+  // (sections behave identically on every tab; cards follow their section),
+  // so an empty shell would just duplicate their headings.
   const allSectionWidgets = section.widgets || []
   const allSuppressed = allSectionWidgets.length > 0 && hiddenWidgetTypes &&
     allSectionWidgets.every(w => hiddenWidgetTypes.has(w.widget_type))
   if (sectionWidgets.length === 0 && allSuppressed) return null
-  // Cards (related lists, galleries, conversations, reports, publish history)
-  // render on the Related tab, not inside their section — when a section holds
-  // ONLY cards, say where its content went instead of looking broken.
-  const relatedTabCardCount = allSectionWidgets.filter(w =>
+  const cardCount = allSectionWidgets.filter(w =>
     ['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'].includes(w.widget_type)).length
-  // On the Related tab, a section whose only content is Related-tab cards
-  // (related lists, galleries, conversations, reports, publish history) renders
-  // NOTHING here — those cards already render as their own standalone cards
-  // right below. Drawing an empty section shell would (a) duplicate the card,
-  // producing a second, empty "Buildings"/"Documents" block, and (b) show the
-  // self-referential note "this section's card appears on the Related tab"
-  // while the user is already on the Related tab. The shell only makes sense on
-  // the Details tab, where it tells the user their content lives over on
-  // Related. So suppress the card-only shell here.
-  if (sectionWidgets.length === 0 && relatedTabCardCount > 0 && activeTab === 'Related') return null
+  if (sectionWidgets.length === 0 && cardCount > 0) return null
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
       <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
@@ -4694,9 +4720,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
       </div>
       {!collapsed && sectionWidgets.length === 0 && (
         <div style={{ padding: isMobile ? '14px 14px' : '16px 18px', fontSize: 12.5, color: C.textMuted, fontStyle: 'italic' }}>
-          {relatedTabCardCount > 0
-            ? `This section's ${relatedTabCardCount === 1 ? 'card appears' : 'cards appear'} on the Related tab.`
-            : 'No fields in this section yet — add some in the page layout editor.'}
+          No fields in this section yet — add some in the page layout editor.
         </div>
       )}
       {!collapsed && sectionWidgets.map(w => {
@@ -4798,6 +4822,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
+  // HOMES paperwork generator (only used when tableName === 'projects').
+  const [showPaperworkModal, setShowPaperworkModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
   const [showLogCall, setShowLogCall] = useState(false)
@@ -5924,6 +5950,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     const changes = {}
     for (const [k, v] of Object.entries(draft)) if (v !== data.record[k]) changes[k] = v
     for (const sys of ['id','created_at','updated_at']) delete changes[sys]
+    // Cross-object (related) field values live under dotted keys — they are
+    // display-only copies of a parent record's columns, never writable here.
+    for (const k of Object.keys(changes)) if (k.includes('.')) delete changes[k]
     for (const k of Object.keys(changes)) {
       if (k.endsWith('_created_at') || k.endsWith('_created_by') || k.endsWith('_updated_at') || k.endsWith('_updated_by') || k.endsWith('_is_deleted')) delete changes[k]
     }
@@ -6121,6 +6150,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: handleRunIncomeQualification,
     [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
+    [ACTION_KEYS.GENERATE_PAPERWORK]:     () => setShowPaperworkModal(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -6436,12 +6466,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           </div>
         )}
 
-        {/* Sections — field groups only. Filter by active tab. For
-            document_templates we also skip the Document Content section
-            when authoring mode is "docx" (the body_html field is
-            irrelevant in that mode — the .docx asset replaces it).
-            Right-rail sections (section_placement='right') are excluded
-            here — they render in the always-visible right column below. */}
+        {/* Sections — filtered to the active tab, rendered IN ORDER, each as
+            its shell (fields and other in-section widgets) followed by its
+            card widgets (related lists, file galleries, conversation panels,
+            publish history, embedded reports) in widget order. Sections
+            behave identically on every tab — a card renders wherever its
+            section is placed, never force-moved to the Related tab
+            (Nicholas, 2026-07-26). Cards are hidden in insert mode (the
+            record doesn't exist yet). For document_templates we also skip
+            the Document Content section when authoring mode is "docx" (the
+            body_html field is irrelevant in that mode — the .docx asset
+            replaces it). Right-rail sections (section_placement='right')
+            are excluded here — they render in the always-visible right
+            column below. */}
         {sections
           .filter(sec => (sec.section_placement || 'main') === 'main')
           .filter(sec => (sec.section_tab || 'Details') === activeTab)
@@ -6472,79 +6509,76 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 hiddenWidgetTypes = new Set(['merge_field_reference'])
               }
             }
+            const cards = isInsertMode ? [] : (sec.widgets || []).filter(w =>
+              ['related_list', 'file_gallery', 'conversation_panel', 'prtsn_history', 'report'].includes(w.widget_type))
             return (
-              <Section key={sec.id} section={sec} record={record} picklists={picklists} lookups={lookups}
-                editing={editing} draft={draft} onChange={handleFieldChange}
-                allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName}
-                onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
-                fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes}
-                onNavigateToRecord={onNavigateToRecord}
-                requiredFields={requiredFields} activeTab={activeTab} />
-            )
-          })}
-
-        {/* Related lists — standalone Salesforce-style cards, shown only on
-            the Related tab regardless of which section they came from.
-            Right-placement widgets are excluded — they render in the right
-            sidebar below. */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'related_list'))
-          .map(w => {
-            // Lock child related_lists when the parent template is Active or
-            // Archived. We match the widget's table against the lifecycle's
-            // childrenTable (e.g. project_report_template_sections for PRT).
-            // Sibling related_lists (record-type assignments, etc.) stay
-            // editable. We force editable=false on the widget copy so the
-            // Add button + drag handles + remove buttons all disappear; the
-            // trigger is the ultimate enforcement layer.
-            const isLockedChildrenList = lifecycleIsLocked
-              && lifecycle?.childrenTable
-              && w.widget_config?.table === lifecycle.childrenTable
-            const effectiveWidget = isLockedChildrenList
-              ? { ...w, widget_config: { ...w.widget_config, editable: false } }
-              : w
-            return (
-              <RelatedListWidget
-                key={w.id}
-                widget={effectiveWidget}
-                picklists={picklists}
-                onNavigateToRecord={onNavigateToRecord}
-                parentRecordId={recordId}
-                parentTable={tableName}
-                parentRecord={data?.record}
-                onRefreshRelated={async () => {
-                  try {
-                    const rows = await fetchRelatedRecords(w.widget_config, recordId)
-                    // Mutate the widget's cached data in place, then nudge
-                    // React with a top-level data clone so the widget re-reads.
-                    w._relatedData = rows
-                    setData(prev => ({ ...prev }))
-                  } catch (err) {
-                    // Non-fatal — widget will keep showing its previous rows.
-                    // eslint-disable-next-line no-console
-                    console.error('Related list refresh failed', err)
+              <div key={sec.id}>
+                <Section section={sec} record={record} picklists={picklists} lookups={lookups}
+                  editing={editing} draft={draft} onChange={handleFieldChange}
+                  allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName}
+                  onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
+                  fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes}
+                  onNavigateToRecord={onNavigateToRecord}
+                  requiredFields={requiredFields} activeTab={activeTab} />
+                {cards.map(w => {
+                  if (w.widget_type === 'related_list') {
+                    // Lock child related_lists when the parent template is
+                    // Active or Archived. We match the widget's table against
+                    // the lifecycle's childrenTable (e.g.
+                    // project_report_template_sections for PRT). Sibling
+                    // related_lists stay editable. We force editable=false on
+                    // the widget copy so the Add button + drag handles +
+                    // remove buttons all disappear; the trigger is the
+                    // ultimate enforcement layer.
+                    const isLockedChildrenList = lifecycleIsLocked
+                      && lifecycle?.childrenTable
+                      && w.widget_config?.table === lifecycle.childrenTable
+                    const effectiveWidget = isLockedChildrenList
+                      ? { ...w, widget_config: { ...w.widget_config, editable: false } }
+                      : w
+                    return (
+                      <RelatedListWidget
+                        key={w.id}
+                        widget={effectiveWidget}
+                        picklists={picklists}
+                        onNavigateToRecord={onNavigateToRecord}
+                        parentRecordId={recordId}
+                        parentTable={tableName}
+                        parentRecord={data?.record}
+                        onRefreshRelated={async () => {
+                          try {
+                            const rows = await fetchRelatedRecords(w.widget_config, recordId)
+                            // Mutate the widget's cached data in place, then
+                            // nudge React with a top-level data clone so the
+                            // widget re-reads.
+                            w._relatedData = rows
+                            setData(prev => ({ ...prev }))
+                          } catch (err) {
+                            // Non-fatal — widget keeps its previous rows.
+                            // eslint-disable-next-line no-console
+                            console.error('Related list refresh failed', err)
+                          }
+                        }}
+                      />
+                    )
                   }
-                }}
-              />
+                  if (w.widget_type === 'file_gallery') {
+                    return <FileGalleryWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId} />
+                  }
+                  if (w.widget_type === 'conversation_panel') {
+                    return <ConversationPanelWidget key={w.id} widget={w} parentRecordId={recordId} />
+                  }
+                  if (w.widget_type === 'prtsn_history') {
+                    return <PrtsnHistoryWidget key={w.id} widget={w} parentRecordId={recordId} />
+                  }
+                  if (w.widget_type === 'report') {
+                    return <ReportWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId} onOpenRecord={onNavigateToRecord} />
+                  }
+                  return null
+                })}
+              </div>
             )
           })}
-
-        {/* File galleries — photos and documents widgets. Self-contained:
-            each widget loads its own data, owns its own upload/delete UI,
-            and refreshes after mutations without going back through the
-            page-layout loader. */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'file_gallery'))
-          .map(w => (
-            <FileGalleryWidget
-              key={w.id}
-              widget={w}
-              parentTable={tableName}
-              parentRecordId={recordId}
-            />
-          ))}
 
         {/* Income Qualification — runs the multifamily HUD categorical
             qualification tool against this enrollment: classifies the
@@ -6565,52 +6599,6 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         {!isInsertMode && activeTab === 'Related' && (tableName === 'properties' || tableName === 'accounts') && (
           <PropertyOwnerResearchPanel tableName={tableName} recordId={recordId} />
         )}
-
-        {/* Conversation panel — Service Cloud Messaging-style split-pane
-            (thread list left, active thread + composer right). Self-contained:
-            loads its own conversations + messages, marks threads read on
-            open, and invokes send-notification-sms v2 for replies. */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'conversation_panel'))
-          .map(w => (
-            <ConversationPanelWidget
-              key={w.id}
-              widget={w}
-              parentRecordId={recordId}
-            />
-          ))}
-
-        {/* PRTSN history — Versions list for project_report_templates only.
-            Self-contained widget that fetches snapshots for the current PRT
-            and offers a Preview-from-snapshot action per version. */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'prtsn_history'))
-          .map(w => (
-            <PrtsnHistoryWidget
-              key={w.id}
-              widget={w}
-              parentRecordId={recordId}
-            />
-          ))}
-
-        {/* Embedded reports — saved reports rendered inline as widgets.
-            Optional context filter narrows the report to rows matching
-            the current record (so a generic 'All Tasks' report becomes
-            'Tasks for THIS record' when embedded). */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'report'))
-          .map(w => (
-            <ReportWidget
-              key={w.id}
-              widget={w}
-              parentTable={tableName}
-              parentRecordId={recordId}
-              onOpenRecord={onNavigateToRecord}
-            />
-          ))}
 
         {/* Activity Timeline — chronological audit trail of tracked field
             changes and record-level actions (create, soft-delete, restore).
@@ -6835,6 +6823,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             project={record}
             onClose={() => setShowReportModal(false)}
             onComplete={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
+
+        {/* HOMES paperwork generator (only mounted on projects, opt-in via toolbar action) */}
+        {showPaperworkModal && tableName === 'projects' && (
+          <ProjectPaperworkModal
+            projectId={recordId}
+            project={record}
+            onClose={() => setShowPaperworkModal(false)}
           />
         )}
 
