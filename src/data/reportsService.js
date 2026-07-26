@@ -1903,12 +1903,17 @@ export async function runWidgetAggregateSingle(widget, extraFilters = null, over
 // LiveWidgetPreview route identically.
 export const WIDGET_QUERY_SHAPES = {
   bar: 'agg', line: 'agg', pie: 'agg', donut: 'agg', funnel: 'agg', pyramid: 'agg',
-  ranked_list: 'agg', treemap: 'agg', waterfall: 'agg',
+  ranked_list: 'agg', treemap: 'agg', waterfall: 'agg', multi_row_card: 'agg',
+  pareto: 'agg', rose: 'agg',
   stacked_bar: 'agg2d', clustered_bar: 'agg2d', stacked_bar_100: 'agg2d', heatmap: 'agg2d',
-  area: 'time', stat: 'stat',
-  metric: 'single', gauge: 'single', kpi: 'single',
-  table: 'rows', scatter: 'rows', histogram: 'rows',
-  heading: 'none', rich_text: 'none', spacer: 'none', image: 'none',
+  matrix: 'agg2d', sankey: 'agg2d', radar: 'agg2d', sunburst: 'agg2d',
+  area: 'time', calendar_heatmap: 'time', stat: 'stat',
+  metric: 'single', gauge: 'single', kpi: 'single', rating: 'single',
+  speedometer: 'single', bullet: 'single', progress_ring: 'single',
+  combo: 'combo',
+  table: 'rows', scatter: 'rows', histogram: 'rows', box_plot: 'rows',
+  filter_picklist: 'filter', filter_toggle: 'filter', filter_date_range: 'filter',
+  heading: 'none', rich_text: 'none', spacer: 'none', image: 'none', link: 'none',
 }
 
 // Route a widget to its fast path, falling back to the full row fetch when the
@@ -1946,6 +1951,35 @@ export async function runWidgetData(widget, extraFilters = null, overrideFields 
           const t = await runWidgetAggregateTime(widget, extraFilters, overrideFields)
           return { ...single, aggregatedTime: t.aggregatedTime }
         } catch { return single }
+      }
+      case 'combo': {
+        // Two measures over the same grouping: the primary aggregate renders
+        // as bars, the secondary (measure2_*) as a line, merged by label.
+        if (!cfg.group_by) return await rows()
+        const primary = await runWidgetAggregate(widget, extraFilters, overrideFields)
+        if (!cfg.measure2_type) return primary
+        const w2 = { ...widget, dw_widget_config: {
+          ...cfg, measure_type: cfg.measure2_type, measure_field: cfg.measure2_field || null,
+        } }
+        const second = await runWidgetAggregate(w2, extraFilters, overrideFields)
+        return { ...primary, aggregatedSecondary: second.aggregated }
+      }
+      case 'filter': {
+        // On-canvas filter widget: its "data" is the distinct-value option
+        // list for the configured field (date-range filters need none).
+        const { primaryObject, reportName } = await buildWidgetAggregateContext(widget, null, null)
+        if (widget.dw_widget_type === 'filter_date_range' || !cfg.filter_field) {
+          return { filterOptions: [], primaryObject, name: reportName }
+        }
+        const { data, error } = await supabase.rpc('dashboard_filter_distinct_values', {
+          p_object: primaryObject, p_field: cfg.filter_field, p_limit: 200,
+        })
+        // A failed option fetch degrades to an empty list (free-text-less
+        // filter), never to the full-report row fallback.
+        return {
+          filterOptions: error ? [] : (data || []).map(r => ({ value: r.value, label: r.value })),
+          primaryObject, name: reportName,
+        }
       }
       default:
         return await rows()

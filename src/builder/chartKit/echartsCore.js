@@ -14,20 +14,24 @@
 import * as echarts from 'echarts/core'
 import {
   BarChart, LineChart, PieChart, FunnelChart, GaugeChart,
-  HeatmapChart, TreemapChart, ScatterChart,
+  HeatmapChart, TreemapChart, ScatterChart, SankeyChart,
+  BoxplotChart, RadarChart, SunburstChart,
 } from 'echarts/charts'
 import {
   GridComponent, TooltipComponent, LegendComponent, TitleComponent,
-  MarkLineComponent, DataZoomComponent, VisualMapComponent,
+  MarkLineComponent, DataZoomComponent, VisualMapComponent, CalendarComponent,
+  RadarComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LEAP_ECHARTS_THEME } from './leapEchartsTheme'
 
 echarts.use([
   BarChart, LineChart, PieChart, FunnelChart, GaugeChart,
-  HeatmapChart, TreemapChart, ScatterChart,
+  HeatmapChart, TreemapChart, ScatterChart, SankeyChart,
+  BoxplotChart, RadarChart, SunburstChart,
   GridComponent, TooltipComponent, LegendComponent, TitleComponent,
-  MarkLineComponent, DataZoomComponent, VisualMapComponent,
+  MarkLineComponent, DataZoomComponent, VisualMapComponent, CalendarComponent,
+  RadarComponent,
   CanvasRenderer,
 ])
 
