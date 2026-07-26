@@ -1,6 +1,8 @@
-import { useRecharts } from '../lib/RechartsLazy'
-import { C, CHART_COLORS } from '../data/constants'
+import { C } from '../data/constants'
 import { getRowValue } from '../data/reportsService'
+import { LeapEChart } from '../builder/chartKit/EChartsLazy'
+import { TOOLTIP_ITEM, TOOLTIP_AXIS } from '../builder/chartKit/leapEchartsTheme'
+import { formatNumber, formatAxisTick } from '../builder/chartKit/formatNumber'
 
 // ─── Dashboard widget view ──────────────────────────────────────────────────
 //
@@ -111,11 +113,7 @@ function MetricWidget({ result, widget, canDrill, drillTo, drillWhole }) {
     displayLabel = cfg.label || `${measureType} of ${measureField}`
   }
 
-  // Format integers cleanly, decimals to 1 place
-  const isInt = Number.isInteger(value)
-  const display = isInt
-    ? value.toLocaleString()
-    : value.toLocaleString(undefined, { maximumFractionDigits: 1 })
+  const display = formatNumber(value, cfg.number_format, cfg.decimals)
 
   // Click drills: if the metric is scoped to a group/filter value, drill to
   // those filtered records; otherwise open the whole report.
@@ -143,7 +141,7 @@ function TableWidget({ result, canDrill, drillWhole }) {
   return (
     <div
       onClick={canDrill ? () => drillWhole?.() : undefined}
-      style={{ overflow:'auto', maxHeight:240, cursor: canDrill ? 'pointer' : 'default' }}>
+      style={{ overflow:'auto', height:'100%', cursor: canDrill ? 'pointer' : 'default' }}>
       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
         <thead style={{ background:C.cardSecondary, position:'sticky', top:0 }}>
           <tr>
@@ -265,109 +263,152 @@ export function buildChartData(result, widget) {
   return aggregated.slice(0, limit)
 }
 
+// Widget-level formatting helpers shared by the chart renderers. Every number
+// a widget shows (label, tooltip, axis tick) goes through the widget's own
+// number_format/decimals config so a quantity reads identically everywhere.
+function widgetFmt(cfg) {
+  return (v) => formatNumber(v, cfg.number_format, cfg.decimals)
+}
+
 function BarWidget({ result, widget, canDrill, drillTo }) {
-  const R = useRecharts()
   const data = buildChartData(result, widget)
-  if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
-  const onBarClick = canDrill ? (d) => drillTo?.(d?.rawValue) : undefined
   const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
   // Horizontal layout: categories listed top-to-bottom on the Y axis,
   // counts growing left-to-right on the X axis (ranked-bar style). Default
   // for category-count widgets; matches the standard outreach dashboards.
   const horizontal = cfg.orientation !== 'vertical'
-  // Height scales with the number of bars so 20 categories aren't crushed.
-  const chartHeight = horizontal ? Math.max(240, data.length * 26 + 40) : 240
+  const showLabels = cfg.show_data_labels !== false
+  // ECharts renders category axes bottom-up; reverse so rank 1 sits on top.
+  const display = horizontal ? [...data].reverse() : data
+  const axisTick = (v) => formatAxisTick(v, cfg.number_format)
 
-  if (horizontal) {
-    return (
-      <R.ResponsiveContainer width="100%" height={chartHeight}>
-        <R.BarChart data={data} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
-          <R.XAxis type="number" tick={{ fontSize:10 }} />
-          <R.YAxis type="category" dataKey="name" width={150}
-            tick={{ fontSize:10 }} interval={0} />
-          <R.Tooltip />
-          <R.Bar dataKey="value" fill={C.emerald}
-            cursor={canDrill ? 'pointer' : undefined}
-            onClick={onBarClick} />
-        </R.BarChart>
-      </R.ResponsiveContainer>
-    )
+  const catAxis = {
+    type: 'category', data: display.map(d => d.name),
+    axisLabel: { interval: 0, width: horizontal ? 140 : undefined, overflow: 'truncate', hideOverlap: !horizontal },
   }
+  const valAxis = { type: 'value', axisLabel: { formatter: axisTick } }
 
-  return (
-    <R.ResponsiveContainer width="100%" height={240}>
-      <R.BarChart data={data}>
-        <R.XAxis dataKey="name" tick={{ fontSize:10 }} />
-        <R.YAxis tick={{ fontSize:10 }} />
-        <R.Tooltip />
-        <R.Bar dataKey="value" fill={C.emerald}
-          cursor={canDrill ? 'pointer' : undefined}
-          onClick={onBarClick} />
-      </R.BarChart>
-    </R.ResponsiveContainer>
-  )
+  const option = {
+    animationDuration: 250,
+    grid: { left: 8, right: horizontal && showLabels ? 56 : 16, top: 8, bottom: 4, containLabel: true },
+    tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.name}<br/><b>${fmt(p.value)}</b>` },
+    xAxis: horizontal ? valAxis : catAxis,
+    yAxis: horizontal ? catAxis : valAxis,
+    series: [{
+      type: 'bar', data: display.map(d => d.value),
+      barMaxWidth: 26,
+      itemStyle: { color: C.emerald, borderRadius: horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0] },
+      label: {
+        show: showLabels, position: horizontal ? 'right' : 'top',
+        color: C.textPrimary, fontSize: 10.5, formatter: (p) => fmt(p.value),
+      },
+      cursor: canDrill ? 'pointer' : 'default',
+    }],
+  }
+  const onSeriesClick = canDrill
+    ? (p) => drillTo?.(display[p.dataIndex]?.rawValue)
+    : undefined
+  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
 }
 
 function LineWidget({ result, widget, canDrill, drillTo }) {
-  const R = useRecharts()
   const data = buildChartData(result, widget)
-  if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
-  const onPointClick = canDrill ? (d) => drillTo?.(d?.payload?.rawValue ?? d?.rawValue) : undefined
-  return (
-    <R.ResponsiveContainer width="100%" height={240}>
-      <R.LineChart data={data}>
-        <R.XAxis dataKey="name" tick={{ fontSize:10 }} />
-        <R.YAxis tick={{ fontSize:10 }} />
-        <R.Tooltip />
-        <R.Line type="monotone" dataKey="value" stroke={C.emerald} strokeWidth={2}
-          activeDot={{ cursor: canDrill ? 'pointer' : undefined, onClick: onPointClick }} />
-      </R.LineChart>
-    </R.ResponsiveContainer>
-  )
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  // Data labels default OFF for lines — a number on every point is noise;
+  // the crosshair tooltip carries exact values.
+  const showLabels = cfg.show_data_labels === true
+  const option = {
+    animationDuration: 250,
+    grid: { left: 8, right: 16, top: 12, bottom: 4, containLabel: true },
+    tooltip: { ...TOOLTIP_AXIS, formatter: (ps) => {
+      const p = Array.isArray(ps) ? ps[0] : ps
+      return `${p.name}<br/><b>${fmt(p.value)}</b>`
+    } },
+    xAxis: { type: 'category', data: data.map(d => d.name), boundaryGap: false, axisLabel: { hideOverlap: true } },
+    yAxis: { type: 'value', axisLabel: { formatter: (v) => formatAxisTick(v, cfg.number_format) } },
+    series: [{
+      type: 'line', data: data.map(d => d.value),
+      lineStyle: { width: 2, color: C.emerald },
+      itemStyle: { color: C.emerald, borderColor: '#ffffff', borderWidth: 2 },
+      symbol: 'circle', symbolSize: 7,
+      areaStyle: { color: C.emerald, opacity: 0.06 },
+      label: { show: showLabels, color: C.textPrimary, fontSize: 10.5, formatter: (p) => fmt(p.value) },
+      cursor: canDrill ? 'pointer' : 'default',
+    }],
+  }
+  const onSeriesClick = canDrill ? (p) => drillTo?.(data[p.dataIndex]?.rawValue) : undefined
+  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
 }
 
 function PieWidget({ result, widget, donut, canDrill, drillTo }) {
-  const R = useRecharts()
   const data = buildChartData(result, widget)
-  if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
-  const onSliceClick = canDrill ? (d) => drillTo?.(d?.payload?.rawValue ?? d?.rawValue) : undefined
-  return (
-    <R.ResponsiveContainer width="100%" height={240}>
-      <R.PieChart>
-        <R.Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%"
-          outerRadius={80} innerRadius={donut ? 40 : 0}
-          label={(e) => e.name}
-          cursor={canDrill ? 'pointer' : undefined}
-          onClick={onSliceClick}>
-          {data.map((_, i) => (
-            <R.Cell key={i} fill={(CHART_COLORS && CHART_COLORS[i % CHART_COLORS.length]) || C.emerald} />
-          ))}
-        </R.Pie>
-        <R.Tooltip />
-      </R.PieChart>
-    </R.ResponsiveContainer>
-  )
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const showLabels = cfg.show_data_labels !== false
+  const showLegend = cfg.show_legend !== false
+  const total = data.reduce((a, d) => a + (Number(d.value) || 0), 0)
+  const byName = Object.fromEntries(data.map(d => [d.name, d]))
+
+  const option = {
+    animationDuration: 250,
+    tooltip: { ...TOOLTIP_ITEM, formatter: (p) => `${p.name}<br/><b>${fmt(p.value)}</b> · ${p.percent}%` },
+    legend: showLegend ? { type: 'scroll', bottom: 0, left: 'center' } : { show: false },
+    // Donuts carry the total in the hole — the Salesforce donut pattern.
+    title: donut ? {
+      text: fmt(total), subtext: 'Total', left: 'center', top: '38%',
+      textStyle: { fontSize: 22, fontWeight: 700, color: C.textPrimary, fontFamily: "'JetBrains Mono', monospace" },
+      subtextStyle: { fontSize: 11, color: C.textMuted },
+    } : undefined,
+    series: [{
+      type: 'pie', data: data.map(d => ({ name: d.name, value: d.value })),
+      radius: donut ? ['52%', '76%'] : '72%',
+      center: ['50%', showLegend ? '44%' : '50%'],
+      // 2px white ring between slices keeps adjacent fills separated.
+      itemStyle: { borderColor: '#ffffff', borderWidth: 2, borderRadius: 3 },
+      label: showLabels
+        ? { show: true, color: C.textSecondary, fontSize: 11, formatter: (p) => `${p.name} · ${p.percent}%` }
+        : { show: false },
+      labelLine: { show: showLabels, length: 10, length2: 8, lineStyle: { color: C.borderDark } },
+      cursor: canDrill ? 'pointer' : 'default',
+    }],
+  }
+  const onSeriesClick = canDrill ? (p) => drillTo?.(byName[p.name]?.rawValue) : undefined
+  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
 }
 
 function FunnelWidget({ result, widget, canDrill, drillTo }) {
-  const R = useRecharts()
-  const data = buildChartData(result, widget).sort((a, b) => b.value - a.value)
-  if (!R) return <div style={{ fontSize:12, color:C.textMuted }}>Loading chart…</div>
-  const onSegClick = canDrill ? (d) => drillTo?.(d?.payload?.rawValue ?? d?.rawValue) : undefined
-  return (
-    <R.ResponsiveContainer width="100%" height={240}>
-      <R.FunnelChart>
-        <R.Tooltip />
-        <R.Funnel data={data} dataKey="value" nameKey="name" isAnimationActive={false}
-          cursor={canDrill ? 'pointer' : undefined}
-          onClick={onSegClick}>
-          {data.map((_, i) => (
-            <R.Cell key={i} fill={(CHART_COLORS && CHART_COLORS[i % CHART_COLORS.length]) || C.emerald} />
-          ))}
-        </R.Funnel>
-      </R.FunnelChart>
-    </R.ResponsiveContainer>
-  )
+  const data = [...buildChartData(result, widget)].sort((a, b) => b.value - a.value)
+  const cfg = widget.dw_widget_config || {}
+  const fmt = widgetFmt(cfg)
+  const showLabels = cfg.show_data_labels !== false
+  const first = data[0]?.value || 0
+  const byName = Object.fromEntries(data.map(d => [d.name, d]))
+  const option = {
+    animationDuration: 250,
+    tooltip: { ...TOOLTIP_ITEM, formatter: (p) => {
+      const conv = first > 0 ? ` · ${Math.round((p.value / first) * 100)}% of top` : ''
+      return `${p.name}<br/><b>${fmt(p.value)}</b>${conv}`
+    } },
+    series: [{
+      type: 'funnel', data: data.map(d => ({ name: d.name, value: d.value })),
+      sort: 'descending', gap: 2,
+      left: '2%', right: '26%', top: 8, bottom: 8,
+      // A floor width keeps late stages readable instead of collapsing to a
+      // sliver — the fix for the "distorted wedge" render.
+      minSize: '14%', maxSize: '96%',
+      itemStyle: { borderColor: '#ffffff', borderWidth: 1 },
+      label: showLabels
+        ? { show: true, position: 'right', color: C.textSecondary, fontSize: 11,
+            formatter: (p) => `${p.name} · ${fmt(p.value)}` }
+        : { show: false },
+      labelLine: { length: 12, lineStyle: { color: C.borderDark } },
+      cursor: canDrill ? 'pointer' : 'default',
+    }],
+  }
+  const onSeriesClick = canDrill ? (p) => drillTo?.(byName[p.name]?.rawValue) : undefined
+  return <LeapEChart option={option} onSeriesClick={onSeriesClick} />
 }
 
 // Ranked list — the readable form for a many-category breakdown (county,
@@ -379,6 +420,8 @@ function FunnelWidget({ result, widget, canDrill, drillTo }) {
 function RankedListWidget({ result, widget, canDrill, drillTo }) {
   const data = buildChartData(result, widget)
   if (!data.length) return <div style={{ fontSize:12, color:C.textMuted, padding:14 }}>No data.</div>
+  const cfg = widget.dw_widget_config || {}
+  const fmtValue = widgetFmt(cfg)
   const max = Math.max(...data.map(d => d.value), 1)
   return (
     <div style={{ flex:1, overflowY:'auto', padding:'4px 12px 12px' }}>
@@ -399,7 +442,7 @@ function RankedListWidget({ result, widget, canDrill, drillTo }) {
               <div style={{ width:`${pct}%`, height:'100%', background:C.emerald, borderRadius:4 }} />
             </div>
             <div style={{ fontSize:13, fontWeight:600, color:C.textPrimary, fontFamily:'JetBrains Mono, monospace', minWidth:48, textAlign:'right' }}>
-              {Number(d.value).toLocaleString()}
+              {fmtValue(d.value)}
             </div>
           </div>
         )
@@ -438,28 +481,31 @@ function GaugeWidget({ result, widget, canDrill, drillWhole }) {
   }
 
   const pct = target > 0 ? Math.min(100, (value / target) * 100) : 0
-  const isInt = Number.isInteger(value) && Number.isInteger(target)
-  const fmt = (n) => isInt ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 1 })
+  const fmt = widgetFmt(cfg)
 
+  const option = {
+    animationDuration: 250,
+    series: [{
+      type: 'gauge',
+      startAngle: 210, endAngle: -30,
+      min: 0, max: Math.max(target, value, 1),
+      progress: { show: true, roundCap: true, width: 14, itemStyle: { color: C.emerald } },
+      axisLine: { roundCap: true, lineStyle: { width: 14, color: [[1, '#e4e9f2']] } },
+      pointer: { show: false }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
+      anchor: { show: false },
+      detail: {
+        valueAnimation: true, offsetCenter: [0, '-8%'],
+        formatter: () => fmt(value),
+        color: C.textPrimary, fontSize: 26, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+      },
+      title: { offsetCenter: [0, '22%'], color: C.textMuted, fontSize: 11 },
+      data: [{ value, name: `${pct.toFixed(0)}% of ${fmt(target)}` }],
+    }],
+  }
   return (
-    <div
-      onClick={canDrill ? () => drillWhole?.() : undefined}
-      style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', cursor: canDrill ? 'pointer' : 'default' }}>
-      <div style={{ fontSize:32, fontWeight:700, color:C.textPrimary, lineHeight:1 }}>
-        {fmt(value)} / {fmt(target)}
-      </div>
-      <div style={{
-        marginTop:14, width:'80%', height:10, borderRadius:5,
-        background:C.borderDark, overflow:'hidden',
-      }}>
-        <div style={{
-          width:`${pct}%`, height:'100%', background:C.emerald,
-          transition:'width 250ms ease',
-        }} />
-      </div>
-      <div style={{ fontSize:11, color:C.textMuted, marginTop:6 }}>
-        {pct.toFixed(0)}%
-      </div>
+    <div onClick={canDrill ? () => drillWhole?.() : undefined}
+      style={{ height: '100%', cursor: canDrill ? 'pointer' : 'default' }}>
+      <LeapEChart option={option} minHeight={160} />
     </div>
   )
 }
