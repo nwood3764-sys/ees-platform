@@ -18,6 +18,11 @@
  *
  * The module is implied by the table on record URLs — TABLE_MODULE_MAP
  * tells the App which module to activate when a user opens a deep link.
+ * In-app record navigation (global search, related lists, lookups) does
+ * NOT switch modules: the user stays in whatever module they're in and the
+ * record renders there, Salesforce-style. TABLE_MODULE_MAP is only the
+ * fallback for cold loads and for surfaces that can't host a record
+ * (Home, Dispatch, Providers, Search, Help). See resolveRecordModule.
  *
  * Two routes are reserved and bypass this controller (handled in main.jsx
  * and App.jsx respectively):
@@ -121,6 +126,39 @@ const TABLE_MODULE_MAP = {
   dashboard_filters: 'reports',
   dashboard_folder_user_shares: 'reports',
   dashboard_folder_role_shares: 'reports',
+}
+
+// Modules that render a record detail surface from the selectedRecord nav
+// prop (they pass it straight into the generic RecordDetail). Opening a
+// record while one of these is active keeps the user in place instead of
+// switching to the table's owning module — Salesforce behavior: apps are
+// navigation chrome, records are global. Modules NOT listed (home, dispatch,
+// providers have no record-detail surface; search and help are synthetic
+// pages) can't display a record, so record-opens from them fall back to
+// TABLE_MODULE_MAP — the same resolution a cold deep link uses in parsePath.
+const RECORD_HOSTING_MODULES = new Set([
+  'tasks', 'enrollment', 'outreach', 'qualification', 'field', 'planning',
+  'implementation', 'incentives', 'stock', 'fleet', 'reports', 'admin',
+  'portal',
+])
+
+// The module the user was in when they opened the /search results page.
+// Lets a record click from the full search results return them to that
+// module rather than the record's owning module. Module-scoped rather than
+// URL state: a cold-loaded /search link has no prior module and falls back
+// to TABLE_MODULE_MAP like any other deep link.
+let moduleBeforeSearch = null
+
+// Which module should be active after opening a record. Stay in the current
+// module when it can host a record; returning from the search results page,
+// restore the module the user searched from; otherwise (Home, Dispatch,
+// deep links, unknown) use the table's owning module.
+function resolveRecordModule(table, currentModule) {
+  if (RECORD_HOSTING_MODULES.has(currentModule)) return currentModule
+  if (currentModule === 'search' && RECORD_HOSTING_MODULES.has(moduleBeforeSearch)) {
+    return moduleBeforeSearch
+  }
+  return TABLE_MODULE_MAP[table] || currentModule
 }
 
 // Some module sections drop or change the table name — e.g. the Field
@@ -503,9 +541,9 @@ export function useUrlNavigation() {
       pendingPrefill = { key, prefill: rec.prefill }
     }
     setState((prev) => {
-      const mod = TABLE_MODULE_MAP[rec.table] || prev.activeModule
+      const mod = resolveRecordModule(rec.table, prev.activeModule)
       // Remember which section we came from so closing the record returns to
-      // that list's URL — but only when the record lives in the same module
+      // that list's URL — but only when staying in the same module
       // (a cross-module open can't keep the prior module's section).
       const keepSection = mod === prev.activeModule
       const next = { activeModule: mod, selectedRecord: { ...rec },
@@ -521,20 +559,28 @@ export function useUrlNavigation() {
   // Open the universal search results page. Called from the search
   // modal's "View all results" footer button and any deep-link sources.
   const navigateToSearch = useCallback((query, typeFilter = null, { useReplace = false } = {}) => {
-    const next = {
-      activeModule: 'search',
-      selectedRecord: null,
-      section: null,
-      subsection: null,
-      searchQuery: query || '',
-      searchType: typeFilter || null,
-    }
-    const path = buildPath(next)
-    if (path !== currentFullPath()) {
-      if (useReplace) window.history.replaceState(null, '', path)
-      else            window.history.pushState(null, '', path)
-    }
-    setState(next)
+    setState((prev) => {
+      // Stash the module the user searched from so a record click on the
+      // results page returns them there (see resolveRecordModule). Refining
+      // the query while already on /search keeps the original stash.
+      if (RECORD_HOSTING_MODULES.has(prev.activeModule)) {
+        moduleBeforeSearch = prev.activeModule
+      }
+      const next = {
+        activeModule: 'search',
+        selectedRecord: null,
+        section: null,
+        subsection: null,
+        searchQuery: query || '',
+        searchType: typeFilter || null,
+      }
+      const path = buildPath(next)
+      if (path !== currentFullPath()) {
+        if (useReplace) window.history.replaceState(null, '', path)
+        else            window.history.pushState(null, '', path)
+      }
+      return next
+    })
   }, [])
 
   const closeRecord = useCallback(() => {
@@ -560,7 +606,9 @@ export function useUrlNavigation() {
       pendingPrefill = null
     }
     setState((prev) => {
-      const mod = TABLE_MODULE_MAP[rec?.table] || prev.activeModule
+      const mod = rec?.table
+        ? resolveRecordModule(rec.table, prev.activeModule)
+        : prev.activeModule
       const keepSection = mod === prev.activeModule
       const next = { activeModule: mod, selectedRecord: rec ? { ...rec } : null,
         section: keepSection ? prev.section : null,
