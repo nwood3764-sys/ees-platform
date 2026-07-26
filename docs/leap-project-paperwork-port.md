@@ -7,6 +7,24 @@ workbook) INTO LEAP, lifted from the standalone Audit Template Builder. Written
 so the building session can read every referenced function directly. The
 LEAP-side facts below were verified against the live codebase on the same date.
 
+> **PHASE 1 SHIPPED (2026-07-26, same day).** The port is live:
+> `src/data/paperworkModel.js` (pure math + document builders, node-tested),
+> `src/data/paperworkService.js` (record context, Asset Score PDF parsing,
+> workbook fetch), `src/components/ProjectPaperworkModal.jsx` (lazy), and the
+> `generate_paperwork` record action on projects. All Phase-1 fixture checks
+> passed (§7). Three spec corrections discovered during the build, now
+> reflected below: (1) **accounts DO carry billing/mailing address columns**
+> (`billing_street/city/state/zip`, `mailing_*`) — the §4 address gap is
+> closed, BILL TO prefills from the account; (2) **the IQ number already
+> exists** at `properties.property_ira_income_qualification_number` — no new
+> project field needed for it; (3) the workbook template ships as an **app
+> asset** (`public/paperwork/invoice_workbook.xlsx`, fetched same-origin)
+> instead of the `templates` storage bucket — the build session had no
+> service-role credentials to seed the bucket, and the app asset is versioned
+> with the bundle and works on every environment with zero upload ops. pdf.js
+> loads from the pinned CDN exactly like `SigningPortal.jsx` (prod-verified
+> pattern) — no new npm dependency. Phases 2–3 remain open.
+
 ---
 
 ## 1. Vision / goal
@@ -209,12 +227,14 @@ Relationship graph (verified): `projects.property_id` → properties;
   LEAP; standalone tool stays live for energy modeling.
 - **DECIDED (carried from standalone iterations)**: every layout/content rule
   in §5 and every program rule in §3.
-- **OPEN — recommendation first**: account billing address — recommend adding
-  `account_billing_street/city/state/zip` (or equivalent) via LEAP Admin and
-  backfilling known owners; until populated the modal's BILL TO fields are
-  manual overrides. Confirm with Nicholas.
-- **OPEN**: IQ Number + invoice-number fields on projects (recommend plain
-  project fields, admin-managed). Confirm naming with Nicholas.
+- **RESOLVED 2026-07-26 (build session)**: account billing address — the
+  columns already exist (`billing_street/city/state/zip` + `mailing_*` on
+  accounts); BILL TO prefills from them (billing preferred, mailing fallback)
+  with manual override in the modal. IQ Number likewise already exists at
+  `properties.property_ira_income_qualification_number` and prefills.
+- **OPEN**: invoice-number fields on projects (audit + project invoice
+  numbers; recommend plain project fields, admin-managed — Phase 2). Confirm
+  naming with Nicholas.
 - **OPEN**: persist parsed Asset Score numbers onto the project (recommend yes
   — makes paperwork reproducible without re-uploading reports).
 - **OPEN (Phase 3)**: source of measures — opportunity line items vs work
