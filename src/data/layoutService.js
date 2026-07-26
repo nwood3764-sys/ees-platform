@@ -692,7 +692,7 @@ export async function resolvePolymorphicLookups(requests) {
  * Fetch related records for a related_list widget.
  */
 export async function fetchRelatedRecords(config, parentRecordId) {
-  const { table, fk, is_deleted_col, columns, sort_field, sort_dir } = config
+  const { table, fk, via, is_deleted_col, columns, sort_field, sort_dir } = config
 
   // Build the select. Plain columns are listed by name. A column of
   // type 'lookup' (with lookup_table + lookup_field) is fetched as a
@@ -711,6 +711,19 @@ export async function fetchRelatedRecords(config, parentRecordId) {
     }
   }
 
+  // Grandchild (two-hop) related lists: config.via = { table, fk } names the
+  // intermediate table and ITS foreign key to the layout's object, while
+  // config.fk stays the target table's FK — which here points at the via
+  // table, not the parent (e.g. Units on a Property: table 'units',
+  // fk 'building_id', via { table: 'buildings', fk: 'property_id' }).
+  // Resolved as a PostgREST inner-join embed filtered on the via table's
+  // parent FK, so one round-trip returns all grandchildren across every
+  // intermediate row, RLS-respecting and count-accurate.
+  const isViaPath = !!(via && via.table && via.fk && fk)
+  if (isViaPath) {
+    selectParts.push(`_via:${fk}!inner(${via.fk})`)
+  }
+
   let query = supabase
     .from(table)
     // count:'exact' returns the TRUE total in the same round-trip (in the
@@ -719,7 +732,10 @@ export async function fetchRelatedRecords(config, parentRecordId) {
     // exist than are loaded. The count is over one parent's children (FK-
     // filtered), so it's cheap and RLS-respecting.
     .select(selectParts.join(', '), { count: 'exact' })
-    .eq(fk, parentRecordId)
+
+  query = isViaPath
+    ? query.eq(`_via.${via.fk}`, parentRecordId)
+    : query.eq(fk, parentRecordId)
 
   if (is_deleted_col) {
     query = query.eq(is_deleted_col, false)
@@ -738,6 +754,11 @@ export async function fetchRelatedRecords(config, parentRecordId) {
   // renderer receives a plain value. `row[colName]` arrives as
   // { <lookup_field>: 'Josiah Brazle' } | null; collapse it to the string.
   const rows = data || []
+  // Drop the join-plumbing embed from via-path rows — the renderer only
+  // knows the configured display columns.
+  if (isViaPath) {
+    for (const row of rows) delete row._via
+  }
   if (lookupCols.length) {
     for (const row of rows) {
       for (const c of lookupCols) {
