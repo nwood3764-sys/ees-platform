@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
-import { runReport, loadDashboard, runWidgetAggregate, fetchFilterOptions } from '../data/reportsService'
+import { loadDashboard, runWidgetData, fetchFilterOptions } from '../data/reportsService'
 import { WidgetBody } from './DashboardWidgetView'
 
 // ─── Dashboard Runner ─────────────────────────────────────────────────────
@@ -44,30 +44,14 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
     const overrideFields = (dashboardData.filters || [])
       .map(f => f.dfilt_field_name)
       .filter(Boolean)
-    // Widget types that are pure group-by aggregations use the server-side
-    // report_aggregate fast path (one GROUP BY, ~N rows) instead of pulling
-    // all detail rows into the browser. metric/table still use runReport.
-    const AGG_TYPES = new Set(['bar', 'line', 'pie', 'donut', 'funnel', 'ranked_list'])
+    // Each widget type routes to its server-side query shape (grouped
+    // aggregate, 2D pivot, time buckets, single aggregate) via runWidgetData,
+    // which itself falls back to the full row fetch on any fast-path failure —
+    // a degraded-but-correct result, never a blank widget.
     const widgetResults = await Promise.all(
       (dashboardData.widgets || []).map(async w => {
-        const cfg = w.dw_widget_config || {}
-        if (AGG_TYPES.has(w.dw_widget_type) && cfg.group_by) {
-          try {
-            const agg = await runWidgetAggregate(w, extra, overrideFields)
-            return [w.id, agg]
-          } catch (err) {
-            // Fall back to the full row-fetch path so a fast-path failure
-            // degrades to the (slower) correct result, never a blank widget.
-            try {
-              const r = await runReport(w.dw_report_id, null, extra, overrideFields)
-              return [w.id, r]
-            } catch (err2) {
-              return [w.id, { error: err2 }]
-            }
-          }
-        }
         try {
-          const r = await runReport(w.dw_report_id, null, extra, overrideFields)
+          const r = await runWidgetData(w, extra, overrideFields)
           return [w.id, r]
         } catch (err) {
           return [w.id, { error: err }]

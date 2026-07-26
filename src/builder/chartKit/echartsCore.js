@@ -12,18 +12,22 @@
 // =============================================================================
 
 import * as echarts from 'echarts/core'
-import { BarChart, LineChart, PieChart, FunnelChart, GaugeChart } from 'echarts/charts'
+import {
+  BarChart, LineChart, PieChart, FunnelChart, GaugeChart,
+  HeatmapChart, TreemapChart, ScatterChart,
+} from 'echarts/charts'
 import {
   GridComponent, TooltipComponent, LegendComponent, TitleComponent,
-  MarkLineComponent, DataZoomComponent,
+  MarkLineComponent, DataZoomComponent, VisualMapComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LEAP_ECHARTS_THEME } from './leapEchartsTheme'
 
 echarts.use([
   BarChart, LineChart, PieChart, FunnelChart, GaugeChart,
+  HeatmapChart, TreemapChart, ScatterChart,
   GridComponent, TooltipComponent, LegendComponent, TitleComponent,
-  MarkLineComponent, DataZoomComponent,
+  MarkLineComponent, DataZoomComponent, VisualMapComponent,
   CanvasRenderer,
 ])
 
