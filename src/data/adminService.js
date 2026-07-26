@@ -1,5 +1,8 @@
 import { supabase, fetchAllPaged } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
+import { invalidateObjectColumnsCache } from './reportsService'
+import { invalidateEditableFieldsCache } from './fieldMetadataService'
+import { invalidateMergeFieldColumnsCache } from './mergeFieldCatalog'
 
 // ---------------------------------------------------------------------------
 // Roles (used by Permission Builder)
@@ -1162,9 +1165,14 @@ export async function addCustomField(params) {
     p_fk_table: params.fkTable || null,
   })
   if (error) throw error
-  // The object's column set changed — drop its cached schema so the next
-  // describeObject() reflects the new field.
+  // The object's column set changed — drop every session cache of its column
+  // list so the new field shows up everywhere without a page refresh: this
+  // service's describeObject(), the report builder + page layout editor
+  // palettes, editable list views, and the merge field picker.
   invalidateObjectSchema(params.object)
+  invalidateObjectColumnsCache(params.object)
+  invalidateEditableFieldsCache(params.object)
+  invalidateMergeFieldColumnsCache(params.object)
   return data
 }
 
