@@ -1829,7 +1829,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
                 aria-label="View example"
               >
                 <img src={screen.field.illustration} alt={`Example — ${screen.field.label}`}
-                  style={{ display: 'block', width: '100%', maxHeight: 210, objectFit: 'contain' }} />
+                  style={{ display: 'block', width: '100%', maxHeight: '56dvh', objectFit: 'contain', background: '#ffffff' }} />
                 <span style={{
                   display: 'block', padding: '7px 10px', borderTop: `1px solid ${C.border}`,
                   fontFamily: FONT, fontSize: 12.5, fontWeight: 600, color: C.textSecondary,
