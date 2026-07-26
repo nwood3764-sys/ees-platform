@@ -147,12 +147,23 @@ const TABLE_COLUMN_PREFIX = {
   contacts:                          'contact',
   contact_skills:                    'cs',
   conversations:                     'conv',
-  diagnostic_tests:                  'dt',
+  // NB: 'dt' is document_templates' short prefix — diagnostic_tests columns
+  // are diagnostic_* (diagnostic_record_number, diagnostic_record_type, ...).
+  diagnostic_tests:                  'diagnostic',
   efr_reports:                       'efr',
+  enrollments:                       'enrollment',
+  envelopes:                         'env',
+  envelope_events:                   'event',
+  envelope_recipients:               'recipient',
+  envelope_tabs:                     'tab',
   equipment:                         'equipment',
   equipment_activities:              'ea',
+  gps_points:                        'gps',
   incentive_applications:            'ia',
+  incentives:                        'incentive',
+  mechanical_equipment:              'me',
   messages:                          'msg',
+  occurrences:                       'occurrence',
   opportunities:                     'opportunity',
   opportunity_contact_roles:         'ocr',
   outbound_mailboxes:                'outbound_mailbox',
@@ -167,9 +178,13 @@ const TABLE_COLUMN_PREFIX = {
   service_appointments:              'sa',
   service_appointment_assignments:   'saa',
   skills:                            'skill',
+  time_sheets:                       'ts',
+  time_sheet_entries:                'tse',
   units:                             'unit',
   vehicles:                          'vehicle',
+  vehicle_activities:                'va',
   work_orders:                       'work_order',
+  work_types:                        'work_type',
   work_plans:                        'work_plan',
   work_plan_templates:               'wpt',
   work_steps:                        'work_step',
@@ -946,6 +961,7 @@ export function applyInsertDefaults(tableName, fields, userId) {
     assessments:    'assessment',
     buildings:      'building',
     contacts:       'contact',
+    enrollments:    'enrollment',
     equipment:      'equipment',   // already singular
     opportunities:  'opportunity',
     products:       'product',
@@ -1225,6 +1241,24 @@ export async function fetchDependentLookupOptions(field, record) {
       return (data || []).map(r => ({
         value: r.id,
         label: r.building_name || r.id.slice(0, 8),
+      }))
+    }
+    case 'opportunities_for_property': {
+      // An opportunity always belongs to a property (opportunities.property_id).
+      // Any child record that carries both a property FK and an opportunity FK
+      // (enrollments, projects, work orders, incentive applications) must only
+      // offer opportunities on that same property — never a universal list.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_opportunities_for_property', {
+        p_property_ids: dependencyValues,
+        p_include_opportunity_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.opportunity_name || r.id.slice(0, 8),
       }))
     }
     case 'opportunities_for_contact_account': {
