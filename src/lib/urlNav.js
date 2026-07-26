@@ -20,9 +20,10 @@
  * tells the App which module to activate when a user opens a deep link.
  * In-app record navigation (global search, related lists, lookups) does
  * NOT switch modules: the user stays in whatever module they're in and the
- * record renders there, Salesforce-style. TABLE_MODULE_MAP is only the
- * fallback for cold loads and for surfaces that can't host a record
- * (Home, Dispatch, Providers, Search, Help). See resolveRecordModule.
+ * record renders there, Salesforce-style. Surfaces that can't host a
+ * record (Home, Dispatch, Providers, Search, Help) send the user back to
+ * the last workspace module they were in; TABLE_MODULE_MAP is only the
+ * fallback for cold loads and fresh sessions. See resolveRecordModule.
  *
  * Two routes are reserved and bypass this controller (handled in main.jsx
  * and App.jsx respectively):
@@ -134,30 +135,32 @@ const TABLE_MODULE_MAP = {
 // switching to the table's owning module — Salesforce behavior: apps are
 // navigation chrome, records are global. Modules NOT listed (home, dispatch,
 // providers have no record-detail surface; search and help are synthetic
-// pages) can't display a record, so record-opens from them fall back to
-// TABLE_MODULE_MAP — the same resolution a cold deep link uses in parsePath.
+// pages) can't display a record, so record-opens from them go to the last
+// hosting module the user was in, then fall back to TABLE_MODULE_MAP — the
+// same resolution a cold deep link uses in parsePath.
 const RECORD_HOSTING_MODULES = new Set([
   'tasks', 'enrollment', 'outreach', 'qualification', 'field', 'planning',
   'implementation', 'incentives', 'stock', 'fleet', 'reports', 'admin',
   'portal',
 ])
 
-// The module the user was in when they opened the /search results page.
-// Lets a record click from the full search results return them to that
-// module rather than the record's owning module. Module-scoped rather than
-// URL state: a cold-loaded /search link has no prior module and falls back
-// to TABLE_MODULE_MAP like any other deep link.
-let moduleBeforeSearch = null
+// The last record-hosting module the user was in — their "workspace".
+// Updated by useUrlNavigation whenever the active module is one that can
+// host a record. Lets a record open from a surface with no record detail
+// (Home, the /search results page, Dispatch, Providers) return the user to
+// the workspace they were last working in rather than the record's owning
+// module. Module-scoped rather than URL state: a cold-loaded deep link has
+// no workspace history and falls back to TABLE_MODULE_MAP.
+let lastHostingModule = null
 
 // Which module should be active after opening a record. Stay in the current
-// module when it can host a record; returning from the search results page,
-// restore the module the user searched from; otherwise (Home, Dispatch,
-// deep links, unknown) use the table's owning module.
+// module when it can host a record; from a non-hosting surface (Home,
+// search results, Dispatch, Providers), return to the last workspace the
+// user was in; otherwise (cold deep links, fresh sessions) use the table's
+// owning module.
 function resolveRecordModule(table, currentModule) {
   if (RECORD_HOSTING_MODULES.has(currentModule)) return currentModule
-  if (currentModule === 'search' && RECORD_HOSTING_MODULES.has(moduleBeforeSearch)) {
-    return moduleBeforeSearch
-  }
+  if (RECORD_HOSTING_MODULES.has(lastHostingModule)) return lastHostingModule
   return TABLE_MODULE_MAP[table] || currentModule
 }
 
@@ -446,6 +449,16 @@ export function useUrlNavigation() {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
+  // Track the user's workspace — the last record-hosting module they were
+  // in — so record opens from non-hosting surfaces (Home, search results,
+  // Dispatch, Providers) can return them there. Covers every way the module
+  // can change: sidebar clicks, record opens, popstate, initial load.
+  useEffect(() => {
+    if (RECORD_HOSTING_MODULES.has(state.activeModule)) {
+      lastHostingModule = state.activeModule
+    }
+  }, [state.activeModule])
+
   // Compare a target path (which may include ?queryString) against the
   // current full URL. We must include search here because /search?q=foo
   // and /search?q=bar share the same pathname — comparing pathname only
@@ -559,28 +572,20 @@ export function useUrlNavigation() {
   // Open the universal search results page. Called from the search
   // modal's "View all results" footer button and any deep-link sources.
   const navigateToSearch = useCallback((query, typeFilter = null, { useReplace = false } = {}) => {
-    setState((prev) => {
-      // Stash the module the user searched from so a record click on the
-      // results page returns them there (see resolveRecordModule). Refining
-      // the query while already on /search keeps the original stash.
-      if (RECORD_HOSTING_MODULES.has(prev.activeModule)) {
-        moduleBeforeSearch = prev.activeModule
-      }
-      const next = {
-        activeModule: 'search',
-        selectedRecord: null,
-        section: null,
-        subsection: null,
-        searchQuery: query || '',
-        searchType: typeFilter || null,
-      }
-      const path = buildPath(next)
-      if (path !== currentFullPath()) {
-        if (useReplace) window.history.replaceState(null, '', path)
-        else            window.history.pushState(null, '', path)
-      }
-      return next
-    })
+    const next = {
+      activeModule: 'search',
+      selectedRecord: null,
+      section: null,
+      subsection: null,
+      searchQuery: query || '',
+      searchType: typeFilter || null,
+    }
+    const path = buildPath(next)
+    if (path !== currentFullPath()) {
+      if (useReplace) window.history.replaceState(null, '', path)
+      else            window.history.pushState(null, '', path)
+    }
+    setState(next)
   }, [])
 
   const closeRecord = useCallback(() => {
