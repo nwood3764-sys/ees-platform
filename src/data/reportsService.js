@@ -10,6 +10,7 @@
 // into RecordDetail.
 
 import { supabase } from '../lib/supabase'
+import { guessPrefix } from './fieldMetadataService'
 
 // ─── Folders ──────────────────────────────────────────────────────────────
 
@@ -796,7 +797,16 @@ async function loadPicklistLabels(pairs) {
   const byObject = new Map()
   for (const p of pairs) {
     if (!byObject.has(p.object)) byObject.set(p.object, new Set())
-    byObject.get(p.object).add(p.field)
+    const fieldSet = byObject.get(p.object)
+    fieldSet.add(p.field)
+    // picklist_field naming is inconsistent across objects: some rows use
+    // the full column name (property_status), others the prefix-stripped
+    // field (record_type). Query both spellings so either resolves —
+    // without this, accounts.account_record_type never finds its labels.
+    const prefix = guessPrefix(p.object)
+    if (prefix && p.field.startsWith(prefix + '_')) {
+      fieldSet.add(p.field.slice(prefix.length + 1))
+    }
   }
   for (const [object, fields] of byObject) {
     const { data, error } = await supabase

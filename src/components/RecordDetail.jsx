@@ -41,6 +41,7 @@ import StatusTransitionsBar from './StatusTransitionsBar'
 import TopbarActions from './TopbarActions'
 import { ACTION_KEYS } from '../data/recordActions'
 import { supabase } from '../lib/supabase'
+import DuplicateCheckPanel, { DUPLICATE_CHECK_TABLES, buildDuplicateProbe } from './DuplicateCheckPanel'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
 import { MERGE_FIELD_OBJECTS, loadFieldsForObject } from '../data/mergeFieldCatalog'
@@ -210,6 +211,7 @@ const TABLE_META = {
   opportunities:             { module: 'Enrollment',       label: 'Opportunities',        nameColumn: 'opportunity_name',       recordNumberColumn: 'opportunity_record_number',       statusColumn: 'opportunity_status',       parents: ['property_id', 'building_id', 'opportunity_account_id'],          parentTables: ['properties', 'buildings', 'accounts'] },
   opportunity_contact_roles: { module: 'Enrollment',       label: 'Contact Role',         nameColumn: 'ocr_name',               recordNumberColumn: 'ocr_record_number',               statusColumn: null,                       parents: ['opportunity_id', 'contact_id'],                   parentTables: ['opportunities', 'contacts'] },
   property_programs:         { module: 'Enrollment',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
+  enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['property_id', 'opportunity_id'],                  parentTables: ['properties', 'opportunities'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
   projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id', 'building_id', 'project_account_id'],                     parentTables: ['properties', 'buildings', 'accounts'] },
   assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id'],                     parentTables: ['properties', 'buildings'] },
@@ -1038,6 +1040,11 @@ function EmailTemplatePreviewModal({
 // unusable. This renders a button showing the current selection; clicking it
 // opens a panel with a search input and an ascending-sorted, filtered option
 // list. Selecting an option (or the leading blank row) calls onChange(value).
+// Lookup targets that must NEVER offer inline quick-create: identity objects
+// are provisioned through Admin flows (auth account, role, permissions) — an
+// inline insert would create a half-provisioned row that can't sign in.
+const QUICK_CREATE_EXCLUDED_TABLES = new Set(['users', 'portal_users'])
+
 // QuickCreateModal — inline "+ New" for a scalar lookup field. Opens the REAL
 // create path for the lookup's target table (same insertRecord +
 // applyInsertDefaults the full form uses), scoped to the table's required
@@ -1052,6 +1059,9 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
   const [fields, setFields] = useState([])      // [{name,label,type,required,lookup_table,lookup_field}]
   const [draft, setDraft] = useState({})
   const [picklistOpts, setPicklistOpts] = useState({})
+  // Options for required-FK lookup fields, keyed by column name. Loaded with
+  // the field list; refreshed per-field by server search as the user types.
+  const [fkLookupOpts, setFkLookupOpts] = useState({})
   const [recordTypes, setRecordTypes] = useState([])
   const rtColumn = useMemo(() => getRecordTypeColumn(table), [table])
 
@@ -1088,11 +1098,43 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         if (rtColumn) {
           fieldDefs.push({ name: rtColumn, label: 'Record Type', type: 'picklist', required: true })
         }
+        // Required FK columns render as real lookups, not raw text — resolve
+        // each against the created table's declared parents (TABLE_META), so
+        // e.g. a quick-created Opportunity asks for its Property with a
+        // searchable picker instead of a UUID box.
+        const parentFkTargets = {}
+        const createdMeta = TABLE_META[table]
+        if (createdMeta) {
+          ;(createdMeta.parents || []).forEach((fk, i) => {
+            const t = (createdMeta.parentTables || [])[i]
+            if (t && TABLE_META[t]?.nameColumn) parentFkTargets[fk] = t
+          })
+        }
         for (const col of required) {
           if (SYSTEM.test(col)) continue
           if (col === rtColumn) continue
           if (derivedCols.has(col)) continue              // trigger fills it
           if (seed && seed[col] != null) continue  // already known from the dependency — don't ask
+          const fkTable = parentFkTargets[col]
+          if (fkTable) {
+            // Keep the parent chain intact inside quick-create too: when the
+            // seed already pins a property, scope building/opportunity pickers
+            // to it via the same dependent-lookup RPCs the full form uses.
+            const scopedKind = seed?.property_id
+              ? (fkTable === 'buildings' ? 'buildings_for_property'
+                : fkTable === 'opportunities' ? 'opportunities_for_property' : null)
+              : null
+            fieldDefs.push({
+              name: col,
+              label: col.replace(/_id$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+              type: 'lookup',
+              lookup_table: fkTable,
+              lookup_field: TABLE_META[fkTable].nameColumn,
+              scopedKind,
+              required: true,
+            })
+            continue
+          }
           fieldDefs.push({
             name: col,
             label: col.replace(/^[a-z]+_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
@@ -1110,9 +1152,22 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         if (rtColumn) {
           rts = await fetchAvailableRecordTypes(table).catch(() => [])
         }
+        // First option page for each required-FK lookup field. Scoped fields
+        // load their full (small) scoped set; unscoped load the first page.
+        const fkOpts = {}
+        await Promise.all(fieldDefs.filter(f => f.type === 'lookup').map(async f => {
+          try {
+            fkOpts[f.name] = f.scopedKind
+              ? await fetchDependentLookupOptions(
+                  { name: f.name, lookup_dependency: { kind: f.scopedKind, depends_on: ['property_id'] } },
+                  seed || {})
+              : await fetchLookupOptions(f.lookup_table, f.lookup_field)
+          } catch { fkOpts[f.name] = [] }
+        }))
         if (cancelled) return
         setFields(fieldDefs)
         setRecordTypes(rts)
+        setFkLookupOpts(fkOpts)
         setLoading(false)
       } catch (err) {
         if (!cancelled) { toast.error(`Could not open create form — ${err.message || err}`); onCancel() }
@@ -1124,11 +1179,42 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
 
   const setVal = (name, v) => setDraft(d => ({ ...d, [name]: v }))
 
+  // Create-time duplicate probe — same soft gate as the full create form.
+  // Quick-create from a lookup (e.g. a new account off a property's owner
+  // field) is a prime source of duplicate records.
+  const [qcDupMatches, setQcDupMatches] = useState([])
+  const [qcDupAcknowledged, setQcDupAcknowledged] = useState(false)
+  const qcDupReqRef = useRef(0)
+  const qcProbeSignature = useMemo(() => {
+    if (!DUPLICATE_CHECK_TABLES.includes(table)) return ''
+    const probe = buildDuplicateProbe(table, { ...(seed || {}), ...draft })
+    return probe ? JSON.stringify(probe) : ''
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table, draft])
+  useEffect(() => {
+    if (!qcProbeSignature) { setQcDupMatches([]); setQcDupAcknowledged(false); return undefined }
+    const params = JSON.parse(qcProbeSignature)
+    const myReq = ++qcDupReqRef.current
+    const t = setTimeout(async () => {
+      const { data: hits, error: dupErr } = await supabase.rpc('find_duplicate_candidates', params)
+      if (myReq !== qcDupReqRef.current) return
+      if (dupErr) { setQcDupMatches([]); return }
+      setQcDupMatches(Array.isArray(hits) ? hits : [])
+      setQcDupAcknowledged(false)
+    }, 250)
+    return () => clearTimeout(t)
+  }, [qcProbeSignature])
+
   const handleSave = async () => {
     if (saving) return
     const missing = fields.filter(f => f.required && !isDerivedReadonlyField(table, f.name) && (draft[f.name] == null || draft[f.name] === ''))
     if (missing.length) {
       toast.error(missing.length === 1 ? `Required: ${missing[0].label}` : `Required: ${missing.map(f => f.label).join(', ')}`)
+      return
+    }
+    if (qcDupMatches.length > 0 && !qcDupAcknowledged) {
+      setQcDupAcknowledged(true)
+      toast.warning('Possible duplicate found — review the matches shown, pick the existing record from the lookup instead, or press Save again to create anyway.')
       return
     }
     setSaving(true)
@@ -1182,6 +1268,23 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                   onChange={(val) => setVal(f.name, val || null)}
                   placeholder="— Select —"
                 />
+              ) : f.type === 'lookup' ? (
+                <SearchableLookup
+                  value={draft[f.name] || ''}
+                  options={fkLookupOpts[f.name] || []}
+                  onChange={(val) => setVal(f.name, val || null)}
+                  // Scoped pickers hold their complete set — local filtering
+                  // (onSearch null) keeps the parent scope airtight. Unscoped
+                  // pickers server-search the target table as the user types.
+                  onSearch={f.scopedKind ? null : async (term) => {
+                    try {
+                      const opts = await fetchLookupOptions(f.lookup_table, f.lookup_field, 50,
+                        term ? { search: term } : {})
+                      setFkLookupOpts(prev => ({ ...prev, [f.name]: opts }))
+                    } catch { /* keep the current page on a failed search */ }
+                  }}
+                  placeholder="— Select —"
+                />
               ) : (
                 <input type={f.type === 'email' ? 'email' : 'text'} style={{ ...inputBase }} value={draft[f.name] || ''}
                   onChange={e => setVal(f.name, e.target.value)} />
@@ -1189,6 +1292,14 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
             </div>
             )
           })}
+          {!loading && (
+            <DuplicateCheckPanel
+              tableName={table}
+              matches={qcDupMatches}
+              confirming={qcDupAcknowledged}
+              onNavigateToRecord={null}
+            />
+          )}
         </div>
         <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.border}`, background: '#fafbfd',
           display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -1466,7 +1577,13 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
   const [serverOpts, setServerOpts] = useState(null) // results from server search (null = not searched)
   const [selectedOption, setSelectedOption] = useState(null) // resolved label for current value
 
-  const canServerSearch = !!(field.lookup_table && field.lookup_field)
+  // Dependent lookups never server-search: fetchLookupOptions queries the
+  // whole table, which would leak records outside the dependency scope back
+  // into the list (e.g. every opportunity in the system on a property-scoped
+  // picker). The scoped RPCs return the full matching set, so SearchableLookup's
+  // local filtering (active when onSearch is null) covers typing.
+  const isDependent = !!field.lookup_dependency?.kind
+  const canServerSearch = !isDependent && !!(field.lookup_table && field.lookup_field)
 
   // Resolve the selected value's label up front so the field shows it even if
   // the record isn't in the initial option page (the carry-over case).
@@ -1500,7 +1617,9 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
 
   const objectLabel = useMemo(() => {
     if (field.create_object_label) return field.create_object_label
-    const t = (field.lookup_table || '').replace(/s$/, '').replace(/_/g, ' ')
+    // Singularize the table name: ies→y first (properties → property,
+    // opportunities → opportunity), then trailing s (accounts → account).
+    const t = (field.lookup_table || '').replace(/ies$/, 'y').replace(/s$/, '').replace(/_/g, ' ')
     return t ? t.replace(/\b\w/g, c => c.toUpperCase()) : 'record'
   }, [field])
 
@@ -1535,6 +1654,10 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
     if (dep.kind === 'buildings_for_property') {
       const prop = dependencyValues.property_id
         || dependencyValues.opportunity_property_id
+      return prop ? { property_id: prop } : null
+    }
+    if (dep.kind === 'opportunities_for_property') {
+      const prop = dependencyValues.property_id
       return prop ? { property_id: prop } : null
     }
     return null
@@ -1638,7 +1761,15 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
     case 'lookup': {
       const opts = lookupOpts || []
       const dep = field.lookup_dependency
-      const canCreate = field.allow_inline_create === true && !!field.lookup_table
+      // Inline "+ New" is ON BY DEFAULT for every lookup, system-wide
+      // (Nicholas, 2026-07-26): searching related records must always offer
+      // creating the record when it doesn't exist. A layout can still opt a
+      // field out with allow_inline_create: false. Identity objects are the
+      // one hard exclusion — platform/portal users are provisioned through
+      // Admin (auth account + role), never quick-created from a lookup.
+      const canCreate = field.allow_inline_create !== false
+        && !!field.lookup_table && !!field.lookup_field
+        && !QUICK_CREATE_EXCLUDED_TABLES.has(field.lookup_table)
       const canServerSearch = !!(field.lookup_table && field.lookup_field)
 
       // Dependent lookup (e.g. Site Contact scoped to the selected Account):
@@ -1661,7 +1792,12 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
           )
         }
         const dependsOn = Array.isArray(dep.depends_on) ? dep.depends_on : []
-        const hint = dependsOn.length > 0
+        // "Fill X first" only when the dependency really is unfilled; when the
+        // parent IS set and the scoped pool is just empty (e.g. a property
+        // with no opportunities yet), say so instead of a misleading prompt.
+        const depsFilled = dependsOn.length > 0
+          && dependsOn.some(k => field._dependencyValues?.[k] != null && field._dependencyValues?.[k] !== '')
+        const hint = dependsOn.length > 0 && !depsFilled
           ? `— Fill ${dependsOn.map(n => n.replace(/_id$/, '').replace(/_/g, ' ')).join(' or ')} first —`
           : '— No matching records —'
         return (
@@ -3475,6 +3611,61 @@ function RelatedListWidget({
       prefillObj.__derivedNameBase = parentRecord.project_name
     }
 
+    // An enrollment documents its property for a program application, so seed
+    // every enrollment field the property already knows — HUD property/site
+    // info, units, category, owner and management-agent contact data — the
+    // whole point is that the user never re-types data the system holds.
+    // enrollment_state also drives the record-type picker's state filter, so
+    // a Milwaukee property offers WI record types only. All values remain
+    // user-editable on the form. Only fill blanks; never clobber.
+    if (childTable === 'enrollments' && parentTable === 'properties' && parentRecord) {
+      const copyFromProperty = (src, dst) => {
+        const v = parentRecord[src]
+        if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
+      }
+      copyFromProperty('property_hud_property_id',            'enrollment_hud_property_id')
+      copyFromProperty('property_name',                       'enrollment_property_name')
+      copyFromProperty('property_street',                     'enrollment_site_address')
+      copyFromProperty('property_city',                       'enrollment_city')
+      copyFromProperty('property_state',                      'enrollment_state')
+      copyFromProperty('property_zip',                        'enrollment_zip')
+      copyFromProperty('property_county',                     'enrollment_county')
+      copyFromProperty('property_total_units',                'enrollment_total_units')
+      copyFromProperty('property_total_number_of_units',      'enrollment_total_units')
+      copyFromProperty('property_assisted_units',             'enrollment_assisted_units')
+      copyFromProperty('property_category',                   'enrollment_property_category')
+      copyFromProperty('property_number_of_buildings',        'enrollment_number_of_buildings')
+      copyFromProperty('property_total_buildings',            'enrollment_number_of_buildings')
+      copyFromProperty('property_hud_owner_org',              'enrollment_owner_organization')
+      copyFromProperty('property_hud_owner_type',             'enrollment_owner_type')
+      copyFromProperty('property_hud_owner_address',          'enrollment_owner_address')
+      copyFromProperty('property_hud_owner_phone',            'enrollment_owner_phone')
+      copyFromProperty('property_hud_owner_email',            'enrollment_owner_email')
+      copyFromProperty('property_hud_management_org',         'enrollment_management_agent')
+      copyFromProperty('property_hud_management_phone',       'enrollment_management_phone')
+      copyFromProperty('property_hud_management_email',       'enrollment_management_email')
+      copyFromProperty('property_primary_contract_number',    'enrollment_hud_contract_number')
+      copyFromProperty('property_primary_contract_tracs_status', 'enrollment_hud_tracs_status')
+      copyFromProperty('property_primary_contract_expiration','enrollment_hud_contract_expiration')
+      copyFromProperty('property_is_202_811',                 'enrollment_is_202_811')
+      copyFromProperty('property_is_opportunity_zone',        'enrollment_is_opportunity_zone')
+      // Subsidized share: not stored on the property — derive from the unit
+      // counts when both are present so the form opens pre-computed.
+      const totalUnits = prefillObj.enrollment_total_units
+      const assistedUnits = prefillObj.enrollment_assisted_units
+      if (prefillObj.enrollment_subsidized_share_pct == null
+          && Number(totalUnits) > 0 && assistedUnits != null) {
+        prefillObj.enrollment_subsidized_share_pct =
+          Math.round((Number(assistedUnits) / Number(totalUnits)) * 1000) / 10
+      }
+      // Enrollment name composes "<property name> - <record type label>" once
+      // the user picks a record type (same derived-name mechanism projects
+      // use). Transient hint — stripped before insert.
+      if (parentRecord.property_name) {
+        prefillObj.__derivedNameBase = parentRecord.property_name
+      }
+    }
+
     // A building sits at its property's address, so seed the new building's
     // address/location and year-built from the parent property — the user can
     // still edit (e.g. a multi-building property where buildings have distinct
@@ -4570,6 +4761,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // draft pre-populated from the source.
   const [cloneSource, setCloneSource] = useState(null)
   const isInsertMode = isCreate || cloneSource !== null
+  // Create-time duplicate checking (accounts / properties / buildings).
+  // dupMatches holds find_duplicate_candidates results for the current
+  // draft; dupAcknowledged flips after the first Save press so the second
+  // press creates anyway (soft gate, never a hard block).
+  const [dupMatches, setDupMatches] = useState([])
+  const [dupAcknowledged, setDupAcknowledged] = useState(false)
+  const dupReqRef = useRef(0)
   // Record-type picker state. In create mode, if the user hasn't supplied a
   // prefill record_type and the object has multiple active record types, we
   // show RecordTypePicker before loading the form layout. `pickedRecordType`
@@ -5025,15 +5223,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       const derived = [street, city].filter(s => String(s || '').trim()).join(' - ')
       next.property_name = derived || ''
     }
-    // Projects: recompose the derived name when record type changes during
-    // create, mirroring trg_project_name (opportunity name + RT label). Only
-    // applies while a derived base is held (i.e. created from an opportunity).
-    if (tableName === 'projects' && name === getRecordTypeColumn('projects') && derivedNameBaseRef.current) {
+    // Recompose the derived name when record type changes during create —
+    // "<base> - <record type label>" (projects mirror trg_project_name with
+    // the opportunity name as base; enrollments use the property name). Only
+    // applies while a derived base is held (i.e. created from a parent whose
+    // related-list New seeded __derivedNameBase).
+    const derivedNameCol = TABLE_META[tableName]?.nameColumn
+    if (derivedNameCol && name === getRecordTypeColumn(tableName) && derivedNameBaseRef.current) {
       const opts = allPicklistOpts?.[name] || []
       const rtLabel = (opts.find(o => o.value === value)?.label) || ''
       const composed = [String(derivedNameBaseRef.current || '').trim(), String(rtLabel || '').trim()]
         .filter(Boolean).join(' - ').replace(/^[\s-]+|[\s-]+$/g, '')
-      next.project_name = composed || ''
+      next[derivedNameCol] = composed || ''
     }
     return next
   })
@@ -5073,6 +5274,33 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // directly would re-fire on every keystroke in unrelated fields.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dependencySignature])
+
+  // Create-time duplicate probe (accounts / properties / buildings). As the
+  // user types the name/address fields, debounce-call find_duplicate_candidates
+  // and surface exact + close matches in DuplicateCheckPanel. The signature
+  // (serialized probe params) keeps this from firing on unrelated keystrokes.
+  const dupProbeSignature = useMemo(() => {
+    if (!isInsertMode || !DUPLICATE_CHECK_TABLES.includes(tableName)) return ''
+    const probe = buildDuplicateProbe(tableName, draft)
+    return probe ? JSON.stringify(probe) : ''
+  }, [isInsertMode, tableName, draft])
+
+  useEffect(() => {
+    if (!dupProbeSignature) {
+      setDupMatches([]); setDupAcknowledged(false)
+      return undefined
+    }
+    const params = JSON.parse(dupProbeSignature)
+    const myReq = ++dupReqRef.current
+    const t = setTimeout(async () => {
+      const { data: hits, error: dupErr } = await supabase.rpc('find_duplicate_candidates', params)
+      if (myReq !== dupReqRef.current) return   // stale response — a newer probe is in flight
+      if (dupErr) { setDupMatches([]); return } // probe failure must never block creation
+      setDupMatches(Array.isArray(hits) ? hits : [])
+      setDupAcknowledged(false)
+    }, 250)
+    return () => clearTimeout(t)
+  }, [dupProbeSignature])
 
   // Clone: strip system fields, append " (Copy)" to visible name fields,
   // enter insert-mode so Save inserts a brand-new record in the same table.
@@ -5657,6 +5885,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           return
         }
 
+        // Duplicate soft gate: when the probe found existing matches the
+        // user hasn't reviewed, the first Save press pauses; the second
+        // press creates anyway. One record per real-world company/property.
+        if (dupMatches.length > 0 && !dupAcknowledged) {
+          setDupAcknowledged(true)
+          toast.warning('Possible duplicate found — review the matches in the blue panel, open the existing record if it\'s the same one, or press Save again to create anyway.')
+          setSaving(false)
+          return
+        }
+
         const created = await insertRecord(tableName, fields)
         toast.success(cloneSource ? 'Clone created' : 'Record created')
 
@@ -6049,6 +6287,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             <Icon path="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" size={14} color="#166534" />
             Editing mode — modify fields and click Save.
           </div>
+        )}
+
+        {/* Create-time duplicate warning (accounts / properties / buildings) —
+            rendered on desktop AND mobile: creating a duplicate from the field
+            is exactly the case this exists to prevent. */}
+        {isInsertMode && (
+          <DuplicateCheckPanel
+            tableName={tableName}
+            matches={dupMatches}
+            confirming={dupAcknowledged}
+            onNavigateToRecord={onNavigateToRecord}
+          />
         )}
 
         {/* Timestamps (view mode only, hidden on mobile to reduce clutter) */}
