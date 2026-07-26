@@ -41,6 +41,7 @@ import StatusTransitionsBar from './StatusTransitionsBar'
 import TopbarActions from './TopbarActions'
 import { ACTION_KEYS } from '../data/recordActions'
 import { supabase } from '../lib/supabase'
+import DuplicateCheckPanel, { DUPLICATE_CHECK_TABLES, buildDuplicateProbe } from './DuplicateCheckPanel'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
 import { MERGE_FIELD_OBJECTS, loadFieldsForObject } from '../data/mergeFieldCatalog'
@@ -1125,11 +1126,42 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
 
   const setVal = (name, v) => setDraft(d => ({ ...d, [name]: v }))
 
+  // Create-time duplicate probe — same soft gate as the full create form.
+  // Quick-create from a lookup (e.g. a new account off a property's owner
+  // field) is a prime source of duplicate records.
+  const [qcDupMatches, setQcDupMatches] = useState([])
+  const [qcDupAcknowledged, setQcDupAcknowledged] = useState(false)
+  const qcDupReqRef = useRef(0)
+  const qcProbeSignature = useMemo(() => {
+    if (!DUPLICATE_CHECK_TABLES.includes(table)) return ''
+    const probe = buildDuplicateProbe(table, { ...(seed || {}), ...draft })
+    return probe ? JSON.stringify(probe) : ''
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table, draft])
+  useEffect(() => {
+    if (!qcProbeSignature) { setQcDupMatches([]); setQcDupAcknowledged(false); return undefined }
+    const params = JSON.parse(qcProbeSignature)
+    const myReq = ++qcDupReqRef.current
+    const t = setTimeout(async () => {
+      const { data: hits, error: dupErr } = await supabase.rpc('find_duplicate_candidates', params)
+      if (myReq !== qcDupReqRef.current) return
+      if (dupErr) { setQcDupMatches([]); return }
+      setQcDupMatches(Array.isArray(hits) ? hits : [])
+      setQcDupAcknowledged(false)
+    }, 250)
+    return () => clearTimeout(t)
+  }, [qcProbeSignature])
+
   const handleSave = async () => {
     if (saving) return
     const missing = fields.filter(f => f.required && !isDerivedReadonlyField(table, f.name) && (draft[f.name] == null || draft[f.name] === ''))
     if (missing.length) {
       toast.error(missing.length === 1 ? `Required: ${missing[0].label}` : `Required: ${missing.map(f => f.label).join(', ')}`)
+      return
+    }
+    if (qcDupMatches.length > 0 && !qcDupAcknowledged) {
+      setQcDupAcknowledged(true)
+      toast.warning('Possible duplicate found — review the matches shown, pick the existing record from the lookup instead, or press Save again to create anyway.')
       return
     }
     setSaving(true)
@@ -1190,6 +1222,14 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
             </div>
             )
           })}
+          {!loading && (
+            <DuplicateCheckPanel
+              tableName={table}
+              matches={qcDupMatches}
+              confirming={qcDupAcknowledged}
+              onNavigateToRecord={null}
+            />
+          )}
         </div>
         <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.border}`, background: '#fafbfd',
           display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -4641,6 +4681,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // draft pre-populated from the source.
   const [cloneSource, setCloneSource] = useState(null)
   const isInsertMode = isCreate || cloneSource !== null
+  // Create-time duplicate checking (accounts / properties / buildings).
+  // dupMatches holds find_duplicate_candidates results for the current
+  // draft; dupAcknowledged flips after the first Save press so the second
+  // press creates anyway (soft gate, never a hard block).
+  const [dupMatches, setDupMatches] = useState([])
+  const [dupAcknowledged, setDupAcknowledged] = useState(false)
+  const dupReqRef = useRef(0)
   // Record-type picker state. In create mode, if the user hasn't supplied a
   // prefill record_type and the object has multiple active record types, we
   // show RecordTypePicker before loading the form layout. `pickedRecordType`
@@ -5147,6 +5194,33 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // directly would re-fire on every keystroke in unrelated fields.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dependencySignature])
+
+  // Create-time duplicate probe (accounts / properties / buildings). As the
+  // user types the name/address fields, debounce-call find_duplicate_candidates
+  // and surface exact + close matches in DuplicateCheckPanel. The signature
+  // (serialized probe params) keeps this from firing on unrelated keystrokes.
+  const dupProbeSignature = useMemo(() => {
+    if (!isInsertMode || !DUPLICATE_CHECK_TABLES.includes(tableName)) return ''
+    const probe = buildDuplicateProbe(tableName, draft)
+    return probe ? JSON.stringify(probe) : ''
+  }, [isInsertMode, tableName, draft])
+
+  useEffect(() => {
+    if (!dupProbeSignature) {
+      setDupMatches([]); setDupAcknowledged(false)
+      return undefined
+    }
+    const params = JSON.parse(dupProbeSignature)
+    const myReq = ++dupReqRef.current
+    const t = setTimeout(async () => {
+      const { data: hits, error: dupErr } = await supabase.rpc('find_duplicate_candidates', params)
+      if (myReq !== dupReqRef.current) return   // stale response — a newer probe is in flight
+      if (dupErr) { setDupMatches([]); return } // probe failure must never block creation
+      setDupMatches(Array.isArray(hits) ? hits : [])
+      setDupAcknowledged(false)
+    }, 250)
+    return () => clearTimeout(t)
+  }, [dupProbeSignature])
 
   // Clone: strip system fields, append " (Copy)" to visible name fields,
   // enter insert-mode so Save inserts a brand-new record in the same table.
@@ -5731,6 +5805,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           return
         }
 
+        // Duplicate soft gate: when the probe found existing matches the
+        // user hasn't reviewed, the first Save press pauses; the second
+        // press creates anyway. One record per real-world company/property.
+        if (dupMatches.length > 0 && !dupAcknowledged) {
+          setDupAcknowledged(true)
+          toast.warning('Possible duplicate found — review the matches in the blue panel, open the existing record if it\'s the same one, or press Save again to create anyway.')
+          setSaving(false)
+          return
+        }
+
         const created = await insertRecord(tableName, fields)
         toast.success(cloneSource ? 'Clone created' : 'Record created')
 
@@ -6123,6 +6207,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             <Icon path="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" size={14} color="#166534" />
             Editing mode — modify fields and click Save.
           </div>
+        )}
+
+        {/* Create-time duplicate warning (accounts / properties / buildings) —
+            rendered on desktop AND mobile: creating a duplicate from the field
+            is exactly the case this exists to prevent. */}
+        {isInsertMode && (
+          <DuplicateCheckPanel
+            tableName={tableName}
+            matches={dupMatches}
+            confirming={dupAcknowledged}
+            onNavigateToRecord={onNavigateToRecord}
+          />
         )}
 
         {/* Timestamps (view mode only, hidden on mobile to reduce clutter) */}
