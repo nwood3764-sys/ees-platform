@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient><linearGradient id="mt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#aab6c8"/><stop offset="0.25" stop-color="#e8edf4"/><stop offset="0.6" stop-color="#f4f8fd"/><stop offset="1" stop-color="#b3bfd0"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f0"/>
+<rect x="120" y="70" width="240" height="420" rx="6" fill="url(#wl)" stroke="#44526a" stroke-width="3"/>
+<!-- body -->
+<path d="M176 210 Q176 150 240 150 Q304 150 304 210 L304 300 L176 300 Z" fill="url(#mt)" stroke="#44526a" stroke-width="3"/>
+<rect x="176" y="300" width="128" height="40" rx="4" fill="#dde3ec" stroke="#44526a" stroke-width="3"/>
+<!-- index dials -->
+<g fill="#f4f8fd" stroke="#6a7788" stroke-width="2.5">
+ <circle cx="212" cy="200" r="18"/><circle cx="268" cy="200" r="18"/></g>
+<g stroke="#0d1a2e" stroke-width="2.5"><line x1="212" y1="200" x2="212" y2="186"/><line x1="268" y1="200" x2="278" y2="200"/></g>
+<!-- pipes + regulator -->
+<path d="M200 340 L200 460" stroke="#6a7788" stroke-width="10" stroke-linecap="round"/>
+<path d="M280 340 L280 460" stroke="#6a7788" stroke-width="10" stroke-linecap="round"/>
+<circle cx="240" cy="120" r="24" fill="#dde3ec" stroke="#44526a" stroke-width="3"/>
+<rect x="150" y="96" width="180" height="384" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="48" y="36">The gas meter</text><text x="150" y="522">Skip if the home has no gas</text><text x="150" y="546">Show the index dials</text></g></svg>

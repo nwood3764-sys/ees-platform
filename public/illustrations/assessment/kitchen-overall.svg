@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient><linearGradient id="mt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#aab6c8"/><stop offset="0.25" stop-color="#e8edf4"/><stop offset="0.6" stop-color="#f4f8fd"/><stop offset="1" stop-color="#b3bfd0"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#f2efe8"/>
+<rect x="0" y="430" width="480" height="130" fill="#e4dfd2"/>
+<!-- upper cabinets -->
+<rect x="60" y="96" width="360" height="70" rx="4" fill="#dde3ec" stroke="#44526a" stroke-width="2.5"/>
+<g stroke="#6a7788" stroke-width="2"><line x1="180" y1="100" x2="180" y2="162"/><line x1="300" y1="100" x2="300" y2="162"/></g>
+<!-- counter -->
+<rect x="60" y="300" width="360" height="20" fill="#aab6c8"/>
+<!-- lower cabinets -->
+<rect x="60" y="320" width="360" height="120" fill="#eef1f6" stroke="#6a7788" stroke-width="2"/>
+<g stroke="#6a7788" stroke-width="2"><line x1="180" y1="320" x2="180" y2="440"/><line x1="300" y1="320" x2="300" y2="440"/></g>
+<!-- sink -->
+<rect x="96" y="304" width="72" height="12" rx="3" fill="#7eb3e8" opacity="0.6"/>
+<!-- range -->
+<rect x="210" y="300" width="80" height="140" fill="#dde3ec" stroke="#44526a" stroke-width="2.5"/>
+<g fill="none" stroke="#6a7788" stroke-width="2.5"><circle cx="230" cy="316" r="8"/><circle cx="270" cy="316" r="8"/></g>
+<!-- fridge -->
+<rect x="336" y="180" width="72" height="252" rx="5" fill="url(#mt)" stroke="#44526a" stroke-width="3"/>
+<line x1="336" y1="250" x2="408" y2="250" stroke="#6a7788" stroke-width="2.5"/>
+<!-- window -->
+<rect x="96" y="188" width="80" height="80" fill="#7eb3e8" opacity="0.45" stroke="#6a7788" stroke-width="2.5"/>
+<rect x="46" y="86" width="388" height="372" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="30" y="36">A wide shot of the whole kitchen</text><text x="150" y="520">Include the appliances and ventilation</text></g></svg>

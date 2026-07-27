@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<rect x="0" y="440" width="480" height="120" fill="#d9d2c1"/>
+<rect x="96" y="86" width="288" height="374" rx="4" fill="url(#wl)" stroke="#44526a" stroke-width="3"/>
+<!-- door frame + door -->
+<rect x="176" y="150" width="128" height="286" rx="3" fill="#6a7788"/>
+<rect x="186" y="160" width="108" height="276" rx="2" fill="#c8b48f" stroke="#44526a" stroke-width="2.5"/>
+<g fill="none" stroke="#8a744f" stroke-width="2.5">
+ <rect x="198" y="176" width="84" height="66" rx="2"/><rect x="198" y="256" width="84" height="66" rx="2"/>
+ <rect x="198" y="336" width="84" height="84" rx="2"/></g>
+<circle cx="270" cy="300" r="6" fill="#e8bf63" stroke="#9a7a2c" stroke-width="2"/>
+<!-- transom window -->
+<rect x="186" y="122" width="108" height="26" rx="2" fill="#7eb3e8" opacity="0.5" stroke="#6a7788" stroke-width="2"/>
+<!-- house number plate -->
+<rect x="320" y="176" width="42" height="20" rx="3" fill="#dde3ec" stroke="#6a7788" stroke-width="2"/>
+<g stroke="#0d1a2e" stroke-width="3"><line x1="328" y1="180" x2="328" y2="192"/><line x1="338" y1="180" x2="346" y2="192"/><line x1="352" y1="180" x2="352" y2="192"/></g>
+<!-- stoop -->
+<rect x="160" y="436" width="160" height="14" fill="#aab6c8"/>
+<rect x="150" y="450" width="180" height="12" fill="#c4bca7"/>
+<rect x="150" y="104" width="180" height="352" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="24" y="34">Photograph the front door</text><text x="300" y="150">House number</text><text x="28" y="506">Stand back so the whole doorway fits</text></g><g stroke="#4a5e7a" stroke-width="2.5" fill="none"><path d="M330 156 q-18 12 -36 18"/></g></svg>

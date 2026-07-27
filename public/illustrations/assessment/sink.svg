@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="mt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#aab6c8"/><stop offset="0.25" stop-color="#e8edf4"/><stop offset="0.6" stop-color="#f4f8fd"/><stop offset="1" stop-color="#b3bfd0"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#f0f3f8"/>
+<rect x="0" y="360" width="480" height="200" fill="#eef1f6"/>
+<rect x="120" y="360" width="240" height="120" fill="#dde3ec" stroke="#6a7788" stroke-width="2.5"/>
+<!-- basin -->
+<ellipse cx="240" cy="330" rx="110" ry="34" fill="#ffffff" stroke="#44526a" stroke-width="3"/>
+<ellipse cx="240" cy="330" rx="86" ry="24" fill="#7eb3e8" opacity="0.2" stroke="#6a7788" stroke-width="2"/>
+<!-- faucet -->
+<path d="M240 300 L240 210 Q240 176 276 176 L300 176" fill="none" stroke="url(#mt)" stroke-width="12" stroke-linecap="round"/>
+<rect x="216" y="298" width="48" height="16" rx="4" fill="#aab6c8" stroke="#6a7788" stroke-width="2"/>
+<rect x="100" y="150" width="280" height="308" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="58" y="36">The bathroom sink</text></g></svg>

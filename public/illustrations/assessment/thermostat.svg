@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<rect x="60" y="70" width="360" height="420" rx="6" fill="url(#wl)" stroke="#44526a" stroke-width="3"/>
+<!-- thermostat body -->
+<rect x="168" y="196" width="144" height="168" rx="14" fill="#eef1f6" stroke="#44526a" stroke-width="3"/>
+<rect x="188" y="220" width="104" height="80" rx="8" fill="#0d1a2e"/>
+<text x="206" y="272" font-size="34" font-weight="800" fill="#3ecf8e" font-family="JetBrains Mono, monospace">68°</text>
+<g fill="#aab6c8" stroke="#6a7788" stroke-width="2"><circle cx="210" cy="330" r="10"/><circle cx="270" cy="330" r="10"/></g>
+<rect x="150" y="178" width="180" height="204" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="46" y="36">The thermostat</text><text x="150" y="520">Show the display and model</text></g></svg>

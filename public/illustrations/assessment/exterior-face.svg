@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<rect x="0" y="470" width="480" height="90" fill="#d9d2c1"/>
+<!-- gable house -->
+<path d="M96 210 L240 108 L384 210 Z" fill="#b9c2cf" stroke="#44526a" stroke-width="3"/>
+<rect x="120" y="210" width="240" height="260" fill="url(#wl)" stroke="#44526a" stroke-width="3"/>
+<!-- windows -->
+<g fill="#7eb3e8" opacity="0.55" stroke="#6a7788" stroke-width="2.5">
+ <rect x="150" y="250" width="56" height="66"/><rect x="274" y="250" width="56" height="66"/>
+ <rect x="150" y="360" width="56" height="66"/></g>
+<g stroke="#6a7788" stroke-width="2"><line x1="178" y1="250" x2="178" y2="316"/><line x1="150" y1="283" x2="206" y2="283"/>
+ <line x1="302" y1="250" x2="302" y2="316"/><line x1="274" y1="283" x2="330" y2="283"/>
+ <line x1="178" y1="360" x2="178" y2="426"/><line x1="150" y1="393" x2="206" y2="393"/></g>
+<!-- door -->
+<rect x="270" y="368" width="60" height="102" rx="2" fill="#c8b48f" stroke="#44526a" stroke-width="2.5"/>
+<circle cx="322" cy="420" r="4" fill="#9a7a2c"/>
+<!-- chimney -->
+<rect x="320" y="128" width="26" height="46" fill="#6a7788"/>
+<rect x="80" y="96" width="320" height="386" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="20" y="34">Photograph this entire side of the building</text><text x="150" y="520">Stand back — fit roofline to ground</text><text x="150" y="544">One photo per face (N / E / S / W)</text></g></svg>

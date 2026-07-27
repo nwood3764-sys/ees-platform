@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<!-- ceiling looking up -->
+<rect x="96" y="90" width="288" height="380" rx="4" fill="#f4f6fa" stroke="#44526a" stroke-width="3"/>
+<!-- fan grille -->
+<rect x="168" y="180" width="144" height="200" rx="8" fill="#eef1f6" stroke="#44526a" stroke-width="3"/>
+<g stroke="#6a7788" stroke-width="4">
+ <line x1="182" y1="200" x2="298" y2="200"/><line x1="182" y1="224" x2="298" y2="224"/>
+ <line x1="182" y1="248" x2="298" y2="248"/><line x1="182" y1="272" x2="298" y2="272"/>
+ <line x1="182" y1="296" x2="298" y2="296"/><line x1="182" y1="320" x2="298" y2="320"/>
+ <line x1="182" y1="344" x2="298" y2="344"/></g>
+<rect x="150" y="160" width="180" height="240" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="20" y="36">The ceiling exhaust fan</text><text x="150" y="520">Look up at the ceiling</text><text x="150" y="544">Skip if none is present</text></g></svg>

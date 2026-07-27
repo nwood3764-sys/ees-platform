@@ -835,6 +835,28 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
             ref={videoRef} type="file" accept="video/*" capture="environment"
             onChange={onVideoFile} style={{ display: 'none' }}
           />
+          {step.reference_photo_url && (
+            <button
+              onClick={() => (isVideoStep ? videoRef.current?.click() : triggerCapture('general'))}
+              disabled={uploading || busy}
+              style={{
+                appearance: 'none', cursor: 'pointer', display: 'block', width: '100%',
+                background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+                padding: 0, overflow: 'hidden', marginBottom: 10,
+              }}
+              aria-label={isVideoStep ? 'Record video like this example' : 'Take photo like this example'}
+            >
+              <img src={step.reference_photo_url} alt="Example"
+                style={{ display: 'block', width: '100%', maxHeight: '52dvh', objectFit: 'contain', background: '#ffffff' }} />
+              <span style={{
+                display: 'block', padding: '7px 10px', borderTop: `1px solid ${C.border}`,
+                fontFamily: FONT, fontSize: 12.5, fontWeight: 600, color: C.textSecondary,
+                background: C.cardSecondary, textAlign: 'center',
+              }}>
+                Example — {isVideoStep ? 'record like this' : 'take your photo like this'} · tap to open the camera
+              </span>
+            </button>
+          )}
           <div style={{ display: 'flex', gap: 8, marginBottom: gap ? 8 : 0, flexWrap: 'wrap' }}>
             {isVideoStep ? (
               <CaptureBtn label="Record Video" icon="video" onClick={() => videoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />

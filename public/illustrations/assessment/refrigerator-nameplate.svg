@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="mt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#aab6c8"/><stop offset="0.25" stop-color="#e8edf4"/><stop offset="0.6" stop-color="#f4f8fd"/><stop offset="1" stop-color="#b3bfd0"/></linearGradient><linearGradient id="pl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f8fd"/><stop offset="1" stop-color="#dfe9f5"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#f2efe8"/>
+<!-- fridge with open door, label inside -->
+<rect x="40" y="70" width="120" height="200" rx="6" fill="url(#mt)" stroke="#44526a" stroke-width="3"/>
+<path d="M160 74 L214 64 L214 250 L160 262 Z" fill="#eef1f6" stroke="#6a7788" stroke-width="2.5"/>
+<rect x="66" y="110" width="60" height="44" rx="3" fill="url(#pl)" stroke="#7eb3e8" stroke-width="3"/>
+<g stroke="#7eb3e8" stroke-width="2"><line x1="74" y1="122" x2="118" y2="122"/><line x1="74" y1="132" x2="112" y2="132"/><line x1="74" y1="142" x2="118" y2="142"/></g>
+<!-- magnifier -->
+<circle cx="196" cy="196" r="30" fill="#ffffff" opacity="0.35"/><circle cx="196" cy="196" r="30" fill="none" stroke="#2a6bb0" stroke-width="5"/>
+<line x1="218" y1="218" x2="250" y2="250" stroke="#2a6bb0" stroke-width="7" stroke-linecap="round"/>
+<!-- zoomed label -->
+<rect x="72" y="286" width="338" height="210" rx="10" fill="url(#pl)" stroke="#44526a" stroke-width="3"/>
+<rect x="88" y="300" width="150" height="22" rx="3" fill="#24478a"/>
+<g stroke="#7d92b3" stroke-width="3"><line x1="96" y1="352" x2="360" y2="352"/><line x1="96" y1="380" x2="330" y2="380"/></g>
+<rect x="96" y="404" width="180" height="34" fill="#ffffff" stroke="#7d92b3" stroke-width="2"/>
+<line x1="96" y1="462" x2="280" y2="462" stroke="#7d92b3" stroke-width="3"/>
+<rect x="54" y="270" width="374" height="242" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="26" y="34">The refrigerator's data label</text><text x="224" y="110">Often inside</text><text x="224" y="132">the door</text><text x="96" y="540">Model and serial numbers must be readable</text></g></svg>

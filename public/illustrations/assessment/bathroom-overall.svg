@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#f0f3f8"/>
+<rect x="0" y="440" width="480" height="120" fill="#e4dfd2"/>
+<!-- vanity + sink -->
+<rect x="70" y="300" width="130" height="140" fill="#eef1f6" stroke="#6a7788" stroke-width="2.5"/>
+<ellipse cx="135" cy="308" rx="52" ry="12" fill="#dde3ec" stroke="#6a7788" stroke-width="2"/>
+<!-- mirror -->
+<rect x="86" y="150" width="98" height="110" rx="4" fill="#7eb3e8" opacity="0.4" stroke="#6a7788" stroke-width="2.5"/>
+<!-- toilet -->
+<ellipse cx="290" cy="400" rx="40" ry="24" fill="#eef1f6" stroke="#44526a" stroke-width="2.5"/>
+<rect x="266" y="300" width="48" height="80" rx="5" fill="#eef1f6" stroke="#44526a" stroke-width="2.5"/>
+<!-- shower -->
+<rect x="352" y="150" width="72" height="290" fill="#7eb3e8" opacity="0.16" stroke="#6a7788" stroke-width="2.5"/>
+<circle cx="388" cy="176" r="12" fill="#dde3ec" stroke="#6a7788" stroke-width="2"/>
+<line x1="388" y1="164" x2="388" y2="150" stroke="#6a7788" stroke-width="3"/>
+<rect x="54" y="132" width="372" height="326" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="30" y="36">A wide shot of the whole bathroom</text><text x="150" y="520">Include sink, toilet, and shower/tub</text></g></svg>

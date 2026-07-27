@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<rect x="0" y="430" width="480" height="130" fill="#d9d2c1"/>
+<!-- house -->
+<path d="M170 250 L240 196 L310 250 Z" fill="#b9c2cf" stroke="#44526a" stroke-width="3"/>
+<rect x="186" y="250" width="108" height="140" fill="url(#wl)" stroke="#44526a" stroke-width="3"/>
+<rect x="206" y="330" width="30" height="60" fill="#c8b48f" stroke="#6a7788" stroke-width="2"/>
+<rect x="252" y="278" width="34" height="34" fill="#7eb3e8" opacity="0.5" stroke="#6a7788" stroke-width="2"/>
+<!-- circular arrow around it -->
+<path d="M120 320 A130 74 0 1 1 360 320" fill="none" stroke="#3ecf8e" stroke-width="7" stroke-dasharray="2 0" stroke-linecap="round"/>
+<path d="M120 320 A130 74 0 0 0 240 396" fill="none" stroke="#3ecf8e" stroke-width="7" stroke-linecap="round"/>
+<path d="M232 384 L242 398 L256 390" fill="none" stroke="#3ecf8e" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="64" y="170" width="352" height="290" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="24" y="36">Walk all the way around the building</text><text x="150" y="520">One slow, continuous video</text><text x="150" y="544">Capture the entire exterior</text></g></svg>

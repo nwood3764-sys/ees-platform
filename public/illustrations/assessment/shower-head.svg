@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="mt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#aab6c8"/><stop offset="0.25" stop-color="#e8edf4"/><stop offset="0.6" stop-color="#f4f8fd"/><stop offset="1" stop-color="#b3bfd0"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<!-- arm -->
+<path d="M120 140 L210 140 Q250 140 262 176" fill="none" stroke="url(#mt)" stroke-width="14" stroke-linecap="round"/>
+<!-- head -->
+<ellipse cx="286" cy="206" rx="46" ry="26" fill="#aab6c8" stroke="#44526a" stroke-width="3" transform="rotate(28 286 206)"/>
+<g stroke="#7eb3e8" stroke-width="4" stroke-linecap="round" opacity="0.8">
+ <line x1="270" y1="250" x2="258" y2="320"/><line x1="292" y1="256" x2="284" y2="330"/>
+ <line x1="312" y1="252" x2="312" y2="326"/><line x1="330" y1="244" x2="342" y2="316"/></g>
+<rect x="104" y="104" width="272" height="286" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="48" y="36">The shower head</text></g></svg>

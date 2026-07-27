@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs></defs><rect x="0" y="0" width="480" height="560" fill="#f0f3f8"/>
+<rect x="0" y="452" width="480" height="108" fill="#e4dfd2"/>
+<!-- tank -->
+<rect x="150" y="150" width="180" height="120" rx="8" fill="#eef1f6" stroke="#44526a" stroke-width="3"/>
+<rect x="150" y="146" width="180" height="20" rx="6" fill="#dde3ec" stroke="#6a7788" stroke-width="2"/>
+<circle cx="316" cy="180" r="7" fill="#aab6c8" stroke="#6a7788" stroke-width="2"/>
+<!-- bowl -->
+<path d="M176 270 L304 270 Q300 340 240 366 Q180 340 176 270 Z" fill="#eef1f6" stroke="#44526a" stroke-width="3"/>
+<ellipse cx="240" cy="292" rx="52" ry="20" fill="#7eb3e8" opacity="0.2" stroke="#6a7788" stroke-width="2"/>
+<!-- base -->
+<path d="M210 366 L270 366 L286 452 L194 452 Z" fill="#dde3ec" stroke="#44526a" stroke-width="2.5"/>
+<rect x="140" y="132" width="200" height="340" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="64" y="36">The toilet</text><text x="150" y="520">Gallons per flush is often stamped</text><text x="150" y="544">inside the tank near the seat hinge</text></g></svg>
