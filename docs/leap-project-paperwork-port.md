@@ -293,6 +293,49 @@ first, then ship.
 
 ## 7c. NEXT SESSION — Sealed sectioning, then the template editor
 
+> **PHASES A + B SHIPPED (2026-07-27, branch
+> `claude/sealed-docs-template-editor-jhtz3i`).**
+>
+> **Phase A — Sealed documents are now sectioned.** `buildSealedPdf(m, kind,
+> sections)` iterates ten named renderers (`SEALED_SECTION_RENDERERS` in
+> `paperworkModel.js`) drawn against `buildSealedContext` — its own helpers
+> (`bh`, `lines9`, zebra fill, the reusable rebate `sect`), not the EES grid
+> helpers. Section types: `sealed_primary_contractor_block`,
+> `sealed_document_details_block`, `sealed_bill_to_block`,
+> `sealed_project_address_block`, `sealed_title`, `sealed_line_items_table`,
+> `sealed_rebate_section` (parameterised by `config.variant` = `ira` | `foe`),
+> `sealed_totals_list`, `sealed_signature_block` (9 distinct types; the rebate
+> section appears twice in the default list). Red amounts kept.
+> `DEFAULT_DOCUMENT_SECTIONS.sealedProposal` / `.sealedInvoice` reproduce the
+> two documents **byte-identically** (verified vs. the pre-refactor output and
+> vs. the seeded DB rows). New `DOCUMENT_KIND_ENGINE` +
+> `SECTION_TYPES_BY_ENGINE` + `buildSubmittalPdf(m, kind, sections)` are the
+> single EES/Sealed dispatch used by the modal, editor, and preview. `sdt_kind`
+> widened with `sealed_proposal` / `sealed_invoice` (migration
+> `20260727025206`, applied to prod, advisors unchanged at ~202) and both
+> Sealed templates seeded fully populated. Harnesses extended:
+> `paperwork-section-parity.mjs` + `paperwork-db-template-parity.mjs` now cover
+> both Sealed docs, and `paperwork-math-fixture.mjs` (38 program-math checks)
+> is committed.
+>
+> **Phase B — the template editor is live.** Lazy
+> `src/components/SubmittalDocumentTemplateEditor.jsx`, opened from an SDT
+> record via the **Edit Sections** action (`edit_submittal_template` in
+> `recordActions.js`). dnd-kit reorder (shared `SortableList`), Add-Section
+> palette keyed on the engine (EES vs Sealed never mixed), activate/deactivate,
+> remove, typed config forms from new `src/data/submittalSectionSchemas.js`
+> (text / string-list / row-grid / select, JSON fallback), a live PDF preview
+> beside the list (regenerates through `buildSubmittalPdf`), and **Clone
+> Template** scoping the copy to an opportunity record type. Service layer in
+> `paperworkService.js`: `loadSubmittalTemplateForEdit`,
+> `saveSubmittalTemplateSections`, `cloneSubmittalTemplate`,
+> `loadOpportunityRecordTypeOptions`. Admin-gated by the existing
+> `app_user_can` RLS. Help article **HA-00151**
+> (`editing-submittal-document-templates`).
+>
+> **Remaining: Phase C — the signing route (§7b), unchanged.** Needs a
+> controlled internal test send before deploying.
+
 State as of 2026-07-27 (PRs #223, #231, #238, #241, #243, #245 all merged and
 live). Documents are stored templates; what remains is coverage and authoring.
 

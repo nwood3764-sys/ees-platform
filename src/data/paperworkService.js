@@ -16,6 +16,7 @@
 // ===========================================================================
 
 import { supabase } from '../lib/supabase'
+import { getCurrentUserId } from './layoutService'
 import { parseAssetScoreText, fillPaperworkWorkbook } from './paperworkModel'
 
 /**
@@ -59,6 +60,166 @@ export async function loadSubmittalDocumentTemplate(documentKey, opportunityReco
     console.warn('loadSubmittalDocumentTemplate failed; using built-in sections:', e.message)
     return null
   }
+}
+
+// ---------------------------------------------------------------------------
+// Template editor — load one template with all its sections (including
+// inactive, which the read path filters out), save the edited section list,
+// and clone a template scoped to an opportunity record type.
+// ---------------------------------------------------------------------------
+
+/**
+ * Load a single template by id with its full (non-deleted) section list, for
+ * editing. Unlike loadSubmittalDocumentTemplate this keeps inactive sections
+ * (so they can be re-activated) and returns each section's real row id.
+ */
+export async function loadSubmittalTemplateForEdit(sdtId) {
+  const { data, error } = await supabase
+    .from('submittal_document_templates')
+    .select(`
+      id, sdt_record_number, sdt_name, sdt_kind, sdt_document_key,
+      sdt_opportunity_record_type, sdt_is_active,
+      sections:submittal_document_template_sections (
+        id, sdts_name, sdts_section_type, sdts_config, sdts_sort_order,
+        sdts_is_active, sdts_is_deleted
+      )
+    `)
+    .eq('id', sdtId)
+    .eq('sdt_is_deleted', false)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  const sections = (data.sections || [])
+    .filter(s => !s.sdts_is_deleted)
+    .sort((a, b) => (a.sdts_sort_order ?? 0) - (b.sdts_sort_order ?? 0))
+    .map(s => ({
+      id: s.id,
+      name: s.sdts_name,
+      type: s.sdts_section_type,
+      config: s.sdts_config || {},
+      isActive: s.sdts_is_active !== false,
+    }))
+  return {
+    id: data.id,
+    recordNumber: data.sdt_record_number,
+    name: data.sdt_name,
+    kind: data.sdt_kind,
+    documentKey: data.sdt_document_key,
+    opportunityRecordType: data.sdt_opportunity_record_type,
+    sections,
+  }
+}
+
+/**
+ * Persist the edited section list for a template. Sections are matched by id:
+ * existing rows are updated (type/config/order/active), new rows (no id) are
+ * inserted, and existing rows absent from the list are soft-deleted. Returns
+ * the reloaded template.
+ */
+export async function saveSubmittalTemplateSections(sdtId, sections, sectionLabelFor) {
+  const userId = await getCurrentUserId()
+  const nowIso = new Date().toISOString()
+
+  // Existing (non-deleted) rows for this template.
+  const { data: existing, error: exErr } = await supabase
+    .from('submittal_document_template_sections')
+    .select('id')
+    .eq('sdt_id', sdtId)
+    .eq('sdts_is_deleted', false)
+  if (exErr) throw new Error(exErr.message)
+  const keptIds = new Set(sections.filter(s => s.id).map(s => s.id))
+  const toDelete = (existing || []).map(r => r.id).filter(id => !keptIds.has(id))
+
+  // Soft-delete removed rows.
+  for (const id of toDelete) {
+    const { error } = await supabase
+      .from('submittal_document_template_sections')
+      .update({ sdts_is_deleted: true, sdts_deleted_at: nowIso, sdts_deleted_by: userId,
+        sdts_deletion_reason: 'Removed in template editor', sdts_updated_by: userId, sdts_updated_at: nowIso })
+      .eq('id', id)
+    if (error) throw new Error(error.message)
+  }
+
+  // Update existing, insert new — one round trip each keeps the code readable
+  // and the section counts here are small (≤ ~12).
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i]
+    const label = (sectionLabelFor && sectionLabelFor(s.type)) || s.name || s.type
+    if (s.id) {
+      const { error } = await supabase
+        .from('submittal_document_template_sections')
+        .update({ sdts_name: label, sdts_section_type: s.type, sdts_config: s.config || {},
+          sdts_sort_order: (i + 1) * 10, sdts_is_active: s.isActive !== false,
+          sdts_updated_by: userId, sdts_updated_at: nowIso })
+        .eq('id', s.id)
+      if (error) throw new Error(error.message)
+    } else {
+      const { error } = await supabase
+        .from('submittal_document_template_sections')
+        .insert({ sdts_record_number: '', sdt_id: sdtId, sdts_name: label,
+          sdts_section_type: s.type, sdts_config: s.config || {}, sdts_sort_order: (i + 1) * 10,
+          sdts_is_active: s.isActive !== false, sdts_owner: userId, sdts_created_by: userId })
+      if (error) throw new Error(error.message)
+    }
+  }
+  return loadSubmittalTemplateForEdit(sdtId)
+}
+
+/**
+ * Clone a template (header + all active, non-deleted sections), scoping the
+ * copy to an opportunity record type. Mirrors clone_document_template's
+ * semantics: a program's document is a COPY of a working one, not a rebuild.
+ * The unique index (sdt_document_key, sdt_opportunity_record_type) enforces one
+ * template per program per document key.
+ */
+export async function cloneSubmittalTemplate(sourceSdtId, { opportunityRecordTypeId, name } = {}) {
+  const userId = await getCurrentUserId()
+  const source = await loadSubmittalTemplateForEdit(sourceSdtId)
+  if (!source) throw new Error('Source template not found')
+  if (!opportunityRecordTypeId) throw new Error('Pick a program (opportunity record type) to scope the copy to')
+
+  const { data: created, error: cErr } = await supabase
+    .from('submittal_document_templates')
+    .insert({
+      sdt_record_number: '',
+      sdt_name: name || `${source.name} (Copy)`,
+      sdt_document_key: source.documentKey,
+      sdt_kind: source.kind,
+      sdt_opportunity_record_type: opportunityRecordTypeId,
+      sdt_owner: userId, sdt_created_by: userId,
+    })
+    .select('id')
+    .single()
+  if (cErr) throw new Error(cErr.message)
+
+  const rows = source.sections
+    .filter(s => s.isActive !== false)
+    .map((s, i) => ({
+      sdts_record_number: '', sdt_id: created.id, sdts_name: s.name || s.type,
+      sdts_section_type: s.type, sdts_config: s.config || {}, sdts_sort_order: (i + 1) * 10,
+      sdts_is_active: true, sdts_owner: userId, sdts_created_by: userId,
+    }))
+  if (rows.length) {
+    const { error: sErr } = await supabase.from('submittal_document_template_sections').insert(rows)
+    if (sErr) throw new Error(sErr.message)
+  }
+  return created.id
+}
+
+/**
+ * Opportunity record types available to scope a cloned template to. Returns
+ * [{ id, value, label }] active opportunity record-type picklist values.
+ */
+export async function loadOpportunityRecordTypeOptions() {
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('id, picklist_value, picklist_label')
+    .eq('picklist_object', 'opportunities')
+    .eq('picklist_field', 'record_type')
+    .eq('picklist_is_active', true)
+    .order('picklist_label')
+  if (error) throw new Error(error.message)
+  return (data || []).map(r => ({ id: r.id, value: r.picklist_value, label: r.picklist_label || r.picklist_value }))
 }
 
 /**
