@@ -622,9 +622,39 @@ export function SummaryLayout({ result }) {
 function groupingFieldDef(g) {
   if (!g) return { name: null, via_path: null }
   return {
-    name:         g.name || g.field_name,
-    via_path:     g.via_path || g.field_via_path || null,
-    _is_picklist: !!g._is_picklist,
+    name:             g.name || g.field_name,
+    via_path:         g.via_path || g.field_via_path || null,
+    _is_picklist:     !!g._is_picklist,
+    date_granularity: g.date_granularity || null,
+  }
+}
+
+// Bucket a date/datetime value into a grain label (Salesforce date bucketing).
+// Returns { key, sortKey } so buckets sort chronologically even though the
+// display label is a friendly string.
+function bucketDate(value, grain) {
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return { key: '(blank)', sortKey: '' }
+  const y = d.getFullYear()
+  const m = d.getMonth()
+  const pad = (n) => String(n).padStart(2, '0')
+  switch (grain) {
+    case 'year':
+      return { key: String(y), sortKey: `${y}` }
+    case 'quarter': {
+      const q = Math.floor(m / 3) + 1
+      return { key: `Q${q} ${y}`, sortKey: `${y}-${q}` }
+    }
+    case 'month':
+      return { key: d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }), sortKey: `${y}-${pad(m + 1)}` }
+    case 'week': {
+      // ISO-ish: week starting Sunday. Label with the week-start date.
+      const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay())
+      return { key: `Week of ${start.toLocaleDateString()}`, sortKey: start.toISOString().slice(0, 10) }
+    }
+    case 'day':
+    default:
+      return { key: d.toLocaleDateString(), sortKey: `${y}-${pad(m + 1)}-${pad(d.getDate())}` }
   }
 }
 
@@ -633,26 +663,47 @@ function buildGroupTree(rows, columns, groupings, level = 0, ctx = null) {
     return { leafRows: rows }
   }
   const g = groupings[level]
-  const buckets = new Map()
+  const grain = g.date_granularity || null
+  const buckets = new Map()      // key → rows
+  const sortKeys = new Map()     // key → chronological/lexical sort key
   // The grouping object IS the field descriptor — it carries name, via_path
   // and _is_picklist — so getRowValue resolves picklist and lookup group keys
   // to their labels instead of bucketing on raw UUIDs.
   const fieldDef = groupingFieldDef(g)
   for (const row of rows) {
-    const key = getRowValue(row, fieldDef, ctx)
-    const k = key ?? '(blank)'
-    if (!buckets.has(k)) buckets.set(k, [])
+    const raw = getRowValue(row, fieldDef, ctx)
+    let k, sk
+    if (grain && raw != null && raw !== '') {
+      const b = bucketDate(raw, grain)
+      k = b.key; sk = b.sortKey
+    } else {
+      k = raw ?? '(blank)'; sk = k
+    }
+    if (!buckets.has(k)) { buckets.set(k, []); sortKeys.set(k, sk) }
     buckets.get(k).push(row)
   }
-  // Sort group keys
-  const sorted = Array.from(buckets.entries()).sort((a, b) => {
-    const dir = g.sort_direction === 'desc' ? -1 : 1
-    if (a[0] === b[0]) return 0
-    return a[0] < b[0] ? -1 * dir : 1 * dir
+
+  // Sort groups: by value (default), by record count, or by the report's
+  // measure. Direction respected either way.
+  const dir = g.sort_direction === 'desc' ? -1 : 1
+  const sortBy = g.sort_by_aggregate || 'value'
+  const measure = ctx?.measure || { type: 'count', field: null }
+  const entries = Array.from(buckets.entries())
+  entries.sort((a, b) => {
+    if (sortBy === 'count') return (a[1].length - b[1].length) * dir
+    if (sortBy === 'measure') return (applyMeasure(a[1], measure, ctx) - applyMeasure(b[1], measure, ctx)) * dir
+    const ka = sortKeys.get(a[0]), kb = sortKeys.get(b[0])
+    if (ka === kb) return 0
+    // Numeric-aware value sort (chronological for bucketed dates via sortKey).
+    const na = parseFloat(ka), nb = parseFloat(kb)
+    if (Number.isFinite(na) && Number.isFinite(nb) && String(na) === String(ka) && String(nb) === String(kb)) {
+      return (na - nb) * dir
+    }
+    return (String(ka) < String(kb) ? -1 : 1) * dir
   })
   return {
     groupingLevel: level,
-    children: sorted.map(([key, group_rows]) => ({
+    children: entries.map(([key, group_rows]) => ({
       value: key,
       level,
       rows: group_rows,
@@ -713,55 +764,81 @@ function SummaryGroupNode({ node, columns, groupings, depth, ctx, summaryCalcFie
   )
 }
 
+// Aggregate one column over a set of resolved rows per its `summarize` mode.
+// Returns a formatted string, or null when the column requests no summary.
+function summarizeColumnValue(col, resolvedRows) {
+  if (!col.summarize) return null
+  const nums = []
+  for (const rr of resolvedRows) {
+    const v = rr[col.name]
+    const n = typeof v === 'number' ? v : parseFloat(v)
+    if (Number.isFinite(n)) nums.push(n)
+  }
+  let val
+  switch (col.summarize) {
+    case 'count': val = resolvedRows.length; break
+    case 'sum':   val = nums.reduce((a, b) => a + b, 0); break
+    case 'avg':   val = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null; break
+    case 'min':   val = nums.length ? Math.min(...nums) : null; break
+    case 'max':   val = nums.length ? Math.max(...nums) : null; break
+    default: return null
+  }
+  if (val == null) return '—'
+  const tag = { sum:'Σ', avg:'avg', min:'min', max:'max', count:'#' }[col.summarize]
+  return `${tag} ${formatCellValue(val, col.type)}`
+}
+
+// Build the column-aligned cells for a subtotal / grand-total row: cell 0 is
+// the label; each other column shows its own per-column summarize aggregate;
+// summary calc-field values drop into the remaining empty rightmost cells so
+// existing summary-formula reports keep working.
+function summaryRowCells({ label, rows, columns, ctx, calcFields, aggregableColumnNames, bold }) {
+  const resolved = buildResolvedRows(rows, columns, ctx)
+  const aggs = computeAggregates(resolved, aggregableColumnNames)
+  const cells = columns.map((c, i) => (i === 0 ? label : summarizeColumnValue(c, resolved)))
+  // Place calc-field values into the empty trailing cells (right to left) so
+  // per-column summaries keep their own columns and formulas fill the gaps.
+  const calcVals = (calcFields || []).map(cf => ({
+    text: formatCellValue(evaluateSummaryExpression(cf.expression, aggs), cf.data_type),
+    title: `${cf.label} (${cf.expression})`,
+  }))
+  const emptySlots = []
+  for (let i = columns.length - 1; i >= 1; i--) if (cells[i] == null) emptySlots.push(i)
+  for (let k = calcVals.length - 1, s = 0; k >= 0 && s < emptySlots.length; k--, s++) {
+    cells[emptySlots[s]] = calcVals[k]
+  }
+  return cells.map((cell, i) => {
+    const isCalc = cell && typeof cell === 'object'
+    return (
+      <td key={i} style={{ ...cellStyle(), fontWeight: bold ? 700 : 500, color: i === 0 ? C.textSecondary : C.textPrimary, fontStyle: i === 0 && !bold ? 'italic' : 'normal' }}
+          title={isCalc ? cell.title : undefined}>
+        {isCalc ? cell.text : (cell || '')}
+      </td>
+    )
+  })
+}
+
 function SummarySubtotalRow({ groupValue, grouping, groupRows, columns, depth, ctx, summaryCalcFields, aggregableColumnNames, gradeLevel }) {
-  // Subtotal label spans roughly the leftmost cells; calc-field values
-  // populate trailing columns in the order they appear in summaryCalcFields.
   const applicableCalc = (summaryCalcFields || []).filter(cf =>
     cf.grouping_level == null || cf.grouping_level === gradeLevel
   )
-  const aggs = computeAggregates(buildResolvedRows(groupRows, columns, ctx), aggregableColumnNames)
   return (
     <tr style={{ background: '#f0f3f8', borderTop:`1px solid ${C.borderDark}` }}>
-      <td style={{ ...cellStyle(), fontWeight:500, fontStyle:'italic', color:C.textSecondary, paddingLeft: 12 + depth * 16 }}>
-        Subtotal — {grouping.field_label}: {String(groupValue)} ({groupRows.length} rows)
-      </td>
-      {/* Fill across remaining columns. Calc-field values fill rightmost
-          cells; intermediate cells stay blank. */}
-      {Array.from({ length: Math.max(0, columns.length - 1 - applicableCalc.length) }, (_, i) => (
-        <td key={`fill-${i}`} style={cellStyle()} />
-      ))}
-      {applicableCalc.map((cf, idx) => {
-        const v = evaluateSummaryExpression(cf.expression, aggs)
-        return (
-          <td key={`calc-${idx}`} style={{ ...cellStyle(), fontWeight:500, color:C.textPrimary }} title={`${cf.label} (${cf.expression})`}>
-            {formatCellValue(v, cf.data_type)}
-          </td>
-        )
+      {summaryRowCells({
+        label: `Subtotal — ${grouping.field_label}: ${String(groupValue)} (${groupRows.length})`,
+        rows: groupRows, columns, ctx, calcFields: applicableCalc, aggregableColumnNames, bold: false,
       })}
     </tr>
   )
 }
 
 function SummaryTotalRow({ rows, columns, summaryCalcFields, aggregableColumnNames, ctx }) {
-  // Grand total — apply summary calc fields with grouping_level === null
-  // (or unspecified) since they apply at the top level.
   const grandTotalCalc = (summaryCalcFields || []).filter(cf => cf.grouping_level == null)
-  const aggs = computeAggregates(buildResolvedRows(rows, columns, ctx), aggregableColumnNames)
   return (
     <tr style={{ background: C.borderDark, borderTop:`2px solid ${C.textSecondary}` }}>
-      <td style={{ ...cellStyle(), fontWeight:700, color:C.textPrimary }}>
-        Grand Total — {rows.length} rows
-      </td>
-      {Array.from({ length: Math.max(0, columns.length - 1 - grandTotalCalc.length) }, (_, i) => (
-        <td key={`gfill-${i}`} style={cellStyle()} />
-      ))}
-      {grandTotalCalc.map((cf, idx) => {
-        const v = evaluateSummaryExpression(cf.expression, aggs)
-        return (
-          <td key={`gcalc-${idx}`} style={{ ...cellStyle(), fontWeight:700, color:C.textPrimary }} title={`${cf.label} (${cf.expression})`}>
-            {formatCellValue(v, cf.data_type)}
-          </td>
-        )
+      {summaryRowCells({
+        label: `Grand Total — ${rows.length} rows`,
+        rows, columns, ctx, calcFields: grandTotalCalc, aggregableColumnNames, bold: true,
       })}
     </tr>
   )

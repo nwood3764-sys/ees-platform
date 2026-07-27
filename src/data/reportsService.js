@@ -1572,6 +1572,7 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
       via_path:          g.rgr_field_via_path,
       _is_picklist:      isPicklistField(g.rgr_field_name, g.rgr_field_table, g.rgr_field_via_path),
       sort_direction:    g.rgr_sort_direction,
+      sort_by_aggregate: g.rgr_sort_by_aggregate,
       show_subtotal:     g.rgr_show_subtotal,
       date_granularity:  g.rgr_date_granularity,
     })),

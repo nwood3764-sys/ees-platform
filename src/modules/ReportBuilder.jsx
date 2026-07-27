@@ -447,6 +447,9 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
                 report={report} updateReport={updateReport}
                 groupings={groupings} setGroupings={setGroupings}
                 fieldTree={fieldTree}
+                primaryObject={report.rpt_primary_object}
+                expandedRelated={expandedRelated}
+                onExpandRelated={handleExpandRelated}
               />
             )}
             {tab === 'calc_fields' && (
@@ -1633,16 +1636,47 @@ function CrossFilterRow({ filter: f, idx, primaryObject, primaryOptions, onUpdat
 
 // ─── Groupings tab ────────────────────────────────────────────────────────
 
-function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree }) {
+// Date-bucketing grains offered when a grouping field is a date/datetime.
+const DATE_GRAINS = [
+  { value: '',        label: 'Exact date' },
+  { value: 'day',     label: 'Day' },
+  { value: 'week',    label: 'Week' },
+  { value: 'month',   label: 'Month' },
+  { value: 'quarter', label: 'Quarter' },
+  { value: 'year',    label: 'Year' },
+]
+
+function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree, primaryObject, expandedRelated, onExpandRelated }) {
   const formatLabel = report.rpt_format
+  const fieldCatalog = useMemo(
+    () => buildFieldCatalog(primaryObject, fieldTree, expandedRelated),
+    [primaryObject, fieldTree, expandedRelated],
+  )
+  const kindOfGrouping = (g) => {
+    const entry = fieldCatalog.byKey.get(`${g.field_table || ''}|${g.field_name || ''}|${(g.field_via_path || []).join('>')}`)
+    return entry?.kind || 'text'
+  }
+
   const addGrouping = () => {
     if (groupings.length >= 6) { alert('Maximum 6 row groupings.'); return }
-    setGroupings([...groupings, { field_name:'', sort_direction:'asc', show_subtotal:true }])
+    setGroupings([...groupings, { field_name:'', field_table:primaryObject, field_via_path:null, sort_direction:'asc', sort_by_aggregate:'value', show_subtotal:true }])
   }
   const updateGrouping = (idx, patch) => {
     setGroupings(groupings.map((g, i) => i === idx ? { ...g, ...patch } : g))
   }
   const removeGrouping = (idx) => setGroupings(groupings.filter((_, i) => i !== idx))
+
+  // Grouping ⇄ field-catalog value bridge (same JSON shape as the filter picker).
+  const groupingCatalogValue = (g) => {
+    const entry = fieldCatalog.byKey.get(`${g.field_table || ''}|${g.field_name || ''}|${(g.field_via_path || []).join('>')}`)
+    return entry ? entry.value : ''
+  }
+  const onGroupingFieldChange = (idx, jsonValue) => {
+    let parsed = null
+    try { parsed = JSON.parse(jsonValue) } catch { /* ignore */ }
+    if (!parsed) return
+    updateGrouping(idx, { field_name: parsed.n, field_table: parsed.t, field_via_path: parsed.v || null, date_granularity: null })
+  }
 
   if (formatLabel === 'tabular') {
     return (
@@ -1667,34 +1701,58 @@ function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree
         {groupings.length === 0 ? (
           <div style={emptyState()}>No groupings yet. Click "Add Grouping" to add one.</div>
         ) : (
-          groupings.map((g, idx) => (
-            <div key={idx} style={{
-              display:'grid', gridTemplateColumns:'30px 1fr 100px 100px 30px',
-              gap:8, marginBottom:8, alignItems:'center',
-            }}>
-              <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
-              <SearchableCombo
-                value={g.field_name}
-                options={columnsToOptions(fieldTree?.primary?.columns)}
-                onChange={v => updateGrouping(idx, { field_name: v })}
-                placeholder="— Field —"
-              />
-              <select
-                value={g.sort_direction}
-                onChange={e => updateGrouping(idx, { sort_direction: e.target.value })}
-                style={inputStyle()}
-              >
-                <option value="asc">Asc</option>
-                <option value="desc">Desc</option>
-              </select>
-              <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:C.textPrimary }}>
-                <input type="checkbox" checked={g.show_subtotal !== false}
-                  onChange={e => updateGrouping(idx, { show_subtotal: e.target.checked })} />
-                Subtotal
-              </label>
-              <button onClick={() => removeGrouping(idx)} style={miniBtn(true)}>×</button>
-            </div>
-          ))
+          groupings.map((g, idx) => {
+            const kind = kindOfGrouping(g)
+            const isDate = kind === 'date' || kind === 'datetime'
+            return (
+              <div key={idx} style={{ marginBottom:12, paddingBottom:10, borderBottom: idx === groupings.length - 1 ? 'none' : `1px solid ${C.border}` }}>
+                <div style={{ display:'grid', gridTemplateColumns:'26px 1fr 30px', gap:8, alignItems:'center' }}>
+                  <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
+                  <FilterFieldPicker
+                    value={groupingCatalogValue(g)}
+                    catalog={fieldCatalog}
+                    onChange={v => onGroupingFieldChange(idx, v)}
+                    onExpandRelated={onExpandRelated}
+                  />
+                  <button onClick={() => removeGrouping(idx)} style={miniBtn(true)}>×</button>
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'26px 1fr 1fr auto', gap:8, alignItems:'center', marginTop:6 }}>
+                  <div />
+                  {isDate ? (
+                    <select
+                      value={g.date_granularity || ''}
+                      onChange={e => updateGrouping(idx, { date_granularity: e.target.value || null })}
+                      style={{ ...inputStyle(), fontSize:12 }}
+                      title="Bucket this date grouping"
+                    >
+                      {DATE_GRAINS.map(gr => <option key={gr.value} value={gr.value}>{gr.label}</option>)}
+                    </select>
+                  ) : <div />}
+                  <select
+                    value={`${g.sort_by_aggregate || 'value'}:${g.sort_direction || 'asc'}`}
+                    onChange={e => {
+                      const [by, dir] = e.target.value.split(':')
+                      updateGrouping(idx, { sort_by_aggregate: by, sort_direction: dir })
+                    }}
+                    style={{ ...inputStyle(), fontSize:12 }}
+                    title="How to order the groups"
+                  >
+                    <option value="value:asc">Group value ↑</option>
+                    <option value="value:desc">Group value ↓</option>
+                    <option value="count:desc">Record count ↓</option>
+                    <option value="count:asc">Record count ↑</option>
+                    <option value="measure:desc">Measure ↓</option>
+                    <option value="measure:asc">Measure ↑</option>
+                  </select>
+                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:C.textPrimary, whiteSpace:'nowrap' }}>
+                    <input type="checkbox" checked={g.show_subtotal !== false}
+                      onChange={e => updateGrouping(idx, { show_subtotal: e.target.checked })} />
+                    Subtotal
+                  </label>
+                </div>
+              </div>
+            )
+          })
         )}
 
         {formatLabel === 'matrix' && (
