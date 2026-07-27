@@ -535,6 +535,32 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
     { type: 'acknowledgment_and_signature' },
     { type: 'page_footer' },
   ],
+  // Sealed-style documents (Sealed, Inc. primary contractor). A different
+  // layout that shares none of the nine EES sections — its own section types.
+  sealedProposal: [
+    { type: 'sealed_primary_contractor_block' },
+    { type: 'sealed_document_details_block' },
+    { type: 'sealed_bill_to_block' },
+    { type: 'sealed_project_address_block' },
+    { type: 'sealed_title' },
+    { type: 'sealed_line_items_table' },
+    { type: 'sealed_rebate_section', config: { variant: 'ira' } },
+    { type: 'sealed_rebate_section', config: { variant: 'foe' } },
+    { type: 'sealed_totals_list' },
+    { type: 'sealed_signature_block' },
+  ],
+  sealedInvoice: [
+    { type: 'sealed_primary_contractor_block' },
+    { type: 'sealed_document_details_block' },
+    { type: 'sealed_bill_to_block' },
+    { type: 'sealed_project_address_block' },
+    { type: 'sealed_title' },
+    { type: 'sealed_line_items_table' },
+    { type: 'sealed_rebate_section', config: { variant: 'ira' } },
+    { type: 'sealed_rebate_section', config: { variant: 'foe' } },
+    { type: 'sealed_totals_list' },
+    { type: 'sealed_signature_block' },
+  ],
 })
 
 /**
@@ -557,58 +583,35 @@ export async function buildEesPdf(m, kind, sections) {
 // Sealed-style documents — 'proposal' | 'invoice'. Sealed, Inc. is the
 // primary contractor; EES is the line-item contractor. Keeps Sealed's own
 // look (including red amounts — the EES no-red rule applies to EES documents
-// only). Returns a Blob.
+// only, not to Sealed's own format).
+//
+// Like the EES documents, a Sealed document is an ordered list of named
+// sections drawn against a shared context. This is a genuinely different
+// layout — two-column party header, a contractor/name/description items table
+// with zebra-striped rows, red rebate amounts, and a totals *list* rather than
+// a bordered box — so it has its own section types and its own context helpers
+// (bh, lines9, zebra fill, the reusable rebate `sect`) rather than the EES grid
+// helpers. DEFAULT_DOCUMENT_SECTIONS.sealedProposal / .sealedInvoice reproduce
+// the two documents exactly as they shipped.
+//
+// Column layout: the header is two columns drawn at the same y. Left-column
+// sections (primary contractor, bill to) draw at st.y and record their bottom
+// in ctx.leftBottom WITHOUT advancing st.y; the paired right-column section
+// (document details, project address) draws at the same st.y, then advances
+// st.y past the taller of the two columns.
 // ---------------------------------------------------------------------------
-export async function buildSealedPdf(m, kind) {
+
+/** Shared drawing context handed to every Sealed section renderer. */
+async function buildSealedContext(m, kind) {
   const F = m.fields
-  const isInv = kind === 'invoice'
+  const isInv = /invoice/.test(kind)   // 'invoice' or 'sealed_invoice'
   const P = await pdfCanvas()
   const { d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc } = P
   const bh = (txt, x, yy) => { tc(C.sealBlue); font(9.5, 'bold'); t(x, yy, txt.toUpperCase()) }
   const lines9 = (arr, x, yy) => { tc(C.ink); font(9); arr.filter(v => v).forEach((ln, k) => t(x, yy + k * 11.5, String(ln))); return yy + arr.filter(v => v).length * 11.5 }
   st.y = M + 4
-  bh('Primary Contractor:', M, st.y)
-  let yA = lines9(['Sealed, Inc.', '200 E Verona Ave', 'Verona, WI 53593', '(949) 832-6798'], M, st.y + 15)
   const RX = W / 2 + 20
-  bh(isInv ? 'Invoice Details:' : 'Project Details:', RX, st.y)
-  const det = isInv
-    ? ['Invoice No.: ' + (F.projectInvoiceNumber || ''), 'Invoice Date: ' + (F.invoiceDate || ''), 'Due Date: 30 days', 'IQ Number: ' + (F.iqNumber || ''), 'Start Date: ' + (F.startDate || ''), 'Completion Date: ' + (F.endDate || '')]
-    : ['Date: ' + (F.invoiceDate || ''), 'Valid for: 30 days', 'IQ Number: ' + (F.iqNumber || ''), 'Estimated Start Date: ' + (F.estimatedStartDate || ''), 'Estimated Completion Date: ' + (F.estimatedEndDate || '')]
-  let yB = lines9(det, RX, st.y + 15)
-  st.y = Math.max(yA, yB) + 12
-  bh('Bill To:', M, st.y)
-  yA = lines9([F.ownerName, F.contactName, F.ownerAddress, F.ownerCityStateZip, F.contactPhone, F.contactEmail], M, st.y + 15)
-  bh('Project Address:', RX, st.y)
-  yB = lines9([F.propertyName, F.installationAddress, F.installationCityStateZip, 'Multifamily', isInv ? '' : F.iqNumber], RX, st.y + 15)
-  st.y = Math.max(yA, yB) + 12
-  tc(C.sealBlue); font(14, 'bold'); t(M, st.y + 11, isInv ? 'INVOICE' : 'PROPOSAL'); st.y += 17
-  /* items table */
-  stroke(C.sealBlue); d.setLineWidth(1); d.line(M, st.y, W - M, st.y)
-  tc(C.sealBlue); font(8, 'bold')
-  t(M, st.y + 13, 'CONTRACTOR'); t(M + 92, st.y + 13, 'NAME'); t(M + 185, st.y + 13, 'DESCRIPTION'); t(W - M, st.y + 13, 'TOTAL', { align: 'right' })
-  st.y += 17; stroke([188, 214, 242]); d.setLineWidth(1.2); d.line(M, st.y, W - M, st.y); st.y += 2
-  const descW = CW - 185 - 80
-  m.rows.forEach((r, i) => {
-    const desc = 'Qty: ' + _qty(r.qty) + ' ' + (r.unit === 'Sq Ft' ? 'Sq Ft.' : 'Units.') + ' ' + r.desc.replace(/\n/g, ' ')
-    const dl = wrap(desc, descW), cl = wrap('Energy Efficiency Services of Wisconsin', 82), nml = wrap(r.name, 85)
-    let i0 = 0, firstSeg = true
-    while (i0 < dl.length) {
-      const fit = Math.max(3, Math.floor((H - M - 20 - st.y) / 9.5))
-      const seg = dl.slice(i0, i0 + fit)
-      const h = Math.max(seg.length, firstSeg ? Math.max(cl.length, nml.length) : 0) * 9.5 + 8
-      if (st.y + h > H - M - 16 && !firstSeg) { d.addPage(); st.y = M }
-      if (i % 2 === 1) { fill(C.zebra); d.rect(M, st.y, CW, h, 'F') }
-      tc(C.ink); font(8)
-      if (firstSeg) { cl.forEach((ln, k) => t(M, st.y + 10 + k * 9.5, ln)); nml.forEach((ln, k) => t(M + 92, st.y + 10 + k * 9.5, ln))
-        font(8, 'bold'); t(W - M, st.y + 10, _money(r.cost), { align: 'right' }); font(8) }
-      seg.forEach((ln, k) => { if (firstSeg && i0 + (k === 0) && i0 === 0 && k === 0) { font(8, 'bold'); t(M + 185, st.y + 10, ln); font(8) }
-        else t(M + 185, st.y + 10 + k * 9.5, ln) })
-      st.y += h; i0 += fit; firstSeg = false
-      if (i0 < dl.length) { d.addPage(); st.y = M }
-    }
-    stroke(C.line); d.setLineWidth(.5); d.line(M, st.y, W - M, st.y); st.y += 2
-  })
-  /* rebate sections */
+  // The reusable rebate block (used for both the IRA and non-IRA rebate rows).
   const sect = (title, desc, name, amt) => { need(46); st.y += 12; bh(title, M, st.y)
     st.y += 5; stroke([188, 214, 242]); d.setLineWidth(1); d.line(M, st.y, W - M, st.y)
     const dl = wrap(desc, 270), h = Math.max(dl.length * 9.5, 19) + 10; need(h)
@@ -616,24 +619,160 @@ export async function buildSealedPdf(m, kind) {
     wrap(name, 150).forEach((ln, k) => t(M + 300, st.y + 12 + k * 9.5, ln))
     tc(C.red); font(9, 'bold'); t(W - M, st.y + 12, _money(amt), { align: 'right' })
     st.y += h; stroke([188, 214, 242]); d.line(M, st.y, W - M, st.y) }
-  sect('IRA Rebates', 'Incentive Description: ' + (m.tier ? m.tier.desc : '') + '. Notes: ' + (m.tier ? m.tier.note : '') + '.',
-    'IRA HOMES ' + (isInv ? 'Incentive ' : '') + '- Instant Discount', m.homesAmt)
-  if (m.foe) sect('Other Non-IRA Rebates', 'Incentive Description: ' + m.foe.desc + '. Notes: ' + m.foe.note + '.',
-    'Focus on Energy - Instant Discount', m.foeAmt)
-  /* totals */
-  need(90); st.y += 12; bh('Totals', M, st.y); st.y += 5
-  stroke([188, 214, 242]); d.setLineWidth(1); d.line(M, st.y, W - M, st.y); st.y += 4
-  const trows = [['Total Cost', _money(m.total), false], ['Total Rebates', _money(m.total), false],
-    ['Total Deposits', '$0.00', false], [isInv ? 'Total Due' : 'Total Final', '$0.00', true]]
-  for (const [lbl, val, strong] of trows) {
-    tc(C.ink); font(9, strong ? 'bold' : 'normal')
-    t(M, st.y + 12, lbl); t(W - M, st.y + 12, val, { align: 'right' })
-    stroke(C.line); d.setLineWidth(.5); d.line(M, st.y + 17, W - M, st.y + 17); st.y += 18 }
-  /* signature */
-  need(64); st.y += 40; stroke([68, 68, 68]); d.setLineWidth(1)
-  d.line(M, st.y, M + 300, st.y); d.line(W - M - 160, st.y, W - M, st.y)
-  tc(C.mut); font(8.5); t(M, st.y + 11, 'Customer Signature'); t(W - M - 160, st.y + 11, 'Date')
-  return d.output('blob')
+  return { m, F, kind, isInv, d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc,
+    bh, lines9, sect, RX, leftBottom: null }
+}
+
+export const SEALED_SECTION_RENDERERS = {
+  /* Left column, row 1: the fixed Sealed, Inc. contractor block. */
+  sealed_primary_contractor_block(x, cfg = {}) {
+    const { M, st, bh, lines9 } = x
+    bh(cfg.heading || 'Primary Contractor:', M, st.y)
+    x.leftBottom = lines9(cfg.lines || ['Sealed, Inc.', '200 E Verona Ave', 'Verona, WI 53593', '(949) 832-6798'], M, st.y + 15)
+  },
+
+  /* Right column, row 1: invoice/project details; advances past the taller column. */
+  sealed_document_details_block(x, cfg = {}) {
+    const { F, st, bh, lines9, RX, isInv } = x
+    bh(cfg.heading || (isInv ? 'Invoice Details:' : 'Project Details:'), RX, st.y)
+    const det = isInv
+      ? ['Invoice No.: ' + (F.projectInvoiceNumber || ''), 'Invoice Date: ' + (F.invoiceDate || ''), 'Due Date: 30 days', 'IQ Number: ' + (F.iqNumber || ''), 'Start Date: ' + (F.startDate || ''), 'Completion Date: ' + (F.endDate || '')]
+      : ['Date: ' + (F.invoiceDate || ''), 'Valid for: 30 days', 'IQ Number: ' + (F.iqNumber || ''), 'Estimated Start Date: ' + (F.estimatedStartDate || ''), 'Estimated Completion Date: ' + (F.estimatedEndDate || '')]
+    const yB = lines9(det, RX, st.y + 15)
+    st.y = Math.max(x.leftBottom != null ? x.leftBottom : st.y, yB) + 12
+    x.leftBottom = null
+  },
+
+  /* Left column, row 2: the Bill To party block. */
+  sealed_bill_to_block(x, cfg = {}) {
+    const { F, M, st, bh, lines9 } = x
+    bh(cfg.heading || 'Bill To:', M, st.y)
+    x.leftBottom = lines9([F.ownerName, F.contactName, F.ownerAddress, F.ownerCityStateZip, F.contactPhone, F.contactEmail], M, st.y + 15)
+  },
+
+  /* Right column, row 2: the project address block; advances past the taller column. */
+  sealed_project_address_block(x, cfg = {}) {
+    const { F, st, bh, lines9, RX, isInv } = x
+    bh(cfg.heading || 'Project Address:', RX, st.y)
+    const yB = lines9([F.propertyName, F.installationAddress, F.installationCityStateZip, 'Multifamily', isInv ? '' : F.iqNumber], RX, st.y + 15)
+    st.y = Math.max(x.leftBottom != null ? x.leftBottom : st.y, yB) + 12
+    x.leftBottom = null
+  },
+
+  /* The big INVOICE / PROPOSAL title. */
+  sealed_title(x, cfg = {}) {
+    const { M, C, st, font, t, tc, isInv } = x
+    tc(C.sealBlue); font(14, 'bold'); t(M, st.y + 11, cfg.text || (isInv ? 'INVOICE' : 'PROPOSAL')); st.y += 17
+  },
+
+  /* Contractor / Name / Description / Total table, zebra-striped, EES per line. */
+  sealed_line_items_table(x) {
+    const { m, W, H, M, CW, C, st, font, t, wrap, d, fill, stroke, tc } = x
+    stroke(C.sealBlue); d.setLineWidth(1); d.line(M, st.y, W - M, st.y)
+    tc(C.sealBlue); font(8, 'bold')
+    t(M, st.y + 13, 'CONTRACTOR'); t(M + 92, st.y + 13, 'NAME'); t(M + 185, st.y + 13, 'DESCRIPTION'); t(W - M, st.y + 13, 'TOTAL', { align: 'right' })
+    st.y += 17; stroke([188, 214, 242]); d.setLineWidth(1.2); d.line(M, st.y, W - M, st.y); st.y += 2
+    const descW = CW - 185 - 80
+    m.rows.forEach((r, i) => {
+      const desc = 'Qty: ' + _qty(r.qty) + ' ' + (r.unit === 'Sq Ft' ? 'Sq Ft.' : 'Units.') + ' ' + r.desc.replace(/\n/g, ' ')
+      const dl = wrap(desc, descW), cl = wrap('Energy Efficiency Services of Wisconsin', 82), nml = wrap(r.name, 85)
+      let i0 = 0, firstSeg = true
+      while (i0 < dl.length) {
+        const fit = Math.max(3, Math.floor((H - M - 20 - st.y) / 9.5))
+        const seg = dl.slice(i0, i0 + fit)
+        const h = Math.max(seg.length, firstSeg ? Math.max(cl.length, nml.length) : 0) * 9.5 + 8
+        if (st.y + h > H - M - 16 && !firstSeg) { d.addPage(); st.y = M }
+        if (i % 2 === 1) { fill(C.zebra); d.rect(M, st.y, CW, h, 'F') }
+        tc(C.ink); font(8)
+        if (firstSeg) { cl.forEach((ln, k) => t(M, st.y + 10 + k * 9.5, ln)); nml.forEach((ln, k) => t(M + 92, st.y + 10 + k * 9.5, ln))
+          font(8, 'bold'); t(W - M, st.y + 10, _money(r.cost), { align: 'right' }); font(8) }
+        seg.forEach((ln, k) => { if (firstSeg && i0 + (k === 0) && i0 === 0 && k === 0) { font(8, 'bold'); t(M + 185, st.y + 10, ln); font(8) }
+          else t(M + 185, st.y + 10 + k * 9.5, ln) })
+        st.y += h; i0 += fit; firstSeg = false
+        if (i0 < dl.length) { d.addPage(); st.y = M }
+      }
+      stroke(C.line); d.setLineWidth(.5); d.line(M, st.y, W - M, st.y); st.y += 2
+    })
+  },
+
+  /* A rebate block. Parameterised via config.variant: 'ira' (always) or 'foe'
+     (only when the model has a Focus on Energy rebate). Red amount preserved. */
+  sealed_rebate_section(x, cfg = {}) {
+    const { m, sect, isInv } = x
+    const variant = cfg.variant || 'ira'
+    if (variant === 'foe') {
+      if (!m.foe) return
+      sect(cfg.heading || 'Other Non-IRA Rebates',
+        'Incentive Description: ' + m.foe.desc + '. Notes: ' + m.foe.note + '.',
+        'Focus on Energy - Instant Discount', m.foeAmt)
+    } else {
+      sect(cfg.heading || 'IRA Rebates',
+        'Incentive Description: ' + (m.tier ? m.tier.desc : '') + '. Notes: ' + (m.tier ? m.tier.note : '') + '.',
+        'IRA HOMES ' + (isInv ? 'Incentive ' : '') + '- Instant Discount', m.homesAmt)
+    }
+  },
+
+  /* Total Cost / Total Rebates / Total Deposits / Total Due (or Total Final). */
+  sealed_totals_list(x, cfg = {}) {
+    const { m, W, M, C, st, font, t, tc, stroke, d, need, bh, isInv } = x
+    need(90); st.y += 12; bh(cfg.heading || 'Totals', M, st.y); st.y += 5
+    stroke([188, 214, 242]); d.setLineWidth(1); d.line(M, st.y, W - M, st.y); st.y += 4
+    const trows = [['Total Cost', _money(m.total), false], ['Total Rebates', _money(m.total), false],
+      ['Total Deposits', '$0.00', false], [isInv ? 'Total Due' : 'Total Final', '$0.00', true]]
+    for (const [lbl, val, strong] of trows) {
+      tc(C.ink); font(9, strong ? 'bold' : 'normal')
+      t(M, st.y + 12, lbl); t(W - M, st.y + 12, val, { align: 'right' })
+      stroke(C.line); d.setLineWidth(.5); d.line(M, st.y + 17, W - M, st.y + 17); st.y += 18 }
+  },
+
+  /* Customer signature + date rules. */
+  sealed_signature_block(x, cfg = {}) {
+    const { W, M, C, st, font, t, tc, stroke, d, need } = x
+    need(64); st.y += 40; stroke([68, 68, 68]); d.setLineWidth(1)
+    d.line(M, st.y, M + 300, st.y); d.line(W - M - 160, st.y, W - M, st.y)
+    tc(C.mut); font(8.5); t(M, st.y + 11, cfg.signer_label || 'Customer Signature'); t(W - M - 160, st.y + 11, 'Date')
+  },
+}
+
+/**
+ * Render a Sealed-style document. `sections` overrides the built-in list —
+ * that is how a stored template drives the output. Returns a Blob.
+ */
+export async function buildSealedPdf(m, kind, sections) {
+  const x = await buildSealedContext(m, kind)
+  const defaultKey = /invoice/.test(kind) ? 'sealedInvoice' : 'sealedProposal'
+  const list = sections && sections.length ? sections : DEFAULT_DOCUMENT_SECTIONS[defaultKey]
+  if (!list) throw new Error(`Unknown Sealed document kind: ${kind}`)
+  for (const s of list) {
+    const render = SEALED_SECTION_RENDERERS[s.type]
+    if (!render) throw new Error(`Unknown Sealed document section type: ${s.type}`)
+    render(x, s.config || {})
+  }
+  return x.d.output('blob')
+}
+
+// ---------------------------------------------------------------------------
+// Kind → rendering engine, and a single dispatch used by the modal, the
+// template editor, and the live preview. EES kinds render through
+// SECTION_RENDERERS; Sealed kinds through SEALED_SECTION_RENDERERS. Keeping the
+// map here means callers never branch on the kind themselves.
+// ---------------------------------------------------------------------------
+export const DOCUMENT_KIND_ENGINE = Object.freeze({
+  audit: 'ees', proposal: 'ees', invoice: 'ees',
+  sealed_proposal: 'sealed', sealed_invoice: 'sealed',
+})
+
+/** Section-type catalogue per engine — the source of truth for the editor palette. */
+export const SECTION_TYPES_BY_ENGINE = Object.freeze({
+  ees: Object.keys(SECTION_RENDERERS),
+  sealed: Object.keys(SEALED_SECTION_RENDERERS),
+})
+
+/** Render any submittal document by kind, dispatching to the right engine. */
+export async function buildSubmittalPdf(m, kind, sections) {
+  return DOCUMENT_KIND_ENGINE[kind] === 'sealed'
+    ? buildSealedPdf(m, kind, sections)
+    : buildEesPdf(m, kind, sections)
 }
 
 // ---------------------------------------------------------------------------

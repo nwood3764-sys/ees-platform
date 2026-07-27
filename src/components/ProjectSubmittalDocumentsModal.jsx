@@ -201,10 +201,10 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
           blob = await buildEesPdf(model, tpl?.kind || 'invoice', tpl?.sections)
           filename = `${prefix} - Final Project Payment Request Invoice.pdf`; break
         case DOCUMENTS.SEALED_PROPOSAL:
-          blob = await buildSealedPdf(model, 'proposal')
+          blob = await buildSealedPdf(model, tpl?.kind || 'sealed_proposal', tpl?.sections)
           filename = `${prefix} - Sealed Proposal.pdf`; break
         case DOCUMENTS.SEALED_INVOICE:
-          blob = await buildSealedPdf(model, 'invoice')
+          blob = await buildSealedPdf(model, tpl?.kind || 'sealed_invoice', tpl?.sections)
           filename = `${prefix} - Sealed Invoice.pdf`; break
         case DOCUMENTS.PAPERWORK_WORKBOOK:
           blob = await buildPaperworkWorkbook(model)

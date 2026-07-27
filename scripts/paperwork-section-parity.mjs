@@ -1,6 +1,6 @@
 // Prove the section-driven renderer reproduces the shipped documents exactly.
 import crypto from 'node:crypto'
-import { buildPaperworkModel, buildEesPdf, DEFAULT_DOCUMENT_SECTIONS }
+import { buildPaperworkModel, buildEesPdf, buildSealedPdf, DEFAULT_DOCUMENT_SECTIONS }
   from '/home/user/ees-platform/src/data/paperworkModel.js'
 
 const fields = {
@@ -54,4 +54,30 @@ try {
 } catch (e) {
   console.log(`PASS  unknown section type throws: ${e.message}`)
 }
+
+// --- Sealed documents: the same three proofs ------------------------------
+for (const kind of ['proposal', 'invoice']) {
+  const key = kind === 'invoice' ? 'sealedInvoice' : 'sealedProposal'
+  const a = await contentHash(await buildSealedPdf(model, kind))
+  const b = await contentHash(await buildSealedPdf(model, kind, DEFAULT_DOCUMENT_SECTIONS[key]))
+  const ok = a === b
+  console.log(`${ok ? 'PASS' : 'FAIL'}  sealed ${kind}: template-driven render is byte-identical to the built-in (${a.slice(0,12)})`)
+  if (!ok) fail = 1
+}
+
+// Omitting a Sealed section must change the output (sections are live).
+const sealedTrim = DEFAULT_DOCUMENT_SECTIONS.sealedInvoice.filter(s => s.type !== 'sealed_totals_list')
+const sFull = await contentHash(await buildSealedPdf(model, 'invoice'))
+const sLess = await contentHash(await buildSealedPdf(model, 'invoice', sealedTrim))
+console.log(`${sFull !== sLess ? 'PASS' : 'FAIL'}  omitting a Sealed section changes the document (sections are live)`)
+if (sFull === sLess) fail = 1
+
+// Unknown Sealed section type must throw.
+try {
+  await buildSealedPdf(model, 'invoice', [{ type: 'nope' }])
+  console.log('FAIL  unknown Sealed section type should throw'); fail = 1
+} catch (e) {
+  console.log(`PASS  unknown Sealed section type throws: ${e.message}`)
+}
+
 process.exit(fail)

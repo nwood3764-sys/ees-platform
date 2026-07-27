@@ -1,7 +1,7 @@
 // Render from the ACTUAL seeded database section lists and prove they match
 // the shipped documents. The JSON below is copied verbatim from prod.
 import crypto from 'node:crypto'
-import { buildPaperworkModel, buildEesPdf } from '/home/user/ees-platform/src/data/paperworkModel.js'
+import { buildPaperworkModel, buildEesPdf, buildSubmittalPdf } from '/home/user/ees-platform/src/data/paperworkModel.js'
 import { readFileSync } from 'node:fs'
 
 const dbTemplates = JSON.parse(readFileSync(new URL('./paperwork-db-templates.fixture.json', import.meta.url), 'utf8'))
@@ -28,8 +28,9 @@ const hash = async b => {
 }
 let fail = 0
 for (const t of dbTemplates) {
-  const builtin = await hash(await buildEesPdf(model, t.sdt_kind))
-  const fromDb  = await hash(await buildEesPdf(model, t.sdt_kind, t.sections))
+  // buildSubmittalPdf dispatches EES vs Sealed on the kind.
+  const builtin = await hash(await buildSubmittalPdf(model, t.sdt_kind))
+  const fromDb  = await hash(await buildSubmittalPdf(model, t.sdt_kind, t.sections))
   const ok = builtin === fromDb
   console.log(`${ok?'PASS':'FAIL'}  ${t.sdt_document_key}: rendered from the seeded DB rows matches the shipped document`)
   if (!ok) fail = 1
