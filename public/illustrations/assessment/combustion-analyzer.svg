@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient><linearGradient id="mt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#aab6c8"/><stop offset="0.5" stop-color="#f4f8fd"/><stop offset="1" stop-color="#b3bfd0"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<!-- flue pipe -->
+<rect x="70" y="70" width="52" height="420" fill="url(#mt)" stroke="#44526a" stroke-width="3"/>
+<ellipse cx="96" cy="70" rx="26" ry="8" fill="#dde3ec" stroke="#44526a" stroke-width="2"/>
+<!-- probe hole + probe -->
+<circle cx="122" cy="230" r="6" fill="#0d1a2e"/>
+<path d="M122 230 L240 300" stroke="#6a7788" stroke-width="7" stroke-linecap="round"/>
+<circle cx="122" cy="230" r="10" fill="none" stroke="#3ecf8e" stroke-width="3"/>
+<!-- analyzer body -->
+<rect x="236" y="250" width="160" height="230" rx="14" fill="#eef1f6" stroke="#44526a" stroke-width="3"/>
+<rect x="256" y="272" width="120" height="90" rx="6" fill="#0d1a2e"/>
+<text x="270" y="312" font-size="20" font-weight="800" fill="#3ecf8e" font-family="JetBrains Mono, monospace">CO</text>
+<text x="270" y="344" font-size="22" font-weight="800" fill="#3ecf8e" font-family="JetBrains Mono, monospace">0 ppm</text>
+<g fill="#aab6c8" stroke="#6a7788" stroke-width="2"><circle cx="286" cy="410" r="16"/><circle cx="346" cy="410" r="16"/></g>
+<rect x="256" y="440" width="120" height="24" rx="4" fill="#dde3ec" stroke="#6a7788" stroke-width="2"/>
+<rect x="220" y="236" width="192" height="258" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="24" y="34">Combustion analyzer reading</text><text x="150" y="522">Probe in the flue — capture CO,</text><text x="150" y="546">draft, and spillage results</text></g></svg>
