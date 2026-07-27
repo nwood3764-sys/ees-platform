@@ -17,7 +17,7 @@ import { C } from '../data/constants'
 // widget_config:
 //   {
 //     tile_layer: 'satellite' | 'street',  // default base layer (default satellite)
-//     zoom:       17,                       // initial zoom (default 17)
+//     zoom:       18,                       // initial zoom (default 18)
 //     height:     420,                      // map height in px (default 420)
 //     lat_field:  'property_latitude',      // coordinate column overrides
 //     lng_field:  'property_longitude',
@@ -93,7 +93,7 @@ export default function PropertyMapWidget({ widget, record, tableName, embedded 
   const latField  = cfg.lat_field || 'property_latitude'
   const lngField  = cfg.lng_field || 'property_longitude'
   const baseLayer = cfg.tile_layer === 'street' ? 'street' : 'satellite'
-  const zoom      = toNumber(cfg.zoom) || 17
+  const zoom      = toNumber(cfg.zoom) || 18
   const height    = toNumber(cfg.height) || 420
 
   const lat = toNumber(record?.[latField])
