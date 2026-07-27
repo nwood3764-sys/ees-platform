@@ -280,6 +280,19 @@ Relationship graph (verified): `projects.property_id` → properties;
   stage** — Income Qualification Application / Project Reservation / Final
   Project Payment Request — with every program carrying all three stages.
   Each stage is its own explicitly-named action and its own document set.
+- **DECIDED 2026-07-27 (Nicholas)**: build it out **record type by record
+  type**, keyed on the **opportunity record type** (the complete, state-scoped
+  program axis — 26 active values vs. `incentive_applications`' Wisconsin-only
+  8). Document **wording** moves into the database so it is admin-editable and
+  program-overridable; the **math and layout stay in code**. Investigated and
+  rejected: rebuilding these as `document_templates`. That system is
+  flat-merge only (`_shared/merge.ts:buildMergeDict` emits one parent row plus
+  `today`/`template.name` — no arrays, no cross-object fields, no computed
+  values), so the variable-length measure table is not expressible; and its
+  render path (docx → mammoth → HTML → the simplified `_shared/htmlToPdf.ts`
+  reflow engine) would degrade the gridded, content-sized, header-repeating
+  layout that took ~15 review rounds. Document templates remain the right home
+  for flat documents (agreements, the income qualification statement).
 - **OPEN — recommendation first**: make each submittal a real record rather
   than date fields on the incentive application. `project_payment_requests`
   already has a full 9-status lifecycle (`Payment Request To Be Prepared` →

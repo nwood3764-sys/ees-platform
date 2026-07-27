@@ -25,6 +25,7 @@ import { Icon } from './UI'
 import { useToast } from './Toast'
 import {
   loadPaperworkContext, parseAssetScorePdf, buildPaperworkWorkbook, downloadBlob,
+  loadSubmittalTextBlocks, loadOpportunityRecordTypeMap,
 } from '../data/paperworkService'
 import { buildPaperworkModel, buildEesPdf, buildSealedPdf, formatMoney } from '../data/paperworkModel'
 import {
@@ -75,19 +76,39 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
   const [includeAttic, setIncludeAttic] = useState(null)
   const [busyDoc, setBusyDoc] = useState(null)
   const [genError, setGenError] = useState(null)
+  const [recordTypeMap, setRecordTypeMap] = useState({})
+  const [textBlocks, setTextBlocks] = useState(null)
+  const [projectProgramKey, setProjectProgramKey] = useState(null)
 
   useEffect(() => {
     let cancelled = false
-    loadPaperworkContext(projectId)
-      .then(ctx => {
+    Promise.all([loadPaperworkContext(projectId), loadOpportunityRecordTypeMap()])
+      .then(([ctx, rtMap]) => {
         if (cancelled) return
         setFields(ctx.fields)
         setUnits(ctx.units != null ? String(ctx.units) : '')
+        setRecordTypeMap(rtMap)
+        // Default the program to the one this project's opportunity is on,
+        // when that program has documents for this submittal stage.
+        const projectProgram = ctx.programRecordTypeValue || null
+        setProjectProgramKey(projectProgram)
+        if (projectProgram && eligiblePrograms.some(p => p.key === projectProgram)) {
+          setProgramKey(projectProgram)
+        }
       })
       .catch(e => { if (!cancelled) setLoadError(e.message || String(e)) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [projectId])
+  }, [projectId, submittalStage])
+
+  // Program wording — defaults plus any overrides for the selected program.
+  useEffect(() => {
+    let cancelled = false
+    if (!programKey) return undefined
+    loadSubmittalTextBlocks(recordTypeMap[programKey] || null)
+      .then(blocks => { if (!cancelled) setTextBlocks(blocks) })
+    return () => { cancelled = true }
+  }, [programKey, recordTypeMap])
 
   const unitsNum = parseInt(units, 10) || null
   const model = useMemo(() => {
@@ -98,8 +119,9 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
       assetScoreImp: reports.imp,
       includeAttic,
       fields,
+      textBlocks,
     })
-  }, [fields, unitsNum, reports, includeAttic])
+  }, [fields, unitsNum, reports, includeAttic, textBlocks])
 
   // Only this submittal's documents — never the whole document catalogue.
   const submittalDocuments = useMemo(
@@ -223,8 +245,12 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
                   ))}
                 </select>
                 <div style={hintStyle}>
-                  Each program runs its own incentive application with its own reservation and
-                  payment request. This submittal is filed to the program selected here.
+                  {projectProgramKey && PROGRAM_SUBMITTALS[projectProgramKey]
+                    ? (projectProgramKey === programKey
+                        ? `This project's opportunity is on ${PROGRAM_SUBMITTALS[projectProgramKey].label}.`
+                        : `Note: this project's opportunity is on ${PROGRAM_SUBMITTALS[projectProgramKey].label}, but you are generating the ${PROGRAM_SUBMITTALS[programKey]?.label} submittal.`)
+                    : 'Each program runs its own incentive application with its own reservation and payment request.'}
+                  {' '}Wording is program-specific where an override exists, otherwise the shared default.
                 </div>
               </div>
 
