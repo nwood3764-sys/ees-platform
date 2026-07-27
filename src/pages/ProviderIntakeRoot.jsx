@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
+import { blockNegativeKeys } from '../lib/numberInput'
 
 const FONT = 'Inter, -apple-system, BlinkMacSystemFont, sans-serif'
 
@@ -82,7 +83,9 @@ export default function ProviderIntakeRoot() {
   const Field = ({ k, l, type = 'text', required, placeholder, half }) => (
     <div style={{ flex: half ? '1 1 220px' : '1 1 100%' }}>
       <label style={label}>{l}{required ? <span style={{ color: C.emeraldMid }}> *</span> : null}</label>
-      <input style={input} type={type} value={f[k]} onChange={set(k)} placeholder={placeholder} required={required} />
+      <input style={input} type={type} value={f[k]} onChange={set(k)} placeholder={placeholder} required={required}
+        min={type === 'number' ? 0 : undefined}
+        onKeyDown={type === 'number' ? blockNegativeKeys() : undefined} />
     </div>
   )
   const Section = ({ title, sub, children }) => (

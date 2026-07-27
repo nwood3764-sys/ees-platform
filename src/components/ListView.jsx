@@ -4,6 +4,7 @@ import { C } from '../data/constants';
 import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
 import { usePullToRefresh } from '../lib/usePullToRefresh';
+import { blockNegativeKeys, composeKeyDown, clampNonNegative } from '../lib/numberInput';
 import { Badge, Icon, TableRow, ProgramTag } from './UI';
 import HelpIcon from './help/HelpIcon';
 import {
@@ -3100,8 +3101,9 @@ function CellEditor({ meta, initialValue, onSave, onCancel }) {
                   onChange={(e) => setValue(e.target.value)} onBlur={commit} onKeyDown={onKey} style={inlineEditorStyle} />;
   }
   if (editorType === 'number') {
-    return <input autoFocus type="number" value={value ?? ''} onChange={(e) => setValue(e.target.value)}
-                  onBlur={commit} onKeyDown={onKey} style={inlineEditorStyle} />;
+    return <input autoFocus type="number" min={0} value={value ?? ''}
+                  onChange={(e) => setValue(clampNonNegative(e.target.value))}
+                  onBlur={commit} onKeyDown={composeKeyDown(onKey)} style={inlineEditorStyle} />;
   }
   return <input autoFocus type="text" value={value ?? ''} onChange={(e) => setValue(e.target.value)}
                 onBlur={commit} onKeyDown={onKey} style={inlineEditorStyle} />;
@@ -3301,7 +3303,7 @@ function BulkValueEditor({ meta, value, setValue }) {
   if (meta.editorType === 'lookup')   return <BulkLookup meta={meta} value={value} setValue={setValue} />;
   if (meta.editorType === 'date')     return <input type="date" value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput} />;
   if (meta.editorType === 'datetime') return <input type="datetime-local" value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput} />;
-  if (meta.editorType === 'number')   return <input type="number" value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput} />;
+  if (meta.editorType === 'number')   return <input type="number" min={0} value={value} onChange={(e) => setValue(clampNonNegative(e.target.value))} onKeyDown={blockNegativeKeys()} style={bulkInput} />;
   return <input type="text" value={value} onChange={(e) => setValue(e.target.value)} style={bulkInput} />;
 }
 

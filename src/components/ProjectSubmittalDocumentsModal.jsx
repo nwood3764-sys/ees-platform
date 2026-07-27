@@ -21,6 +21,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { C } from '../data/constants'
+import { blockNegativeKeys, clampNonNegative } from '../lib/numberInput'
 import { Icon } from './UI'
 import { useToast } from './Toast'
 import {
@@ -373,7 +374,8 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
                 <div style={{ marginBottom: 16, maxWidth: 220 }}>
                   <label style={labelStyle}>Dwelling Units</label>
                   <input type="number" min="1" value={units}
-                    onChange={e => setUnits(e.target.value)} style={inputStyle} />
+                    onKeyDown={blockNegativeKeys()}
+                    onChange={e => setUnits(clampNonNegative(e.target.value))} style={inputStyle} />
                   <div style={hintStyle}>Prefilled from the property's total units.</div>
                 </div>
               )}

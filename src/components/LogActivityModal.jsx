@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { C } from '../data/constants'
+import { blockNegativeKeys, clampNonNegative } from '../lib/numberInput'
 import {
   logActivity,
   fetchActivityPicklist,
@@ -279,7 +280,8 @@ export default function LogActivityModal({
                     step="1"
                     style={INPUT_STYLE}
                     value={durationMinutes}
-                    onChange={(e) => setDurationMinutes(e.target.value)}
+                    onKeyDown={blockNegativeKeys()}
+                    onChange={(e) => setDurationMinutes(clampNonNegative(e.target.value))}
                     placeholder="e.g. 15"
                   />
                 </div>
