@@ -239,6 +239,29 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     }
   }
 
+  // Bulk-load every DIRECT related object's columns (non-toggling), so a field
+  // search can span the whole object graph one hop out — Salesforce-style, the
+  // search box reaches related-object fields, not just the primary object's.
+  // Deeper hops stay expand-driven. Returns once all are resolved.
+  const loadAllRelatedFields = async () => {
+    const rels = fieldTree?.related || []
+    const missing = rels.filter(rel => !expandedRelated[rel.fk_column])
+    if (missing.length === 0) return
+    const loaded = await Promise.all(missing.map(async rel => {
+      try {
+        return [rel.fk_column, await loadRelatedObjectFields(rel.table, [rel.fk_column])]
+      } catch (err) {
+        console.warn('related fields load failed:', rel.table, err)
+        return null
+      }
+    }))
+    setExpandedRelated(prev => {
+      const next = { ...prev }
+      for (const entry of loaded) { if (entry) next[entry[0]] = entry[1] }
+      return next
+    })
+  }
+
   const addField = (column, table, viaPath = null) => {
     const exists = report.rpt_selected_fields.some(f =>
       f.name === column.name && f.table === table &&
@@ -247,7 +270,9 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     const newField = {
       name:     column.name,
       table:    table,
-      label:    column.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      // Prefer the metadata label (prefix-stripped, title-cased); fall back to
+      // a humanized column name for older field-tree shapes.
+      label:    column.label || column.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
       via_path: viaPath,
       type:     column.type,
     }
@@ -399,6 +424,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
                 fieldTree={fieldTree}
                 expandedRelated={expandedRelated}
                 onExpandRelated={handleExpandRelated}
+                onLoadAllRelated={loadAllRelatedFields}
                 addField={addField}
                 removeField={removeField}
                 moveField={moveField}
@@ -488,9 +514,50 @@ function fieldKey(f) {
 
 function FieldsTab({
   primaryOptions, report, updateReport,
-  fieldTree, expandedRelated, onExpandRelated,
+  fieldTree, expandedRelated, onExpandRelated, onLoadAllRelated,
   addField, removeField, moveField, reorderFields,
 }) {
+  const [search, setSearch] = useState('')
+  const [loadingAll, setLoadingAll] = useState(false)
+  const primaryObject = report.rpt_primary_object
+  const primaryLabel = primaryOptions.find(o => o.table === primaryObject)?.label || primaryObject
+
+  // First keystroke pulls in every direct related object so the search spans
+  // the whole one-hop graph, not just the fields already expanded.
+  useEffect(() => {
+    if (!search.trim() || !fieldTree?.related?.length) return
+    let cancelled = false
+    setLoadingAll(true)
+    Promise.resolve(onLoadAllRelated?.())
+      .finally(() => { if (!cancelled) setLoadingAll(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, fieldTree])
+
+  // Flatten the searchable universe: primary columns + every loaded related
+  // object's columns, each tagged with its object label and via_path.
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return null
+    const out = []
+    const match = (col) => (col.label || col.name).toLowerCase().includes(q) || col.name.toLowerCase().includes(q)
+    for (const col of (fieldTree?.primary?.columns || [])) {
+      if (match(col)) out.push({ col, table: primaryObject, viaPath: null, objectLabel: primaryLabel })
+    }
+    for (const [key, node] of Object.entries(expandedRelated || {})) {
+      const viaPath = key.split('.')
+      const objectLabel = node?.table ? humanizeFieldName(node.table.replace(/s$/, '')) : viaPath[viaPath.length - 1]
+      for (const col of (node?.columns || [])) {
+        if (match(col)) out.push({ col, table: node.table, viaPath, objectLabel, via: viaPath })
+      }
+    }
+    return out
+  }, [search, fieldTree, expandedRelated, primaryObject, primaryLabel])
+
+  const isSelected = (name, table, viaPath) => report.rpt_selected_fields.some(f =>
+    f.name === name && f.table === table &&
+    JSON.stringify(f.via_path || null) === JSON.stringify(viaPath || null))
+
   return (
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start' }}>
       {/* Left: primary object picker + field tree */}
@@ -499,8 +566,8 @@ function FieldsTab({
         <div style={{ padding:12 }}>
           <label style={fieldLabel()}>Primary Object</label>
           <select
-            value={report.rpt_primary_object}
-            onChange={e => updateReport({ rpt_primary_object: e.target.value, rpt_selected_fields: [] })}
+            value={primaryObject}
+            onChange={e => { updateReport({ rpt_primary_object: e.target.value, rpt_selected_fields: [] }); setSearch('') }}
             style={inputStyle()}
           >
             <option value="">— Select —</option>
@@ -510,34 +577,82 @@ function FieldsTab({
           </select>
 
           {fieldTree?.primary && (
-            <div style={{ marginTop:16 }}>
-              <div style={{ fontSize:12, fontWeight:600, color:C.textSecondary, marginBottom:6 }}>
-                {report.rpt_primary_object}
+            <>
+              {/* Field search — spans the primary object and every related
+                  object reachable from it. */}
+              <div style={{ position:'relative', marginTop:14 }}>
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder={`Search ${primaryLabel} and related fields…`}
+                  style={{ ...inputStyle(), paddingRight: search ? 30 : 10 }}
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    title="Clear search"
+                    style={{
+                      position:'absolute', right:6, top:'50%', transform:'translateY(-50%)',
+                      border:'none', background:'transparent', cursor:'pointer',
+                      color:C.textMuted, fontSize:15, lineHeight:1, padding:4,
+                    }}
+                  >×</button>
+                )}
               </div>
-              {fieldTree.primary.columns.map(col => (
-                <FieldRow key={col.name} column={col}
-                  onAdd={() => addField(col, report.rpt_primary_object)} />
-              ))}
 
-              {fieldTree.related?.length > 0 && (
-                <div style={{ marginTop:16 }}>
-                  <div style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5, marginBottom:6 }}>
-                    Related Objects
+              {searchResults !== null ? (
+                <div style={{ marginTop:12 }}>
+                  <div style={{ fontSize:11, color:C.textMuted, marginBottom:6 }}>
+                    {searchResults.length} match{searchResults.length === 1 ? '' : 'es'}
+                    {loadingAll && <span style={{ marginLeft:6, fontStyle:'italic' }}>· loading related objects…</span>}
                   </div>
-                  {fieldTree.related.map(rel => (
-                    <RelatedObjectNode
-                      key={rel.fk_column}
-                      rel={rel}
-                      viaPath={[rel.fk_column]}
-                      expandedRelated={expandedRelated}
-                      onExpandRelated={onExpandRelated}
-                      addField={addField}
-                      depth={0}
-                    />
+                  {searchResults.length === 0 && !loadingAll ? (
+                    <div style={emptyState()}>No matching fields.</div>
+                  ) : (
+                    searchResults.map((r, i) => (
+                      <FieldRow
+                        key={`${r.table}-${(r.viaPath || []).join('>')}-${r.col.name}-${i}`}
+                        column={r.col}
+                        objectLabel={r.objectLabel}
+                        via={r.viaPath}
+                        selected={isSelected(r.col.name, r.table, r.viaPath)}
+                        onAdd={() => addField(r.col, r.table, r.viaPath)}
+                      />
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div style={{ marginTop:16 }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:C.textSecondary, marginBottom:6 }}>
+                    {primaryLabel}
+                  </div>
+                  {fieldTree.primary.columns.map(col => (
+                    <FieldRow key={col.name} column={col}
+                      selected={isSelected(col.name, primaryObject, null)}
+                      onAdd={() => addField(col, primaryObject)} />
                   ))}
+
+                  {fieldTree.related?.length > 0 && (
+                    <div style={{ marginTop:16 }}>
+                      <div style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5, marginBottom:6 }}>
+                        Related Objects
+                      </div>
+                      {fieldTree.related.map(rel => (
+                        <RelatedObjectNode
+                          key={rel.fk_column}
+                          rel={rel}
+                          viaPath={[rel.fk_column]}
+                          expandedRelated={expandedRelated}
+                          onExpandRelated={onExpandRelated}
+                          addField={addField}
+                          depth={0}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>
@@ -637,19 +752,30 @@ function RelatedObjectNode({ rel, viaPath, expandedRelated, onExpandRelated, add
   )
 }
 
-function FieldRow({ column, onAdd }) {
+function FieldRow({ column, onAdd, objectLabel, via, selected }) {
   return (
     <div style={{
-      display:'flex', alignItems:'center', justifyContent:'space-between',
-      padding:'4px 8px', fontSize:12, borderRadius:4,
+      display:'flex', alignItems:'center', justifyContent:'space-between', gap:8,
+      padding:'5px 8px', fontSize:12, borderRadius:4, opacity: selected ? 0.55 : 1,
     }}
     onMouseEnter={e => e.currentTarget.style.background = C.cardSecondary}
     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-      <div>
-        <span style={{ color:C.textPrimary }}>{column.name}</span>
-        <span style={{ color:C.textMuted, marginLeft:6, fontSize:11 }}>{column.type}</span>
+      <div style={{ minWidth:0 }}>
+        <div style={{ color:C.textPrimary, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+          {column.label || column.name}
+          {objectLabel && (
+            <span style={{ color:C.textMuted, marginLeft:6, fontSize:11 }}>· {objectLabel}</span>
+          )}
+        </div>
+        <div style={{ color:C.textMuted, fontSize:10 }}>
+          {column.name}{column.type ? ` · ${column.type}` : ''}
+          {via && via.length > 0 ? ` · via ${via.join(' → ')}` : ''}
+        </div>
       </div>
-      <button onClick={onAdd} style={miniBtn()}>+</button>
+      <button onClick={onAdd} disabled={selected} title={selected ? 'Already added' : 'Add field'}
+        style={{ ...miniBtn(), opacity: selected ? 0.4 : 1, cursor: selected ? 'default' : 'pointer' }}>
+        {selected ? '✓' : '+'}
+      </button>
     </div>
   )
 }
