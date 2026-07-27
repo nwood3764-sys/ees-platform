@@ -27,6 +27,7 @@ const AddToPortalModal                     = lazy(() => import('./AddToPortalMod
 const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
 
 import { useToast } from './Toast'
+import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
@@ -1712,9 +1713,19 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
       return <input type={field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
         style={inputBase} value={v} onChange={e => onChange(field.name, e.target.value)} />
 
-    case 'number': case 'currency': case 'percent':
-      return <input type="number" step="any" style={monoInput}
-        value={v} onChange={e => onChange(field.name, e.target.value === '' ? null : Number(e.target.value))} />
+    case 'number': case 'currency': case 'percent': {
+      // Business number fields are never negative (see lib/numberInput). Block
+      // the sign keys and clamp any spinner/pasted negative to 0. A field can
+      // opt back into negatives via field.allow_negative.
+      const allowNeg = field.allow_negative === true
+      return <input type="number" step="any" min={nonNegativeMin(allowNeg)} style={monoInput}
+        value={v} onKeyDown={blockNegativeKeys(allowNeg)}
+        onChange={e => {
+          if (e.target.value === '') { onChange(field.name, null); return }
+          const n = Number(e.target.value)
+          onChange(field.name, !allowNeg && n < 0 ? 0 : n)
+        }} />
+    }
 
     case 'date':
       return <input type="date" style={monoInput}
@@ -3375,12 +3386,22 @@ function ConfigFieldRow({ field, value, editing, onChange }) {
           </div>
         )
       }
-      case 'number':
+      case 'number': {
+        // Default the floor to 0 (no negatives); a config field that needs
+        // negatives declares an explicit negative field.min, which also opts
+        // its sign key back in.
+        const allowNeg = typeof field.min === 'number' && field.min < 0
         return <input type="number"
-          min={field.min} max={field.max} step="1"
+          min={field.min ?? nonNegativeMin(allowNeg)} max={field.max} step="1"
           style={{ ...inputBase, fontFamily: 'JetBrains Mono, monospace', maxWidth: 120 }}
           value={value ?? ''}
-          onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} />
+          onKeyDown={blockNegativeKeys(allowNeg)}
+          onChange={e => {
+            if (e.target.value === '') { onChange(null); return }
+            const n = Number(e.target.value)
+            onChange(!allowNeg && n < 0 ? 0 : n)
+          }} />
+      }
       case 'text':
         return <input type="text" style={inputBase}
           value={value ?? ''} onChange={e => onChange(e.target.value)} />

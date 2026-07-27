@@ -24,6 +24,7 @@ import {
   captureInspectionPhoto,
 } from './fieldMobileService'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary } from './styles'
+import { blockNegativeKeys, clampNonNegative } from '../lib/numberInput'
 
 const GAS_LEVELS = ['E', '1/4', '1/2', '3/4', 'F']
 
@@ -284,9 +285,10 @@ function LegFields({ title, leg, odometer, gasLevel, disabled, onSave }) {
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <input
-          type="number" inputMode="numeric" placeholder="Odometer"
+          type="number" inputMode="numeric" placeholder="Odometer" min={0}
           value={odo} disabled={disabled}
-          onChange={e => setOdo(e.target.value)}
+          onKeyDown={blockNegativeKeys()}
+          onChange={e => setOdo(clampNonNegative(e.target.value))}
           style={{
             flex: '1 1 120px', minHeight: 44, boxSizing: 'border-box',
             fontFamily: MONO, fontSize: 15, color: C.textPrimary,
