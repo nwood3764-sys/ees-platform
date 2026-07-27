@@ -228,6 +228,11 @@ export default function WorkOrderDetail({ woId, navigate }) {
   // completed in any order — the auditor walks the house non-linearly. Order was
   // never enforced server-side, so this only relaxes the client's step locking.
   const anyOrder = !!header.allow_any_order
+  // Even in any-order mode the FIRST step gates the rest: e.g. the assessment's
+  // Front Door arrival photo must be captured before the other sections unlock.
+  // Once it's done (or is a corrections re-do), everything else opens up.
+  const gateStep = orderedSteps[0]
+  const gateDone = !gateStep || isStepDone(gateStep) || isStepCorrections(gateStep)
 
   // ── Step handlers ───────────────────────────────────────────────────────
   const handleComplete = async (step) => {
@@ -355,13 +360,20 @@ export default function WorkOrderDetail({ woId, navigate }) {
 
       {/* Steps */}
       <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 13, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, margin: '4px 2px 10px' }}>
-        Work Steps · {anyOrder ? 'complete in any order' : 'complete in order'}
+        Work Steps · {anyOrder ? 'first section first, then any order' : 'complete in order'}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {orderedSteps.map((step, i) => {
-          const locked = !anyOrder && i > actionableIdx && actionableIdx !== -1 && !isStepCorrections(step)
-          const isActionable = !isStepDone(step) && (anyOrder || i === actionableIdx || isStepCorrections(step))
+          const isFirst = i === 0
+          const locked = anyOrder
+            ? (!isFirst && !gateDone && !isStepCorrections(step))
+            : (i > actionableIdx && actionableIdx !== -1 && !isStepCorrections(step))
+          const isActionable = !isStepDone(step) && (
+            anyOrder
+              ? (isFirst || gateDone || isStepCorrections(step))
+              : (i === actionableIdx || isStepCorrections(step))
+          )
           return step.is_screen_flow ? (
             <ScreenFlowCard
               key={step.work_step_id}
