@@ -291,6 +291,89 @@ assumption). The change above is additive and low-risk in shape, but it needs
 a controlled test send to an internal address before it goes to prod. Do that
 first, then ship.
 
+## 7c. NEXT SESSION — Sealed sectioning, then the template editor
+
+State as of 2026-07-27 (PRs #223, #231, #238, #241, #243, #245 all merged and
+live). Documents are stored templates; what remains is coverage and authoring.
+
+### Where things stand
+
+- **Renderer** — `src/data/paperworkModel.js` exposes `SECTION_RENDERERS`
+  (9 sections) and `buildEesPdf(m, kind, sections)`. Sections:
+  `company_header`, `document_meta_and_parties`, `audit_services_table`,
+  `measure_line_items_table`, `rebate_credits_table`, `totals_box`,
+  `deliverables_list`, `acknowledgment_and_signature`, `page_footer`.
+- **Templates** — `submittal_document_templates` (SDT-) +
+  `submittal_document_template_sections` (SDTS-). SDT-00001/2/3 seeded fully
+  populated. `loadSubmittalDocumentTemplate()` in `paperworkService.js`.
+- **Stage assignment** — `stage_document_requirements` (SDR-) maps
+  (object, stage value) → documents, with per-row `sdr_requires_signature`.
+- **Wording** — `submittal_document_text_blocks` (SDTB-), program-overridable.
+- **Proof harnesses (run these first, and after every change):**
+  `node scripts/paperwork-section-parity.mjs` and
+  `node scripts/paperwork-db-template-parity.mjs`. Both assert byte-identical
+  output (PDF `CreationDate`/`ID` stripped) and that config actually drives
+  the render. Plus the program-math fixture (34 checks).
+
+### Phase A — section the Sealed documents (do this first)
+
+`buildSealedPdf(m, kind)` (`paperworkModel.js`) is still monolithic. It is a
+genuinely different layout — Sealed, Inc. as primary contractor with EES as a
+line item, zebra-striped rows, red amounts, a different column structure, and
+a totals *list* rather than a bordered box — so **none of the nine EES
+sections apply**. It needs its own types, roughly:
+
+`sealed_primary_contractor_block`, `sealed_document_details_block`,
+`sealed_bill_to_block`, `sealed_project_address_block`, `sealed_title`,
+`sealed_line_items_table`, `sealed_rebate_section` (parameterised: used twice,
+IRA and non-IRA), `sealed_totals_list`, `sealed_signature_block`.
+
+Method that worked for the EES three, repeat it exactly:
+1. Extract each block into a renderer keyed on a shared context (mirror
+   `buildDocumentContext`); the Sealed context needs its own helpers (`bh`,
+   `lines9`, zebra fill) rather than the EES grid helpers.
+2. Add `DEFAULT_DOCUMENT_SECTIONS.sealedProposal` / `.sealedInvoice`.
+3. Extend the parity script to cover both, and **do not proceed until
+   byte-identical**.
+4. Seed SDT rows for `sealed_proposal` and `sealed_invoice`, then re-run
+   `paperwork-db-template-parity.mjs` against the real rows.
+
+Note `buildSealedPdf` keeps red amounts deliberately — the EES no-red design
+rule applies to EES documents, not to Sealed's own format. Do not "fix" that.
+
+### Phase B — the template editor
+
+New `src/components/SubmittalDocumentTemplateEditor.jsx`, opened from an SDT
+record. Requirements:
+
+- **Section list** with drag-to-reorder (`@dnd-kit/*` is already a dependency
+  and drives `LayoutCanvasEditor` / `DashboardCanvasEditor` — follow those,
+  including the family-filtered collision detection pattern). Reorder writes
+  `sdts_sort_order`.
+- **Add Section** from the registry, grouped by document kind (EES sections
+  must not be offered on a Sealed template and vice versa — key the palette on
+  `sdt_kind`). Remove, and activate/deactivate via `sdts_is_active`.
+- **Typed config form per section type**, not raw JSON. Add
+  `src/data/submittalSectionSchemas.js` following the shape of
+  `src/data/sectionConfigSchemas.js` (typed field descriptors rendered by a
+  generic form). Needed control types: text (headings, signer label), string
+  list (deliverables), and a small row grid (the audit services table's six
+  columns). Fall back to a JSON editor for unknown types, as
+  `SectionConfigEditorWidget` does.
+- **Live preview** — the renderer is pure and takes a section list, so
+  regenerate on change and show the real PDF beside the list. This is the
+  feature that makes it WYSIWYG like the rest of LEAP's builders.
+- **Clone Template** — the actual path to a new program's document is copying
+  a working one and scoping the copy to an opportunity record type. Mirror
+  `clone_document_template`'s semantics (copy header + all section rows).
+
+Hazard: `preflight` requires lazy targets to resolve and default-export; keep
+the editor lazy-loaded like the other heavy modals.
+
+### Phase C — signing route
+
+Unchanged; see §7b. Needs a controlled internal test send before deploying.
+
 ## 8. File + DB-table index (what the building session touches most)
 
 | Thing | Where |
