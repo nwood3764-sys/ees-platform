@@ -481,15 +481,31 @@ export function SummaryLayout({ result }) {
   )
 }
 
+/**
+ * A grouping row from reportsService already carries everything getRowValue
+ * needs (name, via_path, _is_picklist). This normalises the older
+ * field_name/field_via_path spelling so a stale result shape still resolves.
+ */
+function groupingFieldDef(g) {
+  if (!g) return { name: null, via_path: null }
+  return {
+    name:         g.name || g.field_name,
+    via_path:     g.via_path || g.field_via_path || null,
+    _is_picklist: !!g._is_picklist,
+  }
+}
+
 function buildGroupTree(rows, columns, groupings, level = 0, ctx = null) {
   if (level >= groupings.length) {
     return { leafRows: rows }
   }
   const g = groupings[level]
   const buckets = new Map()
+  // The grouping object IS the field descriptor — it carries name, via_path
+  // and _is_picklist — so getRowValue resolves picklist and lookup group keys
+  // to their labels instead of bucketing on raw UUIDs.
+  const fieldDef = groupingFieldDef(g)
   for (const row of rows) {
-    // Lookup the grouping field's value. via_path resolved by getRowValue.
-    const fieldDef = { name: g.field_name, via_path: g.field_via_path }
     const key = getRowValue(row, fieldDef, ctx)
     const k = key ?? '(blank)'
     if (!buckets.has(k)) buckets.set(k, [])
@@ -656,8 +672,8 @@ export function MatrixLayout({ result }) {
 
   // Build the row-axis tree and column-axis tree using getRowValue so FK
   // labels and picklist labels are reflected in headers.
-  const rowAxis = buildAxisTree(rows, groupings.map(g => ({ name: g.field_name, via_path: g.field_via_path, label: g.field_label, sort: g.sort_direction })), result, 0)
-  const colAxis = buildAxisTree(rows, colGroupings.map(c => ({ name: c.name, via_path: c.via_path, label: c.label || c.name, sort: c.sort_direction })), result, 0)
+  const rowAxis = buildAxisTree(rows, groupings.map(g => ({ ...groupingFieldDef(g), label: g.field_label, sort: g.sort_direction })), result, 0)
+  const colAxis = buildAxisTree(rows, colGroupings.map(c => ({ ...groupingFieldDef(c), label: c.label || c.name, sort: c.sort_direction })), result, 0)
 
   // Flatten the leaf paths of both axes to drive the table layout
   const rowLeaves = flattenAxisLeaves(rowAxis)
@@ -670,11 +686,11 @@ export function MatrixLayout({ result }) {
     for (const cl of colLeaves) {
       const cellRows = rows.filter(row => {
         for (let i = 0; i < rl.values.length; i++) {
-          const v = getRowValue(row, { name: groupings[i].field_name, via_path: groupings[i].field_via_path }, result)
+          const v = getRowValue(row, groupingFieldDef(groupings[i]), result)
           if ((v ?? '(blank)') !== rl.values[i]) return false
         }
         for (let i = 0; i < cl.values.length; i++) {
-          const v = getRowValue(row, { name: colGroupings[i].name, via_path: colGroupings[i].via_path }, result)
+          const v = getRowValue(row, groupingFieldDef(colGroupings[i]), result)
           if ((v ?? '(blank)') !== cl.values[i]) return false
         }
         return true
