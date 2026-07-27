@@ -78,23 +78,22 @@ Salesforce PARENTGROUPVAL / PREVGROUPVAL, implemented as prefixed aggregate iden
 - **Prior-group delta** — `PREV_` prefix = the previous peer group (period-over-period).
 - The summary tree threads each subtotal its parent/previous/grand row sets; the editor offers the identifiers in autocomplete and documents the patterns inline.
 
-### Phase 4 — Matrix & aggregation unification
-- **Server-side aggregation accepting `via_path`** — extend the `report_aggregate*` RPCs (or add a joined variant) so grouping/series/date can traverse one+ FK hops; route report summary/matrix through it, drop the 50k ceiling.
-- **Matrix subtotals + grand totals**, per-cell number format, and (stretch) multiple measures.
-- Retire `TABLE_NAME_COLUMNS` in favor of the dynamic `*_name` derivation the RPCs already use.
+### Phase 4 — Matrix & aggregation unification  ◑ PARTIAL (PR #TBD)
+- ✅ **Matrix subtotals + grand totals** — row marginals (right Total column), column totals (bottom Total row), grand total; measure labelled; values via `formatMeasureValue`.
+- *Open:* **server-side aggregation accepting `via_path`** — extend the `report_aggregate*` RPCs so grouping/series/date can traverse FK hops; route report summary/matrix through it, drop the 50k client ceiling. (Internal refactor — the client path works today; deferred as its own DB cycle with `get_advisors`.)
+- *Open:* retire `TABLE_NAME_COLUMNS` for the dynamic `*_name` derivation the RPCs use; multiple measures.
 
-### Phase 5 — Viewer polish
-- **Conditional formatting** (cell/row color rules — blue/navy/emerald/amber, data-bar style) in Tabular + Summary.
-- **Expand/collapse groups** in Summary/Matrix.
-- **Per-column number format** (currency/percent/compact) on the report side, reusing dashboards' `formatNumber`.
-- **Top-N / row-limit** filter and **filters on aggregates (HAVING)** for summary reports.
+### Phase 5 — Viewer polish  ✅ SHIPPED (PR #TBD)
+- **Per-column number format** (Number / Currency $ / Percent % / Compact) + decimals, set from a Format panel on each Selected Field; Tabular + Summary render via `formatReportValue`.
+- **Conditional color rules** per column (>, ≥, <, ≤, =, ≠ → Blue/Green/Amber/Navy, no red) on tabular + summary cells.
+- **Expand/collapse groups** in Summary (click a group header).
+- *Open:* Top-N / row-limit filter, filters on aggregates (HAVING).
 
-### Phase 6 — Dashboards: cascade, cross-filter, drill
-- **Cascading dashboard filters** — one filter drives all compatible widgets (generalize the existing override mechanism); replace the raw text `field_name` filter authoring with a real field picker + distinct-source config.
-- **Cross-filtering** — click a chart segment to filter sibling widgets on the same dashboard (biggest "modern" win).
-- **Drill-through** polish — widget → source report already exists; add per-widget click-behavior config.
-- **On-canvas filter/slicer widgets.**
-- **True matrix/pivot widget.**
+### Phase 6 — Dashboards: cascade, cross-filter, drill  ◑ PARTIAL (PR #TBD)
+- ✅ **Cascading dashboard filters** — header filter bar + on-canvas slicers drive all compatible widgets via the override mechanism (already shipped, verified).
+- ✅ **Cross-filtering** — click a chart segment to filter every other widget on the dashboard (source stays unfiltered, clearable chip in the header, emerald ring on the source). The biggest "modern" win.
+- ✅ **Drill-through** — "View Records →" opens the filtered source report.
+- *Open:* replace the raw text `field_name` filter authoring in the canvas editor with a real field picker + distinct-source config; true matrix/pivot widget; per-widget click-behavior config.
 
 ### Phase 7 — Delivery & security (later)
 Scheduled subscriptions (infra exists via `dispatch-scheduled-reports`), "view as"/running-user, and financial-tier field gating — gated on the `field_permissions` build.
