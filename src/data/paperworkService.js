@@ -19,6 +19,49 @@ import { supabase } from '../lib/supabase'
 import { parseAssetScoreText, fillPaperworkWorkbook } from './paperworkModel'
 
 /**
+ * Load a stored submittal document template — the ordered section list that
+ * defines a document. Program-scoped templates win over the global default.
+ *
+ * Returns { kind, name, sections: [{type, config}] } or null, in which case
+ * the caller falls back to DEFAULT_DOCUMENT_SECTIONS in paperworkModel (which
+ * the seeded templates are byte-identical to).
+ */
+export async function loadSubmittalDocumentTemplate(documentKey, opportunityRecordTypeId = null) {
+  if (!documentKey) return null
+  try {
+    let q = supabase
+      .from('submittal_document_templates')
+      .select(`
+        id, sdt_name, sdt_kind, sdt_opportunity_record_type,
+        sections:submittal_document_template_sections (
+          sdts_section_type, sdts_config, sdts_sort_order, sdts_is_active, sdts_is_deleted
+        )
+      `)
+      .eq('sdt_document_key', documentKey)
+      .eq('sdt_is_deleted', false)
+      .eq('sdt_is_active', true)
+    q = opportunityRecordTypeId
+      ? q.or(`sdt_opportunity_record_type.is.null,sdt_opportunity_record_type.eq.${opportunityRecordTypeId}`)
+      : q.is('sdt_opportunity_record_type', null)
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    if (!data?.length) return null
+    // Prefer the program-scoped template over the global default.
+    const chosen = data.find(r => r.sdt_opportunity_record_type) || data[0]
+    const sections = (chosen.sections || [])
+      .filter(s => !s.sdts_is_deleted && s.sdts_is_active)
+      .sort((a, b) => (a.sdts_sort_order ?? 0) - (b.sdts_sort_order ?? 0))
+      .map(s => ({ type: s.sdts_section_type, config: s.sdts_config || {} }))
+    if (!sections.length) return null
+    return { kind: chosen.sdt_kind, name: chosen.sdt_name, sections }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('loadSubmittalDocumentTemplate failed; using built-in sections:', e.message)
+    return null
+  }
+}
+
+/**
  * Load the stages that carry document requirements for one record type,
  * each with its document list.
  *
