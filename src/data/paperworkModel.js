@@ -20,25 +20,50 @@
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// Measure Description Bank — exact program wording (from the workbook), with
-// R-value substitution slots. Text is contractual language; never edit.
+// Document wording.
+//
+// The authoritative copy lives in the `submittal_document_text_blocks` table
+// so it is editable through LEAP Admin without a deploy, and can be overridden
+// per program (per opportunity record type). The constants below are the
+// built-in FALLBACK used when a block is missing — they are byte-identical to
+// the seeded defaults, so behaviour is unchanged if the table is unreachable.
+//
+// Bodies may carry {{baseline_r}} / {{improved_r}} tokens, substituted from
+// the Asset Score reports at render time.
 // ---------------------------------------------------------------------------
-export const MEASURE_DESCRIPTION_BANK = {
-  atticInsulation: baseR => improvedR => [
-`Upgrade existing attic insulation levels from approximately R-${baseR} to R-${improvedR} in accordance with applicable PNNL building science standards and program requirements to improve thermal performance, reduce energy consumption, and enhance occupant comfort. Work will include preparation of attic areas to support proper airflow, insulation depth consistency, and long-term system performance.`,
+export const DEFAULT_TEXT_BLOCKS = Object.freeze({
+  'measure.attic_insulation': [
+`Upgrade existing attic insulation levels from approximately R-{{baseline_r}} to R-{{improved_r}} in accordance with applicable PNNL building science standards and program requirements to improve thermal performance, reduce energy consumption, and enhance occupant comfort. Work will include preparation of attic areas to support proper airflow, insulation depth consistency, and long-term system performance.`,
 `Install eave baffles with 48-inch extensions in each accessible attic bay to maintain ventilation pathways and allow full insulation coverage above exterior wall top plates.`,
 `Install insulation rulers in each attic bay on both sides to verify uniform insulation depth and ensure consistent installed R-values throughout the attic plane.`,
-`Install blown-in fiberglass insulation to achieve a minimum final attic insulation value of R-${improvedR} across all accessible attic areas.`,
+`Install blown-in fiberglass insulation to achieve a minimum final attic insulation value of R-{{improved_r}} across all accessible attic areas.`,
 `Custom build and install insulated attic access hatches including insulation damming, insulated access covers, and weatherstripping to minimize thermal bypass and air leakage.`,
 `All insulation materials and installation methods will comply with applicable code requirements, manufacturer specifications, and accepted energy efficiency best practices.`].join('\n\n'),
-  atticAirSealing: baseR => [
-`Perform attic air sealing to reduce uncontrolled air leakage between conditioned spaces and unconditioned attic areas in accordance with PNNL air barrier and weatherization best practices. Removal and disposal of existing R-${baseR} insulation material will prepare the attic space for proper air sealing. Air sealing work will be completed prior to insulation installation to maximize thermal effectiveness and moisture control performance.`,
+  'measure.attic_air_sealing': [
+`Perform attic air sealing to reduce uncontrolled air leakage between conditioned spaces and unconditioned attic areas in accordance with PNNL air barrier and weatherization best practices. Removal and disposal of existing R-{{baseline_r}} insulation material will prepare the attic space for proper air sealing. Air sealing work will be completed prior to insulation installation to maximize thermal effectiveness and moisture control performance.`,
 `Scope of work includes identification and sealing of accessible air leakage pathways including, but not limited to:`,
 `Plumbing penetrations\nElectrical penetrations\nTop plates\nMechanical and duct penetrations\nSoffits and open chases\nAttic access openings\nMiscellaneous bypasses and framing gaps\nFabricated isolation boxes for exhaust fans and recessed lights`,
 `Approved sealants, foam products, sheet materials, and weatherstripping will be utilized as appropriate for each application to improve building envelope tightness, reduce heating and cooling loads, and improve overall occupant comfort and building durability.`].join('\n\n'),
-  bathAerators: 'Installation of low flow faucet aerators in tenant bathrooms for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
-  kitchenAerators: 'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
-  showerheads: 'Installation of low flow handheld showerheads in tenant bathrooms for water and energy savings. Model: Niagara Earth Handheld Showerhead N2945CH',
+  'measure.bath_aerators': 'Installation of low flow faucet aerators in tenant bathrooms for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
+  'measure.kitchen_aerators': 'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
+  'measure.showerheads': 'Installation of low flow handheld showerheads in tenant bathrooms for water and energy savings. Model: Niagara Earth Handheld Showerhead N2945CH',
+  'acknowledgment.invoice': 'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes EES-WI to submit for and receive the corresponding program incentive on their behalf.',
+  'acknowledgment.proposal': 'Signed receipt of this proposal constitutes acceptance of the proposed scope of work. The property owner authorizes EES-WI to submit the project for rebate/incentive program preapproval and to begin project planning activities.',
+  'title.proposal': 'Wisconsin Inflation Reduction Act HOMES Program Project Proposal',
+  'header.company_name': 'ENERGY EFFICIENCY SERVICES of WISCONSIN',
+  'footer.company_line': 'Energy Efficiency Services of Wisconsin  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',
+  'footer.contact_line': 'ira@ees-wi.org  |  608-460-7419',
+})
+
+/**
+ * Resolve one wording block: the loaded table row if present, otherwise the
+ * built-in default, with {{token}} substitution applied.
+ */
+export function resolveTextBlock(textBlocks, key, tokens) {
+  const raw = (textBlocks && textBlocks[key]) || DEFAULT_TEXT_BLOCKS[key] || ''
+  if (!tokens) return raw
+  return String(raw).replace(/\{\{(\w+)\}\}/g, (m, t) =>
+    (tokens[t] != null ? String(tokens[t]) : m))
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +145,7 @@ export function parseAssetScoreText(t) {
 //   fields          — document text fields (owner/property/contact/dates);
 //                     carried through untouched onto the model
 // ---------------------------------------------------------------------------
-export function buildPaperworkModel({ units, assetScoreBase, assetScoreImp, includeAttic, fields }) {
+export function buildPaperworkModel({ units, assetScoreBase, assetScoreImp, includeAttic, fields, textBlocks }) {
   const asB = assetScoreBase, asI = assetScoreImp
   // Attic sq ft: straight from the Asset Score report's roof area — the audit
   // reports are the source of record for every quantity; no manual inputs.
@@ -152,19 +177,23 @@ export function buildPaperworkModel({ units, assetScoreBase, assetScoreImp, incl
   const foeAmt = foe ? foe.amt : 0
   const total = Math.round((homesAmt + foeAmt) * 100) / 100
   // Measure lines: breakout fractions × total, largest row absorbs the drift.
-  const BANK = MEASURE_DESCRIPTION_BANK
+  // Descriptions come from the text-block table (program-overridable), falling
+  // back to the built-in defaults.
+  const rTokens = {
+    baseline_r: fmtR(baseAtticR != null ? baseAtticR : 0),
+    improved_r: fmtR(iMin),
+  }
+  const text = (key) => resolveTextBlock(textBlocks, key, rTokens)
   const rows = []
   const push = (name, frac, qty, unit, desc) =>
     rows.push({ name, frac, qty, unit, desc, cost: Math.round(total * frac * 100) / 100 })
   if (hasAttic) {
-    push('Attic Insulation', 0.44, roofSqFt, 'Sq Ft',
-      BANK.atticInsulation(fmtR(baseAtticR != null ? baseAtticR : 0))(fmtR(iMin)))
-    push('Attic Air Sealing', 0.5483, roofSqFt, 'Sq Ft',
-      BANK.atticAirSealing(fmtR(baseAtticR != null ? baseAtticR : 0)))
+    push('Attic Insulation', 0.44, roofSqFt, 'Sq Ft', text('measure.attic_insulation'))
+    push('Attic Air Sealing', 0.5483, roofSqFt, 'Sq Ft', text('measure.attic_air_sealing'))
   }
-  push('Low Flow Devices: Bath Aerators', 0.0033, units, 'Unit', BANK.bathAerators)
-  push('Low Flow Devices: Kitchen Aerators', 0.0035, units, 'Unit', BANK.kitchenAerators)
-  push('Low Flow Devices: Showerheads', 0.0049, units, 'Unit', BANK.showerheads)
+  push('Low Flow Devices: Bath Aerators', 0.0033, units, 'Unit', text('measure.bath_aerators'))
+  push('Low Flow Devices: Kitchen Aerators', 0.0035, units, 'Unit', text('measure.kitchen_aerators'))
+  push('Low Flow Devices: Showerheads', 0.0049, units, 'Unit', text('measure.showerheads'))
   // renormalize when attic rows are absent, then reconcile to the exact total
   const fracSum = rows.reduce((a, r) => a + r.frac, 0)
   if (Math.abs(fracSum - 1) > 1e-6 && fracSum > 0)
@@ -176,7 +205,7 @@ export function buildPaperworkModel({ units, assetScoreBase, assetScoreImp, incl
     rows[mx].cost = Math.round((rows[mx].cost + drift) * 100) / 100
   }
   return { units, roofSqFt, baseAtticR, iMin, savings, tier, homesAmt, foe, foeAmt, total, rows,
-    fields: fields || {} }
+    fields: fields || {}, textBlocks: textBlocks || null }
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +245,21 @@ async function pdfCanvas(margin) {
 // layout decision here was a Nicholas review round (port doc §5). Returns a
 // Blob.
 // ---------------------------------------------------------------------------
-export async function buildEesPdf(m, kind) {
+// ---------------------------------------------------------------------------
+// Document sections.
+//
+// The EES submittal documents are composed of named sections drawn in order.
+// Splitting the renderer this way is what makes a document a TEMPLATE: a
+// template is an ordered list of {type, config}, and the pixels stay
+// high-quality because each section is real vector-drawing code rather than a
+// lossy HTML/docx conversion.
+//
+// DEFAULT_DOCUMENT_SECTIONS reproduces the three EES documents exactly as they
+// shipped, so behaviour is unchanged until a template overrides the list.
+// ---------------------------------------------------------------------------
+
+/** Shared drawing context handed to every section renderer. */
+async function buildDocumentContext(m, kind) {
   const F = m.fields
   const isAudit = kind === 'audit', isInv = kind === 'invoice'
   const P = await pdfCanvas(34)
@@ -224,62 +267,11 @@ export async function buildEesPdf(m, kind) {
   const pv = v => (v != null && String(v).trim() !== '') ? String(v) : '—'
   const GL = [203, 210, 219], HB = [240, 243, 247]       // grid line + header fill
   const AMT = W - M - 6                                   // every dollar figure shares this right edge
-  /* ---- header ---- */
-  tc(C.navy); font(10.5, 'bold'); t(M, st.y + 15, 'ENERGY EFFICIENCY SERVICES of WISCONSIN')
-  if (isAudit || isInv) {
-    tc([150, 160, 174]); font(10.5, 'bold'); t(W - M, st.y + 15, 'INVOICE', { align: 'right' })
-    st.y += 21
-  } else {
-    st.y += 21
-    tc([104, 116, 132]); font(10.5, 'bold')
-    t(W / 2, st.y + 11, 'Wisconsin Inflation Reduction Act HOMES Program Project Proposal', { align: 'center' })
-    st.y += 16
-  }
-  stroke([150, 160, 174]); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 12
-  /* ---- meta stacked top-right; audit due date = N/A, project invoice = Net 30;
-         the proposal has no number and no "Valid for" line ---- */
-  const noLbl = (isAudit || isInv) ? 'Invoice No.:' : 'Proposal No.:'
-  const dateLbl = (isAudit || isInv) ? 'Invoice Date:' : 'Date:'
-  const termLbl = 'Due Date:'
-  const docNo = isAudit ? (F.invoiceNumber || 'INV-WI-') : (isInv ? (F.projectInvoiceNumber || '') : '')
-  const metaRows = []
-  if (isAudit || isInv) metaRows.push([noLbl, pv(docNo)])
-  metaRows.push([dateLbl, pv(F.invoiceDate)])
-  if (isAudit) metaRows.push([termLbl, 'N/A'])
-  else if (isInv) metaRows.push([termLbl, 'Net 30'])
-  if (!isAudit) {
-    const sD = isInv ? F.startDate : F.estimatedStartDate
-    const eD = isInv ? F.endDate : F.estimatedEndDate
-    if (sD) metaRows.push([isInv ? 'Start Date:' : 'Est. Start:', sD])
-    if (eD) metaRows.push([isInv ? 'Completion Date:' : 'Est. Completion:', eD])
-  }
-  /* three top-justified columns: PROPERTY (left), BILL TO (center), meta (right) */
-  const topY = st.y
-  let my = topY
-  for (const [lb, v] of metaRows) {
-    font(8.5, 'bold'); tc([60, 76, 94]); t(W - M - 95, my + 9, lb, { align: 'right' })
-    tc(C.ink); font(9.5); t(W - M, my + 9, String(v), { align: 'right' })
-    my += 13
-  }
-  /* property block: skip the property name when it just repeats the street address */
-  const _addr = String(F.installationAddress || '').trim().toLowerCase()
-  const _pn = String(F.propertyName || '').trim()
-  const showName = _pn && !(_addr && _pn.toLowerCase().startsWith(_addr))
-  const lLines = [showName ? _pn : '', F.installationAddress, F.installationCityStateZip,
-    'Property Type: Multifamily', F.iqNumber ? ('IQ Number: ' + F.iqNumber) : ''].filter(v => v && String(v).trim())
-  const rLines = [F.ownerName, F.ownerAddress, F.ownerCityStateZip, F.contactName, F.contactEmail, F.contactPhone]
-    .filter(v => v && String(v).trim())
-  const BX = M + 210
-  tc(C.navy); font(8.5, 'bold')
-  t(M, topY + 9, 'PROPERTY / INSTALLATION'); t(BX, topY + 9, 'BILL TO')
-  let ly = topY + 22, ry = topY + 22; tc(C.ink); font(9)
-  for (const v of lLines) for (const ln of wrap(v, 190)) { t(M, ly, ln); ly += 11 }
-  for (const v of rLines) for (const ln of wrap(v, 150)) { t(BX, ry, ln); ry += 11 }
-  st.y = Math.max(my, ly, ry) + 4
-  /* ---- section heading ---- */
+  // Wording from the text-block table (program-overridable), default fallback.
+  const text = (key) => resolveTextBlock(m.textBlocks, key)
+
   const head = (txt, gap) => { need(24); st.y += (gap != null ? gap : 10); tc([104, 116, 132]); font(8.5, 'bold')
     t(M, st.y + 8, txt.toUpperCase()); st.y += 12 }
-  /* ---- grid helpers: bordered cells, shaded header row ---- */
   const gridHeader = (cols) => { // cols: [{x0,x1,lbl,align}]
     const h = 16; need(h + 4)
     fill(HB); d.rect(M, st.y, CW, h, 'F')
@@ -293,15 +285,92 @@ export async function buildEesPdf(m, kind) {
     d.line(M, st.y, M, st.y + h); d.line(W - M, st.y, W - M, st.y + h)
     for (const c of cols) d.line(c.x0, st.y, c.x0, st.y + h)
     d.line(M, st.y + h, W - M, st.y + h) }
-  /* ---- line items ---- */
-  head(isAudit ? 'Audit Services' : (isInv ? 'Installed Scope of Work — HOMES Project' : 'Proposed Scope of Work — HOMES Project'), 12)
-  if (isAudit) {
+
+  // Money shared between the credits table and the totals box.
+  const gross = isAudit ? 2000 : m.total
+  const foeAmt = isAudit ? 0 : m.foeAmt
+  const iraAmt = isAudit ? 2000 : m.homesAmt
+  const credits = []
+  if (isAudit) credits.push(['IRA HOMES Incentive — Instant Discount', 'IQ MF Audit Rebate / Building', iraAmt])
+  else {
+    if (m.foe && foeAmt) credits.push(['Focus on Energy — Instant Discount', m.foe.desc + ' (' + m.foe.note + ')', foeAmt])
+    if (m.tier && iraAmt) credits.push(['IRA HOMES — Instant Discount', m.tier.desc + ' (' + m.tier.note + ')', iraAmt])
+  }
+
+  return { m, F, kind, isAudit, isInv, d, W, H, M, CW, C, st, font, t, wrap, need,
+    fill, stroke, tc, pv, GL, HB, AMT, text, head, gridHeader, gridBorders,
+    gross, foeAmt, iraAmt, credits }
+}
+
+export const SECTION_RENDERERS = {
+  /* Company name, the INVOICE word or the centred proposal title, hairline rule. */
+  company_header(x) {
+    const { W, M, C, st, font, t, tc, stroke, d, text, isAudit, isInv } = x
+    tc(C.navy); font(10.5, 'bold'); t(M, st.y + 15, text('header.company_name'))
+    if (isAudit || isInv) {
+      tc([150, 160, 174]); font(10.5, 'bold'); t(W - M, st.y + 15, 'INVOICE', { align: 'right' })
+      st.y += 21
+    } else {
+      st.y += 21
+      tc([104, 116, 132]); font(10.5, 'bold')
+      t(W / 2, st.y + 11, text('title.proposal'), { align: 'center' })
+      st.y += 16
+    }
+    stroke([150, 160, 174]); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 12
+  },
+
+  /* Meta stack top-right + PROPERTY/INSTALLATION and BILL TO columns. */
+  document_meta_and_parties(x) {
+    const { F, W, M, C, st, font, t, tc, wrap, pv, isAudit, isInv } = x
+    const noLbl = (isAudit || isInv) ? 'Invoice No.:' : 'Proposal No.:'
+    const dateLbl = (isAudit || isInv) ? 'Invoice Date:' : 'Date:'
+    const termLbl = 'Due Date:'
+    const docNo = isAudit ? (F.invoiceNumber || 'INV-WI-') : (isInv ? (F.projectInvoiceNumber || '') : '')
+    const metaRows = []
+    if (isAudit || isInv) metaRows.push([noLbl, pv(docNo)])
+    metaRows.push([dateLbl, pv(F.invoiceDate)])
+    if (isAudit) metaRows.push([termLbl, 'N/A'])
+    else if (isInv) metaRows.push([termLbl, 'Net 30'])
+    if (!isAudit) {
+      const sD = isInv ? F.startDate : F.estimatedStartDate
+      const eD = isInv ? F.endDate : F.estimatedEndDate
+      if (sD) metaRows.push([isInv ? 'Start Date:' : 'Est. Start:', sD])
+      if (eD) metaRows.push([isInv ? 'Completion Date:' : 'Est. Completion:', eD])
+    }
+    const topY = st.y
+    let my = topY
+    for (const [lb, v] of metaRows) {
+      font(8.5, 'bold'); tc([60, 76, 94]); t(W - M - 95, my + 9, lb, { align: 'right' })
+      tc(C.ink); font(9.5); t(W - M, my + 9, String(v), { align: 'right' })
+      my += 13
+    }
+    // skip the property name when it just repeats the street address
+    const _addr = String(F.installationAddress || '').trim().toLowerCase()
+    const _pn = String(F.propertyName || '').trim()
+    const showName = _pn && !(_addr && _pn.toLowerCase().startsWith(_addr))
+    const lLines = [showName ? _pn : '', F.installationAddress, F.installationCityStateZip,
+      'Property Type: Multifamily', F.iqNumber ? ('IQ Number: ' + F.iqNumber) : ''].filter(v => v && String(v).trim())
+    const rLines = [F.ownerName, F.ownerAddress, F.ownerCityStateZip, F.contactName, F.contactEmail, F.contactPhone]
+      .filter(v => v && String(v).trim())
+    const BX = M + 210
+    tc(C.navy); font(8.5, 'bold')
+    t(M, topY + 9, 'PROPERTY / INSTALLATION'); t(BX, topY + 9, 'BILL TO')
+    let ly = topY + 22, ry = topY + 22; tc(C.ink); font(9)
+    for (const v of lLines) for (const ln of wrap(v, 190)) { t(M, ly, ln); ly += 11 }
+    for (const v of rLines) for (const ln of wrap(v, 150)) { t(BX, ry, ln); ry += 11 }
+    st.y = Math.max(my, ly, ry) + 4
+  },
+
+  /* Fixed four-row audit services table (Energy Audit Invoice only). */
+  audit_services_table(x, cfg = {}) {
+    const { W, H, M, C, st, font, t, tc, d, AMT, head, gridHeader, gridBorders } = x
+    head(cfg.heading || 'Audit Services', 12)
     const CA = [{ x0: M + 22, x1: M + 300, lbl: 'SERVICE DESCRIPTION' }, { x0: M + 300, x1: M + 340, lbl: 'QTY', align: 'right' },
       { x0: M + 340, x1: M + 400, lbl: 'UNIT' }, { x0: M + 400, x1: M + 466, lbl: 'RATE', align: 'right' },
       { x0: M + 466, x1: W - M, lbl: 'AMOUNT', align: 'right' }]
     gridHeader(CA)
     tc([70, 82, 98]); font(7.5, 'bold'); t(M + 5, st.y - 5, '#')
-    const rows = [['1', 'Whole-Building Energy Audit — Multifamily', '1', 'Building', '$2,000.00', '$2,000.00'],
+    const rows = cfg.rows || [['1', 'Whole-Building Energy Audit — Multifamily', '1', 'Building', '$2,000.00', '$2,000.00'],
       ['2', 'Per-Unit Blower Door and Diagnostic Testing', '', 'Unit', '', 'Included'],
       ['3', 'Common Area and Building Envelope Assessment', '1', 'Lump Sum', '', 'Included'],
       ['4', 'Mechanical Systems Survey', '1', 'Lump Sum', '', 'Included']]
@@ -315,8 +384,13 @@ export async function buildEesPdf(m, kind) {
       if (r[4]) t(M + 461, st.y + 11, r[4], { align: 'right' })
       t(AMT, st.y + 11, r[5], { align: 'right' })
       st.y += h })
-  } else {
-    /* size QTY / UNIT / AMOUNT to their widest contents (plus padding) */
+  },
+
+  /* Variable-length measure table: columns size to content, rows never split,
+     header repeats on continuation. */
+  measure_line_items_table(x, cfg = {}) {
+    const { m, W, H, M, C, st, font, t, tc, wrap, d, AMT, head, gridHeader, gridBorders, isInv } = x
+    head(cfg.heading || (isInv ? 'Installed Scope of Work — HOMES Project' : 'Proposed Scope of Work — HOMES Project'), 12)
     font(9); const qw = Math.max(24, ...m.rows.map(r => d.getTextWidth(_qty(r.qty)))) + 14
     const uw = Math.max(24, ...m.rows.map(r => d.getTextWidth(String(r.unit || '')))) + 14
     font(9.5, 'bold'); const aw = Math.max(46, ...m.rows.map(r => d.getTextWidth(_money(r.cost)))) + 16
@@ -344,17 +418,13 @@ export async function buildEesPdf(m, kind) {
       dl.forEach((ln, k) => t(M + 28, dy + k * 9, ln))
       st.y += h
     })
-  }
-  /* ---- rebates as credit lines in a gridded table ---- */
-  const gross = isAudit ? 2000 : m.total, foeAmt = isAudit ? 0 : m.foeAmt, iraAmt = isAudit ? 2000 : m.homesAmt
-  const credits = []
-  if (isAudit) credits.push(['IRA HOMES Incentive — Instant Discount', 'IQ MF Audit Rebate / Building', iraAmt])
-  else {
-    if (m.foe && foeAmt) credits.push(['Focus on Energy — Instant Discount', m.foe.desc + ' (' + m.foe.note + ')', foeAmt])
-    if (m.tier && iraAmt) credits.push(['IRA HOMES — Instant Discount', m.tier.desc + ' (' + m.tier.note + ')', iraAmt])
-  }
-  head(isAudit ? 'Rebates & Incentives Applied' : 'Applicable Rebates & Incentives', 10)
-  { font(8.5, 'bold')
+  },
+
+  /* Rebates rendered as credit lines feeding the totals. */
+  rebate_credits_table(x, cfg = {}) {
+    const { credits, W, H, M, C, st, font, t, tc, wrap, d, AMT, head, gridHeader, gridBorders, isAudit } = x
+    head(cfg.heading || (isAudit ? 'Rebates & Incentives Applied' : 'Applicable Rebates & Incentives'), 10)
+    font(8.5, 'bold')
     const pw = Math.max(60, ...credits.map(c => d.getTextWidth(c[0]))) + 12
     font(9, 'bold')
     const aw2 = Math.max(50, ...credits.map(c => d.getTextWidth('(' + _money(c[2]) + ')'))) + 16
@@ -371,10 +441,14 @@ export async function buildEesPdf(m, kind) {
       tc(C.ink); font(8.5, 'bold'); nl.forEach((ln, k) => t(M + 5, st.y + 11 + k * 9.5, ln))
       font(8.5); tc([70, 82, 98]); dl.forEach((ln, k) => t(PX + 5, st.y + 11 + k * 9.5, ln))
       tc(C.ink); font(9, 'bold'); t(AMT, st.y + h / 2 + 3.2, '(' + _money(amt) + ')', { align: 'right' })
-      st.y += h }) }
-  /* ---- totals: bordered box, same money edge ---- */
-  const reb = foeAmt + iraAmt, due = gross - reb
-  { const rows = [['Subtotal', _money(gross), 0], ['Total Rebates', '(' + _money(reb) + ')', 0],
+      st.y += h })
+  },
+
+  /* Subtotal / Total Rebates / TOTAL DUE, sharing the one money edge. */
+  totals_box(x) {
+    const { gross, foeAmt, iraAmt, W, M, C, st, font, t, tc, fill, stroke, d, need, GL, HB, AMT } = x
+    const reb = foeAmt + iraAmt, due = gross - reb
+    const rows = [['Subtotal', _money(gross), 0], ['Total Rebates', '(' + _money(reb) + ')', 0],
       ['TOTAL DUE', _money(Math.abs(due) < 0.005 ? 0 : due), 1]]
     const TX = W - M - 250, TW = 250, hh = [16, 16, 18]
     const boxH = hh.reduce((a, b) => a + b, 0)
@@ -386,34 +460,97 @@ export async function buildEesPdf(m, kind) {
       tc(strong ? C.ink : [60, 76, 94]); font(strong ? 9 : 8.5, 'bold'); t(TX + 8, yy + h - 5, lbl)
       tc(C.ink); font(strong ? 9 : 8.5, strong ? 'bold' : 'normal'); t(AMT, yy + h - 5, val, { align: 'right' })
       yy += h })
-    st.y = yy }
-  /* ---- deliverables (audit only) ---- */
-  if (isAudit) {
-    head('Deliverables', 10);
-    ['Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
-     'HPXML v4 / BuildingSync file from Asset Score',
-     'Customer Report / Building Assessment Tool Report'].forEach(dl2 => {
-      need(12); tc(C.ink); font(8.5); t(M + 5, st.y + 9, '–  ' + dl2); st.y += 12 })
+    st.y = yy
+  },
+
+  /* Bulleted deliverables list (Energy Audit Invoice only). */
+  deliverables_list(x, cfg = {}) {
+    const { M, C, st, font, t, tc, need, head } = x
+    head(cfg.heading || 'Deliverables', 10)
+    const items = cfg.items || ['Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
+      'HPXML v4 / BuildingSync file from Asset Score',
+      'Customer Report / Building Assessment Tool Report']
+    items.forEach(item => {
+      need(12); tc(C.ink); font(8.5); t(M + 5, st.y + 9, '–  ' + item); st.y += 12 })
+  },
+
+  /* Acknowledgment paragraph + the two signature rules. */
+  acknowledgment_and_signature(x, cfg = {}) {
+    const { W, M, CW, C, st, font, t, tc, wrap, need, stroke, d, text, isAudit, isInv } = x
+    head_(x, cfg.heading || 'Acknowledgment & Acceptance')
+    const ack = (isAudit || isInv) ? text('acknowledgment.invoice') : text('acknowledgment.proposal')
+    const al = wrap(ack, CW); need(al.length * 10 + 6); tc(C.ink); font(9)
+    al.forEach((ln, k) => t(M, st.y + 9 + k * 10, ln)); st.y += al.length * 10 + 4
+    need(46); st.y += 28; stroke([68, 88, 110]); d.setLineWidth(1)
+    d.line(M, st.y, M + 280, st.y); d.line(W - M - 150, st.y, W - M, st.y)
+    tc(C.mut); font(8.5); t(M, st.y + 10, cfg.signer_label || 'Property Owner / Authorized Representative')
+    t(W - M - 150, st.y + 10, 'Date')
+  },
+
+  /* Footer pinned to the bottom of the last page. */
+  page_footer(x) {
+    const { W, H, M, C, st, font, t, tc, stroke, d, text } = x
+    const fy = H - 44
+    if (st.y > fy - 10) d.addPage()
+    stroke(C.line); d.setLineWidth(.5); d.line(M, fy, W - M, fy)
+    tc(C.mut); font(8.5)
+    t(W / 2, fy + 12, text('footer.company_line'), { align: 'center' })
+    font(8, 'italic'); t(W / 2, fy + 23, text('footer.contact_line'), { align: 'center' })
+  },
+}
+
+// `head` lives on the context; this thin helper keeps the section bodies tidy.
+function head_(x, txt, gap) { x.head(txt, gap) }
+
+/**
+ * The section list for each built-in document, reproducing exactly what
+ * shipped. A stored template supplies its own list of {type, config}.
+ */
+export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
+  audit: [
+    { type: 'company_header' },
+    { type: 'document_meta_and_parties' },
+    { type: 'audit_services_table' },
+    { type: 'rebate_credits_table' },
+    { type: 'totals_box' },
+    { type: 'deliverables_list' },
+    { type: 'acknowledgment_and_signature' },
+    { type: 'page_footer' },
+  ],
+  proposal: [
+    { type: 'company_header' },
+    { type: 'document_meta_and_parties' },
+    { type: 'measure_line_items_table' },
+    { type: 'rebate_credits_table' },
+    { type: 'totals_box' },
+    { type: 'acknowledgment_and_signature' },
+    { type: 'page_footer' },
+  ],
+  invoice: [
+    { type: 'company_header' },
+    { type: 'document_meta_and_parties' },
+    { type: 'measure_line_items_table' },
+    { type: 'rebate_credits_table' },
+    { type: 'totals_box' },
+    { type: 'acknowledgment_and_signature' },
+    { type: 'page_footer' },
+  ],
+})
+
+/**
+ * Render an EES submittal document. `sections` overrides the built-in list —
+ * that is how a stored template drives the output. Returns a Blob.
+ */
+export async function buildEesPdf(m, kind, sections) {
+  const x = await buildDocumentContext(m, kind)
+  const list = sections && sections.length ? sections : DEFAULT_DOCUMENT_SECTIONS[kind]
+  if (!list) throw new Error(`Unknown document kind: ${kind}`)
+  for (const s of list) {
+    const render = SECTION_RENDERERS[s.type]
+    if (!render) throw new Error(`Unknown document section type: ${s.type}`)
+    render(x, s.config || {})
   }
-  /* ---- acknowledgment + signature ---- */
-  head('Acknowledgment & Acceptance', 10)
-  const ack = (isAudit || isInv)
-    ? 'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes EES-WI to submit for and receive the corresponding program incentive on their behalf.'
-    : 'Signed receipt of this proposal constitutes acceptance of the proposed scope of work. The property owner authorizes EES-WI to submit the project for rebate/incentive program preapproval and to begin project planning activities.'
-  { const al = wrap(ack, CW); need(al.length * 10 + 6); tc(C.ink); font(9)
-    al.forEach((ln, k) => t(M, st.y + 9 + k * 10, ln)); st.y += al.length * 10 + 4 }
-  need(46); st.y += 28; stroke([68, 88, 110]); d.setLineWidth(1)
-  d.line(M, st.y, M + 280, st.y); d.line(W - M - 150, st.y, W - M, st.y)
-  tc(C.mut); font(8.5); t(M, st.y + 10, 'Property Owner / Authorized Representative')
-  t(W - M - 150, st.y + 10, 'Date')
-  /* ---- footer pinned to the bottom of the last page ---- */
-  const fy = H - 44
-  if (st.y > fy - 10) d.addPage()
-  stroke(C.line); d.setLineWidth(.5); d.line(M, fy, W - M, fy)
-  tc(C.mut); font(8.5)
-  t(W / 2, fy + 12, 'Energy Efficiency Services of Wisconsin  |  112 Owen Rd. PO Box 6141, Monona, WI 53716', { align: 'center' })
-  font(8, 'italic'); t(W / 2, fy + 23, 'ira@ees-wi.org  |  608-460-7419', { align: 'center' })
-  return d.output('blob')
+  return x.d.output('blob')
 }
 
 // ---------------------------------------------------------------------------

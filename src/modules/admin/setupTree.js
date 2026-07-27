@@ -52,6 +52,8 @@ export const SETUP_TREE = [
     children: [
       { id: 'email_templates',    label: 'Email Templates' },
       { id: 'document_templates', label: 'Document Templates' },
+      { id: 'submittal_document_text_blocks', label: 'Submittal Document Wording' },
+      { id: 'stage_document_requirements', label: 'Stage Document Requirements' },
       { id: 'envelopes',          label: 'Envelopes' },
       { id: 'outbound_mailboxes', label: 'Outbound Mailboxes' },
       { id: 'unmatched_inbox',    label: 'Unmatched Inbox' },

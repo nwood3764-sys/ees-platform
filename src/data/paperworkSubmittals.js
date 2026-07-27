@@ -126,15 +126,30 @@ export const DOCUMENT_DEFINITIONS = Object.freeze({
 })
 
 // ---------------------------------------------------------------------------
-// THE MATRIX. Program key = the `incentive_applications` record-type value.
-// Each program declares the document set for each of its three stages.
+// THE MATRIX.
+//
+// Program key = the **opportunity record type** value. That is LEAP's
+// canonical program identifier: it is state-scoped, complete across WI/NC/MI,
+// and it already owns its own never-shared opportunity stage picklist
+// ("Opportunity — NC HOMES Audit Phase 4: Project Reservation"). The
+// `incentive_applications` record types cover Wisconsin plus Electrify Denver
+// only, so keying off those would dead-end the first time EES files in North
+// Carolina or Michigan.
+//
+// Every program below carries all three stages. Empty arrays mean "this
+// submittal's documents are not built yet" — visible gap, never a silent
+// substitution of another program's documents.
 // ---------------------------------------------------------------------------
 const NO_DOCUMENTS_BUILT = Object.freeze({
   [SUBMITTAL_STAGES.PROJECT_RESERVATION]: [],
   [SUBMITTAL_STAGES.FINAL_PROJECT_PAYMENT_REQUEST]: [],
 })
 
+const notBuilt = (key, label, programName) =>
+  ({ key, label, programName, documentsByStage: NO_DOCUMENTS_BUILT })
+
 export const PROGRAM_SUBMITTALS = Object.freeze({
+  // ── Wisconsin IRA HOMES multifamily — the two programs with built documents ──
   wi_ira_mf_homes_audit: {
     key: 'wi_ira_mf_homes_audit',
     label: 'WI-IRA-MF-HOMES-AUDIT',
@@ -166,14 +181,31 @@ export const PROGRAM_SUBMITTALS = Object.freeze({
       ],
     },
   },
-  // Programs whose submittal documents are not built yet. Declared so the
-  // matrix is complete and the UI reports the gap honestly.
-  wi_ira_sf_homes:       { key: 'wi_ira_sf_homes',       label: 'WI-IRA-SF-HOMES',       programName: 'IRA HOMES — Wisconsin (Single Family)',              documentsByStage: NO_DOCUMENTS_BUILT },
-  wi_ira_sf_homes_audit: { key: 'wi_ira_sf_homes_audit', label: 'WI-IRA-SF-HOMES-AUDIT', programName: 'IRA HOMES — Wisconsin (Single Family Energy Audit)', documentsByStage: NO_DOCUMENTS_BUILT },
-  wi_ira_mf_hear:        { key: 'wi_ira_mf_hear',        label: 'WI-IRA-MF-HEAR',        programName: 'IRA HEAR — Wisconsin (Multifamily)',                 documentsByStage: NO_DOCUMENTS_BUILT },
-  wi_ira_sf_hear:        { key: 'wi_ira_sf_hear',        label: 'WI-IRA-SF-HEAR',        programName: 'IRA HEAR — Wisconsin (Single Family)',               documentsByStage: NO_DOCUMENTS_BUILT },
-  wi_foe:                { key: 'wi_foe',                label: 'WI-FOE',                programName: 'Focus on Energy — Wisconsin',                        documentsByStage: NO_DOCUMENTS_BUILT },
-  electrify_denver:      { key: 'electrify_denver',      label: 'Electrify Denver',      programName: 'Denver Electrification',                             documentsByStage: NO_DOCUMENTS_BUILT },
+
+  // ── Wisconsin — remaining programs ──────────────────────────────────────
+  wi_ira_sf_homes:       notBuilt('wi_ira_sf_homes',       'WI-IRA-SF-HOMES',       'IRA HOMES — Wisconsin (Single Family)'),
+  wi_ira_sf_homes_audit: notBuilt('wi_ira_sf_homes_audit', 'WI-IRA-SF-HOMES-AUDIT', 'IRA HOMES — Wisconsin (Single Family Energy Audit)'),
+  wi_ira_mf_hear:        notBuilt('wi_ira_mf_hear',        'WI-IRA-MF-HEAR',        'IRA HEAR — Wisconsin (Multifamily)'),
+  wi_ira_sf_hear:        notBuilt('wi_ira_sf_hear',        'WI-IRA-SF-HEAR',        'IRA HEAR — Wisconsin (Single Family)'),
+  foe_2024_wi:           notBuilt('foe_2024_wi',           'FOE-2024-WI',           'Focus on Energy — Wisconsin (2024)'),
+  foe_2025_wi:           notBuilt('foe_2025_wi',           'FOE-2025-WI',           'Focus on Energy — Wisconsin (2025)'),
+  foe_2026_wi:           notBuilt('foe_2026_wi',           'FOE-2026-WI',           'Focus on Energy — Wisconsin (2026)'),
+
+  // ── North Carolina ──────────────────────────────────────────────────────
+  nc_ira_mf_homes:       notBuilt('nc_ira_mf_homes',       'NC-IRA-MF-HOMES',       'IRA HOMES — North Carolina (Multifamily)'),
+  nc_ira_mf_homes_audit: notBuilt('nc_ira_mf_homes_audit', 'NC-IRA-MF-HOMES-AUDIT', 'IRA HOMES — North Carolina (Multifamily Energy Audit)'),
+  nc_ira_sf_homes:       notBuilt('nc_ira_sf_homes',       'NC-IRA-SF-HOMES',       'IRA HOMES — North Carolina (Single Family)'),
+  nc_ira_sf_homes_audit: notBuilt('nc_ira_sf_homes_audit', 'NC-IRA-SF-HOMES-AUDIT', 'IRA HOMES — North Carolina (Single Family Energy Audit)'),
+  nc_ira_mf_hear:        notBuilt('nc_ira_mf_hear',        'NC-IRA-MF-HEAR',        'IRA HEAR — North Carolina (Multifamily)'),
+  nc_ira_sf_hear:        notBuilt('nc_ira_sf_hear',        'NC-IRA-SF-HEAR',        'IRA HEAR — North Carolina (Single Family)'),
+
+  // ── Michigan ────────────────────────────────────────────────────────────
+  mi_ira_mf_homes:       notBuilt('mi_ira_mf_homes',       'MI-IRA-MF-HOMES',       'IRA HOMES — Michigan (Multifamily)'),
+  mi_ira_mf_homes_audit: notBuilt('mi_ira_mf_homes_audit', 'MI-IRA-MF-HOMES-AUDIT', 'IRA HOMES — Michigan (Multifamily Energy Audit)'),
+  mi_ira_sf_homes:       notBuilt('mi_ira_sf_homes',       'MI-IRA-SF-HOMES',       'IRA HOMES — Michigan (Single Family)'),
+  mi_ira_sf_homes_audit: notBuilt('mi_ira_sf_homes_audit', 'MI-IRA-SF-HOMES-AUDIT', 'IRA HOMES — Michigan (Single Family Energy Audit)'),
+  mi_ira_mf_hear:        notBuilt('mi_ira_mf_hear',        'MI-IRA-MF-HEAR',        'IRA HEAR — Michigan (Multifamily)'),
+  mi_ira_sf_hear:        notBuilt('mi_ira_sf_hear',        'MI-IRA-SF-HEAR',        'IRA HEAR — Michigan (Single Family)'),
 })
 
 // ---------------------------------------------------------------------------

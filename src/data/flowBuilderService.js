@@ -220,89 +220,21 @@ export async function updateFlowMeta(flowId, patch) {
   if (error) throw error
 }
 
-// Persist the full ordered element list for a flow. Soft-deletes existing
-// elements and re-inserts the provided set, renumbering fe_order and rewiring
-// fe_next_element_id into a linear chain start → … → finish. Decision branches
-// are stored as provided. This is the builder's single save path.
+// Persist the full ordered element list for a flow. The RPC soft-deletes the
+// existing elements and re-inserts the provided set — renumbering fe_order,
+// rewiring fe_next_element_id into a linear chain start → … → finish, and
+// resolving decision-branch target_order references to real element ids —
+// inside a SINGLE transaction. If any step fails the whole save rolls back, so
+// a failed save can never leave the flow with its elements deleted. (This
+// replaced a client-side soft-delete-then-reinsert sequence whose delete
+// committed before the re-insert could fail.) Not-authenticated is raised
+// server-side, mirroring the previous behavior.
 export async function saveFlowElements(flowId, elements) {
-  const { data: uid } = await supabase.rpc('current_app_user_id')
-  if (!uid) throw new Error('Not authenticated')
-
-  // Soft-delete every current element, then re-insert from the editor state.
-  // Simpler and race-free for a single-author builder versus diffing.
-  const { error: delErr } = await supabase
-    .from('flow_elements')
-    .update({ is_deleted: true, updated_by: uid })
-    .eq('fe_flow_id', flowId)
-    .eq('is_deleted', false)
-  if (delErr) throw delErr
-
-  // Build ordered rows: start, …middle…, finish. Branch target references in
-  // the editor use target_order (index into this ordered list); they are
-  // resolved to real element ids after insert.
-  const ordered = [...elements].sort((a, b) => a.fe_order - b.fe_order)
-  const rows = ordered.map((el, i) => ({
-    fe_record_number: '',
-    fe_flow_id: flowId,
-    fe_element_type: el.fe_element_type,
-    fe_order: i,
-    fe_label: el.fe_label || null,
-    fe_api_name: el.fe_api_name || null,
-    fe_config: el.fe_config || {},
-    // branches re-resolved below; insert empty to satisfy NOT NULL/default
-    fe_decision_branches: [],
-    owner_id: uid,
-    created_by: uid,
-    updated_by: uid,
-  }))
-
-  const { data: inserted, error: insErr } = await supabase
-    .from('flow_elements')
-    .insert(rows)
-    .select('id, fe_order, fe_element_type')
-  if (insErr) throw insErr
-
-  const byOrder = [...inserted].sort((a, b) => a.fe_order - b.fe_order)
-  const idByOrder = new Map(byOrder.map(r => [r.fe_order, r.id]))
-
-  // Rewire linear next-element pointers in fe_order sequence.
-  for (let i = 0; i < byOrder.length - 1; i++) {
-    await supabase.from('flow_elements')
-      .update({ fe_next_element_id: byOrder[i + 1].id })
-      .eq('id', byOrder[i].id)
-  }
-
-  // Resolve and persist decision branches. Each editor branch carries
-  // { condition:{field,op,value}, target_order, label }. We write the
-  // interpreter shape: { condition, next_element_id, label }. target_order is
-  // the fe_order of the destination element; unset/invalid targets fall through
-  // to the element's linear next (handled by the interpreter's default path).
-  for (let i = 0; i < ordered.length; i++) {
-    const el = ordered[i]
-    if (el.fe_element_type !== 'decision') continue
-    const branches = (el.fe_decision_branches || [])
-      .filter(b => b && b.condition && b.condition.field)
-      .map(b => {
-        const tgt = (b.target_order !== undefined && b.target_order !== null)
-          ? idByOrder.get(Number(b.target_order))
-          : null
-        return {
-          condition: {
-            field: b.condition.field,
-            op: b.condition.op || 'eq',
-            value: b.condition.value ?? null,
-          },
-          next_element_id: tgt || null,
-          label: b.label || null,
-        }
-      })
-    if (branches.length > 0) {
-      await supabase.from('flow_elements')
-        .update({ fe_decision_branches: branches })
-        .eq('id', idByOrder.get(i))
-    }
-  }
-  return inserted
+  const { error } = await supabase.rpc('save_flow_elements', {
+    p_flow_id: flowId,
+    p_elements: elements || [],
+  })
+  if (error) throw error
 }
 
 // ─── Lifecycle (RPC wrappers) ────────────────────────────────────────────────
