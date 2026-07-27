@@ -238,6 +238,29 @@ export function TabularLayout({ result }) {
   const [savingCell, setSavingCell]   = useState(null)
   const [editError, setEditError]     = useState(null)   // { key, message }
 
+  // Viewer sort — click a header to sort by that column; shift-click adds a
+  // secondary/tertiary sort key (Salesforce/Excel multi-sort). Sorting is on
+  // the RESOLVED, displayed value (labels, not UUIDs) so what you sort is what
+  // you see. Column-summarize aggregates recompute over the same rows.
+  const [sortKeys, setSortKeys] = useState([])   // [{ col: <index>, dir: 'asc'|'desc' }]
+  const toggleSort = (colIdx, additive) => {
+    setSortKeys(prev => {
+      const existing = prev.find(k => k.col === colIdx)
+      if (additive) {
+        if (existing) {
+          if (existing.dir === 'asc') return prev.map(k => k.col === colIdx ? { ...k, dir: 'desc' } : k)
+          return prev.filter(k => k.col !== colIdx)   // asc → desc → off
+        }
+        return [...prev, { col: colIdx, dir: 'asc' }]
+      }
+      if (existing && prev.length === 1) {
+        if (existing.dir === 'asc') return [{ col: colIdx, dir: 'desc' }]
+        return []   // asc → desc → off
+      }
+      return [{ col: colIdx, dir: 'asc' }]
+    })
+  }
+
   useEffect(() => {
     let cancelled = false
     if (!primaryObject) { setFieldMeta(new Map()); return undefined }
@@ -276,21 +299,50 @@ export function TabularLayout({ result }) {
   if (rows.length === 0) {
     return <EmptyState message="No matching rows." />
   }
+
+  // Resolve each column's displayed value for a row (calc fields evaluated,
+  // FK/picklist labels resolved) — the basis for both sorting and summarize.
+  const resolveDisplay = (row, c) => {
+    if (c._calc) {
+      const rr = {}
+      for (const col of columns) rr[col.name] = getRowValue(row, col, result)
+      return evaluateRowExpression(c.expression, rr)
+    }
+    const ov = overlay.get(`${row.id}::${c.name}`)
+    if (ov) return ov.label ?? ov.value
+    return getRowValue(row, c, result)
+  }
+
+  const sortedRows = applyViewerSort(rows, sortKeys, allColumns, resolveDisplay)
+
+  // Column-summarize footer — only shows if at least one column has an
+  // aggregate chosen in the report definition (col.summarize).
+  const summaryRow = buildColumnSummaries(sortedRows, allColumns, resolveDisplay)
+
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'auto' }}>
       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
         <thead style={{ background:C.cardSecondary, position:'sticky', top:0, zIndex:1 }}>
           <tr>
-            {allColumns.map((c, idx) => (
-              <th key={`h-${idx}`} style={cellHeaderStyle()}>
-                {c.label}
-                {c._calc && <span style={{ marginLeft:4, fontSize:10, color:C.emerald }}>ƒ</span>}
-              </th>
-            ))}
+            {allColumns.map((c, idx) => {
+              const sk = sortKeys.find(k => k.col === idx)
+              const rank = sortKeys.length > 1 && sk ? sortKeys.findIndex(k => k.col === idx) + 1 : null
+              return (
+                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), cursor:'pointer', userSelect:'none' }}
+                    onClick={(e) => toggleSort(idx, e.shiftKey)}
+                    title="Click to sort · Shift-click to add a sort level">
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
+                    {c.label}
+                    {c._calc && <span style={{ fontSize:10, color:C.emerald }}>ƒ</span>}
+                    {sk && <span style={{ fontSize:10, color:C.emerald }}>{sk.dir === 'asc' ? '▲' : '▼'}{rank ? <sup>{rank}</sup> : null}</span>}
+                  </span>
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIdx) => (
+          {sortedRows.map((row, rowIdx) => (
             <tr key={row.id || rowIdx} style={{
               borderTop: `1px solid ${C.border}`,
             }}>
@@ -378,9 +430,90 @@ export function TabularLayout({ result }) {
             </tr>
           ))}
         </tbody>
+        {summaryRow && (
+          <tfoot>
+            <tr style={{ background:C.cardSecondary, borderTop:`2px solid ${C.borderDark}` }}>
+              {allColumns.map((c, idx) => (
+                <td key={`sum-${idx}`} style={{ ...cellStyle(), fontWeight:600, color:C.textPrimary }}>
+                  {idx === 0 && !summaryRow[idx] ? `${sortedRows.length} records` : (summaryRow[idx] || '')}
+                </td>
+              ))}
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   )
+}
+
+// ─── Viewer sort + column summarize helpers ───────────────────────────────
+
+// Compare two resolved cell values. Numbers sort numerically, ISO dates sort
+// chronologically, everything else case-insensitive lexical. Null/blank sinks
+// to the bottom regardless of direction.
+function compareValues(a, b) {
+  const aBlank = a == null || a === ''
+  const bBlank = b == null || b === ''
+  if (aBlank && bBlank) return 0
+  if (aBlank) return 1
+  if (bBlank) return -1
+  const na = typeof a === 'number' ? a : parseFloat(a)
+  const nb = typeof b === 'number' ? b : parseFloat(b)
+  if (Number.isFinite(na) && Number.isFinite(nb) && String(a).trim() !== '' && String(b).trim() !== '') {
+    // Only treat as numeric when both fully parse (avoid "12 Main St" vs 12).
+    if (String(na) === String(a).trim() && String(nb) === String(b).trim()) return na - nb
+  }
+  const da = Date.parse(a), db = Date.parse(b)
+  if (Number.isFinite(da) && Number.isFinite(db) &&
+      /^\d{4}-\d{2}-\d{2}/.test(String(a)) && /^\d{4}-\d{2}-\d{2}/.test(String(b))) {
+    return da - db
+  }
+  return String(a).toLowerCase().localeCompare(String(b).toLowerCase())
+}
+
+function applyViewerSort(rows, sortKeys, columns, resolveDisplay) {
+  if (!sortKeys || sortKeys.length === 0) return rows
+  const decorated = rows.map(row => ({
+    row,
+    vals: sortKeys.map(k => resolveDisplay(row, columns[k.col])),
+  }))
+  decorated.sort((x, y) => {
+    for (let i = 0; i < sortKeys.length; i++) {
+      const cmp = compareValues(x.vals[i], y.vals[i])
+      if (cmp !== 0) return sortKeys[i].dir === 'desc' ? -cmp : cmp
+    }
+    return 0
+  })
+  return decorated.map(d => d.row)
+}
+
+// Build the summarize footer. Each column may carry `summarize`
+// ('sum'|'avg'|'min'|'max'|'count') set in the report definition; returns an
+// array (index-aligned to columns) of formatted aggregate strings, or null
+// when no column requests a summary.
+function buildColumnSummaries(rows, columns, resolveDisplay) {
+  const anySummary = columns.some(c => c.summarize)
+  if (!anySummary) return null
+  return columns.map(c => {
+    if (!c.summarize) return ''
+    const nums = []
+    for (const row of rows) {
+      const v = resolveDisplay(row, c)
+      const n = typeof v === 'number' ? v : parseFloat(v)
+      if (Number.isFinite(n)) nums.push(n)
+    }
+    let val
+    switch (c.summarize) {
+      case 'count': val = rows.length; break
+      case 'sum':   val = nums.reduce((a, b) => a + b, 0); break
+      case 'avg':   val = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null; break
+      case 'min':   val = nums.length ? Math.min(...nums) : null; break
+      case 'max':   val = nums.length ? Math.max(...nums) : null; break
+      default: return ''
+    }
+    const label = { sum:'Σ', avg:'avg', min:'min', max:'max', count:'#' }[c.summarize]
+    return val == null ? '—' : `${label} ${formatCellValue(val, c.type)}`
+  })
 }
 
 // Inline picklist cell editor for tabular report rows. Loads the active

@@ -666,29 +666,52 @@ function FieldsTab({
           {report.rpt_selected_fields.length === 0 ? (
             <div style={emptyState()}>No fields selected. Pick from the left.</div>
           ) : (
-            <SortableList
-              items={report.rpt_selected_fields.map(f => ({ id: fieldKey(f), f }))}
-              onReorder={(next) => reorderFields(next.map(x => x.f))}
-              renderItem={(item, { setNodeRef, style, dragHandleProps }) => {
-                const f = item.f
-                const idx = report.rpt_selected_fields.findIndex(x => fieldKey(x) === item.id)
-                return (
-                  <div ref={setNodeRef} style={{
-                    ...style, display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
-                    background:C.cardSecondary, borderRadius:6, marginBottom:6,
-                  }}>
-                    <span {...dragHandleProps} title="Drag to reorder" style={{ cursor:'grab', color:C.textMuted, fontSize:14, lineHeight:1, touchAction:'none' }}>⠿</span>
-                    <div style={{ flex:1, fontSize:12, minWidth:0 }}>
-                      <div style={{ fontWeight:500, color:C.textPrimary }}>{f.label}</div>
-                      <div style={{ color:C.textMuted, fontSize:11 }}>
-                        {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
+            <>
+              <div style={{ fontSize:11, color:C.textMuted, marginBottom:8 }}>
+                Drag to reorder columns. Set <strong>Σ</strong> to show a column total (Tabular).
+              </div>
+              <SortableList
+                items={report.rpt_selected_fields.map(f => ({ id: fieldKey(f), f }))}
+                onReorder={(next) => reorderFields(next.map(x => x.f))}
+                renderItem={(item, { setNodeRef, style, dragHandleProps }) => {
+                  const f = item.f
+                  const idx = report.rpt_selected_fields.findIndex(x => fieldKey(x) === item.id)
+                  const updateThisField = (patch) => {
+                    const fields = report.rpt_selected_fields.map((x, i) => i === idx ? { ...x, ...patch } : x)
+                    updateReport({ rpt_selected_fields: fields })
+                  }
+                  const numericish = ['numeric','integer','bigint','smallint','double precision','real','money','decimal'].includes(String(f.type || '').toLowerCase())
+                  return (
+                    <div ref={setNodeRef} style={{
+                      ...style, display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
+                      background:C.cardSecondary, borderRadius:6, marginBottom:6,
+                    }}>
+                      <span {...dragHandleProps} title="Drag to reorder" style={{ cursor:'grab', color:C.textMuted, fontSize:14, lineHeight:1, touchAction:'none' }}>⠿</span>
+                      <div style={{ flex:1, fontSize:12, minWidth:0 }}>
+                        <div style={{ fontWeight:500, color:C.textPrimary, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.label}</div>
+                        <div style={{ color:C.textMuted, fontSize:11 }}>
+                          {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
+                        </div>
                       </div>
+                      <select
+                        value={f.summarize || ''}
+                        onChange={e => updateThisField({ summarize: e.target.value || undefined })}
+                        title="Column summary (shown as a total row on Tabular reports)"
+                        style={{ ...inputStyle(), width:78, fontSize:11, padding:'4px 6px' }}
+                      >
+                        <option value="">Σ —</option>
+                        <option value="count">Count</option>
+                        {numericish && <option value="sum">Sum</option>}
+                        {numericish && <option value="avg">Average</option>}
+                        {numericish && <option value="min">Min</option>}
+                        {numericish && <option value="max">Max</option>}
+                      </select>
+                      <button onClick={() => removeField(idx)} style={miniBtn(true)}>×</button>
                     </div>
-                    <button onClick={() => removeField(idx)} style={miniBtn(true)}>×</button>
-                  </div>
-                )
-              }}
-            />
+                  )
+                }}
+              />
+            </>
           )}
         </div>
       </div>
