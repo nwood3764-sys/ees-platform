@@ -248,6 +248,49 @@ Relationship graph (verified): `projects.property_id` → properties;
    `describe_object_columns('opportunity_line_items')` first — its columns are
    unverified (only `oli_record_number`/`oli_is_deleted` appear in code).
 
+## 7b. Signing route for generated PDFs (designed, NOT built)
+
+Nicholas's rule: of the submittal documents, only the **Final Project Payment
+Request invoice** needs to be sent for signature. It cannot be today, and the
+reason is structural:
+
+- `envelopes.document_template_id` is **NOT NULL**.
+- `send-envelope/index.ts:75-96` refuses anything without an **Active**
+  document template *and* a published `document_template_snapshots` row.
+- The unsigned PDF is produced *inside* `send-envelope` by calling
+  `render-document-template-pdf` with the snapshot id (`:178-188`), which is
+  also what discovers the `\sig1\`-style anchor positions.
+
+There is no code path that accepts a pre-generated PDF. The design:
+
+1. **Migration.** Make `envelopes.document_template_id` nullable; add
+   `env_source_document_id uuid REFERENCES documents(id)`; add a CHECK that
+   exactly one of the two is set. Existing rows are unaffected.
+2. **`send-envelope`.** Accept `source_document_id` as an alternative to
+   `document_template_id`. When present: skip the template/snapshot lookup,
+   skip the render call, and read the PDF bytes from the `documents` row's
+   storage path instead. Everything downstream (upload to
+   `envelopes/{id}/unsigned.pdf`, recipients, signing tokens, emails,
+   `signing-portal-submit`) is unchanged. Keep the template branch untouched
+   so existing signature sends cannot regress.
+3. **Tabs.** A generated PDF has no discoverable anchors, so the caller passes
+   explicit tab positions. `buildEesPdf` already draws the signature rule at a
+   known point — return those coordinates alongside the blob and hand them to
+   `send-envelope` as `tabs: [{ recipient_order, tab_type, page, x, y, width,
+   height }]`.
+4. **Client.** On the Final Project Payment Request submittal only, a
+   "Send for Signature" action: generate the invoice, `uploadDocument` it to
+   the project, then call `send-envelope` with `source_document_id` + tabs.
+
+**Why this was not shipped in the 2026-07-27 session:** `send-envelope` is a
+live legal e-signature pipeline with no automated test harness, and verifying
+it end-to-end means sending a real email to a real signer. Deploying an
+untested change there is precisely the failure mode of the
+`20260713121244` incident (a live pipeline torn out on an untested
+assumption). The change above is additive and low-risk in shape, but it needs
+a controlled test send to an internal address before it goes to prod. Do that
+first, then ship.
+
 ## 8. File + DB-table index (what the building session touches most)
 
 | Thing | Where |
