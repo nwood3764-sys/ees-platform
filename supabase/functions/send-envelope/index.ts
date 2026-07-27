@@ -1,19 +1,24 @@
 // =============================================================================
-// send-envelope (v3 — Outlook email integration + EES branding)
+// send-envelope (v4 — pre-generated source-document signing route)
 //
-// Same as v2, plus: rebranded email body footer from "via Anura" to
-// "from Energy Efficiency Services" so external recipients see the company
-// name they recognize.
+// v3 + an ADDITIVE second entry path: an envelope can now be sent from a
+// pre-generated PDF (a `documents` row) with explicit tab positions, instead
+// of from a document_template + snapshot that gets rendered here. This is what
+// lets the Final Project Payment Request invoice — produced in-app by
+// paperworkModel, which has no document_template — be sent for a property
+// owner's signature.
 //
-// What this function does:
-//   1. Validates the document template, locates the latest published snapshot
-//   2. Inserts an envelope row + per-recipient rows with unique signing tokens
-//   3. Calls render-document-template-pdf to merge fields and discover anchors
-//   4. Stores the unsigned PDF in storage; persists tab positions per recipient
-//   5. Audits with Created + Sent envelope_events
-//   6. Sends recipient #1 a notification email through the calling user's
-//      Outlook (via send-email-via-graph). Falls back to copy-paste URLs in
-//      the FE response if Outlook isn't connected.
+// The template path is UNCHANGED. Mode is chosen by the request body:
+//   - document_template_id present → existing path (validate template, find
+//     snapshot, render via render-document-template-pdf, discover anchors).
+//   - source_document_id present   → read the PDF bytes from that documents
+//     row's storage location and use the caller-supplied `tabs` (a generated
+//     PDF has no discoverable text anchors). Exactly one of the two is required.
+//
+// Everything after the PDF bytes + tab list are in hand is shared and
+// unchanged: unsigned.pdf upload, recipients, tokens, tab rows, events, and the
+// recipient-#1 email (which still only fires when Outlook is connected —
+// otherwise the response carries copy-paste signing URLs, the safe test mode).
 // =============================================================================
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
@@ -36,8 +41,20 @@ interface Recipient {
   contact_id?: string | null
 }
 
+interface TabInput {
+  recipient_order: number
+  tab_type: string          // 'sig' | 'signature' | 'date' | 'text' | 'initial'
+  page: number
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 interface ReqBody {
-  document_template_id: string
+  document_template_id?: string   // template path (existing)
+  source_document_id?: string     // source-document path (new); exactly one of the two
+  tabs?: TabInput[]               // required with source_document_id — a generated PDF has no anchors
   parent_object: string
   parent_record_id: string
   recipients: Recipient[]
@@ -72,28 +89,50 @@ Deno.serve(async (req) => {
   const callerUserId = await resolveCallerUserId(supabase)
   if (!callerUserId) return json({ error: "Could not resolve caller's user id" }, 401)
 
-  const { data: dt, error: dtErr } = await supabase
-    .from("document_templates")
-    .select(`
-      id, name, dt_record_number,
-      authoring:dt_authoring_mode ( picklist_value ),
-      status:status ( picklist_value )
-    `)
-    .eq("id", body.document_template_id)
-    .eq("is_deleted", false)
-    .maybeSingle()
-  if (dtErr || !dt) return json({ error: `Template not found: ${dtErr?.message || ""}` }, 404)
-  if ((dt as any).status?.picklist_value !== "Active")
-    return json({ error: `Template must be Active (currently ${(dt as any).status?.picklist_value || "Draft"})` }, 400)
+  // Mode: template (existing) vs. pre-generated source document (new).
+  const useSourceDoc = !!body.source_document_id
+  let docName = "Document"                 // env_name / subject / email default
+  let snapshot: { id: string, dtsn_version?: number } | null = null
+  let sourceDoc: { id: string, name: string, storage_bucket: string, storage_path: string } | null = null
 
-  const { data: snapshot, error: snapErr } = await supabase
-    .from("document_template_snapshots")
-    .select("id, dtsn_version")
-    .eq("document_template_id", body.document_template_id)
-    .order("dtsn_version", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (snapErr || !snapshot) return json({ error: "No published snapshot — re-publish the template first" }, 400)
+  if (useSourceDoc) {
+    const { data: doc, error: docErr } = await supabase
+      .from("documents")
+      .select("id, name, storage_bucket, storage_path, is_deleted")
+      .eq("id", body.source_document_id)
+      .maybeSingle()
+    if (docErr || !doc) return json({ error: `Source document not found: ${docErr?.message || ""}` }, 404)
+    if ((doc as any).is_deleted) return json({ error: "Source document is deleted" }, 400)
+    if (!(doc as any).storage_bucket || !(doc as any).storage_path)
+      return json({ error: "Source document has no stored file" }, 400)
+    sourceDoc = doc as any
+    docName = body.env_name || (doc as any).name || "Document"
+  } else {
+    const { data: dt, error: dtErr } = await supabase
+      .from("document_templates")
+      .select(`
+        id, name, dt_record_number,
+        authoring:dt_authoring_mode ( picklist_value ),
+        status:status ( picklist_value )
+      `)
+      .eq("id", body.document_template_id)
+      .eq("is_deleted", false)
+      .maybeSingle()
+    if (dtErr || !dt) return json({ error: `Template not found: ${dtErr?.message || ""}` }, 404)
+    if ((dt as any).status?.picklist_value !== "Active")
+      return json({ error: `Template must be Active (currently ${(dt as any).status?.picklist_value || "Draft"})` }, 400)
+
+    const { data: snap, error: snapErr } = await supabase
+      .from("document_template_snapshots")
+      .select("id, dtsn_version")
+      .eq("document_template_id", body.document_template_id)
+      .order("dtsn_version", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (snapErr || !snap) return json({ error: "No published snapshot — re-publish the template first" }, 400)
+    snapshot = snap
+    docName = (dt as any).name
+  }
 
   const [
     standardEnvRtId, standardRecRtId, standardTabRtId, standardEventRtId,
@@ -116,8 +155,8 @@ Deno.serve(async (req) => {
   if (!draftStatusId || !sentStatusId || !standardEnvRtId)
     return json({ error: "Required picklist seeds missing — contact admin" }, 500)
 
-  const envName = body.env_name || `${dt.name} — ${body.parent_record_id.slice(0, 8)}`
-  const subject = body.subject || `Please sign: ${dt.name}`
+  const envName = body.env_name || `${docName} — ${body.parent_record_id.slice(0, 8)}`
+  const subject = body.subject || `Please sign: ${docName}`
 
   const { data: envelopeRow, error: envInsertErr } = await supabase
     .from("envelopes")
@@ -125,8 +164,9 @@ Deno.serve(async (req) => {
       env_record_number: "",
       env_name: envName,
       env_record_type: standardEnvRtId,
-      document_template_id: body.document_template_id,
-      document_template_snapshot_id: snapshot.id,
+      document_template_id: useSourceDoc ? null : body.document_template_id,
+      document_template_snapshot_id: useSourceDoc ? null : snapshot!.id,
+      env_source_document_id: useSourceDoc ? sourceDoc!.id : null,
       env_parent_object: body.parent_object,
       env_parent_record_id: body.parent_record_id,
       env_subject: subject,
@@ -173,25 +213,55 @@ Deno.serve(async (req) => {
   const recipientByOrder = new Map<number, typeof insertedRecips[number]>()
   for (const r of insertedRecips) recipientByOrder.set(r.recipient_order, r)
 
-  let renderResult: { pdf_base64: string, anchors: any[], page_count: number, template_name: string }
-  try {
-    const renderResp = await fetch(`${supabaseUrl}/functions/v1/render-document-template-pdf`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": authHeader },
-      body: JSON.stringify({
-        document_template_snapshot_id: snapshot.id,
-        parent_object:                 body.parent_object,
-        parent_record_id:              body.parent_record_id,
-      }),
-    })
-    if (!renderResp.ok) throw new Error(`render-document-template-pdf returned ${renderResp.status}: ${await renderResp.text()}`)
-    renderResult = await renderResp.json()
-  } catch (e) {
-    await markEnvelopeFailed(supabase, envelopeId, failedStatusId!, callerUserId, `Render failed: ${(e as Error).message}`)
-    return json({ error: `Render failed: ${(e as Error).message}`, envelope_id: envelopeId }, 500)
+  // Acquire the unsigned PDF bytes and the tab source (anchors for the template
+  // path; caller-supplied tabs for the source-document path).
+  let pdfBytes: Uint8Array
+  let anchorList: any[]
+  let pageCount = 0
+  if (useSourceDoc) {
+    try {
+      const { data: blob, error: dlErr } = await supabase.storage
+        .from(sourceDoc!.storage_bucket)
+        .download(sourceDoc!.storage_path)
+      if (dlErr || !blob) throw new Error(dlErr?.message || "download returned no data")
+      pdfBytes = new Uint8Array(await blob.arrayBuffer())
+    } catch (e) {
+      await markEnvelopeFailed(supabase, envelopeId, failedStatusId!, callerUserId, `Source document read failed: ${(e as Error).message}`)
+      return json({ error: `Source document read failed: ${(e as Error).message}`, envelope_id: envelopeId }, 500)
+    }
+    // Normalize caller tabs into the same shape the anchor loop consumes.
+    anchorList = body.tabs!.map((t, i) => ({
+      anchor_string: `generated:${t.tab_type}:${t.recipient_order}:${i}`,
+      tab_type: t.tab_type,
+      ordinal:  t.recipient_order,
+      page:     t.page,
+      x:        t.x,
+      y:        t.y,
+      width:    t.width,
+      height:   t.height,
+    }))
+  } else {
+    let renderResult: { pdf_base64: string, anchors: any[], page_count: number, template_name: string }
+    try {
+      const renderResp = await fetch(`${supabaseUrl}/functions/v1/render-document-template-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": authHeader },
+        body: JSON.stringify({
+          document_template_snapshot_id: snapshot!.id,
+          parent_object:                 body.parent_object,
+          parent_record_id:              body.parent_record_id,
+        }),
+      })
+      if (!renderResp.ok) throw new Error(`render-document-template-pdf returned ${renderResp.status}: ${await renderResp.text()}`)
+      renderResult = await renderResp.json()
+    } catch (e) {
+      await markEnvelopeFailed(supabase, envelopeId, failedStatusId!, callerUserId, `Render failed: ${(e as Error).message}`)
+      return json({ error: `Render failed: ${(e as Error).message}`, envelope_id: envelopeId }, 500)
+    }
+    pdfBytes = atobBytes(renderResult.pdf_base64)
+    anchorList = renderResult.anchors
+    pageCount = renderResult.page_count
   }
-
-  const pdfBytes = atobBytes(renderResult.pdf_base64)
   const unsignedPath = `envelopes/${envelopeId}/unsigned.pdf`
   const { error: uploadErr } = await supabase.storage
     .from(SIGNATURES_BUCKET)
@@ -208,7 +278,7 @@ Deno.serve(async (req) => {
 
   const tabRows = []
   const droppedAnchors: string[] = []
-  for (const a of renderResult.anchors) {
+  for (const a of anchorList) {
     const recip = recipientByOrder.get(a.ordinal)
     if (!recip) {
       droppedAnchors.push(a.anchor_string)
@@ -275,8 +345,9 @@ Deno.serve(async (req) => {
       event_record_type: standardEventRtId,
       event_type: eventCreatedId,
       event_metadata: {
-        page_count:       renderResult.page_count,
-        anchor_count:     renderResult.anchors.length,
+        source:           useSourceDoc ? "source_document" : "template",
+        page_count:       pageCount,
+        anchor_count:     anchorList.length,
         tab_count:        tabRows.length,
         dropped_anchors:  droppedAnchors,
         recipient_count:  insertedRecips.length,
@@ -311,14 +382,14 @@ Deno.serve(async (req) => {
     const emailHtml = renderEmailHtml({
       recipientName: firstRecip.recipient_name,
       senderName,
-      templateName:  dt.name,
+      templateName:  docName,
       customMessage: body.message || null,
       signingUrl:    firstRecipUrl,
     })
     const emailText = renderEmailText({
       recipientName: firstRecip.recipient_name,
       senderName,
-      templateName:  dt.name,
+      templateName:  docName,
       customMessage: body.message || null,
       signingUrl:    firstRecipUrl,
     })
@@ -335,7 +406,7 @@ Deno.serve(async (req) => {
           body_html: emailHtml,
           body_text: emailText,
           attachment_paths: body.attach_unsigned_pdf
-            ? [{ storage_bucket: SIGNATURES_BUCKET, storage_path: unsignedPath, name: `${dt.name}.pdf`, content_type: "application/pdf" }]
+            ? [{ storage_bucket: SIGNATURES_BUCKET, storage_path: unsignedPath, name: `${docName}.pdf`, content_type: "application/pdf" }]
             : [],
           related_envelope_id:  envelopeId,
           related_recipient_id: firstRecip.id,
@@ -375,7 +446,8 @@ Deno.serve(async (req) => {
 // ─── helpers ───────────────────────────────────────────────────────────────
 
 function validate(b: ReqBody): string | null {
-  if (!b.document_template_id) return "document_template_id required"
+  const hasTpl = !!b.document_template_id, hasDoc = !!b.source_document_id
+  if (hasTpl === hasDoc) return "exactly one of document_template_id or source_document_id required"
   if (!b.parent_object)        return "parent_object required"
   if (!b.parent_record_id)     return "parent_record_id required"
   if (!Array.isArray(b.recipients) || b.recipients.length === 0)
@@ -386,6 +458,18 @@ function validate(b: ReqBody): string | null {
   }
   const orders = new Set(b.recipients.map(r => r.order))
   if (orders.size !== b.recipients.length) return "recipient.order values must be unique"
+  if (hasDoc) {
+    if (!Array.isArray(b.tabs) || b.tabs.length === 0)
+      return "tabs[] required and non-empty when sending a source document"
+    for (const t of b.tabs) {
+      if (!Number.isInteger(t.recipient_order) || t.recipient_order < 1)
+        return "tab.recipient_order must be positive integer"
+      if (!t.tab_type) return "tab.tab_type required"
+      for (const k of ["page", "x", "y", "width", "height"] as const)
+        if (typeof t[k] !== "number" || !Number.isFinite(t[k])) return `tab.${k} must be a finite number`
+    }
+    if (!orders.has(1)) return "a recipient with order 1 is required"
+  }
   return null
 }
 

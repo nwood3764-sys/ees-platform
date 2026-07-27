@@ -259,7 +259,7 @@ async function pdfCanvas(margin) {
 // ---------------------------------------------------------------------------
 
 /** Shared drawing context handed to every section renderer. */
-async function buildDocumentContext(m, kind) {
+async function buildDocumentContext(m, kind, opts = {}) {
   const F = m.fields
   const isAudit = kind === 'audit', isInv = kind === 'invoice'
   const P = await pdfCanvas(34)
@@ -299,7 +299,13 @@ async function buildDocumentContext(m, kind) {
 
   return { m, F, kind, isAudit, isInv, d, W, H, M, CW, C, st, font, t, wrap, need,
     fill, stroke, tc, pv, GL, HB, AMT, text, head, gridHeader, gridBorders,
-    gross, foeAmt, iraAmt, credits }
+    gross, foeAmt, iraAmt, credits,
+    // Signature-tab capture (opt-in). When collectTabs is set, the
+    // acknowledgment/signature section records the signature + date tab
+    // positions in PDF coordinates (origin bottom-left, letter H=792) so the
+    // e-signature pipeline can place a property-owner signature on this
+    // generated PDF — which has no discoverable text anchors.
+    collectTabs: !!opts.collectTabs, signatureTabs: [] }
 }
 
 export const SECTION_RENDERERS = {
@@ -476,7 +482,7 @@ export const SECTION_RENDERERS = {
 
   /* Acknowledgment paragraph + the two signature rules. */
   acknowledgment_and_signature(x, cfg = {}) {
-    const { W, M, CW, C, st, font, t, tc, wrap, need, stroke, d, text, isAudit, isInv } = x
+    const { W, H, M, CW, C, st, font, t, tc, wrap, need, stroke, d, text, isAudit, isInv } = x
     head_(x, cfg.heading || 'Acknowledgment & Acceptance')
     const ack = (isAudit || isInv) ? text('acknowledgment.invoice') : text('acknowledgment.proposal')
     const al = wrap(ack, CW); need(al.length * 10 + 6); tc(C.ink); font(9)
@@ -485,6 +491,18 @@ export const SECTION_RENDERERS = {
     d.line(M, st.y, M + 280, st.y); d.line(W - M - 150, st.y, W - M, st.y)
     tc(C.mut); font(8.5); t(M, st.y + 10, cfg.signer_label || 'Property Owner / Authorized Representative')
     t(W - M - 150, st.y + 10, 'Date')
+    // Record the property-owner signature + date tabs (order 1) for the
+    // e-signature route. jsPDF y is top-origin; the signing pipeline stores
+    // tab_y bottom-origin (pdf-lib / htmlToPdf convention). The signature and
+    // date sit ABOVE their rules: box bottom edge on the rule line at st.y.
+    if (x.collectTabs) {
+      const page = d.getNumberOfPages()
+      const boxH = 26
+      x.signatureTabs.push(
+        { recipient_order: 1, tab_type: 'sig',  page, x: M,          y: H - st.y, width: 280, height: boxH },
+        { recipient_order: 1, tab_type: 'date', page, x: W - M - 150, y: H - st.y, width: 150, height: boxH },
+      )
+    }
   },
 
   /* Footer pinned to the bottom of the last page. */
@@ -567,8 +585,8 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
  * Render an EES submittal document. `sections` overrides the built-in list —
  * that is how a stored template drives the output. Returns a Blob.
  */
-export async function buildEesPdf(m, kind, sections) {
-  const x = await buildDocumentContext(m, kind)
+export async function buildEesPdf(m, kind, sections, opts = {}) {
+  const x = await buildDocumentContext(m, kind, opts)
   const list = sections && sections.length ? sections : DEFAULT_DOCUMENT_SECTIONS[kind]
   if (!list) throw new Error(`Unknown document kind: ${kind}`)
   for (const s of list) {
@@ -576,7 +594,24 @@ export async function buildEesPdf(m, kind, sections) {
     if (!render) throw new Error(`Unknown document section type: ${s.type}`)
     render(x, s.config || {})
   }
+  if (opts.collectTabs) return { blob: x.d.output('blob'), tabs: x.signatureTabs }
   return x.d.output('blob')
+}
+
+/**
+ * Render an EES submittal document AND return the signature/date tab positions
+ * for the e-signature route. Returns { blob, tabs } where each tab is
+ * { recipient_order, tab_type ('sig'|'date'), page, x, y, width, height } in
+ * PDF coordinates (origin bottom-left). Only documents whose section list
+ * includes acknowledgment_and_signature yield tabs.
+ */
+export async function buildSubmittalPdfWithSignatureTabs(m, kind, sections) {
+  // Sealed documents route through the Sealed engine; today only the EES
+  // documents carry a captured property-owner signature tab. Guard so callers
+  // get a clear signal rather than a silent empty tab list.
+  if (DOCUMENT_KIND_ENGINE[kind] === 'sealed')
+    throw new Error('Signature capture is not implemented for Sealed documents')
+  return buildEesPdf(m, kind, sections, { collectTabs: true })
 }
 
 // ---------------------------------------------------------------------------
