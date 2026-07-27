@@ -12,7 +12,7 @@
 // the DB via the dashboard adapter (which reuses saveDashboard).
 // =============================================================================
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
 import { supabase } from '../lib/supabase'
@@ -99,10 +99,31 @@ export default function DashboardCanvasEditor({ dashboardId, onClose, onSaved })
     </div>
   )
 
+  // Field-name suggestions for the filter picker: the columns the dashboard's
+  // widgets already reference (group_by / series / measure / date / filter
+  // fields + table columns). A dashboard filter must name a column that its
+  // widgets' reports actually have, so these are the useful candidates — the
+  // input stays free-text (a widget may use a field not surfaced here) but the
+  // datalist means you pick from real fields instead of typing blind.
+  const fieldSuggestions = useMemo(() => {
+    const set = new Set()
+    for (const c of (loaded?.components || [])) {
+      const cfg = c.config || c.props || c.dw_widget_config || {}
+      for (const k of ['group_by', 'series_by', 'measure_field', 'date_field', 'filter_field']) {
+        if (cfg[k]) set.add(cfg[k])
+      }
+      if (Array.isArray(cfg.columns)) for (const col of cfg.columns) {
+        if (typeof col === 'string') set.add(col)
+        else if (col?.name) set.add(col.name)
+      }
+    }
+    return Array.from(set).sort()
+  }, [loaded])
+
   const settingsPanel = (
     <DashboardSettings
       meta={meta} setMeta={setMeta} folders={folders}
-      filters={filters} ops={FILTER_OPS}
+      filters={filters} ops={FILTER_OPS} fieldSuggestions={fieldSuggestions}
       onAddFilter={addFilter} onUpdateFilter={updateFilter} onRemoveFilter={removeFilter}
       onReorderFilters={setFilters}
     />
@@ -123,7 +144,7 @@ export default function DashboardCanvasEditor({ dashboardId, onClose, onSaved })
 }
 
 // ─── Dashboard settings + filters (inspector, no-widget-selected view) ────────
-function DashboardSettings({ meta, setMeta, folders, filters, ops, onAddFilter, onUpdateFilter, onRemoveFilter, onReorderFilters }) {
+function DashboardSettings({ meta, setMeta, folders, filters, ops, fieldSuggestions = [], onAddFilter, onUpdateFilter, onRemoveFilter, onReorderFilters }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div>
@@ -169,7 +190,13 @@ function DashboardSettings({ meta, setMeta, folders, filters, ops, onAddFilter, 
                     <button onClick={() => onRemoveFilter(f.id)} title="Remove" style={miniRemove()}>×</button>
                   </div>
                   <input type="text" value={f.field_name} placeholder="Field name (column on reports)"
+                    list={fieldSuggestions.length ? `dfilt-fields-${f.id}` : undefined}
                     onChange={e => onUpdateFilter(f.id, { field_name: e.target.value })} style={{ ...input(), fontSize: 12, marginBottom: 6 }} />
+                  {fieldSuggestions.length > 0 && (
+                    <datalist id={`dfilt-fields-${f.id}`}>
+                      {fieldSuggestions.map(fn => <option key={fn} value={fn} />)}
+                    </datalist>
+                  )}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                     <select value={f.operator} onChange={e => onUpdateFilter(f.id, { operator: e.target.value })} style={{ ...input(), fontSize: 12 }}>
                       {ops.map(o => <option key={o} value={o}>{o}</option>)}

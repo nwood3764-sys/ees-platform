@@ -83,11 +83,17 @@ Salesforce PARENTGROUPVAL / PREVGROUPVAL, implemented as prefixed aggregate iden
 - *Open:* **server-side aggregation accepting `via_path`** — extend the `report_aggregate*` RPCs so grouping/series/date can traverse FK hops; route report summary/matrix through it, drop the 50k client ceiling. (Internal refactor — the client path works today; deferred as its own DB cycle with `get_advisors`.)
 - *Open:* retire `TABLE_NAME_COLUMNS` for the dynamic `*_name` derivation the RPCs use; multiple measures.
 
-### Phase 5 — Viewer polish  ✅ SHIPPED (PR #TBD)
+### Phase 5 — Viewer polish  ✅ SHIPPED (PR #259)
 - **Per-column number format** (Number / Currency $ / Percent % / Compact) + decimals, set from a Format panel on each Selected Field; Tabular + Summary render via `formatReportValue`.
 - **Conditional color rules** per column (>, ≥, <, ≤, =, ≠ → Blue/Green/Amber/Navy, no red) on tabular + summary cells.
 - **Expand/collapse groups** in Summary (click a group header).
-- *Open:* Top-N / row-limit filter, filters on aggregates (HAVING).
+
+### Phase 8 — Remaining opens  ✅ SHIPPED (PR #TBD)
+- **Top-N row limit** — `reports.rpt_row_limit`; runner caps rows after sort; Settings tab control.
+- **HAVING** — `report_groupings.rgr_group_filter_op`/`_value`; each row grouping can hide groups whose measure fails a threshold (e.g. count ≥ 5). Applied in `buildGroupTree`; Groupings-tab control; persisted via `save_report_children`.
+- **Custom picklist group order** — picklist grouping fields order by `picklist_values.picklist_sort_order`, not alphabetically.
+- **Dashboard filter field picker** — the canvas editor's filter field input now offers a datalist of the fields the dashboard's widgets reference, instead of blind free-text.
+- Migrations `20260727203143` (row limit + HAVING columns) and `20260727203627` (`save_report_children` HAVING persistence), both applied to prod, advisors clean (203, none new).
 
 ### Phase 6 — Dashboards: cascade, cross-filter, drill  ◑ PARTIAL (PR #TBD)
 - ✅ **Cascading dashboard filters** — header filter bar + on-canvas slicers drive all compatible widgets via the override mechanism (already shipped, verified).

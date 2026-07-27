@@ -69,6 +69,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     rpt_column_groupings: [],
     rpt_runtime_prompts:  [],
     rpt_charts:           [],
+    rpt_row_limit:        null,
   })
   const [filters, setFilters]                   = useState([])
   const [groupings, setGroupings]               = useState([])
@@ -160,6 +161,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
             rpt_column_groupings: loaded.report.rpt_column_groupings || [],
             rpt_runtime_prompts:  loaded.report.rpt_runtime_prompts || [],
             rpt_charts:           loaded.report.rpt_charts || [],
+            rpt_row_limit:        loaded.report.rpt_row_limit ?? null,
           })
           setFilters((loaded.filters || []).map(f => ({
             field_name:        f.rfilt_field_name,
@@ -185,6 +187,8 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
             sort_by_aggregate:  g.rgr_sort_by_aggregate,
             show_subtotal:      g.rgr_show_subtotal,
             date_granularity:   g.rgr_date_granularity,
+            group_filter_op:    g.rgr_group_filter_op,
+            group_filter_value: g.rgr_group_filter_value,
           })))
           setCalculatedFields((loaded.calculatedFields || []).map(c => ({
             label:          c.rcf_label,
@@ -1815,6 +1819,33 @@ function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree
                     Subtotal
                   </label>
                 </div>
+                {/* HAVING — keep only groups whose measure passes the test. */}
+                <div style={{ display:'grid', gridTemplateColumns:'26px auto 90px 1fr', gap:8, alignItems:'center', marginTop:6 }}>
+                  <div />
+                  <span style={{ fontSize:11, color:C.textMuted }}>Show groups where measure</span>
+                  <select
+                    value={g.group_filter_op || ''}
+                    onChange={e => updateGrouping(idx, { group_filter_op: e.target.value || null })}
+                    style={{ ...inputStyle(), fontSize:12 }}
+                    title="Group filter (HAVING)"
+                  >
+                    <option value="">(any)</option>
+                    <option value="gt">&gt;</option>
+                    <option value="gte">≥</option>
+                    <option value="lt">&lt;</option>
+                    <option value="lte">≤</option>
+                    <option value="eq">=</option>
+                    <option value="ne">≠</option>
+                  </select>
+                  <input
+                    type="number"
+                    value={g.group_filter_value ?? ''}
+                    onChange={e => updateGrouping(idx, { group_filter_value: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                    placeholder="value"
+                    disabled={!g.group_filter_op}
+                    style={{ ...inputStyle(), fontSize:12, opacity: g.group_filter_op ? 1 : 0.5 }}
+                  />
+                </div>
               </div>
             )
           })
@@ -2068,6 +2099,19 @@ function SettingsTab({ report, updateReport, folders }) {
                 <option key={f.id} value={f.id}>{f.rf_name}</option>
               ))}
             </select>
+          </div>
+        </div>
+        <div>
+          <label style={fieldLabel()}>Row Limit</label>
+          <input
+            type="number" min="1"
+            value={report.rpt_row_limit ?? ''}
+            onChange={e => updateReport({ rpt_row_limit: e.target.value === '' ? null : parseInt(e.target.value, 10) })}
+            placeholder="No limit (show all rows)"
+            style={inputStyle()}
+          />
+          <div style={{ fontSize:11, color:C.textMuted, marginTop:4 }}>
+            Cap the number of rows returned (Top-N). Combine with a sort to show, e.g., the top 10 by amount.
           </div>
         </div>
       </div>
