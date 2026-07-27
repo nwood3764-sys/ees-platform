@@ -61,22 +61,22 @@ Help article HA-00146 added. **None of this is in production until #237 merges.*
 
 ## 5. Phased build plan (each phase independently shippable)
 
-### Phase 1 — Filters & field UX  ✅ SHIPPED (PR #237)
-Filter kernel, rebuilt Filters tab, filter logic, searchable field picker, group-header label fix, viewer click-to-sort + column summarize.
+### Phase 1 — Filters, field UX & viewer sort  ✅ SHIPPED (PR #237)
+Filter kernel, rebuilt Filters tab, filter logic, searchable field picker (primary + related), group-header label fix, viewer click-to-sort + shift-click multi-sort + per-column summarize footer.
 
-### Phase 2 — Groupings depth (builder + runner)
-Wire up the dead columns and close the grouping gaps.
-- **Date bucketing** — granularity control (Day/Week/Month/Quarter/Year, + Fiscal) per date grouping; `buildGroupTree` buckets on the truncated date, headers labelled per grain.
-- **Sort groups by aggregate** — `rgr_sort_by_aggregate` UI + runner (sort group nodes by their subtotal, not just the key).
-- **Related-object grouping fields** — let `GroupingsTab` pick from related objects (reuse the Filters tab's field catalog + `via_path`).
-- **Automatic per-column subtotals** in Summary — a numeric column with a Summarize set shows its aggregate on every subtotal + grand total row (today only summary calc fields do).
-- **Custom picklist sort order** — group keys for picklist columns follow `picklist_values` order, not alphabetical.
+### Phase 2 — Groupings depth (builder + runner)  ✅ SHIPPED (PR #237)
+- **Date bucketing** — granularity control (Exact/Day/Week/Month/Quarter/Year) per date grouping; `buildGroupTree` buckets on the truncated date with chronological ordering and friendly headers ("Q3 2026", "Jul 2026", "Week of …"). Wired up the dead `rgr_date_granularity`. (Fiscal still open.)
+- **Sort groups by aggregate** — each grouping orders by group value, record count, or the report's measure, asc/desc. Wired up the dead `rgr_sort_by_aggregate`.
+- **Related-object grouping fields** — `GroupingsTab` now uses the shared field catalog (primary + expandable related objects), persisting `field_table`/`field_via_path`.
+- **Automatic per-column subtotals** — subtotal/grand-total rows render one cell per column and show each column's own Summarize aggregate under its column.
+- *Open:* custom picklist sort order (follow `picklist_values` order).
 
-### Phase 3 — Group formulas (the analytical layer)
-The two functions that most make a summary report feel enterprise-class:
-- **% of total / % of parent** (Salesforce `PARENTGROUPVAL`) — implement as `SUM() OVER (PARTITION BY parent_group)` semantics in the summary evaluator.
-- **Prior-group delta** (Salesforce `PREVGROUPVAL`) — `LAG()` over ordered peer groups, for period-over-period.
-- Restricted to summary-scope formulas at a chosen grouping level, mirroring Salesforce.
+### Phase 3 — Group formulas  ✅ SHIPPED (PR #237)
+Salesforce PARENTGROUPVAL / PREVGROUPVAL, implemented as prefixed aggregate identifiers so the existing formula engine needs no rewrite:
+- **% of total** — `SUM_x / GRAND_SUM_x * 100` (`GRAND_` prefix = grand-total aggregate).
+- **% of parent** — `PARENT_` prefix = the parent group's aggregate.
+- **Prior-group delta** — `PREV_` prefix = the previous peer group (period-over-period).
+- The summary tree threads each subtotal its parent/previous/grand row sets; the editor offers the identifiers in autocomplete and documents the patterns inline.
 
 ### Phase 4 — Matrix & aggregation unification
 - **Server-side aggregation accepting `via_path`** — extend the `report_aggregate*` RPCs (or add a joined variant) so grouping/series/date can traverse one+ FK hops; route report summary/matrix through it, drop the 50k ceiling.
