@@ -682,7 +682,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
             {/* Main canvas (active tab) + the live right-sidebar rail. The rail
                 mirrors the record page: always visible, whatever tab is active. */}
             <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-              <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+              <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: 16 }}>
                 {visibleSections.length === 0 ? (
                   <div style={{ background: C.card, border: `1px dashed ${C.borderDark}`, borderRadius: 8, padding: '28px 20px', textAlign: 'center' }}>
                     <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
@@ -823,9 +823,12 @@ function RightRail({ count, onAdd, children }) {
   const { setNodeRef, isOver } = useDroppable({ id: `tabdrop::${RIGHT_TAB}` })
   return (
     <div ref={setNodeRef} style={{
-      // Matches the record page's rail width (480px) so the editor shows the
-      // real proportions — WYSIWYG.
-      width: 480, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      // Prefers the record page's rail width (480px) for real WYSIWYG
+      // proportions, but shrinks toward 300px on narrow viewports so the rail
+      // is never pushed off the right edge (flex-basis 480, can shrink, won't
+      // grow). The main canvas beside it carries minWidth:0 so it yields first.
+      flex: '0 1 480px', minWidth: 300, boxSizing: 'border-box',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
       borderLeft: `1px solid ${C.borderDark}`,
       background: isOver ? '#f0faf5' : '#eaeef6',
       boxShadow: isOver ? `inset 0 0 0 1px ${C.emerald}` : 'none',
@@ -932,9 +935,9 @@ const SectionCard = memo(function SectionCard({
         <span {...attributes} {...listeners} title="Drag to reorder sections"
           style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none', fontSize: 14, lineHeight: 1, flexShrink: 0 }}>⠿</span>
         <input value={section.label} onChange={e => onPatch(section.key, { label: e.target.value })}
-          style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.textPrimary, border: 'none', background: 'transparent', outline: 'none' }} />
+          style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: C.textPrimary, border: 'none', background: 'transparent', outline: 'none' }} />
         <span title="Move this section by dragging its ⠿ handle onto a tab above or into the right-sidebar rail"
-          style={{ fontSize: 10.5, color: C.textMuted, flexShrink: 0 }}>drag ⠿ to a tab or the sidebar</span>
+          style={{ fontSize: 10.5, color: C.textMuted, flexShrink: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>drag ⠿ to a tab or the sidebar</span>
         <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
           Columns
           <select value={cols} onChange={e => onPatch(section.key, { columns: Number(e.target.value) })}
