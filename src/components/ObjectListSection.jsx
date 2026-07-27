@@ -6,7 +6,7 @@ import RecordLink from './RecordLink'
 import { fetchObjectRecords, buildObjectColumnCatalog, deriveColumnOptions, isRelatedField } from '../data/objectListService'
 import { fetchSavedViewsForObject } from '../data/listViewsService'
 import { useNav } from '../lib/navContext'
-import { isUrlAddressableTable } from '../lib/urlNav'
+import { isUrlAddressableTable, getTableListUrl } from '../lib/urlNav'
 
 // ---------------------------------------------------------------------------
 // ObjectListSection — renders the universal list view for any object, on any
@@ -33,6 +33,17 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
   // `selected` state below is only used as a fallback for a standalone mount
   // with no NavContext provider.
   const nav = useNav()
+
+  // Related-list "View All" scope, decoded from the URL's `rel` param and
+  // surfaced on the nav context. Applies only when it targets THIS list's
+  // object — the list then fetches just this parent's related records
+  // (Salesforce related-list page parity) rather than the whole object. A
+  // stable key drives a re-fetch when the scope changes.
+  const listScope = (nav?.listScope && nav.listScope.table === objectTable) ? nav.listScope : null
+  const scopeKey = listScope
+    ? `${listScope.fk}|${listScope.parentId}|${(listScope.via || []).map(v => `${v.table}:${v.fk}`).join('>')}`
+    : ''
+
   const [data, setData]       = useState([])
   const [columns, setColumns] = useState([])     // default-visible descriptors
   const [catalog, setCatalog] = useState([])     // full selectable catalog
@@ -59,9 +70,9 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
   }
 
   const fetchRows = useCallback(async (relatedFields) => {
-    const rows = await fetchObjectRecords(objectTable, { activeFields: relatedFields })
+    const rows = await fetchObjectRecords(objectTable, { activeFields: relatedFields, relatedScope: listScope })
     return rows
-  }, [objectTable])
+  }, [objectTable, scopeKey])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -93,7 +104,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
           fetchSavedViewsForObject(objectTable).catch(() => []),
         ])
         const seeded = seedRelatedFromViews(savedViews)
-        const rows = await fetchObjectRecords(objectTable, { activeFields: seeded })
+        const rows = await fetchObjectRecords(objectTable, { activeFields: seeded, relatedScope: listScope })
         if (cancelled) return
         lastRowsRef.current = rows
         setCatalog(cat.catalog); setGroups(cat.groups)
@@ -106,7 +117,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
       }
     })()
     return () => { cancelled = true }
-  }, [objectTable])
+  }, [objectTable, scopeKey])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // When the user adds/removes related columns live, ListView reports the new
   // set of active related fields. If it changed, refetch rows with those fields
@@ -189,7 +200,14 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
     : null
   const effectiveViews = drillView ? [drillView, ...views] : views
 
-  return (
+  // When the list is scoped to a parent record (related-list "View All"), the
+  // rows are already fetched scoped — so the header banner tells the user what
+  // they're looking at and offers a one-click return to the full object list.
+  // A pinned per-user default view is skipped in this mode so its saved filters
+  // don't further narrow the scoped set.
+  const unscopedListUrl = listScope ? getTableListUrl(objectTable) : null
+
+  const listView = (
     <ListView
       data={data}
       columns={columns}
@@ -198,7 +216,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
       onActiveRelatedFieldsChange={handleActiveRelatedChange}
       systemViews={effectiveViews}
       defaultViewId={drillView ? '__drill__' : undefined}
-      applyDefaultViewOnLoad={!drillView}
+      applyDefaultViewOnLoad={!drillView && !listScope}
       listObject={objectTable}
       listModule={moduleId}
       onRefresh={load}
@@ -233,5 +251,42 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
         return null   // fall through to ListView's default cell for other columns
       }}
     />
+  )
+
+  if (!listScope) return listView
+
+  // Scoped view — a related-list "View All". Header banner names the parent and
+  // links back to the full object list (a real anchor so it also opens in a new
+  // tab / shares like every other list link).
+  const objectLabel = objectTable
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, m => m.toUpperCase())
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        padding: '10px 16px', background: '#eef4fb',
+        borderBottom: '1px solid #d0d8e8', fontSize: 12.5, color: '#0d1a2e',
+        flexShrink: 0,
+      }}>
+        <span style={{ fontWeight: 500 }}>
+          Showing {objectLabel}
+          {listScope.label ? <> related to <strong>{listScope.label}</strong></> : ' for this record'}
+        </span>
+        {unscopedListUrl && (
+          <a
+            href={unscopedListUrl}
+            style={{ marginLeft: 'auto', color: '#1a5a8a', fontWeight: 500, textDecoration: 'none' }}
+            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline' }}
+            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none' }}
+          >
+            View all {objectLabel} →
+          </a>
+        )}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        {listView}
+      </div>
+    </div>
   )
 }

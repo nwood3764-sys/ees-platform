@@ -10,7 +10,10 @@ import { createContext, useContext } from 'react'
 // is absent (a standalone mount with no provider) consumers fall back to their
 // own local state, so nothing breaks outside the app shell.
 //
-// value shape: { selectedRecord, navigateToRecord, closeRecord, replaceRecord }
+// value shape: { selectedRecord, navigateToRecord, closeRecord, replaceRecord,
+//                listScope }
+// listScope is the related-list "View All" scope decoded from the URL's `rel`
+// param — ObjectListSection reads it to scope its fetch to one parent record.
 export const NavContext = createContext(null)
 
 export function useNav() {
