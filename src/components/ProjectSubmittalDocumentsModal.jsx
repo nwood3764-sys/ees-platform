@@ -25,11 +25,11 @@ import { Icon } from './UI'
 import { useToast } from './Toast'
 import {
   loadPaperworkContext, parseAssetScorePdf, buildPaperworkWorkbook, downloadBlob,
-  loadSubmittalTextBlocks, loadOpportunityRecordTypeMap,
+  loadSubmittalTextBlocks, loadOpportunityRecordTypeMap, loadStageDocumentRequirements,
 } from '../data/paperworkService'
 import { buildPaperworkModel, buildEesPdf, buildSealedPdf, formatMoney } from '../data/paperworkModel'
 import {
-  SUBMITTAL_STAGE_DEFINITIONS, DOCUMENTS,
+  SUBMITTAL_STAGE_DEFINITIONS, DOCUMENTS, DOCUMENT_DEFINITIONS,
   documentDefinitionsForSubmittal, programsWithDocumentsForStage, PROGRAM_SUBMITTALS,
 } from '../data/paperworkSubmittals'
 
@@ -79,22 +79,36 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
   const [recordTypeMap, setRecordTypeMap] = useState({})
   const [textBlocks, setTextBlocks] = useState(null)
   const [projectProgramKey, setProjectProgramKey] = useState(null)
+  // Stage-driven document requirements (the authoritative source when rows
+  // exist); the code registry is the fallback for programs not configured yet.
+  const [stageRequirements, setStageRequirements] = useState([])
+  const [selectedStageId, setSelectedStageId] = useState(null)
+  const [currentStageValue, setCurrentStageValue] = useState(null)
 
   useEffect(() => {
     let cancelled = false
     Promise.all([loadPaperworkContext(projectId), loadOpportunityRecordTypeMap()])
-      .then(([ctx, rtMap]) => {
+      .then(async ([ctx, rtMap]) => {
         if (cancelled) return
         setFields(ctx.fields)
         setUnits(ctx.units != null ? String(ctx.units) : '')
         setRecordTypeMap(rtMap)
-        // Default the program to the one this project's opportunity is on,
-        // when that program has documents for this submittal stage.
         const projectProgram = ctx.programRecordTypeValue || null
         setProjectProgramKey(projectProgram)
+        setCurrentStageValue(ctx.currentStageValue || null)
         if (projectProgram && eligiblePrograms.some(p => p.key === projectProgram)) {
           setProgramKey(projectProgram)
         }
+        // Documents belong to the stage the record is at.
+        const stages = await loadStageDocumentRequirements({
+          object: 'opportunities', recordTypeId: ctx.programRecordTypeId,
+        })
+        if (cancelled) return
+        setStageRequirements(stages)
+        // Default to the opportunity's current stage when it carries
+        // documents, otherwise the first stage that does.
+        const atCurrent = stages.find(s => s.stageId === ctx.currentStageId)
+        setSelectedStageId((atCurrent || stages[0])?.stageId || null)
       })
       .catch(e => { if (!cancelled) setLoadError(e.message || String(e)) })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -123,10 +137,24 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
     })
   }, [fields, unitsNum, reports, includeAttic, textBlocks])
 
-  // Only this submittal's documents — never the whole document catalogue.
-  const submittalDocuments = useMemo(
-    () => documentDefinitionsForSubmittal(programKey, submittalStage),
-    [programKey, submittalStage])
+  // Documents for the selected STAGE, from the stage_document_requirements
+  // table. Falls back to the code registry for programs not configured there
+  // yet, so nothing goes missing while the table is being filled in.
+  const selectedStage = useMemo(
+    () => stageRequirements.find(s => s.stageId === selectedStageId) || null,
+    [stageRequirements, selectedStageId])
+  const submittalDocuments = useMemo(() => {
+    if (selectedStage) {
+      return selectedStage.documents.map(d => ({
+        ...(DOCUMENT_DEFINITIONS[d.key] || {}),
+        key: d.key,
+        label: d.name || DOCUMENT_DEFINITIONS[d.key]?.label || d.key,
+        requiresSignature: d.requiresSignature,
+        signerRole: d.signerRole,
+      }))
+    }
+    return documentDefinitionsForSubmittal(programKey, submittalStage)
+  }, [selectedStage, programKey, submittalStage])
 
   const reportsReady = !!(reports.base && reports.imp)
   const needsReports = submittalDocuments.some(d => d.requiresAssetScoreReports)
@@ -235,7 +263,31 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
             </div>
           ) : (
             <>
-              {/* Program — each program files its own submittal at this stage */}
+              {/* Stage — documents belong to the stage the record is at.
+                  Opportunity stages are record-type scoped, so one stage value
+                  already identifies both the program and the submittal. */}
+              {stageRequirements.length > 0 ? (
+                <div style={{ marginBottom: 16 }}>
+                  <label style={labelStyle}>Stage</label>
+                  <select value={selectedStageId || ''} onChange={e => setSelectedStageId(e.target.value)}
+                    disabled={!!busyDoc} style={{ ...inputStyle, cursor: 'pointer' }}>
+                    {stageRequirements.map(s => (
+                      <option key={s.stageId} value={s.stageId}>
+                        {s.stageValue} ({s.documents.length} document{s.documents.length === 1 ? '' : 's'})
+                      </option>
+                    ))}
+                  </select>
+                  <div style={hintStyle}>
+                    {currentStageValue
+                      ? (selectedStage?.stageValue === currentStageValue
+                          ? 'This opportunity is at this stage now.'
+                          : `This opportunity is currently at "${currentStageValue}".`)
+                      : 'This opportunity has no stage set.'}
+                    {' '}Configure which documents each stage requires in Setup → Communication
+                    Templates → Stage Document Requirements.
+                  </div>
+                </div>
+              ) : (
               <div style={{ marginBottom: 16 }}>
                 <label style={labelStyle}>Program</label>
                 <select value={programKey} onChange={e => setProgramKey(e.target.value)}
@@ -253,6 +305,7 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
                   {' '}Wording is program-specific where an override exists, otherwise the shared default.
                 </div>
               </div>
+              )}
 
               {/* Asset Score reports — only when this submittal's documents need them */}
               {needsReports && (
@@ -340,12 +393,19 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
 
               {/* This submittal's documents — nothing else */}
               <div style={{ marginTop: 18 }}>
-                <label style={labelStyle}>{stage?.label} Documents</label>
+                <label style={labelStyle}>
+                  {selectedStage ? 'Documents Required at This Stage' : `${stage?.label} Documents`}
+                </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8 }}>
                   {submittalDocuments.map(doc => {
                     const blocked = doc.requiresAssetScoreReports && !scopeReady
                     return (
-                      <DocButton key={doc.key} label={doc.label} sub={doc.format} title={doc.note}
+                      <DocButton key={doc.key}
+                        label={doc.label}
+                        sub={doc.requiresSignature
+                          ? `${doc.format || 'PDF'} · signature required`
+                          : doc.format}
+                        title={doc.note}
                         onClick={() => generate(doc.key)}
                         busy={busyDoc === doc.key} disabled={!!busyDoc || blocked} />
                     )
