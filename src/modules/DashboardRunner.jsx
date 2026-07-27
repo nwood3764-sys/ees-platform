@@ -18,6 +18,7 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
   const [filterValues, setFilterValues] = useState({})          // dfilt id → current value
   const [filterOptions, setFilterOptions] = useState({})        // dfilt id → [{value,label}]
   const [filterWidgetValues, setFilterWidgetValues] = useState({}) // filter-widget id → value
+  const [crossFilter, setCrossFilter] = useState(null)             // { field, value, label, sourceWidgetId }
 
   // Build the extraFilters array for runReport from the current filter
   // values. Empty values mean the filter is not applied this run.
@@ -56,8 +57,8 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
     return out
   }
 
-  const runWidgets = async (dashboardData, currentFilterValues, widgetValues = filterWidgetValues) => {
-    const extra = [
+  const runWidgets = async (dashboardData, currentFilterValues, widgetValues = filterWidgetValues, activeCross = crossFilter) => {
+    const baseExtra = [
       ...buildExtraFilters(dashboardData.filters, currentFilterValues),
       ...buildWidgetFilterExtras(dashboardData.widgets, widgetValues),
     ]
@@ -66,7 +67,7 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
     // "All" clears the report's built-in `property_state = NC` filter rather
     // than leaving the dashboard pinned to NC. Listed even when their current
     // value is "All" (empty), which is precisely when the override matters.
-    const overrideFields = [
+    const baseOverride = [
       ...(dashboardData.filters || []).map(f => f.dfilt_field_name),
       ...(dashboardData.widgets || [])
         .filter(w => FILTER_WIDGET_TYPES.has(w.dw_widget_type))
@@ -78,6 +79,14 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
     // a degraded-but-correct result, never a blank widget.
     const widgetResults = await Promise.all(
       (dashboardData.widgets || []).map(async w => {
+        // Cross-filter: a click on another widget's segment filters this one.
+        // The source widget stays unfiltered (Power BI behavior — the clicked
+        // visual keeps showing every category so you can pick another).
+        const applyCross = activeCross && activeCross.field && w.id !== activeCross.sourceWidgetId
+        const extra = applyCross
+          ? [...baseExtra, { field_name: activeCross.field, operator: 'equals', value: activeCross.value }]
+          : baseExtra
+        const overrideFields = applyCross ? [...baseOverride, activeCross.field] : baseOverride
         try {
           const r = await runWidgetData(w, extra, overrideFields)
           return [w.id, r]
@@ -87,6 +96,22 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
       })
     )
     setResults(Object.fromEntries(widgetResults))
+  }
+
+  // Cross-filter: clicking a chart segment filters every other widget on the
+  // dashboard by that segment's value. Click again (or Clear) to remove it.
+  const applyCrossFilter = async (widget, rawValue, label) => {
+    const field = widget.dw_widget_config?.group_by
+    if (!field || rawValue == null || rawValue === '') return
+    const isSame = crossFilter && crossFilter.sourceWidgetId === widget.id &&
+      String(crossFilter.value) === String(rawValue)
+    const next = isSame ? null : { field, value: rawValue, label: label ?? rawValue, sourceWidgetId: widget.id }
+    setCrossFilter(next)
+    if (data) await runWidgets(data, filterValues, filterWidgetValues, next)
+  }
+  const clearCrossFilter = async () => {
+    setCrossFilter(null)
+    if (data) await runWidgets(data, filterValues, filterWidgetValues, null)
   }
 
   const refresh = async () => {
@@ -170,7 +195,18 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
             {data.widgets.length} widgets · {cols}-column layout
           </div>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          {crossFilter && (
+            <div style={{
+              display:'inline-flex', alignItems:'center', gap:8,
+              padding:'5px 8px 5px 12px', borderRadius:16,
+              background:'#e8f1fb', border:`1px solid ${C.skyBlue}`, color:'#2f6da3', fontSize:12,
+            }}>
+              <span>Filtered by <strong>{String(crossFilter.label)}</strong></span>
+              <button onClick={clearCrossFilter} title="Clear cross-filter"
+                style={{ border:'none', background:'transparent', cursor:'pointer', color:'#2f6da3', fontSize:14, lineHeight:1, padding:0 }}>×</button>
+            </div>
+          )}
           <button onClick={refresh} style={btnSecondary()}>Refresh</button>
           {onEdit  && <button onClick={onEdit}  style={btnSecondary()}>Edit</button>}
           {onClose && <button onClick={onClose} style={btnSecondary()}>Close</button>}
@@ -260,6 +296,8 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
                 onNavigate={onNavigate}
                 filterValue={filterWidgetValues[w.id]}
                 onFilterWidgetChange={handleFilterWidgetChange}
+                onCrossFilter={applyCrossFilter}
+                crossFilter={crossFilter}
               />
             ))}
           </div>
@@ -271,26 +309,32 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
 
 // ─── Widget tile ──────────────────────────────────────────────────────────
 
-function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onNavigate, filterValue, onFilterWidgetChange }) {
+function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onNavigate, filterValue, onFilterWidgetChange, onCrossFilter, crossFilter }) {
   const span = widget.dw_width || 1
-  // Drill: open the report behind the widget. The header link opens the whole
-  // report; clicking a chart segment / metric drills to just those filtered
-  // records (Salesforce-style) by passing extraFilters to onOpenReport.
   const canDrill = !!onOpenReport
+  const canCrossFilter = !!onCrossFilter && !!(widget.dw_widget_config || {}).group_by
   const cfg = widget.dw_widget_config || {}
 
-  // Build the extraFilters for a clicked segment: filter the group_by column to
-  // the segment's raw stored value (what the report engine matches on).
+  // Segment click = cross-filter the dashboard (Power BI behavior): filter every
+  // other widget by the clicked value, staying on the dashboard. The "View
+  // Records →" header link is the drill-through to the filtered source report.
+  // Resolve the human label from the aggregated rows for the cross-filter chip.
+  const resolveLabel = (rawValue) => {
+    const agg = Array.isArray(result?.aggregated) ? result.aggregated : null
+    const hit = agg?.find(r => String(r.rawValue) === String(rawValue))
+    return hit?.name ?? rawValue
+  }
   const drillTo = (rawValue) => {
-    if (!canDrill) return
-    const groupCol = cfg.group_by || null
-    if (groupCol && rawValue !== undefined && rawValue !== null && rawValue !== '') {
-      onOpenReport(widget.dw_report_id, [{ field_name: groupCol, operator: 'equals', value: rawValue }])
-    } else {
-      onOpenReport(widget.dw_report_id)        // fall back to whole report
+    if (canCrossFilter && rawValue != null && rawValue !== '') {
+      onCrossFilter(widget, rawValue, resolveLabel(rawValue))
+    } else if (canDrill) {
+      onOpenReport(widget.dw_report_id)
     }
   }
   const drillWhole = () => { if (canDrill) onOpenReport(widget.dw_report_id) }
+
+  // Is this widget the source of the active cross-filter?
+  const isCrossSource = crossFilter && crossFilter.sourceWidgetId === widget.id
 
   // Salesforce dashboard-component chrome carried in config by the canvas.
   const subtitle = cfg._subtitle || null
@@ -308,7 +352,9 @@ function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onNavi
   return (
     <div style={{
       ...placement,
-      background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+      background: C.card,
+      border: isCrossSource ? `2px solid ${C.emerald}` : `1px solid ${C.border}`,
+      borderRadius: 8,
       overflow: 'hidden',
       display: 'flex', flexDirection: 'column',
     }}>

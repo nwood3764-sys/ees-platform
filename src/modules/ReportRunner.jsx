@@ -356,9 +356,10 @@ export function TabularLayout({ result }) {
                     resolvedRow[col.name] = getRowValue(row, col, result)
                   }
                   const v = evaluateRowExpression(c.expression, resolvedRow)
+                  const condStyle = conditionalCellStyle(v, c)
                   return (
-                    <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
-                      {formatCellValue(v, c.data_type)}
+                    <td key={`r-${rowIdx}-${idx}`} style={{ ...cellStyle(), ...(condStyle || {}) }}>
+                      {formatReportValue(v, { ...c, type: c.data_type })}
                     </td>
                   )
                 }
@@ -369,9 +370,11 @@ export function TabularLayout({ result }) {
                 const isDirect = !c.via_path || c.via_path.length === 0
                 const isEditablePicklist = !!(row.id && isDirect && meta?.isEditable && meta.editorType === 'picklist')
                 const isEditing = editingCell && editingCell.rowId === row.id && editingCell.colName === c.name
+                const rawValue = ov ? ov.value : getRowValue(row, c, result)
                 const display = ov
                   ? (ov.label ?? '—')
-                  : formatCellValue(getRowValue(row, c, result), c.type)
+                  : formatReportValue(rawValue, c)
+                const condStyle = conditionalCellStyle(rawValue, c)
 
                 if (isEditing) {
                   return (
@@ -415,7 +418,7 @@ export function TabularLayout({ result }) {
                 return (
                   <td
                     key={`r-${rowIdx}-${idx}`}
-                    style={{ ...cellStyle(), ...(isEditablePicklist ? { cursor:'cell' } : null) }}
+                    style={{ ...cellStyle(), ...(condStyle || {}), ...(isEditablePicklist ? { cursor:'cell' } : null) }}
                     title={isEditablePicklist ? 'Double-click to edit' : undefined}
                     onDoubleClick={isEditablePicklist ? () => {
                       setEditError(null)
@@ -717,11 +720,15 @@ function SummaryTreeRows({ nodes, columns, groupings, depth, ctx, summaryCalcFie
   if (!nodes.children) {
     return nodes.leafRows.map((row, idx) => (
       <tr key={`leaf-${idx}`} style={{ borderTop:`1px solid ${C.border}` }}>
-        {columns.map((c, ci) => (
-          <td key={ci} style={{ ...cellStyle(), paddingLeft: 12 + depth * 16 }}>
-            {formatCellValue(getRowValue(row, c, ctx), c.type)}
-          </td>
-        ))}
+        {columns.map((c, ci) => {
+          const val = getRowValue(row, c, ctx)
+          const cond = conditionalCellStyle(val, c)
+          return (
+            <td key={ci} style={{ ...cellStyle(), paddingLeft: 12 + depth * 16, ...(cond || {}) }}>
+              {formatReportValue(val, c)}
+            </td>
+          )
+        })}
       </tr>
     ))
   }
@@ -744,19 +751,24 @@ function SummaryTreeRows({ nodes, columns, groupings, depth, ctx, summaryCalcFie
 function SummaryGroupNode({ node, columns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames, prevRows, parentRows, grandRows }) {
   const grouping = groupings[depth]
   const showSubtotal = grouping.show_subtotal !== false
+  const [collapsed, setCollapsed] = useState(false)
   return (
     <>
-      <tr style={{ background: C.cardSecondary, borderTop:`2px solid ${C.borderDark}` }}>
+      <tr style={{ background: C.cardSecondary, borderTop:`2px solid ${C.borderDark}`, cursor:'pointer' }}
+          onClick={() => setCollapsed(c => !c)}>
         <td colSpan={columns.length} style={{ ...cellStyle(), fontWeight:600, paddingLeft: 12 + depth * 16 }}>
+          <span style={{ display:'inline-block', width:14, color:C.textMuted }}>{collapsed ? '▸' : '▾'}</span>
           {grouping.field_label}: {String(node.value)} <span style={{ color:C.textMuted, fontWeight:400 }}>({node.rows.length})</span>
         </td>
       </tr>
-      <SummaryTreeRows
-        nodes={node.child} columns={columns} groupings={groupings} depth={depth + 1}
-        ctx={ctx} summaryCalcFields={summaryCalcFields}
-        aggregableColumnNames={aggregableColumnNames}
-        parentRows={node.rows} grandRows={grandRows}
-      />
+      {!collapsed && (
+        <SummaryTreeRows
+          nodes={node.child} columns={columns} groupings={groupings} depth={depth + 1}
+          ctx={ctx} summaryCalcFields={summaryCalcFields}
+          aggregableColumnNames={aggregableColumnNames}
+          parentRows={node.rows} grandRows={grandRows}
+        />
+      )}
       {showSubtotal && (
         <SummarySubtotalRow
           groupValue={node.value} grouping={grouping} groupRows={node.rows}
@@ -915,33 +927,39 @@ export function MatrixLayout({ result }) {
   const rowLeaves = flattenAxisLeaves(rowAxis)
   const colLeaves = flattenAxisLeaves(colAxis)
 
-  // Compute cell values: for each (rowLeaf, colLeaf), filter rows that
-  // match all axis values, then apply the measure.
+  // Row/col leaf membership — the rows that fall under each leaf path, so a
+  // cell is the intersection and the totals are the marginals. Computed once.
+  const rowLeafRows = rowLeaves.map(rl => rows.filter(row =>
+    rl.values.every((val, i) => (getRowValue(row, groupingFieldDef(groupings[i]), result) ?? '(blank)') === val)))
+  const colLeafRows = colLeaves.map(cl => rows.filter(row =>
+    cl.values.every((val, i) => (getRowValue(row, groupingFieldDef(colGroupings[i]), result) ?? '(blank)') === val)))
+
+  // Cell = measure over the intersection of a row leaf and a col leaf.
   const cellMap = new Map()
-  for (const rl of rowLeaves) {
-    for (const cl of colLeaves) {
-      const cellRows = rows.filter(row => {
-        for (let i = 0; i < rl.values.length; i++) {
-          const v = getRowValue(row, groupingFieldDef(groupings[i]), result)
-          if ((v ?? '(blank)') !== rl.values[i]) return false
-        }
-        for (let i = 0; i < cl.values.length; i++) {
-          const v = getRowValue(row, groupingFieldDef(colGroupings[i]), result)
-          if ((v ?? '(blank)') !== cl.values[i]) return false
-        }
-        return true
-      })
-      const key = rl.values.join('||') + '###' + cl.values.join('||')
-      cellMap.set(key, applyMeasure(cellRows, measure, result))
+  for (let ri = 0; ri < rowLeaves.length; ri++) {
+    const rlSet = new Set(rowLeafRows[ri])
+    for (let ci = 0; ci < colLeaves.length; ci++) {
+      const inter = colLeafRows[ci].filter(r => rlSet.has(r))
+      cellMap.set(`${ri}##${ci}`, applyMeasure(inter, measure, result))
     }
   }
+  // Marginals: row totals (per row leaf), column totals (per col leaf), grand.
+  const rowTotals = rowLeafRows.map(rs => applyMeasure(rs, measure, result))
+  const colTotals = colLeafRows.map(rs => applyMeasure(rs, measure, result))
+  const grandTotal = applyMeasure(rows, measure, result)
+  const fmt = (v) => v == null ? <span style={{ color:C.textMuted }}>—</span> : formatMeasureValue(v, measure)
 
   // Render
   const headerRowCount = colGroupings.length
   const labelColCount  = groupings.length
+  const measureLabel = measure.type === 'count' ? 'Records'
+    : `${measure.type.toUpperCase()}${measure.field ? ' ' + humanizeColumnLabel(measure.field) : ''}`
 
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'auto' }}>
+      <div style={{ padding:'6px 12px', fontSize:11, color:C.textMuted, borderBottom:`1px solid ${C.border}` }}>
+        Measure: <strong style={{ color:C.textSecondary }}>{measureLabel}</strong>
+      </div>
       <table style={{ borderCollapse:'collapse', fontSize:13 }}>
         <thead>
           {/* Column header rows — one row per column-grouping level */}
@@ -956,6 +974,13 @@ export function MatrixLayout({ result }) {
               )}
               {/* Walk the column axis at this level */}
               {emitAxisHeaderCells(colAxis, hLvl)}
+              {/* Row-total column header spans all header rows */}
+              {hLvl === 0 && (
+                <th rowSpan={headerRowCount}
+                    style={{ ...cellHeaderStyle(), textAlign:'right', background:C.cardSecondary, borderLeft:`2px solid ${C.borderDark}` }}>
+                  Total
+                </th>
+              )}
             </tr>
           ))}
         </thead>
@@ -967,17 +992,28 @@ export function MatrixLayout({ result }) {
                   {String(v)}
                 </td>
               ))}
-              {colLeaves.map((cl, ci) => {
-                const key = rl.values.join('||') + '###' + cl.values.join('||')
-                const cellVal = cellMap.get(key)
-                return (
-                  <td key={`c-${ci}`} style={{ ...cellStyle(), textAlign:'right' }}>
-                    {cellVal == null ? <span style={{ color:C.textMuted }}>—</span> : formatCellValue(cellVal, 'number')}
-                  </td>
-                )
-              })}
+              {colLeaves.map((cl, ci) => (
+                <td key={`c-${ci}`} style={{ ...cellStyle(), textAlign:'right' }}>
+                  {fmt(cellMap.get(`${ri}##${ci}`))}
+                </td>
+              ))}
+              <td style={{ ...cellStyle(), textAlign:'right', fontWeight:600, background:'#f0f3f8', borderLeft:`2px solid ${C.borderDark}` }}>
+                {fmt(rowTotals[ri])}
+              </td>
             </tr>
           ))}
+          {/* Column totals + grand total */}
+          <tr style={{ borderTop:`2px solid ${C.borderDark}`, background:C.borderDark }}>
+            <td colSpan={labelColCount} style={{ ...cellStyle(), fontWeight:700, color:C.textPrimary }}>Total</td>
+            {colLeaves.map((cl, ci) => (
+              <td key={`ct-${ci}`} style={{ ...cellStyle(), textAlign:'right', fontWeight:600, color:C.textPrimary }}>
+                {fmt(colTotals[ci])}
+              </td>
+            ))}
+            <td style={{ ...cellStyle(), textAlign:'right', fontWeight:700, color:C.textPrimary, borderLeft:`2px solid ${C.textSecondary}` }}>
+              {fmt(grandTotal)}
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -1065,6 +1101,71 @@ function applyMeasure(cellRows, measure, ctx) {
     case 'avg': return values.reduce((a, b) => a + b, 0) / values.length
     case 'min': return Math.min(...values)
     case 'max': return Math.max(...values)
+  }
+  return null
+}
+
+// Format a measure/aggregate number: integers show whole, fractions show up
+// to two decimals, all with thousands separators.
+function formatMeasureValue(v, measure) {
+  if (v == null) return '—'
+  const n = typeof v === 'number' ? v : parseFloat(v)
+  if (!Number.isFinite(n)) return String(v)
+  const isInt = Number.isInteger(n) || (measure && measure.type === 'count')
+  return n.toLocaleString(undefined, isInt ? { maximumFractionDigits: 0 } : { maximumFractionDigits: 2 })
+}
+
+function humanizeColumnLabel(name) {
+  return String(name || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+// Per-column number formatting. A selected field may carry `format`
+// (number / currency / percent / compact) and `decimals`. When set and the
+// value is numeric, format accordingly; otherwise fall back to the type-based
+// formatter. Percent treats the stored value as already a percentage number
+// (42 → "42%"), matching how report percentages are computed.
+function formatReportValue(v, col) {
+  const fmt = col && col.format
+  if (fmt && fmt !== 'auto' && v != null && v !== '') {
+    const n = typeof v === 'number' ? v : parseFloat(v)
+    if (Number.isFinite(n)) {
+      const decimals = col.decimals == null ? (fmt === 'currency' ? 2 : 0) : col.decimals
+      if (fmt === 'currency') return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+      if (fmt === 'percent')  return `${n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}%`
+      if (fmt === 'compact')  return n.toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: decimals || 1 })
+      if (fmt === 'number')   return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+    }
+  }
+  return formatCellValue(v, col ? col.type : undefined)
+}
+
+// Evaluate a column's conditional-format rules against a value; returns a
+// style patch (background/color) or null. Rules: [{op, value, color}] where
+// color ∈ emerald|sky|amber|navy (no red, per the LEAP palette). First match
+// wins.
+const COND_COLORS = {
+  emerald: { background: '#e7f7ef', color: '#1c7a52' },
+  sky:     { background: '#e8f1fb', color: '#2f6da3' },
+  amber:   { background: '#fbf2df', color: '#8a6316' },
+  navy:    { background: '#e6eaf2', color: '#1f3355' },
+}
+function conditionalCellStyle(v, col) {
+  const rules = col && col.conditional_rules
+  if (!rules || !rules.length) return null
+  const n = typeof v === 'number' ? v : parseFloat(v)
+  for (const r of rules) {
+    const target = parseFloat(r.value)
+    let hit = false
+    switch (r.op) {
+      case 'gt':  hit = Number.isFinite(n) && n > target; break
+      case 'gte': hit = Number.isFinite(n) && n >= target; break
+      case 'lt':  hit = Number.isFinite(n) && n < target; break
+      case 'lte': hit = Number.isFinite(n) && n <= target; break
+      case 'eq':  hit = String(v) === String(r.value); break
+      case 'ne':  hit = String(v) !== String(r.value); break
+      default: hit = false
+    }
+    if (hit) return COND_COLORS[r.color] || COND_COLORS.sky
   }
   return null
 }
