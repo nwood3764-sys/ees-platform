@@ -209,19 +209,31 @@ export function buildScopedListUrl(scope) {
   if (!scope || !scope.table || !scope.parentId || !scope.fk) return null
   const base = getTableListUrl(scope.table)
   if (!base) return null
+  const token = scopeToToken(scope)
+  if (!token) return null
+  return `${base}?rel=${token}`
+}
+
+// The scope rides in the URL as a single compact base64url token rather than
+// raw JSON, so the address bar shows `?rel=eyJ0Ijoi…` instead of a wall of
+// percent-escaped braces and quotes.
+function scopeToToken(scope) {
+  if (!scope || !scope.table || !scope.parentId || !scope.fk) return null
   const via = Array.isArray(scope.via)
-    ? scope.via.filter(v => v && v.table && v.fk)
-    : (scope.via && scope.via.table && scope.via.fk ? [scope.via] : [])
+    ? scope.via.filter(v => v && v.table && v.fk).map(v => ({ table: v.table, fk: v.fk }))
+    : (scope.via && scope.via.table && scope.via.fk ? [{ table: scope.via.table, fk: scope.via.fk }] : [])
   const payload = {
     t: scope.table,
     fk: scope.fk,
-    via: via.length ? via.map(v => ({ table: v.table, fk: v.fk })) : null,
+    via: via.length ? via : null,
     pid: scope.parentId,
     lbl: scope.label || null,
   }
-  const params = new URLSearchParams()
-  params.set('rel', JSON.stringify(payload))
-  return `${base}?${params.toString()}`
+  try {
+    return b64urlEncode(JSON.stringify(payload))
+  } catch {
+    return null
+  }
 }
 
 // Decode the `rel` query param (see buildScopedListUrl) back into a listScope
@@ -231,7 +243,7 @@ function decodeListScope(search) {
   const raw = params.get('rel')
   if (!raw) return null
   try {
-    const p = JSON.parse(raw)
+    const p = JSON.parse(b64urlDecode(raw))
     if (!p || !p.t || !p.pid || !p.fk) return null
     return {
       table: p.t,
@@ -246,16 +258,23 @@ function decodeListScope(search) {
 }
 
 // Re-encode a listScope onto a URLSearchParams as the `rel` param (inverse of
-// decodeListScope). No-op when scope is falsy.
+// decodeListScope). No-op when scope is falsy. URLSearchParams won't touch a
+// base64url token (its alphabet is URL-safe), so the address bar stays clean.
 function encodeListScope(params, scope) {
-  if (!scope || !scope.table || !scope.parentId || !scope.fk) return
-  const via = Array.isArray(scope.via)
-    ? scope.via.filter(v => v && v.table && v.fk).map(v => ({ table: v.table, fk: v.fk }))
-    : null
-  params.set('rel', JSON.stringify({
-    t: scope.table, fk: scope.fk, via: via && via.length ? via : null,
-    pid: scope.parentId, lbl: scope.label || null,
-  }))
+  const token = scopeToToken(scope)
+  if (token) params.set('rel', token)
+}
+
+// Unicode-safe base64url (RFC 4648 §5) — the JSON scope may carry a parent
+// label with non-ASCII characters, so round-trip through UTF-8 bytes.
+function b64urlEncode(str) {
+  const b64 = btoa(unescape(encodeURIComponent(str)))
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+function b64urlDecode(token) {
+  let b64 = token.replace(/-/g, '+').replace(/_/g, '/')
+  while (b64.length % 4) b64 += '='
+  return decodeURIComponent(escape(atob(b64)))
 }
 
 // Reverse of TABLE_LIST_SECTION_MAP — section id back to its table name for
