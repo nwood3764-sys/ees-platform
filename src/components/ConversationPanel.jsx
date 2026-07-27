@@ -31,6 +31,7 @@ const FK_TO_ANCHOR_OBJECT = {
   assessment_id: 'assessments',
   building_id: 'buildings',
   property_id: 'properties',
+  unit_id: 'units',
 }
 
 // ---------------------------------------------------------------------------

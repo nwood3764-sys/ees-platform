@@ -244,6 +244,7 @@ Deno.serve(async (req) => {
     opportunities:          "p_opportunity_id",
     properties:             "p_property_id",
     buildings:              "p_building_id",
+    units:                  "p_unit_id",
     projects:               "p_project_id",
     service_appointments:   "p_service_appointment_id",
     incentive_applications: "p_incentive_application_id",
@@ -683,6 +684,9 @@ const RELATED_MERGE_ROOTS: Record<string, Array<[string, string, string]>> = {
   ],
   buildings: [
     ["property", "properties", "property_id"],
+  ],
+  units: [
+    ["building", "buildings", "building_id"],
   ],
   work_orders: [
     ["property", "properties", "property_id"],

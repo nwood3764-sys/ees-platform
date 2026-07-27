@@ -75,6 +75,20 @@ const RIGHT_TAB = '__right_sidebar__'
 // rail) — so the only render hint a tile needs is the right-sidebar one.
 const CARD_WIDGET_TYPES = new Set(['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'])
 
+// Objects whose records can host a Communications (two-way email) panel, and
+// the FK column on `conversations` that anchors a thread to them. A
+// conversation_panel widget stores its anchor as widget_config.fk, so this map
+// is what lets the editor place one on the right object. Mirror of the client
+// FK_TO_ANCHOR_OBJECT / server ANCHOR_FK_PARAM maps — keep them in sync when a
+// new anchor object is enabled.
+const OBJECT_CONVERSATION_FK = {
+  contacts: 'contact_id', accounts: 'account_id', projects: 'project_id',
+  service_appointments: 'service_appointment_id', work_orders: 'work_order_id',
+  incentive_applications: 'incentive_application_id', opportunities: 'opportunity_id',
+  assessments: 'assessment_id', buildings: 'building_id', properties: 'property_id',
+  units: 'unit_id',
+}
+
 function humanize(col, object) {
   let c = col
   if (object && c.startsWith(object.replace(/s$/, '') + '_')) c = c.slice(object.replace(/s$/, '').length + 1)
@@ -513,6 +527,23 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
     }))
   }
 
+  // Place a Communications (two-way email) panel in a section. Anchored to the
+  // FK on `conversations` for this object (units → unit_id, etc.). One per
+  // layout — Salesforce shows a single communications area per record — so the
+  // affordance hides once a panel exists anywhere on the layout.
+  const addConversationPanel = useCallback((sectionKey) => {
+    const fk = OBJECT_CONVERSATION_FK[meta?.object]
+    if (!fk) return
+    setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
+      ...sec,
+      widgets: [...(sec.widgets || []), {
+        key: `w-new-${Date.now()}`, type: 'conversation_panel', title: 'Communications',
+        column: 1, size: 'medium', isRequired: false,
+        config: { fk, table: 'conversations', channel_filter: null },
+      }],
+    }))
+  }, [meta?.object])
+
   const applyRelatedModal = ({ title, config }) => {
     const { sectionKey, widgetKey } = relatedModal
     if (widgetKey) {
@@ -563,6 +594,11 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const visibleSections = sections.filter(s => sectionInTab(s, activeTab))
   const railSections = sections.filter(s => (s.placement || 'main') === 'right')
   const deleteTabSectionCount = deleteTab ? sections.filter(s => (s.tab || 'Details') === deleteTab).length : 0
+
+  // A Communications panel can be added when this object supports conversations
+  // and the layout doesn't already have one (one comms area per record).
+  const hasConversationPanel = sections.some(s => (s.widgets || []).some(w => w.type === 'conversation_panel'))
+  const canAddConversation = !!OBJECT_CONVERSATION_FK[meta.object] && !hasConversationPanel
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
@@ -704,7 +740,8 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
                       {visibleSections.map(sec => (
                         <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
                           onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
-                          onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal} />
+                          onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal}
+                          canAddConversation={canAddConversation} onAddConversation={addConversationPanel} />
                       ))}
                     </SortableContext>
                     <button onClick={() => addSection('end')} style={addSectionBtn()}>
@@ -718,7 +755,8 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
                   {railSections.map(sec => (
                     <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
                       onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
-                      onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal} />
+                      onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal}
+                      canAddConversation={canAddConversation} onAddConversation={addConversationPanel} />
                   ))}
                 </SortableContext>
               </RightRail>
@@ -914,6 +952,7 @@ const SectionCard = memo(function SectionCard({
   section, object, active,
   onActivate, onPatch, onRemove, onSetFields,
   onPatchWidget, onRemoveWidget, onOpenRelatedModal,
+  canAddConversation, onAddConversation,
 }) {
   const fg = (section.widgets || []).find(w => w.type === 'field_group')
   const others = (section.widgets || []).filter(w => w.type !== 'field_group')
@@ -964,6 +1003,8 @@ const SectionCard = memo(function SectionCard({
           onPatchWidget={onPatchWidget}
           onRemoveWidget={onRemoveWidget}
           onOpenRelatedModal={onOpenRelatedModal}
+          canAddConversation={canAddConversation}
+          onAddConversation={onAddConversation}
         />
       </div>
     </div>
@@ -975,7 +1016,7 @@ const SectionCard = memo(function SectionCard({
 // ("wzone::<sectionKey>") so a related-list card can be dragged within its
 // section or into another one — the resulting array order persists as
 // widget_position, which is exactly the order the Related tab renders cards.
-function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWidget, onOpenRelatedModal }) {
+function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWidget, onOpenRelatedModal, canAddConversation, onAddConversation }) {
   const { setNodeRef, isOver } = useDroppable({ id: `wzone::${sectionKey}` })
   return (
     <div ref={setNodeRef} style={{
@@ -989,11 +1030,21 @@ function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWid
             onPatch={onPatchWidget} onRemove={onRemoveWidget} onOpenRelatedModal={onOpenRelatedModal} />
         ))}
       </SortableContext>
-      <button onClick={() => onOpenRelatedModal(sectionKey, null)}
-        style={{ width: '100%', padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
-          color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
-        + Add Related List
-      </button>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => onOpenRelatedModal(sectionKey, null)}
+          style={{ flex: 1, padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
+            color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
+          + Add Related List
+        </button>
+        {canAddConversation && (
+          <button onClick={() => onAddConversation(sectionKey)}
+            title="Add a two-way email Communications panel anchored to this record"
+            style={{ flex: 1, padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
+              color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
+            + Add Communications
+          </button>
+        )}
+      </div>
     </div>
   )
 }
