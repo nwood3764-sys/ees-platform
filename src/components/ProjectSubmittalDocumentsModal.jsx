@@ -26,6 +26,7 @@ import { useToast } from './Toast'
 import {
   loadPaperworkContext, parseAssetScorePdf, buildPaperworkWorkbook, downloadBlob,
   loadSubmittalTextBlocks, loadOpportunityRecordTypeMap, loadStageDocumentRequirements,
+  loadSubmittalDocumentTemplate,
 } from '../data/paperworkService'
 import { buildPaperworkModel, buildEesPdf, buildSealedPdf, formatMoney } from '../data/paperworkModel'
 import {
@@ -185,15 +186,18 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
     try {
       let blob, filename
       const prefix = `${baseName} - ${programLabel}`
+      // The stored template's section list drives the render when one exists;
+      // otherwise the built-in list (which the seeded templates match exactly).
+      const tpl = await loadSubmittalDocumentTemplate(docKey, recordTypeMap[programKey] || null)
       switch (docKey) {
         case DOCUMENTS.ENERGY_AUDIT_INVOICE:
-          blob = await buildEesPdf(model, 'audit')
+          blob = await buildEesPdf(model, tpl?.kind || 'audit', tpl?.sections)
           filename = `${prefix} - Energy Audit Invoice.pdf`; break
         case DOCUMENTS.HOMES_PROJECT_PROPOSAL:
-          blob = await buildEesPdf(model, 'proposal')
+          blob = await buildEesPdf(model, tpl?.kind || 'proposal', tpl?.sections)
           filename = `${prefix} - Project Reservation Proposal.pdf`; break
         case DOCUMENTS.HOMES_PROJECT_INVOICE:
-          blob = await buildEesPdf(model, 'invoice')
+          blob = await buildEesPdf(model, tpl?.kind || 'invoice', tpl?.sections)
           filename = `${prefix} - Final Project Payment Request Invoice.pdf`; break
         case DOCUMENTS.SEALED_PROPOSAL:
           blob = await buildSealedPdf(model, 'proposal')

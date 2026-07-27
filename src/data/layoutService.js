@@ -183,6 +183,8 @@ const TABLE_COLUMN_PREFIX = {
   service_appointment_assignments:   'saa',
   skills:                            'skill',
   stage_document_requirements:       'sdr',
+  submittal_document_templates:      'sdt',
+  submittal_document_template_sections: 'sdts',
   submittal_document_text_blocks:    'sdtb',
   time_sheets:                       'ts',
   time_sheet_entries:                'tse',
@@ -652,6 +654,8 @@ const POLY_DISPLAY_COL = {
   skills:                   'skill_name',
   submittal_document_text_blocks: 'sdtb_name',
   stage_document_requirements:    'sdr_name',
+  submittal_document_templates:   'sdt_name',
+  submittal_document_template_sections: 'sdts_name',
 }
 
 /**
