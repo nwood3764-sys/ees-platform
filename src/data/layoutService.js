@@ -845,6 +845,60 @@ export async function loadRecordDetailData(tableName, recordId) {
     } catch { /* leave the dotted keys unset — fields render as '—' */ }
   }))
 
+  // Reverse-then-forward (child-lookup) related fields — used where the value
+  // lives on a record this one does NOT hold an outgoing FK to, but which is
+  // reachable through a CHILD record's own lookup. Example: property "Systems
+  // Information" is sourced from the building on the property's opportunity —
+  // opportunities.property_id points back at this property, and that
+  // opportunity's building_id points forward at the building whose HVAC fields
+  // we display. Config shape on each field:
+  //   related: { source:'child_lookup', child_table, child_fk, hop_column,
+  //              table, column, column_type,
+  //              child_order_by?, child_order_dir?, child_deleted_col? }
+  // Fields are grouped by child path so the hop resolves in ONE query per
+  // path; the final rows are then batch-fetched with only the needed columns.
+  // Read-only, RLS-respecting; any failure degrades to blank values.
+  const childLookupGroups = new Map()
+  for (const sec of layoutData.sections) {
+    for (const w of sec.widgets) {
+      if (w.widget_type !== 'field_group' || !w.widget_config?.fields) continue
+      for (const f of w.widget_config.fields) {
+        const r = f.related
+        if (f.type !== 'related_field' || r?.source !== 'child_lookup') continue
+        if (!r.child_table || !r.child_fk || !r.hop_column || !r.table || !r.column) continue
+        const key = `${r.child_table}|${r.child_fk}|${r.hop_column}|${r.child_order_by || ''}|${r.child_order_dir || ''}`
+        if (!childLookupGroups.has(key)) {
+          childLookupGroups.set(key, {
+            child_table: r.child_table, child_fk: r.child_fk, hop_column: r.hop_column,
+            child_order_by: r.child_order_by, child_order_dir: r.child_order_dir,
+            child_deleted_col: r.child_deleted_col, table: r.table, fields: [],
+          })
+        }
+        childLookupGroups.get(key).fields.push(f)
+      }
+    }
+  }
+  await Promise.all([...childLookupGroups.values()].map(async (group) => {
+    try {
+      // 1) Resolve the hop id from the most-relevant non-deleted child row.
+      let q = supabase.from(group.child_table)
+        .select(group.hop_column)
+        .eq(group.child_fk, recordId)
+        .not(group.hop_column, 'is', null)
+      if (group.child_deleted_col) q = q.not(group.child_deleted_col, 'is', true)
+      if (group.child_order_by) q = q.order(group.child_order_by, { ascending: group.child_order_dir === 'asc' })
+      const { data: childRows, error: childErr } = await q.limit(1)
+      if (childErr || !childRows?.length) return
+      const hopId = childRows[0][group.hop_column]
+      if (!hopId) return
+      // 2) Fetch the final table row with only the needed columns.
+      const cols = [...new Set(group.fields.map(f => f.related.column))].join(',')
+      const { data: row, error: rowErr } = await supabase.from(group.table).select(cols).eq('id', hopId).maybeSingle()
+      if (rowErr || !row) return
+      for (const f of group.fields) record[f.name] = row[f.related.column]
+    } catch { /* leave the dotted keys unset — fields render as '—' */ }
+  }))
+
   // Collect lookup requests from all field_group widgets.
   // Three flavors are gathered side-by-side:
   //   • static lookups (type='lookup') — target table fixed in widget config
