@@ -75,6 +75,20 @@ const RIGHT_TAB = '__right_sidebar__'
 // rail) — so the only render hint a tile needs is the right-sidebar one.
 const CARD_WIDGET_TYPES = new Set(['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'])
 
+// Objects whose records can host a Communications (two-way email) panel, and
+// the FK column on `conversations` that anchors a thread to them. A
+// conversation_panel widget stores its anchor as widget_config.fk, so this map
+// is what lets the editor place one on the right object. Mirror of the client
+// FK_TO_ANCHOR_OBJECT / server ANCHOR_FK_PARAM maps — keep them in sync when a
+// new anchor object is enabled.
+const OBJECT_CONVERSATION_FK = {
+  contacts: 'contact_id', accounts: 'account_id', projects: 'project_id',
+  service_appointments: 'service_appointment_id', work_orders: 'work_order_id',
+  incentive_applications: 'incentive_application_id', opportunities: 'opportunity_id',
+  assessments: 'assessment_id', buildings: 'building_id', properties: 'property_id',
+  units: 'unit_id',
+}
+
 function humanize(col, object) {
   let c = col
   if (object && c.startsWith(object.replace(/s$/, '') + '_')) c = c.slice(object.replace(/s$/, '').length + 1)
@@ -513,6 +527,23 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
     }))
   }
 
+  // Place a Communications (two-way email) panel in a section. Anchored to the
+  // FK on `conversations` for this object (units → unit_id, etc.). One per
+  // layout — Salesforce shows a single communications area per record — so the
+  // affordance hides once a panel exists anywhere on the layout.
+  const addConversationPanel = useCallback((sectionKey) => {
+    const fk = OBJECT_CONVERSATION_FK[meta?.object]
+    if (!fk) return
+    setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
+      ...sec,
+      widgets: [...(sec.widgets || []), {
+        key: `w-new-${Date.now()}`, type: 'conversation_panel', title: 'Communications',
+        column: 1, size: 'medium', isRequired: false,
+        config: { fk, table: 'conversations', channel_filter: null },
+      }],
+    }))
+  }, [meta?.object])
+
   const applyRelatedModal = ({ title, config }) => {
     const { sectionKey, widgetKey } = relatedModal
     if (widgetKey) {
@@ -564,6 +595,11 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
   const railSections = sections.filter(s => (s.placement || 'main') === 'right')
   const deleteTabSectionCount = deleteTab ? sections.filter(s => (s.tab || 'Details') === deleteTab).length : 0
 
+  // A Communications panel can be added when this object supports conversations
+  // and the layout doesn't already have one (one comms area per record).
+  const hasConversationPanel = sections.some(s => (s.widgets || []).some(w => w.type === 'conversation_panel'))
+  const canAddConversation = !!OBJECT_CONVERSATION_FK[meta.object] && !hasConversationPanel
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
       <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
@@ -593,15 +629,16 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
                 border: `1px solid ${C.border}`, borderRadius: 5, background: C.card, color: C.textPrimary, outline: 'none' }}
             />
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
+          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 10 }}>
             {available.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, padding: 6 }}>{fieldQuery ? 'No fields match your search.' : 'All fields placed.'}</div>
               : available.map(c => (
                 <button key={c.name} onClick={() => activeSection && addField(activeSection, c)} disabled={!activeSection}
                   title={activeSection ? `Add ${c.name}` : 'Select a section first'}
-                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 9px', marginBottom: 5, fontSize: 12.5,
+                  style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '7px 9px', marginBottom: 5, fontSize: 12.5,
+                    overflow: 'hidden', overflowWrap: 'anywhere',
                     background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
                   {humanize(c.name, meta.object)}
-                  <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace' }}>{c.name}</span>
+                  <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.name}</span>
                 </button>
               ))}
 
@@ -649,11 +686,12 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
                           {Array.isArray(cols) && list.map(c => (
                             <button key={c.column_name} onClick={() => addRelatedField(g, c)} disabled={!activeSection}
                               title={activeSection ? `Add ${g.fk}.${c.column_name} (read-only)` : 'Select a section first'}
-                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', marginBottom: 4, fontSize: 12,
+                              style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '6px 8px', marginBottom: 4, fontSize: 12,
+                                overflow: 'hidden', overflowWrap: 'anywhere',
                                 background: C.card, border: `1px dashed ${C.border}`, borderRadius: 6,
                                 cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
                               {humanize(c.column_name, g.table)}
-                              <span style={{ fontSize: 9.5, color: C.textMuted, marginLeft: 5, fontFamily: 'JetBrains Mono, monospace' }}>{c.column_name}</span>
+                              <span style={{ fontSize: 9.5, color: C.textMuted, marginLeft: 5, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.column_name}</span>
                             </button>
                           ))}
                         </div>
@@ -680,7 +718,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
             {/* Main canvas (active tab) + the live right-sidebar rail. The rail
                 mirrors the record page: always visible, whatever tab is active. */}
             <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-              <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+              <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: 16 }}>
                 {visibleSections.length === 0 ? (
                   <div style={{ background: C.card, border: `1px dashed ${C.borderDark}`, borderRadius: 8, padding: '28px 20px', textAlign: 'center' }}>
                     <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 4 }}>
@@ -702,7 +740,8 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
                       {visibleSections.map(sec => (
                         <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
                           onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
-                          onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal} />
+                          onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal}
+                          canAddConversation={canAddConversation} onAddConversation={addConversationPanel} />
                       ))}
                     </SortableContext>
                     <button onClick={() => addSection('end')} style={addSectionBtn()}>
@@ -716,7 +755,8 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
                   {railSections.map(sec => (
                     <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
                       onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
-                      onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal} />
+                      onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal}
+                      canAddConversation={canAddConversation} onAddConversation={addConversationPanel} />
                   ))}
                 </SortableContext>
               </RightRail>
@@ -821,9 +861,12 @@ function RightRail({ count, onAdd, children }) {
   const { setNodeRef, isOver } = useDroppable({ id: `tabdrop::${RIGHT_TAB}` })
   return (
     <div ref={setNodeRef} style={{
-      // Matches the record page's rail width (480px) so the editor shows the
-      // real proportions — WYSIWYG.
-      width: 480, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      // Prefers the record page's rail width (480px) for real WYSIWYG
+      // proportions, but shrinks toward 300px on narrow viewports so the rail
+      // is never pushed off the right edge (flex-basis 480, can shrink, won't
+      // grow). The main canvas beside it carries minWidth:0 so it yields first.
+      flex: '0 1 480px', minWidth: 300, boxSizing: 'border-box',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
       borderLeft: `1px solid ${C.borderDark}`,
       background: isOver ? '#f0faf5' : '#eaeef6',
       boxShadow: isOver ? `inset 0 0 0 1px ${C.emerald}` : 'none',
@@ -909,6 +952,7 @@ const SectionCard = memo(function SectionCard({
   section, object, active,
   onActivate, onPatch, onRemove, onSetFields,
   onPatchWidget, onRemoveWidget, onOpenRelatedModal,
+  canAddConversation, onAddConversation,
 }) {
   const fg = (section.widgets || []).find(w => w.type === 'field_group')
   const others = (section.widgets || []).filter(w => w.type !== 'field_group')
@@ -930,9 +974,9 @@ const SectionCard = memo(function SectionCard({
         <span {...attributes} {...listeners} title="Drag to reorder sections"
           style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none', fontSize: 14, lineHeight: 1, flexShrink: 0 }}>⠿</span>
         <input value={section.label} onChange={e => onPatch(section.key, { label: e.target.value })}
-          style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.textPrimary, border: 'none', background: 'transparent', outline: 'none' }} />
+          style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: C.textPrimary, border: 'none', background: 'transparent', outline: 'none' }} />
         <span title="Move this section by dragging its ⠿ handle onto a tab above or into the right-sidebar rail"
-          style={{ fontSize: 10.5, color: C.textMuted, flexShrink: 0 }}>drag ⠿ to a tab or the sidebar</span>
+          style={{ fontSize: 10.5, color: C.textMuted, flexShrink: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>drag ⠿ to a tab or the sidebar</span>
         <label style={{ fontSize: 11, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
           Columns
           <select value={cols} onChange={e => onPatch(section.key, { columns: Number(e.target.value) })}
@@ -959,6 +1003,8 @@ const SectionCard = memo(function SectionCard({
           onPatchWidget={onPatchWidget}
           onRemoveWidget={onRemoveWidget}
           onOpenRelatedModal={onOpenRelatedModal}
+          canAddConversation={canAddConversation}
+          onAddConversation={onAddConversation}
         />
       </div>
     </div>
@@ -970,7 +1016,7 @@ const SectionCard = memo(function SectionCard({
 // ("wzone::<sectionKey>") so a related-list card can be dragged within its
 // section or into another one — the resulting array order persists as
 // widget_position, which is exactly the order the Related tab renders cards.
-function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWidget, onOpenRelatedModal }) {
+function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWidget, onOpenRelatedModal, canAddConversation, onAddConversation }) {
   const { setNodeRef, isOver } = useDroppable({ id: `wzone::${sectionKey}` })
   return (
     <div ref={setNodeRef} style={{
@@ -984,11 +1030,21 @@ function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWid
             onPatch={onPatchWidget} onRemove={onRemoveWidget} onOpenRelatedModal={onOpenRelatedModal} />
         ))}
       </SortableContext>
-      <button onClick={() => onOpenRelatedModal(sectionKey, null)}
-        style={{ width: '100%', padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
-          color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
-        + Add Related List
-      </button>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => onOpenRelatedModal(sectionKey, null)}
+          style={{ flex: 1, padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
+            color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
+          + Add Related List
+        </button>
+        {canAddConversation && (
+          <button onClick={() => onAddConversation(sectionKey)}
+            title="Add a two-way email Communications panel anchored to this record"
+            style={{ flex: 1, padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
+              color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
+            + Add Communications
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -1080,7 +1136,7 @@ function FieldTile({ field, object, onRemove }) {
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
     }}>
       <span {...attributes} {...listeners} title="Drag" style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
-      <span style={{ flex: 1, fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field.label || humanize(field.name, object)}</span>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field.label || humanize(field.name, object)}</span>
       <button onClick={onRemove} style={miniBtn()}>×</button>
     </div>
   )

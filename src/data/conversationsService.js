@@ -41,6 +41,7 @@ const CONV_COLUMNS = [
   'assessment_id',
   'building_id',
   'property_id',
+  'unit_id',
 ].join(', ')
 
 const MSG_COLUMNS = [
@@ -78,6 +79,7 @@ const SUPPORTED_FK = new Set([
   'assessment_id',
   'building_id',
   'property_id',
+  'unit_id',
 ])
 
 /**
@@ -203,7 +205,7 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
     // one anchor. Resolve from the conversation's own FKs in priority order
     // (most-specific leaf → most-canonical root): service_appointment >
     // work_order > assessment > incentive_application > project > opportunity
-    // > building > property > account > contact.
+    // > unit > building > property > account > contact.
     let anchorObject = null
     let anchorRecordId = null
     if (opts.anchorObject && opts.anchorRecordId) {
@@ -227,6 +229,9 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
     } else if (conversation.opportunity_id) {
       anchorObject = 'opportunities'
       anchorRecordId = conversation.opportunity_id
+    } else if (conversation.unit_id) {
+      anchorObject = 'units'
+      anchorRecordId = conversation.unit_id
     } else if (conversation.building_id) {
       anchorObject = 'buildings'
       anchorRecordId = conversation.building_id
