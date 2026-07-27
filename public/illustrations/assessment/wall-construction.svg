@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<rect x="70" y="90" width="200" height="380" fill="url(#wl)" stroke="#44526a" stroke-width="3"/>
+<g stroke="#6a7788" stroke-width="2"><line x1="70" y1="150" x2="270" y2="150"/><line x1="70" y1="210" x2="270" y2="210"/><line x1="70" y1="270" x2="270" y2="270"/><line x1="70" y1="330" x2="270" y2="330"/><line x1="70" y1="390" x2="270" y2="390"/></g>
+<!-- cutaway showing studs + cavity -->
+<rect x="270" y="90" width="140" height="380" fill="#eef1f6" stroke="#44526a" stroke-width="3"/>
+<g fill="#cdb98f" stroke="#a98f5f" stroke-width="2"><rect x="282" y="90" width="20" height="380"/><rect x="342" y="90" width="20" height="380"/></g>
+<rect x="302" y="90" width="40" height="380" fill="#f0e6c8" stroke="#d8c48f" stroke-width="2"/>
+<rect x="362" y="90" width="40" height="380" fill="#f0e6c8" stroke="#d8c48f" stroke-width="2"/>
+<path d="M270 90 L270 470" stroke="#0d1a2e" stroke-width="2" stroke-dasharray="6 5"/>
+<rect x="54" y="78" width="372" height="404" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="24" y="34">Exterior finish (siding / brick)</text><text x="150" y="510">Note construction and any</text><text x="150" y="534">cavity insulation at an opening</text></g></svg>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient><linearGradient id="mt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#aab6c8"/><stop offset="0.5" stop-color="#f4f8fd"/><stop offset="1" stop-color="#b3bfd0"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<rect x="60" y="70" width="360" height="420" rx="4" fill="url(#wl)" stroke="#44526a" stroke-width="3"/>
+<!-- doorway -->
+<rect x="150" y="120" width="180" height="360" rx="3" fill="#6a7788"/>
+<rect x="162" y="132" width="156" height="348" fill="#c7d2e0"/>
+<!-- fabric panel -->
+<rect x="168" y="138" width="144" height="336" fill="#0d1a2e" opacity="0.14"/>
+<!-- fan -->
+<circle cx="240" cy="360" r="58" fill="url(#mt)" stroke="#44526a" stroke-width="3"/>
+<circle cx="240" cy="360" r="58" fill="none" stroke="#6a7788" stroke-width="2"/>
+<g stroke="#6a7788" stroke-width="4" fill="none"><path d="M240 360 Q268 340 264 314"/><path d="M240 360 Q262 388 288 388"/><path d="M240 360 Q212 380 216 406"/><path d="M240 360 Q218 332 192 332"/></g>
+<circle cx="240" cy="360" r="12" fill="#dde3ec" stroke="#44526a" stroke-width="2"/>
+<!-- manometer -->
+<rect x="196" y="176" width="88" height="60" rx="6" fill="#eef1f6" stroke="#44526a" stroke-width="3"/>
+<rect x="208" y="188" width="64" height="26" rx="3" fill="#0d1a2e"/>
+<text x="214" y="208" font-size="15" font-weight="800" fill="#3ecf8e" font-family="JetBrains Mono, monospace">CFM50</text>
+<rect x="110" y="104" width="260" height="386" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="28" y="34">Blower door set in the doorway</text><text x="150" y="522">Record CFM50 (or pressure + airflow</text><text x="150" y="546">if you can't reach 50 Pa)</text></g></svg>

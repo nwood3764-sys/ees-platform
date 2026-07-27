@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="wl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2efe8"/><stop offset="1" stop-color="#e4dfd2"/></linearGradient><linearGradient id="pl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f8fd"/><stop offset="1" stop-color="#dfe9f5"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#eef2f7"/>
+<rect x="96" y="80" width="200" height="240" rx="4" fill="#c9d6e6" stroke="#44526a" stroke-width="3"/>
+<rect x="110" y="94" width="172" height="212" fill="#7eb3e8" opacity="0.35" stroke="#6a7788" stroke-width="2.5"/>
+<line x1="196" y1="94" x2="196" y2="306" stroke="#6a7788" stroke-width="4"/>
+<line x1="110" y1="200" x2="282" y2="200" stroke="#6a7788" stroke-width="4"/>
+<!-- NFRC sticker -->
+<rect x="210" y="120" width="60" height="80" rx="3" fill="url(#pl)" stroke="#2a6bb0" stroke-width="3"/>
+<g stroke="#2a6bb0" stroke-width="2"><line x1="218" y1="134" x2="262" y2="134"/><line x1="218" y1="150" x2="256" y2="150"/><line x1="218" y1="166" x2="262" y2="166"/><line x1="218" y1="182" x2="250" y2="182"/></g>
+<!-- magnifier + zoom label -->
+<circle cx="300" cy="230" r="30" fill="#ffffff" opacity="0.35"/><circle cx="300" cy="230" r="30" fill="none" stroke="#2a6bb0" stroke-width="5"/>
+<line x1="322" y1="252" x2="352" y2="282" stroke="#2a6bb0" stroke-width="7" stroke-linecap="round"/>
+<rect x="120" y="360" width="240" height="120" rx="8" fill="url(#pl)" stroke="#44526a" stroke-width="3"/>
+<rect x="134" y="372" width="120" height="18" rx="3" fill="#24478a"/>
+<g stroke="#7d92b3" stroke-width="3"><line x1="134" y1="410" x2="340" y2="410"/><line x1="134" y1="436" x2="310" y2="436"/><line x1="134" y1="460" x2="290" y2="460"/></g>
+<rect x="80" y="66" width="232" height="268" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="24" y="34">Frame type &amp; number of panes</text><text x="150" y="522">Photograph the NFRC label if present</text><text x="150" y="546">(U-value, SHGC, gas fill)</text></g></svg>
