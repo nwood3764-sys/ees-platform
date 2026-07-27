@@ -333,8 +333,11 @@ first, then ship.
 > `app_user_can` RLS. Help article **HA-00151**
 > (`editing-submittal-document-templates`).
 >
-> **Remaining: Phase C — the signing route (§7b), unchanged.** Needs a
-> controlled internal test send before deploying.
+> **Phase C — the signing route — SHIPPED 2026-07-27 (details below).** The
+> Final Project Payment Request invoice can now be sent for a property owner's
+> signature via an additive source-document path in `send-envelope` v4. Still
+> wants a controlled internal test send (to an internal address) before the
+> first real customer send.
 
 State as of 2026-07-27 (PRs #223, #231, #238, #241, #243, #245 all merged and
 live). Documents are stored templates; what remains is coverage and authoring.
@@ -413,9 +416,47 @@ record. Requirements:
 Hazard: `preflight` requires lazy targets to resolve and default-export; keep
 the editor lazy-loaded like the other heavy modals.
 
-### Phase C — signing route
+### Phase C — signing route — SHIPPED 2026-07-27
 
-Unchanged; see §7b. Needs a controlled internal test send before deploying.
+Built exactly as §7b designed. The Final Project Payment Request invoice
+(`homes_project_invoice`) can now be sent for a property owner's signature.
+
+- **DB (migration `20260727130400`, applied to prod, advisors unchanged at
+  202):** `envelopes.document_template_id` is now nullable; new
+  `env_source_document_id uuid REFERENCES documents(id)`; CHECK
+  `num_nonnulls(document_template_id, env_source_document_id) = 1`. Every
+  existing row satisfies it, so the template path is untouched.
+- **`send-envelope` v4 (deployed to prod, `verify_jwt` still true):** an
+  additive `source_document_id` + explicit `tabs` path. When present it skips
+  the template/snapshot lookup and the render call, reads the PDF bytes from
+  the `documents` row's storage location, and builds `envelope_tabs` from the
+  caller's tabs. Everything downstream — `unsigned.pdf` upload, recipients,
+  tokens, events, the recipient-#1 email — is shared and unchanged. The
+  template branch is byte-unchanged in behavior.
+- **`paperworkModel.buildSubmittalPdfWithSignatureTabs(m, kind, sections)`**
+  returns `{ blob, tabs }`. The `acknowledgment_and_signature` section records
+  the property-owner signature + date tabs (recipient order 1) in PDF
+  coordinates (origin bottom-left, H=792) — matching the signing portal's
+  overlay transform (`top = (pdfHeight - tab_y - tab_height) * scale`) and
+  pdf-lib's stamp — so the signature lands on the Property Owner line. Capture
+  is opt-in (`collectTabs`); default renders stay byte-identical (all three
+  parity harnesses + the 38-check math fixture still green).
+- **Client:** `ProjectSubmittalDocumentsModal` shows **Send for Signature** on
+  any stage document flagged requires-signature (today: the HOMES Project
+  Invoice). It generates the signable PDF + tabs, `uploadDocument`s it to the
+  project (`property-documents` bucket, `projects/{id}/…`), and calls
+  `send-envelope` with `source_document_id` + tabs. A confirm dialog defaults
+  the recipient to the property-owner contact (editable) and surfaces the
+  signing URL when email delivery isn't connected.
+- Help article **HA-00152**.
+
+**Controlled internal test (do this before sending to a real customer):** on a
+WI-IRA-MF-HOMES project at the Final Project Payment Request stage, upload both
+Asset Score reports, click **Send for Signature** on the HOMES Project Invoice,
+and set the recipient to an internal address. If Outlook is not connected the
+dialog returns a signing link and sends no email — open it, confirm the
+signature box sits on the Property Owner line, sign, and verify the stamped
+`signed.pdf`. Only after that looks right should it go to a real owner.
 
 ## 8. File + DB-table index (what the building session touches most)
 
