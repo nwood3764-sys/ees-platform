@@ -29,7 +29,9 @@ import {
   loadSubmittalTextBlocks, loadOpportunityRecordTypeMap, loadStageDocumentRequirements,
   loadSubmittalDocumentTemplate,
 } from '../data/paperworkService'
-import { buildPaperworkModel, buildEesPdf, buildSealedPdf, formatMoney } from '../data/paperworkModel'
+import { buildPaperworkModel, buildEesPdf, buildSealedPdf, buildSubmittalPdfWithSignatureTabs, formatMoney } from '../data/paperworkModel'
+import { supabase } from '../lib/supabase'
+import { uploadDocument } from '../data/storageService'
 import {
   SUBMITTAL_STAGE_DEFINITIONS, DOCUMENTS, DOCUMENT_DEFINITIONS,
   documentDefinitionsForSubmittal, programsWithDocumentsForStage, PROGRAM_SUBMITTALS,
@@ -224,7 +226,67 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
 
   const setField = (key, value) => setFields(f => ({ ...f, [key]: value }))
 
+  // ── Send for Signature ────────────────────────────────────────────────
+  // Generates the signable document, uploads it to the project, and sends it
+  // through the e-signature pipeline with an explicit property-owner signature
+  // tab (a generated PDF has no discoverable anchors). Only offered on
+  // documents the stage marks as requiring a signature.
+  const [sendState, setSendState] = useState(null)
+  const openSend = (doc) => setSendState({
+    doc,
+    name: fields?.contactName || fields?.ownerName || '',
+    email: fields?.contactEmail || '',
+    subject: `Please sign: ${doc.label}`,
+    sending: false, resultUrl: null, emailed: false, error: null,
+  })
+  const setSend = (patch) => setSendState(s => (s ? { ...s, ...patch } : s))
+  const doSend = async () => {
+    if (!sendState || !model) return
+    const s = sendState
+    if (!s.email.trim()) { setSend({ error: 'Enter the property owner’s email address.' }); return }
+    setSend({ sending: true, error: null })
+    try {
+      const tpl = await loadSubmittalDocumentTemplate(s.doc.key, recordTypeMap[programKey] || null)
+      const kind = tpl?.kind || 'invoice'
+      const { blob, tabs } = await buildSubmittalPdfWithSignatureTabs(model, kind, tpl?.sections)
+      if (!tabs.length) throw new Error('This document has no signature block, so there is nowhere to place a signature.')
+      const filename = `${baseName} - ${programLabel} - ${s.doc.label}.pdf`
+      const file = new File([blob], filename, { type: 'application/pdf' })
+      const docRow = await uploadDocument({
+        file, relatedObject: 'projects', relatedId: projectId,
+        documentType: 'submittal', name: filename, category: 'signature_source',
+      })
+      const { data: sess } = await supabase.auth.getSession()
+      const token = sess?.session?.access_token
+      if (!token) throw new Error('Not authenticated')
+      const FN_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
+      const resp = await fetch(`${FN_BASE}/send-envelope`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          source_document_id: docRow.id,
+          parent_object: 'projects',
+          parent_record_id: projectId,
+          recipients: [{ name: s.name.trim() || 'Property Owner', email: s.email.trim(), role: s.doc.signerRole || 'Property Owner', order: 1 }],
+          subject: s.subject.trim() || undefined,
+          signing_base_url: window.location.origin,
+          tabs,
+        }),
+      })
+      const j = await resp.json()
+      if (!resp.ok) throw new Error(j.error || `send-envelope returned ${resp.status}`)
+      const url = j.signing_urls?.find(u => u.order === 1)?.signing_url || null
+      const emailed = j.email_send_results?.[0]?.status === 'sent'
+      setSend({ sending: false, resultUrl: url, emailed })
+      toast.success(emailed ? `Signature request emailed to ${s.email}` : 'Envelope created — signing link ready')
+    } catch (e) {
+      setSend({ sending: false, error: e.message || String(e) })
+      toast.error(`Send failed — ${e.message || e}`)
+    }
+  }
+
   return (
+    <>
     <div style={overlay} onClick={busyDoc ? undefined : onClose}>
       <div style={card} onClick={e => e.stopPropagation()}>
         <div style={headerStyle}>
@@ -406,14 +468,34 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
                   {submittalDocuments.map(doc => {
                     const blocked = doc.requiresAssetScoreReports && !scopeReady
                     return (
-                      <DocButton key={doc.key}
-                        label={doc.label}
-                        sub={doc.requiresSignature
-                          ? `${doc.format || 'PDF'} · signature required`
-                          : doc.format}
-                        title={doc.note}
-                        onClick={() => generate(doc.key)}
-                        busy={busyDoc === doc.key} disabled={!!busyDoc || blocked} />
+                      <div key={doc.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <DocButton
+                          label={doc.label}
+                          sub={doc.requiresSignature
+                            ? `${doc.format || 'PDF'} · signature required`
+                            : doc.format}
+                          title={doc.note}
+                          onClick={() => generate(doc.key)}
+                          busy={busyDoc === doc.key} disabled={!!busyDoc || blocked} />
+                        {doc.requiresSignature && (
+                          <button type="button"
+                            onClick={() => openSend(doc)}
+                            disabled={!!busyDoc || blocked || !model}
+                            title="Generate this document and send it to the property owner for signature"
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 7, textAlign: 'left',
+                              background: C.card, border: `1px solid ${(blocked || !model) ? C.border : C.sky}`,
+                              borderRadius: 6, padding: '7px 12px', fontSize: 12,
+                              color: (blocked || !model) ? C.textMuted : C.textPrimary,
+                              cursor: (blocked || !model) ? 'not-allowed' : 'pointer',
+                              opacity: (blocked || !model) ? 0.55 : 1,
+                            }}>
+                            <Icon path="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z M16 8L2 22 M17.5 15H9" size={13}
+                              color={(blocked || !model) ? C.textMuted : C.sky} />
+                            Send for Signature
+                          </button>
+                        )}
+                      </div>
                     )
                   })}
                 </div>
@@ -441,7 +523,86 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
         </div>
       </div>
     </div>
+
+    {sendState && (
+      <div style={{ ...overlay, zIndex: 1200 }} onClick={sendState.sending ? undefined : () => setSendState(null)}>
+        <div style={{ ...card, maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+          <div style={headerStyle}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>Send for Signature</div>
+            <button onClick={sendState.sending ? undefined : () => setSendState(null)} aria-label="Close"
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 6 }}>
+              <Icon path="M18 6 6 18M6 6l12 12" size={15} color="currentColor" />
+            </button>
+          </div>
+          <div style={{ padding: 20 }}>
+            {sendState.resultUrl || sendState.emailed ? (
+              <div>
+                <div style={{ fontSize: 13, color: C.textPrimary, marginBottom: 10 }}>
+                  {sendState.emailed
+                    ? `A signature request was emailed to ${sendState.email}.`
+                    : 'Envelope created. Email delivery is not connected, so share this signing link directly with the property owner:'}
+                </div>
+                {sendState.resultUrl && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input readOnly value={sendState.resultUrl} style={{ ...inputStyle, fontSize: 11.5 }}
+                      onFocus={e => e.target.select()} />
+                    <button style={sendPrimaryBtn}
+                      onClick={() => { navigator.clipboard?.writeText(sendState.resultUrl); toast.success('Link copied') }}>
+                      Copy
+                    </button>
+                  </div>
+                )}
+                <div style={{ ...hintStyle, marginTop: 10 }}>
+                  The document was saved to this project and the signature request logged. The signature lands on the
+                  Property Owner line of the invoice.
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.5, marginBottom: 14 }}>
+                  Generates <strong style={strongStyle}>{sendState.doc.label}</strong>, saves it to this project, and sends it
+                  to the property owner for signature. The signature is placed on the invoice's Property Owner line.
+                </div>
+                <label style={labelStyle}>Recipient Name</label>
+                <input style={{ ...inputStyle, marginBottom: 12 }} value={sendState.name}
+                  onChange={e => setSend({ name: e.target.value })} />
+                <label style={labelStyle}>Recipient Email</label>
+                <input style={{ ...inputStyle, marginBottom: 12 }} value={sendState.email}
+                  onChange={e => setSend({ email: e.target.value })} placeholder="owner@example.com" />
+                <label style={labelStyle}>Subject</label>
+                <input style={inputStyle} value={sendState.subject}
+                  onChange={e => setSend({ subject: e.target.value })} />
+                {sendState.error && <div style={{ ...errorBox, marginTop: 12 }}>{sendState.error}</div>}
+              </div>
+            )}
+          </div>
+          <div style={footerStyle}>
+            {sendState.resultUrl || sendState.emailed ? (
+              <button style={sendPrimaryBtn} onClick={() => setSendState(null)}>Done</button>
+            ) : (
+              <>
+                <button onClick={sendState.sending ? undefined : () => setSendState(null)} disabled={sendState.sending}
+                  style={{ background: C.card, color: C.textSecondary, border: `1px solid ${C.border}`,
+                    borderRadius: 6, padding: '8px 16px', fontSize: 13, cursor: sendState.sending ? 'wait' : 'pointer' }}>
+                  Cancel
+                </button>
+                <button onClick={doSend} disabled={sendState.sending}
+                  style={{ ...sendPrimaryBtn, opacity: sendState.sending ? 0.6 : 1 }}>
+                  {sendState.sending ? 'Sending…' : 'Send'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
+}
+
+const sendPrimaryBtn = {
+  background: C.emerald, color: '#fff', border: 'none', borderRadius: 6,
+  padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
 }
 
 function DocButton({ label, sub, title, onClick, busy, disabled }) {
