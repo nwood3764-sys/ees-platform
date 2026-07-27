@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react'
 import { C } from '../data/constants'
 import { Icon, LoadingState, ErrorState } from '../components/UI'
 import SearchableCombo from '../components/SearchableCombo'
@@ -12,6 +12,12 @@ import {
   runReportDefinition,
   buildReportDefinition,
 } from '../data/reportsService'
+import {
+  operatorsForKind, defaultOperatorForKind, operatorMeta,
+  operatorNeedsValue, operatorIsRange, operatorIsMulti,
+  toValueArray, parseFilterLogic, defaultFilterLogic, remapFilterLogic,
+  DATE_LITERALS, isDateLiteral, parseDateLiteral, dateLiteralLabel,
+} from '../lib/reportFilters'
 import { TabularLayout, SummaryLayout, MatrixLayout } from './ReportRunner'
 import { supabase } from '../lib/supabase'
 import SortableList from '../builder/SortableList'
@@ -233,6 +239,29 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     }
   }
 
+  // Bulk-load every DIRECT related object's columns (non-toggling), so a field
+  // search can span the whole object graph one hop out — Salesforce-style, the
+  // search box reaches related-object fields, not just the primary object's.
+  // Deeper hops stay expand-driven. Returns once all are resolved.
+  const loadAllRelatedFields = async () => {
+    const rels = fieldTree?.related || []
+    const missing = rels.filter(rel => !expandedRelated[rel.fk_column])
+    if (missing.length === 0) return
+    const loaded = await Promise.all(missing.map(async rel => {
+      try {
+        return [rel.fk_column, await loadRelatedObjectFields(rel.table, [rel.fk_column])]
+      } catch (err) {
+        console.warn('related fields load failed:', rel.table, err)
+        return null
+      }
+    }))
+    setExpandedRelated(prev => {
+      const next = { ...prev }
+      for (const entry of loaded) { if (entry) next[entry[0]] = entry[1] }
+      return next
+    })
+  }
+
   const addField = (column, table, viaPath = null) => {
     const exists = report.rpt_selected_fields.some(f =>
       f.name === column.name && f.table === table &&
@@ -241,7 +270,9 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     const newField = {
       name:     column.name,
       table:    table,
-      label:    column.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      // Prefer the metadata label (prefix-stripped, title-cased); fall back to
+      // a humanized column name for older field-tree shapes.
+      label:    column.label || column.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
       via_path: viaPath,
       type:     column.type,
     }
@@ -393,6 +424,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
                 fieldTree={fieldTree}
                 expandedRelated={expandedRelated}
                 onExpandRelated={handleExpandRelated}
+                onLoadAllRelated={loadAllRelatedFields}
                 addField={addField}
                 removeField={removeField}
                 moveField={moveField}
@@ -406,6 +438,8 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
                 primaryObject={report.rpt_primary_object}
                 fieldTree={fieldTree}
                 primaryOptions={primaryOptions}
+                expandedRelated={expandedRelated}
+                onExpandRelated={handleExpandRelated}
               />
             )}
             {tab === 'groupings' && (
@@ -413,6 +447,9 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
                 report={report} updateReport={updateReport}
                 groupings={groupings} setGroupings={setGroupings}
                 fieldTree={fieldTree}
+                primaryObject={report.rpt_primary_object}
+                expandedRelated={expandedRelated}
+                onExpandRelated={handleExpandRelated}
               />
             )}
             {tab === 'calc_fields' && (
@@ -480,9 +517,50 @@ function fieldKey(f) {
 
 function FieldsTab({
   primaryOptions, report, updateReport,
-  fieldTree, expandedRelated, onExpandRelated,
+  fieldTree, expandedRelated, onExpandRelated, onLoadAllRelated,
   addField, removeField, moveField, reorderFields,
 }) {
+  const [search, setSearch] = useState('')
+  const [loadingAll, setLoadingAll] = useState(false)
+  const primaryObject = report.rpt_primary_object
+  const primaryLabel = primaryOptions.find(o => o.table === primaryObject)?.label || primaryObject
+
+  // First keystroke pulls in every direct related object so the search spans
+  // the whole one-hop graph, not just the fields already expanded.
+  useEffect(() => {
+    if (!search.trim() || !fieldTree?.related?.length) return
+    let cancelled = false
+    setLoadingAll(true)
+    Promise.resolve(onLoadAllRelated?.())
+      .finally(() => { if (!cancelled) setLoadingAll(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, fieldTree])
+
+  // Flatten the searchable universe: primary columns + every loaded related
+  // object's columns, each tagged with its object label and via_path.
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return null
+    const out = []
+    const match = (col) => (col.label || col.name).toLowerCase().includes(q) || col.name.toLowerCase().includes(q)
+    for (const col of (fieldTree?.primary?.columns || [])) {
+      if (match(col)) out.push({ col, table: primaryObject, viaPath: null, objectLabel: primaryLabel })
+    }
+    for (const [key, node] of Object.entries(expandedRelated || {})) {
+      const viaPath = key.split('.')
+      const objectLabel = node?.table ? humanizeFieldName(node.table.replace(/s$/, '')) : viaPath[viaPath.length - 1]
+      for (const col of (node?.columns || [])) {
+        if (match(col)) out.push({ col, table: node.table, viaPath, objectLabel, via: viaPath })
+      }
+    }
+    return out
+  }, [search, fieldTree, expandedRelated, primaryObject, primaryLabel])
+
+  const isSelected = (name, table, viaPath) => report.rpt_selected_fields.some(f =>
+    f.name === name && f.table === table &&
+    JSON.stringify(f.via_path || null) === JSON.stringify(viaPath || null))
+
   return (
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start' }}>
       {/* Left: primary object picker + field tree */}
@@ -491,8 +569,8 @@ function FieldsTab({
         <div style={{ padding:12 }}>
           <label style={fieldLabel()}>Primary Object</label>
           <select
-            value={report.rpt_primary_object}
-            onChange={e => updateReport({ rpt_primary_object: e.target.value, rpt_selected_fields: [] })}
+            value={primaryObject}
+            onChange={e => { updateReport({ rpt_primary_object: e.target.value, rpt_selected_fields: [] }); setSearch('') }}
             style={inputStyle()}
           >
             <option value="">— Select —</option>
@@ -502,34 +580,82 @@ function FieldsTab({
           </select>
 
           {fieldTree?.primary && (
-            <div style={{ marginTop:16 }}>
-              <div style={{ fontSize:12, fontWeight:600, color:C.textSecondary, marginBottom:6 }}>
-                {report.rpt_primary_object}
+            <>
+              {/* Field search — spans the primary object and every related
+                  object reachable from it. */}
+              <div style={{ position:'relative', marginTop:14 }}>
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder={`Search ${primaryLabel} and related fields…`}
+                  style={{ ...inputStyle(), paddingRight: search ? 30 : 10 }}
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    title="Clear search"
+                    style={{
+                      position:'absolute', right:6, top:'50%', transform:'translateY(-50%)',
+                      border:'none', background:'transparent', cursor:'pointer',
+                      color:C.textMuted, fontSize:15, lineHeight:1, padding:4,
+                    }}
+                  >×</button>
+                )}
               </div>
-              {fieldTree.primary.columns.map(col => (
-                <FieldRow key={col.name} column={col}
-                  onAdd={() => addField(col, report.rpt_primary_object)} />
-              ))}
 
-              {fieldTree.related?.length > 0 && (
-                <div style={{ marginTop:16 }}>
-                  <div style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5, marginBottom:6 }}>
-                    Related Objects
+              {searchResults !== null ? (
+                <div style={{ marginTop:12 }}>
+                  <div style={{ fontSize:11, color:C.textMuted, marginBottom:6 }}>
+                    {searchResults.length} match{searchResults.length === 1 ? '' : 'es'}
+                    {loadingAll && <span style={{ marginLeft:6, fontStyle:'italic' }}>· loading related objects…</span>}
                   </div>
-                  {fieldTree.related.map(rel => (
-                    <RelatedObjectNode
-                      key={rel.fk_column}
-                      rel={rel}
-                      viaPath={[rel.fk_column]}
-                      expandedRelated={expandedRelated}
-                      onExpandRelated={onExpandRelated}
-                      addField={addField}
-                      depth={0}
-                    />
+                  {searchResults.length === 0 && !loadingAll ? (
+                    <div style={emptyState()}>No matching fields.</div>
+                  ) : (
+                    searchResults.map((r, i) => (
+                      <FieldRow
+                        key={`${r.table}-${(r.viaPath || []).join('>')}-${r.col.name}-${i}`}
+                        column={r.col}
+                        objectLabel={r.objectLabel}
+                        via={r.viaPath}
+                        selected={isSelected(r.col.name, r.table, r.viaPath)}
+                        onAdd={() => addField(r.col, r.table, r.viaPath)}
+                      />
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div style={{ marginTop:16 }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:C.textSecondary, marginBottom:6 }}>
+                    {primaryLabel}
+                  </div>
+                  {fieldTree.primary.columns.map(col => (
+                    <FieldRow key={col.name} column={col}
+                      selected={isSelected(col.name, primaryObject, null)}
+                      onAdd={() => addField(col, primaryObject)} />
                   ))}
+
+                  {fieldTree.related?.length > 0 && (
+                    <div style={{ marginTop:16 }}>
+                      <div style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5, marginBottom:6 }}>
+                        Related Objects
+                      </div>
+                      {fieldTree.related.map(rel => (
+                        <RelatedObjectNode
+                          key={rel.fk_column}
+                          rel={rel}
+                          viaPath={[rel.fk_column]}
+                          expandedRelated={expandedRelated}
+                          onExpandRelated={onExpandRelated}
+                          addField={addField}
+                          depth={0}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>
@@ -543,29 +669,52 @@ function FieldsTab({
           {report.rpt_selected_fields.length === 0 ? (
             <div style={emptyState()}>No fields selected. Pick from the left.</div>
           ) : (
-            <SortableList
-              items={report.rpt_selected_fields.map(f => ({ id: fieldKey(f), f }))}
-              onReorder={(next) => reorderFields(next.map(x => x.f))}
-              renderItem={(item, { setNodeRef, style, dragHandleProps }) => {
-                const f = item.f
-                const idx = report.rpt_selected_fields.findIndex(x => fieldKey(x) === item.id)
-                return (
-                  <div ref={setNodeRef} style={{
-                    ...style, display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
-                    background:C.cardSecondary, borderRadius:6, marginBottom:6,
-                  }}>
-                    <span {...dragHandleProps} title="Drag to reorder" style={{ cursor:'grab', color:C.textMuted, fontSize:14, lineHeight:1, touchAction:'none' }}>⠿</span>
-                    <div style={{ flex:1, fontSize:12, minWidth:0 }}>
-                      <div style={{ fontWeight:500, color:C.textPrimary }}>{f.label}</div>
-                      <div style={{ color:C.textMuted, fontSize:11 }}>
-                        {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
+            <>
+              <div style={{ fontSize:11, color:C.textMuted, marginBottom:8 }}>
+                Drag to reorder columns. Set <strong>Σ</strong> to show a column total (Tabular).
+              </div>
+              <SortableList
+                items={report.rpt_selected_fields.map(f => ({ id: fieldKey(f), f }))}
+                onReorder={(next) => reorderFields(next.map(x => x.f))}
+                renderItem={(item, { setNodeRef, style, dragHandleProps }) => {
+                  const f = item.f
+                  const idx = report.rpt_selected_fields.findIndex(x => fieldKey(x) === item.id)
+                  const updateThisField = (patch) => {
+                    const fields = report.rpt_selected_fields.map((x, i) => i === idx ? { ...x, ...patch } : x)
+                    updateReport({ rpt_selected_fields: fields })
+                  }
+                  const numericish = ['numeric','integer','bigint','smallint','double precision','real','money','decimal'].includes(String(f.type || '').toLowerCase())
+                  return (
+                    <div ref={setNodeRef} style={{
+                      ...style, display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
+                      background:C.cardSecondary, borderRadius:6, marginBottom:6,
+                    }}>
+                      <span {...dragHandleProps} title="Drag to reorder" style={{ cursor:'grab', color:C.textMuted, fontSize:14, lineHeight:1, touchAction:'none' }}>⠿</span>
+                      <div style={{ flex:1, fontSize:12, minWidth:0 }}>
+                        <div style={{ fontWeight:500, color:C.textPrimary, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.label}</div>
+                        <div style={{ color:C.textMuted, fontSize:11 }}>
+                          {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
+                        </div>
                       </div>
+                      <select
+                        value={f.summarize || ''}
+                        onChange={e => updateThisField({ summarize: e.target.value || undefined })}
+                        title="Column summary (shown as a total row on Tabular reports)"
+                        style={{ ...inputStyle(), width:78, fontSize:11, padding:'4px 6px' }}
+                      >
+                        <option value="">Σ —</option>
+                        <option value="count">Count</option>
+                        {numericish && <option value="sum">Sum</option>}
+                        {numericish && <option value="avg">Average</option>}
+                        {numericish && <option value="min">Min</option>}
+                        {numericish && <option value="max">Max</option>}
+                      </select>
+                      <button onClick={() => removeField(idx)} style={miniBtn(true)}>×</button>
                     </div>
-                    <button onClick={() => removeField(idx)} style={miniBtn(true)}>×</button>
-                  </div>
-                )
-              }}
-            />
+                  )
+                }}
+              />
+            </>
           )}
         </div>
       </div>
@@ -629,212 +778,693 @@ function RelatedObjectNode({ rel, viaPath, expandedRelated, onExpandRelated, add
   )
 }
 
-function FieldRow({ column, onAdd }) {
+function FieldRow({ column, onAdd, objectLabel, via, selected }) {
   return (
     <div style={{
-      display:'flex', alignItems:'center', justifyContent:'space-between',
-      padding:'4px 8px', fontSize:12, borderRadius:4,
+      display:'flex', alignItems:'center', justifyContent:'space-between', gap:8,
+      padding:'5px 8px', fontSize:12, borderRadius:4, opacity: selected ? 0.55 : 1,
     }}
     onMouseEnter={e => e.currentTarget.style.background = C.cardSecondary}
     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-      <div>
-        <span style={{ color:C.textPrimary }}>{column.name}</span>
-        <span style={{ color:C.textMuted, marginLeft:6, fontSize:11 }}>{column.type}</span>
+      <div style={{ minWidth:0 }}>
+        <div style={{ color:C.textPrimary, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+          {column.label || column.name}
+          {objectLabel && (
+            <span style={{ color:C.textMuted, marginLeft:6, fontSize:11 }}>· {objectLabel}</span>
+          )}
+        </div>
+        <div style={{ color:C.textMuted, fontSize:10 }}>
+          {column.name}{column.type ? ` · ${column.type}` : ''}
+          {via && via.length > 0 ? ` · via ${via.join(' → ')}` : ''}
+        </div>
       </div>
-      <button onClick={onAdd} style={miniBtn()}>+</button>
+      <button onClick={onAdd} disabled={selected} title={selected ? 'Already added' : 'Add field'}
+        style={{ ...miniBtn(), opacity: selected ? 0.4 : 1, cursor: selected ? 'default' : 'pointer' }}>
+        {selected ? '✓' : '+'}
+      </button>
     </div>
   )
 }
 
 // ─── Filters tab ──────────────────────────────────────────────────────────
+//
+// Salesforce-parity filter authoring:
+//   • one numbered row per filter — the number is what filter logic references
+//   • the field picker spans the primary object AND its related objects
+//   • operators are scoped to the field's kind (no "starts with" on a picklist)
+//   • picklist and lookup filters take multiple values ("is any of")
+//   • date filters accept relative literals (TODAY, LAST 90 DAYS, THIS QUARTER)
+//   • filter logic is a validated boolean expression, not free text — every
+//     filter must be referenced, references must exist, parens must balance
+//
+// The semantics live in lib/reportFilters so the builder, the server-side
+// pushdown, and the client-side evaluation can never drift apart.
 
-const FILTER_OPS = [
-  'equals','not_equals','greater_than','less_than','greater_or_equal','less_or_equal',
-  'in','not_in','contains','starts_with','ends_with',
-  'is_null','is_not_null','in_last_n_days','this_month','this_year',
-]
+function FiltersTab({
+  report, updateReport, filters, setFilters, primaryObject,
+  fieldTree, primaryOptions, expandedRelated, onExpandRelated,
+}) {
+  const [addOpen, setAddOpen] = useState(false)
 
-function FiltersTab({ report, updateReport, filters, setFilters, primaryObject, fieldTree, primaryOptions }) {
+  const fieldCatalog = useMemo(
+    () => buildFieldCatalog(primaryObject, fieldTree, expandedRelated),
+    [primaryObject, fieldTree, expandedRelated],
+  )
+  const kindFor = (f) => {
+    if (!f || f.is_cross_filter) return 'text'
+    const entry = fieldCatalog.byKey.get(filterFieldKey(f))
+    return entry?.kind || 'text'
+  }
+
+  const logicActive = String(report.rpt_filter_logic || 'all').trim().toLowerCase() !== 'all'
+  const logicCheck  = parseFilterLogic(report.rpt_filter_logic, filters.length)
+
+  const appendToLogic = (newIndex) => {
+    if (!logicActive) return
+    updateReport({ rpt_filter_logic: `${String(report.rpt_filter_logic).trim()} AND ${newIndex}` })
+  }
+
   const addFilter = () => {
-    setFilters([...filters, { field_name:'', field_table:primaryObject, operator:'equals', value:'' }])
+    setFilters([...filters, {
+      field_name: '', field_table: primaryObject, field_via_path: null,
+      operator: 'equals', value: '',
+    }])
+    appendToLogic(filters.length + 1)
+    setAddOpen(false)
   }
   const addCrossFilter = () => {
     setFilters([...filters, {
-      is_cross_filter: true,
-      cross_object:    '',
-      cross_match:     'with',
-      cross_subfilters: [],
+      is_cross_filter: true, cross_object: '', cross_match: 'with', cross_subfilters: [],
     }])
+    appendToLogic(filters.length + 1)
+    setAddOpen(false)
   }
   const updateFilter = (idx, patch) => {
     setFilters(filters.map((f, i) => i === idx ? { ...f, ...patch } : f))
   }
-  const removeFilter = (idx) => setFilters(filters.filter((_, i) => i !== idx))
+  const removeFilter = (idx) => {
+    const next = filters.filter((_, i) => i !== idx)
+    setFilters(next)
+    if (logicActive) {
+      // Renumber the expression around the hole the removal leaves.
+      const mapping = {}
+      filters.forEach((_, i) => { mapping[i + 1] = i === idx ? null : (i < idx ? i + 1 : i) })
+      updateReport({ rpt_filter_logic: remapFilterLogic(report.rpt_filter_logic, mapping, next.length) })
+    }
+  }
 
   return (
-    <div style={card()}>
-      <div style={cardHeader()}>
-        <span>Filters ({filters.length})</span>
-        <div style={{ display:'flex', gap:6 }}>
-          <button onClick={addFilter}      style={btnSecondary(false, 'small')}>+ Filter</button>
-          <button onClick={addCrossFilter} style={btnSecondary(false, 'small')}>+ Cross-Filter</button>
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={card()}>
+        <div style={cardHeader()}>
+          <span>Filters ({filters.length})</span>
+          <div style={{ position:'relative' }}>
+            <button onClick={() => setAddOpen(o => !o)} style={btnSecondary(false, 'small')}>+ Add Filter ▾</button>
+            {addOpen && (
+              <>
+                <div onClick={() => setAddOpen(false)} style={{ position:'fixed', inset:0, zIndex:40 }} />
+                <div style={{
+                  position:'absolute', right:0, top:'calc(100% + 4px)', zIndex:41,
+                  background:C.card, border:`1px solid ${C.borderDark}`, borderRadius:6,
+                  boxShadow:'0 6px 18px rgba(13,26,46,0.12)', minWidth:220, overflow:'hidden',
+                }}>
+                  <MenuItem
+                    title="Field Filter"
+                    subtitle="Filter on a field of this report"
+                    onClick={addFilter}
+                  />
+                  <MenuItem
+                    title="Cross Filter"
+                    subtitle="Records with / without related records"
+                    onClick={addCrossFilter}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
-      <div style={{ padding:12 }}>
-        {filters.length === 0 ? (
-          <div style={emptyState()}>No filters yet. Click "+ Filter" to add a field filter, or "+ Cross-Filter" to filter by related records.</div>
-        ) : (
-          <>
-            {filters.map((f, idx) => (
-              <div key={idx} style={{ marginBottom:12, paddingBottom:8, borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ padding:12 }}>
+          {filters.length === 0 ? (
+            <div style={emptyState()}>
+              No filters — this report returns every {primaryObject || 'record'}.
+              Add a field filter, or a cross filter to scope by related records.
+            </div>
+          ) : (
+            filters.map((f, idx) => (
+              <div key={idx} style={{
+                marginBottom:10, padding:'10px 10px 10px 0',
+                borderBottom: idx === filters.length - 1 ? 'none' : `1px solid ${C.border}`,
+              }}>
                 {f.is_cross_filter ? (
                   <CrossFilterRow
-                    filter={f}
-                    idx={idx}
+                    filter={f} idx={idx}
                     primaryObject={primaryObject}
                     primaryOptions={primaryOptions}
                     onUpdate={(patch) => updateFilter(idx, patch)}
                     onRemove={() => removeFilter(idx)}
                   />
                 ) : (
-                  <RegularFilterRow
-                    filter={f}
-                    idx={idx}
-                    fieldTree={fieldTree}
+                  <FieldFilterRow
+                    filter={f} idx={idx}
+                    kind={kindFor(f)}
+                    fieldCatalog={fieldCatalog}
                     primaryObject={primaryObject}
+                    onExpandRelated={onExpandRelated}
                     onUpdate={(patch) => updateFilter(idx, patch)}
                     onRemove={() => removeFilter(idx)}
                   />
                 )}
               </div>
-            ))}
+            ))
+          )}
+        </div>
+      </div>
 
-            <div style={{ marginTop:16, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
-              <label style={fieldLabel()}>Filter Logic</label>
+      {/* Filter logic — Salesforce's "Add Filter Logic" panel */}
+      <div style={card()}>
+        <div style={cardHeader()}>
+          <span>Filter Logic</span>
+          {filters.length > 0 && (
+            logicActive ? (
+              <button
+                onClick={() => updateReport({ rpt_filter_logic: 'all' })}
+                style={btnSecondary(false, 'small')}
+              >Remove Filter Logic</button>
+            ) : (
+              <button
+                onClick={() => updateReport({ rpt_filter_logic: defaultFilterLogic(filters.length) })}
+                style={btnSecondary(false, 'small')}
+              >Add Filter Logic</button>
+            )
+          )}
+        </div>
+        <div style={{ padding:12 }}>
+          {filters.length === 0 ? (
+            <div style={emptyState()}>Add at least one filter to write filter logic.</div>
+          ) : !logicActive ? (
+            <div style={{ fontSize:12, color:C.textSecondary }}>
+              Matching <strong>all</strong> filters ({filters.map((_, i) => i + 1).join(' AND ')}).
+              Add filter logic to combine them with OR, NOT, and parentheses.
+            </div>
+          ) : (
+            <>
               <input
                 type="text"
                 value={report.rpt_filter_logic}
                 onChange={e => updateReport({ rpt_filter_logic: e.target.value })}
-                placeholder="all  (or e.g. '1 AND (2 OR 3)')"
-                style={inputStyle()}
+                placeholder="e.g. 1 AND (2 OR 3)"
+                style={{
+                  ...inputStyle(),
+                  fontFamily:'JetBrains Mono, monospace',
+                  borderColor: logicCheck.ok ? C.border : C.skyBlue,
+                }}
               />
-              <div style={{ fontSize:11, color:C.textMuted, marginTop:4 }}>
-                Use 'all' for AND of all filters, or write '1 AND (2 OR 3)' to combine them.
+              <div style={{ fontSize:11, marginTop:6, color: logicCheck.ok ? C.textMuted : C.skyBlue }}>
+                {logicCheck.ok
+                  ? `Reference each filter by its number. Operators: AND, OR, NOT, and parentheses.`
+                  : logicCheck.error}
               </div>
-            </div>
-          </>
-        )}
+              <div style={{ marginTop:8, display:'flex', flexWrap:'wrap', gap:6 }}>
+                {filters.map((f, i) => (
+                  <span key={i} style={{
+                    fontSize:11, padding:'3px 8px', borderRadius:10,
+                    background:C.cardSecondary, border:`1px solid ${C.border}`, color:C.textSecondary,
+                  }}>
+                    <strong style={{ fontFamily:'JetBrains Mono, monospace' }}>{i + 1}</strong>
+                    {' · '}{describeFilter(f, kindFor(f))}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
-// ─── Filter row components ────────────────────────────────────────────────
+function MenuItem({ title, subtitle, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display:'block', width:'100%', textAlign:'left', padding:'10px 12px',
+        background:'transparent', border:'none', cursor:'pointer',
+        borderBottom:`1px solid ${C.border}`,
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = C.cardSecondary}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+    >
+      <div style={{ fontSize:13, fontWeight:500, color:C.textPrimary }}>{title}</div>
+      <div style={{ fontSize:11, color:C.textMuted }}>{subtitle}</div>
+    </button>
+  )
+}
 
-function RegularFilterRow({ filter: f, idx, fieldTree, onUpdate, onRemove, primaryObject }) {
-  const [valueOpts, setValueOpts] = useState({ kind: null, options: [] })
-  const [valueLoading, setValueLoading] = useState(false)
+// ─── Field catalog (primary + expanded related objects) ───────────────────
 
-  // Operators that compare against a discrete value (where a value picker
-  // makes sense). Range/null/relative-date operators skip the picker.
-  const VALUE_PICKER_OPS = new Set(['equals', 'not_equals'])
-  const NO_VALUE_OPS = new Set(['is_null', 'is_not_null', 'this_month', 'this_year'])
+function filterFieldKey(f) {
+  const via = (f.field_via_path || []).join('>')
+  return `${f.field_table || ''}|${f.field_name || ''}|${via}`
+}
+
+/**
+ * Flatten the field tree the Fields tab already loaded into one option list
+ * for the filter/grouping pickers: every primary-object column, plus the
+ * columns of any related object the user has expanded. Each entry keeps the
+ * table + via_path needed to persist the filter and the kind that drives its
+ * operator list.
+ */
+function buildFieldCatalog(primaryObject, fieldTree, expandedRelated) {
+  const options = []
+  const byKey = new Map()
+  const push = (col, table, viaPath, objectLabel) => {
+    const entry = {
+      value:     JSON.stringify({ n: col.name, t: table, v: viaPath || null }),
+      label:     objectLabel ? `${objectLabel}: ${col.label || col.name}` : (col.label || col.name),
+      secondary: col.name,
+      name:      col.name,
+      table,
+      via_path:  viaPath || null,
+      kind:      col.kind || 'text',
+      type:      col.type,
+    }
+    options.push(entry)
+    byKey.set(`${table || ''}|${col.name}|${(viaPath || []).join('>')}`, entry)
+  }
+
+  for (const col of (fieldTree?.primary?.columns || [])) {
+    push(col, primaryObject, null, null)
+  }
+  for (const [key, node] of Object.entries(expandedRelated || {})) {
+    const viaPath = key.split('.')
+    const objectLabel = node?.table
+      ? humanizeFieldName(node.table.replace(/s$/, ''))
+      : viaPath[viaPath.length - 1]
+    for (const col of (node?.columns || [])) {
+      push(col, node.table, viaPath, objectLabel)
+    }
+  }
+  return { options, byKey, related: fieldTree?.related || [] }
+}
+
+// ─── Field filter row ─────────────────────────────────────────────────────
+
+function FieldFilterRow({
+  filter: f, idx, kind, fieldCatalog, primaryObject,
+  onExpandRelated, onUpdate, onRemove,
+}) {
+  const operators = operatorsForKind(kind, f.operator)
+  const needsValue = operatorNeedsValue(kind, f.operator)
+  const isRange    = operatorIsRange(kind, f.operator)
+  const isMulti    = operatorIsMulti(kind, f.operator)
+
+  const selectedKey = filterFieldKey(f)
+  const selectedEntry = fieldCatalog.byKey.get(selectedKey)
+  const selectedValue = selectedEntry ? selectedEntry.value : ''
+
+  const onFieldChange = (jsonValue) => {
+    let parsed = null
+    try { parsed = JSON.parse(jsonValue) } catch { /* free text ignored */ }
+    if (!parsed) return
+    const entry = fieldCatalog.byKey.get(`${parsed.t || ''}|${parsed.n}|${(parsed.v || []).join('>')}`)
+    const nextKind = entry?.kind || 'text'
+    // Keep the operator when it still applies to the new field's kind,
+    // otherwise fall back to that kind's default. Value always resets —
+    // a stage UUID means nothing on a date column.
+    const stillValid = operatorsForKind(nextKind).some(o => o.op === f.operator)
+    onUpdate({
+      field_name:     parsed.n,
+      field_table:    parsed.t,
+      field_via_path: parsed.v || null,
+      operator:       stillValid ? f.operator : defaultOperatorForKind(nextKind),
+      value:          '',
+    })
+  }
+
+  const onOperatorChange = (op) => {
+    const wasMulti = operatorIsMulti(kind, f.operator)
+    const nowMulti = operatorIsMulti(kind, op)
+    const wasRange = operatorIsRange(kind, f.operator)
+    const nowRange = operatorIsRange(kind, op)
+    let value = f.value
+    if (nowRange && !wasRange) value = ['', '']
+    else if (!nowRange && wasRange) value = ''
+    else if (nowMulti && !wasMulti) value = toValueArray(f.value)
+    else if (!nowMulti && wasMulti) value = toValueArray(f.value)[0] || ''
+    onUpdate({ operator: op, value })
+  }
+
+  return (
+    <div style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
+      <div style={{
+        width:22, height:26, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+        fontFamily:'JetBrains Mono, monospace', fontSize:12, fontWeight:600, color:C.textSecondary,
+      }}>{idx + 1}</div>
+
+      <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:6 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 150px', gap:6 }}>
+          <FilterFieldPicker
+            value={selectedValue}
+            catalog={fieldCatalog}
+            onChange={onFieldChange}
+            onExpandRelated={onExpandRelated}
+          />
+          <select
+            value={f.operator}
+            onChange={e => onOperatorChange(e.target.value)}
+            style={inputStyle()}
+            disabled={!f.field_name}
+          >
+            {operators.map(op => <option key={op.op} value={op.op}>{op.label}</option>)}
+          </select>
+        </div>
+
+        {needsValue && (
+          <FilterValueEditor
+            kind={kind}
+            operator={f.operator}
+            value={f.value}
+            table={f.field_via_path && f.field_via_path.length > 0 ? f.field_table : primaryObject}
+            column={f.field_name}
+            isRange={isRange}
+            isMulti={isMulti}
+            isPrompt={!!f.is_runtime_prompt}
+            onChange={v => onUpdate({ value: v })}
+          />
+        )}
+
+        <RuntimePromptControls filter={f} onUpdate={onUpdate} />
+      </div>
+
+      <button onClick={onRemove} title="Remove filter" style={miniBtn(true)}>×</button>
+    </div>
+  )
+}
+
+/**
+ * Field picker popover — primary-object fields are listed immediately;
+ * related objects expand on click (one describe call each, cached) and their
+ * fields join the same searchable list. Mirrors how Salesforce lets you
+ * filter on a related object's field without leaving the filter row.
+ */
+function FilterFieldPicker({ value, catalog, onChange, onExpandRelated }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const selected = catalog.options.find(o => o.value === value)
+  const q = query.trim().toLowerCase()
+  const matches = q
+    ? catalog.options.filter(o => o.label.toLowerCase().includes(q) || o.secondary.toLowerCase().includes(q))
+    : catalog.options
+
+  return (
+    <div style={{ position:'relative' }}>
+      <button
+        onClick={() => { setOpen(o => !o); setQuery('') }}
+        style={{
+          ...inputStyle(), textAlign:'left', cursor:'pointer',
+          color: selected ? C.textPrimary : C.textMuted,
+          whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+        }}
+      >
+        {selected ? selected.label : '— Field —'}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position:'fixed', inset:0, zIndex:60 }} />
+          <div style={{
+            position:'absolute', left:0, top:'calc(100% + 4px)', zIndex:61,
+            width:'max(320px, 100%)', maxHeight:340, overflow:'auto',
+            background:C.card, border:`1px solid ${C.borderDark}`, borderRadius:6,
+            boxShadow:'0 8px 24px rgba(13,26,46,0.14)',
+          }}>
+            <div style={{ padding:8, borderBottom:`1px solid ${C.border}`, position:'sticky', top:0, background:C.card }}>
+              <input
+                autoFocus
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Search fields…"
+                style={{ ...inputStyle(), fontSize:12, padding:'6px 8px' }}
+              />
+            </div>
+            {matches.length === 0 && (
+              <div style={{ padding:'10px 12px', fontSize:12, color:C.textMuted }}>
+                No matching fields. Expand a related object below to search its fields.
+              </div>
+            )}
+            {matches.map(o => (
+              <button
+                key={o.value}
+                onClick={() => { onChange(o.value); setOpen(false) }}
+                style={{
+                  display:'block', width:'100%', textAlign:'left', padding:'7px 12px',
+                  background: o.value === value ? C.cardSecondary : 'transparent',
+                  border:'none', cursor:'pointer', fontSize:12, color:C.textPrimary,
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = C.cardSecondary}
+                onMouseLeave={e => e.currentTarget.style.background = o.value === value ? C.cardSecondary : 'transparent'}
+              >
+                {o.label}
+                <span style={{ color:C.textMuted, marginLeft:6, fontSize:11 }}>{o.secondary}</span>
+              </button>
+            ))}
+            {(catalog.related || []).length > 0 && (
+              <div style={{ borderTop:`1px solid ${C.border}`, padding:'8px 12px' }}>
+                <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:0.5, color:C.textMuted, marginBottom:6 }}>
+                  Related Objects
+                </div>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                  {catalog.related.map(rel => (
+                    <button
+                      key={rel.fk_column}
+                      onClick={() => onExpandRelated?.([rel.fk_column], rel.table)}
+                      style={{ ...btnSecondary(false, 'small'), fontSize:11 }}
+                      title={`Load ${rel.table} fields`}
+                    >
+                      + {rel.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── Value editors ────────────────────────────────────────────────────────
+
+function FilterValueEditor({ kind, operator, value, table, column, isRange, isMulti, isPrompt, onChange }) {
+  const [opts, setOpts] = useState({ kind: null, options: [] })
+  const [loading, setLoading] = useState(false)
+  const wantsOptions = kind === 'picklist' || kind === 'lookup' || kind === 'boolean'
 
   useEffect(() => {
     let cancelled = false
-    if (!f.field_name || !primaryObject || !VALUE_PICKER_OPS.has(f.operator)) {
-      setValueOpts({ kind: null, options: [] })
-      return
-    }
-    setValueLoading(true)
-    loadFilterValueOptions(primaryObject, f.field_name)
-      .then(res => { if (!cancelled) setValueOpts(res || { kind: null, options: [] }) })
-      .catch(() => { if (!cancelled) setValueOpts({ kind: null, options: [] }) })
-      .finally(() => { if (!cancelled) setValueLoading(false) })
+    if (!wantsOptions || !table || !column) { setOpts({ kind: null, options: [] }); return }
+    setLoading(true)
+    loadFilterValueOptions(table, column)
+      .then(res => { if (!cancelled) setOpts(res || { kind: null, options: [] }) })
+      .catch(() => { if (!cancelled) setOpts({ kind: null, options: [] }) })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [f.field_name, f.operator, primaryObject]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [wantsOptions, table, column])
 
-  const showValuePicker = VALUE_PICKER_OPS.has(f.operator) && valueOpts.kind !== null && valueOpts.options.length > 0
-  const hideValue = NO_VALUE_OPS.has(f.operator)
+  if (isRange) {
+    const arr = Array.isArray(value) ? value : ['', '']
+    const setAt = (i, v) => {
+      const next = [arr[0] ?? '', arr[1] ?? '']
+      next[i] = v
+      onChange(next)
+    }
+    return (
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 20px 1fr', gap:6, alignItems:'center' }}>
+        <ScalarValueInput kind={kind} value={arr[0] ?? ''} onChange={v => setAt(0, v)} placeholder="From" />
+        <div style={{ textAlign:'center', fontSize:11, color:C.textMuted }}>to</div>
+        <ScalarValueInput kind={kind} value={arr[1] ?? ''} onChange={v => setAt(1, v)} placeholder="To" />
+      </div>
+    )
+  }
+
+  if (isMulti && wantsOptions) {
+    return (
+      <MultiValuePicker
+        values={toValueArray(value)}
+        options={opts.options}
+        loading={loading}
+        placeholder={isPrompt ? 'Default values (optional)' : 'Add a value…'}
+        onChange={onChange}
+      />
+    )
+  }
+
+  if (kind === 'boolean') {
+    return (
+      <select value={String(value ?? '')} onChange={e => onChange(e.target.value)} style={inputStyle()}>
+        <option value="">— Select —</option>
+        <option value="true">True</option>
+        <option value="false">False</option>
+      </select>
+    )
+  }
+
+  if (wantsOptions && opts.options.length > 0) {
+    return (
+      <SearchableCombo
+        value={value || ''}
+        options={opts.options}
+        loading={loading}
+        onChange={onChange}
+        placeholder={isPrompt ? 'Default value (optional)' : 'Value'}
+        allowFreeText
+      />
+    )
+  }
+
+  return <ScalarValueInput kind={kind} value={value ?? ''} onChange={onChange}
+    placeholder={isPrompt ? 'Default value (optional)' : (loading ? 'Loading values…' : 'Value')} />
+}
+
+/**
+ * A single scalar value. Date/datetime fields get Salesforce's relative date
+ * literals alongside a fixed date, so "last 90 days" stays true every time the
+ * report runs instead of freezing a date into the definition.
+ */
+function ScalarValueInput({ kind, value, onChange, placeholder }) {
+  const isDate = kind === 'date' || kind === 'datetime'
+  const literal = isDateLiteral(value) ? parseDateLiteral(value) : null
+  const [mode, setMode] = useState(literal ? 'relative' : 'fixed')
+
+  useEffect(() => {
+    if (isDateLiteral(value) && mode !== 'relative') setMode('relative')
+  }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!isDate) {
+    return (
+      <input
+        type={kind === 'number' ? 'number' : 'text'}
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={inputStyle()}
+      />
+    )
+  }
+
+  const literalDef = literal ? DATE_LITERALS.find(d => d.token === literal.token) : null
 
   return (
-    <>
-      <div style={{
-        display:'grid', gridTemplateColumns:'30px 1fr 140px 1fr 30px',
-        gap:8, alignItems:'center',
-      }}>
-        <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
-        <SearchableCombo
-          value={f.field_name || ''}
-          options={columnsToOptions(fieldTree?.primary?.columns)}
-          onChange={v => onUpdate({ field_name: v, value: '' })}
-          placeholder="— Field —"
-        />
-        <select
-          value={f.operator}
-          onChange={e => onUpdate({ operator: e.target.value })}
+    <div style={{ display:'grid', gridTemplateColumns:'96px 1fr', gap:6 }}>
+      <select
+        value={mode}
+        onChange={e => { setMode(e.target.value); onChange(e.target.value === 'relative' ? 'TODAY' : '') }}
+        style={{ ...inputStyle(), fontSize:12 }}
+      >
+        <option value="fixed">Fixed date</option>
+        <option value="relative">Relative</option>
+      </select>
+      {mode === 'relative' ? (
+        <div style={{ display:'grid', gridTemplateColumns: literalDef?.needsN ? '1fr 74px' : '1fr', gap:6 }}>
+          <select
+            value={literal?.token || 'TODAY'}
+            onChange={e => {
+              const def = DATE_LITERALS.find(d => d.token === e.target.value)
+              onChange(def?.needsN ? `${def.token}:${literal?.n || 30}` : e.target.value)
+            }}
+            style={{ ...inputStyle(), fontSize:12 }}
+          >
+            {DATE_LITERALS.map(d => <option key={d.token} value={d.token}>{d.label}</option>)}
+          </select>
+          {literalDef?.needsN && (
+            <input
+              type="number" min="1"
+              value={literal?.n ?? 30}
+              onChange={e => onChange(`${literal.token}:${e.target.value || 1}`)}
+              style={{ ...inputStyle(), fontSize:12 }}
+              title="N"
+            />
+          )}
+        </div>
+      ) : (
+        <input
+          type="date"
+          value={typeof value === 'string' ? value.slice(0, 10) : ''}
+          onChange={e => onChange(e.target.value)}
           style={inputStyle()}
-        >
-          {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
-        </select>
-        {hideValue ? (
-          <div style={{ fontSize:11, color:C.textMuted, fontStyle:'italic', alignSelf:'center' }}>
-            No value needed
-          </div>
-        ) : showValuePicker ? (
-          <SearchableCombo
-            value={f.value || ''}
-            options={valueOpts.options}
-            loading={valueLoading}
-            onChange={v => onUpdate({ value: v })}
-            placeholder={f.is_runtime_prompt ? 'Default value (optional)' : 'Value'}
-            allowFreeText
-          />
-        ) : (
-          <input
-            type="text"
-            value={f.value || ''}
-            onChange={e => onUpdate({ value: e.target.value })}
-            placeholder={f.is_runtime_prompt ? 'Default value (optional)' : (valueLoading ? 'Loading values…' : 'Value')}
-            style={inputStyle()}
-          />
-        )}
-        <button onClick={onRemove} style={miniBtn(true)}>×</button>
-      </div>
-      <div style={{
-        display:'grid', gridTemplateColumns:'30px auto 1fr 30px',
-        gap:8, alignItems:'center', marginTop:6,
-      }}>
-        <div></div>
-        <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:C.textSecondary, cursor:'pointer' }}>
-          <input
-            type="checkbox"
-            checked={!!f.is_runtime_prompt}
-            onChange={e => onUpdate({ is_runtime_prompt: e.target.checked })}
-          />
-          Prompt at runtime
-        </label>
-        {f.is_runtime_prompt && (
+        />
+      )}
+    </div>
+  )
+}
+
+/** Chips + picker for "is any of" / "is none of" multi-value filters. */
+function MultiValuePicker({ values, options, loading, placeholder, onChange }) {
+  const labelFor = (v) => options.find(o => String(o.value) === String(v))?.label || String(v)
+  const remaining = options.filter(o => !values.some(v => String(v) === String(o.value)))
+  return (
+    <div>
+      {values.length > 0 && (
+        <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:6 }}>
+          {values.map(v => (
+            <span key={String(v)} style={{
+              display:'inline-flex', alignItems:'center', gap:6,
+              fontSize:11, padding:'3px 6px 3px 9px', borderRadius:12,
+              background:C.cardSecondary, border:`1px solid ${C.border}`, color:C.textPrimary,
+            }}>
+              {labelFor(v)}
+              <button
+                onClick={() => onChange(values.filter(x => String(x) !== String(v)))}
+                style={{
+                  border:'none', background:'transparent', cursor:'pointer',
+                  color:C.textMuted, fontSize:13, lineHeight:1, padding:0,
+                }}
+                title="Remove value"
+              >×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <SearchableCombo
+        value=""
+        options={remaining}
+        loading={loading}
+        onChange={v => { if (v) onChange([...values, v]) }}
+        placeholder={values.length ? 'Add another value…' : placeholder}
+        emptyText={loading ? 'Loading values…' : 'No values left to add'}
+        allowFreeText
+      />
+    </div>
+  )
+}
+
+/** "Prompt at runtime" — unchanged behaviour, folded into a compact row. */
+function RuntimePromptControls({ filter: f, onUpdate }) {
+  return (
+    <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
+      <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:C.textSecondary, cursor:'pointer' }}>
+        <input
+          type="checkbox"
+          checked={!!f.is_runtime_prompt}
+          onChange={e => onUpdate({ is_runtime_prompt: e.target.checked })}
+        />
+        Prompt at runtime
+      </label>
+      {f.is_runtime_prompt && (
+        <>
           <input
             type="text"
             value={f.runtime_label || ''}
             onChange={e => onUpdate({ runtime_label: e.target.value })}
-            placeholder="Label shown to user (e.g. 'Date Range')"
-            style={{ ...inputStyle(), fontSize:11 }}
+            placeholder="Label shown to the user (e.g. 'State')"
+            style={{ ...inputStyle(), fontSize:11, flex:1, minWidth:160 }}
           />
-        )}
-        <div></div>
-      </div>
-      {f.is_runtime_prompt && (
-        <div style={{
-          display:'grid', gridTemplateColumns:'30px 140px 1fr 30px',
-          gap:8, alignItems:'center', marginTop:6,
-        }}>
-          <div></div>
           <select
             value={f.prompt_input_type || 'text'}
             onChange={e => onUpdate({ prompt_input_type: e.target.value })}
-            style={{ ...inputStyle(), fontSize:11 }}
+            style={{ ...inputStyle(), fontSize:11, width:130 }}
           >
             <option value="text">Text</option>
             <option value="number">Number</option>
@@ -842,31 +1472,48 @@ function RegularFilterRow({ filter: f, idx, fieldTree, onUpdate, onRemove, prima
             <option value="datetime">Date & Time</option>
             <option value="select">Select (preset values)</option>
           </select>
-          {f.prompt_input_type === 'select' ? (
+          {f.prompt_input_type === 'select' && (
             <input
               type="text"
               value={(f.prompt_options || []).join(', ')}
               onChange={e => onUpdate({ prompt_options: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
-              placeholder="Preset values (comma-separated, e.g. open, closed, in_progress)"
-              style={{ ...inputStyle(), fontSize:11 }}
+              placeholder="Preset values (comma-separated)"
+              style={{ ...inputStyle(), fontSize:11, flex:1, minWidth:180 }}
             />
-          ) : (
-            <div style={{ fontSize:10, color:C.textMuted, fontStyle:'italic', alignSelf:'center' }}>
-              Input type for the runtime prompt modal.
-            </div>
           )}
-          <div></div>
-        </div>
+        </>
       )}
-    </>
+    </div>
   )
 }
 
+/** One-line summary of a filter, shown beside its number in the logic panel. */
+function describeFilter(f, kind) {
+  if (f.is_cross_filter) {
+    return `${f.cross_match === 'without' ? 'without' : 'with'} ${f.cross_object || 'related records'}`
+  }
+  const field = f.field_name ? humanizeFieldName(f.field_name) : '(no field)'
+  const opLabel = operatorMeta(kind, f.operator).label
+  if (!operatorNeedsValue(kind, f.operator)) return `${field} ${opLabel}`
+  const value = Array.isArray(f.value)
+    ? (operatorIsRange(kind, f.operator)
+        ? `${describeValue(f.value[0])} – ${describeValue(f.value[1])}`
+        : `${f.value.length} value${f.value.length === 1 ? '' : 's'}`)
+    : describeValue(f.value)
+  return `${field} ${opLabel} ${value || '…'}`
+}
+
+function describeValue(v) {
+  if (v == null || v === '') return '…'
+  return dateLiteralLabel(v) || String(v)
+}
+
+// ─── Cross filter row ─────────────────────────────────────────────────────
+
 function CrossFilterRow({ filter: f, idx, primaryObject, primaryOptions, onUpdate, onRemove }) {
   const subfilters = f.cross_subfilters || []
-  // Lazy-loaded columns of the chosen cross object — used to populate
-  // each sub-filter's field dropdown. Reloaded whenever cross_object
-  // changes; cleared when the user picks a different one.
+  // Columns of the chosen cross object — populates each sub-filter's field
+  // picker, and carries the kind that scopes its operator list.
   const [crossColumns, setCrossColumns] = useState([])
   useEffect(() => {
     let cancelled = false
@@ -876,6 +1523,8 @@ function CrossFilterRow({ filter: f, idx, primaryObject, primaryOptions, onUpdat
       .catch(err => { if (!cancelled) { console.warn('cross object columns load failed:', err); setCrossColumns([]) } })
     return () => { cancelled = true }
   }, [f.cross_object])
+
+  const kindOf = (name) => crossColumns.find(c => c.name === name)?.kind || 'text'
 
   const addSubfilter = () => {
     onUpdate({ cross_subfilters: [...subfilters, { field_name:'', operator:'equals', value:'' }] })
@@ -888,96 +1537,146 @@ function CrossFilterRow({ filter: f, idx, primaryObject, primaryOptions, onUpdat
   }
 
   return (
-    <div style={{ background: C.cardSecondary, borderRadius:6, padding:10 }}>
+    <div style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
       <div style={{
-        display:'grid', gridTemplateColumns:'30px 100px 1fr 30px',
-        gap:8, alignItems:'center',
-      }}>
-        <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
-        <select
-          value={f.cross_match || 'with'}
-          onChange={e => onUpdate({ cross_match: e.target.value })}
-          style={inputStyle()}
-        >
-          <option value="with">with</option>
-          <option value="without">without</option>
-        </select>
-        <select
-          value={f.cross_object || ''}
-          onChange={e => onUpdate({ cross_object: e.target.value })}
-          style={inputStyle()}
-        >
-          <option value="">— Related Object —</option>
-          {(primaryOptions || []).filter(o => o.table !== primaryObject).map(o => (
-            <option key={o.table} value={o.table}>{o.label}</option>
-          ))}
-        </select>
-        <button onClick={onRemove} style={miniBtn(true)}>×</button>
+        width:22, height:26, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+        fontFamily:'JetBrains Mono, monospace', fontSize:12, fontWeight:600, color:C.textSecondary,
+      }}>{idx + 1}</div>
+
+      <div style={{ flex:1, minWidth:0, background:C.cardSecondary, borderRadius:6, padding:10 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'110px 1fr', gap:6, alignItems:'center' }}>
+          <select
+            value={f.cross_match || 'with'}
+            onChange={e => onUpdate({ cross_match: e.target.value })}
+            style={inputStyle()}
+          >
+            <option value="with">with</option>
+            <option value="without">without</option>
+          </select>
+          <select
+            value={f.cross_object || ''}
+            onChange={e => onUpdate({ cross_object: e.target.value, cross_subfilters: [] })}
+            style={inputStyle()}
+          >
+            <option value="">— Related Object —</option>
+            {(primaryOptions || []).filter(o => o.table !== primaryObject).map(o => (
+              <option key={o.table} value={o.table}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginTop:8 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
+            <div style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5 }}>
+              Sub-filters on {f.cross_object ? humanizeFieldName(f.cross_object) : '…'}
+            </div>
+            <button onClick={addSubfilter} disabled={!f.cross_object} style={btnSecondary(!f.cross_object, 'small')}>
+              + Sub-filter
+            </button>
+          </div>
+          {subfilters.length === 0 ? (
+            <div style={{ fontSize:11, color:C.textMuted, fontStyle:'italic', padding:'4px 0' }}>
+              No sub-filters — matches any {f.cross_object ? humanizeFieldName(f.cross_object) : 'related'} record.
+            </div>
+          ) : subfilters.map((sf, sIdx) => {
+            const kind = kindOf(sf.field_name)
+            const needsValue = operatorNeedsValue(kind, sf.operator || 'equals')
+            return (
+              <div key={sIdx} style={{
+                display:'grid',
+                gridTemplateColumns: needsValue ? '1fr 130px 1fr 26px' : '1fr 130px 26px',
+                gap:6, marginBottom:6, alignItems:'center',
+              }}>
+                <SearchableCombo
+                  value={sf.field_name || ''}
+                  options={crossColumns.map(c => ({ value:c.name, label:c.label || c.name, secondary:c.name }))}
+                  onChange={v => {
+                    const nextKind = crossColumns.find(c => c.name === v)?.kind || 'text'
+                    const stillValid = operatorsForKind(nextKind).some(o => o.op === sf.operator)
+                    updateSubfilter(sIdx, {
+                      field_name: v,
+                      operator: stillValid ? sf.operator : defaultOperatorForKind(nextKind),
+                      value: '',
+                    })
+                  }}
+                  placeholder={crossColumns.length === 0 ? 'Loading…' : '— Field —'}
+                />
+                <select
+                  value={sf.operator || 'equals'}
+                  onChange={e => updateSubfilter(sIdx, { operator: e.target.value, value: '' })}
+                  style={{ ...inputStyle(), fontSize:12 }}
+                >
+                  {operatorsForKind(kind, sf.operator).map(op => (
+                    <option key={op.op} value={op.op}>{op.label}</option>
+                  ))}
+                </select>
+                {needsValue && (
+                  <FilterValueEditor
+                    kind={kind}
+                    operator={sf.operator || 'equals'}
+                    value={sf.value}
+                    table={f.cross_object}
+                    column={sf.field_name}
+                    isRange={operatorIsRange(kind, sf.operator || 'equals')}
+                    isMulti={operatorIsMulti(kind, sf.operator || 'equals')}
+                    onChange={v => updateSubfilter(sIdx, { value: v })}
+                  />
+                )}
+                <button onClick={() => removeSubfilter(sIdx)} style={miniBtn(true)}>×</button>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
-      <div style={{ marginTop:8, paddingLeft:38 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
-          <div style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5 }}>
-            Sub-filters on {f.cross_object || '...'}
-          </div>
-          <button onClick={addSubfilter} disabled={!f.cross_object} style={btnSecondary(!f.cross_object, 'small')}>
-            + Sub-filter
-          </button>
-        </div>
-        {subfilters.length === 0 ? (
-          <div style={{ fontSize:11, color:C.textMuted, fontStyle:'italic', padding:'4px 0' }}>
-            No sub-filters. Will match any {f.cross_object || 'related'} record.
-          </div>
-        ) : subfilters.map((sf, sIdx) => (
-          <div key={sIdx} style={{
-            display:'grid', gridTemplateColumns:'1fr 130px 1fr 30px',
-            gap:6, marginBottom:6, alignItems:'center',
-          }}>
-            <select
-              value={sf.field_name || ''}
-              onChange={e => updateSubfilter(sIdx, { field_name: e.target.value })}
-              style={{ ...inputStyle(), fontSize:11 }}
-              disabled={crossColumns.length === 0}
-            >
-              <option value="">{crossColumns.length === 0 ? 'Loading…' : '— Field —'}</option>
-              {crossColumns.map(c => (
-                <option key={c.name} value={c.name}>{c.name}</option>
-              ))}
-            </select>
-            <select
-              value={sf.operator || 'equals'}
-              onChange={e => updateSubfilter(sIdx, { operator: e.target.value })}
-              style={{ ...inputStyle(), fontSize:11 }}
-            >
-              {FILTER_OPS.map(op => <option key={op} value={op}>{op}</option>)}
-            </select>
-            <input
-              type="text"
-              value={sf.value || ''}
-              onChange={e => updateSubfilter(sIdx, { value: e.target.value })}
-              placeholder="Value"
-              style={{ ...inputStyle(), fontSize:11 }}
-            />
-            <button onClick={() => removeSubfilter(sIdx)} style={miniBtn(true)}>×</button>
-          </div>
-        ))}
-      </div>
+      <button onClick={onRemove} title="Remove filter" style={miniBtn(true)}>×</button>
     </div>
   )
 }
 
 // ─── Groupings tab ────────────────────────────────────────────────────────
 
-function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree }) {
+// Date-bucketing grains offered when a grouping field is a date/datetime.
+const DATE_GRAINS = [
+  { value: '',        label: 'Exact date' },
+  { value: 'day',     label: 'Day' },
+  { value: 'week',    label: 'Week' },
+  { value: 'month',   label: 'Month' },
+  { value: 'quarter', label: 'Quarter' },
+  { value: 'year',    label: 'Year' },
+]
+
+function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree, primaryObject, expandedRelated, onExpandRelated }) {
   const formatLabel = report.rpt_format
+  const fieldCatalog = useMemo(
+    () => buildFieldCatalog(primaryObject, fieldTree, expandedRelated),
+    [primaryObject, fieldTree, expandedRelated],
+  )
+  const kindOfGrouping = (g) => {
+    const entry = fieldCatalog.byKey.get(`${g.field_table || ''}|${g.field_name || ''}|${(g.field_via_path || []).join('>')}`)
+    return entry?.kind || 'text'
+  }
+
   const addGrouping = () => {
     if (groupings.length >= 6) { alert('Maximum 6 row groupings.'); return }
-    setGroupings([...groupings, { field_name:'', sort_direction:'asc', show_subtotal:true }])
+    setGroupings([...groupings, { field_name:'', field_table:primaryObject, field_via_path:null, sort_direction:'asc', sort_by_aggregate:'value', show_subtotal:true }])
   }
   const updateGrouping = (idx, patch) => {
     setGroupings(groupings.map((g, i) => i === idx ? { ...g, ...patch } : g))
   }
   const removeGrouping = (idx) => setGroupings(groupings.filter((_, i) => i !== idx))
+
+  // Grouping ⇄ field-catalog value bridge (same JSON shape as the filter picker).
+  const groupingCatalogValue = (g) => {
+    const entry = fieldCatalog.byKey.get(`${g.field_table || ''}|${g.field_name || ''}|${(g.field_via_path || []).join('>')}`)
+    return entry ? entry.value : ''
+  }
+  const onGroupingFieldChange = (idx, jsonValue) => {
+    let parsed = null
+    try { parsed = JSON.parse(jsonValue) } catch { /* ignore */ }
+    if (!parsed) return
+    updateGrouping(idx, { field_name: parsed.n, field_table: parsed.t, field_via_path: parsed.v || null, date_granularity: null })
+  }
 
   if (formatLabel === 'tabular') {
     return (
@@ -1002,34 +1701,58 @@ function GroupingsTab({ report, updateReport, groupings, setGroupings, fieldTree
         {groupings.length === 0 ? (
           <div style={emptyState()}>No groupings yet. Click "Add Grouping" to add one.</div>
         ) : (
-          groupings.map((g, idx) => (
-            <div key={idx} style={{
-              display:'grid', gridTemplateColumns:'30px 1fr 100px 100px 30px',
-              gap:8, marginBottom:8, alignItems:'center',
-            }}>
-              <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
-              <SearchableCombo
-                value={g.field_name}
-                options={columnsToOptions(fieldTree?.primary?.columns)}
-                onChange={v => updateGrouping(idx, { field_name: v })}
-                placeholder="— Field —"
-              />
-              <select
-                value={g.sort_direction}
-                onChange={e => updateGrouping(idx, { sort_direction: e.target.value })}
-                style={inputStyle()}
-              >
-                <option value="asc">Asc</option>
-                <option value="desc">Desc</option>
-              </select>
-              <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:C.textPrimary }}>
-                <input type="checkbox" checked={g.show_subtotal !== false}
-                  onChange={e => updateGrouping(idx, { show_subtotal: e.target.checked })} />
-                Subtotal
-              </label>
-              <button onClick={() => removeGrouping(idx)} style={miniBtn(true)}>×</button>
-            </div>
-          ))
+          groupings.map((g, idx) => {
+            const kind = kindOfGrouping(g)
+            const isDate = kind === 'date' || kind === 'datetime'
+            return (
+              <div key={idx} style={{ marginBottom:12, paddingBottom:10, borderBottom: idx === groupings.length - 1 ? 'none' : `1px solid ${C.border}` }}>
+                <div style={{ display:'grid', gridTemplateColumns:'26px 1fr 30px', gap:8, alignItems:'center' }}>
+                  <div style={{ fontSize:12, color:C.textMuted, textAlign:'center' }}>{idx + 1}</div>
+                  <FilterFieldPicker
+                    value={groupingCatalogValue(g)}
+                    catalog={fieldCatalog}
+                    onChange={v => onGroupingFieldChange(idx, v)}
+                    onExpandRelated={onExpandRelated}
+                  />
+                  <button onClick={() => removeGrouping(idx)} style={miniBtn(true)}>×</button>
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'26px 1fr 1fr auto', gap:8, alignItems:'center', marginTop:6 }}>
+                  <div />
+                  {isDate ? (
+                    <select
+                      value={g.date_granularity || ''}
+                      onChange={e => updateGrouping(idx, { date_granularity: e.target.value || null })}
+                      style={{ ...inputStyle(), fontSize:12 }}
+                      title="Bucket this date grouping"
+                    >
+                      {DATE_GRAINS.map(gr => <option key={gr.value} value={gr.value}>{gr.label}</option>)}
+                    </select>
+                  ) : <div />}
+                  <select
+                    value={`${g.sort_by_aggregate || 'value'}:${g.sort_direction || 'asc'}`}
+                    onChange={e => {
+                      const [by, dir] = e.target.value.split(':')
+                      updateGrouping(idx, { sort_by_aggregate: by, sort_direction: dir })
+                    }}
+                    style={{ ...inputStyle(), fontSize:12 }}
+                    title="How to order the groups"
+                  >
+                    <option value="value:asc">Group value ↑</option>
+                    <option value="value:desc">Group value ↓</option>
+                    <option value="count:desc">Record count ↓</option>
+                    <option value="count:asc">Record count ↑</option>
+                    <option value="measure:desc">Measure ↓</option>
+                    <option value="measure:asc">Measure ↑</option>
+                  </select>
+                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:C.textPrimary, whiteSpace:'nowrap' }}>
+                    <input type="checkbox" checked={g.show_subtotal !== false}
+                      onChange={e => updateGrouping(idx, { show_subtotal: e.target.checked })} />
+                    Subtotal
+                  </label>
+                </div>
+              </div>
+            )
+          })
         )}
 
         {formatLabel === 'matrix' && (
@@ -1195,16 +1918,41 @@ function CalcFieldsTab({ calculatedFields, setCalculatedFields, report }) {
               <Suspense fallback={<div style={{ fontSize:12, color:C.textMuted, padding:'8px 0' }}>Loading editor…</div>}>
                 <FormulaEditor
                   value={c.expression}
-                  fields={fieldNames}
+                  fields={c.scope === 'summary' ? summaryIdentifiers(fieldNames) : fieldNames}
                   onChange={(expr) => update(idx, { expression: expr })}
                 />
               </Suspense>
+              {c.scope === 'summary' && (
+                <div style={{ fontSize:11, color:C.textMuted, marginTop:8, lineHeight:1.5 }}>
+                  Summary formulas run per group. Reference aggregates as
+                  {' '}<code>SUM_field</code>, <code>AVG_field</code>, <code>COUNT_field</code>,
+                  {' '}<code>MIN_field</code>, <code>MAX_field</code>. Compare across groups with:
+                  <div style={{ marginTop:4 }}>
+                    • <code>GRAND_SUM_field</code> — grand total (for <strong>% of total</strong>: <code>SUM_amount / GRAND_SUM_amount * 100</code>)<br/>
+                    • <code>PARENT_SUM_field</code> — the parent group (for <strong>% of parent</strong>)<br/>
+                    • <code>PREV_SUM_field</code> — the previous group (for <strong>period-over-period</strong>: <code>SUM_amount - PREV_SUM_amount</code>)
+                  </div>
+                </div>
+              )}
             </div>
           ))
         )}
       </div>
     </div>
   )
+}
+
+// The identifier catalog offered to the summary-formula editor: each numeric
+// column exposed as SUM_/AVG_/COUNT_/MIN_/MAX_ plus PARENT_/PREV_/GRAND_
+// variants for cross-group comparison.
+function summaryIdentifiers(fieldNames) {
+  const aggs = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX']
+  const prefixes = ['', 'PARENT_', 'PREV_', 'GRAND_']
+  const out = []
+  for (const f of fieldNames) {
+    for (const p of prefixes) for (const a of aggs) out.push(`${p}${a}_${f}`)
+  }
+  return out
 }
 
 // ─── Settings tab ─────────────────────────────────────────────────────────

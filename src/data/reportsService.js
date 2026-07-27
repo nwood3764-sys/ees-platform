@@ -11,6 +11,21 @@
 
 import { supabase } from '../lib/supabase'
 import { guessPrefix } from './fieldMetadataService'
+import {
+  fieldKindFor,
+  resolveDateBound,
+  resolveDateLiteral,
+  isDateLiteral,
+  toValueArray,
+  operatorNeedsValue,
+  operatorIsRange,
+  operatorIsMulti,
+  filterIsIncomplete,
+  evaluateOperator,
+  parseFilterLogic,
+  evaluateLogic,
+  logicIsPlainAnd,
+} from '../lib/reportFilters'
 
 // ─── Folders ──────────────────────────────────────────────────────────────
 
@@ -233,11 +248,42 @@ export async function listObjectColumns(tableName) {
   const cols = await describeColumns(tableName)
   return cols
     .filter(c => !['created_at','updated_at','created_by','updated_by','deleted_at','deleted_by','is_deleted','deletion_reason'].includes(c.column_name))
-    .map(c => ({
-      name: c.column_name,
-      type: c.data_type,
-      nullable: c.is_nullable === 'YES',
-    }))
+    .map(c => describeColumnToField(tableName, c))
+}
+
+/**
+ * Human field label for a column, Salesforce-style: the object's column
+ * prefix is stripped and the remainder title-cased, so `opportunity_stage`
+ * reads "Stage" and `property_hud_management_org` reads "Hud Management Org".
+ * FK columns drop the trailing `_id` ("Property", not "Property Id").
+ */
+export function columnLabel(tableName, columnName) {
+  if (!columnName) return ''
+  const prefix = guessPrefix(tableName)
+  let name = String(columnName)
+  if (prefix && name.startsWith(prefix + '_') && name.length > prefix.length + 1) {
+    name = name.slice(prefix.length + 1)
+  }
+  name = name.replace(/_id$/, '')
+  if (!name) name = String(columnName)
+  return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+/**
+ * Normalise a describe_object_columns row into the field shape the Builder
+ * works with — label and kind included, so operator lists and value editors
+ * can be chosen without every caller re-deriving them.
+ */
+function describeColumnToField(tableName, c) {
+  return {
+    name:             c.column_name,
+    label:            columnLabel(tableName, c.column_name),
+    type:             c.data_type,
+    kind:             fieldKindFor({ type: c.data_type, is_foreign_key: c.is_foreign_key, references_table: c.references_table }),
+    nullable:         c.is_nullable === 'YES',
+    is_foreign_key:   !!c.is_foreign_key,
+    references_table: c.references_table || null,
+  }
 }
 
 async function describeColumns(tableName) {
@@ -294,11 +340,7 @@ export async function loadFieldTree(primaryObject) {
   return {
     primary: {
       table: primaryObject,
-      columns: columns.map(c => ({
-        name: c.column_name,
-        type: c.data_type,
-        nullable: c.is_nullable === 'YES',
-      })),
+      columns: columns.map(c => describeColumnToField(primaryObject, c)),
     },
     related: fks.map(f => ({
       fk_column: f.column_name,
@@ -322,11 +364,7 @@ export async function loadRelatedObjectFields(viaTable, viaPath) {
   return {
     table: viaTable,
     via_path: viaPath,
-    columns: columns.map(c => ({
-      name: c.column_name,
-      type: c.data_type,
-      nullable: c.is_nullable === 'YES',
-    })),
+    columns: columns.map(c => describeColumnToField(viaTable, c)),
     related: fks.map(f => ({
       fk_column: f.column_name,
       table: f.references_table,
@@ -854,90 +892,39 @@ export async function loadFilterValueOptions(primaryTable, columnName) {
 
 /**
  * Apply a filter-logic expression (e.g. '1 AND (2 OR 3)') to a row set
- * client-side. Each filter row evaluated per-row produces a boolean,
- * indexed by rfilt_filter_index. The expression is parsed via shunting-
- * yard into RPN and evaluated for each row.
+ * client-side. Each filter row is evaluated per row, indexed by
+ * rfilt_filter_index, and combined by the parsed expression.
  *
- * Used only when the report's rpt_filter_logic is non-trivial — pure
- * AND-of-all-filters reports use PostgREST server-side filters and skip
- * this code path.
+ * Used whenever the report's logic isn't a plain AND of every filter —
+ * AND-only reports push their filters to PostgREST and skip this path.
+ * Operator semantics come from lib/reportFilters so the client-side result
+ * matches the server-side pushdown exactly.
  */
 function applyFilterLogic(rows, filters, expression, fkLookup, primaryObject) {
-  // Tokenize the logic expression: numbers, AND, OR, NOT, ( )
-  const tokens = []
-  let i = 0
-  while (i < expression.length) {
-    const c = expression[i]
-    if (/\s/.test(c)) { i++; continue }
-    if (/[0-9]/.test(c)) {
-      let j = i
-      while (j < expression.length && /[0-9]/.test(expression[j])) j++
-      tokens.push({ type: 'num', value: parseInt(expression.slice(i, j), 10) })
-      i = j; continue
-    }
-    if (c === '(') { tokens.push({ type: '(' }); i++; continue }
-    if (c === ')') { tokens.push({ type: ')' }); i++; continue }
-    if (/[a-zA-Z]/.test(c)) {
-      let j = i
-      while (j < expression.length && /[a-zA-Z]/.test(expression[j])) j++
-      const word = expression.slice(i, j).toUpperCase()
-      if (word === 'AND' || word === 'OR' || word === 'NOT') tokens.push({ type: word })
-      else throw new Error(`Unexpected token in filter logic: ${word}`)
-      i = j; continue
-    }
-    throw new Error(`Unexpected character in filter logic: ${c}`)
+  const fieldFilters = (filters || []).filter(f => !f.rfilt_is_cross_filter)
+  const parsed = parseFilterLogic(expression, (filters || []).length)
+  if (!parsed.ok) throw new Error(`Filter logic: ${parsed.error}`)
+  if (parsed.isAll || !parsed.rpn) {
+    return rows.filter(row => fieldFilters.every(f => evalFilterOnRow(f, row, fkLookup, primaryObject)))
   }
 
-  // Shunting-yard to RPN
-  const prec = { NOT: 3, AND: 2, OR: 1 }
-  const output = []
-  const stack = []
-  for (const t of tokens) {
-    if (t.type === 'num') output.push(t)
-    else if (t.type === '(') stack.push(t)
-    else if (t.type === ')') {
-      while (stack.length && stack[stack.length-1].type !== '(') output.push(stack.pop())
-      stack.pop()
-    }
-    else { // operator
-      while (stack.length) {
-        const top = stack[stack.length-1]
-        if (top.type === '(') break
-        if ((prec[top.type] || 0) >= (prec[t.type] || 0)) output.push(stack.pop())
-        else break
-      }
-      stack.push(t)
-    }
-  }
-  while (stack.length) output.push(stack.pop())
-
-  // Evaluate per-row. Per-filter evaluation is delegated to a helper.
   const filterByIdx = new Map()
-  for (const f of filters) filterByIdx.set(f.rfilt_filter_index, f)
+  for (const f of (filters || [])) filterByIdx.set(f.rfilt_filter_index, f)
 
-  return rows.filter(row => {
-    const evalStack = []
-    for (const t of output) {
-      if (t.type === 'num') {
-        const f = filterByIdx.get(t.value)
-        if (!f) { evalStack.push(false); continue }
-        evalStack.push(evalFilterOnRow(f, row, fkLookup, primaryObject))
-      } else if (t.type === 'NOT') {
-        const a = evalStack.pop()
-        evalStack.push(!a)
-      } else if (t.type === 'AND') {
-        const b = evalStack.pop(), a = evalStack.pop()
-        evalStack.push(a && b)
-      } else if (t.type === 'OR') {
-        const b = evalStack.pop(), a = evalStack.pop()
-        evalStack.push(a || b)
-      }
-    }
-    return !!evalStack[0]
-  })
+  return rows.filter(row => evaluateLogic(parsed.rpn, (idx) => {
+    const f = filterByIdx.get(idx)
+    if (!f) return false
+    // Cross-filters were already applied as row-set intersections before
+    // this point; inside the logic expression they read as satisfied so a
+    // reference to one doesn't wipe out the whole clause.
+    if (f.rfilt_is_cross_filter) return true
+    return evalFilterOnRow(f, row, fkLookup, primaryObject)
+  }))
 }
 
 function evalFilterOnRow(f, row, fkLookup, primaryObject) {
+  if (!f.rfilt_field_name || !f.rfilt_operator) return true
+
   // Resolve the value at the filter's column path — supports arbitrary
   // via_path depth.
   let v
@@ -951,46 +938,31 @@ function evalFilterOnRow(f, row, fkLookup, primaryObject) {
   } else {
     v = row[f.rfilt_field_name]
   }
-  const target = f.rfilt_value
-  switch (f.rfilt_operator) {
-    case 'equals':           return v == target  // eslint-disable-line eqeqeq
-    case 'not_equals':       return v != target  // eslint-disable-line eqeqeq
-    case 'greater_than':     return parseFloat(v) > parseFloat(target)
-    case 'less_than':        return parseFloat(v) < parseFloat(target)
-    case 'greater_or_equal': return parseFloat(v) >= parseFloat(target)
-    case 'less_or_equal':    return parseFloat(v) <= parseFloat(target)
-    case 'in': {
-      const list = Array.isArray(target) ? target : String(target).split(',').map(s => s.trim())
-      return list.includes(v) || list.includes(String(v))
-    }
-    case 'not_in': {
-      const list = Array.isArray(target) ? target : String(target).split(',').map(s => s.trim())
-      return !(list.includes(v) || list.includes(String(v)))
-    }
-    case 'contains':    return v != null && String(v).toLowerCase().includes(String(target).toLowerCase())
-    case 'starts_with': return v != null && String(v).toLowerCase().startsWith(String(target).toLowerCase())
-    case 'ends_with':   return v != null && String(v).toLowerCase().endsWith(String(target).toLowerCase())
-    case 'is_null':     return v == null || v === ''
-    case 'is_not_null': return v != null && v !== ''
-    case 'in_last_n_days': {
-      const n = parseInt(target, 10)
-      if (!Number.isFinite(n) || !v) return false
-      const d = new Date(v)
-      if (isNaN(d.getTime())) return false
-      return (Date.now() - d.getTime()) <= n * 86400000
-    }
-    case 'this_month': {
-      if (!v) return false
-      const d = new Date(v); const now = new Date()
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
-    }
-    case 'this_year': {
-      if (!v) return false
-      const d = new Date(v); const now = new Date()
-      return d.getFullYear() === now.getFullYear()
-    }
+
+  const kind = filterFieldKind(f, fkLookup, primaryObject)
+  // An incomplete filter (no value chosen yet) matches everything, so a
+  // half-built filter in the live preview never blanks the result set.
+  if (filterIsIncomplete(kind, f.rfilt_operator, f.rfilt_value)) return true
+  return evaluateOperator(v, f.rfilt_operator, f.rfilt_value, kind)
+}
+
+/**
+ * The field kind (text / number / date / picklist / lookup / boolean) a
+ * filter compares against, resolved from the FK lookup when the column is a
+ * foreign key and from the cached column metadata otherwise.
+ */
+function filterFieldKind(f, fkLookup, primaryObject) {
+  const table = (f.rfilt_field_via_path && f.rfilt_field_via_path.length > 0)
+    ? (f.rfilt_field_table || null)
+    : primaryObject
+  if (table) {
+    const fkInfo = fkLookup?.[`${table}.${f.rfilt_field_name}`]
+    if (fkInfo) return fkInfo.is_picklist ? 'picklist' : 'lookup'
+    const cols = _columnsCache.get(table)
+    const col = cols?.find(c => c.column_name === f.rfilt_field_name)
+    if (col) return fieldKindFor({ type: col.data_type, is_foreign_key: col.is_foreign_key, references_table: col.references_table })
   }
-  return true
+  return isDateLiteral(f.rfilt_value) ? 'date' : 'text'
 }
 
 /**
@@ -1025,47 +997,100 @@ export async function getReportPrompts(reportId) {
  * builder. Same operator vocabulary as the runner's main filter loop;
  * extracted so cross-filter sub-filters reuse the same semantics.
  */
-function applySimpleFilter(query, fieldName, operator, value) {
+/**
+ * Push one filter down to PostgREST. Shared by the report's own filters and
+ * by cross-filter sub-filters, so both honour the same operator vocabulary:
+ * multi-value equals ("is any of"), between, does-not-contain, and relative
+ * date literals (TODAY / LAST_N_DAYS:90 / THIS_QUARTER …).
+ *
+ * `kind` steers date handling; pass null when the column's kind is unknown
+ * and it will be inferred from the value itself.
+ */
+function applySimpleFilter(query, fieldName, operator, value, kind = null) {
+  const quoteList = (list) => `(${list.map(x => `"${String(x).replace(/"/g, '\\"')}"`).join(',')})`
+  const dateish = kind === 'date' || kind === 'datetime' || isDateLiteral(value) ||
+    (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value))
+
   switch (operator) {
-    case 'equals':           return query.eq(fieldName, value)
-    case 'not_equals':       return query.neq(fieldName, value)
-    case 'greater_than':     return query.gt(fieldName, value)
-    case 'less_than':        return query.lt(fieldName, value)
-    case 'greater_or_equal': return query.gte(fieldName, value)
-    case 'less_or_equal':    return query.lte(fieldName, value)
-    case 'in':
-      return query.in(fieldName,
-        Array.isArray(value) ? value : String(value).split(',').map(s => s.trim()))
-    case 'not_in':
-      return query.not(fieldName, 'in',
-        `(${(Array.isArray(value) ? value : String(value).split(',').map(s => s.trim())).map(x => `"${x}"`).join(',')})`)
-    case 'contains':    return query.ilike(fieldName, `%${value}%`)
-    case 'starts_with': return query.ilike(fieldName, `${value}%`)
-    case 'ends_with':   return query.ilike(fieldName, `%${value}`)
-    case 'is_null':     return query.is(fieldName, null)
-    case 'is_not_null': return query.not(fieldName, 'is', null)
-    case 'in_last_n_days': {
-      const n = parseInt(value, 10)
-      if (Number.isFinite(n) && n > 0) {
-        const cutoff = new Date(Date.now() - n * 86400000).toISOString()
-        return query.gte(fieldName, cutoff)
+    case 'equals':
+    case 'not_equals': {
+      const negate = operator === 'not_equals'
+      if (dateish) {
+        const range = resolveDateBound(value, new Date())
+        if (!range) return query
+        // A ranged equality can't be negated in one PostgREST clause — the
+        // client-side pass handles the negative case.
+        if (negate) return query.or(`${fieldName}.lt.${range.start},${fieldName}.gte.${range.end}`)
+        return query.gte(fieldName, range.start).lt(fieldName, range.end)
       }
+      const list = Array.isArray(value) ? toValueArray(value) : null
+      if (list) {
+        if (list.length === 0) return query
+        if (list.length === 1) return negate ? query.neq(fieldName, list[0]) : query.eq(fieldName, list[0])
+        return negate ? query.not(fieldName, 'in', quoteList(list)) : query.in(fieldName, list)
+      }
+      return negate ? query.neq(fieldName, value) : query.eq(fieldName, value)
+    }
+    case 'greater_than':
+    case 'greater_or_equal':
+    case 'less_than':
+    case 'less_or_equal': {
+      if (dateish) {
+        const range = resolveDateBound(value, new Date())
+        if (!range) return query
+        switch (operator) {
+          case 'greater_than':     return query.gte(fieldName, range.end)
+          case 'greater_or_equal': return query.gte(fieldName, range.start)
+          case 'less_than':        return query.lt(fieldName, range.start)
+          case 'less_or_equal':    return query.lt(fieldName, range.end)
+          default: return query
+        }
+      }
+      switch (operator) {
+        case 'greater_than':     return query.gt(fieldName, value)
+        case 'greater_or_equal': return query.gte(fieldName, value)
+        case 'less_than':        return query.lt(fieldName, value)
+        case 'less_or_equal':    return query.lte(fieldName, value)
+        default: return query
+      }
+    }
+    case 'between': {
+      const arr = Array.isArray(value) ? value : []
+      const loRaw = arr[0], hiRaw = arr[1]
+      if (dateish || isDateLiteral(loRaw) || isDateLiteral(hiRaw)) {
+        const lo = resolveDateBound(loRaw, new Date())
+        const hi = resolveDateBound(hiRaw, new Date())
+        if (lo) query = query.gte(fieldName, lo.start)
+        if (hi) query = query.lt(fieldName, hi.end)
+        return query
+      }
+      if (loRaw != null && loRaw !== '') query = query.gte(fieldName, loRaw)
+      if (hiRaw != null && hiRaw !== '') query = query.lte(fieldName, hiRaw)
       return query
     }
-    case 'this_month': {
-      const now = new Date()
-      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-      const end   = new Date(now.getFullYear(), now.getMonth()+1, 1).toISOString()
-      return query.gte(fieldName, start).lt(fieldName, end)
+    case 'in':
+      return query.in(fieldName, toValueArray(value))
+    case 'not_in':
+      return query.not(fieldName, 'in', quoteList(toValueArray(value)))
+    case 'contains':         return query.ilike(fieldName, `%${value}%`)
+    case 'does_not_contain': return query.not(fieldName, 'ilike', `%${value}%`)
+    case 'starts_with':      return query.ilike(fieldName, `${value}%`)
+    case 'ends_with':        return query.ilike(fieldName, `%${value}`)
+    case 'is_null':          return query.is(fieldName, null)
+    case 'is_not_null':      return query.not(fieldName, 'is', null)
+    case 'in_last_n_days': {
+      const range = resolveDateLiteral(`LAST_N_DAYS:${parseInt(value, 10) || 0}`, new Date())
+      return range ? query.gte(fieldName, range.start).lt(fieldName, range.end) : query
     }
+    case 'this_month':
     case 'this_year': {
-      const now = new Date()
-      const start = new Date(now.getFullYear(), 0, 1).toISOString()
-      const end   = new Date(now.getFullYear()+1, 0, 1).toISOString()
-      return query.gte(fieldName, start).lt(fieldName, end)
+      const range = resolveDateLiteral(operator === 'this_month' ? 'THIS_MONTH' : 'THIS_YEAR', new Date())
+      return query.gte(fieldName, range.start).lt(fieldName, range.end)
     }
+    default:
+      console.warn(`Unsupported report filter operator: ${operator}`)
+      return query
   }
-  return query
 }
 
 /**
@@ -1161,11 +1186,24 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
   // object that any selected field traverses (single- or multi-hop). This
   // is what powers (a) auto-embedded FK-label resolution and (b) picklist
   // detection for fields living on related objects.
-  const fkLookup = await buildFKLookup(r.rpt_primary_object,
-    Array.from(new Set((r.rpt_selected_fields || [])
-      .filter(f => f.via_path && f.via_path.length > 0 && f.table)
-      .map(f => f.table)))
-  )
+  // Related tables come from anywhere the report reaches across a via_path:
+  // selected fields, filters, and groupings alike — a filter or grouping on a
+  // related object needs the same FK/picklist metadata a column does.
+  const relatedTables = new Set()
+  for (const f of (r.rpt_selected_fields || [])) {
+    if (f.via_path && f.via_path.length > 0 && f.table) relatedTables.add(f.table)
+  }
+  for (const f of (loaded.filters || [])) {
+    if (f.rfilt_field_via_path && f.rfilt_field_via_path.length > 0 && f.rfilt_field_table) {
+      relatedTables.add(f.rfilt_field_table)
+    }
+  }
+  for (const g of (loaded.groupings || [])) {
+    if (g.rgr_field_via_path && g.rgr_field_via_path.length > 0 && g.rgr_field_table) {
+      relatedTables.add(g.rgr_field_table)
+    }
+  }
+  const fkLookup = await buildFKLookup(r.rpt_primary_object, Array.from(relatedTables))
 
   // Build the PostgREST select string. Direct fields are listed by name;
   // related-object fields use embedded resource syntax with arbitrary
@@ -1237,9 +1275,29 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
   for (const le of labelEmbeds) {
     selectParts.push(`${le.alias}:${le.fk_column}(${le.name_column})`)
   }
+  // Grouping columns. A report can group by a field it doesn't display, so
+  // each direct grouping column is pulled explicitly — and, when it's a
+  // lookup FK, its name-label embed comes along too. Without that embed a
+  // "group by Property" header would read as a bare UUID.
   for (const g of (loaded.groupings || [])) {
-    if (!g.rgr_field_via_path && g.rgr_field_name && !selectParts.includes(g.rgr_field_name)) {
-      selectParts.push(g.rgr_field_name)
+    if (g.rgr_field_via_path && g.rgr_field_via_path.length > 0) continue
+    if (!g.rgr_field_name) continue
+    if (!selectParts.includes(g.rgr_field_name)) selectParts.push(g.rgr_field_name)
+    const fkInfo = fkLookup[`${r.rpt_primary_object}.${g.rgr_field_name}`]
+    const alias = `_lbl_${g.rgr_field_name}`
+    if (fkInfo?.name_column && !selectParts.some(p => p.startsWith(`${alias}:`))) {
+      selectParts.push(`${alias}:${g.rgr_field_name}(${fkInfo.name_column})`)
+    }
+  }
+  // Matrix column groupings get the same treatment.
+  for (const cg of (r.rpt_column_groupings || [])) {
+    const name = typeof cg === 'string' ? cg : (cg?.name || cg?.field_name)
+    if (!name || (cg?.via_path && cg.via_path.length > 0)) continue
+    if (!selectParts.includes(name)) selectParts.push(name)
+    const fkInfo = fkLookup[`${r.rpt_primary_object}.${name}`]
+    const alias = `_lbl_${name}`
+    if (fkInfo?.name_column && !selectParts.some(p => p.startsWith(`${alias}:`))) {
+      selectParts.push(`${alias}:${name}(${fkInfo.name_column})`)
     }
   }
 
@@ -1309,62 +1367,29 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     }
   }
 
-  // When the report uses non-trivial filter logic (anything other than
-  // 'all' AND-of-everything), skip server-side filter pushdown — the
-  // filter logic is evaluated client-side after the query returns. Reports
-  // with simple AND-only logic keep using PostgREST filters for efficiency.
-  const _logicCheck = (r.rpt_filter_logic || 'all').trim()
-  const _hasComplexLogic = _logicCheck !== 'all' && /[A-Z]+\s*[A-Z]|\(|NOT/i.test(_logicCheck)
+  // Filter pushdown. A report whose logic is a plain AND of every filter
+  // pushes its filters to PostgREST; anything with OR / NOT / parentheses is
+  // pulled back and evaluated client-side against the same operator
+  // semantics (lib/reportFilters), because PostgREST can't express a mixed
+  // AND/OR tree in one request.
+  const logicExpression = (r.rpt_filter_logic || 'all').trim()
+  const pushDownFilters = logicIsPlainAnd(logicExpression, (loaded.filters || []).length)
 
-  // Apply filters — AND-only for v1.
-  for (const f of (loaded.filters || [])) {
-    if (_hasComplexLogic) break  // skip server-side; client-side handles it
-    if (f.rfilt_is_cross_filter) continue  // cross-filters in 2c.2
-    if (!f.rfilt_field_name || !f.rfilt_operator) continue
-    const col = (f.rfilt_field_via_path && f.rfilt_field_via_path.length > 0)
-      ? `${f.rfilt_field_via_path[0]}.${f.rfilt_field_name}`
-      : f.rfilt_field_name
-    const v = f.rfilt_value
-    switch (f.rfilt_operator) {
-      case 'equals':            query = query.eq(col, v); break
-      case 'not_equals':        query = query.neq(col, v); break
-      case 'greater_than':      query = query.gt(col, v); break
-      case 'less_than':         query = query.lt(col, v); break
-      case 'greater_or_equal':  query = query.gte(col, v); break
-      case 'less_or_equal':     query = query.lte(col, v); break
-      case 'in':                query = query.in(col, Array.isArray(v) ? v : String(v).split(',').map(s => s.trim())); break
-      case 'not_in':            query = query.not(col, 'in', `(${(Array.isArray(v) ? v : String(v).split(',').map(s => s.trim())).map(x => `"${x}"`).join(',')})`); break
-      case 'contains':          query = query.ilike(col, `%${v}%`); break
-      case 'starts_with':       query = query.ilike(col, `${v}%`); break
-      case 'ends_with':         query = query.ilike(col, `%${v}`); break
-      case 'is_null':           query = query.is(col, null); break
-      case 'is_not_null':       query = query.not(col, 'is', null); break
-      case 'in_last_n_days': {
-        const n = parseInt(v, 10)
-        if (Number.isFinite(n) && n > 0) {
-          const cutoff = new Date(Date.now() - n * 86400000).toISOString()
-          query = query.gte(col, cutoff)
-        }
-        break
-      }
-      case 'this_month': {
-        const now = new Date()
-        const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-        const end   = new Date(now.getFullYear(), now.getMonth()+1, 1).toISOString()
-        query = query.gte(col, start).lt(col, end)
-        break
-      }
-      case 'this_year': {
-        const now = new Date()
-        const start = new Date(now.getFullYear(), 0, 1).toISOString()
-        const end   = new Date(now.getFullYear()+1, 0, 1).toISOString()
-        query = query.gte(col, start).lt(col, end)
-        break
-      }
-      default:
-        console.warn(`Unsupported operator: ${f.rfilt_operator}`)
+  if (pushDownFilters) {
+    for (const f of (loaded.filters || [])) {
+      if (f.rfilt_is_cross_filter) continue  // applied as a row-set intersection below
+      if (!f.rfilt_field_name || !f.rfilt_operator) continue
+      const kind = filterFieldKind(f, fkLookup, r.rpt_primary_object)
+      // Skip filters the user hasn't finished authoring rather than
+      // querying for an empty value and returning nothing.
+      if (filterIsIncomplete(kind, f.rfilt_operator, f.rfilt_value)) continue
+      const col = (f.rfilt_field_via_path && f.rfilt_field_via_path.length > 0)
+        ? `${f.rfilt_field_via_path[0]}.${f.rfilt_field_name}`
+        : f.rfilt_field_name
+      query = applySimpleFilter(query, col, f.rfilt_operator, f.rfilt_value, kind)
     }
   }
+
 
   // Apply sort — sort_config is an array of { name, direction, table?, via_path? }
   const sortConfig = r.rpt_sort_config || []
@@ -1375,14 +1400,6 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
       : s.name
     query = query.order(col, { ascending: s.direction !== 'desc' })
   }
-
-  // Cap rows defensively — full pagination later.
-  // When a non-trivial filter logic expression is present (contains OR
-  // or NOT), we pull the full filtered server-side set, then evaluate
-  // the logic expression client-side. PostgREST's .or() is flat and
-  // can't combine with AND in the same query.
-  const logicExpr = (r.rpt_filter_logic || 'all').trim()
-  const hasComplexLogic = logicExpr !== 'all' && /[A-Z]+\s*[A-Z]|\(|NOT/i.test(logicExpr)
 
   // Pagination loop. PostgREST defaults to 1000 rows per response and
   // caps each query at the per-request maximum. We iterate with .range()
@@ -1425,28 +1442,45 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     }
   }
 
-  // Client-side filter logic evaluation if expression is non-trivial.
-  if (hasComplexLogic && data && (loaded.filters || []).length > 0) {
-    data = applyFilterLogic(data, loaded.filters || [], logicExpr, fkLookup, r.rpt_primary_object)
+  // Client-side evaluation for anything the pushdown couldn't express
+  // (OR / NOT / parentheses). The row set here is the soft-delete- and
+  // cross-filter-scoped superset, so the expression sees every candidate.
+  if (!pushDownFilters && data && (loaded.filters || []).length > 0) {
+    data = applyFilterLogic(data, loaded.filters || [], logicExpression, fkLookup, r.rpt_primary_object)
   }
 
-  // Picklist label resolution — second pass. For every selected field
-  // that is a picklist FK (either on the primary object or on any related
-  // object reached via a via_path), batch-fetch the label rows. Each
-  // (object, field) pair the resolution targets goes into the load.
-  const picklistFields = (r.rpt_selected_fields || []).filter(f => {
-    const fieldTable = (f.via_path && f.via_path.length > 0) ? f.table : r.rpt_primary_object
-    if (!fieldTable) return false
-    return fkLookup[`${fieldTable}.${f.name}`]?.is_picklist
-  })
+  // Picklist label resolution — second pass. Every field the report renders
+  // as a picklist FK gets its label rows batch-fetched: selected columns,
+  // row groupings, AND matrix column groupings. Groupings were the gap that
+  // made "Opportunities by Stage" print raw picklist UUIDs in its group
+  // headers while the same column rendered its label in the detail rows.
+  const tableForField = (table, viaPath) =>
+    (viaPath && viaPath.length > 0) ? table : r.rpt_primary_object
+  const isPicklistField = (name, table, viaPath) => {
+    const fieldTable = tableForField(table, viaPath)
+    return !!(fieldTable && name && fkLookup[`${fieldTable}.${name}`]?.is_picklist)
+  }
+
+  const picklistPairs = []
+  for (const f of (r.rpt_selected_fields || [])) {
+    if (isPicklistField(f.name, f.table, f.via_path)) {
+      picklistPairs.push({ object: tableForField(f.table, f.via_path), field: f.name })
+    }
+  }
+  for (const g of (loaded.groupings || [])) {
+    if (isPicklistField(g.rgr_field_name, g.rgr_field_table, g.rgr_field_via_path)) {
+      picklistPairs.push({ object: tableForField(g.rgr_field_table, g.rgr_field_via_path), field: g.rgr_field_name })
+    }
+  }
+  for (const cg of (r.rpt_column_groupings || [])) {
+    const name = typeof cg === 'string' ? cg : (cg?.name || cg?.field_name)
+    if (isPicklistField(name, cg?.table, cg?.via_path)) {
+      picklistPairs.push({ object: tableForField(cg?.table, cg?.via_path), field: name })
+    }
+  }
   let picklistMap = new Map()
-  if (picklistFields.length > 0) {
-    picklistMap = await loadPicklistLabels(
-      picklistFields.map(f => {
-        const fieldTable = (f.via_path && f.via_path.length > 0) ? f.table : r.rpt_primary_object
-        return { object: fieldTable, field: f.name }
-      })
-    )
+  if (picklistPairs.length > 0) {
+    picklistMap = await loadPicklistLabels(picklistPairs)
   }
 
   // Mark this report as run for "Last Run" display — only for a real saved
@@ -1462,25 +1496,41 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
 
   return {
     rows: data || [],
-    columns: (r.rpt_selected_fields || []).map(f => {
-      const fieldTable = (f.via_path && f.via_path.length > 0) ? f.table : r.rpt_primary_object
-      return {
-        ...f,
-        // Mark picklist columns so getRowValue knows to look up the
-        // label — works for direct fields AND fields reached via_path.
-        _is_picklist: !!(fieldTable && fkLookup[`${fieldTable}.${f.name}`]?.is_picklist),
-      }
-    }),
+    columns: (r.rpt_selected_fields || []).map(f => ({
+      ...f,
+      // Mark picklist columns so getRowValue knows to look up the
+      // label — works for direct fields AND fields reached via_path.
+      _is_picklist: isPicklistField(f.name, f.table, f.via_path),
+    })),
     picklistMap,
+    // Groupings carry `name`/`via_path`/`_is_picklist` as well as their
+    // rgr_-derived names so a grouping is itself a valid field descriptor
+    // for getRowValue — that is what resolves picklist and lookup group
+    // headers to labels instead of UUIDs.
     groupings: (loaded.groupings || []).map(g => ({
       field_name:        g.rgr_field_name,
-      field_label:       g.rgr_field_label || g.rgr_field_name,
+      field_label:       g.rgr_field_label || columnLabel(tableForField(g.rgr_field_table, g.rgr_field_via_path), g.rgr_field_name),
+      field_table:       g.rgr_field_table,
       field_via_path:    g.rgr_field_via_path,
+      name:              g.rgr_field_name,
+      via_path:          g.rgr_field_via_path,
+      _is_picklist:      isPicklistField(g.rgr_field_name, g.rgr_field_table, g.rgr_field_via_path),
       sort_direction:    g.rgr_sort_direction,
+      sort_by_aggregate: g.rgr_sort_by_aggregate,
       show_subtotal:     g.rgr_show_subtotal,
       date_granularity:  g.rgr_date_granularity,
     })),
-    columnGroupings:  r.rpt_column_groupings || [],
+    columnGroupings: (r.rpt_column_groupings || []).map(cg => {
+      const name = typeof cg === 'string' ? cg : (cg?.name || cg?.field_name)
+      const base = typeof cg === 'string' ? {} : { ...cg }
+      return {
+        ...base,
+        name,
+        label: base.label || columnLabel(tableForField(base.table, base.via_path), name),
+        via_path: base.via_path || null,
+        _is_picklist: isPicklistField(name, base.table, base.via_path),
+      }
+    }),
     measure:          (r.rpt_charts && r.rpt_charts[0] && r.rpt_charts[0].measure_type)
       ? { type: r.rpt_charts[0].measure_type, field: r.rpt_charts[0].measure_field || null }
       : { type: 'count', field: null },
