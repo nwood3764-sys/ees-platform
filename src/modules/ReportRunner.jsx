@@ -915,33 +915,39 @@ export function MatrixLayout({ result }) {
   const rowLeaves = flattenAxisLeaves(rowAxis)
   const colLeaves = flattenAxisLeaves(colAxis)
 
-  // Compute cell values: for each (rowLeaf, colLeaf), filter rows that
-  // match all axis values, then apply the measure.
+  // Row/col leaf membership — the rows that fall under each leaf path, so a
+  // cell is the intersection and the totals are the marginals. Computed once.
+  const rowLeafRows = rowLeaves.map(rl => rows.filter(row =>
+    rl.values.every((val, i) => (getRowValue(row, groupingFieldDef(groupings[i]), result) ?? '(blank)') === val)))
+  const colLeafRows = colLeaves.map(cl => rows.filter(row =>
+    cl.values.every((val, i) => (getRowValue(row, groupingFieldDef(colGroupings[i]), result) ?? '(blank)') === val)))
+
+  // Cell = measure over the intersection of a row leaf and a col leaf.
   const cellMap = new Map()
-  for (const rl of rowLeaves) {
-    for (const cl of colLeaves) {
-      const cellRows = rows.filter(row => {
-        for (let i = 0; i < rl.values.length; i++) {
-          const v = getRowValue(row, groupingFieldDef(groupings[i]), result)
-          if ((v ?? '(blank)') !== rl.values[i]) return false
-        }
-        for (let i = 0; i < cl.values.length; i++) {
-          const v = getRowValue(row, groupingFieldDef(colGroupings[i]), result)
-          if ((v ?? '(blank)') !== cl.values[i]) return false
-        }
-        return true
-      })
-      const key = rl.values.join('||') + '###' + cl.values.join('||')
-      cellMap.set(key, applyMeasure(cellRows, measure, result))
+  for (let ri = 0; ri < rowLeaves.length; ri++) {
+    const rlSet = new Set(rowLeafRows[ri])
+    for (let ci = 0; ci < colLeaves.length; ci++) {
+      const inter = colLeafRows[ci].filter(r => rlSet.has(r))
+      cellMap.set(`${ri}##${ci}`, applyMeasure(inter, measure, result))
     }
   }
+  // Marginals: row totals (per row leaf), column totals (per col leaf), grand.
+  const rowTotals = rowLeafRows.map(rs => applyMeasure(rs, measure, result))
+  const colTotals = colLeafRows.map(rs => applyMeasure(rs, measure, result))
+  const grandTotal = applyMeasure(rows, measure, result)
+  const fmt = (v) => v == null ? <span style={{ color:C.textMuted }}>—</span> : formatMeasureValue(v, measure)
 
   // Render
   const headerRowCount = colGroupings.length
   const labelColCount  = groupings.length
+  const measureLabel = measure.type === 'count' ? 'Records'
+    : `${measure.type.toUpperCase()}${measure.field ? ' ' + humanizeColumnLabel(measure.field) : ''}`
 
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'auto' }}>
+      <div style={{ padding:'6px 12px', fontSize:11, color:C.textMuted, borderBottom:`1px solid ${C.border}` }}>
+        Measure: <strong style={{ color:C.textSecondary }}>{measureLabel}</strong>
+      </div>
       <table style={{ borderCollapse:'collapse', fontSize:13 }}>
         <thead>
           {/* Column header rows — one row per column-grouping level */}
@@ -956,6 +962,13 @@ export function MatrixLayout({ result }) {
               )}
               {/* Walk the column axis at this level */}
               {emitAxisHeaderCells(colAxis, hLvl)}
+              {/* Row-total column header spans all header rows */}
+              {hLvl === 0 && (
+                <th rowSpan={headerRowCount}
+                    style={{ ...cellHeaderStyle(), textAlign:'right', background:C.cardSecondary, borderLeft:`2px solid ${C.borderDark}` }}>
+                  Total
+                </th>
+              )}
             </tr>
           ))}
         </thead>
@@ -967,17 +980,28 @@ export function MatrixLayout({ result }) {
                   {String(v)}
                 </td>
               ))}
-              {colLeaves.map((cl, ci) => {
-                const key = rl.values.join('||') + '###' + cl.values.join('||')
-                const cellVal = cellMap.get(key)
-                return (
-                  <td key={`c-${ci}`} style={{ ...cellStyle(), textAlign:'right' }}>
-                    {cellVal == null ? <span style={{ color:C.textMuted }}>—</span> : formatCellValue(cellVal, 'number')}
-                  </td>
-                )
-              })}
+              {colLeaves.map((cl, ci) => (
+                <td key={`c-${ci}`} style={{ ...cellStyle(), textAlign:'right' }}>
+                  {fmt(cellMap.get(`${ri}##${ci}`))}
+                </td>
+              ))}
+              <td style={{ ...cellStyle(), textAlign:'right', fontWeight:600, background:'#f0f3f8', borderLeft:`2px solid ${C.borderDark}` }}>
+                {fmt(rowTotals[ri])}
+              </td>
             </tr>
           ))}
+          {/* Column totals + grand total */}
+          <tr style={{ borderTop:`2px solid ${C.borderDark}`, background:C.borderDark }}>
+            <td colSpan={labelColCount} style={{ ...cellStyle(), fontWeight:700, color:C.textPrimary }}>Total</td>
+            {colLeaves.map((cl, ci) => (
+              <td key={`ct-${ci}`} style={{ ...cellStyle(), textAlign:'right', fontWeight:600, color:C.textPrimary }}>
+                {fmt(colTotals[ci])}
+              </td>
+            ))}
+            <td style={{ ...cellStyle(), textAlign:'right', fontWeight:700, color:C.textPrimary, borderLeft:`2px solid ${C.textSecondary}` }}>
+              {fmt(grandTotal)}
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -1067,6 +1091,20 @@ function applyMeasure(cellRows, measure, ctx) {
     case 'max': return Math.max(...values)
   }
   return null
+}
+
+// Format a measure/aggregate number: integers show whole, fractions show up
+// to two decimals, all with thousands separators.
+function formatMeasureValue(v, measure) {
+  if (v == null) return '—'
+  const n = typeof v === 'number' ? v : parseFloat(v)
+  if (!Number.isFinite(n)) return String(v)
+  const isInt = Number.isInteger(n) || (measure && measure.type === 'count')
+  return n.toLocaleString(undefined, isInt ? { maximumFractionDigits: 0 } : { maximumFractionDigits: 2 })
+}
+
+function humanizeColumnLabel(name) {
+  return String(name || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 // ─── Cell formatting ──────────────────────────────────────────────────────
