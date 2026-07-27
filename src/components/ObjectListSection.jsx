@@ -262,7 +262,11 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
     .replace(/_/g, ' ')
     .replace(/\b\w/g, m => m.toUpperCase())
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    // Mirror ListView's own root box (flex:1 + minWidth/minHeight:0 + overflow
+    // hidden) so this wrapper fills the module's flex row exactly as the bare
+    // ListView did — otherwise it collapses to content width and the table is
+    // clipped with dead space beside it.
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
         padding: '10px 16px', background: '#eef4fb',
@@ -284,7 +288,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
           </a>
         )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {listView}
       </div>
     </div>
