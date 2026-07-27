@@ -187,6 +187,77 @@ export function getTableListUrl(table) {
   return `/m/${moduleId}/${section}`
 }
 
+/**
+ * Build the URL for a related-list "View All" — the target object's list view
+ * SCOPED to a single parent record, Salesforce-style (the related-list page
+ * shows only the records related to this parent, not the whole object).
+ *
+ * scope: { table, fk, via, parentId, label }
+ *   • table    — target object table (e.g. 'units')
+ *   • fk       — the target's FK to the first intermediate (via-path) or the
+ *                direct parent FK (e.g. 'building_id' or 'property_id')
+ *   • via      — via-chain array for multi-hop related lists (null for direct)
+ *   • parentId — the parent record UUID the list is scoped to
+ *   • label    — display name of the parent (for the scope banner)
+ *
+ * The scope rides in a single `rel` query param (compact JSON) so the scoped
+ * list is shareable/bookmarkable and survives a reload — parsePath decodes it
+ * back into `listScope`. Returns null (caller falls back to the unscoped list
+ * URL) when the table isn't addressable or there's nothing to scope on.
+ */
+export function buildScopedListUrl(scope) {
+  if (!scope || !scope.table || !scope.parentId || !scope.fk) return null
+  const base = getTableListUrl(scope.table)
+  if (!base) return null
+  const via = Array.isArray(scope.via)
+    ? scope.via.filter(v => v && v.table && v.fk)
+    : (scope.via && scope.via.table && scope.via.fk ? [scope.via] : [])
+  const payload = {
+    t: scope.table,
+    fk: scope.fk,
+    via: via.length ? via.map(v => ({ table: v.table, fk: v.fk })) : null,
+    pid: scope.parentId,
+    lbl: scope.label || null,
+  }
+  const params = new URLSearchParams()
+  params.set('rel', JSON.stringify(payload))
+  return `${base}?${params.toString()}`
+}
+
+// Decode the `rel` query param (see buildScopedListUrl) back into a listScope
+// object, or null when absent/malformed.
+function decodeListScope(search) {
+  const params = new URLSearchParams(search || '')
+  const raw = params.get('rel')
+  if (!raw) return null
+  try {
+    const p = JSON.parse(raw)
+    if (!p || !p.t || !p.pid || !p.fk) return null
+    return {
+      table: p.t,
+      fk: p.fk,
+      via: Array.isArray(p.via) && p.via.length ? p.via.filter(v => v && v.table && v.fk) : null,
+      parentId: p.pid,
+      label: p.lbl || null,
+    }
+  } catch {
+    return null
+  }
+}
+
+// Re-encode a listScope onto a URLSearchParams as the `rel` param (inverse of
+// decodeListScope). No-op when scope is falsy.
+function encodeListScope(params, scope) {
+  if (!scope || !scope.table || !scope.parentId || !scope.fk) return
+  const via = Array.isArray(scope.via)
+    ? scope.via.filter(v => v && v.table && v.fk).map(v => ({ table: v.table, fk: v.fk }))
+    : null
+  params.set('rel', JSON.stringify({
+    t: scope.table, fk: scope.fk, via: via && via.length ? via : null,
+    pid: scope.parentId, lbl: scope.label || null,
+  }))
+}
+
 // Reverse of TABLE_LIST_SECTION_MAP — section id back to its table name for
 // the handful of sections whose id differs from the table.
 const SECTION_TABLE_MAP = Object.fromEntries(
@@ -263,6 +334,7 @@ export function parsePath(pathname, search = '') {
     searchQuery: null,
     searchType: null,
     helpSlug: null,
+    listScope: null,
   }
 
   // /
@@ -321,6 +393,8 @@ export function parsePath(pathname, search = '') {
         subsection: parts[3] || null,
         adminTab: params.get('tab') || null,
         adminLayoutId: params.get('layout') || null,
+        // A related-list "View All" scopes the section's list to one parent.
+        listScope: decodeListScope(search),
       }
     }
     return base
@@ -350,7 +424,7 @@ export function parsePath(pathname, search = '') {
  * state. Inverse of parsePath. Returns the full path including any query
  * string the search route needs.
  */
-export function buildPath({ activeModule, selectedRecord, section, subsection, adminTab, adminLayoutId, searchQuery, searchType, helpSlug }) {
+export function buildPath({ activeModule, selectedRecord, section, subsection, adminTab, adminLayoutId, searchQuery, searchType, helpSlug, listScope }) {
   if (selectedRecord?.table) {
     if (selectedRecord.mode === 'create') return `/${selectedRecord.table}/new`
     if (selectedRecord.id) return `/${selectedRecord.table}/${selectedRecord.id}`
@@ -373,6 +447,7 @@ export function buildPath({ activeModule, selectedRecord, section, subsection, a
   const params = new URLSearchParams()
   if (adminTab) params.set('tab', adminTab)
   if (adminLayoutId) params.set('layout', adminLayoutId)
+  encodeListScope(params, listScope)
   const qs = params.toString()
   return qs ? `${base}?${qs}` : base
 }
@@ -635,6 +710,7 @@ export function useUrlNavigation() {
     searchQuery: state.searchQuery,
     searchType: state.searchType,
     helpSlug: state.helpSlug,
+    listScope: state.listScope,
     navigateToModule,
     navigateToSection,
     navigateToSubsection,

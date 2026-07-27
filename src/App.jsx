@@ -152,6 +152,7 @@ function AuthedApp({ session }) {
     searchQuery,
     searchType,
     helpSlug,
+    listScope,
     navigateToModule,
     navigateToSection,
     navigateToSubsection,
@@ -377,7 +378,7 @@ function AuthedApp({ session }) {
   }
 
   return (
-    <NavContext.Provider value={{ selectedRecord, navigateToRecord, closeRecord, replaceRecord }}>
+    <NavContext.Provider value={{ selectedRecord, navigateToRecord, closeRecord, replaceRecord, listScope }}>
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, -apple-system, sans-serif', background: C.page, overflow: 'hidden' }}>
       <Sidebar
         activeModule={activeModule}

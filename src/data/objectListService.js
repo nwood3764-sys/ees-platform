@@ -416,8 +416,19 @@ export function deriveColumnOptions(columns, rows) {
 // columns are always emitted in full (the underlying fetch is select *), so a
 // newly-shown own column always has data without re-fetching. When
 // activeFields is omitted, no related columns are resolved (default render).
+//
+// relatedScope (optional): scopes the fetch to the children of a single parent
+// record — the server-side query behind a related-list "View All" so the list
+// shows only the related records, not every row of the object (Salesforce
+// related-list page parity). Shape mirrors the related-list widget config:
+//   { fk, via, parentId }
+//   • direct FK   — { fk:'property_id', parentId } → .eq('property_id', parentId)
+//   • via-path    — { fk:'building_id',
+//                     via:[{ table:'buildings', fk:'property_id' }], parentId }
+//     resolved with the same nested PostgREST inner-join embeds that
+//     fetchRelatedRecords uses, filtered on the parent id (RLS-respecting).
 // ---------------------------------------------------------------------------
-export async function fetchObjectRecords(table, { activeFields = null } = {}) {
+export async function fetchObjectRecords(table, { activeFields = null, relatedScope = null } = {}) {
   const [cols, picklists] = await Promise.all([
     describeObject(table),
     loadPicklists().catch(() => ({ byId: new Map() })),
@@ -449,25 +460,61 @@ export async function fetchObjectRecords(table, { activeFields = null } = {}) {
     }
   }
 
+  // ── Related-list scope ───────────────────────────────────────────────────
+  // When a related-list "View All" scopes the fetch to one parent, build the
+  // select + filter for it. Mirrors fetchRelatedRecords: a direct FK becomes a
+  // plain .eq(); a via-path becomes nested inner-join embeds filtered on the
+  // parent id. scopeSelect is appended to the base `*` select so the embed
+  // rides along; scopeApply adds the filter to both the page and count queries.
+  let scopeSelect = '*'
+  let scopeApply = (q) => q
+  let scopeStripEmbed = false
+  if (relatedScope && relatedScope.fk && relatedScope.parentId) {
+    const viaChain = Array.isArray(relatedScope.via)
+      ? relatedScope.via.filter(v => v && v.table && v.fk)
+      : []
+    const isViaPath = viaChain.length > 0
+    if (isViaPath) {
+      let embed = viaChain[viaChain.length - 1].fk
+      for (let i = viaChain.length - 2; i >= 0; i--) {
+        embed = `_v${i + 2}:${viaChain[i].fk}!inner(${embed})`
+      }
+      scopeSelect = `*, _v1:${relatedScope.fk}!inner(${embed})`
+      scopeStripEmbed = true
+      const aliasPath = viaChain.map((_, i) => `_v${i + 1}`).join('.')
+      const lastFk = viaChain[viaChain.length - 1].fk
+      scopeApply = (q) => q.eq(`${aliasPath}.${lastFk}`, relatedScope.parentId)
+    } else {
+      scopeApply = (q) => q.eq(relatedScope.fk, relatedScope.parentId)
+    }
+  }
+
   // Load every row (list search/filter runs client-side over the full set), but
   // fetch the pages CONCURRENTLY after a HEAD count instead of one-at-a-time —
   // ~7× faster on large objects (e.g. 17k properties). Falls back to sequential
   // paging automatically if the count query isn't available.
   const rows = await fetchAllPagedParallel(
     (from, to) => {
-      let q = supabase.from(table).select('*')
+      let q = supabase.from(table).select(scopeSelect)
       // Plain eq(false) on the soft-delete column (an .or(...is.null...) filter
       // can error on some tables and return nothing). Every soft-deletable row
       // carries a boolean.
       if (softDel) q = q.eq(softDel, false)
+      q = scopeApply(q)
       return q.range(from, to)
     },
     () => {
-      let q = supabase.from(table).select('*', { count: 'exact', head: true })
+      let q = supabase.from(table).select(scopeSelect, { count: 'exact', head: true })
       if (softDel) q = q.eq(softDel, false)
+      q = scopeApply(q)
       return q
     },
   )
+
+  // Drop the join-plumbing embed from via-path scoped rows before shaping.
+  if (scopeStripEmbed) {
+    for (const r of rows) { if (r && typeof r === 'object') delete r._v1 }
+  }
 
   // ── Resolve active related (one-hop) columns ────────────────────────────
   // Determine which relationships are needed from activeFields, then batch-load

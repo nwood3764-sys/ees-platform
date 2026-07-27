@@ -29,7 +29,7 @@ const LogActivityModal                     = lazy(() => import('./LogActivityMod
 import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
-import { getTableListUrl } from '../lib/urlNav'
+import { getTableListUrl, buildScopedListUrl } from '../lib/urlNav'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
@@ -3554,7 +3554,7 @@ function renderRelatedValue(col, val, picklists) {
 
 function RelatedListWidget({
   widget, picklists, onNavigateToRecord, parentRecordId, onRefreshRelated,
-  parentTable, parentRecord,
+  parentTable, parentRecord, parentRecordName,
 }) {
   const config = widget.widget_config || {}
   const columns = config.columns || []
@@ -4307,10 +4307,20 @@ function RelatedListWidget({
             )}
 
             {hiddenCount > 0 && (() => {
-              // Wire View All to the table's list view when one is mapped.
-              // No project-filter yet — the link drops the user on the full
-              // list, which is still better than a not-allowed placeholder.
-              const listUrl = getTableListUrl(childTable)
+              // Wire View All to the table's list view, SCOPED to this parent
+              // record (Salesforce related-list page parity) so the user lands
+              // on only these related records — not the whole object. Works for
+              // both direct-FK lists (fk = parentRecordId) and via-path lists
+              // (Units on a Property via Buildings), which carry config.via.
+              // Falls back to the unscoped list URL if the scope can't be built.
+              const scopedUrl = buildScopedListUrl({
+                table: childTable,
+                fk: config.fk,
+                via: config.via,
+                parentId: parentRecordId,
+                label: parentRecordName || null,
+              })
+              const listUrl = scopedUrl || getTableListUrl(childTable)
               return (
                 <div style={{
                   padding: '8px 14px',
@@ -6833,6 +6843,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                         parentRecordId={recordId}
                         parentTable={tableName}
                         parentRecord={data?.record}
+                        parentRecordName={displayName}
                         onRefreshRelated={async () => {
                           try {
                             const rows = await fetchRelatedRecords(w.widget_config, recordId)
@@ -6954,6 +6965,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                             parentRecordId={recordId}
                             parentTable={tableName}
                             parentRecord={data?.record}
+                            parentRecordName={displayName}
                           />
                         ))}
                       {(sec.widgets || [])
