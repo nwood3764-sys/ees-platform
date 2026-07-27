@@ -677,40 +677,17 @@ function FieldsTab({
                 items={report.rpt_selected_fields.map(f => ({ id: fieldKey(f), f }))}
                 onReorder={(next) => reorderFields(next.map(x => x.f))}
                 renderItem={(item, { setNodeRef, style, dragHandleProps }) => {
-                  const f = item.f
                   const idx = report.rpt_selected_fields.findIndex(x => fieldKey(x) === item.id)
                   const updateThisField = (patch) => {
                     const fields = report.rpt_selected_fields.map((x, i) => i === idx ? { ...x, ...patch } : x)
                     updateReport({ rpt_selected_fields: fields })
                   }
-                  const numericish = ['numeric','integer','bigint','smallint','double precision','real','money','decimal'].includes(String(f.type || '').toLowerCase())
                   return (
-                    <div ref={setNodeRef} style={{
-                      ...style, display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
-                      background:C.cardSecondary, borderRadius:6, marginBottom:6,
-                    }}>
-                      <span {...dragHandleProps} title="Drag to reorder" style={{ cursor:'grab', color:C.textMuted, fontSize:14, lineHeight:1, touchAction:'none' }}>⠿</span>
-                      <div style={{ flex:1, fontSize:12, minWidth:0 }}>
-                        <div style={{ fontWeight:500, color:C.textPrimary, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.label}</div>
-                        <div style={{ color:C.textMuted, fontSize:11 }}>
-                          {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
-                        </div>
-                      </div>
-                      <select
-                        value={f.summarize || ''}
-                        onChange={e => updateThisField({ summarize: e.target.value || undefined })}
-                        title="Column summary (shown as a total row on Tabular reports)"
-                        style={{ ...inputStyle(), width:78, fontSize:11, padding:'4px 6px' }}
-                      >
-                        <option value="">Σ —</option>
-                        <option value="count">Count</option>
-                        {numericish && <option value="sum">Sum</option>}
-                        {numericish && <option value="avg">Average</option>}
-                        {numericish && <option value="min">Min</option>}
-                        {numericish && <option value="max">Max</option>}
-                      </select>
-                      <button onClick={() => removeField(idx)} style={miniBtn(true)}>×</button>
-                    </div>
+                    <SelectedFieldRow
+                      f={item.f} setNodeRef={setNodeRef} style={style}
+                      dragHandleProps={dragHandleProps}
+                      onUpdate={updateThisField} onRemove={() => removeField(idx)}
+                    />
                   )
                 }}
               />
@@ -718,6 +695,94 @@ function FieldsTab({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// One selected-field row: label, column-summary picker, and an expandable
+// Format panel (number format + decimals + conditional color rules).
+function SelectedFieldRow({ f, setNodeRef, style, dragHandleProps, onUpdate, onRemove }) {
+  const [open, setOpen] = useState(false)
+  const numericish = ['numeric','integer','bigint','smallint','double precision','real','money','decimal'].includes(String(f.type || '').toLowerCase())
+  const rules = f.conditional_rules || []
+  const setRule = (i, patch) => onUpdate({ conditional_rules: rules.map((r, j) => j === i ? { ...r, ...patch } : r) })
+  const addRule = () => onUpdate({ conditional_rules: [...rules, { op:'gt', value:'', color:'sky' }] })
+  const removeRule = (i) => onUpdate({ conditional_rules: rules.filter((_, j) => j !== i) })
+  const hasFormatting = (f.format && f.format !== 'auto') || rules.length > 0
+
+  return (
+    <div ref={setNodeRef} style={{ ...style, background:C.cardSecondary, borderRadius:6, marginBottom:6, padding:'8px 10px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <span {...dragHandleProps} title="Drag to reorder" style={{ cursor:'grab', color:C.textMuted, fontSize:14, lineHeight:1, touchAction:'none' }}>⠿</span>
+        <div style={{ flex:1, fontSize:12, minWidth:0 }}>
+          <div style={{ fontWeight:500, color:C.textPrimary, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.label}</div>
+          <div style={{ color:C.textMuted, fontSize:11 }}>
+            {f.via_path ? `${f.table} (via ${f.via_path.join(' → ')})` : f.table}
+          </div>
+        </div>
+        <select
+          value={f.summarize || ''}
+          onChange={e => onUpdate({ summarize: e.target.value || undefined })}
+          title="Column summary (total row on Tabular)"
+          style={{ ...inputStyle(), width:78, fontSize:11, padding:'4px 6px' }}
+        >
+          <option value="">Σ —</option>
+          <option value="count">Count</option>
+          {numericish && <option value="sum">Sum</option>}
+          {numericish && <option value="avg">Average</option>}
+          {numericish && <option value="min">Min</option>}
+          {numericish && <option value="max">Max</option>}
+        </select>
+        <button onClick={() => setOpen(o => !o)} title="Format & conditional color"
+          style={{ ...miniBtn(), color: hasFormatting ? C.emerald : C.textMuted }}>◧</button>
+        <button onClick={onRemove} style={miniBtn(true)}>×</button>
+      </div>
+
+      {open && (
+        <div style={{ marginTop:8, paddingTop:8, borderTop:`1px solid ${C.border}`, display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 90px', gap:6, alignItems:'center' }}>
+            <select value={f.format || 'auto'} onChange={e => onUpdate({ format: e.target.value })} style={{ ...inputStyle(), fontSize:12 }}>
+              <option value="auto">Format: Auto</option>
+              <option value="number">Number</option>
+              <option value="currency">Currency ($)</option>
+              <option value="percent">Percent (%)</option>
+              <option value="compact">Compact (1.2K)</option>
+            </select>
+            <input type="number" min="0" max="6" value={f.decimals ?? ''} placeholder="dec"
+              onChange={e => onUpdate({ decimals: e.target.value === '' ? undefined : parseInt(e.target.value, 10) })}
+              style={{ ...inputStyle(), fontSize:12 }} title="Decimal places" />
+          </div>
+          <div>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
+              <span style={{ fontSize:11, color:C.textMuted, textTransform:'uppercase', letterSpacing:0.5 }}>Conditional color</span>
+              <button onClick={addRule} style={btnSecondary(false, 'small')}>+ Rule</button>
+            </div>
+            {rules.length === 0 ? (
+              <div style={{ fontSize:11, color:C.textMuted, fontStyle:'italic' }}>No color rules. Add one to highlight cells by value.</div>
+            ) : rules.map((r, i) => (
+              <div key={i} style={{ display:'grid', gridTemplateColumns:'70px 1fr 90px 26px', gap:6, marginBottom:6, alignItems:'center' }}>
+                <select value={r.op} onChange={e => setRule(i, { op: e.target.value })} style={{ ...inputStyle(), fontSize:11 }}>
+                  <option value="gt">&gt;</option>
+                  <option value="gte">≥</option>
+                  <option value="lt">&lt;</option>
+                  <option value="lte">≤</option>
+                  <option value="eq">=</option>
+                  <option value="ne">≠</option>
+                </select>
+                <input value={r.value} onChange={e => setRule(i, { value: e.target.value })} placeholder="value"
+                  style={{ ...inputStyle(), fontSize:11 }} />
+                <select value={r.color} onChange={e => setRule(i, { color: e.target.value })} style={{ ...inputStyle(), fontSize:11 }}>
+                  <option value="sky">Blue</option>
+                  <option value="emerald">Green</option>
+                  <option value="amber">Amber</option>
+                  <option value="navy">Navy</option>
+                </select>
+                <button onClick={() => removeRule(i)} style={miniBtn(true)}>×</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
