@@ -6,8 +6,11 @@ import { C } from '../data/constants'
 //
 // Salesforce-parity "Maps" card for a property record page. Renders an
 // interactive satellite map pinned to the record's stored coordinates
-// (property_latitude / property_longitude) — no per-address geocoding
-// call, because HUD/LIHTC imports already carry lat/long.
+// (property_latitude / property_longitude) — no client-side geocoding.
+// HUD/LIHTC imports carry lat/long; everything else is geocoded
+// server-side by the geocode-property-coordinates edge function
+// (pg_cron sweep every 15 min via the US Census Bureau geocoder), so a
+// missing-coordinates state here resolves itself once the sweep runs.
 //
 // Registered as the 'map' page-layout widget type and placed via a
 // record layout's "Map" section (see RecordDetail.jsx). Config lives in
@@ -205,7 +208,8 @@ export default function PropertyMapWidget({ widget, record, tableName, embedded 
   ) : (
     <div style={{ padding: '20px 16px', fontSize: 12.5, color: C.textSecondary, lineHeight: 1.6 }}>
       <div style={{ color: C.textMuted, marginBottom: address ? 6 : 0 }}>
-        This property has no map coordinates yet, so it can’t be pinned.
+        Map coordinates haven’t been captured yet — LEAP looks them up automatically
+        from the address (usually within 15 minutes). Use the Google Maps link meanwhile.
       </div>
       {address && <div style={{ color: C.textPrimary }}>{address}</div>}
     </div>
