@@ -149,37 +149,20 @@ export async function softDeleteHelpArticle(id, reason) {
 }
 
 /**
- * Replace the full set of anchors for an article. Atomic for the consumer —
- * we delete then bulk-insert. The matching set on the table is small (each
- * article averages a handful of anchors), so this is straightforward.
+ * Replace the full set of anchors for an article. The RPC deletes the current
+ * anchors and inserts the new set inside a SINGLE transaction, so a failed
+ * insert can never leave the article with its anchors deleted (the previous
+ * client-side delete-then-insert deleted first, in a separate request).
  *
  * `anchors` shape: array of
  *   { type, route?, object?, field?, concept?, sort_order? }
  */
 export async function setArticleAnchors(articleId, anchors) {
-  const { error: delErr } = await supabase
-    .from('help_article_anchors')
-    .delete()
-    .eq('haa_article_id', articleId)
-  if (delErr) throw delErr
-  if (!anchors || anchors.length === 0) return []
-
-  const rows = anchors.map((a, i) => ({
-    haa_article_id:   articleId,
-    haa_anchor_type:  a.type,
-    haa_route:        a.type === 'route'   ? a.route   : null,
-    haa_object:       (a.type === 'object' || a.type === 'field') ? a.object : null,
-    haa_field:        a.type === 'field'   ? a.field   : null,
-    haa_concept:      a.type === 'concept' ? a.concept : null,
-    haa_sort_order:   typeof a.sort_order === 'number' ? a.sort_order : i,
-  }))
-
-  const { data, error } = await supabase
-    .from('help_article_anchors')
-    .insert(rows)
-    .select()
+  const { error } = await supabase.rpc('set_article_anchors', {
+    p_article_id: articleId,
+    p_anchors: anchors || [],
+  })
   if (error) throw error
-  return data
 }
 
 // ─── Slug helper ─────────────────────────────────────────────────────────

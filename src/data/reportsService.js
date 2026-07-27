@@ -567,74 +567,18 @@ export async function saveReport({ id, report, filters, groupings, calculatedFie
     if (error) throw error
   }
 
-  // Soft-delete existing children, then re-insert
-  if (!isNew) {
-    await Promise.all([
-      supabase.from('report_filters').update({ is_deleted: true }).eq('rfilt_report_id', reportId),
-      supabase.from('report_groupings').update({ is_deleted: true }).eq('rgr_report_id', reportId),
-      supabase.from('report_calculated_fields').update({ is_deleted: true }).eq('rcf_report_id', reportId),
-    ])
-  }
-
-  if (filters?.length) {
-    const rows = filters.map((f, idx) => ({
-      rfilt_report_id:         reportId,
-      rfilt_filter_index:      idx + 1,
-      rfilt_field_name:        f.field_name || null,
-      rfilt_field_table:       f.field_table || null,
-      rfilt_field_via_path:    f.field_via_path || null,
-      rfilt_operator:          f.operator,
-      rfilt_value:             f.value !== undefined ? f.value : null,
-      rfilt_is_cross_filter:   !!f.is_cross_filter,
-      rfilt_cross_object:      f.cross_object || null,
-      rfilt_cross_match:       f.cross_match || null,
-      rfilt_cross_subfilters:  f.cross_subfilters || [],
-      rfilt_is_runtime_prompt: !!f.is_runtime_prompt,
-      rfilt_runtime_label:     f.runtime_label || null,
-      rfilt_prompt_input_type: f.prompt_input_type || 'text',
-      rfilt_prompt_options:    f.prompt_options || [],
-      created_by:              userId,
-      updated_by:              userId,
-    }))
-    const { error } = await supabase.from('report_filters').insert(rows)
-    if (error) throw error
-  }
-
-  if (groupings?.length) {
-    const rows = groupings.map((g, idx) => ({
-      rgr_report_id:         reportId,
-      rgr_grouping_level:    idx + 1,
-      rgr_field_name:        g.field_name,
-      rgr_field_table:       g.field_table || null,
-      rgr_field_via_path:    g.field_via_path || null,
-      rgr_field_label:       g.field_label || null,
-      rgr_sort_direction:    g.sort_direction || 'asc',
-      rgr_sort_by_aggregate: g.sort_by_aggregate || null,
-      rgr_show_subtotal:     g.show_subtotal !== false,
-      rgr_date_granularity:  g.date_granularity || null,
-      created_by:            userId,
-      updated_by:            userId,
-    }))
-    const { error } = await supabase.from('report_groupings').insert(rows)
-    if (error) throw error
-  }
-
-  if (calculatedFields?.length) {
-    const rows = calculatedFields.map((c, idx) => ({
-      rcf_report_id:      reportId,
-      rcf_label:          c.label,
-      rcf_scope:          c.scope || 'row',
-      rcf_expression:     c.expression,
-      rcf_data_type:      c.data_type || 'number',
-      rcf_format_options: c.format_options || {},
-      rcf_display_order:  idx,
-      rcf_grouping_level: c.grouping_level || null,
-      created_by:         userId,
-      updated_by:         userId,
-    }))
-    const { error } = await supabase.from('report_calculated_fields').insert(rows)
-    if (error) throw error
-  }
+  // Replace the child collections (filters / groupings / calculated fields)
+  // atomically. The RPC soft-deletes the current set and re-inserts the new
+  // set inside a SINGLE transaction, so a failed re-insert can never leave the
+  // report with its children deleted (the delete rolls back with the insert).
+  // Safe on a brand-new report too — the delete is a no-op when there are none.
+  const { error: childErr } = await supabase.rpc('save_report_children', {
+    p_report_id:         reportId,
+    p_filters:           filters || [],
+    p_groupings:         groupings || [],
+    p_calculated_fields: calculatedFields || [],
+  })
+  if (childErr) throw childErr
 
   return reportId
 }
@@ -2022,51 +1966,18 @@ export async function saveDashboard({ id, dashboard, widgets, filters }) {
     if (error) throw error
   }
 
-  if (!isNew) {
-    await Promise.all([
-      supabase.from('dashboard_widgets').update({ is_deleted: true }).eq('dw_dashboard_id', dashId),
-      supabase.from('dashboard_filters').update({ is_deleted: true }).eq('dfilt_dashboard_id', dashId),
-    ])
-  }
-
-  if (widgets?.length) {
-    // Position is derived from the array order plus the dashboard's column
-    // count — reordering in the editor (move up/down in the list) is the
-    // single source of truth. Per-widget position_row/col fields are
-    // ignored on save and recomputed from index here.
-    const cols = Math.max(1, dashboard.dash_columns || 3)
-    const rows = widgets.map((w, idx) => ({
-      dw_dashboard_id:  dashId,
-      dw_report_id:     w.report_id,
-      dw_title:         w.title || null,
-      dw_widget_type:   w.widget_type || 'table',
-      dw_position_row:  Math.floor(idx / cols),
-      dw_position_col:  idx % cols,
-      dw_width:         w.width || 1,
-      dw_height:        w.height || 1,
-      dw_widget_config: w.widget_config || {},
-      created_by:       userId,
-      updated_by:       userId,
-    }))
-    const { error } = await supabase.from('dashboard_widgets').insert(rows)
-    if (error) throw error
-  }
-
-  if (filters?.length) {
-    const rows = filters.map((f, idx) => ({
-      dfilt_dashboard_id:   dashId,
-      dfilt_label:          f.label,
-      dfilt_field_name:     f.field_name,
-      dfilt_operator:       f.operator || 'equals',
-      dfilt_default_value:  f.default_value ?? null,
-      dfilt_options:        f.options || [],
-      dfilt_display_order:  idx,
-      created_by:           userId,
-      updated_by:           userId,
-    }))
-    const { error } = await supabase.from('dashboard_filters').insert(rows)
-    if (error) throw error
-  }
+  // Replace widgets + filters atomically. The RPC soft-deletes the current set
+  // and re-inserts the new set in ONE transaction (widget position row/col are
+  // recomputed server-side from array order + column count, exactly as before),
+  // so a failed re-insert can never leave the dashboard with its widgets
+  // deleted. Safe on a new dashboard — the delete is a no-op with no children.
+  const { error: childErr } = await supabase.rpc('save_dashboard_children', {
+    p_dashboard_id: dashId,
+    p_widgets:      widgets || [],
+    p_filters:      filters || [],
+    p_columns:      dashboard.dash_columns || 3,
+  })
+  if (childErr) throw childErr
 
   return dashId
 }
