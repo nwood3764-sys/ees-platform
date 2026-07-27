@@ -445,7 +445,18 @@ const DERIVED_READONLY = {
   // mapping — the record type dictates the price book and a user never picks
   // one (Nicholas, 2026-07-26).
   opportunities: ['opportunity_name', 'price_book_id'],
-  buildings: ['building_name'],
+  // building_name is trigger-derived; the In-Unit Information fields are
+  // trigger-maintained rollups from child units (recompute_building_rollups,
+  // 2026-07-27) — read-only so users edit the unit rows, not the aggregate.
+  // (Unit count is intentionally not here — it's owned by a separate workstream.)
+  buildings: [
+    'building_name',
+    'building_number_of_studio', 'building_number_of_one_bedrooms',
+    'building_number_of_two_bedrooms', 'building_number_of_three_bedroom_units',
+    'building_number_of_four_bedrooms', 'building_number_of_bedrooms',
+    'building_average_sq_ft_of_units',
+    'building_full_bathrooms', 'building_half_bathrooms',
+  ],
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],
   opportunity_line_items: ['oli_name'],
