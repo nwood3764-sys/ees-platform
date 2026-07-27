@@ -41,8 +41,22 @@
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
     Permissions-Policy        = "geolocation=(self), camera=(self), microphone=()"
 
+# Outlook add-in ("Log to LEAP") task pane. Outlook loads this page in a
+# cross-origin iframe, so the global X-Frame-Options: SAMEORIGIN above would
+# blank the pane. Netlify applies the most-specific matching header rule per
+# key, so this block replaces X-Frame-Options for /outlook-addin/* — set to a
+# non-standard token browsers ignore (no framing restriction) — and pins the
+# allowed framers to the Office/Outlook hosts via CSP frame-ancestors.
+[[headers]]
+  for = "/outlook-addin/*"
+  [headers.values]
+    X-Frame-Options         = "ALLOWALL"
+    Content-Security-Policy  = "frame-ancestors https://outlook.office.com https://outlook.office365.com https://outlook-sdf.office.com https://*.outlook.com https://outlook.live.com https://*.microsoft365.com https://*.cloud.microsoft https://*.office.com;"
+    X-Content-Type-Options  = "nosniff"
+
 # SPA routing — any unknown path should serve index.html so the React
-# router (via AuthGate) can handle it client-side.
+# router (via AuthGate) can handle it client-side. Real static files (incl.
+# everything under /outlook-addin/) are served before this fallback fires.
 [[redirects]]
   from   = "/*"
   to     = "/index.html"
