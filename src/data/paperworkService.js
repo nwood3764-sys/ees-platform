@@ -19,6 +19,72 @@ import { supabase } from '../lib/supabase'
 import { parseAssetScoreText, fillPaperworkWorkbook } from './paperworkModel'
 
 /**
+ * Load the stages that carry document requirements for one record type,
+ * each with its document list.
+ *
+ * Documents belong to the STAGE a record is at (Nicholas, 2026-07-27) — and
+ * because opportunity stage picklists are record-type-scoped and never shared,
+ * one stage value already means "this program, this submittal". So this is a
+ * single lookup, not a program × stage matrix.
+ *
+ * Returns: [{ stageId, stageValue, sortOrder, documents: [
+ *   { key, name, requiresSignature, signerRole, documentTemplateId } ] }]
+ * ordered by stage sort order, containing only stages that have documents.
+ */
+export async function loadStageDocumentRequirements({ object = 'opportunities', recordTypeId }) {
+  if (!recordTypeId) return []
+  // 1) the stages assigned to this record type
+  const { data: assignments, error: aErr } = await supabase
+    .from('picklist_value_record_type_assignments')
+    .select('pvrta_picklist_value_id, stage:pvrta_picklist_value_id ( id, picklist_value, picklist_field, picklist_object, picklist_sort_order )')
+    .eq('pvrta_record_type_id', recordTypeId)
+  if (aErr) {
+    // eslint-disable-next-line no-console
+    console.warn('loadStageDocumentRequirements: stage lookup failed:', aErr.message)
+    return []
+  }
+  const stages = (assignments || [])
+    .map(a => a.stage)
+    .filter(s => s && s.picklist_object === object && s.picklist_field?.endsWith('stage'))
+  if (!stages.length) return []
+
+  // 2) the document requirements sitting on those stages
+  const { data: reqs, error: rErr } = await supabase
+    .from('stage_document_requirements')
+    .select('sdr_stage_value_id, sdr_name, sdr_document_key, sdr_document_template_id, sdr_requires_signature, sdr_signer_role, sdr_sort_order')
+    .eq('sdr_object', object)
+    .eq('sdr_is_deleted', false)
+    .eq('sdr_is_active', true)
+    .in('sdr_stage_value_id', stages.map(s => s.id))
+  if (rErr) {
+    // eslint-disable-next-line no-console
+    console.warn('loadStageDocumentRequirements: requirement lookup failed:', rErr.message)
+    return []
+  }
+
+  const byStage = new Map()
+  for (const s of stages) byStage.set(s.id, {
+    stageId: s.id, stageValue: s.picklist_value, sortOrder: s.picklist_sort_order ?? 0, documents: [],
+  })
+  for (const r of reqs || []) {
+    const entry = byStage.get(r.sdr_stage_value_id)
+    if (!entry) continue
+    entry.documents.push({
+      key: r.sdr_document_key,
+      name: r.sdr_name,
+      requiresSignature: !!r.sdr_requires_signature,
+      signerRole: r.sdr_signer_role || null,
+      documentTemplateId: r.sdr_document_template_id || null,
+      sortOrder: r.sdr_sort_order ?? 100,
+    })
+  }
+  return [...byStage.values()]
+    .filter(s => s.documents.length > 0)
+    .map(s => ({ ...s, documents: s.documents.sort((a, b) => a.sortOrder - b.sortOrder) }))
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+/**
  * Map of opportunity record-type picklist value → picklist_values.id.
  * The submittal registry is keyed by value; the text-block table scopes by id.
  */
@@ -172,7 +238,7 @@ export async function loadPaperworkContext(projectId) {
   if (project.opportunity_id) {
     const { data } = await supabase
       .from('opportunities')
-      .select('id, opportunity_record_number, opportunity_name, opportunity_record_type, recordType:opportunity_record_type ( picklist_value, picklist_label )')
+      .select('id, opportunity_record_number, opportunity_name, opportunity_record_type, opportunity_stage, recordType:opportunity_record_type ( picklist_value, picklist_label ), stage:opportunity_stage ( picklist_value )')
       .eq('id', project.opportunity_id)
       .maybeSingle()
     opportunity = data || null
@@ -242,6 +308,8 @@ export async function loadPaperworkContext(projectId) {
     opportunity,
     programRecordTypeId: opportunity?.opportunity_record_type || null,
     programRecordTypeValue: opportunity?.recordType?.picklist_value || null,
+    currentStageId: opportunity?.opportunity_stage || null,
+    currentStageValue: opportunity?.stage?.picklist_value || null,
     property,
     account,
     contact,
