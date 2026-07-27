@@ -67,6 +67,7 @@ import {
   loadPicklists as loadAllPicklists,
   getCurrentUserId,
   fetchRelatedRecords,
+  resolveLookups,
   reorderJunctionRows,
   fetchPickerCandidates,
   addJunctionRow,
@@ -209,7 +210,7 @@ const TABLE_META = {
   account_contact_relations: { module: 'Enrollment',       label: 'Account Contact Roles',nameColumn: null,                     recordNumberColumn: 'acr_record_number',               statusColumn: null,                       parents: ['account_id', 'contact_id'],                       parentTables: ['accounts', 'contacts'] },
   properties:                { module: 'Enrollment',       label: 'Properties',           nameColumn: 'property_name',          recordNumberColumn: 'property_record_number',          statusColumn: 'property_status',          parents: ['property_account_id'],                            parentTables: ['accounts'] },
   buildings:                 { module: 'Enrollment',       label: 'Buildings',            nameColumn: 'building_name',          recordNumberColumn: 'building_record_number',          statusColumn: 'building_status',          parents: ['property_id'],                                    parentTables: ['properties'] },
-  units:                     { module: 'Enrollment',       label: 'Units',                nameColumn: 'unit_name',              recordNumberColumn: 'unit_record_number',              statusColumn: 'unit_status',              parents: ['building_id', 'property_id'],                     parentTables: ['buildings', 'properties'] },
+  units:                     { module: 'Enrollment',       label: 'Units',                nameColumn: 'unit_name',              recordNumberColumn: 'unit_record_number',              statusColumn: 'unit_status',              parents: ['building_id'],                                    parentTables: ['buildings'] },
   opportunities:             { module: 'Enrollment',       label: 'Opportunities',        nameColumn: 'opportunity_name',       recordNumberColumn: 'opportunity_record_number',       statusColumn: 'opportunity_status',       parents: ['property_id', 'building_id', 'opportunity_account_id'],          parentTables: ['properties', 'buildings', 'accounts'] },
   opportunity_contact_roles: { module: 'Enrollment',       label: 'Contact Role',         nameColumn: 'ocr_name',               recordNumberColumn: 'ocr_record_number',               statusColumn: null,                       parents: ['opportunity_id', 'contact_id'],                   parentTables: ['opportunities', 'contacts'] },
   opportunity_line_items:    { module: 'Enrollment',       label: 'Opportunity Line Items', nameColumn: 'oli_name',             recordNumberColumn: 'oli_record_number',               statusColumn: null,                       parents: ['opportunity_id'],                                 parentTables: ['opportunities'] },
@@ -3003,7 +3004,7 @@ const tdStyle = { padding: '10px 14px', color: C.textPrimary, verticalAlign: 'mi
 // FieldGroup widget — view mode OR edit mode
 // ---------------------------------------------------------------------------
 
-function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons, onNavigateToRecord, requiredFields, tableName }) {
+function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, onRefreshRecord, recordId, fieldDisabledReasons, onNavigateToRecord, requiredFields, tableName, createRelatedValues }) {
   const fields = widget.widget_config?.fields || []
   if (fields.length === 0) return null
 
@@ -3026,15 +3027,24 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // record a lookup on this record points at (loadRecordDetailData
         // merges them into `record` under the dotted name). Always
         // display-only: they belong to the parent record and are edited
-        // there. Hidden on the create form (no parent linked yet).
+        // there. On the create form the record doesn't exist yet, but the
+        // parent FK is often already chosen (e.g. a new Unit's Building), so
+        // the create-mode resolver (createRelatedValues) supplies the display
+        // value; if the FK isn't picked yet there's nothing to show, so hide.
         if (f.type === 'related_field') {
-          if (isCreate) return null
           const rel = f.related || {}
-          const relRaw = record[f.name]
-          const relDisplay = formatFieldValue(relRaw, {
-            ...f, type: rel.column_type || 'text',
-            lookup_table: rel.lookup_table, lookup_field: rel.lookup_field,
-          }, picklists, lookups)
+          let relRaw
+          let relDisplay
+          if (isCreate) {
+            relDisplay = createRelatedValues?.get?.(f.name)
+            if (relDisplay == null || relDisplay === '') return null
+          } else {
+            relRaw = record[f.name]
+            relDisplay = formatFieldValue(relRaw, {
+              ...f, type: rel.column_type || 'text',
+              lookup_table: rel.lookup_table, lookup_field: rel.lookup_field,
+            }, picklists, lookups)
+          }
           return (
             <div key={f.name} style={{
               padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
@@ -4811,7 +4821,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
 // Section
 // ---------------------------------------------------------------------------
 
-function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes, onNavigateToRecord, requiredFields, activeTab }) {
+function Section({ section, record, picklists, lookups, editing, draft, onChange, allPicklistOpts, allLookupOpts, tableName, onRefreshRecord, recordId, fieldDisabledReasons, hiddenWidgetTypes, onNavigateToRecord, requiredFields, activeTab, createRelatedValues }) {
   const isMobile = useIsMobile()
   // Standing rule: every record-detail section opens EXPANDED. We intentionally
   // ignore section_is_collapsed_by_default for the initial state (the user can
@@ -4868,7 +4878,8 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
           return <FieldGroupWidget key={w.id} widget={w} record={record} picklists={picklists} lookups={lookups}
             editing={editing} draft={draft} onChange={onChange} allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts}
             onRefreshRecord={onRefreshRecord} recordId={recordId} fieldDisabledReasons={fieldDisabledReasons}
-            onNavigateToRecord={onNavigateToRecord} requiredFields={requiredFields} tableName={tableName} />
+            onNavigateToRecord={onNavigateToRecord} requiredFields={requiredFields} tableName={tableName}
+            createRelatedValues={createRelatedValues} />
         }
         if (w.widget_type === 'section_config_editor') {
           return <SectionConfigEditorWidget key={w.id} widget={w} record={record} picklists={picklists}
@@ -4929,6 +4940,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // leaving the breadcrumb flat ("Module / Object") instead of hierarchical.
   // The effect below resolves them from the prefill.
   const [createCrumbLookups, setCreateCrumbLookups] = useState(() => new Map())
+  // Cross-object (related) field display values for CREATE mode. On saved
+  // records loadRecordDetailData resolves these, but on the create form the
+  // record doesn't exist yet — so we resolve them here from the FK the user
+  // has already picked (e.g. a new Unit's Building lookup lets us show its
+  // Property). Map<dottedFieldName, displayString>; recomputed whenever the
+  // relevant FK draft value changes. Display-only; never inserted.
+  const [createRelatedValues, setCreateRelatedValues] = useState(() => new Map())
   // When non-null, we are cloning the current record: same table, insert path,
   // draft pre-populated from the source.
   const [cloneSource, setCloneSource] = useState(null)
@@ -5287,6 +5305,84 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreate, tableName, createCrumbKey])
+
+  // CREATE mode: resolve cross-object (related) field display values from the
+  // FK the user has already chosen. Related fields (type='related_field',
+  // name '<fk_column>.<parent_column>') are read-only reflections of a parent
+  // record — on a saved record loadRecordDetailData fills them in, but on the
+  // create form there's no record yet, so they'd otherwise render blank/hidden
+  // even though the parent FK (e.g. a new Unit's Building) is already picked.
+  // Here we group the layout's related fields by FK column, fetch each parent
+  // row once (RLS-respecting), resolve any lookup-typed parent columns to
+  // their display names, and stash the formatted strings for the renderer.
+  // Keyed on the FK draft values so it re-runs when the user changes the FK.
+  const relatedFieldDefs = useMemo(() => {
+    if (!isCreate || !data?.sections) return []
+    const defs = []
+    for (const sec of data.sections) {
+      for (const w of sec.widgets || []) {
+        if (w.widget_type !== 'field_group' || !w.widget_config?.fields) continue
+        for (const f of w.widget_config.fields) {
+          if (f.type !== 'related_field' || !f.related?.table || !f.related?.column) continue
+          const fk = f.related.fk_column || String(f.name).split('.')[0]
+          if (fk) defs.push({ ...f, __fk: fk })
+        }
+      }
+    }
+    return defs
+  }, [isCreate, data?.sections])
+  const relatedFieldFkKey = relatedFieldDefs.map(f => `${f.__fk}:${draft[f.__fk] || ''}`).join('|')
+  useEffect(() => {
+    if (!isCreate || relatedFieldDefs.length === 0) { setCreateRelatedValues(new Map()); return }
+    // Group by FK column so each parent row is fetched once.
+    const byFk = new Map()
+    for (const f of relatedFieldDefs) {
+      if (!byFk.has(f.__fk)) byFk.set(f.__fk, [])
+      byFk.get(f.__fk).push(f)
+    }
+    let cancelled = false
+    ;(async () => {
+      const out = new Map()
+      const lookupRequests = []
+      const rawByField = new Map()
+      // 1. Fetch parent rows and collect raw parent-column values.
+      await Promise.all([...byFk.entries()].map(async ([fk, fields]) => {
+        const parentId = draft[fk]
+        if (!parentId) return
+        const table = fields[0].related.table
+        const cols = [...new Set(fields.map(f => f.related.column))].join(',')
+        try {
+          const { data: row, error } = await supabase.from(table).select(cols).eq('id', parentId).maybeSingle()
+          if (error || !row) return
+          for (const f of fields) {
+            const raw = row[f.related.column]
+            rawByField.set(f.name, raw)
+            if (raw != null && f.related.column_type === 'lookup' && f.related.lookup_table && f.related.lookup_field) {
+              lookupRequests.push({ lookup_table: f.related.lookup_table, lookup_field: f.related.lookup_field, value: raw })
+            }
+          }
+        } catch { /* leave unresolved — the field simply won't show yet */ }
+      }))
+      // 2. Resolve any lookup-typed parent columns to their display names.
+      let lookups = new Map()
+      try { lookups = await resolveLookups(lookupRequests) } catch { /* best-effort */ }
+      // 3. Format each field the same way the saved-record renderer does.
+      for (const f of relatedFieldDefs) {
+        if (!rawByField.has(f.name)) continue
+        const raw = rawByField.get(f.name)
+        if (raw == null || raw === '') continue
+        const rel = f.related
+        const display = formatFieldValue(raw, {
+          ...f, type: rel.column_type || 'text',
+          lookup_table: rel.lookup_table, lookup_field: rel.lookup_field,
+        }, data?.picklists, lookups)
+        if (display != null && display !== '') out.set(f.name, display)
+      }
+      if (!cancelled) setCreateRelatedValues(out)
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreate, relatedFieldFkKey])
 
   // Select a tab AND push it onto browser history as ?tab=<name> (Salesforce
   // parity: the related-list/Activity view is its own history entry, so the
@@ -6050,6 +6146,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         const userId = await getCurrentUserId()
         const fields = applyInsertDefaults(tableName, { ...draft }, userId)
 
+        // Cross-object (related) field values live under dotted keys — they are
+        // display-only reflections of a parent record's columns and are not
+        // real columns on this table, so they must never reach the insert.
+        for (const k of Object.keys(fields)) if (k.includes('.')) delete fields[k]
+
         // Strip empty string values (convert to null)
         for (const [k, v] of Object.entries(fields)) {
           if (v === '') fields[k] = null
@@ -6684,7 +6785,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
                   fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes}
                   onNavigateToRecord={onNavigateToRecord}
-                  requiredFields={requiredFields} activeTab={activeTab} />
+                  requiredFields={requiredFields} activeTab={activeTab}
+                  createRelatedValues={createRelatedValues} />
                 {cards.map(w => {
                   if (w.widget_type === 'related_list') {
                     // Lock child related_lists when the parent template is
