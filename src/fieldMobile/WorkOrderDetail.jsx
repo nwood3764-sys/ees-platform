@@ -176,6 +176,16 @@ function CheckIcon() {
   )
 }
 
+// Small forward chevron marking a review row as tappable (jumps back to edit).
+function ReviewChevron() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.textMuted}
+      strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
+}
+
 export default function WorkOrderDetail({ woId, navigate }) {
   const [detail, setDetail]   = useState(null)
   const [loading, setLoading] = useState(true)
@@ -1511,6 +1521,51 @@ function fieldSavedString(f) {
   return f.text_value != null ? String(f.text_value) : ''
 }
 
+// Evaluate a calculated field's arithmetic expression (+ - * / and parens) over
+// sibling field values. `resolveVar(name)` returns a finite number or null; any
+// missing input, divide-by-zero, or parse error yields null (nothing to show).
+// A hand-written recursive-descent parser — never eval/Function — so an
+// admin-authored expression can't run arbitrary code.
+function evalCalc(expr, resolveVar) {
+  if (!expr) return null
+  try {
+    const tokens = String(expr).match(/[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|[()+\-*/]/g)
+    if (!tokens || !tokens.length) return null
+    let pos = 0
+    const peek = () => tokens[pos]
+    const eat = () => tokens[pos++]
+    const parseExpr = () => {
+      let v = parseTerm()
+      while (peek() === '+' || peek() === '-') {
+        const op = eat(); const r = parseTerm()
+        if (v == null || r == null) return null
+        v = op === '+' ? v + r : v - r
+      }
+      return v
+    }
+    const parseTerm = () => {
+      let v = parseFactor()
+      while (peek() === '*' || peek() === '/') {
+        const op = eat(); const r = parseFactor()
+        if (v == null || r == null) return null
+        v = op === '*' ? v * r : (r === 0 ? null : v / r)
+      }
+      return v
+    }
+    const parseFactor = () => {
+      const t = peek()
+      if (t === '(') { eat(); const v = parseExpr(); if (peek() === ')') eat(); return v }
+      if (t === '-') { eat(); const v = parseFactor(); return v == null ? null : -v }
+      eat()
+      if (/^[A-Za-z_]/.test(t)) { const rv = resolveVar(t); return (rv == null || !Number.isFinite(rv)) ? null : rv }
+      const n = Number(t)
+      return Number.isFinite(n) ? n : null
+    }
+    const result = parseExpr()
+    return (result == null || !Number.isFinite(result)) ? null : Math.round(result * 100) / 100
+  } catch { return null }
+}
+
 // ─── ScreenFlowCard ──────────────────────────────────────────────────────────
 // A screen-flow work step (e.g. Heating System on the Single-Family Energy
 // Assessment). Rather than inline capture, it renders a compact section card
@@ -1674,12 +1729,33 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const stepPhotos = Array.isArray(live.photos) ? live.photos : []
   const photosOfType = (name) => stepPhotos.filter((p) => (p.photo_type || '') === name)
 
-  // Screen list: [generic photo?] + one per field (a 'photo' field becomes a
-  // photo-capture screen) + review.
+  // Resolve a sibling field's numeric value for a calculated expression —
+  // preferring the unsaved editor value so the review recomputes live.
+  const resolveVar = (name) => {
+    const f = fields.find((x) => x.name === name)
+    if (!f) return null
+    const p = pending[f.field_id]
+    if (p !== undefined && String(p).trim() !== '') {
+      const n = Number(p); return Number.isFinite(n) ? n : null
+    }
+    return f.numeric_value != null ? Number(f.numeric_value) : null
+  }
+  const calcValue = (f) => evalCalc(f.calc, resolveVar)
+
+  // Calculated fields are derived, not captured — they get no input screen.
+  const inputFields = fields.filter((f) => !f.calculated)
+
+  // Screen list: [generic photo?] + one per input field (a 'photo' field
+  // becomes a photo-capture screen) + review.
   const screens = []
   if (photoNeeded) screens.push({ kind: 'photo' })
-  fields.forEach((f) => screens.push({ kind: f.type === 'photo' ? 'photofield' : 'field', field: f }))
+  inputFields.forEach((f) => screens.push({ kind: f.type === 'photo' ? 'photofield' : 'field', field: f }))
   screens.push({ kind: 'review' })
+
+  // From a review row back to the screen that captures it (-1 = no screen,
+  // e.g. a calculated field). The generic photo screen, if any, is index 0.
+  const screenIndexForField = (fid) => screens.findIndex((s) => s.field && s.field.field_id === fid)
+  const jumpTo = (i) => { if (i >= 0) setIdx(i) }
 
   const clampedIdx = Math.min(idx, screens.length - 1)
   const screen = screens[clampedIdx]
@@ -1715,6 +1791,15 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const finish = async () => {
     setBusy(true)
     try {
+      // Persist calculated fields from the values entered this session, so the
+      // derived numbers (e.g. Output Capacity) are stored, not just displayed.
+      for (const f of fields) {
+        if (!f.calculated) continue
+        const v = calcValue(f)
+        if (v == null) continue
+        if (f.numeric_value != null && Number(f.numeric_value) === v) continue
+        try { await saveWorkStepFieldValue(live.work_step_id, f.field_id, String(v)) } catch { /* non-blocking */ }
+      }
       await completeWorkStep(live.work_step_id)
       onCompleted()
     } catch (e) {
@@ -1898,32 +1983,73 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
 
         {screen.kind === 'review' && (
           <div>
-            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 14 }}>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 4 }}>
               Review &amp; save
             </div>
+            <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 14 }}>
+              Tap any row to go back and enter or change its data.
+            </div>
             {photoNeeded && (
-              <div style={{ ...card, padding: '10px 12px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+              <button
+                onClick={() => jumpTo(0)}
+                style={{
+                  ...card, width: '100%', appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                  padding: '10px 12px', marginBottom: 8, display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between', gap: 12, fontSize: 14,
+                }}
+              >
                 <span style={{ color: C.textSecondary }}>Photo</span>
-                <span style={{ fontFamily: MONO, fontWeight: 700, color: photoSatisfied ? C.emeraldMid : C.amber }}>
-                  {photoCount} captured{photoSatisfied ? ' ✓' : ''}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: MONO, fontWeight: 700, color: photoSatisfied ? C.emeraldMid : C.amber }}>
+                    {photoCount} captured{photoSatisfied ? ' ✓' : ''}
+                  </span>
+                  <ReviewChevron />
                 </span>
-              </div>
+              </button>
             )}
             {fields.map((f) => {
               const isPhoto = f.type === 'photo'
               const n = isPhoto ? photosOfType(f.name).length : 0
+
+              // Calculated field: derived, read-only, no screen to jump to.
+              if (f.calculated) {
+                const cv = calcValue(f)
+                return (
+                  <div key={f.field_id} style={{ ...card, padding: '10px 12px', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 14, background: C.cardSecondary }}>
+                    <span style={{ display: 'inline-flex', flexDirection: 'column' }}>
+                      <span style={{ color: C.textSecondary }}>{f.label}</span>
+                      <span style={{ fontSize: 11, color: C.textMuted }}>Calculated automatically</span>
+                    </span>
+                    <span style={{ fontFamily: MONO, fontWeight: 700, textAlign: 'right', color: cv != null ? C.textPrimary : C.textMuted }}>
+                      {cv != null ? `${cv}${f.unit ? ` ${f.unit}` : ''}` : '—'}
+                    </span>
+                  </div>
+                )
+              }
+
               const has = isPhoto ? n > 0 : fieldHasValue(f)
               const val = f.numeric_value ?? f.text_value
               const color = has ? C.textPrimary : (f.required ? C.amber : C.textMuted)
               return (
-                <div key={f.field_id} style={{ ...card, padding: '10px 12px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
+                <button
+                  key={f.field_id}
+                  onClick={() => jumpTo(screenIndexForField(f.field_id))}
+                  style={{
+                    ...card, width: '100%', appearance: 'none', cursor: 'pointer', textAlign: 'left',
+                    padding: '10px 12px', marginBottom: 8, display: 'flex', alignItems: 'center',
+                    justifyContent: 'space-between', gap: 12, fontSize: 14,
+                  }}
+                >
                   <span style={{ color: C.textSecondary }}>{f.label}</span>
-                  <span style={{ fontFamily: MONO, fontWeight: 700, textAlign: 'right', color }}>
-                    {has
-                      ? (isPhoto ? `${n} captured` : `${val}${f.unit ? ` ${f.unit}` : ''}`)
-                      : (f.required ? (isPhoto ? 'photo required' : 'required') : '—')}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontFamily: MONO, fontWeight: 700, textAlign: 'right', color }}>
+                      {has
+                        ? (isPhoto ? `${n} captured` : `${val}${f.unit ? ` ${f.unit}` : ''}`)
+                        : (f.required ? (isPhoto ? 'photo required' : 'required') : '—')}
+                    </span>
+                    <ReviewChevron />
                   </span>
-                </div>
+                </button>
               )
             })}
             {live.evidence_gap && (
