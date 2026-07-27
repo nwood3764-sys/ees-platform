@@ -582,6 +582,7 @@ export async function saveReport({ id, report, filters, groupings, calculatedFie
     rpt_column_groupings: report.rpt_column_groupings || [],
     rpt_runtime_prompts:  report.rpt_runtime_prompts || [],
     rpt_charts:           report.rpt_charts || [],
+    rpt_row_limit:        report.rpt_row_limit || null,
     updated_by:           userId,
   }
 
@@ -657,6 +658,8 @@ export function buildReportDefinition({ report, filters = [], groupings = [], ca
       rgr_sort_by_aggregate: g.sort_by_aggregate || null,
       rgr_show_subtotal:     g.show_subtotal !== false,
       rgr_date_granularity:  g.date_granularity || null,
+      rgr_group_filter_op:   g.group_filter_op || null,
+      rgr_group_filter_value: g.group_filter_value ?? null,
     })),
     calculatedFields: (calculatedFields || []).map((c, idx) => ({
       rcf_label:          c.label,
@@ -793,7 +796,7 @@ async function loadPicklistLabels(pairs) {
   for (const [object, fields] of byObject) {
     const { data, error } = await supabase
       .from('picklist_values')
-      .select('id, picklist_field, picklist_value, picklist_label')
+      .select('id, picklist_field, picklist_value, picklist_label, picklist_sort_order')
       .eq('picklist_object', object)
       .in('picklist_field', Array.from(fields))
     if (error) {
@@ -804,6 +807,9 @@ async function loadPicklistLabels(pairs) {
       map.set(row.id, {
         value: row.picklist_value,
         label: row.picklist_label || row.picklist_value,
+        // Carried so grouped reports can order picklist groups by the
+        // picklist's defined order (Salesforce parity) instead of alphabetically.
+        sort_order: row.picklist_sort_order,
       })
     }
   }
@@ -1449,6 +1455,14 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     data = applyFilterLogic(data, loaded.filters || [], logicExpression, fkLookup, r.rpt_primary_object)
   }
 
+  // Top-N row limit — cap the returned rows after all filtering + sort
+  // (Salesforce "Row Limit"). NULL/0 = no cap.
+  const rowLimit = parseInt(r.rpt_row_limit, 10)
+  if (Number.isFinite(rowLimit) && rowLimit > 0 && data && data.length > rowLimit) {
+    data = data.slice(0, rowLimit)
+    truncated = true
+  }
+
   // Picklist label resolution — second pass. Every field the report renders
   // as a picklist FK gets its label rows batch-fetched: selected columns,
   // row groupings, AND matrix column groupings. Groupings were the gap that
@@ -1517,6 +1531,8 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
       _is_picklist:      isPicklistField(g.rgr_field_name, g.rgr_field_table, g.rgr_field_via_path),
       sort_direction:    g.rgr_sort_direction,
       sort_by_aggregate: g.rgr_sort_by_aggregate,
+      group_filter_op:    g.rgr_group_filter_op,
+      group_filter_value: g.rgr_group_filter_value,
       show_subtotal:     g.rgr_show_subtotal,
       date_granularity:  g.rgr_date_granularity,
     })),

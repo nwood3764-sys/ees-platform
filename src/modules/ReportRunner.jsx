@@ -662,14 +662,26 @@ function bucketDate(value, grain) {
   }
 }
 
+// The raw (unresolved) value at a grouping field — walks via_path but does NOT
+// resolve picklist/FK labels, so a picklist grouping can look its sort order up
+// by the underlying id.
+function rawGroupValue(row, fieldDef) {
+  if (!fieldDef.via_path || fieldDef.via_path.length === 0) return row[fieldDef.name] ?? null
+  let nested = row
+  for (const fk of fieldDef.via_path) { if (!nested) return null; nested = nested[fk] }
+  return nested ? (nested[fieldDef.name] ?? null) : null
+}
+
 function buildGroupTree(rows, columns, groupings, level = 0, ctx = null) {
   if (level >= groupings.length) {
     return { leafRows: rows }
   }
   const g = groupings[level]
   const grain = g.date_granularity || null
+  const isPicklist = !!g._is_picklist && !grain
   const buckets = new Map()      // key → rows
   const sortKeys = new Map()     // key → chronological/lexical sort key
+  const orderKeys = new Map()    // key → picklist sort order (when applicable)
   // The grouping object IS the field descriptor — it carries name, via_path
   // and _is_picklist — so getRowValue resolves picklist and lookup group keys
   // to their labels instead of bucketing on raw UUIDs.
@@ -683,7 +695,16 @@ function buildGroupTree(rows, columns, groupings, level = 0, ctx = null) {
     } else {
       k = raw ?? '(blank)'; sk = k
     }
-    if (!buckets.has(k)) { buckets.set(k, []); sortKeys.set(k, sk) }
+    if (!buckets.has(k)) {
+      buckets.set(k, []); sortKeys.set(k, sk)
+      // Picklist groups order by the picklist's defined sort order (Salesforce
+      // parity) — look up the raw value's sort order from the picklist map.
+      if (isPicklist && ctx?.picklistMap) {
+        const rawId = rawGroupValue(row, fieldDef)
+        const entry = rawId != null ? ctx.picklistMap.get(rawId) : null
+        orderKeys.set(k, entry && entry.sort_order != null ? entry.sort_order : Number.MAX_SAFE_INTEGER)
+      }
+    }
     buckets.get(k).push(row)
   }
 
@@ -692,7 +713,38 @@ function buildGroupTree(rows, columns, groupings, level = 0, ctx = null) {
   const dir = g.sort_direction === 'desc' ? -1 : 1
   const sortBy = g.sort_by_aggregate || 'value'
   const measure = ctx?.measure || { type: 'count', field: null }
-  const entries = Array.from(buckets.entries())
+
+  // HAVING: drop groups whose measure fails the grouping's group filter
+  // (e.g. keep only groups with count >= 5). Applied before sort/render.
+  const havingOk = (groupRows) => {
+    if (!g.group_filter_op || g.group_filter_value == null || g.group_filter_value === '') return true
+    const m = applyMeasure(groupRows, measure, ctx)
+    const target = parseFloat(g.group_filter_value)
+    if (m == null || !Number.isFinite(target)) return true
+    switch (g.group_filter_op) {
+      case 'gt':  return m > target
+      case 'gte': return m >= target
+      case 'lt':  return m < target
+      case 'lte': return m <= target
+      case 'eq':  return m === target
+      case 'ne':  return m !== target
+      default:    return true
+    }
+  }
+
+  // Picklist value-sort follows the picklist order, not the alphabet.
+  if (isPicklist && sortBy === 'value' && orderKeys.size > 0) {
+    const entries = Array.from(buckets.entries()).filter(([, rs]) => havingOk(rs))
+    entries.sort((a, b) => ((orderKeys.get(a[0]) ?? 0) - (orderKeys.get(b[0]) ?? 0)) * dir)
+    return {
+      groupingLevel: level,
+      children: entries.map(([key, group_rows]) => ({
+        value: key, level, rows: group_rows,
+        child: buildGroupTree(group_rows, columns, groupings, level + 1, ctx),
+      })),
+    }
+  }
+  const entries = Array.from(buckets.entries()).filter(([, rs]) => havingOk(rs))
   entries.sort((a, b) => {
     if (sortBy === 'count') return (a[1].length - b[1].length) * dir
     if (sortBy === 'measure') return (applyMeasure(a[1], measure, ctx) - applyMeasure(b[1], measure, ctx)) * dir
