@@ -182,6 +182,7 @@ const TABLE_COLUMN_PREFIX = {
   service_appointments:              'sa',
   service_appointment_assignments:   'saa',
   skills:                            'skill',
+  submittal_document_text_blocks:    'sdtb',
   time_sheets:                       'ts',
   time_sheet_entries:                'tse',
   units:                             'unit',
@@ -648,6 +649,7 @@ const POLY_DISPLAY_COL = {
   document_templates:       'name',
   project_report_templates: 'prt_name',
   skills:                   'skill_name',
+  submittal_document_text_blocks: 'sdtb_name',
 }
 
 /**

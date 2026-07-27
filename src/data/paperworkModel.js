@@ -20,25 +20,50 @@
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// Measure Description Bank — exact program wording (from the workbook), with
-// R-value substitution slots. Text is contractual language; never edit.
+// Document wording.
+//
+// The authoritative copy lives in the `submittal_document_text_blocks` table
+// so it is editable through LEAP Admin without a deploy, and can be overridden
+// per program (per opportunity record type). The constants below are the
+// built-in FALLBACK used when a block is missing — they are byte-identical to
+// the seeded defaults, so behaviour is unchanged if the table is unreachable.
+//
+// Bodies may carry {{baseline_r}} / {{improved_r}} tokens, substituted from
+// the Asset Score reports at render time.
 // ---------------------------------------------------------------------------
-export const MEASURE_DESCRIPTION_BANK = {
-  atticInsulation: baseR => improvedR => [
-`Upgrade existing attic insulation levels from approximately R-${baseR} to R-${improvedR} in accordance with applicable PNNL building science standards and program requirements to improve thermal performance, reduce energy consumption, and enhance occupant comfort. Work will include preparation of attic areas to support proper airflow, insulation depth consistency, and long-term system performance.`,
+export const DEFAULT_TEXT_BLOCKS = Object.freeze({
+  'measure.attic_insulation': [
+`Upgrade existing attic insulation levels from approximately R-{{baseline_r}} to R-{{improved_r}} in accordance with applicable PNNL building science standards and program requirements to improve thermal performance, reduce energy consumption, and enhance occupant comfort. Work will include preparation of attic areas to support proper airflow, insulation depth consistency, and long-term system performance.`,
 `Install eave baffles with 48-inch extensions in each accessible attic bay to maintain ventilation pathways and allow full insulation coverage above exterior wall top plates.`,
 `Install insulation rulers in each attic bay on both sides to verify uniform insulation depth and ensure consistent installed R-values throughout the attic plane.`,
-`Install blown-in fiberglass insulation to achieve a minimum final attic insulation value of R-${improvedR} across all accessible attic areas.`,
+`Install blown-in fiberglass insulation to achieve a minimum final attic insulation value of R-{{improved_r}} across all accessible attic areas.`,
 `Custom build and install insulated attic access hatches including insulation damming, insulated access covers, and weatherstripping to minimize thermal bypass and air leakage.`,
 `All insulation materials and installation methods will comply with applicable code requirements, manufacturer specifications, and accepted energy efficiency best practices.`].join('\n\n'),
-  atticAirSealing: baseR => [
-`Perform attic air sealing to reduce uncontrolled air leakage between conditioned spaces and unconditioned attic areas in accordance with PNNL air barrier and weatherization best practices. Removal and disposal of existing R-${baseR} insulation material will prepare the attic space for proper air sealing. Air sealing work will be completed prior to insulation installation to maximize thermal effectiveness and moisture control performance.`,
+  'measure.attic_air_sealing': [
+`Perform attic air sealing to reduce uncontrolled air leakage between conditioned spaces and unconditioned attic areas in accordance with PNNL air barrier and weatherization best practices. Removal and disposal of existing R-{{baseline_r}} insulation material will prepare the attic space for proper air sealing. Air sealing work will be completed prior to insulation installation to maximize thermal effectiveness and moisture control performance.`,
 `Scope of work includes identification and sealing of accessible air leakage pathways including, but not limited to:`,
 `Plumbing penetrations\nElectrical penetrations\nTop plates\nMechanical and duct penetrations\nSoffits and open chases\nAttic access openings\nMiscellaneous bypasses and framing gaps\nFabricated isolation boxes for exhaust fans and recessed lights`,
 `Approved sealants, foam products, sheet materials, and weatherstripping will be utilized as appropriate for each application to improve building envelope tightness, reduce heating and cooling loads, and improve overall occupant comfort and building durability.`].join('\n\n'),
-  bathAerators: 'Installation of low flow faucet aerators in tenant bathrooms for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
-  kitchenAerators: 'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
-  showerheads: 'Installation of low flow handheld showerheads in tenant bathrooms for water and energy savings. Model: Niagara Earth Handheld Showerhead N2945CH',
+  'measure.bath_aerators': 'Installation of low flow faucet aerators in tenant bathrooms for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
+  'measure.kitchen_aerators': 'Installation of low flow faucet aerators in tenant kitchens for water and energy savings. Model: Niagara 0.5 GPM Aerator N3205N',
+  'measure.showerheads': 'Installation of low flow handheld showerheads in tenant bathrooms for water and energy savings. Model: Niagara Earth Handheld Showerhead N2945CH',
+  'acknowledgment.invoice': 'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes EES-WI to submit for and receive the corresponding program incentive on their behalf.',
+  'acknowledgment.proposal': 'Signed receipt of this proposal constitutes acceptance of the proposed scope of work. The property owner authorizes EES-WI to submit the project for rebate/incentive program preapproval and to begin project planning activities.',
+  'title.proposal': 'Wisconsin Inflation Reduction Act HOMES Program Project Proposal',
+  'header.company_name': 'ENERGY EFFICIENCY SERVICES of WISCONSIN',
+  'footer.company_line': 'Energy Efficiency Services of Wisconsin  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',
+  'footer.contact_line': 'ira@ees-wi.org  |  608-460-7419',
+})
+
+/**
+ * Resolve one wording block: the loaded table row if present, otherwise the
+ * built-in default, with {{token}} substitution applied.
+ */
+export function resolveTextBlock(textBlocks, key, tokens) {
+  const raw = (textBlocks && textBlocks[key]) || DEFAULT_TEXT_BLOCKS[key] || ''
+  if (!tokens) return raw
+  return String(raw).replace(/\{\{(\w+)\}\}/g, (m, t) =>
+    (tokens[t] != null ? String(tokens[t]) : m))
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +145,7 @@ export function parseAssetScoreText(t) {
 //   fields          — document text fields (owner/property/contact/dates);
 //                     carried through untouched onto the model
 // ---------------------------------------------------------------------------
-export function buildPaperworkModel({ units, assetScoreBase, assetScoreImp, includeAttic, fields }) {
+export function buildPaperworkModel({ units, assetScoreBase, assetScoreImp, includeAttic, fields, textBlocks }) {
   const asB = assetScoreBase, asI = assetScoreImp
   // Attic sq ft: straight from the Asset Score report's roof area — the audit
   // reports are the source of record for every quantity; no manual inputs.
@@ -152,19 +177,23 @@ export function buildPaperworkModel({ units, assetScoreBase, assetScoreImp, incl
   const foeAmt = foe ? foe.amt : 0
   const total = Math.round((homesAmt + foeAmt) * 100) / 100
   // Measure lines: breakout fractions × total, largest row absorbs the drift.
-  const BANK = MEASURE_DESCRIPTION_BANK
+  // Descriptions come from the text-block table (program-overridable), falling
+  // back to the built-in defaults.
+  const rTokens = {
+    baseline_r: fmtR(baseAtticR != null ? baseAtticR : 0),
+    improved_r: fmtR(iMin),
+  }
+  const text = (key) => resolveTextBlock(textBlocks, key, rTokens)
   const rows = []
   const push = (name, frac, qty, unit, desc) =>
     rows.push({ name, frac, qty, unit, desc, cost: Math.round(total * frac * 100) / 100 })
   if (hasAttic) {
-    push('Attic Insulation', 0.44, roofSqFt, 'Sq Ft',
-      BANK.atticInsulation(fmtR(baseAtticR != null ? baseAtticR : 0))(fmtR(iMin)))
-    push('Attic Air Sealing', 0.5483, roofSqFt, 'Sq Ft',
-      BANK.atticAirSealing(fmtR(baseAtticR != null ? baseAtticR : 0)))
+    push('Attic Insulation', 0.44, roofSqFt, 'Sq Ft', text('measure.attic_insulation'))
+    push('Attic Air Sealing', 0.5483, roofSqFt, 'Sq Ft', text('measure.attic_air_sealing'))
   }
-  push('Low Flow Devices: Bath Aerators', 0.0033, units, 'Unit', BANK.bathAerators)
-  push('Low Flow Devices: Kitchen Aerators', 0.0035, units, 'Unit', BANK.kitchenAerators)
-  push('Low Flow Devices: Showerheads', 0.0049, units, 'Unit', BANK.showerheads)
+  push('Low Flow Devices: Bath Aerators', 0.0033, units, 'Unit', text('measure.bath_aerators'))
+  push('Low Flow Devices: Kitchen Aerators', 0.0035, units, 'Unit', text('measure.kitchen_aerators'))
+  push('Low Flow Devices: Showerheads', 0.0049, units, 'Unit', text('measure.showerheads'))
   // renormalize when attic rows are absent, then reconcile to the exact total
   const fracSum = rows.reduce((a, r) => a + r.frac, 0)
   if (Math.abs(fracSum - 1) > 1e-6 && fracSum > 0)
@@ -176,7 +205,7 @@ export function buildPaperworkModel({ units, assetScoreBase, assetScoreImp, incl
     rows[mx].cost = Math.round((rows[mx].cost + drift) * 100) / 100
   }
   return { units, roofSqFt, baseAtticR, iMin, savings, tier, homesAmt, foe, foeAmt, total, rows,
-    fields: fields || {} }
+    fields: fields || {}, textBlocks: textBlocks || null }
 }
 
 // ---------------------------------------------------------------------------
@@ -224,15 +253,17 @@ export async function buildEesPdf(m, kind) {
   const pv = v => (v != null && String(v).trim() !== '') ? String(v) : '—'
   const GL = [203, 210, 219], HB = [240, 243, 247]       // grid line + header fill
   const AMT = W - M - 6                                   // every dollar figure shares this right edge
+  // Wording from the text-block table (program-overridable), default fallback.
+  const text = (key) => resolveTextBlock(m.textBlocks, key)
   /* ---- header ---- */
-  tc(C.navy); font(10.5, 'bold'); t(M, st.y + 15, 'ENERGY EFFICIENCY SERVICES of WISCONSIN')
+  tc(C.navy); font(10.5, 'bold'); t(M, st.y + 15, text('header.company_name'))
   if (isAudit || isInv) {
     tc([150, 160, 174]); font(10.5, 'bold'); t(W - M, st.y + 15, 'INVOICE', { align: 'right' })
     st.y += 21
   } else {
     st.y += 21
     tc([104, 116, 132]); font(10.5, 'bold')
-    t(W / 2, st.y + 11, 'Wisconsin Inflation Reduction Act HOMES Program Project Proposal', { align: 'center' })
+    t(W / 2, st.y + 11, text('title.proposal'), { align: 'center' })
     st.y += 16
   }
   stroke([150, 160, 174]); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 12
@@ -398,8 +429,8 @@ export async function buildEesPdf(m, kind) {
   /* ---- acknowledgment + signature ---- */
   head('Acknowledgment & Acceptance', 10)
   const ack = (isAudit || isInv)
-    ? 'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes EES-WI to submit for and receive the corresponding program incentive on their behalf.'
-    : 'Signed receipt of this proposal constitutes acceptance of the proposed scope of work. The property owner authorizes EES-WI to submit the project for rebate/incentive program preapproval and to begin project planning activities.'
+    ? text('acknowledgment.invoice')
+    : text('acknowledgment.proposal')
   { const al = wrap(ack, CW); need(al.length * 10 + 6); tc(C.ink); font(9)
     al.forEach((ln, k) => t(M, st.y + 9 + k * 10, ln)); st.y += al.length * 10 + 4 }
   need(46); st.y += 28; stroke([68, 88, 110]); d.setLineWidth(1)
@@ -411,8 +442,8 @@ export async function buildEesPdf(m, kind) {
   if (st.y > fy - 10) d.addPage()
   stroke(C.line); d.setLineWidth(.5); d.line(M, fy, W - M, fy)
   tc(C.mut); font(8.5)
-  t(W / 2, fy + 12, 'Energy Efficiency Services of Wisconsin  |  112 Owen Rd. PO Box 6141, Monona, WI 53716', { align: 'center' })
-  font(8, 'italic'); t(W / 2, fy + 23, 'ira@ees-wi.org  |  608-460-7419', { align: 'center' })
+  t(W / 2, fy + 12, text('footer.company_line'), { align: 'center' })
+  font(8, 'italic'); t(W / 2, fy + 23, text('footer.contact_line'), { align: 'center' })
   return d.output('blob')
 }
 

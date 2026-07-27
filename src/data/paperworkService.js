@@ -18,6 +18,63 @@
 import { supabase } from '../lib/supabase'
 import { parseAssetScoreText, fillPaperworkWorkbook } from './paperworkModel'
 
+/**
+ * Map of opportunity record-type picklist value → picklist_values.id.
+ * The submittal registry is keyed by value; the text-block table scopes by id.
+ */
+export async function loadOpportunityRecordTypeMap() {
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('id, picklist_value')
+    .eq('picklist_object', 'opportunities')
+    .eq('picklist_field', 'record_type')
+    .eq('picklist_is_active', true)
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn('loadOpportunityRecordTypeMap failed:', error.message)
+    return {}
+  }
+  const map = {}
+  for (const row of data || []) map[row.picklist_value] = row.id
+  return map
+}
+
+/**
+ * Load the document wording for a program, as a {key: body} map.
+ *
+ * Rows scoped to the given opportunity record type override the global
+ * defaults (rows with a NULL record type) key by key. Returns an empty object
+ * on any failure so the renderer falls back to its built-in defaults rather
+ * than producing a blank document.
+ */
+export async function loadSubmittalTextBlocks(opportunityRecordTypeId = null) {
+  try {
+    let query = supabase
+      .from('submittal_document_text_blocks')
+      .select('sdtb_key, sdtb_body, sdtb_opportunity_record_type')
+      .eq('sdtb_is_deleted', false)
+      .eq('sdtb_is_active', true)
+    query = opportunityRecordTypeId
+      ? query.or(`sdtb_opportunity_record_type.is.null,sdtb_opportunity_record_type.eq.${opportunityRecordTypeId}`)
+      : query.is('sdtb_opportunity_record_type', null)
+    const { data, error } = await query
+    if (error) throw new Error(error.message)
+    const blocks = {}
+    // Defaults first, then the program-scoped rows overwrite them.
+    for (const row of data || []) {
+      if (!row.sdtb_opportunity_record_type) blocks[row.sdtb_key] = row.sdtb_body
+    }
+    for (const row of data || []) {
+      if (row.sdtb_opportunity_record_type) blocks[row.sdtb_key] = row.sdtb_body
+    }
+    return blocks
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('loadSubmittalTextBlocks failed; using built-in wording:', e.message)
+    return {}
+  }
+}
+
 // pdf.js from CDN at runtime — same pattern (and same pinned version) as the
 // signing portal's PDF preview (src/pages/SigningPortal.jsx), which is the
 // established, prod-verified way this app does pdf.js without bundling it.
@@ -97,6 +154,7 @@ export async function loadPaperworkContext(projectId) {
     .from('projects')
     .select(`
       id, project_record_number, project_name, property_id, project_account_id,
+      opportunity_id,
       project_start_date, project_completion_date,
       project_installation_completion_date,
       project_project_implementation_start_date,
@@ -106,6 +164,19 @@ export async function loadPaperworkContext(projectId) {
     .maybeSingle()
   if (pErr) throw new Error(pErr.message)
   if (!project) throw new Error('Project not found')
+
+  // The opportunity carries the PROGRAM (its record type is the program
+  // identifier — WI-IRA-MF-HOMES, NC-IRA-MF-HOMES-AUDIT, …), which selects
+  // both the submittal's document set and any program-specific wording.
+  let opportunity = null
+  if (project.opportunity_id) {
+    const { data } = await supabase
+      .from('opportunities')
+      .select('id, opportunity_record_number, opportunity_name, opportunity_record_type, recordType:opportunity_record_type ( picklist_value, picklist_label )')
+      .eq('id', project.opportunity_id)
+      .maybeSingle()
+    opportunity = data || null
+  }
 
   let property = null
   if (project.property_id) {
@@ -168,6 +239,9 @@ export async function loadPaperworkContext(projectId) {
 
   return {
     project,
+    opportunity,
+    programRecordTypeId: opportunity?.opportunity_record_type || null,
+    programRecordTypeValue: opportunity?.recordType?.picklist_value || null,
     property,
     account,
     contact,
