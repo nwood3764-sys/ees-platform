@@ -11,8 +11,13 @@
 //   • Personal — list_view_user_id = me, is_shared = false, role_id = null
 //   • Role     — list_view_role_id = <role>, is_shared = false
 //   • Shared   — is_shared = true (visible to everyone)
-//   • Default  — list_view_is_default = true; at most one default per
-//                (object) for a given user is enforced client-side on save.
+//   • Default  — one row per (user, object) in list_view_user_defaults
+//                pointing at the user's chosen saved view. The default is a
+//                property of the USER, never of the view row itself — the old
+//                saved_list_views.list_view_is_default flag is deprecated
+//                (it lived on shared rows, so one user's default changed
+//                everyone's, and stale flags on rows owned by other user
+//                records could never be cleared — the "two stars" bug).
 //
 // System views are defined per-module as in-code constants. To let users
 // edit them, an edited system view is persisted as a saved row carrying the
@@ -52,17 +57,20 @@ export async function fetchSavedViewsForObject(objectName) {
     getCurrentRoleId().catch(() => null),
   ])
 
-  const { data, error } = await supabase
-    .from('saved_list_views')
-    .select(`
-      id, list_view_name, list_view_object, list_view_module,
-      list_view_user_id, list_view_role_id, list_view_is_shared,
-      list_view_is_default, list_view_sort_field, list_view_sort_direction,
-      list_view_visible_columns, list_view_filters, list_view_owner
-    `)
-    .eq('list_view_object', objectName)
-    .eq('is_deleted', false)
-    .order('list_view_name', { ascending: true })
+  const [{ data, error }, defaultViewId] = await Promise.all([
+    supabase
+      .from('saved_list_views')
+      .select(`
+        id, list_view_name, list_view_object, list_view_module,
+        list_view_user_id, list_view_role_id, list_view_is_shared,
+        list_view_sort_field, list_view_sort_direction,
+        list_view_visible_columns, list_view_filters, list_view_owner
+      `)
+      .eq('list_view_object', objectName)
+      .eq('is_deleted', false)
+      .order('list_view_name', { ascending: true }),
+    fetchDefaultViewId(objectName, userId),
+  ])
 
   if (error) throw error
 
@@ -72,11 +80,30 @@ export async function fetchSavedViewsForObject(objectName) {
     (roleId && r.list_view_role_id === roleId)
   )
 
-  return rows.map(toSelectorView)
+  return rows.map(r => toSelectorView(r, defaultViewId))
 }
 
-// Map a DB row to the shape the ListView selector expects.
-function toSelectorView(r) {
+// The current user's default view id for this object, from the per-user
+// pointer table. RLS already limits rows to the current user; the explicit
+// user filter keeps the query self-documenting. Null when no default is set.
+async function fetchDefaultViewId(objectName, userId) {
+  if (!userId) return null
+  try {
+    const { data } = await supabase
+      .from('list_view_user_defaults')
+      .select('saved_list_view_id')
+      .eq('list_view_default_user_id', userId)
+      .eq('list_view_default_object', objectName)
+      .maybeSingle()
+    return data?.saved_list_view_id || null
+  } catch {
+    return null
+  }
+}
+
+// Map a DB row to the shape the ListView selector expects. isDefault is
+// per-user: true only when the row is THIS user's pinned default.
+function toSelectorView(r, defaultViewId) {
   // list_view_filters stores both the filter array and optional meta. We keep
   // backward-compat: if it's a plain array, treat it as filters; if it's an
   // object { filters, __system_base }, unpack.
@@ -99,7 +126,7 @@ function toSelectorView(r) {
     sortField: r.list_view_sort_field || null,
     sortDir: r.list_view_sort_direction || 'asc',
     visibleColumns: Array.isArray(r.list_view_visible_columns) ? r.list_view_visible_columns : null,
-    isDefault: r.list_view_is_default === true,
+    isDefault: Boolean(defaultViewId) && r.id === defaultViewId,
     scope,
     roleId: r.list_view_role_id || null,
     systemBase,
@@ -128,7 +155,6 @@ export async function createSavedView(opts) {
     list_view_user_id: opts.scope === 'personal' ? userId : null,
     list_view_role_id: roleId,
     list_view_is_shared: opts.scope === 'shared',
-    list_view_is_default: !!opts.isDefault,
     list_view_sort_field: opts.sortField || null,
     list_view_sort_direction: opts.sortDir || 'asc',
     list_view_visible_columns: opts.visibleColumns || null,
@@ -137,11 +163,10 @@ export async function createSavedView(opts) {
     list_view_created_by: userId,
   }
 
-  if (opts.isDefault) await clearDefaultFor(opts.object, userId)
-
   const { data, error } = await supabase
     .from('saved_list_views').insert(row).select('id').single()
   if (error) throw error
+  if (opts.isDefault) await setDefaultViewForObject(opts.object, data.id)
   return data.id
 }
 
@@ -166,36 +191,67 @@ export async function updateSavedView(id, opts) {
     patch.list_view_role_id   = opts.scope === 'role' ? (opts.roleId || await getCurrentRoleId()) : null
     patch.list_view_user_id   = opts.scope === 'personal' ? userId : null
   }
-  if (opts.isDefault !== undefined) {
-    patch.list_view_is_default = !!opts.isDefault
-    if (opts.isDefault && opts.object) await clearDefaultFor(opts.object, userId)
+  if (Object.keys(patch).length > 0) {
+    const { error } = await supabase.from('saved_list_views').update(patch).eq('id', id)
+    if (error) throw error
   }
 
-  const { error } = await supabase.from('saved_list_views').update(patch).eq('id', id)
-  if (error) throw error
+  // Default is a per-user pointer, not a row column: setting it pins this view
+  // for the current user only; unsetting removes the pin only if it points here.
+  if (opts.isDefault === true && opts.object) {
+    await setDefaultViewForObject(opts.object, id)
+  } else if (opts.isDefault === false && opts.object) {
+    await clearDefaultViewForObject(opts.object, id)
+  }
 }
 
 // Soft-delete a saved view. A deletion_reason is required by the data
-// standards; we supply a default for user-initiated deletes.
+// standards; we supply a default for user-initiated deletes. The current
+// user's default pin is dropped if it pointed at the deleted view (other
+// users' pins simply resolve to nothing until they pick a new default).
 export async function deleteSavedView(id) {
   const { error } = await supabase
     .from('saved_list_views')
     .update({ is_deleted: true, deletion_reason: 'Deleted by user from list view selector' })
     .eq('id', id)
   if (error) throw error
+  try {
+    const userId = await getCurrentUserId()
+    await supabase
+      .from('list_view_user_defaults')
+      .delete()
+      .eq('list_view_default_user_id', userId)
+      .eq('saved_list_view_id', id)
+  } catch { /* non-fatal: a dangling pin is ignored on load */ }
 }
 
-// Clear any existing default for this object owned by this user, so a newly
-// set default is the only one. Best-effort; failure here is non-fatal to the
-// save itself (the new row still gets is_default=true).
-async function clearDefaultFor(objectName, userId) {
-  try {
-    await supabase
-      .from('saved_list_views')
-      .update({ list_view_is_default: false })
-      .eq('list_view_object', objectName)
-      .eq('list_view_owner', userId)
-      .eq('list_view_is_default', true)
-      .eq('is_deleted', false)
-  } catch { /* non-fatal */ }
+// Pin a saved view as the current user's default for an object. The unique
+// constraint on (user, object) makes this a true replace: whatever was the
+// default before — including a view owned by someone else — stops being it.
+export async function setDefaultViewForObject(objectName, savedViewId) {
+  const userId = await getCurrentUserId()
+  const { error } = await supabase
+    .from('list_view_user_defaults')
+    .upsert({
+      list_view_default_user_id: userId,
+      list_view_default_object: objectName,
+      saved_list_view_id: savedViewId,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'list_view_default_user_id,list_view_default_object' })
+  if (error) throw error
+}
+
+// Remove the current user's default for an object. When savedViewId is given,
+// only clears if the pin currently points at that view (used when un-toggling
+// "Make this my default view" on a specific view).
+export async function clearDefaultViewForObject(objectName, savedViewId = null) {
+  const userId = await getCurrentUserId()
+  let q = supabase
+    .from('list_view_user_defaults')
+    .delete()
+    .eq('list_view_default_user_id', userId)
+    .eq('list_view_default_object', objectName)
+  if (savedViewId) q = q.eq('saved_list_view_id', savedViewId)
+  const { error } = await q
+  if (error) throw error
 }

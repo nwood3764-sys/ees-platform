@@ -487,7 +487,7 @@ export async function fetchSavedListViews() {
       list_view_object, list_view_module,
       list_view_user_id, list_view_role_id,
       list_view_owner,
-      list_view_is_default, list_view_is_shared,
+      list_view_is_shared,
       list_view_sort_field, list_view_sort_direction,
       list_view_visible_columns, list_view_filters,
       updated_at
@@ -519,6 +519,15 @@ export async function fetchSavedListViews() {
     roleNames = Object.fromEntries((roles || []).map(r => [r.id, r.role_name]))
   }
 
+  // Defaults are per-user pointers in list_view_user_defaults (RLS scopes the
+  // query to the viewer's own rows), so the column reads "My Default".
+  let myDefaultViewIds = new Set()
+  try {
+    const { data: defs } = await supabase
+      .from('list_view_user_defaults').select('saved_list_view_id')
+    myDefaultViewIds = new Set((defs || []).map(d => d.saved_list_view_id))
+  } catch { /* column simply shows No if the fetch fails */ }
+
   return rows.map(r => {
     // Scope label: shared (everyone), role-scoped, user-scoped, or "owner only"
     let scope = 'Personal'
@@ -544,7 +553,7 @@ export async function fetchSavedListViews() {
       object: r.list_view_object || '',
       module: r.list_view_module || '',
       scope,
-      isDefault: r.list_view_is_default ? 'Yes' : 'No',
+      isDefault: myDefaultViewIds.has(r.id) ? 'Yes' : 'No',
       sort: r.list_view_sort_field
         ? `${r.list_view_sort_field} ${r.list_view_sort_direction === 'asc' ? '↑' : '↓'}`
         : '—',

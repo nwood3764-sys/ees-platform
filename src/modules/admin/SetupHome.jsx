@@ -1356,7 +1356,7 @@ const LV_COLS = [
   { field: 'object',        label: 'Object',     type: 'text',   sortable: true, filterable: true },
   { field: 'module',        label: 'Module',     type: 'text',   sortable: true, filterable: true },
   { field: 'scope',         label: 'Scope',      type: 'text',   sortable: true, filterable: true },
-  { field: 'isDefault',     label: 'Default',    type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'] },
+  { field: 'isDefault',     label: 'My Default', type: 'select', sortable: true, filterable: true, options: ['Yes', 'No'] },
   { field: 'sort',          label: 'Sort',       type: 'text',   sortable: false, filterable: false },
   { field: 'columnsCount',  label: 'Columns',    type: 'text',   sortable: true, filterable: false },
   { field: 'filtersCount',  label: 'Filters',    type: 'text',   sortable: true, filterable: false },

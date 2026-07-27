@@ -198,6 +198,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
       onActiveRelatedFieldsChange={handleActiveRelatedChange}
       systemViews={effectiveViews}
       defaultViewId={drillView ? '__drill__' : undefined}
+      applyDefaultViewOnLoad={!drillView}
       listObject={objectTable}
       listModule={moduleId}
       onRefresh={load}
