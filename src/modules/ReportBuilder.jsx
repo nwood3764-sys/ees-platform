@@ -1918,16 +1918,41 @@ function CalcFieldsTab({ calculatedFields, setCalculatedFields, report }) {
               <Suspense fallback={<div style={{ fontSize:12, color:C.textMuted, padding:'8px 0' }}>Loading editor…</div>}>
                 <FormulaEditor
                   value={c.expression}
-                  fields={fieldNames}
+                  fields={c.scope === 'summary' ? summaryIdentifiers(fieldNames) : fieldNames}
                   onChange={(expr) => update(idx, { expression: expr })}
                 />
               </Suspense>
+              {c.scope === 'summary' && (
+                <div style={{ fontSize:11, color:C.textMuted, marginTop:8, lineHeight:1.5 }}>
+                  Summary formulas run per group. Reference aggregates as
+                  {' '}<code>SUM_field</code>, <code>AVG_field</code>, <code>COUNT_field</code>,
+                  {' '}<code>MIN_field</code>, <code>MAX_field</code>. Compare across groups with:
+                  <div style={{ marginTop:4 }}>
+                    • <code>GRAND_SUM_field</code> — grand total (for <strong>% of total</strong>: <code>SUM_amount / GRAND_SUM_amount * 100</code>)<br/>
+                    • <code>PARENT_SUM_field</code> — the parent group (for <strong>% of parent</strong>)<br/>
+                    • <code>PREV_SUM_field</code> — the previous group (for <strong>period-over-period</strong>: <code>SUM_amount - PREV_SUM_amount</code>)
+                  </div>
+                </div>
+              )}
             </div>
           ))
         )}
       </div>
     </div>
   )
+}
+
+// The identifier catalog offered to the summary-formula editor: each numeric
+// column exposed as SUM_/AVG_/COUNT_/MIN_/MAX_ plus PARENT_/PREV_/GRAND_
+// variants for cross-group comparison.
+function summaryIdentifiers(fieldNames) {
+  const aggs = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX']
+  const prefixes = ['', 'PARENT_', 'PREV_', 'GRAND_']
+  const out = []
+  for (const f of fieldNames) {
+    for (const p of prefixes) for (const a of aggs) out.push(`${p}${a}_${f}`)
+  }
+  return out
 }
 
 // ─── Settings tab ─────────────────────────────────────────────────────────

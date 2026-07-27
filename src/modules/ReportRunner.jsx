@@ -601,6 +601,7 @@ export function SummaryLayout({ result }) {
             nodes={tree} columns={columns} groupings={groupings} depth={0}
             ctx={result} summaryCalcFields={summaryCalcFields}
             aggregableColumnNames={aggregableColumnNames}
+            parentRows={rows} grandRows={rows}
           />
           <SummaryTotalRow
             rows={rows} columns={columns}
@@ -712,7 +713,7 @@ function buildGroupTree(rows, columns, groupings, level = 0, ctx = null) {
   }
 }
 
-function SummaryTreeRows({ nodes, columns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames }) {
+function SummaryTreeRows({ nodes, columns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames, parentRows, grandRows }) {
   if (!nodes.children) {
     return nodes.leafRows.map((row, idx) => (
       <tr key={`leaf-${idx}`} style={{ borderTop:`1px solid ${C.border}` }}>
@@ -730,11 +731,17 @@ function SummaryTreeRows({ nodes, columns, groupings, depth, ctx, summaryCalcFie
       node={node} columns={columns} groupings={groupings} depth={depth}
       ctx={ctx} summaryCalcFields={summaryCalcFields}
       aggregableColumnNames={aggregableColumnNames}
+      // Group-formula context: the previous peer group's rows (for prior-group
+      // delta), this level's parent rows (for % of parent), and the grand-total
+      // rows (for % of total).
+      prevRows={ni > 0 ? nodes.children[ni - 1].rows : null}
+      parentRows={parentRows}
+      grandRows={grandRows}
     />
   ))
 }
 
-function SummaryGroupNode({ node, columns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames }) {
+function SummaryGroupNode({ node, columns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames, prevRows, parentRows, grandRows }) {
   const grouping = groupings[depth]
   const showSubtotal = grouping.show_subtotal !== false
   return (
@@ -748,6 +755,7 @@ function SummaryGroupNode({ node, columns, groupings, depth, ctx, summaryCalcFie
         nodes={node.child} columns={columns} groupings={groupings} depth={depth + 1}
         ctx={ctx} summaryCalcFields={summaryCalcFields}
         aggregableColumnNames={aggregableColumnNames}
+        parentRows={node.rows} grandRows={grandRows}
       />
       {showSubtotal && (
         <SummarySubtotalRow
@@ -755,6 +763,7 @@ function SummaryGroupNode({ node, columns, groupings, depth, ctx, summaryCalcFie
           columns={columns} depth={depth} ctx={ctx}
           summaryCalcFields={summaryCalcFields}
           aggregableColumnNames={aggregableColumnNames}
+          prevRows={prevRows} parentRows={parentRows} grandRows={grandRows}
           // Per-grouping-level calc fields: only render those with no
           // grouping_level filter, OR those whose grouping_level matches.
           gradeLevel={depth + 1}
@@ -788,18 +797,32 @@ function summarizeColumnValue(col, resolvedRows) {
   return `${tag} ${formatCellValue(val, col.type)}`
 }
 
+// Rename an aggregate scope's keys with a prefix (SUM_x → PARENT_SUM_x) so a
+// summary formula can reference parent/previous/grand-total aggregates.
+function prefixAggs(aggs, prefix) {
+  const out = {}
+  for (const k of Object.keys(aggs)) out[`${prefix}${k}`] = aggs[k]
+  return out
+}
+
 // Build the column-aligned cells for a subtotal / grand-total row: cell 0 is
 // the label; each other column shows its own per-column summarize aggregate;
 // summary calc-field values drop into the remaining empty rightmost cells so
-// existing summary-formula reports keep working.
-function summaryRowCells({ label, rows, columns, ctx, calcFields, aggregableColumnNames, bold }) {
+// existing summary-formula reports keep working. Group formulas can reference
+// PARENT_/PREV_/GRAND_-prefixed aggregates for % of total, % of parent, and
+// prior-group delta.
+function summaryRowCells({ label, rows, columns, ctx, calcFields, aggregableColumnNames, bold, parentRows, prevRows, grandRows }) {
   const resolved = buildResolvedRows(rows, columns, ctx)
   const aggs = computeAggregates(resolved, aggregableColumnNames)
+  const scope = { ...aggs }
+  if (parentRows) Object.assign(scope, prefixAggs(computeAggregates(buildResolvedRows(parentRows, columns, ctx), aggregableColumnNames), 'PARENT_'))
+  if (prevRows)   Object.assign(scope, prefixAggs(computeAggregates(buildResolvedRows(prevRows, columns, ctx), aggregableColumnNames), 'PREV_'))
+  if (grandRows)  Object.assign(scope, prefixAggs(computeAggregates(buildResolvedRows(grandRows, columns, ctx), aggregableColumnNames), 'GRAND_'))
   const cells = columns.map((c, i) => (i === 0 ? label : summarizeColumnValue(c, resolved)))
   // Place calc-field values into the empty trailing cells (right to left) so
   // per-column summaries keep their own columns and formulas fill the gaps.
   const calcVals = (calcFields || []).map(cf => ({
-    text: formatCellValue(evaluateSummaryExpression(cf.expression, aggs), cf.data_type),
+    text: formatCellValue(evaluateSummaryExpression(cf.expression, scope), cf.data_type),
     title: `${cf.label} (${cf.expression})`,
   }))
   const emptySlots = []
@@ -818,7 +841,7 @@ function summaryRowCells({ label, rows, columns, ctx, calcFields, aggregableColu
   })
 }
 
-function SummarySubtotalRow({ groupValue, grouping, groupRows, columns, depth, ctx, summaryCalcFields, aggregableColumnNames, gradeLevel }) {
+function SummarySubtotalRow({ groupValue, grouping, groupRows, columns, depth, ctx, summaryCalcFields, aggregableColumnNames, gradeLevel, prevRows, parentRows, grandRows }) {
   const applicableCalc = (summaryCalcFields || []).filter(cf =>
     cf.grouping_level == null || cf.grouping_level === gradeLevel
   )
@@ -827,6 +850,7 @@ function SummarySubtotalRow({ groupValue, grouping, groupRows, columns, depth, c
       {summaryRowCells({
         label: `Subtotal — ${grouping.field_label}: ${String(groupValue)} (${groupRows.length})`,
         rows: groupRows, columns, ctx, calcFields: applicableCalc, aggregableColumnNames, bold: false,
+        prevRows, parentRows, grandRows,
       })}
     </tr>
   )
@@ -839,6 +863,8 @@ function SummaryTotalRow({ rows, columns, summaryCalcFields, aggregableColumnNam
       {summaryRowCells({
         label: `Grand Total — ${rows.length} rows`,
         rows, columns, ctx, calcFields: grandTotalCalc, aggregableColumnNames, bold: true,
+        // At the grand total, parent and grand are itself; no previous group.
+        parentRows: rows, grandRows: rows,
       })}
     </tr>
   )
