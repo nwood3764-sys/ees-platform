@@ -593,15 +593,16 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
                 border: `1px solid ${C.border}`, borderRadius: 5, background: C.card, color: C.textPrimary, outline: 'none' }}
             />
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
+          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 10 }}>
             {available.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, padding: 6 }}>{fieldQuery ? 'No fields match your search.' : 'All fields placed.'}</div>
               : available.map(c => (
                 <button key={c.name} onClick={() => activeSection && addField(activeSection, c)} disabled={!activeSection}
                   title={activeSection ? `Add ${c.name}` : 'Select a section first'}
-                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 9px', marginBottom: 5, fontSize: 12.5,
+                  style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '7px 9px', marginBottom: 5, fontSize: 12.5,
+                    overflow: 'hidden', overflowWrap: 'anywhere',
                     background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
                   {humanize(c.name, meta.object)}
-                  <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace' }}>{c.name}</span>
+                  <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.name}</span>
                 </button>
               ))}
 
@@ -649,11 +650,12 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
                           {Array.isArray(cols) && list.map(c => (
                             <button key={c.column_name} onClick={() => addRelatedField(g, c)} disabled={!activeSection}
                               title={activeSection ? `Add ${g.fk}.${c.column_name} (read-only)` : 'Select a section first'}
-                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', marginBottom: 4, fontSize: 12,
+                              style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '6px 8px', marginBottom: 4, fontSize: 12,
+                                overflow: 'hidden', overflowWrap: 'anywhere',
                                 background: C.card, border: `1px dashed ${C.border}`, borderRadius: 6,
                                 cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
                               {humanize(c.column_name, g.table)}
-                              <span style={{ fontSize: 9.5, color: C.textMuted, marginLeft: 5, fontFamily: 'JetBrains Mono, monospace' }}>{c.column_name}</span>
+                              <span style={{ fontSize: 9.5, color: C.textMuted, marginLeft: 5, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.column_name}</span>
                             </button>
                           ))}
                         </div>
@@ -1080,7 +1082,7 @@ function FieldTile({ field, object, onRemove }) {
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
     }}>
       <span {...attributes} {...listeners} title="Drag" style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
-      <span style={{ flex: 1, fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field.label || humanize(field.name, object)}</span>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field.label || humanize(field.name, object)}</span>
       <button onClick={onRemove} style={miniBtn()}>×</button>
     </div>
   )
