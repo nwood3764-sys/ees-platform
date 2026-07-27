@@ -19,6 +19,12 @@ function buildId() {
   return `${buildSha()} · ${date}Z`
 }
 
+// Full ISO timestamp of the build, so the UI can render the deploy time in the
+// viewer's own timezone instead of making them translate UTC in their head.
+function buildTime() {
+  return new Date().toISOString()
+}
+
 // Pull-request number of the deployed build, e.g. "#207". master deploys are
 // squash merges titled "... (#NNN)", so the head commit subject carries the PR
 // number; extract it from git (works on Netlify's checkout and locally).
@@ -72,6 +78,7 @@ export default defineConfig({
     __BUILD_ID__: JSON.stringify(buildId()),
     __BUILD_SHA__: JSON.stringify(buildSha()),
     __BUILD_PR__: JSON.stringify(buildPr()),
+    __BUILD_TIME__: JSON.stringify(buildTime()),
   },
   build: {
     // Silence the 500KB warning — our bundle is well-segmented now and the
@@ -115,6 +122,13 @@ export default defineConfig({
           // CodeMirror 6 (formula editor: syntax highlighting + autocomplete) →
           // own leaf chunk, lazy-loaded with the editor.
           if (id.includes('@codemirror') || id.includes('@lezer')) return 'vendor-codemirror'
+          // ECharts + zrender (its renderer) → own leaf chunk, lazy-loaded via
+          // chartKit/EChartsLazy. Neither imports React or anything that
+          // imports back — forward edges only, no TDZ cycle. NOTE: must match
+          // path-delimited '/echarts/' — a bare 'echarts' substring also
+          // matches 'recharts' and would merge both chart libs into one chunk.
+          if (id.includes('/echarts/') || id.includes('\\echarts\\') ||
+              id.includes('zrender')) return 'vendor-echarts'
           // Recharts + d3 → its own chunk. Must be tested FIRST so that any
           // node_module that recharts pulls in (d3-*, victory-vendor, etc.)
           // lands here too, not in vendor-react.

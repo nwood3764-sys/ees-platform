@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
-import { runReport, loadDashboard, runWidgetAggregate, fetchFilterOptions } from '../data/reportsService'
+import { loadDashboard, runWidgetData, fetchFilterOptions } from '../data/reportsService'
 import { WidgetBody } from './DashboardWidgetView'
 
 // ─── Dashboard Runner ─────────────────────────────────────────────────────
@@ -17,6 +17,7 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
   const [error, setError]               = useState(null)
   const [filterValues, setFilterValues] = useState({})          // dfilt id → current value
   const [filterOptions, setFilterOptions] = useState({})        // dfilt id → [{value,label}]
+  const [filterWidgetValues, setFilterWidgetValues] = useState({}) // filter-widget id → value
 
   // Build the extraFilters array for runReport from the current filter
   // values. Empty values mean the filter is not applied this run.
@@ -34,40 +35,51 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
     return out
   }
 
-  const runWidgets = async (dashboardData, currentFilterValues) => {
-    const extra = buildExtraFilters(dashboardData.filters, currentFilterValues)
+  const FILTER_WIDGET_TYPES = new Set(['filter_picklist', 'filter_toggle', 'filter_date_range'])
+
+  // On-canvas filter widgets contribute filters exactly like the header bar:
+  // picklist/toggle → equals; date range → gte/lte pair. Unset = not applied.
+  function buildWidgetFilterExtras(widgets, values) {
+    const out = []
+    for (const w of (widgets || [])) {
+      if (!FILTER_WIDGET_TYPES.has(w.dw_widget_type)) continue
+      const field = w.dw_widget_config?.filter_field
+      if (!field) continue
+      const v = values[w.id]
+      if (w.dw_widget_type === 'filter_date_range') {
+        if (v?.from) out.push({ field_name: field, operator: 'greater_or_equal', value: v.from })
+        if (v?.to)   out.push({ field_name: field, operator: 'less_or_equal',    value: v.to })
+      } else if (v !== undefined && v !== null && v !== '') {
+        out.push({ field_name: field, operator: 'equals', value: v })
+      }
+    }
+    return out
+  }
+
+  const runWidgets = async (dashboardData, currentFilterValues, widgetValues = filterWidgetValues) => {
+    const extra = [
+      ...buildExtraFilters(dashboardData.filters, currentFilterValues),
+      ...buildWidgetFilterExtras(dashboardData.widgets, widgetValues),
+    ]
     // Columns the dashboard filter bar controls. These override each widget
     // report's own saved filter on the same column — so setting STATE to
     // "All" clears the report's built-in `property_state = NC` filter rather
     // than leaving the dashboard pinned to NC. Listed even when their current
     // value is "All" (empty), which is precisely when the override matters.
-    const overrideFields = (dashboardData.filters || [])
-      .map(f => f.dfilt_field_name)
-      .filter(Boolean)
-    // Widget types that are pure group-by aggregations use the server-side
-    // report_aggregate fast path (one GROUP BY, ~N rows) instead of pulling
-    // all detail rows into the browser. metric/table still use runReport.
-    const AGG_TYPES = new Set(['bar', 'line', 'pie', 'donut', 'funnel', 'ranked_list'])
+    const overrideFields = [
+      ...(dashboardData.filters || []).map(f => f.dfilt_field_name),
+      ...(dashboardData.widgets || [])
+        .filter(w => FILTER_WIDGET_TYPES.has(w.dw_widget_type))
+        .map(w => w.dw_widget_config?.filter_field),
+    ].filter(Boolean)
+    // Each widget type routes to its server-side query shape (grouped
+    // aggregate, 2D pivot, time buckets, single aggregate) via runWidgetData,
+    // which itself falls back to the full row fetch on any fast-path failure —
+    // a degraded-but-correct result, never a blank widget.
     const widgetResults = await Promise.all(
       (dashboardData.widgets || []).map(async w => {
-        const cfg = w.dw_widget_config || {}
-        if (AGG_TYPES.has(w.dw_widget_type) && cfg.group_by) {
-          try {
-            const agg = await runWidgetAggregate(w, extra, overrideFields)
-            return [w.id, agg]
-          } catch (err) {
-            // Fall back to the full row-fetch path so a fast-path failure
-            // degrades to the (slower) correct result, never a blank widget.
-            try {
-              const r = await runReport(w.dw_report_id, null, extra, overrideFields)
-              return [w.id, r]
-            } catch (err2) {
-              return [w.id, { error: err2 }]
-            }
-          }
-        }
         try {
-          const r = await runReport(w.dw_report_id, null, extra, overrideFields)
+          const r = await runWidgetData(w, extra, overrideFields)
           return [w.id, r]
         } catch (err) {
           return [w.id, { error: err }]
@@ -119,6 +131,14 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
     } finally {
       setLoading(false)
     }
+  }
+
+  // On-canvas filter widgets apply immediately on change (no Apply button —
+  // Power BI slicer behavior). Data widgets re-fetch; the tiles stay mounted.
+  const handleFilterWidgetChange = async (widgetId, value) => {
+    const next = { ...filterWidgetValues, [widgetId]: value }
+    setFilterWidgetValues(next)
+    if (data) await runWidgets(data, filterValues, next)
   }
 
   useEffect(() => {
@@ -238,6 +258,8 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
                 useGeometry={useGeometry}
                 onOpenReport={onOpenReport}
                 onNavigate={onNavigate}
+                filterValue={filterWidgetValues[w.id]}
+                onFilterWidgetChange={handleFilterWidgetChange}
               />
             ))}
           </div>
@@ -249,7 +271,7 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
 
 // ─── Widget tile ──────────────────────────────────────────────────────────
 
-function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onNavigate }) {
+function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onNavigate, filterValue, onFilterWidgetChange }) {
   const span = widget.dw_width || 1
   // Drill: open the report behind the widget. The header link opens the whole
   // report; clicking a chart segment / metric drills to just those filtered
@@ -319,7 +341,9 @@ function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onNavi
           <div style={{ fontSize:12, color:C.danger }}>Failed: {result.error.message}</div>
         ) : (
           <WidgetBody widget={widget} result={result}
-            canDrill={canDrill} drillTo={drillTo} drillWhole={drillWhole} />
+            canDrill={canDrill} drillTo={drillTo} drillWhole={drillWhole}
+            filterValue={filterValue}
+            onFilterChange={onFilterWidgetChange ? (v) => onFilterWidgetChange(widget.id, v) : undefined} />
         )}
       </div>
       {footer && (

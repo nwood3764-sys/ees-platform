@@ -7,6 +7,67 @@ workbook) INTO LEAP, lifted from the standalone Audit Template Builder. Written
 so the building session can read every referenced function directly. The
 LEAP-side facts below were verified against the live codebase on the same date.
 
+> **STRUCTURAL CORRECTION (Nicholas, 2026-07-26) — "paperwork" is not a
+> thing; SUBMITTALS are.** The first cut shipped a single generic "Generate
+> Paperwork" action producing all six documents at once. That was wrong and
+> has been replaced. The real model, confirmed by Nicholas and already
+> documented in `docs/leap-project-lifecycle.md`:
+>
+> **Every program runs its own incentive application, and every incentive
+> application has the same three stages, which can be months apart:**
+>
+> | # | Submittal | Lifecycle stage | Where it is generated |
+> |---|---|---|---|
+> | 1 | **Income Qualification Application** | Stage 3 — Enrollment & Income Qualification | **Already built** — `run_income_qualification` on the **enrollment** record produces the IRA Multifamily Application PDF + Tenant Data Sheet XLSX. Not duplicated by this port. |
+> | 2 | **Project Reservation** | Stage 6 — Project Reservation | `generate_project_reservation_submittal` action on projects |
+> | 3 | **Final Project Payment Request** | Stage 11 — Project Payment Request | `generate_final_payment_request_submittal` action on projects |
+>
+> It is a **matrix, not a list**: a property commonly runs several programs
+> at once and each carries all three stages with its own dates, owner, and
+> documents. That is exactly why `incentive_applications` has **WI-IRA-MF-HOMES
+> and WI-IRA-MF-HOMES-AUDIT as separate record types**, and why the opportunity
+> stage picklists come in parallel sets ("HOMES Phase 4: Project Reservation"
+> vs "HOMES **Audit** Phase 4: Project Reservation"). **The audit is its own
+> program, not a step inside HOMES** — so the Energy Audit Invoice is the
+> AUDIT program's Final Project Payment Request document, not a HOMES
+> document.
+>
+> The matrix lives in **`src/data/paperworkSubmittals.js`** — the single
+> source of truth for which documents belong to which (program, stage) pair.
+> Adding a program or document is a data edit there, never a UI change. All
+> eight `incentive_applications` programs are declared; the six without built
+> documents carry empty sets so the gap is visible rather than silently wrong.
+>
+> Current document coverage:
+> - **WI-IRA-MF-HOMES-AUDIT → Final Project Payment Request**: Energy Audit Invoice
+> - **WI-IRA-MF-HOMES → Project Reservation**: Project Reservation Proposal, Sealed Proposal, Paperwork Workbook
+> - **WI-IRA-MF-HOMES → Final Project Payment Request**: Project Invoice, Sealed Invoice, Paperwork Workbook
+>
+> Still open from this correction (§9): `project_reservations` is an empty
+> shell table (no statuses, no UI) while `project_payment_requests` has a full
+> 9-status lifecycle — the two reservation/payment submittals are currently
+> tracked only as flat date fields on the incentive application. Making each
+> submittal a real record with its own status, owner, and due date is the
+> natural Phase 2.
+>
+> **PHASE 1 SHIPPED (2026-07-26, same day).** The port is live:
+> `src/data/paperworkModel.js` (pure math + document builders, node-tested),
+> `src/data/paperworkService.js` (record context, Asset Score PDF parsing,
+> workbook fetch), `src/components/ProjectPaperworkModal.jsx` (lazy), and the
+> `generate_paperwork` record action on projects. All Phase-1 fixture checks
+> passed (§7). Three spec corrections discovered during the build, now
+> reflected below: (1) **accounts DO carry billing/mailing address columns**
+> (`billing_street/city/state/zip`, `mailing_*`) — the §4 address gap is
+> closed, BILL TO prefills from the account; (2) **the IQ number already
+> exists** at `properties.property_ira_income_qualification_number` — no new
+> project field needed for it; (3) the workbook template ships as an **app
+> asset** (`public/paperwork/invoice_workbook.xlsx`, fetched same-origin)
+> instead of the `templates` storage bucket — the build session had no
+> service-role credentials to seed the bucket, and the app asset is versioned
+> with the bundle and works on every environment with zero upload ops. pdf.js
+> loads from the pinned CDN exactly like `SigningPortal.jsx` (prod-verified
+> pattern) — no new npm dependency. Phases 2–3 remain open.
+
 ---
 
 ## 1. Vision / goal
@@ -209,12 +270,31 @@ Relationship graph (verified): `projects.property_id` → properties;
   LEAP; standalone tool stays live for energy modeling.
 - **DECIDED (carried from standalone iterations)**: every layout/content rule
   in §5 and every program rule in §3.
-- **OPEN — recommendation first**: account billing address — recommend adding
-  `account_billing_street/city/state/zip` (or equivalent) via LEAP Admin and
-  backfilling known owners; until populated the modal's BILL TO fields are
-  manual overrides. Confirm with Nicholas.
-- **OPEN**: IQ Number + invoice-number fields on projects (recommend plain
-  project fields, admin-managed). Confirm naming with Nicholas.
+- **RESOLVED 2026-07-26 (build session)**: account billing address — the
+  columns already exist (`billing_street/city/state/zip` + `mailing_*` on
+  accounts); BILL TO prefills from them (billing preferred, mailing fallback)
+  with manual override in the modal. IQ Number likewise already exists at
+  `properties.property_ira_income_qualification_number` and prefills.
+- **DECIDED 2026-07-26 (Nicholas)**: there is no such thing as generic
+  "paperwork." Generation is organized by **program × incentive application
+  stage** — Income Qualification Application / Project Reservation / Final
+  Project Payment Request — with every program carrying all three stages.
+  Each stage is its own explicitly-named action and its own document set.
+- **OPEN — recommendation first**: make each submittal a real record rather
+  than date fields on the incentive application. `project_payment_requests`
+  already has a full 9-status lifecycle (`Payment Request To Be Prepared` →
+  … → `Payment Request Closed`); `project_reservations` exists but has no
+  statuses and no UI. Recommend seeding a matching **Project Reservation**
+  lifecycle and generating the submittal record when its documents are
+  generated, so each filing has a status, an owner, and a due date. Confirm
+  with Nicholas.
+- **OPEN**: invoice-number fields on projects (audit + project invoice
+  numbers; recommend plain project fields, admin-managed — Phase 2). Confirm
+  naming with Nicholas.
+- **OPEN**: the Paperwork Workbook is a single three-sheet file spanning two
+  programs (audit invoice / proposal-contract / project invoice). It is
+  offered on both HOMES submittals as a reference. Recommend splitting it
+  per submittal once Nicholas confirms the program expects them separately.
 - **OPEN**: persist parsed Asset Score numbers onto the project (recommend yes
   — makes paperwork reproducible without re-uploading reports).
 - **OPEN (Phase 3)**: source of measures — opportunity line items vs work

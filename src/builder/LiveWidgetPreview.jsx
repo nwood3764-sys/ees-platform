@@ -16,10 +16,8 @@
 
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
-import { runReport, runWidgetAggregate } from '../data/reportsService'
+import { runWidgetData } from '../data/reportsService'
 import { WidgetBody } from '../modules/DashboardWidgetView'
-
-const AGG_TYPES = new Set(['bar', 'line', 'pie', 'donut', 'funnel', 'ranked_list'])
 
 export default function LiveWidgetPreview({ component }) {
   const { type, dataSourceId, config } = component
@@ -32,6 +30,7 @@ export default function LiveWidgetPreview({ component }) {
   const sig = JSON.stringify({
     g: config?.group_by, mt: config?.measure_type, mf: config?.measure_field,
     s: config?.sort_by, l: config?.limit, fv: config?.filter_value,
+    sb: config?.series_by, df: config?.date_field, dg: config?.date_grain,
   })
 
   useEffect(() => {
@@ -39,13 +38,7 @@ export default function LiveWidgetPreview({ component }) {
     if (!dataSourceId) { setResult(null); setLoading(false); return }
     setLoading(true); setError(null)
     const widget = { dw_widget_type: type, dw_widget_config: config || {}, dw_report_id: dataSourceId }
-    const run = async () => {
-      if (AGG_TYPES.has(type) && config?.group_by) {
-        try { return await runWidgetAggregate(widget) }
-        catch { return await runReport(dataSourceId) }
-      }
-      return runReport(dataSourceId)
-    }
+    const run = () => runWidgetData(widget)
     run()
       .then(r => { if (!cancelled) { setResult(r); setLoading(false) } })
       .catch(err => { if (!cancelled) { setError(err); setLoading(false) } })

@@ -41,10 +41,45 @@ export function FieldControl({ descriptor, value, onChange, columns = [] }) {
     case 'boolean':
       return (
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.textPrimary, cursor: 'pointer' }}>
-          <input type="checkbox" checked={value !== false} onChange={e => onChange(e.target.checked)} />
+          <input type="checkbox" checked={(value ?? descriptor.default) !== false} onChange={e => onChange(e.target.checked)} />
           {descriptor.help ? '' : 'Enabled'}
         </label>
       )
+    case 'multi-field': {
+      // Ordered subset of the report's columns (e.g. a table widget's visible
+      // columns). Checkbox list to include/exclude; ↑/↓ set left-to-right order.
+      const picked = Array.isArray(value) ? value : []
+      const move = (name, dir) => {
+        const i = picked.indexOf(name)
+        const j = i + dir
+        if (i < 0 || j < 0 || j >= picked.length) return
+        const next = [...picked]
+        ;[next[i], next[j]] = [next[j], next[i]]
+        onChange(next)
+      }
+      return (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 6, maxHeight: 220, overflowY: 'auto', background: C.card }}>
+          {!columns.length && <div style={{ padding: 8, fontSize: 12, color: C.textMuted }}>— Choose a report first —</div>}
+          {picked.filter(n => columns.some(c => c.name === n)).map(name => {
+            const col = columns.find(c => c.name === name)
+            return (
+              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderBottom: `1px solid ${C.border}`, fontSize: 12 }}>
+                <input type="checkbox" checked onChange={() => onChange(picked.filter(n => n !== name))} />
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: C.textPrimary }}>{col?.label || name}</span>
+                <button onClick={() => move(name, -1)} title="Move up" style={miniBtn()}>↑</button>
+                <button onClick={() => move(name, 1)} title="Move down" style={miniBtn()}>↓</button>
+              </div>
+            )
+          })}
+          {columns.filter(c => !picked.includes(c.name)).map(c => (
+            <div key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderBottom: `1px solid ${C.border}`, fontSize: 12 }}>
+              <input type="checkbox" checked={false} onChange={() => onChange([...picked, c.name])} />
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: C.textSecondary }}>{c.label || c.name}</span>
+            </div>
+          ))}
+        </div>
+      )
+    }
     case 'select':
       return (
         <select value={value ?? descriptor.options?.[0]?.value ?? ''} onChange={e => onChange(e.target.value)} style={inputStyle()}>
@@ -69,5 +104,13 @@ export function FieldControl({ descriptor, value, onChange, columns = [] }) {
     default:
       return <input type="text" value={value ?? ''} placeholder={descriptor.placeholder || ''}
         onChange={e => onChange(e.target.value)} style={inputStyle()} />
+  }
+}
+
+function miniBtn() {
+  return {
+    width: 20, height: 20, padding: 0, fontSize: 11, lineHeight: 1,
+    background: C.cardSecondary, color: C.textSecondary,
+    border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer', flexShrink: 0,
   }
 }

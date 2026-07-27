@@ -166,7 +166,11 @@ const TABLE_COLUMN_PREFIX = {
   occurrences:                       'occurrence',
   opportunities:                     'opportunity',
   opportunity_contact_roles:         'ocr',
+  opportunity_line_items:            'oli',
+  opportunity_record_type_price_books: 'ortpb',
   outbound_mailboxes:                'outbound_mailbox',
+  price_books:                       'price_book',
+  price_book_entries:                'price_book_entry',
   products:                          'product',
   projects:                          'project',
   project_payment_requests:          'ppr',
@@ -809,13 +813,48 @@ export async function loadRecordDetailData(tableName, recordId) {
     return { record, layout: null, sections: [], picklists, lookups: new Map(), actionOverrides: [] }
   }
 
+  // Cross-object (related) fields — fields[] entries with
+  // type='related_field' and name '<fk_column>.<related_column>' show a
+  // read-only value from the record a lookup on THIS record points at
+  // (e.g. property HUD fields on an opportunity page). Group the entries
+  // by FK column, fetch each parent row ONCE with just the needed columns
+  // (RLS-respecting), and merge the values into the record under the
+  // dotted names — FieldGroupWidget then reads record[f.name] like any
+  // other field. Failures degrade to blank values, never a broken page.
+  const relatedFieldGroups = new Map()
+  for (const sec of layoutData.sections) {
+    for (const w of sec.widgets) {
+      if (w.widget_type !== 'field_group' || !w.widget_config?.fields) continue
+      for (const f of w.widget_config.fields) {
+        if (f.type !== 'related_field' || !f.related?.table || !f.related?.column) continue
+        const fk = f.related.fk_column || String(f.name).split('.')[0]
+        if (!fk) continue
+        if (!relatedFieldGroups.has(fk)) relatedFieldGroups.set(fk, { table: f.related.table, fields: [] })
+        relatedFieldGroups.get(fk).fields.push(f)
+      }
+    }
+  }
+  await Promise.all([...relatedFieldGroups.entries()].map(async ([fk, group]) => {
+    const parentId = record[fk]
+    if (!parentId) return
+    const cols = [...new Set(group.fields.map(f => f.related.column))].join(',')
+    try {
+      const { data: row, error } = await supabase.from(group.table).select(cols).eq('id', parentId).maybeSingle()
+      if (error || !row) return
+      for (const f of group.fields) record[f.name] = row[f.related.column]
+    } catch { /* leave the dotted keys unset — fields render as '—' */ }
+  }))
+
   // Collect lookup requests from all field_group widgets.
-  // Two flavors are gathered side-by-side:
+  // Three flavors are gathered side-by-side:
   //   • static lookups (type='lookup') — target table fixed in widget config
   //   • polymorphic lookups (type='polymorphic_lookup') — target table read
   //     from a sibling column on the record (e.g. env_parent_object names
   //     the table for env_parent_record_id). The sibling column is given
   //     by widget_config.fields[].object_field.
+  //   • related fields whose PARENT column is itself a lookup — the fetched
+  //     value is a UUID into another table; resolve its display name so the
+  //     cell shows e.g. the owner account's name, not a UUID.
   const lookupRequests = []
   const polyRequests = []
   for (const sec of layoutData.sections) {
@@ -831,6 +870,12 @@ export async function loadRecordDetailData(tableName, recordId) {
           } else if (f.type === 'polymorphic_lookup' && record[f.name] && f.object_field) {
             polyRequests.push({
               object_value: record[f.object_field],
+              value: record[f.name],
+            })
+          } else if (f.type === 'related_field' && record[f.name] && f.related?.column_type === 'lookup' && f.related?.lookup_table && f.related?.lookup_field) {
+            lookupRequests.push({
+              lookup_table: f.related.lookup_table,
+              lookup_field: f.related.lookup_field,
               value: record[f.name],
             })
           }
@@ -998,6 +1043,10 @@ export function applyInsertDefaults(tableName, fields, userId) {
     enrollments:    'enrollment',
     equipment:      'equipment',   // already singular
     opportunities:  'opportunity',
+    opportunity_line_items:  'oli',
+    opportunity_record_type_price_books: 'ortpb',
+    price_books:             'price_book',
+    price_book_entries:      'price_book_entry',
     products:       'product',
     projects:       'project',
     properties:     'property',
@@ -1054,6 +1103,12 @@ export function applyInsertDefaults(tableName, fields, userId) {
     // NULL + findMissingRequired both pass; the trigger overwrites it.
     if (!fields.ocr_record_number) fields.ocr_record_number = 'NEW'
     if (!fields.ocr_created_by)    fields.ocr_created_by    = userId
+  } else if (tableName === 'opportunity_record_type_price_books') {
+    // ortpb_record_number is populated by trg_ortpb_rn (BEFORE INSERT); the
+    // placeholder just satisfies NOT NULL + findMissingRequired.
+    if (!fields.ortpb_record_number) fields.ortpb_record_number = 'NEW'
+    if (!fields.ortpb_owner)         fields.ortpb_owner         = userId
+    if (!fields.ortpb_created_by)    fields.ortpb_created_by    = userId
   } else if (tableName === 'contact_skills') {
     if (!fields.cs_record_number) fields.cs_record_number = 'NEW'
     if (!fields.cs_owner)         fields.cs_owner         = userId
@@ -1293,6 +1348,61 @@ export async function fetchDependentLookupOptions(field, record) {
       return (data || []).map(r => ({
         value: r.id,
         label: r.opportunity_name || r.id.slice(0, 8),
+      }))
+    }
+    case 'products_for_opportunity': {
+      // Line-item Product picker: only products with an active price book
+      // entry — scoped to the opportunity's price book when it has one,
+      // falling back to any active entry. Physical/equipment products with
+      // no entries never appear; pricing a product into a book is what makes
+      // it chargeable (Nicholas, 2026-07-26: line items are the things we
+      // charge for, not the install catalog).
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_products_for_opportunity', {
+        p_opportunity_ids: dependencyValues,
+        p_include_product_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.product_name || r.id.slice(0, 8),
+      }))
+    }
+    case 'price_book_entries_for_opportunity': {
+      // Mixed-type dependency (opportunity + product), so read the draft
+      // fields by name rather than relying on the positional values array.
+      const opportunityId = record?.opportunity_id ?? null
+      if (!opportunityId) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_price_book_entries_for_opportunity', {
+        p_opportunity_ids: [opportunityId],
+        p_product_id: record?.product_id ?? null,
+        p_include_entry_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.price_book_entry_name || r.id.slice(0, 8),
+      }))
+    }
+    case 'units_for_opportunity': {
+      // Units offered on a line item must live on the opportunity's property
+      // (via their building) — same parent-chain rule as
+      // opportunities_for_property.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_units_for_opportunity', {
+        p_opportunity_ids: dependencyValues,
+        p_include_unit_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.unit_name || r.id.slice(0, 8),
       }))
     }
     case 'opportunities_for_contact_account': {

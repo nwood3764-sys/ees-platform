@@ -16,6 +16,7 @@ import { Badge, Icon } from './UI'
 // preview code). A combined chunk would still be large; per-modal
 // splits give Vite the freedom to share only what's truly shared.
 const ProjectReportModal                  = lazy(() => import('./ProjectReportModal'))
+const ProjectSubmittalDocumentsModal      = lazy(() => import('./ProjectSubmittalDocumentsModal'))
 const ProjectSchedulerWizard              = lazy(() => import('./scheduler/ProjectSchedulerWizard'))
 const ServiceAppointmentRescheduleModal   = lazy(() => import('./scheduler/ServiceAppointmentRescheduleModal'))
 const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkOrderScheduleModal'))
@@ -40,6 +41,7 @@ import PropertyMapWidget from './PropertyMapWidget'
 import StatusTransitionsBar from './StatusTransitionsBar'
 import TopbarActions from './TopbarActions'
 import { ACTION_KEYS } from '../data/recordActions'
+import { SUBMITTAL_STAGES } from '../data/paperworkSubmittals'
 import { supabase } from '../lib/supabase'
 import DuplicateCheckPanel, { DUPLICATE_CHECK_TABLES, buildDuplicateProbe } from './DuplicateCheckPanel'
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
@@ -210,6 +212,10 @@ const TABLE_META = {
   units:                     { module: 'Enrollment',       label: 'Units',                nameColumn: 'unit_name',              recordNumberColumn: 'unit_record_number',              statusColumn: 'unit_status',              parents: ['building_id', 'property_id'],                     parentTables: ['buildings', 'properties'] },
   opportunities:             { module: 'Enrollment',       label: 'Opportunities',        nameColumn: 'opportunity_name',       recordNumberColumn: 'opportunity_record_number',       statusColumn: 'opportunity_status',       parents: ['property_id', 'building_id', 'opportunity_account_id'],          parentTables: ['properties', 'buildings', 'accounts'] },
   opportunity_contact_roles: { module: 'Enrollment',       label: 'Contact Role',         nameColumn: 'ocr_name',               recordNumberColumn: 'ocr_record_number',               statusColumn: null,                       parents: ['opportunity_id', 'contact_id'],                   parentTables: ['opportunities', 'contacts'] },
+  opportunity_line_items:    { module: 'Enrollment',       label: 'Opportunity Line Items', nameColumn: 'oli_name',             recordNumberColumn: 'oli_record_number',               statusColumn: null,                       parents: ['opportunity_id'],                                 parentTables: ['opportunities'] },
+  price_books:               { module: 'Stock',            label: 'Price Books',          nameColumn: 'price_book_name',        recordNumberColumn: 'price_book_record_number',        statusColumn: null,                       parents: [],                                                 parentTables: [] },
+  price_book_entries:        { module: 'Stock',            label: 'Price Book Entries',   nameColumn: 'price_book_entry_name',  recordNumberColumn: 'price_book_entry_record_number',  statusColumn: null,                       parents: ['price_book_id', 'product_id'],                    parentTables: ['price_books', 'products'] },
+  opportunity_record_type_price_books: { module: 'Admin',  label: 'Record Type Price Books', nameColumn: null,                  recordNumberColumn: 'ortpb_record_number',             statusColumn: null,                       parents: ['price_book_id'],                                  parentTables: ['price_books'] },
   property_programs:         { module: 'Enrollment',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['property_id', 'opportunity_id'],                  parentTables: ['properties', 'opportunities'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
@@ -420,6 +426,7 @@ const TRIGGER_DERIVED_REQUIRED = {
   buildings: ['building_name'],
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],
+  opportunity_line_items: ['oli_name'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
 }
@@ -431,10 +438,15 @@ const TRIGGER_DERIVED_REQUIRED = {
 // enforce the same contract.
 const DERIVED_READONLY = {
   contacts: ['contact_name'],
-  opportunities: ['opportunity_name'],
+  // price_book_id is derived from the opportunity record type by
+  // trg_opportunity_price_book, using the opportunity_record_type_price_books
+  // mapping — the record type dictates the price book and a user never picks
+  // one (Nicholas, 2026-07-26).
+  opportunities: ['opportunity_name', 'price_book_id'],
   buildings: ['building_name'],
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],
+  opportunity_line_items: ['oli_name'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
 }
@@ -501,19 +513,18 @@ function validateBeforeSave(tableName, fields, evidenceLabelById) {
 }
 
 // Build the ordered list of tab names from the loaded sections.
-// Details first, Related second (if any section has related_list or
-// file_gallery widgets), Activity third (always shown on existing records),
-// then any custom tabs alphabetical after.
+// Details first, Related second, Activity third (always shown on existing
+// records), then any custom tabs alphabetical after. Tabs derive PURELY from
+// where sections sit — cards render inside their section on its tab
+// (sections behave identically on every tab; Nicholas, 2026-07-26), so
+// having card widgets no longer forces a Related tab into existence.
 function buildOrderedTabs(sections, { includeActivity = true } = {}) {
   const names = new Set()
-  let hasRelated = false
   for (const sec of sections || []) {
+    if ((sec.section_placement || 'main') !== 'main') continue
     names.add(sec.section_tab || 'Details')
-    if ((sec.widgets || []).some(w => w.widget_type === 'related_list' || w.widget_type === 'file_gallery' || w.widget_type === 'prtsn_history' || w.widget_type === 'report' || w.widget_type === 'conversation_panel')) {
-      hasRelated = true
-    }
   }
-  if (hasRelated) names.add('Related')
+  names.add('Details')
   if (includeActivity) names.add('Activity')
   const rank = (t) => t === 'Details' ? 0 : t === 'Related' ? 1 : t === 'Activity' ? 2 : 3
   return [...names].sort((a, b) => {
@@ -3010,6 +3021,39 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // just confuses the user (and produced an incorrect 'Required fields
         // missing' error before the prefix-map fix landed).
         if (isCreate && isSystemField(f.name)) return null
+
+        // Cross-object (related) fields — read-only values pulled from the
+        // record a lookup on this record points at (loadRecordDetailData
+        // merges them into `record` under the dotted name). Always
+        // display-only: they belong to the parent record and are edited
+        // there. Hidden on the create form (no parent linked yet).
+        if (f.type === 'related_field') {
+          if (isCreate) return null
+          const rel = f.related || {}
+          const relRaw = record[f.name]
+          const relDisplay = formatFieldValue(relRaw, {
+            ...f, type: rel.column_type || 'text',
+            lookup_table: rel.lookup_table, lookup_field: rel.lookup_field,
+          }, picklists, lookups)
+          return (
+            <div key={f.name} style={{
+              padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}>
+              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                {f.label}
+                <span
+                  title={`Read-only — this value lives on the related ${rel.table || 'record'} and is edited there.`}
+                  style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, color: '#1a5a8a', background: '#e8f3fb', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em' }}>
+                  RELATED
+                </span>
+              </span>
+              <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>
+                {rel.column_type === 'picklist' && relRaw ? <Badge s={relDisplay} /> : relDisplay}
+              </span>
+            </div>
+          )
+        }
         const raw = editing ? draft[f.name] : record[f.name]
         const display = formatFieldValue(raw, f, picklists, lookups)
         const isLookupLike = f.type === 'lookup' || f.type === 'polymorphic_lookup'
@@ -3546,7 +3590,7 @@ function RelatedListWidget({
     onNavigateToRecord({ table: childTable, id: row.id, mode: 'view' })
   }
 
-  const handleNewClick = (e) => {
+  const handleNewClick = async (e) => {
     e.stopPropagation()
     if (!canCreate) return
 
@@ -3643,11 +3687,12 @@ function RelatedListWidget({
       copyFromProperty('property_category',                   'enrollment_property_category')
       copyFromProperty('property_number_of_buildings',        'enrollment_number_of_buildings')
       copyFromProperty('property_total_buildings',            'enrollment_number_of_buildings')
+      copyFromProperty('property_mf_property_category',       'enrollment_property_category')
+      copyFromProperty('property_mf_raw_property_category_name', 'enrollment_property_category')
       copyFromProperty('property_hud_owner_org',              'enrollment_owner_organization')
-      copyFromProperty('property_hud_owner_type',             'enrollment_owner_type')
-      copyFromProperty('property_hud_owner_address',          'enrollment_owner_address')
       copyFromProperty('property_hud_owner_phone',            'enrollment_owner_phone')
       copyFromProperty('property_hud_owner_email',            'enrollment_owner_email')
+      copyFromProperty('fein',                                'enrollment_owner_fein')
       copyFromProperty('property_hud_management_org',         'enrollment_management_agent')
       copyFromProperty('property_hud_management_phone',       'enrollment_management_phone')
       copyFromProperty('property_hud_management_email',       'enrollment_management_email')
@@ -3656,6 +3701,33 @@ function RelatedListWidget({
       copyFromProperty('property_primary_contract_expiration','enrollment_hud_contract_expiration')
       copyFromProperty('property_is_202_811',                 'enrollment_is_202_811')
       copyFromProperty('property_is_opportunity_zone',        'enrollment_is_opportunity_zone')
+      // Owner address is one text field on the enrollment; the property holds
+      // it in four parts — compose "street, city, ST zip".
+      const composeAddress = (street, city, state, zip) => {
+        const head = [street, city].map(v => String(v || '').trim()).filter(Boolean).join(', ')
+        const tail = [state, zip].map(v => String(v || '').trim()).filter(Boolean).join(' ')
+        return [head, tail].filter(Boolean).join(', ')
+      }
+      if (prefillObj.enrollment_owner_address == null || prefillObj.enrollment_owner_address === '') {
+        const composed = composeAddress(
+          parentRecord.property_hud_owner_address, parentRecord.property_hud_owner_city,
+          parentRecord.property_hud_owner_state, parentRecord.property_hud_owner_zip)
+        if (composed) prefillObj.enrollment_owner_address = composed
+      }
+      // HUD program: the MF raw program types when imported, else composed
+      // from the program-participation flags.
+      if (prefillObj.enrollment_hud_program == null || prefillObj.enrollment_hud_program === '') {
+        let programs = [parentRecord.property_mf_raw_program_type1, parentRecord.property_mf_raw_program_type2]
+          .map(v => String(v || '').trim()).filter(Boolean)
+        programs = [...new Set(programs)]
+        if (!programs.length) {
+          if (parentRecord.property_in_program_mf_assisted)    programs.push('Multifamily Assisted')
+          if (parentRecord.property_in_program_public_housing) programs.push('Public Housing')
+          if (parentRecord.property_in_program_lihtc)          programs.push('LIHTC')
+          if (parentRecord.property_in_program_usda_rd)        programs.push('USDA Rural Development')
+        }
+        if (programs.length) prefillObj.enrollment_hud_program = programs.join(' / ')
+      }
       // Subsidized share: not stored on the property — derive from the unit
       // counts when both are present so the form opens pre-computed.
       const totalUnits = prefillObj.enrollment_total_units
@@ -3664,6 +3736,107 @@ function RelatedListWidget({
           && Number(totalUnits) > 0 && assistedUnits != null) {
         prefillObj.enrollment_subsidized_share_pct =
           Math.round((Number(assistedUnits) / Number(totalUnits)) * 1000) / 10
+      }
+      // Occupancy: public-housing properties carry an occupied count; MF
+      // properties carry a percent-occupied — either way, seed occupied and
+      // derive unoccupied as total minus occupied.
+      if (prefillObj.enrollment_occupied_units == null) {
+        let occupied = parentRecord.property_ph_total_occupied
+        const pctRaw = parentRecord.property_mf_raw_pct_occupied ?? parentRecord.property_ph_pct_occupied
+        if (occupied == null && pctRaw != null && Number(totalUnits) > 0) {
+          const pct = Number(pctRaw)
+          if (Number.isFinite(pct) && pct > 0) occupied = Math.round(Number(totalUnits) * pct / 100)
+        }
+        if (occupied != null && Number.isFinite(Number(occupied))) {
+          prefillObj.enrollment_occupied_units = Number(occupied)
+          if (prefillObj.enrollment_unoccupied_units == null && Number(totalUnits) > 0) {
+            prefillObj.enrollment_unoccupied_units = Math.max(0, Number(totalUnits) - Number(occupied))
+          }
+        }
+      }
+      // Bedroom mix: USDA imports carry per-bedroom unit counts (5 and 6
+      // bedroom collapse into the enrollment's 5+ bucket).
+      const seedBr = (dst, ...srcs) => {
+        if (prefillObj[dst] != null) return
+        const total = srcs.reduce((sum, s) => {
+          const n = Number(parentRecord[s])
+          return Number.isFinite(n) ? (sum ?? 0) + n : sum
+        }, null)
+        if (total != null) prefillObj[dst] = total
+      }
+      seedBr('enrollment_br_1',     'property_usda_raw_total_1_bedroom_units')
+      seedBr('enrollment_br_2',     'property_usda_raw_total_2_bedroom_units')
+      seedBr('enrollment_br_3',     'property_usda_raw_total_3_bedroom_units')
+      seedBr('enrollment_br_4',     'property_usda_raw_total_4_bedroom_units')
+      seedBr('enrollment_br_5plus', 'property_usda_raw_total_5_bedroom_units', 'property_usda_raw_total_6_bedroom_units')
+      // Application contact + owner/management fallbacks live on related
+      // records the property links to (primary contact, owner account,
+      // management-company account). Fetch them so the form opens with the
+      // people fields filled too; any failure just leaves those blanks.
+      try {
+        const fetchRow = (table, id, cols, delCol) => id
+          ? supabase.from(table).select(cols).eq('id', id).eq(delCol, false).maybeSingle()
+          : Promise.resolve({ data: null })
+        const [contactRes, accountRes, mgmtRes] = await Promise.all([
+          fetchRow('contacts', parentRecord.property_primary_contact_id,
+            'contact_name, contact_title, contact_phone, contact_mobile_phone, contact_email', 'contact_is_deleted'),
+          fetchRow('accounts', parentRecord.property_account_id,
+            'account_name, account_phone, account_email, billing_street, billing_city, billing_state, billing_zip', 'account_is_deleted'),
+          fetchRow('accounts', parentRecord.property_management_company_id,
+            'account_name, account_phone, account_email', 'account_is_deleted'),
+        ])
+        const fill = (dst, v) => {
+          if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
+        }
+        const contact = contactRes?.data
+        if (contact) {
+          fill('enrollment_contact_name',  contact.contact_name)
+          fill('enrollment_contact_title', contact.contact_title)
+          fill('enrollment_contact_phone', contact.contact_phone || contact.contact_mobile_phone)
+          fill('enrollment_contact_email', contact.contact_email)
+        } else {
+          // No primary contact — the MF import's management contact person is
+          // the next-best application contact.
+          fill('enrollment_contact_name',  parentRecord.property_mf_raw_mgmt_contact_full_name)
+          fill('enrollment_contact_title', parentRecord.property_mf_raw_mgmt_contact_indv_title_text)
+          fill('enrollment_contact_phone', parentRecord.property_mf_raw_mgmt_contact_main_phn_nbr)
+          fill('enrollment_contact_email', parentRecord.property_mf_raw_mgmt_contact_email_text)
+        }
+        const account = accountRes?.data
+        if (account) {
+          // The property's account is the owner company (one account per
+          // company) — it backstops any owner field HUD didn't supply.
+          fill('enrollment_owner_organization', account.account_name)
+          fill('enrollment_owner_phone',        account.account_phone)
+          fill('enrollment_owner_email',        account.account_email)
+          fill('enrollment_owner_address', composeAddress(
+            account.billing_street, account.billing_city, account.billing_state, account.billing_zip))
+        }
+        const mgmt = mgmtRes?.data
+        if (mgmt) {
+          fill('enrollment_management_agent', mgmt.account_name)
+          fill('enrollment_management_phone', mgmt.account_phone)
+          fill('enrollment_management_email', mgmt.account_email)
+        }
+      } catch (err) {
+        console.warn('enrollment prefill: related-record fetch failed', err)
+      }
+      // Owner type is a two-value business field (Nicholas, 2026-07-26):
+      // Public Housing Authority or Private Ownership. HUD's raw taxonomy
+      // (Non-Profit / Profit Motivated / Limited Dividend / ...) collapses to
+      // Private Ownership; the public-housing program flag or a housing-
+      // authority / community-development-authority owner name means PHA.
+      // Runs after the account fallback so the account name counts as an
+      // owner-name signal too.
+      if (prefillObj.enrollment_owner_type == null || prefillObj.enrollment_owner_type === '') {
+        const ownerName = String(prefillObj.enrollment_owner_organization || '')
+        const rawType = String(parentRecord.property_hud_owner_type || '')
+        const isPha = parentRecord.property_in_program_public_housing === true
+          || /housing authority|community development authority|\bcda\b|\bpha\b/i.test(ownerName)
+          || /housing authority/i.test(rawType)
+        if (ownerName || rawType || parentRecord.property_account_id) {
+          prefillObj.enrollment_owner_type = isPha ? 'Public Housing Authority' : 'Private Ownership'
+        }
       }
       // Enrollment name composes "<property name> - <record type label>" once
       // the user picks a record type (same derived-name mechanism projects
@@ -4662,29 +4835,22 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   })
   // Blank sections still render — the record page stays consistent with the
   // page layout editor: every section in the layout shows its header, with a
-  // muted empty state in place of content. The one exception is a section
-  // whose widgets were ALL deliberately suppressed via hiddenWidgetTypes
-  // (context-dependent hides like docx-only widgets) — rendering an empty
-  // shell there would defeat the suppression.
+  // muted empty state in place of content. Two exceptions return null:
+  // (1) a section whose widgets were ALL deliberately suppressed via
+  // hiddenWidgetTypes (context-dependent hides like docx-only widgets) —
+  // rendering an empty shell there would defeat the suppression; and
+  // (2) a section whose only content is card widgets (related lists,
+  // galleries, conversations, reports, publish history) — those cards render
+  // as their own standalone cards immediately after this shell's slot
+  // (sections behave identically on every tab; cards follow their section),
+  // so an empty shell would just duplicate their headings.
   const allSectionWidgets = section.widgets || []
   const allSuppressed = allSectionWidgets.length > 0 && hiddenWidgetTypes &&
     allSectionWidgets.every(w => hiddenWidgetTypes.has(w.widget_type))
   if (sectionWidgets.length === 0 && allSuppressed) return null
-  // Cards (related lists, galleries, conversations, reports, publish history)
-  // render on the Related tab, not inside their section — when a section holds
-  // ONLY cards, say where its content went instead of looking broken.
-  const relatedTabCardCount = allSectionWidgets.filter(w =>
+  const cardCount = allSectionWidgets.filter(w =>
     ['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'].includes(w.widget_type)).length
-  // On the Related tab, a section whose only content is Related-tab cards
-  // (related lists, galleries, conversations, reports, publish history) renders
-  // NOTHING here — those cards already render as their own standalone cards
-  // right below. Drawing an empty section shell would (a) duplicate the card,
-  // producing a second, empty "Buildings"/"Documents" block, and (b) show the
-  // self-referential note "this section's card appears on the Related tab"
-  // while the user is already on the Related tab. The shell only makes sense on
-  // the Details tab, where it tells the user their content lives over on
-  // Related. So suppress the card-only shell here.
-  if (sectionWidgets.length === 0 && relatedTabCardCount > 0 && activeTab === 'Related') return null
+  if (sectionWidgets.length === 0 && cardCount > 0) return null
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
       <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
@@ -4694,9 +4860,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
       </div>
       {!collapsed && sectionWidgets.length === 0 && (
         <div style={{ padding: isMobile ? '14px 14px' : '16px 18px', fontSize: 12.5, color: C.textMuted, fontStyle: 'italic' }}>
-          {relatedTabCardCount > 0
-            ? `This section's ${relatedTabCardCount === 1 ? 'card appears' : 'cards appear'} on the Related tab.`
-            : 'No fields in this section yet — add some in the page layout editor.'}
+          No fields in this section yet — add some in the page layout editor.
         </div>
       )}
       {!collapsed && sectionWidgets.map(w => {
@@ -4738,8 +4902,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // main content on wide screens (>1024px). Below that, it stacks underneath
   // — keeps the main field groups readable when there's not enough width for
   // two columns. Salesforce's Lightning utility rail collapses at a similar
-  // breakpoint.
-  const isNarrow = useMediaQuery('(max-width: 1024px)')
+  // breakpoint. 1280 (not 1024) since the rail widened to 480px (Nicholas,
+  // 2026-07-26: related-list cards in a 320px rail truncated unreadably).
+  const isNarrow = useMediaQuery('(max-width: 1280px)')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -4798,6 +4963,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // tick is bumped after a successful generation so the related-records area
   // (Documents widget) re-fetches and the new PDF appears immediately.
   const [showReportModal, setShowReportModal] = useState(false)
+  // Program submittal document generator (projects only). Holds WHICH
+  // submittal stage was requested — each program stage is its own filing.
+  const [submittalStage, setSubmittalStage] = useState(null)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
   const [showLogCall, setShowLogCall] = useState(false)
@@ -5229,6 +5397,26 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       const city   = (name === 'property_city'   ? value : next.property_city)   || ''
       const derived = [street, city].filter(s => String(s || '').trim()).join(' - ')
       next.property_name = derived || ''
+    }
+    // Enrollments: subsidized share % is assisted/total — recompute whenever
+    // either unit count changes so the form never shows stale or blank math.
+    // Occupancy mirrors it: unoccupied = total - occupied.
+    if (tableName === 'enrollments'
+        && (name === 'enrollment_total_units' || name === 'enrollment_assisted_units')) {
+      const total = Number(next.enrollment_total_units)
+      const assisted = Number(next.enrollment_assisted_units)
+      next.enrollment_subsidized_share_pct =
+        (total > 0 && Number.isFinite(assisted))
+          ? Math.round((assisted / total) * 1000) / 10
+          : null
+    }
+    if (tableName === 'enrollments'
+        && (name === 'enrollment_total_units' || name === 'enrollment_occupied_units')) {
+      const total = Number(next.enrollment_total_units)
+      const occupied = Number(next.enrollment_occupied_units)
+      if (total > 0 && Number.isFinite(occupied)) {
+        next.enrollment_unoccupied_units = Math.max(0, total - occupied)
+      }
     }
     // Recompose the derived name when record type changes during create —
     // "<base> - <record type label>" (projects mirror trg_project_name with
@@ -5924,6 +6112,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     const changes = {}
     for (const [k, v] of Object.entries(draft)) if (v !== data.record[k]) changes[k] = v
     for (const sys of ['id','created_at','updated_at']) delete changes[sys]
+    // Cross-object (related) field values live under dotted keys — they are
+    // display-only copies of a parent record's columns, never writable here.
+    for (const k of Object.keys(changes)) if (k.includes('.')) delete changes[k]
     for (const k of Object.keys(changes)) {
       if (k.endsWith('_created_at') || k.endsWith('_created_by') || k.endsWith('_updated_at') || k.endsWith('_updated_by') || k.endsWith('_is_deleted')) delete changes[k]
     }
@@ -6121,6 +6312,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: handleRunIncomeQualification,
     [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
+    [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_SUBMITTAL]:
+      () => setSubmittalStage(SUBMITTAL_STAGES.PROJECT_RESERVATION),
+    [ACTION_KEYS.GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL]:
+      () => setSubmittalStage(SUBMITTAL_STAGES.FINAL_PROJECT_PAYMENT_REQUEST),
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -6436,12 +6631,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           </div>
         )}
 
-        {/* Sections — field groups only. Filter by active tab. For
-            document_templates we also skip the Document Content section
-            when authoring mode is "docx" (the body_html field is
-            irrelevant in that mode — the .docx asset replaces it).
-            Right-rail sections (section_placement='right') are excluded
-            here — they render in the always-visible right column below. */}
+        {/* Sections — filtered to the active tab, rendered IN ORDER, each as
+            its shell (fields and other in-section widgets) followed by its
+            card widgets (related lists, file galleries, conversation panels,
+            publish history, embedded reports) in widget order. Sections
+            behave identically on every tab — a card renders wherever its
+            section is placed, never force-moved to the Related tab
+            (Nicholas, 2026-07-26). Cards are hidden in insert mode (the
+            record doesn't exist yet). For document_templates we also skip
+            the Document Content section when authoring mode is "docx" (the
+            body_html field is irrelevant in that mode — the .docx asset
+            replaces it). Right-rail sections (section_placement='right')
+            are excluded here — they render in the always-visible right
+            column below. */}
         {sections
           .filter(sec => (sec.section_placement || 'main') === 'main')
           .filter(sec => (sec.section_tab || 'Details') === activeTab)
@@ -6472,79 +6674,76 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 hiddenWidgetTypes = new Set(['merge_field_reference'])
               }
             }
+            const cards = isInsertMode ? [] : (sec.widgets || []).filter(w =>
+              ['related_list', 'file_gallery', 'conversation_panel', 'prtsn_history', 'report'].includes(w.widget_type))
             return (
-              <Section key={sec.id} section={sec} record={record} picklists={picklists} lookups={lookups}
-                editing={editing} draft={draft} onChange={handleFieldChange}
-                allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName}
-                onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
-                fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes}
-                onNavigateToRecord={onNavigateToRecord}
-                requiredFields={requiredFields} activeTab={activeTab} />
-            )
-          })}
-
-        {/* Related lists — standalone Salesforce-style cards, shown only on
-            the Related tab regardless of which section they came from.
-            Right-placement widgets are excluded — they render in the right
-            sidebar below. */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'related_list'))
-          .map(w => {
-            // Lock child related_lists when the parent template is Active or
-            // Archived. We match the widget's table against the lifecycle's
-            // childrenTable (e.g. project_report_template_sections for PRT).
-            // Sibling related_lists (record-type assignments, etc.) stay
-            // editable. We force editable=false on the widget copy so the
-            // Add button + drag handles + remove buttons all disappear; the
-            // trigger is the ultimate enforcement layer.
-            const isLockedChildrenList = lifecycleIsLocked
-              && lifecycle?.childrenTable
-              && w.widget_config?.table === lifecycle.childrenTable
-            const effectiveWidget = isLockedChildrenList
-              ? { ...w, widget_config: { ...w.widget_config, editable: false } }
-              : w
-            return (
-              <RelatedListWidget
-                key={w.id}
-                widget={effectiveWidget}
-                picklists={picklists}
-                onNavigateToRecord={onNavigateToRecord}
-                parentRecordId={recordId}
-                parentTable={tableName}
-                parentRecord={data?.record}
-                onRefreshRelated={async () => {
-                  try {
-                    const rows = await fetchRelatedRecords(w.widget_config, recordId)
-                    // Mutate the widget's cached data in place, then nudge
-                    // React with a top-level data clone so the widget re-reads.
-                    w._relatedData = rows
-                    setData(prev => ({ ...prev }))
-                  } catch (err) {
-                    // Non-fatal — widget will keep showing its previous rows.
-                    // eslint-disable-next-line no-console
-                    console.error('Related list refresh failed', err)
+              <div key={sec.id}>
+                <Section section={sec} record={record} picklists={picklists} lookups={lookups}
+                  editing={editing} draft={draft} onChange={handleFieldChange}
+                  allPicklistOpts={allPicklistOpts} allLookupOpts={allLookupOpts} tableName={tableName}
+                  onRefreshRecord={() => setReloadTick(t => t + 1)} recordId={recordId}
+                  fieldDisabledReasons={fieldDisabledReasons} hiddenWidgetTypes={hiddenWidgetTypes}
+                  onNavigateToRecord={onNavigateToRecord}
+                  requiredFields={requiredFields} activeTab={activeTab} />
+                {cards.map(w => {
+                  if (w.widget_type === 'related_list') {
+                    // Lock child related_lists when the parent template is
+                    // Active or Archived. We match the widget's table against
+                    // the lifecycle's childrenTable (e.g.
+                    // project_report_template_sections for PRT). Sibling
+                    // related_lists stay editable. We force editable=false on
+                    // the widget copy so the Add button + drag handles +
+                    // remove buttons all disappear; the trigger is the
+                    // ultimate enforcement layer.
+                    const isLockedChildrenList = lifecycleIsLocked
+                      && lifecycle?.childrenTable
+                      && w.widget_config?.table === lifecycle.childrenTable
+                    const effectiveWidget = isLockedChildrenList
+                      ? { ...w, widget_config: { ...w.widget_config, editable: false } }
+                      : w
+                    return (
+                      <RelatedListWidget
+                        key={w.id}
+                        widget={effectiveWidget}
+                        picklists={picklists}
+                        onNavigateToRecord={onNavigateToRecord}
+                        parentRecordId={recordId}
+                        parentTable={tableName}
+                        parentRecord={data?.record}
+                        onRefreshRelated={async () => {
+                          try {
+                            const rows = await fetchRelatedRecords(w.widget_config, recordId)
+                            // Mutate the widget's cached data in place, then
+                            // nudge React with a top-level data clone so the
+                            // widget re-reads.
+                            w._relatedData = rows
+                            setData(prev => ({ ...prev }))
+                          } catch (err) {
+                            // Non-fatal — widget keeps its previous rows.
+                            // eslint-disable-next-line no-console
+                            console.error('Related list refresh failed', err)
+                          }
+                        }}
+                      />
+                    )
                   }
-                }}
-              />
+                  if (w.widget_type === 'file_gallery') {
+                    return <FileGalleryWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId} />
+                  }
+                  if (w.widget_type === 'conversation_panel') {
+                    return <ConversationPanelWidget key={w.id} widget={w} parentRecordId={recordId} />
+                  }
+                  if (w.widget_type === 'prtsn_history') {
+                    return <PrtsnHistoryWidget key={w.id} widget={w} parentRecordId={recordId} />
+                  }
+                  if (w.widget_type === 'report') {
+                    return <ReportWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId} onOpenRecord={onNavigateToRecord} />
+                  }
+                  return null
+                })}
+              </div>
             )
           })}
-
-        {/* File galleries — photos and documents widgets. Self-contained:
-            each widget loads its own data, owns its own upload/delete UI,
-            and refreshes after mutations without going back through the
-            page-layout loader. */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'file_gallery'))
-          .map(w => (
-            <FileGalleryWidget
-              key={w.id}
-              widget={w}
-              parentTable={tableName}
-              parentRecordId={recordId}
-            />
-          ))}
 
         {/* Income Qualification — runs the multifamily HUD categorical
             qualification tool against this enrollment: classifies the
@@ -6566,52 +6765,6 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           <PropertyOwnerResearchPanel tableName={tableName} recordId={recordId} />
         )}
 
-        {/* Conversation panel — Service Cloud Messaging-style split-pane
-            (thread list left, active thread + composer right). Self-contained:
-            loads its own conversations + messages, marks threads read on
-            open, and invokes send-notification-sms v2 for replies. */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'conversation_panel'))
-          .map(w => (
-            <ConversationPanelWidget
-              key={w.id}
-              widget={w}
-              parentRecordId={recordId}
-            />
-          ))}
-
-        {/* PRTSN history — Versions list for project_report_templates only.
-            Self-contained widget that fetches snapshots for the current PRT
-            and offers a Preview-from-snapshot action per version. */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'prtsn_history'))
-          .map(w => (
-            <PrtsnHistoryWidget
-              key={w.id}
-              widget={w}
-              parentRecordId={recordId}
-            />
-          ))}
-
-        {/* Embedded reports — saved reports rendered inline as widgets.
-            Optional context filter narrows the report to rows matching
-            the current record (so a generic 'All Tasks' report becomes
-            'Tasks for THIS record' when embedded). */}
-        {!isInsertMode && activeTab === 'Related' && sections
-          .filter(sec => (sec.section_placement || 'main') === 'main')
-          .flatMap(sec => (sec.widgets || []).filter(w => w.widget_type === 'report'))
-          .map(w => (
-            <ReportWidget
-              key={w.id}
-              widget={w}
-              parentTable={tableName}
-              parentRecordId={recordId}
-              onOpenRecord={onNavigateToRecord}
-            />
-          ))}
-
         {/* Activity Timeline — chronological audit trail of tracked field
             changes and record-level actions (create, soft-delete, restore).
             Hidden on new records since there's no history yet. */}
@@ -6632,7 +6785,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               doesn't exist yet. */}
           {!isInsertMode && sections.some(sec => (sec.section_placement || 'main') === 'right') && (
             <div style={{
-              width: isNarrow ? '100%' : 320,
+              width: isNarrow ? '100%' : 480,
               flexShrink: 0,
               display: 'flex',
               flexDirection: 'column',
@@ -6835,6 +6988,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             project={record}
             onClose={() => setShowReportModal(false)}
             onComplete={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
+
+        {/* Program submittal documents (projects only). One modal, scoped to
+            the requested submittal stage — Project Reservation and Final
+            Project Payment Request are separate filings, months apart. */}
+        {submittalStage && tableName === 'projects' && (
+          <ProjectSubmittalDocumentsModal
+            projectId={recordId}
+            project={record}
+            submittalStage={submittalStage}
+            onClose={() => setSubmittalStage(null)}
           />
         )}
 

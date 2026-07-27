@@ -17,7 +17,7 @@ import { useState, useEffect } from 'react'
 import { C } from '../../data/constants'
 import { fetchReports, getReportSelectedFields } from '../../data/reportsService'
 import {
-  COMPONENT_REGISTRY, getComponent, getPaletteCategories, defaultConfigFor, fieldVisible,
+  COMPONENT_REGISTRY, getComponent, getPaletteCategories, defaultConfigFor, fieldVisible, convertConfigForType,
 } from '../componentRegistry'
 import { Field, inputStyle, FieldControl } from '../inspectorControls'
 import LiveWidgetPreview from '../LiveWidgetPreview'
@@ -55,6 +55,23 @@ function DashboardComponentInspector({ component, onChange, onRemove }) {
         <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>{entry.category}</div>
         <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>{entry.label}</div>
       </div>
+
+      <Field label="Widget type" help="Switch the visualization in place — the report, group by, measure, and sort carry over where the new type supports them.">
+        <select
+          value={component.type}
+          onChange={e => {
+            const newType = e.target.value
+            if (!newType || newType === component.type) return
+            onChange({ type: newType, config: convertConfigForType(cfg, newType) })
+          }}
+          style={inputStyle()}>
+          {getPaletteCategories().map(cat => (
+            <optgroup key={cat.category} label={cat.category}>
+              {cat.components.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      </Field>
 
       <Field label="Title"><input type="text" value={component.title || ''} placeholder={entry.label}
         onChange={e => onChange({ title: e.target.value })} style={inputStyle()} /></Field>

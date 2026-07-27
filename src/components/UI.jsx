@@ -267,16 +267,27 @@ export function ErrorState({ error, onRetry }) {
 //                    (see MobileHeader below) and for maintaining `mobileOpen`.
 // ─────────────────────────────────────────────────────────────────────────────
 // ─── SidebarBuildTag ─────────────────────────────────────────────────────────
-// Bottom-left build indicator for Admins: which merged pull request (and
-// commit + build time) is currently live, so Nicholas can confirm at a glance
-// that a deploy has landed without digging through Netlify. Values are baked
-// in at build time (vite.config.js define): __BUILD_PR__ is extracted from the
-// deployed commit's subject ("... (#207)" squash-merge titles), __BUILD_ID__
-// is "<short sha> · <UTC build time>". Hidden for non-admin roles and in the
-// collapsed desktop sidebar (no room for text).
+// Bottom-left build indicator for Admins: when the live build was deployed, so
+// Nicholas can confirm at a glance that a deploy has landed without digging
+// through Netlify. The visible label is ONLY the date and time, written in the
+// viewer's local timezone — the 164px sidebar has no room for more, and the
+// pull-request number and commit sha mean nothing at a glance. Those stay in
+// the hover tooltip for when a build actually needs to be identified.
+// Values are baked in at build time (vite.config.js define): __BUILD_TIME__ is
+// the ISO build timestamp, __BUILD_PR__ is extracted from the deployed commit's
+// subject ("... (#207)" squash-merge titles), __BUILD_SHA__ is the short sha.
+// Hidden for non-admin roles and in the collapsed desktop sidebar.
 // ─────────────────────────────────────────────────────────────────────────────
-const BUILD_TAG_PR = typeof __BUILD_PR__ !== 'undefined' ? __BUILD_PR__ : ''
-const BUILD_TAG_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'dev'
+const BUILD_TAG_PR   = typeof __BUILD_PR__   !== 'undefined' ? __BUILD_PR__   : ''
+const BUILD_TAG_SHA  = typeof __BUILD_SHA__  !== 'undefined' ? __BUILD_SHA__  : ''
+const BUILD_TAG_TIME = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : ''
+
+function formatBuildTime(iso, opts) {
+  if (!iso) return '';
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return '';
+  return when.toLocaleString(undefined, opts);
+}
 
 function SidebarBuildTag({ isCollapsed }) {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -288,14 +299,27 @@ function SidebarBuildTag({ isCollapsed }) {
     return () => { cancelled = true; };
   }, []);
   if (!isAdmin || isCollapsed) return null;
-  const label = BUILD_TAG_PR ? `${BUILD_TAG_PR} · ${BUILD_TAG_ID}` : BUILD_TAG_ID;
+
+  const shortTime = formatBuildTime(BUILD_TAG_TIME, {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+  const label = shortTime ? `Updated ${shortTime}` : 'Development build';
+
+  const fullTime = formatBuildTime(BUILD_TAG_TIME, {
+    dateStyle: 'full', timeStyle: 'short',
+  });
+  const tooltip = [
+    fullTime ? `Build deployed ${fullTime}` : 'Development build',
+    BUILD_TAG_PR ? `pull request ${BUILD_TAG_PR}` : null,
+    BUILD_TAG_SHA ? `commit ${BUILD_TAG_SHA}` : null,
+  ].filter(Boolean).join(' · ');
+
   return (
     <div
-      title="Active build — merged pull request · commit · UTC build time"
+      title={tooltip}
       style={{
         padding: '8px 14px 10px',
         borderTop: '1px solid rgba(255,255,255,0.07)',
-        fontFamily: 'JetBrains Mono, monospace',
         fontSize: 10,
         letterSpacing: '0.02em',
         color: 'rgba(255,255,255,0.38)',
