@@ -3814,6 +3814,18 @@ function RelatedListWidget({
           parentRecord.property_hud_owner_state, parentRecord.property_hud_owner_zip)
         if (composed) prefillObj.enrollment_owner_address = composed
       }
+      // Pre-approval form (WI-IRA-MF-HOMES-ASSESSMENT): the contractor primary
+      // and payment State should never be hand-typed — default both to the
+      // property's state (editable). Also seed the Property Address(es) list
+      // with the property's composed address so the form opens populated.
+      copyFromProperty('property_state', 'enrollment_contractor_primary_state')
+      copyFromProperty('property_state', 'enrollment_payment_state')
+      if (prefillObj.enrollment_property_addresses == null || prefillObj.enrollment_property_addresses === '') {
+        const propAddr = composeAddress(
+          parentRecord.property_street, parentRecord.property_city,
+          parentRecord.property_state, parentRecord.property_zip)
+        if (propAddr) prefillObj.enrollment_property_addresses = propAddr
+      }
       // HUD program: the MF raw program types when imported, else composed
       // from the program-participation flags.
       if (prefillObj.enrollment_hud_program == null || prefillObj.enrollment_hud_program === '') {
