@@ -203,6 +203,35 @@ export function resolveRecordVisual(tableName, rtMeta) {
   return { iconKey, color }
 }
 
+// ─── Custom upload refs ──────────────────────────────────────────────────
+// A record type's icon is either a built-in catalog key ('home') or a custom
+// upload reference of the form `upload:<mode>:<publicUrl>`, where mode is
+// 'mono' (recolored white to match the badge) or 'color' (rendered as-is).
+// parseIconRef normalizes either form so renderers can branch cleanly.
+export function parseIconRef(iconRef) {
+  if (typeof iconRef === 'string' && iconRef.startsWith('upload:')) {
+    // upload:<mode>:<url> — the URL itself may contain colons (https://…),
+    // so only split off the first two segments.
+    const firstColon = iconRef.indexOf(':')
+    const secondColon = iconRef.indexOf(':', firstColon + 1)
+    if (secondColon > firstColon) {
+      const mode = iconRef.slice(firstColon + 1, secondColon)
+      const url = iconRef.slice(secondColon + 1)
+      if (url) return { kind: 'upload', mode: mode === 'color' ? 'color' : 'mono', url }
+    }
+  }
+  return { kind: 'builtin', key: iconRef || null }
+}
+
+// Build the stored ref from an uploaded URL + chosen render mode.
+export function buildUploadIconRef(url, mode = 'mono') {
+  return `upload:${mode === 'color' ? 'color' : 'mono'}:${url}`
+}
+
+export function isUploadIcon(iconRef) {
+  return parseIconRef(iconRef).kind === 'upload'
+}
+
 // ─── Renderers ───────────────────────────────────────────────────────────
 
 // Bare glyph — an <svg> that inherits stroke color. Used inside the badge and
@@ -232,6 +261,56 @@ export function RecordTypeIcon({
 }) {
   const hex = resolveColor(color)
   const glyph = Math.round(size * 0.58)
+  const br = radius != null ? radius : Math.max(5, Math.round(size * 0.22))
+  const ref = parseIconRef(iconKey)
+
+  // Custom upload — 'color' keeps the artwork's own colors on a neutral badge;
+  // 'mono' recolors it to white via CSS mask so it matches the built-in glyphs
+  // inside the colored square. Both render paths refuse embedded SVG scripts.
+  if (ref.kind === 'upload') {
+    const imgSize = Math.round(size * 0.66)
+    if (ref.mode === 'color') {
+      return (
+        <span
+          title={title}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: size, height: size, flex: `0 0 ${size}px`,
+            background: '#ffffff', border: `1px solid ${C.border}`,
+            borderRadius: br, boxShadow: 'inset 0 -1px 0 rgba(0,0,0,0.06)',
+            overflow: 'hidden', ...style,
+          }}
+        >
+          <img src={ref.url} alt="" width={imgSize} height={imgSize}
+            style={{ objectFit: 'contain', display: 'block' }} />
+        </span>
+      )
+    }
+    // mono: white silhouette of the uploaded shape on the colored badge.
+    return (
+      <span
+        title={title}
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: size, height: size, flex: `0 0 ${size}px`,
+          background: hex, borderRadius: br,
+          boxShadow: 'inset 0 -1px 0 rgba(0,0,0,0.12)', ...style,
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: imgSize, height: imgSize, background: '#ffffff',
+            WebkitMaskImage: `url("${ref.url}")`, maskImage: `url("${ref.url}")`,
+            WebkitMaskRepeat: 'no-repeat', maskRepeat: 'no-repeat',
+            WebkitMaskPosition: 'center', maskPosition: 'center',
+            WebkitMaskSize: 'contain', maskSize: 'contain',
+          }}
+        />
+      </span>
+    )
+  }
+
   return (
     <span
       title={title}
@@ -239,12 +318,12 @@ export function RecordTypeIcon({
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         width: size, height: size, flex: `0 0 ${size}px`,
         background: hex,
-        borderRadius: radius != null ? radius : Math.max(5, Math.round(size * 0.22)),
+        borderRadius: br,
         boxShadow: 'inset 0 -1px 0 rgba(0,0,0,0.12)',
         ...style,
       }}
     >
-      <RecordTypeGlyph iconKey={iconKey} size={glyph} color="#ffffff" strokeWidth={2} />
+      <RecordTypeGlyph iconKey={ref.key} size={glyph} color="#ffffff" strokeWidth={2} />
     </span>
   )
 }
