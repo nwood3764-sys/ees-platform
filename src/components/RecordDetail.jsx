@@ -4903,7 +4903,16 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   if (sectionWidgets.length === 0 && allSuppressed) return null
   const cardCount = allSectionWidgets.filter(w =>
     ['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'].includes(w.widget_type)).length
-  if (sectionWidgets.length === 0 && cardCount > 0) return null
+  // An empty field group (zero fields) renders nothing — FieldGroupWidget
+  // returns null for it — yet the canvas editor auto-adds a "Fields" group to
+  // every section. On a card-only section (e.g. the Buildings / Units related
+  // lists) that invisible empty group would otherwise keep the section shell,
+  // stacking a duplicate header right above the identically-named card. Treat
+  // empty field groups as no content so such sections stay card-only, matching
+  // sections authored without any field group (e.g. Assessments).
+  const meaningfulSectionWidgets = sectionWidgets.filter(w =>
+    w.widget_type === 'field_group' ? ((w.widget_config?.fields || []).length > 0) : true)
+  if (meaningfulSectionWidgets.length === 0 && cardCount > 0) return null
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
       <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
