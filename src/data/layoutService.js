@@ -1486,11 +1486,38 @@ export async function fetchDependentLookupOptions(field, record) {
       }))
     }
     case 'signer_contacts_for_opportunity': {
-      if (dependencyValues.length === 0) {
+      // Once the opportunity exists, scope by its id — that path applies the
+      // Decision-Maker / Opportunity-Contact-Role tiers in
+      // list_signer_contacts_for_opportunity. But on /opportunities/new there
+      // is no opportunity id yet, so the id-scoped call would always be empty.
+      // In create mode the opportunity's account is already known (it inherits
+      // the property's account), so fall back to scoping by the draft's account
+      // fields, exactly like contacts_for_accounts. Read fields by name rather
+      // than positionally so the two scopes never get crossed.
+      const opportunityId = record?.id ?? null
+      if (opportunityId) {
+        const { data, error } = await supabase.rpc('list_signer_contacts_for_opportunity', {
+          p_opportunity_id: opportunityId,
+          p_include_contact_id: currentValue,
+        })
+        if (error) throw error
+        return (data || []).map(r => ({
+          value: r.id,
+          label: r.contact_name || r.id.slice(0, 8),
+        }))
+      }
+      const signerAccountIds = [
+        'opportunity_account_id',
+        'opportunity_managing_account_id',
+        'opportunity_property_management_company',
+      ]
+        .map(fieldName => record?.[fieldName])
+        .filter(v => v !== null && v !== undefined && v !== '')
+      if (signerAccountIds.length === 0) {
         return []
       }
-      const { data, error } = await supabase.rpc('list_signer_contacts_for_opportunity', {
-        p_opportunity_id: dependencyValues[0],
+      const { data, error } = await supabase.rpc('list_contacts_for_accounts', {
+        p_account_ids: signerAccountIds,
         p_include_contact_id: currentValue,
       })
       if (error) throw error
