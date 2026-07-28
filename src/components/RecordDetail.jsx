@@ -3132,15 +3132,14 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
               padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
-              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+              <span
+                title={`Read-only — this value lives on the related ${rel.table || 'record'} and is edited there.`}
+                style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                 {/* Show just the field name — strip any legacy "Parent · " path
-                    prefix baked into the saved label. */}
+                    prefix baked into the saved label. The RELATED chip is
+                    omitted: a lookup/related field is self-evidently pulled
+                    from a parent record, so the badge was just noise. */}
                 {typeof f.label === 'string' && f.label.includes(' · ') ? f.label.split(' · ').pop() : f.label}
-                <span
-                  title={`Read-only — this value lives on the related ${rel.table || 'record'} and is edited there.`}
-                  style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, color: '#1a5a8a', background: '#e8f3fb', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em' }}>
-                  RELATED
-                </span>
               </span>
               <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>
                 {rel.column_type === 'picklist' && relRaw ? <Badge s={relDisplay} /> : relDisplay}
