@@ -290,8 +290,8 @@ function RecordTypeRow({
       toast.error('Value and Label are required')
       return
     }
-    if (!/^[a-z0-9_]+$/.test(value)) {
-      toast.error('Value must use lowercase letters, numbers, and underscores only')
+    if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+      toast.error('Value must use letters, numbers, underscores, and hyphens only (no spaces)')
       return
     }
     setSaving(true)
@@ -323,7 +323,7 @@ function RecordTypeRow({
       {/* Value */}
       <div style={{ color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, minWidth: 0 }}>
         {editing
-          ? <TextInput value={value} onChange={setValue} mono placeholder="single_family" />
+          ? <TextInput value={value} onChange={setValue} mono placeholder="WI-IRA-MF-HOMES-PR" />
           : <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', maxWidth: '100%' }}>{row.value}</span>
         }
       </div>
@@ -476,9 +476,9 @@ function NewRecordTypeModal({
   useEffect(() => {
     if (valueEdited) return
     const suggested = label
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
     setValue(suggested)
   }, [label, valueEdited])
 
@@ -500,7 +500,7 @@ function NewRecordTypeModal({
   function validate() {
     if (!label.trim()) return 'Label is required'
     if (!value.trim()) return 'Value is required'
-    if (!/^[a-z0-9_]+$/.test(value)) return 'Value must be lowercase letters, numbers, and underscores only'
+    if (!/^[A-Za-z0-9_-]+$/.test(value)) return 'Value must be letters, numbers, underscores, and hyphens only (no spaces)'
     if (existingValues.includes(value)) return `A record type with value "${value}" already exists on this object`
     if (strategy === 'clone_from' && !sourceLayoutId) return 'Select a layout to clone from'
     if (strategy === 'move_existing' && !existingLayoutId) return 'Select a layout to move'
@@ -577,12 +577,12 @@ function NewRecordTypeModal({
           />
         </FormField>
 
-        <FormField label="Value" hint="Lowercase code used internally. Auto-derived from the label.">
+        <FormField label="Value" hint="Internal code (API name), not shown to end users. Auto-derived from the label.">
           <input
             value={value}
             onChange={e => { setValue(e.target.value); setValueEdited(true) }}
             disabled={busy}
-            placeholder="single_family"
+            placeholder="WI-IRA-MF-HOMES-PR"
             style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5 }}
           />
         </FormField>
