@@ -330,6 +330,42 @@ export function GlobalSearchInline({
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
+  // Group results for display. Same logic the modal used.
+  // NOTE: `groups`/`flatRows`/`navRows` are declared HERE — above the keyboard
+  // effect — on purpose. The effect below lists `navRows` in its dependency
+  // array, and a dependency array is evaluated during render at the point the
+  // useEffect() call is made. If these `const`s lived below the effect (as they
+  // originally did) that render-time read hit the const in its temporal dead
+  // zone. It only "worked" when the minifier happened to hoist the const above
+  // the effect; a build that didn't hoist crashed the whole topbar with
+  // "Cannot access 'navRows' before initialization" on every authenticated
+  // page. Declaring before use removes the hazard regardless of build ordering.
+  const groups = useMemo(() => {
+    if (!results.length) return []
+    const byType = new Map()
+    for (const r of results) {
+      const arr = byType.get(r.object_type) || []
+      arr.push(r)
+      byType.set(r.object_type, arr)
+    }
+    const known = SEARCH_GROUP_ORDER.filter(t => byType.has(t))
+    const extras = [...byType.keys()].filter(t => !SEARCH_GROUP_ORDER.includes(t)).sort()
+    return [...known, ...extras].map(type => ({
+      type,
+      label: byType.get(type)[0]?.object_label || type,
+      table: byType.get(type)[0]?.table_name || type,
+      rows: byType.get(type),
+    }))
+  }, [results])
+
+  const flatRows = useMemo(() => groups.flatMap(g => g.rows), [groups])
+
+  // The rows keyboard nav (↑/↓/Enter) walks: search hits once the user has
+  // typed ≥2 chars, otherwise the recent-items list in the idle panel.
+  const isIdle = query.trim().length < 2
+  const navRows = isIdle ? recents : flatRows
+  const safeActiveIdx = Math.min(activeIdx, Math.max(navRows.length - 1, 0))
+
   // ─── Keyboard ─────────────────────────────────────────────────────────────
   // Esc closes dropdown (and on mobile, dismisses the slide-down too).
   // Up/Down move selection within the result list. Enter opens the active
@@ -423,33 +459,6 @@ export function GlobalSearchInline({
       .finally(() => { if (!cancelled) setRecentsLoading(false) })
     return () => { cancelled = true }
   }, [open])
-
-  // Group results for display. Same logic the modal used.
-  const groups = useMemo(() => {
-    if (!results.length) return []
-    const byType = new Map()
-    for (const r of results) {
-      const arr = byType.get(r.object_type) || []
-      arr.push(r)
-      byType.set(r.object_type, arr)
-    }
-    const known = SEARCH_GROUP_ORDER.filter(t => byType.has(t))
-    const extras = [...byType.keys()].filter(t => !SEARCH_GROUP_ORDER.includes(t)).sort()
-    return [...known, ...extras].map(type => ({
-      type,
-      label: byType.get(type)[0]?.object_label || type,
-      table: byType.get(type)[0]?.table_name || type,
-      rows: byType.get(type),
-    }))
-  }, [results])
-
-  const flatRows = useMemo(() => groups.flatMap(g => g.rows), [groups])
-
-  // The rows keyboard nav (↑/↓/Enter) walks: search hits once the user has
-  // typed ≥2 chars, otherwise the recent-items list in the idle panel.
-  const isIdle = query.trim().length < 2
-  const navRows = isIdle ? recents : flatRows
-  const safeActiveIdx = Math.min(activeIdx, Math.max(navRows.length - 1, 0))
 
   const handleSelectRow = (r) => {
     onNavigate?.({ table: r.table_name, id: r.id, mode: 'view' })
