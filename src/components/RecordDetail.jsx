@@ -1705,6 +1705,16 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
       // can be reparented after creation if needed. No reliable seed here.
       return null
     }
+    if (dep.kind === 'signer_contacts_for_opportunity') {
+      // Quick-creating the Authorized Signer from a new opportunity: the new
+      // contact belongs to the opportunity's account (owner account preferred,
+      // then managing account / property management company) so it's scoped to
+      // the same account the signer picker searches.
+      const acct = dependencyValues.opportunity_account_id
+        || dependencyValues.opportunity_managing_account_id
+        || dependencyValues.opportunity_property_management_company
+      return acct ? { contact_account_id: acct } : null
+    }
     if (dep.kind === 'buildings_for_property') {
       const prop = dependencyValues.property_id
         || dependencyValues.opportunity_property_id
