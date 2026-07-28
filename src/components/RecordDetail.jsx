@@ -3889,6 +3889,23 @@ function RelatedListWidget({
       }
     }
 
+    // Opportunities are state-scoped: every opportunity record type belongs to
+    // one program state (its picklist_state), so an opportunity created from a
+    // property or building must offer only that location's record types — a
+    // Wisconsin property can never carry an NC or MI opportunity. Seed
+    // opportunity_state from the parent's state; RecordDetail's prefillState
+    // reads any *_state prefill key and state-filters the record-type picker to
+    // it (same mechanism enrollments use via enrollment_state). User-editable on
+    // the form; only fill a blank.
+    if (childTable === 'opportunities' && parentRecord
+        && (prefillObj.opportunity_state == null || prefillObj.opportunity_state === '')) {
+      const parentState =
+        parentTable === 'properties' ? parentRecord.property_state :
+        parentTable === 'buildings'  ? parentRecord.building_state  :
+        null
+      if (parentState != null && parentState !== '') prefillObj.opportunity_state = parentState
+    }
+
     // A building sits at its property's address, so seed the new building's
     // address/location and year-built from the parent property — the user can
     // still edit (e.g. a multi-building property where buildings have distinct
