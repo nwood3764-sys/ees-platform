@@ -50,6 +50,7 @@ import { LoadingState, ErrorState } from '../../components/UI'
 import { inputStyle } from '../../builder/inspectorControls'
 import { loadLayoutForCanvas, saveLayoutFromCanvas } from '../../builder/adapters/pageLayoutAdapter'
 import { describeObject } from '../../data/adminService'
+import { consumeLayoutReturnRecord } from '../../lib/urlNav'
 import RelatedListCanvasModal from './widgets/RelatedListCanvasModal'
 
 const WIDGET_LABELS = {
@@ -142,7 +143,11 @@ function dragFamily(id) {
   return 'field'
 }
 
-export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
+export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNavigateToRecord = null }) {
+  // The record the admin opened this editor FROM via the Setup gear, if any.
+  // Consumed once at mount so saving/closing returns them to it (Salesforce
+  // behavior) instead of leaving them stranded in Object Manager.
+  const [returnRecord] = useState(() => consumeLayoutReturnRecord())
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
   const [meta, setMeta]       = useState(null)
@@ -563,9 +568,29 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
     setRelatedModal(null)
   }
 
+  // Return to the record the editor was opened from, if any. Returns true when
+  // it navigated (so callers skip their in-place fallback).
+  const returnToRecord = () => {
+    if (returnRecord && onNavigateToRecord) {
+      onNavigateToRecord({
+        table: returnRecord.table,
+        id: returnRecord.id,
+        mode: 'view',
+        module: returnRecord.module || undefined,
+      })
+      return true
+    }
+    return false
+  }
+
   const handleSave = async () => {
     setSaving(true); setSaveError(null)
-    try { await saveLayoutFromCanvas({ layoutId, sections }); setSavedAt(new Date()) }
+    try {
+      await saveLayoutFromCanvas({ layoutId, sections })
+      // Opened from a record → hop straight back to it. Otherwise (opened from
+      // Object Manager) stay put and show the saved-at stamp as before.
+      if (!returnToRecord()) setSavedAt(new Date())
+    }
     catch (err) { setSaveError(err) }
     finally { setSaving(false) }
   }
@@ -614,7 +639,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {saveError && <span style={{ fontSize: 11, color: C.sky, maxWidth: 320, textAlign: 'right' }}>{saveError.message}</span>}
           {savedAt && !saveError && <span style={{ fontSize: 11, color: C.textMuted }}>Saved {savedAt.toLocaleTimeString()}</span>}
-          <button onClick={onBack} style={btnSecondary()}>Close</button>
+          <button onClick={() => { if (!returnToRecord()) onBack() }} style={btnSecondary()}>Close</button>
           <button onClick={handleSave} disabled={saving} style={btnPrimary(saving)}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>

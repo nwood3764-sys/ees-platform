@@ -154,6 +154,9 @@ export default function RelatedListCanvasModal({
   const [loadingRoot, setLoadingRoot] = useState(true)
   const [expanded, setExpanded] = useState(() => new Set())
   const [search, setSearch] = useState('')
+  // Filter text for the Add/Remove Columns list — the target table can have
+  // dozens of columns, so let the admin type any part of a column name.
+  const [colSearch, setColSearch] = useState('')
 
   const [targetColumns, setTargetColumns] = useState([])
   const [loadingTarget, setLoadingTarget] = useState(false)
@@ -243,6 +246,16 @@ export default function RelatedListCanvasModal({
       .filter(c => !HIDDEN_TARGET_COLUMNS.has(c.column_name) && !c.is_primary_key)
       .sort((a, b) => a.column_name.localeCompare(b.column_name))
   ), [targetColumns])
+
+  const visibleTargetColumns = useMemo(() => {
+    const q = colSearch.trim().toLowerCase()
+    if (!q) return selectableTargetColumns
+    return selectableTargetColumns.filter(c =>
+      c.column_name.toLowerCase().includes(q)
+      || humanizeColumnName(c.column_name).toLowerCase().includes(q)
+      || relatedColumnType(c).toLowerCase().includes(q),
+    )
+  }, [selectableTargetColumns, colSearch])
 
   function toggleColumn(name) {
     setSelectedCols(prev =>
@@ -614,6 +627,13 @@ export default function RelatedListCanvasModal({
               hint={`Sensible defaults are pre-selected — adjust only if you want a different set. ${selectedCols.length} selected · click to toggle`}
               required
             >
+              <input
+                value={colSearch}
+                onChange={e => setColSearch(e.target.value)}
+                disabled={busy || loadingTarget}
+                placeholder="Search columns…"
+                style={{ ...inputStyle, marginBottom: 6 }}
+              />
               <div style={{
                 border: `1px solid ${C.borderDark || C.border}`,
                 borderRadius: 6, overflow: 'hidden',
@@ -626,8 +646,12 @@ export default function RelatedListCanvasModal({
                   <div style={{ padding: 16, textAlign: 'center', color: C.textMuted, fontSize: 12, fontStyle: 'italic' }}>
                     No selectable columns.
                   </div>
+                ) : visibleTargetColumns.length === 0 ? (
+                  <div style={{ padding: 16, textAlign: 'center', color: C.textMuted, fontSize: 12, fontStyle: 'italic' }}>
+                    No columns match “{colSearch.trim()}”.
+                  </div>
                 ) : (
-                  selectableTargetColumns.map(c => {
+                  visibleTargetColumns.map(c => {
                     const checked = selectedCols.includes(c.column_name)
                     return (
                       <label

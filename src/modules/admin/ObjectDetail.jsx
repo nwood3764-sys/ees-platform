@@ -30,7 +30,7 @@ const SUB_TABS = [
   { id: 'related',     label: 'Related Lookups' },
 ]
 
-export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', initialLayoutId = null }) {
+export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', initialLayoutId = null, onOpenRecord = null }) {
   const [sub, setSub] = useState(initialSubTab)
   const [selectedField, setSelectedField] = useState(null)
   const [columns, setColumns] = useState([])
@@ -176,6 +176,7 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
                     layoutId={selectedLayoutId}
                     objectLabel={obj.pluralLabel || obj.label}
                     onBack={() => setSelectedLayoutId(null)}
+                    onNavigateToRecord={onOpenRecord}
                   />
                 : <LayoutsPane
                     objectName={obj.table}

@@ -227,6 +227,7 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
             onBack={() => setSelectedObject(null)}
             initialSubTab={adminTabFromUrl || 'details'}
             initialLayoutId={adminLayoutIdFromUrl || null}
+            onOpenRecord={openRecord}
           />
         ) : (
           <ObjectManager onOpenObject={obj => setSelectedObject(obj)} />
