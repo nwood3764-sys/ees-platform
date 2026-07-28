@@ -394,7 +394,7 @@ function FieldsPane({ columns, picklistFields = new Set(), fieldMeta = {}, onOpe
             <div style={{ textAlign: 'right' }}>
               <span onClick={() => onEditField && onEditField(c.column_name)}
                 style={{ cursor: 'pointer', fontSize: 11, color: C.emerald, fontWeight: 600 }}
-                title="Edit field label, help text, description, tier, history">
+                title="Edit field type, formula/rollup, label, help text, tier, history">
                 Edit
               </span>
             </div>
@@ -578,8 +578,22 @@ function EmptyPane({ label, hint }) {
   )
 }
 
-// Render "text", "uuid → users.id", "timestamp with time zone" etc.
+const DISPLAY_TYPE_LABELS = {
+  text: 'Text', textarea: 'Text Area', number: 'Number', integer: 'Number', currency: 'Currency',
+  percent: 'Percent', date: 'Date', datetime: 'Date/Time', boolean: 'Checkbox',
+  email: 'Email', phone: 'Phone', url: 'URL', picklist: 'Picklist', lookup: 'Lookup',
+}
+
+// Render the LOGICAL field type where an admin has set one (Formula, Roll-Up,
+// Currency, …); otherwise the physical Postgres type ("text", "uuid → users.id").
 function fmtType(col) {
+  if (col.field_kind === 'formula') return `Formula (${DISPLAY_TYPE_LABELS[col.formula_return_type] || col.formula_return_type || 'Text'})`
+  if (col.field_kind === 'rollup') {
+    const fn = (col.rollup_config?.function || '').toUpperCase()
+    const pretty = { COUNT: 'Count', SUM: 'Sum', AVG: 'Average', MIN: 'Min', MAX: 'Max' }[fn] || 'Roll-Up'
+    return `Roll-Up (${pretty})`
+  }
+  if (col.display_type && DISPLAY_TYPE_LABELS[col.display_type]) return DISPLAY_TYPE_LABELS[col.display_type]
   const t = col.data_type
   if (col.character_maximum_length != null) return `${t}(${col.character_maximum_length})`
   if (col.numeric_precision != null && col.numeric_scale != null && (col.numeric_precision !== 32 || col.numeric_scale !== 0)) {

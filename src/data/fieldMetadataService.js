@@ -51,7 +51,22 @@ function isSystemManaged(columnName) {
   return SYSTEM_COLUMN_PATTERNS.some(p => p.test(columnName))
 }
 
-function deriveEditorType({ data_type, is_foreign_key, references_table }) {
+// Logical display types that map onto a concrete cell editor. Formula/rollup are
+// read-only computed types; text-family overrides (email/phone/url/textarea) and
+// number-family overrides (currency/percent) reuse the base editors.
+const DISPLAY_TYPE_TO_EDITOR = {
+  text: 'text', textarea: 'textarea', email: 'text', phone: 'text', url: 'text',
+  number: 'number', integer: 'number', currency: 'number', percent: 'number',
+  date: 'date', datetime: 'datetime', boolean: 'boolean',
+  picklist: 'picklist', lookup: 'lookup', formula: 'formula', rollup: 'rollup',
+}
+
+function deriveEditorType({ data_type, is_foreign_key, references_table, field_kind, display_type }) {
+  // Metadata overlay wins: formula/rollup are computed (read-only); an explicit
+  // display_type override maps onto its base editor.
+  if (field_kind === 'formula') return 'formula'
+  if (field_kind === 'rollup') return 'rollup'
+  if (display_type && DISPLAY_TYPE_TO_EDITOR[display_type]) return DISPLAY_TYPE_TO_EDITOR[display_type]
   if (is_foreign_key && references_table === 'picklist_values') return 'picklist'
   if (is_foreign_key) return 'lookup'
   if (data_type === 'boolean') return 'boolean'
@@ -76,8 +91,10 @@ export function getEditableFieldsForTable(tableName) {
     const { data, error } = await supabase.rpc('describe_object_columns', { p_table: tableName })
     if (error) throw error
     return (data || []).map(c => {
-      const isEditable = !isSystemManaged(c.column_name)
       const editorType = deriveEditorType(c)
+      // Formula and rollup fields are computed-at-read — never hand-editable.
+      const isComputed = editorType === 'formula' || editorType === 'rollup'
+      const isEditable = !isSystemManaged(c.column_name) && !isComputed
       const meta = {
         columnName:      c.column_name,
         dataType:        c.data_type,
@@ -87,6 +104,8 @@ export function getEditableFieldsForTable(tableName) {
         referencesTable: c.references_table,
         isEditable,
         editorType,
+        fieldKind:       c.field_kind || 'standard',
+        displayType:     c.display_type || null,
       }
       // For picklist columns, derive the (picklist_object, picklist_field)
       // pair the values live under. Convention: the column is named

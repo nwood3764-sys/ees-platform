@@ -144,10 +144,29 @@ const TEMPLATE_LIFECYCLES = {
 // Field value formatter
 // ---------------------------------------------------------------------------
 
+// Format a numeric/date value against a logical return type — shared by the
+// currency/percent/etc. cases and by formula/rollup fields (whose displayed
+// type is their declared return type, carried on the field def as return_type).
+function formatByReturnType(raw, returnType) {
+  switch (returnType) {
+    case 'currency': return `$${Number(raw).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+    case 'percent':  return `${Number(raw)}%`
+    case 'date':     return raw ? new Date(String(raw).length <= 10 ? raw + 'T00:00:00' : raw).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+    case 'datetime': return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
+    case 'boolean':  return raw ? 'Yes' : 'No'
+    case 'number':   return Number(raw).toLocaleString()
+    default:         return typeof raw === 'number' ? raw.toLocaleString() : String(raw)
+  }
+}
+
 function formatFieldValue(raw, fieldDef, picklists, lookups) {
   if (raw === null || raw === undefined) return '—'
   switch (fieldDef.type) {
     case 'picklist':   return picklists.byId.get(raw) || String(raw)
+    // Formula / rollup fields are computed at read; format by the field's
+    // declared return type (falls back to a sensible numeric/text guess).
+    case 'formula':
+    case 'rollup':     return formatByReturnType(raw, fieldDef.return_type || fieldDef.formula_return_type)
     case 'lookup':
     case 'polymorphic_lookup': {
       const entry = lookups.get(raw)
@@ -3096,6 +3115,32 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
               <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>
                 {rel.column_type === 'picklist' && relRaw ? <Badge s={relDisplay} /> : relDisplay}
               </span>
+            </div>
+          )
+        }
+        // Formula / rollup fields — computed at read (loadRecordDetailData
+        // merges the value into `record` under the column name). Always
+        // display-only, with a chip, on every tab. Nothing to show before the
+        // record exists, so hide on the create form.
+        if (f.type === 'formula' || f.type === 'rollup') {
+          if (isCreate) return null
+          const cRaw = record[f.name]
+          const cDisplay = formatFieldValue(cRaw, f, picklists, lookups)
+          const isFormula = f.type === 'formula'
+          return (
+            <div key={f.name} style={{
+              padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}>
+              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                {typeof f.label === 'string' && f.label.includes(' · ') ? f.label.split(' · ').pop() : f.label}
+                <span
+                  title={isFormula ? 'Read-only — calculated by a formula.' : 'Read-only — rolled up from related records.'}
+                  style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, color: '#1a5a8a', background: '#e8f3fb', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em' }}>
+                  {isFormula ? 'FORMULA' : 'ROLLUP'}
+                </span>
+              </span>
+              <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>{cDisplay}</span>
             </div>
           )
         }
@@ -6339,6 +6384,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // Cross-object (related) field values live under dotted keys — they are
     // display-only copies of a parent record's columns, never writable here.
     for (const k of Object.keys(changes)) if (k.includes('.')) delete changes[k]
+    // Formula / rollup fields are computed at read — never written back to the
+    // underlying column, even if a stale copy sits in the draft.
+    {
+      const computedNames = new Set()
+      for (const sec of (data?.sections || [])) for (const w of (sec.widgets || []))
+        for (const f of (w.widget_config?.fields || []))
+          if (f.type === 'formula' || f.type === 'rollup') computedNames.add(f.name)
+      for (const k of Object.keys(changes)) if (computedNames.has(k)) delete changes[k]
+    }
     for (const k of Object.keys(changes)) {
       if (k.endsWith('_created_at') || k.endsWith('_created_by') || k.endsWith('_updated_at') || k.endsWith('_updated_by') || k.endsWith('_is_deleted')) delete changes[k]
     }

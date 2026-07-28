@@ -320,4 +320,5 @@ Deep research is now a staged pipeline and findings flow through a review queue 
 | Project Paperwork port (HOMES invoices/proposals from the Audit Template Builder into LEAP) | `leap-project-paperwork-port.md` |
 | Dashboard rehaul (enterprise-class builder: ECharts, 25+ components, query shapes, parity) | `leap-dashboard-rehaul.md` |
 | Report Builder + viewer + dashboards enterprise rebuild (filters, sort, groupings, group formulas, cross-filter) | `leap-report-builder-enterprise.md` |
+| Field type system (modifiable types, formula fields, roll-up summaries) | `leap-field-types.md` |
 | Service Provider portal + intake (subcontractor onboarding, payout book, proposals, AP) | `leap-service-provider-portal.md` |

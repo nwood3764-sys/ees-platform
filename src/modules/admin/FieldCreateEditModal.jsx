@@ -1,29 +1,79 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
 import { useToast } from '../../components/Toast'
-import { addCustomField, upsertFieldMetadata, fetchFieldMetadata } from '../../data/adminService'
+import {
+  addCustomField, updateFieldDefinition, fetchFieldMetadata,
+  describeObject, describeIncomingFKs,
+} from '../../data/adminService'
+import { validateFormula } from '../../lib/formula/engine'
 import { OBJECT_CATALOG } from './objectCatalog'
 
+const FormulaEditor = lazy(() => import('../../lib/formula/FormulaEditor'))
+
 // ---------------------------------------------------------------------------
-// FieldCreateEditModal — two modes:
-//   mode='create' : add a brand-new field. Picks data type; for 'lookup' picks
-//                   a target object. Calls admin_add_custom_field (real ALTER
-//                   TABLE via whitelisted RPC) then records metadata.
-//   mode='edit'   : edit metadata for an existing column (label, help text,
-//                   description, example, financial tier, history flag). The
-//                   column itself isn't altered. Calls admin_upsert_field_metadata.
+// FieldCreateEditModal — Salesforce-parity field editor.
+//   mode='create' : add a brand-new field. Picks a type; a real column is
+//                   created via admin_add_custom_field (whitelisted ALTER
+//                   TABLE), then its logical definition is recorded.
+//   mode='edit'   : change an EXISTING field's type / formula / rollup, plus
+//                   its label/help/tier/history. The physical column is never
+//                   altered — type is metadata over storage (Salesforce model),
+//                   and formula/rollup fields are computed at read.
+//
+// Field types are a logical layer over the physical Postgres column:
+//   • display types (currency, percent, email, phone, url, textarea, …) just
+//     change how the value renders/validates — no column change.
+//   • formula     — read-only, evaluated by the shared formula engine over the
+//                   record's own fields plus cross-object (related) references.
+//   • rollup      — read-only aggregate (COUNT/SUM/AVG/MIN/MAX) of child records.
 // ---------------------------------------------------------------------------
 
-const DATA_TYPES = [
-  { id: 'text',      label: 'Text' },
-  { id: 'number',    label: 'Number (decimal)' },
-  { id: 'integer',   label: 'Number (whole)' },
-  { id: 'date',      label: 'Date' },
-  { id: 'timestamp', label: 'Date/Time' },
-  { id: 'boolean',   label: 'Checkbox (true/false)' },
-  { id: 'picklist',  label: 'Picklist' },
-  { id: 'lookup',    label: 'Lookup (relationship)' },
+// Type options grouped for the picker. Each carries the logical `kind` and the
+// stored `display` type. `physical` is the Postgres type used when CREATING a
+// backing column (create mode only); edit mode never retypes the column.
+const TYPE_OPTIONS = [
+  { group: 'Basic', items: [
+    { id: 'text',      label: 'Text',            kind: 'standard', display: 'text',     physical: 'text' },
+    { id: 'textarea',  label: 'Text Area (long)',kind: 'standard', display: 'textarea', physical: 'text' },
+    { id: 'number',    label: 'Number',          kind: 'standard', display: 'number',   physical: 'number' },
+    { id: 'currency',  label: 'Currency',        kind: 'standard', display: 'currency', physical: 'number' },
+    { id: 'percent',   label: 'Percent',         kind: 'standard', display: 'percent',  physical: 'number' },
+    { id: 'integer',   label: 'Number (whole)',  kind: 'standard', display: 'integer',  physical: 'integer' },
+    { id: 'boolean',   label: 'Checkbox',        kind: 'standard', display: 'boolean',  physical: 'boolean' },
+    { id: 'date',      label: 'Date',            kind: 'standard', display: 'date',      physical: 'date' },
+    { id: 'datetime',  label: 'Date/Time',       kind: 'standard', display: 'datetime',  physical: 'timestamp' },
+    { id: 'email',     label: 'Email',           kind: 'standard', display: 'email',     physical: 'text' },
+    { id: 'phone',     label: 'Phone',           kind: 'standard', display: 'phone',     physical: 'text' },
+    { id: 'url',       label: 'URL',             kind: 'standard', display: 'url',       physical: 'text' },
+  ] },
+  { group: 'Relationship', items: [
+    { id: 'picklist',  label: 'Picklist',        kind: 'standard', display: 'picklist', physical: 'picklist' },
+    { id: 'lookup',    label: 'Lookup (relationship)', kind: 'standard', display: 'lookup', physical: 'lookup' },
+  ] },
+  { group: 'Advanced', items: [
+    { id: 'formula',   label: 'Formula (calculated)',   kind: 'formula', display: 'formula', physical: 'text' },
+    { id: 'rollup',    label: 'Roll-Up Summary',        kind: 'rollup',  display: 'rollup',  physical: 'number' },
+  ] },
+]
+const TYPE_BY_ID = Object.fromEntries(TYPE_OPTIONS.flatMap(g => g.items.map(i => [i.id, i])))
+
+const RETURN_TYPES = [
+  { id: 'text',     label: 'Text' },
+  { id: 'number',   label: 'Number' },
+  { id: 'currency', label: 'Currency' },
+  { id: 'percent',  label: 'Percent' },
+  { id: 'date',     label: 'Date' },
+  { id: 'datetime', label: 'Date/Time' },
+  { id: 'boolean',  label: 'Checkbox' },
+]
+
+const ROLLUP_FUNCTIONS = [
+  { id: 'COUNT', label: 'Count of records' },
+  { id: 'SUM',   label: 'Sum of a field' },
+  { id: 'AVG',   label: 'Average of a field' },
+  { id: 'MIN',   label: 'Minimum of a field' },
+  { id: 'MAX',   label: 'Maximum of a field' },
 ]
 
 const TIERS = [
@@ -32,76 +82,241 @@ const TIERS = [
   { id: 3, label: 'Tier 3 — Financial / Restricted' },
 ]
 
+// Columns a user should never reference / aggregate / see in a picker.
+const HIDDEN_COL_RE = /^(id)$|(_record_number|_created_at|_created_by|_updated_at|_updated_by|_deleted_at|_deleted_by|_is_deleted|_deletion_reason)$/
+const NUMERIC_DTS = new Set(['integer', 'bigint', 'smallint', 'numeric', 'real', 'double precision'])
+
 function labelToColumn(label) {
-  return label.toLowerCase().trim()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 58)
+  return label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 58)
+}
+function humanize(name) {
+  return (name || '').split('_').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
+function safeAlias(s) {
+  let a = String(s || '').replace(/[^A-Za-z0-9_]/g, '_').replace(/^([0-9])/, '_$1')
+  if (!/^[A-Za-z_]/.test(a)) a = '_' + a
+  return a.slice(0, 60)
+}
+// Logical editor type for a column (mirror of the DB overlay) — labels the
+// formula reference pickers.
+function colType(c) {
+  if (c.field_kind === 'formula') return 'formula'
+  if (c.field_kind === 'rollup') return 'rollup'
+  if (c.display_type) return c.display_type
+  if (c.is_foreign_key && c.references_table === 'picklist_values') return 'picklist'
+  if (c.is_foreign_key) return 'lookup'
+  if (c.data_type === 'boolean') return 'boolean'
+  if (NUMERIC_DTS.has(c.data_type)) return 'number'
+  if (c.data_type === 'date') return 'date'
+  if ((c.data_type || '').startsWith('timestamp')) return 'datetime'
+  return 'text'
 }
 
 export default function FieldCreateEditModal({ mode, object, objectLabel, column, onClose, onSaved }) {
   const toast = useToast()
   const isEdit = mode === 'edit'
 
+  // Presentation metadata
   const [label, setLabel] = useState('')
   const [colName, setColName] = useState('')
   const [colTouched, setColTouched] = useState(false)
-  const [dataType, setDataType] = useState('text')
+  const [typeId, setTypeId] = useState('text')
   const [fkTable, setFkTable] = useState('')
   const [helpText, setHelpText] = useState('')
   const [description, setDescription] = useState('')
   const [exampleValue, setExampleValue] = useState('')
   const [financialTier, setFinancialTier] = useState(1)
   const [trackHistory, setTrackHistory] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [loadingMeta, setLoadingMeta] = useState(isEdit)
 
-  // In edit mode, prefill from existing metadata (if any).
+  // Formula config
+  const [formulaExpr, setFormulaExpr] = useState('')
+  const [formulaReturn, setFormulaReturn] = useState('text')
+  const [refs, setRefs] = useState([])   // [{alias, kind, column, fk_column?, table?, column_type?}]
+  const [relFk, setRelFk] = useState('') // selected outgoing FK column for the related picker
+  const [relParentCols, setRelParentCols] = useState({}) // fkColumn -> parent column list
+
+  // Rollup config
+  const [rollupChildKey, setRollupChildKey] = useState('') // `${table}|${fk}`
+  const [rollupFn, setRollupFn] = useState('COUNT')
+  const [rollupField, setRollupField] = useState('')
+  const [rollupReturn, setRollupReturn] = useState('number')
+  const [rollupChildCols, setRollupChildCols] = useState({}) // table -> column list
+
+  // Schema context
+  const [ownCols, setOwnCols] = useState([])         // this object's columns
+  const [incomingFks, setIncomingFks] = useState([]) // child tables (for rollup)
+  const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  const selType = TYPE_BY_ID[typeId] || TYPE_BY_ID.text
+  const isFormula = selType.kind === 'formula'
+  const isRollup = selType.kind === 'rollup'
+
+  // Load schema + (edit) existing definition on mount.
   useEffect(() => {
-    if (!isEdit) return
     let cancelled = false
-    fetchFieldMetadata(object).then(map => {
-      if (cancelled) return
-      const m = map[column]
-      if (m) {
-        setLabel(m.label || column)
-        setHelpText(m.helpText || '')
-        setDescription(m.description || '')
-        setExampleValue(m.exampleValue || '')
-        setFinancialTier(m.financialTier || 1)
-        setTrackHistory(!!m.trackHistory)
-      } else {
-        setLabel(column)
+    ;(async () => {
+      try {
+        const [cols, meta, inc] = await Promise.all([
+          describeObject(object),
+          isEdit ? fetchFieldMetadata(object) : Promise.resolve({}),
+          describeIncomingFKs(object).catch(() => []),
+        ])
+        if (cancelled) return
+        setOwnCols(cols || [])
+        setIncomingFks(inc || [])
+        if (isEdit) {
+          const cur = (cols || []).find(c => c.column_name === column)
+          const m = meta[column]
+          setLabel(m?.label || cur?.field_label || column)
+          setHelpText(m?.helpText || '')
+          setDescription(m?.description || '')
+          setExampleValue(m?.exampleValue || '')
+          setFinancialTier(m?.financialTier || 1)
+          setTrackHistory(!!m?.trackHistory)
+          // Resolve the current type id from the metadata/overlay.
+          const t = cur ? colType(cur) : 'text'
+          setTypeId(TYPE_BY_ID[t] ? t : 'text')
+          if (m?.fieldKind === 'formula') {
+            setFormulaExpr(m.formulaExpression || '')
+            setFormulaReturn(m.formulaReturnType || 'text')
+            setRefs(Array.isArray(m.formulaRefs) ? m.formulaRefs : [])
+          }
+          if (m?.fieldKind === 'rollup' && m.rollupConfig) {
+            const rc = m.rollupConfig
+            setRollupChildKey(`${rc.child_table}|${rc.child_fk}`)
+            setRollupFn((rc.function || 'COUNT').toUpperCase())
+            setRollupField(rc.field || '')
+            setRollupReturn(rc.return_type || 'number')
+          }
+        }
+      } catch (e) {
+        if (!cancelled) toast.error(`Could not load field details: ${e.message || e}`)
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      setLoadingMeta(false)
-    }).catch(() => { if (!cancelled) { setLabel(column); setLoadingMeta(false) } })
+    })()
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEdit, object, column])
 
-  // Auto-derive column name from label until the user edits it directly.
+  // Auto-derive column name from label (create mode only).
   useEffect(() => {
     if (isEdit || colTouched) return
     setColName(labelToColumn(label))
   }, [label, colTouched, isEdit])
+
+  // Outgoing FKs on this object (for cross-object formula references). Exclude
+  // audit FKs to users.
+  const outgoingFks = ownCols.filter(c =>
+    c.is_foreign_key && c.references_table && c.references_table !== 'picklist_values'
+    && !/(_created_by|_updated_by|_deleted_by|_owner)$/.test(c.column_name))
+
+  // Same-object columns selectable in a formula.
+  const selectableOwnCols = ownCols.filter(c => !HIDDEN_COL_RE.test(c.column_name) && c.column_name !== column)
 
   const lookupTargets = OBJECT_CATALOG
     .filter(o => o.table !== object)
     .map(o => ({ table: o.table, label: o.pluralLabel || o.label }))
     .sort((a, b) => a.label.localeCompare(b.label))
 
+  // Lazily fetch a parent table's columns when a related FK is chosen.
+  useEffect(() => {
+    if (!isFormula || !relFk) return
+    const fk = outgoingFks.find(c => c.column_name === relFk)
+    if (!fk || relParentCols[relFk]) return
+    describeObject(fk.references_table).then(cols => {
+      setRelParentCols(prev => ({ ...prev, [relFk]: (cols || []).filter(c => !HIDDEN_COL_RE.test(c.column_name)) }))
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relFk, isFormula])
+
+  // Lazily fetch a rollup child table's columns when chosen.
+  const rollupChild = rollupChildKey ? { table: rollupChildKey.split('|')[0], fk: rollupChildKey.split('|')[1] } : null
+  useEffect(() => {
+    if (!isRollup || !rollupChild?.table || rollupChildCols[rollupChild.table]) return
+    describeObject(rollupChild.table).then(cols => {
+      setRollupChildCols(prev => ({ ...prev, [rollupChild.table]: (cols || []).filter(c => NUMERIC_DTS.has(c.data_type) && !HIDDEN_COL_RE.test(c.column_name)) }))
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rollupChildKey, isRollup])
+
+  const aliasList = refs.map(r => r.alias)
+
+  function addExpr(token) {
+    setFormulaExpr(prev => (prev && !/\s$/.test(prev) ? prev + ' ' : prev) + token)
+  }
+  function addOwnRef(col) {
+    if (!col) return
+    const alias = safeAlias(col.column_name)
+    setRefs(prev => prev.some(r => r.alias === alias) ? prev : [...prev, { alias, kind: 'field', column: col.column_name, column_type: colType(col) }])
+    addExpr(alias)
+  }
+  function addRelatedRef(col) {
+    if (!relFk || !col) return
+    const fk = outgoingFks.find(c => c.column_name === relFk)
+    let alias = safeAlias(`${relFk}_${col.column_name}`)
+    let n = 2
+    while (refs.some(r => r.alias === alias && !(r.kind === 'related' && r.fk_column === relFk && r.column === col.column_name))) { alias = safeAlias(`${relFk}_${col.column_name}_${n++}`) }
+    const ref = {
+      alias, kind: 'related', fk_column: relFk, table: fk.references_table,
+      column: col.column_name, column_type: colType(col),
+    }
+    setRefs(prev => prev.some(r => r.alias === alias) ? prev : [...prev, ref])
+    addExpr(alias)
+  }
+  function removeRef(alias) { setRefs(prev => prev.filter(r => r.alias !== alias)) }
+
+  // Validation
   const colValid = isEdit || /^[a-z][a-z0-9_]{1,57}$/.test(colName)
-  const canSave = label.trim() && (isEdit || colValid) && (dataType !== 'lookup' || fkTable)
+  let canSave = label.trim() && (isEdit || colValid)
+  if (!isEdit && selType.display === 'lookup' && !fkTable) canSave = false
+  if (isFormula && !formulaExpr.trim()) canSave = false
+  if (isRollup) {
+    if (!rollupChild) canSave = false
+    if (rollupFn !== 'COUNT' && !rollupField) canSave = false
+  }
 
   async function save() {
+    // Formula syntax gate before hitting the server.
+    if (isFormula) {
+      const v = validateFormula(formulaExpr, aliasList)
+      if (!v.ok) { toast.error(`Formula error: ${v.error}`); return }
+    }
     setBusy(true)
     try {
-      if (isEdit) {
-        await upsertFieldMetadata({ object, column, label, helpText, description, exampleValue, financialTier, trackHistory })
-        toast.success('Field details saved')
-      } else {
-        await addCustomField({ object, column: colName, label, dataType, helpText, description, exampleValue, financialTier, trackHistory, fkTable: dataType === 'lookup' ? fkTable : null })
-        toast.success(`Field "${label}" created`)
+      let col = column
+      if (!isEdit) {
+        col = colName
+        // Create the backing column with a safe physical type first.
+        await addCustomField({
+          object, column: col, label,
+          dataType: selType.physical === 'text' && isFormula ? physicalForReturn(formulaReturn) : selType.physical,
+          helpText, description, exampleValue, financialTier, trackHistory,
+          fkTable: selType.display === 'lookup' ? fkTable : null,
+        })
       }
+      // Record the logical definition (type / formula / rollup).
+      const params = {
+        object, column: col, label, helpText, description, exampleValue,
+        financialTier, trackHistory,
+        displayType: selType.display,
+        fieldKind: selType.kind,
+      }
+      if (isFormula) {
+        params.formulaExpression = formulaExpr
+        params.formulaReturnType = formulaReturn
+        params.formulaRefs = refs
+      }
+      if (isRollup) {
+        params.rollupConfig = {
+          child_table: rollupChild.table, child_fk: rollupChild.fk,
+          function: rollupFn, field: rollupFn === 'COUNT' ? null : rollupField,
+          return_type: rollupFn === 'COUNT' ? 'number' : rollupReturn,
+        }
+      }
+      await updateFieldDefinition(params)
+      toast.success(isEdit ? 'Field saved' : `Field "${label}" created`)
       onSaved && onSaved()
       onClose && onClose()
     } catch (e) {
@@ -119,8 +334,8 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
   const inputStyle = { width: '100%', padding: '8px 10px', border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12.5, background: C.page, color: C.textPrimary, outline: 'none', boxSizing: 'border-box' }
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '60px 20px', overflow: 'auto' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 12, width: 560, maxWidth: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 20px', overflow: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 12, width: 600, maxWidth: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
         <div style={{ padding: '16px 22px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>
             {isEdit ? `Edit Field — ${column}` : `New Field on ${objectLabel}`}
@@ -129,32 +344,122 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
         </div>
 
         <div style={{ padding: '18px 22px' }}>
-          {loadingMeta ? (
+          {loading ? (
             <div style={{ padding: 20, fontSize: 12.5, color: C.textMuted }}>Loading field details…</div>
           ) : (
           <>
-            {field('Field Label', <input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Annual Income" style={inputStyle} />, 'Shown to users on layouts and lists.')}
+            {field('Field Label', <input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. IRA Income Code" style={inputStyle} />, 'Shown to users on layouts and lists.')}
 
             {!isEdit && field('API / Column Name',
-              <input value={colName} onChange={e => { setColName(e.target.value); setColTouched(true) }} placeholder="annual_income"
+              <input value={colName} onChange={e => { setColName(e.target.value); setColTouched(true) }} placeholder="ira_income_code"
                 style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', borderColor: colName && !colValid ? '#1a5a8a' : C.border }} />,
-              colName && !colValid ? 'Use lower snake_case: start with a letter, letters/digits/underscore, 2–58 chars.' : 'Database column name. Auto-filled from the label; edit if needed. Cannot be changed later.')}
+              colName && !colValid ? 'Use lower snake_case: start with a letter, letters/digits/underscore, 2–58 chars.' : 'Database column name. Auto-filled from the label; cannot be changed later.')}
 
-            {!isEdit && field('Data Type',
-              <select value={dataType} onChange={e => setDataType(e.target.value)} style={inputStyle}>
-                {DATA_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            {field('Field Type',
+              <select value={typeId} onChange={e => setTypeId(e.target.value)} style={inputStyle}>
+                {TYPE_OPTIONS.map(g => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.items.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </optgroup>
+                ))}
               </select>,
-              dataType === 'picklist' ? 'After creating, add the picklist values on the field editor.' : (dataType === 'lookup' ? 'Creates a relationship to another object.' : null))}
+              isEdit
+                ? 'Type is metadata over storage — changing it re-renders the field without altering the column or its data.'
+                : (selType.display === 'picklist' ? 'After creating, add the picklist values on the field editor.' : (selType.display === 'lookup' ? 'Creates a relationship to another object.' : null)))}
 
-            {!isEdit && dataType === 'lookup' && field('Related Object',
+            {!isEdit && selType.display === 'lookup' && field('Related Object',
               <select value={fkTable} onChange={e => setFkTable(e.target.value)} style={inputStyle}>
                 <option value="">Select an object…</option>
                 {lookupTargets.map(t => <option key={t.table} value={t.table}>{t.label}</option>)}
               </select>)}
 
+            {/* ── Formula configuration ── */}
+            {isFormula && (
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14, background: C.pageAlt || '#f7f9fc' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.textPrimary, marginBottom: 10 }}>Formula</div>
+                {field('Return Type',
+                  <select value={formulaReturn} onChange={e => setFormulaReturn(e.target.value)} style={{ ...inputStyle, background: C.card }}>
+                    {RETURN_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </select>)}
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                  <select value="" onChange={e => { const c = selectableOwnCols.find(x => x.column_name === e.target.value); if (c) addOwnRef(c); e.target.value = '' }}
+                    style={{ ...inputStyle, background: C.card, flex: 1, minWidth: 180 }}>
+                    <option value="">Insert this object's field…</option>
+                    {selectableOwnCols.map(c => <option key={c.column_name} value={c.column_name}>{c.field_label || humanize(c.column_name)}</option>)}
+                  </select>
+                </div>
+
+                {outgoingFks.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                    <select value={relFk} onChange={e => setRelFk(e.target.value)} style={{ ...inputStyle, background: C.card, flex: 1, minWidth: 150 }}>
+                      <option value="">Related object (via lookup)…</option>
+                      {outgoingFks.map(c => <option key={c.column_name} value={c.column_name}>{humanize(c.references_table)} · via {humanize(c.column_name)}</option>)}
+                    </select>
+                    <select value="" disabled={!relFk || !relParentCols[relFk]} onChange={e => { const c = (relParentCols[relFk] || []).find(x => x.column_name === e.target.value); if (c) addRelatedRef(c); e.target.value = '' }}
+                      style={{ ...inputStyle, background: C.card, flex: 1, minWidth: 150 }}>
+                      <option value="">{relFk && !relParentCols[relFk] ? 'Loading…' : 'Insert related field…'}</option>
+                      {(relParentCols[relFk] || []).map(c => <option key={c.column_name} value={c.column_name}>{c.field_label || humanize(c.column_name)}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                <Suspense fallback={<div style={{ fontSize: 12, color: C.textMuted, padding: 8 }}>Loading formula editor…</div>}>
+                  <FormulaEditor value={formulaExpr} onChange={setFormulaExpr} fields={aliasList}
+                    placeholder='e.g. property_ira_income_qualification_number  (or IF(amount > 1000, "High", "Std"))' />
+                </Suspense>
+
+                {refs.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: C.textSecondary, marginBottom: 5 }}>Referenced fields</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {refs.map(r => (
+                        <span key={r.alias} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontFamily: 'JetBrains Mono, monospace', background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, padding: '2px 6px', color: C.textPrimary }}>
+                          {r.alias}
+                          <span style={{ color: C.textMuted }}>{r.kind === 'related' ? `→ ${humanize(r.table)}.${r.column}` : ''}</span>
+                          <span onClick={() => removeRef(r.alias)} style={{ cursor: 'pointer', color: C.textMuted, fontWeight: 700 }}>×</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Rollup configuration ── */}
+            {isRollup && (
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14, background: C.pageAlt || '#f7f9fc' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.textPrimary, marginBottom: 10 }}>Roll-Up Summary</div>
+                {field('Child Records',
+                  <select value={rollupChildKey} onChange={e => { setRollupChildKey(e.target.value); setRollupField('') }} style={{ ...inputStyle, background: C.card }}>
+                    <option value="">Select the related child object…</option>
+                    {incomingFks.map(fk => (
+                      <option key={`${fk.referencing_table}|${fk.referencing_column}`} value={`${fk.referencing_table}|${fk.referencing_column}`}>
+                        {humanize(fk.referencing_table)} · via {humanize(fk.referencing_column)}
+                      </option>
+                    ))}
+                  </select>,
+                  'Aggregates records from another object that point back at this one.')}
+                {field('Calculation',
+                  <select value={rollupFn} onChange={e => setRollupFn(e.target.value)} style={{ ...inputStyle, background: C.card }}>
+                    {ROLLUP_FUNCTIONS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                  </select>)}
+                {rollupFn !== 'COUNT' && field('Field to Aggregate',
+                  <select value={rollupField} onChange={e => setRollupField(e.target.value)} style={{ ...inputStyle, background: C.card }} disabled={!rollupChild || !rollupChildCols[rollupChild.table]}>
+                    <option value="">{rollupChild && !rollupChildCols[rollupChild.table] ? 'Loading…' : 'Select a numeric field…'}</option>
+                    {(rollupChild ? rollupChildCols[rollupChild.table] || [] : []).map(c => <option key={c.column_name} value={c.column_name}>{c.field_label || humanize(c.column_name)}</option>)}
+                  </select>,
+                  'Only numeric fields can be summed, averaged, or min/maxed.')}
+                {rollupFn !== 'COUNT' && field('Display As',
+                  <select value={rollupReturn} onChange={e => setRollupReturn(e.target.value)} style={{ ...inputStyle, background: C.card }}>
+                    {RETURN_TYPES.filter(t => ['number', 'currency', 'percent'].includes(t.id)).map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </select>)}
+              </div>
+            )}
+
             {field('Help Text', <input value={helpText} onChange={e => setHelpText(e.target.value)} placeholder="Short guidance shown near the field" style={inputStyle} />)}
             {field('Description', <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="Internal description of what this field captures" style={{ ...inputStyle, resize: 'vertical' }} />)}
-            {field('Example Value', <input value={exampleValue} onChange={e => setExampleValue(e.target.value)} placeholder="e.g. 48000" style={inputStyle} />)}
+            {!isFormula && !isRollup && field('Example Value', <input value={exampleValue} onChange={e => setExampleValue(e.target.value)} placeholder="e.g. 48000" style={inputStyle} />)}
             {field('Financial / Sensitivity Tier',
               <select value={financialTier} onChange={e => setFinancialTier(Number(e.target.value))} style={inputStyle}>
                 {TIERS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
@@ -169,12 +474,25 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
 
         <div style={{ padding: '14px 22px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button onClick={onClose} style={{ padding: '8px 16px', borderRadius: 6, border: `1px solid ${C.border}`, background: C.page, color: C.textSecondary, fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={save} disabled={busy || !canSave}
-            style={{ padding: '8px 18px', borderRadius: 6, border: 'none', background: (busy || !canSave) ? '#cfe9da' : C.emerald, color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: (busy || !canSave) ? 'default' : 'pointer' }}>
+          <button onClick={save} disabled={busy || !canSave || loading}
+            style={{ padding: '8px 18px', borderRadius: 6, border: 'none', background: (busy || !canSave || loading) ? '#cfe9da' : C.emerald, color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: (busy || !canSave || loading) ? 'default' : 'pointer' }}>
             {busy ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save' : 'Create Field')}
           </button>
         </div>
       </div>
     </div>
   )
+}
+
+// Physical Postgres type to back a formula field of a given return type (create
+// mode only). The stored column stays null — the value is computed at read —
+// but a matching type keeps things clean if a value is ever persisted.
+function physicalForReturn(returnType) {
+  switch (returnType) {
+    case 'number': case 'currency': case 'percent': return 'number'
+    case 'date': return 'date'
+    case 'datetime': return 'timestamp'
+    case 'boolean': return 'boolean'
+    default: return 'text'
+  }
 }

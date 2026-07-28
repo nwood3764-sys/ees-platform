@@ -1151,7 +1151,7 @@ export async function fetchRecordTypeValueOrder(recordTypeId) {
 export async function fetchFieldMetadata(object) {
   const { data, error } = await supabase
     .from('field_metadata')
-    .select('fm_object, fm_column, fm_label, fm_help_text, fm_description, fm_example_value, fm_financial_tier, fm_track_history, fm_data_type, fm_is_custom')
+    .select('fm_object, fm_column, fm_label, fm_help_text, fm_description, fm_example_value, fm_financial_tier, fm_track_history, fm_data_type, fm_is_custom, fm_field_kind, fm_display_type, fm_formula_expression, fm_formula_return_type, fm_formula_refs, fm_rollup_config')
     .eq('fm_object', object)
     .eq('fm_is_deleted', false)
   if (error) throw error
@@ -1162,6 +1162,9 @@ export async function fetchFieldMetadata(object) {
       helpText: r.fm_help_text, description: r.fm_description, exampleValue: r.fm_example_value,
       financialTier: r.fm_financial_tier, trackHistory: r.fm_track_history,
       dataType: r.fm_data_type, isCustom: r.fm_is_custom,
+      fieldKind: r.fm_field_kind || 'standard', displayType: r.fm_display_type,
+      formulaExpression: r.fm_formula_expression, formulaReturnType: r.fm_formula_return_type,
+      formulaRefs: r.fm_formula_refs, rollupConfig: r.fm_rollup_config,
     }
   }
   return map
@@ -1200,6 +1203,34 @@ export async function upsertFieldMetadata(params) {
     p_track_history: params.trackHistory ?? false,
   })
   if (error) throw error
+  return data
+}
+
+// Full field-definition update — presentation metadata PLUS logical type,
+// formula, and rollup configuration. Backs the Edit Field modal. The physical
+// column is never altered; type is metadata over storage (Salesforce model) and
+// formula/rollup fields are computed at read.
+export async function updateFieldDefinition(params) {
+  const { data, error } = await supabase.rpc('admin_update_field_definition', {
+    p_object: params.object,
+    p_column: params.column,
+    p_label: params.label,
+    p_help_text: params.helpText || null,
+    p_description: params.description || null,
+    p_example_value: params.exampleValue || null,
+    p_financial_tier: params.financialTier ?? 1,
+    p_track_history: params.trackHistory ?? false,
+    p_display_type: params.displayType || null,
+    p_field_kind: params.fieldKind || 'standard',
+    p_formula_expression: params.formulaExpression || null,
+    p_formula_return_type: params.formulaReturnType || null,
+    p_formula_refs: params.formulaRefs ?? null,
+    p_rollup_config: params.rollupConfig ?? null,
+  })
+  if (error) throw error
+  // The object's logical field types changed — drop its cached schema so the
+  // next describeObject() reflects the new type/formula/rollup.
+  invalidateObjectSchema(params.object)
   return data
 }
 
