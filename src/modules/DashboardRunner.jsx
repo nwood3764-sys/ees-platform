@@ -10,7 +10,27 @@ import { WidgetBody } from './DashboardWidgetView'
 // and renders the widgets in a grid. Each widget chooses its own viz
 // (table / metric / bar / line / pie / donut / funnel / gauge).
 
-export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenReport, onNavigate }) {
+// A UUID raw value means the group column is a picklist/lookup FK, which the
+// object list surfaces as a resolved `<col>__label` text column — so those
+// drill on the human label; plain scalar columns drill on the raw value.
+const DRILL_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// Translate a clicked chart segment into the list-view filter that scopes the
+// records drill. Returns [] (unfiltered — every record behind the widget) when
+// there is no group column or the bucket can't be scoped safely (a `—`/blank
+// bucket: a null FK still renders `—` in the list, not blank, so an equality
+// or is-blank filter would silently match nothing or everything).
+function buildDrillFilters(groupBy, rawValue, label) {
+  if (!groupBy || rawValue == null || rawValue === '') return []
+  const human = String(groupBy).replace(/__label$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  if (typeof rawValue === 'string' && DRILL_UUID_RE.test(rawValue)) {
+    if (label == null || label === '—' || label === '(blank)') return []
+    return [{ field: `${groupBy}__label`, label: human, op: 'equals', value: String(label) }]
+  }
+  return [{ field: groupBy, label: human, op: 'equals', value: String(rawValue) }]
+}
+
+export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenReport, onDrillToRecords, onNavigate }) {
   const [data, setData]                 = useState(null)        // { dashboard, widgets, filters }
   const [results, setResults]           = useState({})          // widget.id → run result
   const [loading, setLoading]           = useState(true)
@@ -293,6 +313,7 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
                 result={results[w.id]}
                 useGeometry={useGeometry}
                 onOpenReport={onOpenReport}
+                onDrillToRecords={onDrillToRecords}
                 onNavigate={onNavigate}
                 filterValue={filterWidgetValues[w.id]}
                 onFilterWidgetChange={handleFilterWidgetChange}
@@ -309,29 +330,47 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
 
 // ─── Widget tile ──────────────────────────────────────────────────────────
 
-function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onNavigate, filterValue, onFilterWidgetChange, onCrossFilter, crossFilter }) {
+function DashboardWidgetTile({ widget, result, useGeometry, onOpenReport, onDrillToRecords, onNavigate, filterValue, onFilterWidgetChange, onCrossFilter, crossFilter }) {
   const span = widget.dw_width || 1
-  const canDrill = !!onOpenReport
-  const canCrossFilter = !!onCrossFilter && !!(widget.dw_widget_config || {}).group_by
   const cfg = widget.dw_widget_config || {}
+  // Drilling opens the underlying RECORDS (the object's list, scoped to what was
+  // clicked) — not the source report, which for a summary widget just re-renders
+  // the same grouped chart as a goofy one-column table. Falls back to opening the
+  // report only where no records-drill handler is wired (e.g. an inline preview).
+  const primaryObject = result?.primaryObject || null
+  const canDrillRecords = !!onDrillToRecords && !!primaryObject
+  const canDrill = canDrillRecords || !!onOpenReport
+  const canCrossFilter = !!onCrossFilter && !!cfg.group_by
 
-  // Segment click = cross-filter the dashboard (Power BI behavior): filter every
-  // other widget by the clicked value, staying on the dashboard. The "View
-  // Records →" header link is the drill-through to the filtered source report.
-  // Resolve the human label from the aggregated rows for the cross-filter chip.
+  // Resolve the human label from the aggregated rows (for the cross-filter chip
+  // and the drill scope banner).
   const resolveLabel = (rawValue) => {
     const agg = Array.isArray(result?.aggregated) ? result.aggregated : null
     const hit = agg?.find(r => String(r.rawValue) === String(rawValue))
     return hit?.name ?? rawValue
   }
-  const drillTo = (rawValue) => {
-    if (canCrossFilter && rawValue != null && rawValue !== '') {
-      onCrossFilter(widget, rawValue, resolveLabel(rawValue))
-    } else if (canDrill) {
+  // Open the records list scoped to a clicked segment (or unscoped for the whole
+  // widget). Falls back to the report opener when records-drill isn't available.
+  const drillRecords = (rawValue, label) => {
+    if (canDrillRecords) {
+      const filters = buildDrillFilters(cfg.group_by || null, rawValue, label)
+      const base = widget.dw_title || result?.name || 'Records'
+      const scopeLabel = filters.length ? `${base} · ${label}` : base
+      onDrillToRecords(primaryObject, filters, scopeLabel)
+    } else if (onOpenReport) {
       onOpenReport(widget.dw_report_id)
     }
   }
-  const drillWhole = () => { if (canDrill) onOpenReport(widget.dw_report_id) }
+  const drillTo = (rawValue) => {
+    // Chart segment on a grouped widget → cross-filter the dashboard (Power BI
+    // behavior — stays on the dashboard). Everything else → drill to records.
+    if (canCrossFilter && rawValue != null && rawValue !== '') {
+      onCrossFilter(widget, rawValue, resolveLabel(rawValue))
+    } else {
+      drillRecords(rawValue, resolveLabel(rawValue))
+    }
+  }
+  const drillWhole = () => drillRecords(null, null)
 
   // Is this widget the source of the active cross-filter?
   const isCrossSource = crossFilter && crossFilter.sourceWidgetId === widget.id

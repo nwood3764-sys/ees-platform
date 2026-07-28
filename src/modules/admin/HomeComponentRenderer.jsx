@@ -8,7 +8,7 @@ import { Icon } from '../../components/UI'
 //
 // To avoid heavy imports at module load, the dashboard/report/list embeds are
 // loaded lazily only when needed on the live screen.
-export default function HomeComponentRenderer({ component, preview = false, sources = {}, onNavigate, onOpenReport, onOpenDashboard }) {
+export default function HomeComponentRenderer({ component, preview = false, sources = {}, onNavigate, onOpenReport, onOpenDashboard, onDrillToRecords }) {
   const { type, sourceId, title, config = {} } = component
 
   const label = title || defaultTitle(type, sourceId, sources)
@@ -29,7 +29,7 @@ export default function HomeComponentRenderer({ component, preview = false, sour
     case 'gauge':           return <GaugeCard title={label} config={config} />
     case 'rich_text':       return <RichTextCard title={label} config={config} />
     case 'task_list':       return <TaskListCard title={label} onNavigate={onNavigate} />
-    case 'dashboard':       return <EmbeddedDashboard title={label} sourceId={sourceId} onNavigate={onNavigate} onOpenReport={onOpenReport} onOpenDashboard={onOpenDashboard} />
+    case 'dashboard':       return <EmbeddedDashboard title={label} sourceId={sourceId} onNavigate={onNavigate} onOpenReport={onOpenReport} onOpenDashboard={onOpenDashboard} onDrillToRecords={onDrillToRecords} />
     case 'report_chart':    return <EmbeddedReport title={label} sourceId={sourceId} />
     case 'list_view':       return <EmbeddedListView title={label} sourceId={sourceId} sources={sources} onNavigate={onNavigate} />
     default:                return <CardShell title={label}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>Unknown component</div></CardShell>
@@ -161,7 +161,7 @@ function TaskListCard({ title, onNavigate }) {
 }
 
 // ── Lazy embeds for dashboard / report / list view ────────────────────────
-function EmbeddedDashboard({ title, sourceId, onNavigate, onOpenReport, onOpenDashboard }) {
+function EmbeddedDashboard({ title, sourceId, onNavigate, onOpenReport, onOpenDashboard, onDrillToRecords }) {
   const [Comp, setComp] = useState(null)
   useEffect(() => { import('../DashboardRunner').then(m => setComp(() => m.default)).catch(() => setComp(null)) }, [])
   if (!sourceId) return <CardShell title={title}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>No dashboard selected.</div></CardShell>
@@ -172,6 +172,7 @@ function EmbeddedDashboard({ title, sourceId, onNavigate, onOpenReport, onOpenDa
         dashboardId={sourceId} embedded
         onNavigate={onNavigate}
         onOpenReport={onOpenReport}
+        onDrillToRecords={onDrillToRecords}
         onEdit={onOpenDashboard ? () => onOpenDashboard(sourceId) : undefined}
       />
     </div>

@@ -82,6 +82,32 @@ export default function DashboardCanvasEditor({ dashboardId, onClose, onSaved })
   const updateFilter = (id, patch) => setFilters(f => f.map(x => x.id === id ? { ...x, ...patch } : x))
   const removeFilter = (id) => setFilters(f => f.filter(x => x.id !== id))
 
+  // Field-name suggestions for the filter picker: the columns the dashboard's
+  // widgets already reference (group_by / series / measure / date / filter
+  // fields + table columns). A dashboard filter must name a column that its
+  // widgets' reports actually have, so these are the useful candidates — the
+  // input stays free-text (a widget may use a field not surfaced here) but the
+  // datalist means you pick from real fields instead of typing blind.
+  //
+  // MUST stay above the loading/error early returns below — it's a hook, and a
+  // hook after a conditional return changes the hook count between the loading
+  // and loaded renders (React "Rendered more/fewer hooks" crash). `loaded` is
+  // null until the load resolves, so the optional chaining keeps it safe.
+  const fieldSuggestions = useMemo(() => {
+    const set = new Set()
+    for (const c of (loaded?.components || [])) {
+      const cfg = c.config || c.props || c.dw_widget_config || {}
+      for (const k of ['group_by', 'series_by', 'measure_field', 'date_field', 'filter_field']) {
+        if (cfg[k]) set.add(cfg[k])
+      }
+      if (Array.isArray(cfg.columns)) for (const col of cfg.columns) {
+        if (typeof col === 'string') set.add(col)
+        else if (col?.name) set.add(col.name)
+      }
+    }
+    return Array.from(set).sort()
+  }, [loaded])
+
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} onRetry={onClose} />
 
@@ -98,27 +124,6 @@ export default function DashboardCanvasEditor({ dashboardId, onClose, onSaved })
         }} />
     </div>
   )
-
-  // Field-name suggestions for the filter picker: the columns the dashboard's
-  // widgets already reference (group_by / series / measure / date / filter
-  // fields + table columns). A dashboard filter must name a column that its
-  // widgets' reports actually have, so these are the useful candidates — the
-  // input stays free-text (a widget may use a field not surfaced here) but the
-  // datalist means you pick from real fields instead of typing blind.
-  const fieldSuggestions = useMemo(() => {
-    const set = new Set()
-    for (const c of (loaded?.components || [])) {
-      const cfg = c.config || c.props || c.dw_widget_config || {}
-      for (const k of ['group_by', 'series_by', 'measure_field', 'date_field', 'filter_field']) {
-        if (cfg[k]) set.add(cfg[k])
-      }
-      if (Array.isArray(cfg.columns)) for (const col of cfg.columns) {
-        if (typeof col === 'string') set.add(col)
-        else if (col?.name) set.add(col.name)
-      }
-    }
-    return Array.from(set).sort()
-  }, [loaded])
 
   const settingsPanel = (
     <DashboardSettings
