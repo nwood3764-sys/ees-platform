@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import { getRecordTypeColumn, getCurrentUserProfile } from '../data/layoutService'
+import { setLayoutReturnRecord } from '../lib/urlNav'
 
 /**
  * Salesforce-style gear menu that lives in the global topbar (not on every
@@ -97,6 +98,17 @@ export default function TopbarSetupGear({
       const tableName = effectiveTable
       if (!tableName) return
 
+      // Remember the record (and the module it's viewed in) the admin is
+      // editing the layout FOR, so saving/closing the editor returns them to
+      // it instead of stranding them in Object Manager. Cleared when the gear
+      // is opened off a record page (a list), so it can't send them somewhere
+      // stale.
+      setLayoutReturnRecord(
+        (selectedRecord?.table && selectedRecord?.id)
+          ? { table: selectedRecord.table, id: selectedRecord.id, module: activeModule }
+          : null,
+      )
+
       // Resolve THIS record's record_type_id inline (awaited) rather than
       // trusting the lazily-prefetched `resolvedRecordTypeId` — the prefetch
       // in handleOpen races the click, and if it hasn't landed we'd silently
@@ -175,7 +187,7 @@ export default function TopbarSetupGear({
     } finally {
       setBusy(false)
     }
-  }, [effectiveTable, selectedRecord, resolvedRecordTypeId, onOpenSetup, busy])
+  }, [effectiveTable, selectedRecord, resolvedRecordTypeId, onOpenSetup, busy, activeModule])
 
   const handleEditObject = useCallback(() => {
     setOpen(false)

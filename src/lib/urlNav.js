@@ -529,6 +529,29 @@ function attachPendingPrefill(navState) {
   return navState
 }
 
+// ── Page-layout editor return target ────────────────────────────────────
+//
+// When the Setup gear opens the page layout editor from a record, we remember
+// that record (and the module it was viewed in) so that saving — or closing —
+// the layout returns the user to it, Salesforce-style, instead of stranding
+// them in Object Manager where they have to hit Back. Module-scoped and
+// single-use: consumed when the editor mounts. The gear sets it to null when
+// opened off a record page, so a stale target never sends the user somewhere
+// unexpected.
+let pendingLayoutReturn = null
+
+export function setLayoutReturnRecord(rec) {
+  pendingLayoutReturn = (rec && rec.table && rec.id)
+    ? { table: rec.table, id: rec.id, module: rec.module || null }
+    : null
+}
+
+export function consumeLayoutReturnRecord() {
+  const r = pendingLayoutReturn
+  pendingLayoutReturn = null
+  return r
+}
+
 export function useUrlNavigation() {
   const [state, setState] = useState(() =>
     attachPendingPrefill(parsePath(window.location.pathname, window.location.search)))
@@ -579,6 +602,7 @@ export function useUrlNavigation() {
 
   const navigateToModule = useCallback((moduleId) => {
     pendingPrefill = null
+    pendingLayoutReturn = null
     push({ activeModule: moduleId, selectedRecord: null, section: null, subsection: null, searchQuery: null, searchType: null })
   }, [push])
 
@@ -648,12 +672,22 @@ export function useUrlNavigation() {
       pendingPrefill = { key, prefill: rec.prefill }
     }
     setState((prev) => {
-      const mod = resolveRecordModule(rec.table, prev.activeModule)
+      // An explicit, record-hosting module override (the page-layout editor
+      // returning the user to the exact module + record they came from) wins
+      // over the stay-in-current-module default — otherwise saving a layout
+      // from Admin would reopen the record still inside the Admin app.
+      const forced = rec.module
+      const mod = (forced && RECORD_HOSTING_MODULES.has(forced))
+        ? forced
+        : resolveRecordModule(rec.table, prev.activeModule)
       // Remember which section we came from so closing the record returns to
       // that list's URL — but only when staying in the same module
       // (a cross-module open can't keep the prior module's section).
       const keepSection = mod === prev.activeModule
-      const next = { activeModule: mod, selectedRecord: { ...rec },
+      // `module` is a navigation hint only — never let it leak into the
+      // selectedRecord state (buildPath ignores it, but keep state clean).
+      const { module: _forcedModule, ...recFields } = rec
+      const next = { activeModule: mod, selectedRecord: { ...recFields },
         section: keepSection ? prev.section : null,
         subsection: keepSection ? prev.subsection : null,
         searchQuery: null, searchType: null }
