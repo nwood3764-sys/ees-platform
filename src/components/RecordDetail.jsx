@@ -245,7 +245,7 @@ const TABLE_META = {
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
   projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id', 'building_id', 'project_account_id'],                     parentTables: ['properties', 'buildings', 'accounts'] },
   assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id'],                     parentTables: ['properties', 'buildings'] },
-  incentive_applications:    { module: 'Qualification',  label: 'Applications',         nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['property_id'],                                    parentTables: ['properties'] },
+  incentive_applications:    { module: 'Qualification',  label: 'Applications',         nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['opportunity_id', 'property_id', 'building_id', 'project_id'], parentTables: ['opportunities', 'properties', 'buildings', 'projects'] },
   efr_reports:               { module: 'Qualification',  label: 'EFR Reports',          nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   project_payment_requests:  { module: 'Incentives',     label: 'Payment Requests',     nameColumn: null,                     recordNumberColumn: 'ppr_record_number',               statusColumn: 'ppr_status',               parents: ['project_id', 'property_id'],                      parentTables: ['projects', 'properties'] },
   payment_receipts:          { module: 'Incentives',     label: 'Payment Receipts',     nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: [],                                                 parentTables: [] },
@@ -3943,6 +3943,121 @@ function RelatedListWidget({
       // use). Transient hint — stripped before insert.
       if (parentRecord.property_name) {
         prefillObj.__derivedNameBase = parentRecord.property_name
+      }
+    }
+
+    // An incentive application is a program submittal for one building, so a new
+    // one created from an Opportunity's related list should open with everything
+    // the system already holds about that opportunity's building and property —
+    // installation address, square footage, floors, year built, unit counts,
+    // utility providers/accounts, owner and business-entity info — leaving only
+    // genuinely application-specific answers to type (Nicholas: "very little
+    // information should be manually entered here"). The generic chain seeder has
+    // already carried opportunity_id/property_id/building_id (the NOT NULL FKs)
+    // from TABLE_META; here we fetch the building, property and owner-account rows
+    // and copy their attributes. ia_installation_address_state also drives the
+    // record-type picker's state filter (prefillState). All values stay
+    // user-editable; only fill blanks, never clobber.
+    if (childTable === 'incentive_applications' && parentTable === 'opportunities' && parentRecord) {
+      const fill = (dst, v) => {
+        if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
+      }
+      // Straight from the opportunity we're creating from.
+      fill('ia_program_name',                    parentRecord.opportunity_program)
+      fill('ia_program_year',                    parentRecord.opportunity_program_year)
+      fill('ia_income_qualified_confirmation_code',
+        parentRecord.opportunity_income_qualified_confirmation_code || parentRecord.opportunity_ira_income_code)
+      fill('ia_electric_account_number',         parentRecord.opportunity_electric_account_number)
+      fill('ia_natural_gas_account_number',      parentRecord.opportunity_gas_account_number)
+      // The building's "how is this building heated" answer is a picklist label;
+      // resolve the building_heating_fuel_type UUID against the loaded picklists
+      // so we seed a readable value, never a raw UUID.
+      const resolvePicklistLabel = (uuid) => {
+        if (!uuid) return null
+        for (const key of Object.keys(picklists || {})) {
+          const opt = (picklists[key] || []).find(o => o.value === uuid || o.id === uuid)
+          if (opt) return opt.label || opt.name || null
+        }
+        return null
+      }
+      // Building, property and owner-account attributes live on other rows —
+      // fetch them (any failure just leaves those fields blank for manual entry).
+      try {
+        const fetchRow = (table, id, cols, delCol) => id
+          ? supabase.from(table).select(cols).eq('id', id).eq(delCol, false).maybeSingle()
+          : Promise.resolve({ data: null })
+        const accountId = parentRecord.opportunity_account_id
+        const [buildingRes, propertyRes, accountRes] = await Promise.all([
+          fetchRow('buildings', parentRecord.building_id,
+            'building_square_footage, building_sq_ft, building_stories, building_stories_of_building, ' +
+            'building_year_built, building_total_units, building_number_of_units, ' +
+            'building_address, building_city, building_state, building_zip, ' +
+            'building_electric_utility, building_electric_fuel_provider, building_electric_account_number, ' +
+            'building_gas_utility, building_gas_fuel_provider, building_gas_account_number, ' +
+            'building_heating_fuel_type, building_heating_fuel_provider', 'building_is_deleted'),
+          fetchRow('properties', parentRecord.property_id,
+            'property_street, property_city, property_state, property_zip, property_total_units, ' +
+            'property_ph_total_occupied, property_account_id, ' +
+            'property_hud_owner_org, property_hud_owner_email, property_hud_owner_phone', 'property_is_deleted'),
+          fetchRow('accounts', accountId,
+            'account_name, account_phone, account_email', 'account_is_deleted'),
+        ])
+        const b = buildingRes?.data
+        if (b) {
+          // (ia_building_name is a bare uuid with no FK/lookup wiring — it renders
+          // as raw text, so we leave it blank rather than show a UUID. The real
+          // building relationship is carried in the NOT NULL building_id FK.)
+          const sqft = b.building_square_footage ?? b.building_sq_ft
+          fill('ia_building_square_footage',      sqft)
+          fill('ia_total_building_square_footage', sqft)
+          fill('ia_total_floors_in_building',     b.building_stories ?? b.building_stories_of_building)
+          if (b.building_year_built != null && b.building_year_built !== '') {
+            fill('ia_year_the_building_was_built', String(b.building_year_built))
+          }
+          const units = b.building_total_units ?? b.building_number_of_units
+          fill('ia_multifamily_of_units_in_building', units)
+          fill('ia_total_number_of_units',        units)
+          fill('ia_installation_address_street',  b.building_address)
+          fill('ia_installation_address_city',    b.building_city)
+          fill('ia_installation_address_state',   b.building_state)
+          fill('ia_installation_address_zip',     b.building_zip)
+          fill('ia_electric_provider',            b.building_electric_utility || b.building_electric_fuel_provider)
+          fill('ia_electric_account_number',      b.building_electric_account_number)
+          fill('ia_natural_gas_provider',         b.building_gas_utility || b.building_gas_fuel_provider)
+          fill('ia_natural_gas_account_number',   b.building_gas_account_number)
+          fill('ia_other_heating_fuel_provider',  b.building_heating_fuel_provider)
+          fill('ia_how_is_this_building_heated',  resolvePicklistLabel(b.building_heating_fuel_type))
+        }
+        const p = propertyRes?.data
+        if (p) {
+          // Installation address / unit-count fallbacks when the building is blank.
+          fill('ia_installation_address_street',  p.property_street)
+          fill('ia_installation_address_city',    p.property_city)
+          fill('ia_installation_address_state',   p.property_state)
+          fill('ia_installation_address_zip',     p.property_zip)
+          fill('ia_total_number_of_units',        p.property_total_units)
+          fill('ia_total_number_of_occupied_units', p.property_ph_total_occupied)
+          // Owner (the "who" of the building).
+          fill('ia_building_owner_name',          p.property_hud_owner_org)
+          fill('ia_building_owner_name_ira',      p.property_hud_owner_org)
+          fill('ia_building_owner_email_address', p.property_hud_owner_email)
+          fill('ia_building_owner_office_phone',  p.property_hud_owner_phone)
+        }
+        const acct = accountRes?.data
+        if (acct) {
+          // The opportunity's account is the owner company — the business entity.
+          fill('ia_business_entity_name',         acct.account_name)
+          fill('ia_business_entity_phone_number', acct.account_phone)
+          fill('ia_business_entity_email',        acct.account_email)
+          fill('ia_building_owner_name',          acct.account_name)
+        }
+      } catch (err) {
+        console.warn('incentive application prefill: related-record fetch failed', err)
+      }
+      // Application name composes "<opportunity name> - <record type label>" once
+      // the user picks a record type (same derived-name mechanism projects use).
+      if (parentRecord.opportunity_name) {
+        prefillObj.__derivedNameBase = parentRecord.opportunity_name
       }
     }
 
