@@ -10,6 +10,7 @@ import {
   fetchServiceProviderApplications,
   approveServiceProviderApplication,
   declineServiceProviderApplication,
+  getDocumentSignedUrl,
 } from '../data/serviceProviderService'
 
 const MONO = 'JetBrains Mono, ui-monospace, monospace'
@@ -36,6 +37,20 @@ function ApplicationCard({ app, busy, onApprove, onDecline }) {
   const isPending = stage === 'Application Submitted' || stage === 'Application Under Review' || stage === 'Application Additional Info Requested'
   const contact = [app.spa_contact_first_name, app.spa_contact_last_name].filter(Boolean).join(' ')
   const email = app.spa_contact_email || app.spa_business_email
+
+  const [w9Busy, setW9Busy] = useState(false)
+  const openW9 = async () => {
+    setW9Busy(true)
+    try {
+      const url = await getDocumentSignedUrl(app.spa_w9_document_id)
+      if (url) window.open(url, '_blank', 'noopener')
+      else alert('The W-9 file could not be found.')
+    } catch (e) {
+      alert(e?.message || 'Could not open the W-9.')
+    } finally {
+      setW9Busy(false)
+    }
+  }
 
   const row = (k, v) => v ? <div style={{ display: 'flex', gap: 8, fontSize: 13, padding: '3px 0' }}><span style={{ color: C.textMuted, minWidth: 150 }}>{k}</span><span style={{ color: C.textPrimary }}>{v}</span></div> : null
 
@@ -72,6 +87,16 @@ function ApplicationCard({ app, busy, onApprove, onDecline }) {
           {row("Workers' comp", app.spa_workers_comp_carrier)}
           {row('Notes', app.spa_notes)}
           {app.spa_declined_reason && row('Declined reason', app.spa_declined_reason)}
+          <div style={{ display: 'flex', gap: 8, fontSize: 13, padding: '6px 0 0', alignItems: 'center' }}>
+            <span style={{ color: C.textMuted, minWidth: 150 }}>W-9 document</span>
+            {app.spa_w9_document_id ? (
+              <button onClick={openW9} disabled={w9Busy} style={{ background: '#eef6ff', border: `1px solid ${C.sky}`, color: '#1a5a8a', borderRadius: 6, padding: '4px 12px', fontSize: 12.5, fontWeight: 600, cursor: w9Busy ? 'default' : 'pointer' }}>
+                {w9Busy ? 'Opening…' : 'View W-9'}
+              </button>
+            ) : (
+              <span style={{ color: C.textMuted }}>Not uploaded — request it before approving.</span>
+            )}
+          </div>
         </div>
       )}
 

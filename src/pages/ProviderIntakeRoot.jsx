@@ -22,6 +22,36 @@ const TRADES = [
 const STATES = ['NC', 'WI', 'MI', 'CO', 'IN']
 const ENTITY_TYPES = ['LLC', 'Corporation', 'S-Corporation', 'Partnership', 'Sole Proprietor', 'Other']
 
+// Shared styles + field/section helpers live at MODULE scope. Defining them
+// inside the component would give each render a brand-new component identity,
+// so React would unmount/remount every input on each keystroke and the field
+// would lose focus after one character.
+const labelStyle = { fontSize: 12, fontWeight: 600, color: C.textSecondary, display: 'block', marginBottom: 5 }
+const inputStyle = { width: '100%', padding: '10px 12px', border: `1px solid ${C.borderDark}`, borderRadius: 8, fontSize: 14, fontFamily: FONT, boxSizing: 'border-box', background: '#fff', color: C.textPrimary }
+
+function Field({ label, value, onChange, type = 'text', required, placeholder, half }) {
+  return (
+    <div style={{ flex: half ? '1 1 220px' : '1 1 100%' }}>
+      <label style={labelStyle}>{label}{required ? <span style={{ color: C.emeraldMid }}> *</span> : null}</label>
+      <input
+        style={inputStyle} type={type} value={value} onChange={onChange} placeholder={placeholder} required={required}
+        min={type === 'number' ? 0 : undefined}
+        onKeyDown={type === 'number' ? blockNegativeKeys() : undefined}
+      />
+    </div>
+  )
+}
+
+function Section({ title, sub, children }) {
+  return (
+    <div style={{ marginTop: 26 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>{title}</div>
+      {sub && <div style={{ fontSize: 13, color: C.textMuted, marginTop: 2 }}>{sub}</div>}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 12 }}>{children}</div>
+    </div>
+  )
+}
+
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader()
@@ -77,25 +107,6 @@ export default function ProviderIntakeRoot() {
     }
   }
 
-  // ── styles ──
-  const label = { fontSize: 12, fontWeight: 600, color: C.textSecondary, display: 'block', marginBottom: 5 }
-  const input = { width: '100%', padding: '10px 12px', border: `1px solid ${C.borderDark}`, borderRadius: 8, fontSize: 14, fontFamily: FONT, boxSizing: 'border-box', background: '#fff', color: C.textPrimary }
-  const Field = ({ k, l, type = 'text', required, placeholder, half }) => (
-    <div style={{ flex: half ? '1 1 220px' : '1 1 100%' }}>
-      <label style={label}>{l}{required ? <span style={{ color: C.emeraldMid }}> *</span> : null}</label>
-      <input style={input} type={type} value={f[k]} onChange={set(k)} placeholder={placeholder} required={required}
-        min={type === 'number' ? 0 : undefined}
-        onKeyDown={type === 'number' ? blockNegativeKeys() : undefined} />
-    </div>
-  )
-  const Section = ({ title, sub, children }) => (
-    <div style={{ marginTop: 26 }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>{title}</div>
-      {sub && <div style={{ fontSize: 13, color: C.textMuted, marginTop: 2 }}>{sub}</div>}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 12 }}>{children}</div>
-    </div>
-  )
-
   if (phase === 'done') {
     return (
       <div style={{ minHeight: '100vh', background: C.page, fontFamily: FONT, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
@@ -136,63 +147,63 @@ export default function ProviderIntakeRoot() {
         {errMsg && <div style={{ marginTop: 16, background: '#e8f1fb', border: `1px solid ${C.sky}`, color: '#1a5a8a', borderRadius: 8, padding: '10px 14px', fontSize: 13 }}>{errMsg}</div>}
 
         <Section title="Company">
-          <Field k="company_legal_name" l="Legal business name" required half />
-          <Field k="dba_name" l="DBA / trade name" half />
+          <Field label="Legal business name" value={f.company_legal_name} onChange={set('company_legal_name')} required half />
+          <Field label="DBA / trade name" value={f.dba_name} onChange={set('dba_name')} half />
           <div style={{ flex: '1 1 220px' }}>
-            <label style={label}>Trade / service type<span style={{ color: C.emeraldMid }}> *</span></label>
-            <select style={input} value={f.service_provider_type} onChange={set('service_provider_type')}>
+            <label style={labelStyle}>Trade / service type<span style={{ color: C.emeraldMid }}> *</span></label>
+            <select style={inputStyle} value={f.service_provider_type} onChange={set('service_provider_type')}>
               {TRADES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
             </select>
           </div>
           <div style={{ flex: '1 1 220px' }}>
-            <label style={label}>Primary state of operation<span style={{ color: C.emeraldMid }}> *</span></label>
-            <select style={input} value={f.home_state} onChange={set('home_state')}>
+            <label style={labelStyle}>Primary state of operation<span style={{ color: C.emeraldMid }}> *</span></label>
+            <select style={inputStyle} value={f.home_state} onChange={set('home_state')}>
               {STATES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div style={{ flex: '1 1 220px' }}>
-            <label style={label}>Business structure</label>
-            <select style={input} value={f.entity_type} onChange={set('entity_type')}>
+            <label style={labelStyle}>Business structure</label>
+            <select style={inputStyle} value={f.entity_type} onChange={set('entity_type')}>
               <option value="">Select…</option>
               {ENTITY_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
-          <Field k="number_of_employees" l="Number of employees" type="number" half />
-          <Field k="business_phone" l="Business phone" half />
-          <Field k="business_email" l="Business email" type="email" half />
-          <Field k="website" l="Website" half />
-          <Field k="address_street" l="Street address" />
-          <Field k="address_city" l="City" half />
-          <Field k="address_state" l="State" half />
-          <Field k="address_zip" l="ZIP" half />
+          <Field label="Number of employees" value={f.number_of_employees} onChange={set('number_of_employees')} type="number" half />
+          <Field label="Business phone" value={f.business_phone} onChange={set('business_phone')} half />
+          <Field label="Business email" value={f.business_email} onChange={set('business_email')} type="email" half />
+          <Field label="Website" value={f.website} onChange={set('website')} half />
+          <Field label="Street address" value={f.address_street} onChange={set('address_street')} />
+          <Field label="City" value={f.address_city} onChange={set('address_city')} half />
+          <Field label="State" value={f.address_state} onChange={set('address_state')} half />
+          <Field label="ZIP" value={f.address_zip} onChange={set('address_zip')} half />
         </Section>
 
         <Section title="Primary contact">
-          <Field k="contact_first_name" l="First name" half />
-          <Field k="contact_last_name" l="Last name" half />
-          <Field k="contact_title" l="Title" half />
-          <Field k="contact_email" l="Email" type="email" half />
-          <Field k="contact_phone" l="Phone" half />
+          <Field label="First name" value={f.contact_first_name} onChange={set('contact_first_name')} half />
+          <Field label="Last name" value={f.contact_last_name} onChange={set('contact_last_name')} half />
+          <Field label="Title" value={f.contact_title} onChange={set('contact_title')} half />
+          <Field label="Email" value={f.contact_email} onChange={set('contact_email')} type="email" half />
+          <Field label="Phone" value={f.contact_phone} onChange={set('contact_phone')} half />
         </Section>
 
         <Section title="License">
-          <Field k="license_number" l="License number" half />
-          <Field k="license_type" l="License type" half />
-          <Field k="license_state" l="License state" half />
-          <Field k="license_expiration_date" l="License expiration" type="date" half />
+          <Field label="License number" value={f.license_number} onChange={set('license_number')} half />
+          <Field label="License type" value={f.license_type} onChange={set('license_type')} half />
+          <Field label="License state" value={f.license_state} onChange={set('license_state')} half />
+          <Field label="License expiration" value={f.license_expiration_date} onChange={set('license_expiration_date')} type="date" half />
         </Section>
 
         <Section title="Insurance">
-          <Field k="gl_carrier" l="General liability carrier" half />
-          <Field k="gl_policy_number" l="GL policy number" half />
-          <Field k="gl_expiration_date" l="GL expiration" type="date" half />
-          <Field k="wc_carrier" l="Workers' comp carrier" half />
-          <Field k="wc_policy_number" l="WC policy number" half />
-          <Field k="wc_expiration_date" l="WC expiration" type="date" half />
+          <Field label="General liability carrier" value={f.gl_carrier} onChange={set('gl_carrier')} half />
+          <Field label="GL policy number" value={f.gl_policy_number} onChange={set('gl_policy_number')} half />
+          <Field label="GL expiration" value={f.gl_expiration_date} onChange={set('gl_expiration_date')} type="date" half />
+          <Field label="Workers' comp carrier" value={f.wc_carrier} onChange={set('wc_carrier')} half />
+          <Field label="WC policy number" value={f.wc_policy_number} onChange={set('wc_policy_number')} half />
+          <Field label="WC expiration" value={f.wc_expiration_date} onChange={set('wc_expiration_date')} type="date" half />
         </Section>
 
         <Section title="Areas of operation" sub="ZIP codes you serve, separated by commas or spaces.">
-          <textarea value={f.zips} onChange={set('zips')} rows={2} placeholder="27601, 27603, 27605" style={{ ...input, resize: 'vertical' }} />
+          <textarea value={f.zips} onChange={set('zips')} rows={2} placeholder="27601, 27603, 27605" style={{ ...inputStyle, resize: 'vertical' }} />
         </Section>
 
         <Section title="W-9" sub="Upload your completed W-9 (PDF or image, max 10 MB). Optional — you can also provide it later.">
@@ -200,7 +211,7 @@ export default function ProviderIntakeRoot() {
         </Section>
 
         <Section title="Anything else?">
-          <textarea value={f.notes} onChange={set('notes')} rows={3} placeholder="Certifications, service areas, notes…" style={{ ...input, resize: 'vertical' }} />
+          <textarea value={f.notes} onChange={set('notes')} rows={3} placeholder="Certifications, service areas, notes…" style={{ ...inputStyle, resize: 'vertical' }} />
         </Section>
 
         {/* honeypot — hidden from users, catches bots */}

@@ -59,6 +59,21 @@ export async function issueWorkOrderToProvider(providerAccountId, workOrderId, n
   return data
 }
 
+// A short-lived signed URL to view/download an application's uploaded W-9
+// (or any document) from its private bucket. Returns null if no file is on file.
+export async function getDocumentSignedUrl(documentId) {
+  if (!documentId) return null
+  const { data: doc, error } = await supabase
+    .from('documents').select('storage_bucket, storage_path')
+    .eq('id', documentId).maybeSingle()
+  if (error) throw error
+  if (!doc?.storage_bucket || !doc?.storage_path) return null
+  const { data, error: e2 } = await supabase.storage
+    .from(doc.storage_bucket).createSignedUrl(doc.storage_path, 300)
+  if (e2) throw e2
+  return data?.signedUrl || null
+}
+
 // ZIP areas of operation for an account.
 export async function fetchServiceAreas(accountId) {
   const { data, error } = await supabase
