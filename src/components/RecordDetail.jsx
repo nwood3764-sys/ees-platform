@@ -178,7 +178,19 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
     }
     case 'currency':   return `$${Number(raw).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
     case 'percent':    return `${Number(raw)}%`
-    case 'date':       return raw ? new Date(raw + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+    case 'date': {
+      if (!raw) return '—'
+      const d = new Date(String(raw).length <= 10 ? raw + 'T00:00:00' : raw)
+      // Optional per-field display format. 'MM/DD/YY' matches external program
+      // forms that use a 2-digit year (e.g. the pre-approval application).
+      if (fieldDef.format === 'MM/DD/YY') {
+        const mm = String(d.getMonth() + 1).padStart(2, '0')
+        const dd = String(d.getDate()).padStart(2, '0')
+        const yy = String(d.getFullYear()).slice(-2)
+        return `${mm}/${dd}/${yy}`
+      }
+      return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+    }
     case 'datetime':   return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
     case 'boolean':    return raw ? 'Yes' : 'No'
     case 'number':     return raw != null ? Number(raw).toLocaleString() : '—'
