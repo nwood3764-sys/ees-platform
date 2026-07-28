@@ -321,4 +321,5 @@ Deep research is now a staged pipeline and findings flow through a review queue 
 | Dashboard rehaul (enterprise-class builder: ECharts, 25+ components, query shapes, parity) | `leap-dashboard-rehaul.md` |
 | Report Builder + viewer + dashboards enterprise rebuild (filters, sort, groupings, group formulas, cross-filter) | `leap-report-builder-enterprise.md` |
 | Field type system (modifiable types, formula fields, roll-up summaries) | `leap-field-types.md` |
+| Inherited fields & lookups (full-chain inheritance, stop duplicating parent data) | `leap-inherited-fields-lookups.md` |
 | Service Provider portal + intake (subcontractor onboarding, payout book, proposals, AP) | `leap-service-provider-portal.md` |

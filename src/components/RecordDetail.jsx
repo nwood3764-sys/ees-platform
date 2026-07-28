@@ -446,7 +446,12 @@ const SYSTEM_REQUIRED_EXEMPT = /(^id$|_record_number$|_owner$|_created_by$|_crea
 // .ocr_name is generated as "<Role> — <Contact>" by trg_ocr_name.
 const TRIGGER_DERIVED_REQUIRED = {
   contacts: ['contact_name'],
-  opportunities: ['opportunity_name'],
+  // opportunity_account_id is forced to the property's account by
+  // trg_opportunities_account_follows_property (sync_opportunity_account_from_property)
+  // on every insert/update — the user never sets it, so the NOT NULL column must
+  // never block a create the DB would happily complete. It's also prefilled from
+  // the property chain below, so in practice it's populated on the form too.
+  opportunities: ['opportunity_name', 'opportunity_account_id'],
   buildings: ['building_name'],
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],
@@ -3751,6 +3756,59 @@ function RelatedListWidget({
         const val = valueByTargetTable[targetTable]
         if (val) prefillObj[childFkCol] = val
       })
+
+      // Multi-hop: the one-hop pass above only sees FKs that sit directly ON the
+      // parent record. A child can need an ancestor that lives further up the
+      // chain — e.g. creating an Opportunity from a BUILDING needs the account,
+      // which the building doesn't carry but its property does
+      // (building → property → account). Climb the ancestor chain, fetching the
+      // rows we already have ids for and reading THEIR parent FKs, until every
+      // parent FK the child still needs is resolved (or we run out). Data-driven
+      // from TABLE_META; bounded fetch so a deep chain can't runaway.
+      const stillNeeded = () => (childMeta.parents || []).some((col, i) => {
+        const t = (childMeta.parentTables || [])[i]
+        return t && !(col in prefillObj) && !(t in valueByTargetTable)
+      })
+      if (stillNeeded()) {
+        // Seed the climb with every ancestor we already know an id for, except
+        // the parent record itself (already fully read into valueByTargetTable).
+        const toVisit = Object.entries(valueByTargetTable)
+          .filter(([table]) => table !== parentTable)
+          .map(([table, id]) => ({ table, id }))
+        const visited = new Set()
+        let hops = 0
+        while (toVisit.length && hops < 6 && stillNeeded()) {
+          hops += 1
+          const { table, id } = toVisit.shift()
+          const key = `${table}:${id}`
+          if (visited.has(key)) continue
+          visited.add(key)
+          const meta = TABLE_META[table]
+          if (!meta || !(meta.parents || []).length) continue
+          try {
+            const { data: row } = await supabase
+              .from(table).select(meta.parents.join(', ')).eq('id', id).maybeSingle()
+            if (!row) continue
+            meta.parents.forEach((pCol, i) => {
+              const t = (meta.parentTables || [])[i]
+              const v = row[pCol]
+              if (t && v && !(t in valueByTargetTable)) {
+                valueByTargetTable[t] = v
+                toVisit.push({ table: t, id: v })
+              }
+            })
+          } catch (err) {
+            console.warn('create prefill: ancestor climb failed', table, err)
+          }
+        }
+        // Re-fill child parent FKs now that deeper ancestors are known.
+        ;(childMeta.parents || []).forEach((childFkCol, i) => {
+          const targetTable = (childMeta.parentTables || [])[i]
+          if (!targetTable || childFkCol in prefillObj) return
+          const val = valueByTargetTable[targetTable]
+          if (val) prefillObj[childFkCol] = val
+        })
+      }
     }
 
     // Contact Role is contact-first: keep whichever parent FK the related list
