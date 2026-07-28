@@ -397,7 +397,7 @@ export async function listRecordTypesForObject(objectName) {
   // a relational embed across unrelated tables.
   const { data: types, error: tErr } = await supabase
     .from('picklist_values')
-    .select('id, picklist_value, picklist_label, picklist_description, picklist_sort_order, picklist_is_active, picklist_state')
+    .select('id, picklist_value, picklist_label, picklist_description, picklist_sort_order, picklist_is_active, picklist_state, picklist_icon, picklist_color')
     .eq('picklist_object', objectName)
     .eq('picklist_field', 'record_type')
     .order('picklist_sort_order', { ascending: true })
@@ -433,6 +433,8 @@ export async function listRecordTypesForObject(objectName) {
       sortOrder: t.picklist_sort_order ?? 0,
       isActive: t.picklist_is_active !== false,
       state: t.picklist_state || null,
+      icon: t.picklist_icon || null,
+      color: t.picklist_color || null,
       assignedLayoutId:   assigned?.id || null,
       assignedLayoutName: assigned?.page_layout_name || null,
     }
@@ -474,6 +476,8 @@ export async function updateRecordType(id, patch) {
   if (patch.description !== undefined) update.picklist_description = patch.description || null
   if (patch.sortOrder   !== undefined) update.picklist_sort_order  = patch.sortOrder
   if (patch.state       !== undefined) update.picklist_state       = patch.state || null
+  if (patch.icon        !== undefined) update.picklist_icon        = patch.icon || null
+  if (patch.color       !== undefined) update.picklist_color       = patch.color || null
 
   const { data, error } = await supabase
     .from('picklist_values')

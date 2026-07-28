@@ -12,6 +12,13 @@ import {
   cloneFromLayout,
 } from '../../data/pageLayoutBuilderService'
 import { fetchPageLayoutsFor } from '../../data/adminService'
+import {
+  RecordTypeIcon,
+  RecordTypeGlyph,
+  ICON_GROUPS,
+  RECORD_TYPE_COLORS,
+  resolveRecordVisual,
+} from '../../lib/recordTypeIcons'
 
 // ---------------------------------------------------------------------------
 // RecordTypesPane — Object Manager > Record Types tab.
@@ -224,6 +231,7 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
             <RecordTypeRow
               key={row.id}
               row={row}
+              objectName={objectName}
               busy={busyRowId === row.id}
               editing={editingRowId === row.id}
               onStartEdit={() => setEditingRowId(row.id)}
@@ -262,7 +270,7 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
 // ─── Record Type Row ───────────────────────────────────────────────────
 
 function RecordTypeRow({
-  row, busy, editing,
+  row, objectName, busy, editing,
   onStartEdit, onCancelEdit, onSaved,
   onDeactivate, onReactivate, onCreateLayout,
 }) {
@@ -272,6 +280,8 @@ function RecordTypeRow({
   const [description, setDescription] = useState(row.description || '')
   const [sortOrder, setSortOrder] = useState(String(row.sortOrder))
   const [state, setState] = useState(row.state || '')
+  const [icon, setIcon] = useState(row.icon || '')
+  const [color, setColor] = useState(row.color || '')
   const [saving, setSaving] = useState(false)
 
   // Reset local state when row changes or edit is cancelled
@@ -282,8 +292,10 @@ function RecordTypeRow({
       setDescription(row.description || '')
       setSortOrder(String(row.sortOrder))
       setState(row.state || '')
+      setIcon(row.icon || '')
+      setColor(row.color || '')
     }
-  }, [row.id, editing, row.label, row.value, row.description, row.sortOrder, row.state])
+  }, [row.id, editing, row.label, row.value, row.description, row.sortOrder, row.state, row.icon, row.color])
 
   async function save() {
     if (!label.trim() || !value.trim()) {
@@ -302,6 +314,8 @@ function RecordTypeRow({
         description: description.trim(),
         sortOrder: parseInt(sortOrder, 10) || 0,
         state: state.trim().toUpperCase() || null,
+        icon: icon || null,
+        color: color || null,
       })
       toast.success('Record type updated')
       onSaved()
@@ -320,8 +334,13 @@ function RecordTypeRow({
       opacity: !row.isActive ? 0.55 : 1,
       background: busy ? '#f7f9fc' : 'transparent',
     }}>
-      {/* Value */}
-      <div style={{ color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, minWidth: 0 }}>
+      {/* Value — with the record-type icon badge (resolves to the object
+          default when the row has no icon/color of its own) */}
+      <div style={{ color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {(() => {
+          const vis = resolveRecordVisual(objectName, editing ? { icon, color } : { icon: row.icon, color: row.color })
+          return <RecordTypeIcon iconKey={vis.iconKey} color={vis.color} size={24} style={{ flexShrink: 0 }} />
+        })()}
         {editing
           ? <TextInput value={value} onChange={setValue} mono placeholder="single_family" />
           : <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', maxWidth: '100%' }}>{row.value}</span>
@@ -433,9 +452,111 @@ function RecordTypeRow({
           rows={2}
           style={{ width: '100%', boxSizing: 'border-box', padding: '6px 9px', fontSize: 12.5, color: C.textPrimary, background: C.card, border: `1px solid ${C.borderDark || C.border}`, borderRadius: 4, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }}
         />
+
+        <IconColorPicker
+          objectName={objectName}
+          icon={icon}
+          color={color}
+          label={label || row.label}
+          onIconChange={setIcon}
+          onColorChange={setColor}
+        />
       </div>
     )}
     </>
+  )
+}
+
+// ─── Icon + color picker (record-type badge) ───────────────────────────────
+// Salesforce-style: choose a glyph and a color for the record type's badge.
+// Leaving both unset falls the badge back to the object's default visual.
+function IconColorPicker({ objectName, icon, color, label, onIconChange, onColorChange }) {
+  const preview = resolveRecordVisual(objectName, { icon, color })
+  const usingDefault = !icon && !color
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+        Icon &amp; Color
+      </label>
+
+      {/* Live preview + reset */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <RecordTypeIcon iconKey={preview.iconKey} color={preview.color} size={40} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {label || 'Record Type'}
+          </div>
+          <div style={{ fontSize: 11, color: C.textMuted }}>
+            {usingDefault ? 'Using the object default badge' : 'Custom badge'}
+          </div>
+        </div>
+        {!usingDefault && (
+          <button
+            type="button"
+            onClick={() => { onIconChange(''); onColorChange('') }}
+            style={{ ...buttonSmSecondaryStyle, marginLeft: 'auto' }}
+          >
+            Reset to default
+          </button>
+        )}
+      </div>
+
+      {/* Color swatches */}
+      <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>Color</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+        {RECORD_TYPE_COLORS.map(c => {
+          const active = color === c.hex || color === c.key
+          return (
+            <button
+              key={c.key}
+              type="button"
+              title={c.label}
+              onClick={() => onColorChange(active ? '' : c.hex)}
+              style={{
+                width: 26, height: 26, borderRadius: 6, background: c.hex, cursor: 'pointer',
+                border: active ? `2px solid ${C.textPrimary}` : '2px solid transparent',
+                outline: active ? `1px solid ${C.card}` : 'none', outlineOffset: -3,
+                boxShadow: 'inset 0 -1px 0 rgba(0,0,0,0.12)',
+              }}
+            />
+          )
+        })}
+      </div>
+
+      {/* Icon grid, grouped */}
+      <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>Icon</div>
+      <div style={{ maxHeight: 190, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, padding: 8, background: C.card }}>
+        {ICON_GROUPS.map(g => (
+          <div key={g.group} style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '2px 0 6px' }}>
+              {g.group}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {g.icons.map(ic => {
+                const active = icon === ic.key
+                return (
+                  <button
+                    key={ic.key}
+                    type="button"
+                    title={ic.label}
+                    onClick={() => onIconChange(active ? '' : ic.key)}
+                    style={{
+                      width: 34, height: 34, borderRadius: 6, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: active ? preview.color : C.page,
+                      border: active ? `1px solid ${preview.color}` : `1px solid ${C.border}`,
+                    }}
+                  >
+                    <RecordTypeGlyph iconKey={ic.key} size={18} color={active ? '#fff' : C.textSecondary} strokeWidth={1.8} />
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
