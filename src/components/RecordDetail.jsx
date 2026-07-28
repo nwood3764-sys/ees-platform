@@ -37,6 +37,7 @@ import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
+import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
@@ -5751,6 +5752,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   useEffect(() => {
     setActiveTab(null)
   }, [tableName, recordId])
+
+  // Record the visit for Recent Items (Salesforce parity). Fires once per opened
+  // record, only for the URL-addressed record (so ObjectListSection's non-URL
+  // detail mounts don't count) and only after the record actually loaded in view
+  // mode. Best-effort — recordRecentlyViewed never throws or blocks the page.
+  const recordedViewRef = useRef(null)
+  useEffect(() => {
+    if (isCreate || !recordId) return
+    if (!recordIsUrlAddressed()) return
+    if (data?.record?.id !== recordId) return
+    const key = `${tableName}:${recordId}`
+    if (recordedViewRef.current === key) return
+    recordedViewRef.current = key
+    recordRecentlyViewed(tableName, recordId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableName, recordId, isCreate, data])
 
   // Resolve prefilled parent FK names so the breadcrumb is hierarchical while
   // CREATING a child from a parent's related list — e.g. "New Building" under a
