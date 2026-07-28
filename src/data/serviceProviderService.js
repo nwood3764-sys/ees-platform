@@ -16,7 +16,7 @@ export async function fetchServiceProviderApplications() {
              spa_contact_email, spa_contact_phone, spa_business_phone, spa_business_email, spa_website,
              spa_license_number, spa_license_type, spa_license_state, spa_license_expiration_date,
              spa_general_liability_carrier, spa_workers_comp_carrier,
-             spa_w9_document_id, spa_declined_reason, spa_notes,
+             spa_w9_document_id, spa_declined_reason, spa_notes, spa_decision_notes, spa_reviewed_at, spa_primary_contact_id,
              stage:spa_stage(picklist_value,picklist_label),
              trade:spa_service_provider_type(picklist_label),
              account:spa_account_id(id,account_name,account_service_provider_is_active)`)
@@ -94,6 +94,16 @@ export async function approveServiceProviderApplication(applicationId) {
   })
   if (error) throw new Error(error.message || 'Approval failed')
   if (data && data.ok === false) throw new Error(data.error || data.detail || 'Approval failed')
+  return data
+}
+
+// Move an application to any pipeline stage (with an optional note).
+export async function advanceApplication(applicationId, stageValue, note) {
+  const { data, error } = await supabase.rpc('advance_service_provider_application', {
+    p_application_id: applicationId, p_stage_value: stageValue, p_note: note || null,
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
   return data
 }
 
