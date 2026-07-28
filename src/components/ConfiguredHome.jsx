@@ -3,6 +3,7 @@ import { C } from '../data/constants'
 import { resolveHomePageForModule } from '../data/adminService'
 import { getTemplate } from '../modules/admin/homePageTemplates'
 import HomeComponentRenderer from '../modules/admin/HomeComponentRenderer'
+import ObjectListSection from './ObjectListSection'
 
 // Lazy-loaded: these full-screen overlays only mount when the user drills into
 // a report or edits a dashboard. Deferring them keeps their heavy deps — the
@@ -55,6 +56,10 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
   // editor — full-screen over the home. null = none; otherwise a dashboard id.
   const [editingDashboard, setEditingDashboard] = useState(null)
   const [dashboardEditNonce, setDashboardEditNonce] = useState(0)
+  // Drilling a dashboard widget opens the underlying RECORDS (the object's list,
+  // scoped to the clicked segment) — not the source report. null = none;
+  // otherwise { table, filters, label }.
+  const [drill, setDrill] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -146,6 +151,46 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
     )
   }
 
+  // A widget drilled into records — the object's list, scoped to the clicked
+  // segment (Salesforce-style drill-to-records), full-screen over the home.
+  // Records open via the normal record URL (ObjectListSection uses NavContext),
+  // so a drilled record is still shareable; Close returns to the home.
+  if (drill) {
+    const objectLabel = String(drill.table || '')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, m => m.toUpperCase())
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 600,
+        background: C.page, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        <div style={{
+          background: C.card, borderBottom: `1px solid ${C.border}`,
+          padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: C.textMuted }}>Records</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {drill.label || objectLabel}
+            </div>
+          </div>
+          <button
+            onClick={() => setDrill(null)}
+            style={{ padding: '8px 14px', fontSize: 13, fontWeight: 500, background: C.card, color: C.textPrimary, border: `1px solid ${C.borderDark}`, borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}
+          >Close</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <ObjectListSection
+            key={`${drill.table}:${JSON.stringify(drill.filters || [])}`}
+            objectTable={drill.table}
+            moduleId={moduleId}
+            initialFilters={Array.isArray(drill.filters) && drill.filters.length ? drill.filters : null}
+          />
+        </div>
+      </div>
+    )
+  }
+
   const tmpl = getTemplate(page.template)
   const comps = page.components || []
   // Pages built in the LEAP Canvas carry per-component _geometry — render them
@@ -160,6 +205,7 @@ export default function ConfiguredHome({ crumb = 'Home', moduleId = null, onOpen
       onNavigate={(table, id) => onOpenRecord && onOpenRecord({ table, id, mode: 'view' })}
       onOpenReport={(reportId, extraFilters = null) => { setEditingReport(false); setOpenReport({ reportId, extraFilters }) }}
       onOpenDashboard={(dashboardId) => setEditingDashboard(dashboardId)}
+      onDrillToRecords={(table, filters, label) => setDrill({ table, filters, label })}
     />
   )
 
