@@ -20,12 +20,24 @@ const NUMERIC_TYPES = new Set([
  * that the field_group runtime uses: one of 'lookup', 'date', 'datetime',
  * 'boolean', 'number', 'textarea', 'text'.
  */
+// Logical display-type overrides authored in field_metadata (surfaced by
+// describeObject as display_type / field_kind) take precedence over the
+// physical-column derivation, so a field placed on a layout renders in the type
+// its admin chose (currency, email, formula, rollup, …).
+const DISPLAY_TYPES = new Set([
+  'text', 'textarea', 'number', 'integer', 'currency', 'percent', 'date',
+  'datetime', 'boolean', 'email', 'phone', 'url', 'formula', 'rollup',
+])
+
 export function deriveEesFieldType(col) {
   if (!col) return 'text'
   const name = col.column_name || ''
   const dt = col.data_type || ''
   const isFk = Boolean(col.is_foreign_key)
 
+  if (col.field_kind === 'formula') return 'formula'
+  if (col.field_kind === 'rollup') return 'rollup'
+  if (col.display_type && DISPLAY_TYPES.has(col.display_type)) return col.display_type
   if (isFk && dt === 'uuid') return 'lookup'
   if (dt === 'date') return 'date'
   if (dt === 'timestamp with time zone' || dt === 'timestamp without time zone') return 'datetime'
@@ -45,12 +57,16 @@ export function buildFieldEntryFromColumn(col, overrides = {}) {
   const entry = {
     name: col.column_name,
     type,
-    label: humanizeColumnName(col.column_name),
+    label: col.field_label || humanizeColumnName(col.column_name),
   }
   if (type === 'lookup' && col.references_table) {
     entry.lookup_table = col.references_table
     entry.lookup_field = col.references_column || 'id'
   }
+  // Formula/rollup fields carry their declared return type so the record
+  // renderer formats the computed value (currency, percent, date, …).
+  if (type === 'formula') entry.return_type = col.formula_return_type || 'text'
+  if (type === 'rollup')  entry.return_type = col.rollup_config?.return_type || 'number'
   return { ...entry, ...overrides }
 }
 

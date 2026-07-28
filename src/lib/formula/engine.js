@@ -117,6 +117,38 @@ export function evaluateFormula(expression, scopeValues = {}) {
 }
 
 /**
+ * Evaluate a FIELD formula (object record scope) and coerce the result by the
+ * field's declared return type. Unlike evaluateFormula (report scope, where a
+ * blank cell behaves as 0 for arithmetic), text/date/boolean field formulas
+ * treat a blank reference as blank — so a passthrough like `property_code`
+ * shows the code, not "0", when the source is empty. Numeric return types keep
+ * the blank→0 arithmetic convention. Errors → null.
+ */
+export function evaluateFieldFormula(expression, scopeValues = {}, returnType = 'text') {
+  if (!expression || !expression.trim()) return null
+  const numericCtx = returnType === 'number' || returnType === 'currency' || returnType === 'percent'
+  try {
+    const syms = fieldSymbols(expression)
+    const scope = {}
+    for (const k of syms) {
+      const v = scopeValues[k]
+      scope[k] = (v === null || v === undefined || v === '') ? (numericCtx ? 0 : '') : v
+    }
+    const out = unwrap(compiled(expression).evaluate(scope))
+    if (out === null || out === undefined) return null
+    if (numericCtx) {
+      const n = typeof out === 'number' ? out : Number(out)
+      return Number.isFinite(n) ? n : null
+    }
+    if (returnType === 'boolean') return Boolean(out)
+    if (out === '') return null
+    return out
+  } catch {
+    return null
+  }
+}
+
+/**
  * Validate an expression. Always checks syntax; when `knownFields` is provided,
  * also flags symbols that are neither a known field nor a registered function/
  * constant (catches typos before save). Returns { ok } or { ok:false, error }.

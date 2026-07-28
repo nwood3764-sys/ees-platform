@@ -973,6 +973,13 @@ export async function loadRecordDetailData(tableName, recordId) {
     })
   )
 
+  // Computed fields + logical-type overlay. Formula fields evaluate client-side;
+  // rollups aggregate server-side; and every field's rendered type is refreshed
+  // from live field_metadata so a type change (→ Formula, Currency, …) takes
+  // effect on existing layouts without re-saving them. One small indexed query,
+  // skipped entirely when the object defines no custom field types.
+  await computeFieldValues(tableName, recordId, record, layoutData.sections)
+
   return {
     record,
     layout: layoutData.layout,
@@ -981,6 +988,105 @@ export async function loadRecordDetailData(tableName, recordId) {
     lookups,
     actionOverrides: layoutData.actionOverrides || [],
   }
+}
+
+// Safe display-type overrides that can be overlaid onto an existing layout field
+// without extra config (unlike picklist/lookup, which need target metadata).
+const OVERLAY_DISPLAY_TYPES = new Set([
+  'text', 'textarea', 'number', 'integer', 'currency', 'percent',
+  'date', 'datetime', 'boolean', 'email', 'phone', 'url',
+])
+
+// Resolve formula + rollup field values for a record and merge them in place,
+// and overlay each field's logical type from field_metadata onto the layout so
+// type changes render live. Formula fields evaluate client-side via the shared
+// engine over a scope of the record's own columns plus cross-object (related)
+// references; rollups are aggregated server-side (RLS-respecting) by the
+// compute_record_rollups RPC. Any failure degrades to a blank value.
+export async function computeFieldValues(tableName, recordId, record, sections = null) {
+  if (!record || !recordId) return record
+  let rows
+  try {
+    const { data, error } = await supabase
+      .from('field_metadata')
+      .select('fm_column, fm_field_kind, fm_display_type, fm_formula_expression, fm_formula_return_type, fm_formula_refs, fm_rollup_config')
+      .eq('fm_object', tableName)
+      .eq('fm_is_deleted', false)
+      .or('fm_field_kind.neq.standard,fm_display_type.not.is.null')
+    if (error) return record
+    rows = data || []
+  } catch { return record }
+  if (!rows.length) return record
+
+  // ── Overlay logical types onto the layout's field defs ──
+  if (sections) {
+    const byCol = new Map(rows.map(r => [r.fm_column, r]))
+    for (const sec of sections) {
+      for (const w of (sec.widgets || [])) {
+        if (w.widget_type !== 'field_group' || !w.widget_config?.fields) continue
+        for (const f of w.widget_config.fields) {
+          if (f.type === 'related_field') continue
+          const m = byCol.get(f.name)
+          if (!m) continue
+          if (m.fm_field_kind === 'formula') { f.type = 'formula'; f.return_type = m.fm_formula_return_type || 'text' }
+          else if (m.fm_field_kind === 'rollup') { f.type = 'rollup'; f.return_type = m.fm_rollup_config?.return_type || 'number' }
+          else if (m.fm_display_type && OVERLAY_DISPLAY_TYPES.has(m.fm_display_type)) { f.type = m.fm_display_type }
+        }
+      }
+    }
+  }
+
+  const computed = rows.filter(r => r.fm_field_kind === 'formula' || r.fm_field_kind === 'rollup')
+  const formulaFields = computed.filter(f => f.fm_field_kind === 'formula' && f.fm_formula_expression)
+  const hasRollup = computed.some(f => f.fm_field_kind === 'rollup')
+
+  // ── Rollups (server-side aggregate) ──
+  const rollupPromise = hasRollup
+    ? supabase.rpc('compute_record_rollups', { p_object: tableName, p_record_id: recordId })
+        .then(({ data, error }) => { if (!error && data) for (const [k, v] of Object.entries(data)) record[k] = v })
+        .catch(() => {})
+    : Promise.resolve()
+
+  // ── Formulas (client-side, with cross-object references) ──
+  const formulaPromise = (async () => {
+    if (!formulaFields.length) return
+    // Gather cross-object (related) references and fetch each parent row once.
+    const relatedByFk = new Map()   // fk_column → { table, columns:Set }
+    for (const f of formulaFields) {
+      for (const ref of (Array.isArray(f.fm_formula_refs) ? f.fm_formula_refs : [])) {
+        if (ref?.kind === 'related' && ref.fk_column && ref.table && ref.column) {
+          if (!relatedByFk.has(ref.fk_column)) relatedByFk.set(ref.fk_column, { table: ref.table, columns: new Set() })
+          relatedByFk.get(ref.fk_column).columns.add(ref.column)
+        }
+      }
+    }
+    const relatedValues = {}   // `${fk_column}.${column}` → value
+    await Promise.all([...relatedByFk.entries()].map(async ([fk, grp]) => {
+      const parentId = record[fk]
+      if (!parentId) return
+      try {
+        const cols = [...grp.columns].join(',')
+        const { data: row, error } = await supabase.from(grp.table).select(cols).eq('id', parentId).maybeSingle()
+        if (error || !row) return
+        for (const c of grp.columns) relatedValues[`${fk}.${c}`] = row[c]
+      } catch { /* leave unresolved — evaluates as blank */ }
+    }))
+
+    const { evaluateFieldFormula } = await import('../lib/formula/engine')
+    for (const f of formulaFields) {
+      const scope = {}
+      for (const ref of (Array.isArray(f.fm_formula_refs) ? f.fm_formula_refs : [])) {
+        if (!ref?.alias) continue
+        scope[ref.alias] = ref.kind === 'related'
+          ? relatedValues[`${ref.fk_column}.${ref.column}`]
+          : record[ref.column]
+      }
+      record[f.fm_column] = evaluateFieldFormula(f.fm_formula_expression, scope, f.fm_formula_return_type || 'text')
+    }
+  })()
+
+  await Promise.all([rollupPromise, formulaPromise])
+  return record
 }
 
 /**
