@@ -704,7 +704,32 @@ export async function resolvePolymorphicLookups(requests) {
  * Fetch related records for a related_list widget.
  */
 export async function fetchRelatedRecords(config, parentRecordId) {
-  const { table, fk, via, is_deleted_col, columns, sort_field, sort_dir } = config
+  const { table, fk, via, shared_parent, is_deleted_col, columns, sort_field, sort_dir } = config
+
+  // Shared-parent (sibling) related lists: the target is not a descendant of
+  // the layout's object but a SIBLING sharing a common parent — e.g.
+  // Enrollments on a Building page, both linked to the same Property. There is
+  // no FK path from the layout's object down to the target, so we resolve THIS
+  // record's own FK to the shared parent (shared_parent.object_table.object_fk),
+  // then filter the target on its FK to that same parent (config.fk). One small
+  // PK lookup, then the normal direct-child query below reused verbatim.
+  let directFilterValue = parentRecordId
+  const isSharedParent = !!(shared_parent && shared_parent.object_table && shared_parent.object_fk && fk)
+  if (isSharedParent) {
+    const { data: parentRow, error: parentErr } = await supabase
+      .from(shared_parent.object_table)
+      .select(shared_parent.object_fk)
+      .eq('id', parentRecordId)
+      .maybeSingle()
+    if (parentErr) throw parentErr
+    directFilterValue = parentRow ? parentRow[shared_parent.object_fk] : null
+    // This record has no shared parent → no sibling can match. Return empty.
+    if (!directFilterValue) {
+      const empty = []
+      empty._total = 0
+      return empty
+    }
+  }
 
   // Build the select. Plain columns are listed by name. A column of
   // type 'lookup' (with lookup_table + lookup_field) is fetched as a
@@ -759,7 +784,9 @@ export async function fetchRelatedRecords(config, parentRecordId) {
     const aliasPath = viaChain.map((_, i) => `_v${i + 1}`).join('.')
     query = query.eq(`${aliasPath}.${viaChain[viaChain.length - 1].fk}`, parentRecordId)
   } else {
-    query = query.eq(fk, parentRecordId)
+    // Direct child (directFilterValue === parentRecordId) or shared-parent
+    // sibling (directFilterValue === the resolved shared-parent id).
+    query = query.eq(fk, directFilterValue)
   }
 
   if (is_deleted_col) {
