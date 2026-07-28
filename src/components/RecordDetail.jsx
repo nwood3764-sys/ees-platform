@@ -453,6 +453,7 @@ const TRIGGER_DERIVED_REQUIRED = {
   opportunity_line_items: ['oli_name'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
+  enrollments: ['enrollment_name'],
 }
 
 // Per-table name fields populated by a BEFORE INSERT/UPDATE trigger that the
@@ -484,6 +485,7 @@ const DERIVED_READONLY = {
   opportunity_line_items: ['oli_name'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
+  enrollments: ['enrollment_name'],
 }
 const isDerivedReadonlyField = (table, name) =>
   (DERIVED_READONLY[table] || []).includes(name)
@@ -3800,8 +3802,9 @@ function RelatedListWidget({
       copyFromProperty('property_total_number_of_units',      'enrollment_total_units')
       copyFromProperty('property_assisted_units',             'enrollment_assisted_units')
       copyFromProperty('property_category',                   'enrollment_property_category')
-      copyFromProperty('property_number_of_buildings',        'enrollment_number_of_buildings')
-      copyFromProperty('property_total_buildings',            'enrollment_number_of_buildings')
+      // Number of buildings / units-per-building / property addresses / LEA#s
+      // are pre-populated from the property's actual building records below,
+      // not from the property summary columns.
       copyFromProperty('property_mf_property_category',       'enrollment_property_category')
       copyFromProperty('property_mf_raw_property_category_name', 'enrollment_property_category')
       copyFromProperty('property_hud_owner_org',              'enrollment_owner_organization')
@@ -3828,17 +3831,6 @@ function RelatedListWidget({
           parentRecord.property_hud_owner_address, parentRecord.property_hud_owner_city,
           parentRecord.property_hud_owner_state, parentRecord.property_hud_owner_zip)
         if (composed) prefillObj.enrollment_owner_address = composed
-      }
-      // Pre-approval form (WI-IRA-MF-HOMES-ASSESSMENT): the contractor primary
-      // Seed the Property Address(es) list with the property's composed address
-      // so the form opens populated. (Contractor name/email/address now come
-      // from the selected contractor account via related fields, so there is
-      // nothing contractor-side to pre-fill here.)
-      if (prefillObj.enrollment_property_addresses == null || prefillObj.enrollment_property_addresses === '') {
-        const propAddr = composeAddress(
-          parentRecord.property_street, parentRecord.property_city,
-          parentRecord.property_state, parentRecord.property_zip)
-        if (propAddr) prefillObj.enrollment_property_addresses = propAddr
       }
       // HUD program: the MF raw program types when imported, else composed
       // from the program-participation flags.
@@ -3903,13 +3895,16 @@ function RelatedListWidget({
         const fetchRow = (table, id, cols, delCol) => id
           ? supabase.from(table).select(cols).eq('id', id).eq(delCol, false).maybeSingle()
           : Promise.resolve({ data: null })
-        const [contactRes, accountRes, mgmtRes] = await Promise.all([
+        const [contactRes, accountRes, mgmtRes, buildingsRes] = await Promise.all([
           fetchRow('contacts', parentRecord.property_primary_contact_id,
             'contact_name, contact_title, contact_phone, contact_mobile_phone, contact_email', 'contact_is_deleted'),
           fetchRow('accounts', parentRecord.property_account_id,
             'account_name, account_phone, account_email, billing_street, billing_city, billing_state, billing_zip', 'account_is_deleted'),
           fetchRow('accounts', parentRecord.property_management_company_id,
             'account_name, account_phone, account_email', 'account_is_deleted'),
+          supabase.from('buildings')
+            .select('building_address, building_name, building_number_or_name, building_city, building_state, building_zip, building_total_units, building_number_of_units, ira_confirmation_code_lea')
+            .eq('property_id', parentRecord.id).eq('building_is_deleted', false),
         ])
         const fill = (dst, v) => {
           if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
@@ -3943,6 +3938,40 @@ function RelatedListWidget({
           fill('enrollment_management_agent', mgmt.account_name)
           fill('enrollment_management_phone', mgmt.account_phone)
           fill('enrollment_management_email', mgmt.account_email)
+        }
+        // Pre-populate the building-derived fields from the property's actual
+        // building records (the pre-approval form asks for these per building):
+        // number of buildings, units per building, the address of each
+        // building, and each building's LEA (IRA confirmation) number.
+        const buildings = buildingsRes?.data || []
+        if (buildings.length) {
+          if (prefillObj.enrollment_number_of_buildings == null)
+            prefillObj.enrollment_number_of_buildings = buildings.length
+
+          const unitCounts = buildings
+            .map(b => Number(b.building_total_units ?? b.building_number_of_units))
+            .filter(n => Number.isFinite(n) && n > 0)
+          if (prefillObj.enrollment_units_per_building == null && unitCounts.length) {
+            const totalUnits = unitCounts.reduce((a, b) => a + b, 0)
+            prefillObj.enrollment_units_per_building = Math.round(totalUnits / buildings.length)
+          }
+
+          if (prefillObj.enrollment_property_addresses == null || prefillObj.enrollment_property_addresses === '') {
+            const addrs = buildings
+              .map(b => composeAddress(
+                b.building_address || b.building_number_or_name || b.building_name,
+                b.building_city, b.building_state, b.building_zip))
+              .filter(Boolean)
+            const uniqAddrs = [...new Set(addrs)]
+            if (uniqAddrs.length) prefillObj.enrollment_property_addresses = uniqAddrs.join('\n')
+          }
+
+          if (prefillObj.enrollment_property_lea_numbers == null || prefillObj.enrollment_property_lea_numbers === '') {
+            const leas = [...new Set(buildings
+              .map(b => String(b.ira_confirmation_code_lea || '').trim())
+              .filter(Boolean))]
+            if (leas.length) prefillObj.enrollment_property_lea_numbers = leas.join(', ')
+          }
         }
       } catch (err) {
         console.warn('enrollment prefill: related-record fetch failed', err)
