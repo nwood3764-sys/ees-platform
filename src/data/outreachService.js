@@ -277,7 +277,7 @@ export async function fetchPropertyOwners() {
     .select('id')
     .eq('picklist_object', 'accounts')
     .eq('picklist_field', 'record_type')
-    .eq('picklist_value', 'property_owner')
+    .eq('picklist_value', 'PROPERTY-OWNER')
     .maybeSingle()
   if (rtErr) throw rtErr
   if (!rt?.id) return []
