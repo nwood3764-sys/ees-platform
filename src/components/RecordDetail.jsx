@@ -3830,11 +3830,10 @@ function RelatedListWidget({
         if (composed) prefillObj.enrollment_owner_address = composed
       }
       // Pre-approval form (WI-IRA-MF-HOMES-ASSESSMENT): the contractor primary
-      // and payment State should never be hand-typed — default both to the
-      // property's state (editable). Also seed the Property Address(es) list
-      // with the property's composed address so the form opens populated.
-      copyFromProperty('property_state', 'enrollment_contractor_primary_state')
-      copyFromProperty('property_state', 'enrollment_payment_state')
+      // Seed the Property Address(es) list with the property's composed address
+      // so the form opens populated. (Contractor name/email/address now come
+      // from the selected contractor account via related fields, so there is
+      // nothing contractor-side to pre-fill here.)
       if (prefillObj.enrollment_property_addresses == null || prefillObj.enrollment_property_addresses === '') {
         const propAddr = composeAddress(
           parentRecord.property_street, parentRecord.property_city,
