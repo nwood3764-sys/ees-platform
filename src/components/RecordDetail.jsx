@@ -31,6 +31,7 @@ import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl, buildScopedListUrl } from '../lib/urlNav'
+import { useDataRefresh } from '../lib/dataRefresh'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
@@ -5117,6 +5118,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showSendSignatureModal, setShowSendSignatureModal] = useState(false)
   const [hasActiveTemplate, setHasActiveTemplate] = useState(false)
   const [reloadTick, setReloadTick] = useState(0)
+  // Re-fetch the open record when a background action (today: the LEAP
+  // Assistant) commits a change, so an edited field or a newly added related
+  // record shows without a manual reload. Skipped while the user is creating or
+  // editing so an in-progress draft is never clobbered — their own save already
+  // refreshes. Refreshes on ANY signal (not filtered by table/id) because a
+  // commit can touch the open record directly OR add a child that appears in
+  // one of its related lists.
+  useDataRefresh(useCallback(() => {
+    if (isCreate || editing) return
+    setReloadTick(t => t + 1)
+  }, [isCreate, editing]))
   // Deep-clone state — only used on project_report_templates. Uses the
   // clone_project_report_template RPC to copy the PRT plus all PRTS rows
   // atomically; lands the user on the new clone via onNavigateToRecord.

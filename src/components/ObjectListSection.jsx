@@ -7,6 +7,7 @@ import { fetchObjectRecords, buildObjectColumnCatalog, deriveColumnOptions, isRe
 import { fetchSavedViewsForObject } from '../data/listViewsService'
 import { useNav } from '../lib/navContext'
 import { isUrlAddressableTable, getTableListUrl } from '../lib/urlNav'
+import { useDataRefresh } from '../lib/dataRefresh'
 
 // ---------------------------------------------------------------------------
 // ObjectListSection — renders the universal list view for any object, on any
@@ -118,6 +119,24 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
     })()
     return () => { cancelled = true }
   }, [objectTable, scopeKey])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fetch the rows when a background action (today: the LEAP Assistant)
+  // commits a change to this list's object, so a newly created record or an
+  // edited field shows without a manual reload. Refetches in the background
+  // (keeps the current rows on screen, no loading flash) and only when this
+  // list's object was touched — an empty tables list means "refresh regardless".
+  useDataRefresh(useCallback((evt) => {
+    const tables = evt?.tables || []
+    if (tables.length && !tables.includes(objectTable)) return
+    ;(async () => {
+      try {
+        const rows = await fetchRows(activeRelated)
+        lastRowsRef.current = rows
+        setData(rows)
+        setColumns(cols => deriveColumnOptions(cols, rows))
+      } catch { /* keep prior rows on failure */ }
+    })()
+  }, [objectTable, activeRelated, fetchRows]))
 
   // When the user adds/removes related columns live, ListView reports the new
   // set of active related fields. If it changed, refetch rows with those fields
