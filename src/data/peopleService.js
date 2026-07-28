@@ -67,7 +67,7 @@ export async function fetchTechnicians() {
     .select('id, picklist_value')
     .eq('picklist_object', 'contacts')
     .eq('picklist_field', 'record_type')
-    .in('picklist_value', ['team_lead', 'lead_technician', 'technician_in_training', 'technician'])
+    .in('picklist_value', ['TEAM-LEAD', 'LEAD-TECHNICIAN', 'TECHNICIAN-IN-TRAINING', 'TECHNICIAN'])
   if (rtErr) throw rtErr
   const rtIds = (rts || []).map(r => r.id)
   if (rtIds.length === 0) return []

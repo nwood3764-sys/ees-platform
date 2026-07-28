@@ -31,7 +31,7 @@ export async function fetchServiceProviderApplications() {
 export async function fetchActiveServiceProviders() {
   const { data: rt } = await supabase
     .from('picklist_values').select('id')
-    .eq('picklist_object', 'accounts').eq('picklist_field', 'record_type').eq('picklist_value', 'service_provider')
+    .eq('picklist_object', 'accounts').eq('picklist_field', 'record_type').eq('picklist_value', 'SERVICE-PROVIDER')
     .maybeSingle()
   let q = supabase
     .from('accounts')

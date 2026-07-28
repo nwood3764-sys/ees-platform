@@ -43,9 +43,9 @@ export async function fetchPortalUsers() {
     // to know about the underlying picklist values.
     const rtValue = r.accounts?.record_type?.picklist_value
     const userType = (() => {
-      if (rtValue === 'partner_organization') return 'Partner Portal'
-      if (rtValue === 'property_owner')       return 'Property Owner Portal'
-      if (rtValue === 'property_management_company') return 'Property Manager Portal'
+      if (rtValue === 'PARTNER-ORGANIZATION') return 'Partner Portal'
+      if (rtValue === 'PROPERTY-OWNER')       return 'Property Owner Portal'
+      if (rtValue === 'PROPERTY-MANAGEMENT-COMPANY') return 'Property Manager Portal'
       return 'Portal'
     })()
 
@@ -84,7 +84,7 @@ export async function fetchPartnerOrganizations() {
     .select('id')
     .eq('picklist_object', 'accounts')
     .eq('picklist_field', 'record_type')
-    .eq('picklist_value', 'partner_organization')
+    .eq('picklist_value', 'PARTNER-ORGANIZATION')
     .maybeSingle()
   if (rtErr) throw rtErr
   if (!rt?.id) return []

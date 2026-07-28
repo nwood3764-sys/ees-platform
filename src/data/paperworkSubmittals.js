@@ -150,8 +150,8 @@ const notBuilt = (key, label, programName) =>
 
 export const PROGRAM_SUBMITTALS = Object.freeze({
   // ── Wisconsin IRA HOMES multifamily — the two programs with built documents ──
-  wi_ira_mf_homes_audit: {
-    key: 'wi_ira_mf_homes_audit',
+  'WI-IRA-MF-HOMES-AUDIT': {
+    key: 'WI-IRA-MF-HOMES-AUDIT',
     label: 'WI-IRA-MF-HOMES-AUDIT',
     programName: 'IRA HOMES — Wisconsin (Multifamily Energy Audit)',
     documentsByStage: {
@@ -164,8 +164,8 @@ export const PROGRAM_SUBMITTALS = Object.freeze({
       ],
     },
   },
-  wi_ira_mf_homes: {
-    key: 'wi_ira_mf_homes',
+  'WI-IRA-MF-HOMES': {
+    key: 'WI-IRA-MF-HOMES',
     label: 'WI-IRA-MF-HOMES',
     programName: 'IRA HOMES — Wisconsin (Multifamily Construction)',
     documentsByStage: {
@@ -183,29 +183,29 @@ export const PROGRAM_SUBMITTALS = Object.freeze({
   },
 
   // ── Wisconsin — remaining programs ──────────────────────────────────────
-  wi_ira_sf_homes:       notBuilt('wi_ira_sf_homes',       'WI-IRA-SF-HOMES',       'IRA HOMES — Wisconsin (Single Family)'),
-  wi_ira_sf_homes_audit: notBuilt('wi_ira_sf_homes_audit', 'WI-IRA-SF-HOMES-AUDIT', 'IRA HOMES — Wisconsin (Single Family Energy Audit)'),
-  wi_ira_mf_hear:        notBuilt('wi_ira_mf_hear',        'WI-IRA-MF-HEAR',        'IRA HEAR — Wisconsin (Multifamily)'),
-  wi_ira_sf_hear:        notBuilt('wi_ira_sf_hear',        'WI-IRA-SF-HEAR',        'IRA HEAR — Wisconsin (Single Family)'),
-  foe_2024_wi:           notBuilt('foe_2024_wi',           'FOE-2024-WI',           'Focus on Energy — Wisconsin (2024)'),
-  foe_2025_wi:           notBuilt('foe_2025_wi',           'FOE-2025-WI',           'Focus on Energy — Wisconsin (2025)'),
-  foe_2026_wi:           notBuilt('foe_2026_wi',           'FOE-2026-WI',           'Focus on Energy — Wisconsin (2026)'),
+  'WI-IRA-SF-HOMES':       notBuilt('WI-IRA-SF-HOMES',       'WI-IRA-SF-HOMES',       'IRA HOMES — Wisconsin (Single Family)'),
+  'WI-IRA-SF-HOMES-AUDIT': notBuilt('WI-IRA-SF-HOMES-AUDIT', 'WI-IRA-SF-HOMES-AUDIT', 'IRA HOMES — Wisconsin (Single Family Energy Audit)'),
+  'WI-IRA-MF-HEAR':        notBuilt('WI-IRA-MF-HEAR',        'WI-IRA-MF-HEAR',        'IRA HEAR — Wisconsin (Multifamily)'),
+  'WI-IRA-SF-HEAR':        notBuilt('WI-IRA-SF-HEAR',        'WI-IRA-SF-HEAR',        'IRA HEAR — Wisconsin (Single Family)'),
+  'FOE-2024-WI':           notBuilt('FOE-2024-WI',           'FOE-2024-WI',           'Focus on Energy — Wisconsin (2024)'),
+  'FOE-2025-WI':           notBuilt('FOE-2025-WI',           'FOE-2025-WI',           'Focus on Energy — Wisconsin (2025)'),
+  'FOE-2026-WI':           notBuilt('FOE-2026-WI',           'FOE-2026-WI',           'Focus on Energy — Wisconsin (2026)'),
 
   // ── North Carolina ──────────────────────────────────────────────────────
-  nc_ira_mf_homes:       notBuilt('nc_ira_mf_homes',       'NC-IRA-MF-HOMES',       'IRA HOMES — North Carolina (Multifamily)'),
-  nc_ira_mf_homes_audit: notBuilt('nc_ira_mf_homes_audit', 'NC-IRA-MF-HOMES-AUDIT', 'IRA HOMES — North Carolina (Multifamily Energy Audit)'),
-  nc_ira_sf_homes:       notBuilt('nc_ira_sf_homes',       'NC-IRA-SF-HOMES',       'IRA HOMES — North Carolina (Single Family)'),
-  nc_ira_sf_homes_audit: notBuilt('nc_ira_sf_homes_audit', 'NC-IRA-SF-HOMES-AUDIT', 'IRA HOMES — North Carolina (Single Family Energy Audit)'),
-  nc_ira_mf_hear:        notBuilt('nc_ira_mf_hear',        'NC-IRA-MF-HEAR',        'IRA HEAR — North Carolina (Multifamily)'),
-  nc_ira_sf_hear:        notBuilt('nc_ira_sf_hear',        'NC-IRA-SF-HEAR',        'IRA HEAR — North Carolina (Single Family)'),
+  'NC-IRA-MF-HOMES':       notBuilt('NC-IRA-MF-HOMES',       'NC-IRA-MF-HOMES',       'IRA HOMES — North Carolina (Multifamily)'),
+  'NC-IRA-MF-HOMES-AUDIT': notBuilt('NC-IRA-MF-HOMES-AUDIT', 'NC-IRA-MF-HOMES-AUDIT', 'IRA HOMES — North Carolina (Multifamily Energy Audit)'),
+  'NC-IRA-SF-HOMES':       notBuilt('NC-IRA-SF-HOMES',       'NC-IRA-SF-HOMES',       'IRA HOMES — North Carolina (Single Family)'),
+  'NC-IRA-SF-HOMES-AUDIT': notBuilt('NC-IRA-SF-HOMES-AUDIT', 'NC-IRA-SF-HOMES-AUDIT', 'IRA HOMES — North Carolina (Single Family Energy Audit)'),
+  'NC-IRA-MF-HEAR':        notBuilt('NC-IRA-MF-HEAR',        'NC-IRA-MF-HEAR',        'IRA HEAR — North Carolina (Multifamily)'),
+  'NC-IRA-SF-HEAR':        notBuilt('NC-IRA-SF-HEAR',        'NC-IRA-SF-HEAR',        'IRA HEAR — North Carolina (Single Family)'),
 
   // ── Michigan ────────────────────────────────────────────────────────────
-  mi_ira_mf_homes:       notBuilt('mi_ira_mf_homes',       'MI-IRA-MF-HOMES',       'IRA HOMES — Michigan (Multifamily)'),
-  mi_ira_mf_homes_audit: notBuilt('mi_ira_mf_homes_audit', 'MI-IRA-MF-HOMES-AUDIT', 'IRA HOMES — Michigan (Multifamily Energy Audit)'),
-  mi_ira_sf_homes:       notBuilt('mi_ira_sf_homes',       'MI-IRA-SF-HOMES',       'IRA HOMES — Michigan (Single Family)'),
-  mi_ira_sf_homes_audit: notBuilt('mi_ira_sf_homes_audit', 'MI-IRA-SF-HOMES-AUDIT', 'IRA HOMES — Michigan (Single Family Energy Audit)'),
-  mi_ira_mf_hear:        notBuilt('mi_ira_mf_hear',        'MI-IRA-MF-HEAR',        'IRA HEAR — Michigan (Multifamily)'),
-  mi_ira_sf_hear:        notBuilt('mi_ira_sf_hear',        'MI-IRA-SF-HEAR',        'IRA HEAR — Michigan (Single Family)'),
+  'MI-IRA-MF-HOMES':       notBuilt('MI-IRA-MF-HOMES',       'MI-IRA-MF-HOMES',       'IRA HOMES — Michigan (Multifamily)'),
+  'MI-IRA-MF-HOMES-AUDIT': notBuilt('MI-IRA-MF-HOMES-AUDIT', 'MI-IRA-MF-HOMES-AUDIT', 'IRA HOMES — Michigan (Multifamily Energy Audit)'),
+  'MI-IRA-SF-HOMES':       notBuilt('MI-IRA-SF-HOMES',       'MI-IRA-SF-HOMES',       'IRA HOMES — Michigan (Single Family)'),
+  'MI-IRA-SF-HOMES-AUDIT': notBuilt('MI-IRA-SF-HOMES-AUDIT', 'MI-IRA-SF-HOMES-AUDIT', 'IRA HOMES — Michigan (Single Family Energy Audit)'),
+  'MI-IRA-MF-HEAR':        notBuilt('MI-IRA-MF-HEAR',        'MI-IRA-MF-HEAR',        'IRA HEAR — Michigan (Multifamily)'),
+  'MI-IRA-SF-HEAR':        notBuilt('MI-IRA-SF-HEAR',        'MI-IRA-SF-HEAR',        'IRA HEAR — Michigan (Single Family)'),
 })
 
 // ---------------------------------------------------------------------------

@@ -82,7 +82,7 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
   // Building
   const [buildings, setBuildings] = useState(null)
   const [building, setBuilding] = useState(null)
-  const [newBuildingType, setNewBuildingType] = useState(null)  // 'single_family_detached' | 'single_family_attached'
+  const [newBuildingType, setNewBuildingType] = useState(null)  // 'SINGLE-FAMILY-DETACHED' | 'SINGLE-FAMILY-ATTACHED'
 
   // Unit (attached only)
   const [units, setUnits] = useState(null)
@@ -122,7 +122,7 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
 
   const pickBuilding = async (b) => {
     setBuilding(b)
-    if (b.record_type_value === 'single_family_detached') {
+    if (b.record_type_value === 'SINGLE-FAMILY-DETACHED') {
       // Detached: the building IS the home — no unit.
       await submit({ buildingId: b.id, unitId: null, newUnit: null })
       return
@@ -139,7 +139,7 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
 
   const chooseNewBuildingType = async (t) => {
     setNewBuildingType(t)
-    if (t === 'single_family_detached') {
+    if (t === 'SINGLE-FAMILY-DETACHED') {
       await submit({ buildingId: null, newType: t, unitId: null, newUnit: null })
     } else {
       setUnits([])   // brand-new building has no units yet — type the first one
@@ -291,8 +291,8 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
               <ListButton key={b.id}
                 title={`${property?.property_street || property?.property_name || newAddr.street.trim()} — Building ${b.building_number_or_name || b.building_name}`}
                 sub={b.record_type_label
-                  ? `${b.record_type_label}${b.record_type_value === 'single_family_detached' ? ' — no units'
-                      : b.record_type_value === 'single_family_attached' ? ' — select the unit next' : ''}`
+                  ? `${b.record_type_label}${b.record_type_value === 'SINGLE-FAMILY-DETACHED' ? ' — no units'
+                      : b.record_type_value === 'SINGLE-FAMILY-ATTACHED' ? ' — select the unit next' : ''}`
                   : 'Building record type not set'}
                 disabled={busy}
                 onClick={() => pickBuilding(b)} />
@@ -303,9 +303,9 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
               </div>
             )}
             <ListButton title="Single Family Detached" sub="One home, no units — the assessment lives on the building"
-              disabled={busy} onClick={() => chooseNewBuildingType('single_family_detached')} />
+              disabled={busy} onClick={() => chooseNewBuildingType('SINGLE-FAMILY-DETACHED')} />
             <ListButton title="Single Family Attached" sub="Townhome / duplex — each attached home is a unit"
-              disabled={busy} onClick={() => chooseNewBuildingType('single_family_attached')} />
+              disabled={busy} onClick={() => chooseNewBuildingType('SINGLE-FAMILY-ATTACHED')} />
           </div>
         )}
 
