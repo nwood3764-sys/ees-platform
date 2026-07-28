@@ -22,7 +22,7 @@ export function loadPicklists() {
     const data = await fetchAllPaged((from, to) =>
       supabase
         .from('picklist_values')
-        .select('id, picklist_object, picklist_field, picklist_value, picklist_label, picklist_is_active, picklist_sort_order')
+        .select('id, picklist_object, picklist_field, picklist_value, picklist_label, picklist_is_active, picklist_sort_order, picklist_icon, picklist_color')
         .order('picklist_object',     { ascending: true })
         .order('picklist_field',      { ascending: true })
         .order('picklist_sort_order', { ascending: true })
@@ -32,6 +32,12 @@ export function loadPicklists() {
     const byId = new Map()
     const valueById = new Map()
     const byField = new Map()
+    // metaById carries the record-type visual identity (icon + color) alongside
+    // the label, so any surface that already holds `picklists` can render a
+    // Salesforce-style record-type badge with a single lookup. Includes inactive
+    // values for the same reason byId does — an existing record referencing a
+    // deactivated record type still shows its badge.
+    const metaById = new Map()
     for (const row of data) {
       // Resolution maps (byId/valueById) include INACTIVE values so an existing
       // record that references a since-deactivated value (e.g. an older record
@@ -40,12 +46,20 @@ export function loadPicklists() {
       // filtered to active, so deactivated values stay out of NEW selections.
       byId.set(row.id, row.picklist_label || row.picklist_value)
       valueById.set(row.id, row.picklist_value)
+      metaById.set(row.id, {
+        label: row.picklist_label || row.picklist_value,
+        value: row.picklist_value,
+        object: row.picklist_object,
+        field: row.picklist_field,
+        icon: row.picklist_icon || null,
+        color: row.picklist_color || null,
+      })
       if (row.picklist_is_active === false) continue
       const k = `${row.picklist_object}.${row.picklist_field}`
       if (!byField.has(k)) byField.set(k, [])
       byField.get(k).push(row.picklist_label || row.picklist_value)
     }
-    return { byId, valueById, byField }
+    return { byId, valueById, byField, metaById }
   })()
   // CRITICAL: never let a *rejected* promise stay memoized. The old code
   // cached _picklistPromise unconditionally, so a single transient failure

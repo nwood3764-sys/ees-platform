@@ -80,6 +80,7 @@ import {
   fetchAvailableRecordTypes,
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
+import { RecordVisualBadge } from '../lib/recordTypeIcons'
 
 // ---------------------------------------------------------------------------
 // Template lifecycle registry
@@ -6470,6 +6471,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const statusRaw = statusColumn ? record[statusColumn] : null
   const statusLabel = statusRaw ? (picklists.byId.get(statusRaw) || statusRaw) : null
 
+  // Record-type visual identity (Salesforce-style icon badge). The record type
+  // lives in `{prefix}_record_type` as a uuid FK into picklist_values; its
+  // icon/color ride along in picklists.metaById. When the record has no record
+  // type (or the object has none), the badge falls back to the object default.
+  // In create mode the picker may have seeded a record type into the draft.
+  const recordTypeColumn = getRecordTypeColumn(tableName)
+  const recordTypeId = recordTypeColumn ? record[recordTypeColumn] : null
+  const recordTypeMeta = recordTypeId ? (picklists.metaById?.get(recordTypeId) || null) : null
+  const recordTypeLabel = recordTypeMeta?.label || (recordTypeId ? picklists.byId.get(recordTypeId) : null) || null
+
   if (!layout) return (
     <div style={{
       flex: 1,
@@ -6610,12 +6621,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             </svg>
           </button>
 
+          <RecordVisualBadge
+            tableName={tableName}
+            recordTypeMeta={recordTypeMeta}
+            size={28}
+            title={recordTypeLabel ? `${singularizeLabel(objectLabel)} · ${recordTypeLabel}` : singularizeLabel(objectLabel)}
+            style={{ flexShrink: 0 }}
+          />
+
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0 }}>
-            {recordNumber && (
-              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {editing && cloneSource ? `Cloning ${recordNumber}` : editing ? `Editing ${recordNumber}` : recordNumber}
-              </div>
-            )}
+            <div style={{ fontSize: 10.5, color: C.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {[recordTypeLabel || singularizeLabel(objectLabel), recordNumber && (editing && cloneSource ? `Cloning ${recordNumber}` : editing ? `Editing ${recordNumber}` : recordNumber)].filter(Boolean).join(' · ')}
+            </div>
             <div style={{
               fontSize: 15, fontWeight: 600, color: C.textPrimary, lineHeight: 1.2,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -6670,10 +6687,27 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         {/* Desktop header card (mobile already shows this info in the sticky bar above — mobile shows a compact title + status chip instead) */}
         {!isMobile ? (
           <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted, marginBottom: 4 }}>{recordNumber}</div>
-              <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px' }}>{displayName}</h1>
-              {statusLabel && <Badge s={statusLabel} />}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, minWidth: 0 }}>
+              <RecordVisualBadge
+                tableName={tableName}
+                recordTypeMeta={recordTypeMeta}
+                size={40}
+                title={recordTypeLabel ? `${singularizeLabel(objectLabel)} · ${recordTypeLabel}` : singularizeLabel(objectLabel)}
+                style={{ marginTop: 2 }}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{singularizeLabel(objectLabel)}</span>
+                  {recordTypeLabel && (
+                    <span style={{ fontSize: 11, fontWeight: 600, color: C.textSecondary, background: C.page, border: `1px solid ${C.border}`, borderRadius: 4, padding: '1px 7px' }}>
+                      {recordTypeLabel}
+                    </span>
+                  )}
+                  {recordNumber && <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted }}>{recordNumber}</span>}
+                </div>
+                <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px' }}>{displayName}</h1>
+                {statusLabel && <Badge s={statusLabel} />}
+              </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {editing ? (<>
