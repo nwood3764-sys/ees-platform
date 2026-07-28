@@ -164,6 +164,50 @@ export async function uploadAvatar({ file, userId }) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Record type icons — custom uploads
+// ───────────────────────────────────────────────────────────────────────────
+// An admin can upload a custom SVG/PNG icon for a record type (Object Manager
+// > Record Types > Icon & Color). Stored in the public `record-type-icons`
+// bucket so the badge renders it by URL. The reference kept on the record type
+// (picklist_values.picklist_icon) is `upload:<mode>:<publicUrl>` where mode is
+// 'mono' (recolored to match the badge via CSS mask) or 'color' (rendered
+// as-is). See src/lib/recordTypeIcons.jsx for the render/parse side.
+const RECORD_TYPE_ICON_BUCKET = 'record-type-icons'
+const RECORD_TYPE_ICON_MAX_BYTES = 512 * 1024 // 512 KB — matches the bucket limit
+const RECORD_TYPE_ICON_ALLOWED_MIME = ['image/svg+xml', 'image/png', 'image/webp']
+
+/**
+ * Upload a custom record-type icon and return its public URL.
+ * @param {Object} args
+ * @param {File}   args.file           image File from <input type=file>
+ * @param {string} args.recordTypeId   picklist_values.id (path key)
+ * @returns {Promise<string>}          public URL to embed in the picklist_icon ref
+ */
+export async function uploadRecordTypeIcon({ file, recordTypeId }) {
+  if (!file)         throw new Error('A file is required.')
+  if (!recordTypeId) throw new Error('A record type id is required.')
+  if (file.size > RECORD_TYPE_ICON_MAX_BYTES) {
+    throw new Error(`Icon is too large (${(file.size / 1024).toFixed(0)} KB). Maximum is 512 KB.`)
+  }
+  if (file.type && !RECORD_TYPE_ICON_ALLOWED_MIME.includes(file.type)) {
+    throw new Error('Unsupported icon type. Upload an SVG, PNG, or WEBP.')
+  }
+  const ext = fileExt(file.name) || (file.type === 'image/svg+xml' ? 'svg' : 'png')
+  // New filename per upload (timestamp) so an overwrite never serves a stale
+  // cached asset under the same URL; the record type points at the latest.
+  const path = `${recordTypeId}/icon-${Date.now()}.${ext}`
+  const { error: upErr } = await supabase.storage
+    .from(RECORD_TYPE_ICON_BUCKET)
+    .upload(path, file, { contentType: file.type || 'image/svg+xml', upsert: true })
+  if (upErr) throw new Error(`Upload failed: ${upErr.message}`)
+
+  const { data } = supabase.storage.from(RECORD_TYPE_ICON_BUCKET).getPublicUrl(path)
+  const url = data?.publicUrl
+  if (!url) throw new Error('Could not resolve the uploaded icon URL.')
+  return url
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Photos
 // ───────────────────────────────────────────────────────────────────────────
 

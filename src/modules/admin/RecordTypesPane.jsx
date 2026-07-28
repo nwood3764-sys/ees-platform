@@ -18,7 +18,10 @@ import {
   ICON_GROUPS,
   RECORD_TYPE_COLORS,
   resolveRecordVisual,
+  parseIconRef,
+  buildUploadIconRef,
 } from '../../lib/recordTypeIcons'
+import { uploadRecordTypeIcon } from '../../data/storageService'
 
 // ---------------------------------------------------------------------------
 // RecordTypesPane — Object Manager > Record Types tab.
@@ -455,6 +458,7 @@ function RecordTypeRow({
 
         <IconColorPicker
           objectName={objectName}
+          recordTypeId={row.id}
           icon={icon}
           color={color}
           label={label || row.label}
@@ -468,11 +472,38 @@ function RecordTypeRow({
 }
 
 // ─── Icon + color picker (record-type badge) ───────────────────────────────
-// Salesforce-style: choose a glyph and a color for the record type's badge.
-// Leaving both unset falls the badge back to the object's default visual.
-function IconColorPicker({ objectName, icon, color, label, onIconChange, onColorChange }) {
+// Salesforce-style: choose a built-in glyph OR upload a custom SVG/PNG, plus a
+// color. Leaving everything unset falls the badge back to the object default.
+function IconColorPicker({ objectName, recordTypeId, icon, color, label, onIconChange, onColorChange }) {
+  const toast = useToast()
   const preview = resolveRecordVisual(objectName, { icon, color })
   const usingDefault = !icon && !color
+  const iconRef = parseIconRef(icon)
+  const isCustom = iconRef.kind === 'upload'
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef(null)
+
+  async function handleFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = '' // allow re-picking the same file later
+    if (!file) return
+    setUploading(true)
+    try {
+      const url = await uploadRecordTypeIcon({ file, recordTypeId })
+      // Default new uploads to 'mono' so they match the built-in badges; the
+      // user can flip to keep-original-colors right after.
+      onIconChange(buildUploadIconRef(url, 'mono'))
+      toast.success('Custom icon uploaded')
+    } catch (err) {
+      toast.error(err.message || String(err))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function setCustomMode(mode) {
+    if (isCustom) onIconChange(buildUploadIconRef(iconRef.url, mode))
+  }
 
   return (
     <div style={{ marginTop: 14 }}>
@@ -488,7 +519,7 @@ function IconColorPicker({ objectName, icon, color, label, onIconChange, onColor
             {label || 'Record Type'}
           </div>
           <div style={{ fontSize: 11, color: C.textMuted }}>
-            {usingDefault ? 'Using the object default badge' : 'Custom badge'}
+            {isCustom ? 'Custom uploaded icon' : usingDefault ? 'Using the object default badge' : 'Custom badge'}
           </div>
         </div>
         {!usingDefault && (
@@ -501,6 +532,56 @@ function IconColorPicker({ objectName, icon, color, label, onIconChange, onColor
           </button>
         )}
       </div>
+
+      {/* Upload custom icon */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/svg+xml,image/png,image/webp"
+        style={{ display: 'none' }}
+        onChange={handleFile}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          style={buttonSmSecondaryStyle}
+        >
+          {uploading ? 'Uploading…' : isCustom ? 'Replace custom icon…' : 'Upload custom icon…'}
+        </button>
+        <span style={{ fontSize: 11, color: C.textMuted }}>SVG, PNG, or WEBP · max 512 KB</span>
+      </div>
+
+      {/* Custom-icon render mode toggle */}
+      {isCustom && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>Custom icon style</div>
+          <div style={{ display: 'inline-flex', border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden' }}>
+            {[
+              { m: 'mono',  t: 'Match badge color' },
+              { m: 'color', t: 'Keep original colors' },
+            ].map(({ m, t }, i) => {
+              const on = iconRef.mode === m
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setCustomMode(m)}
+                  style={{
+                    padding: '5px 12px', fontSize: 12, cursor: 'pointer',
+                    border: 'none', borderLeft: i === 0 ? 'none' : `1px solid ${C.border}`,
+                    background: on ? C.emerald : C.card,
+                    color: on ? '#fff' : C.textSecondary, fontWeight: on ? 600 : 500,
+                  }}
+                >
+                  {t}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Color swatches */}
       <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>Color</div>
@@ -525,7 +606,9 @@ function IconColorPicker({ objectName, icon, color, label, onIconChange, onColor
       </div>
 
       {/* Icon grid, grouped */}
-      <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>Icon</div>
+      <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>
+        {isCustom ? 'Or pick a built-in icon (replaces the custom upload)' : 'Icon'}
+      </div>
       <div style={{ maxHeight: 190, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, padding: 8, background: C.card }}>
         {ICON_GROUPS.map(g => (
           <div key={g.group} style={{ marginBottom: 8 }}>
