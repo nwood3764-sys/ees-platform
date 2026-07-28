@@ -3891,21 +3891,51 @@ function RelatedListWidget({
       }
     }
 
-    // Opportunities are state-scoped: every opportunity record type belongs to
-    // one program state (its picklist_state), so an opportunity created from a
-    // property or building must offer only that location's record types — a
-    // Wisconsin property can never carry an NC or MI opportunity. Seed
-    // opportunity_state from the parent's state; RecordDetail's prefillState
-    // reads any *_state prefill key and state-filters the record-type picker to
-    // it (same mechanism enrollments use via enrollment_state). User-editable on
-    // the form; only fill a blank.
-    if (childTable === 'opportunities' && parentRecord
+    // An opportunity documents a program pursuit on a property, so a new one
+    // created from a property (or building) inherits everything the system
+    // already knows — the same rich carry-over the "Advance to Opportunity"
+    // action performs, so both create paths behave identically. This includes
+    // opportunity_state, which is state-scoped: every opportunity record type
+    // belongs to one program state (its picklist_state), so RecordDetail's
+    // prefillState reads it and filters the record-type picker to that state (a
+    // Wisconsin property can never carry an NC or MI opportunity). All values
+    // remain user-editable on the form; only fill blanks, never clobber a
+    // chain-seeded value.
+    if (childTable === 'opportunities' && parentTable === 'properties' && parentRecord) {
+      const copyFromProperty = (src, dst) => {
+        const v = parentRecord[src]
+        if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
+      }
+      // Account / management company / site contact — the "who" of the property.
+      // (opportunity_account_id is force-synced to the property's account by a DB
+      // trigger, but seed it so the form shows it the moment it opens.)
+      copyFromProperty('property_account_id',            'opportunity_account_id')
+      copyFromProperty('property_management_company_id', 'opportunity_managing_account_id')
+      copyFromProperty('property_management_company_id', 'opportunity_property_management_company')
+      copyFromProperty('property_primary_contact_id',    'opportunity_property_site_contact')
+      // Names / identifiers / location
+      copyFromProperty('property_aka_name',              'opportunity_property_aka')
+      copyFromProperty('property_subdivision_name',      'opportunity_subdivision_name')
+      copyFromProperty('property_state',                 'opportunity_state')
+      // Building & unit characteristics
+      copyFromProperty('property_total_buildings',       'opportunity_number_of_buildings')
+      copyFromProperty('property_number_of_buildings',   'opportunity_number_of_buildings')
+      copyFromProperty('property_total_units',           'opportunity_total_units')
+      copyFromProperty('property_total_number_of_units', 'opportunity_total_number_of_units')
+      copyFromProperty('property_year_built',            'opportunity_year_built')
+      copyFromProperty('property_total_attic_sq_ft',     'opportunity_total_attic_sq_ft')
+      copyFromProperty('property_total_building_sq_ft',  'opportunity_total_building_sq_ft')
+      // Name composes "<property name> — Opportunity" (opportunities have no
+      // derived-name trigger); only if the user hasn't set one.
+      if ((prefillObj.opportunity_name == null || prefillObj.opportunity_name === '') && parentRecord.property_name) {
+        prefillObj.opportunity_name = `${parentRecord.property_name} — Opportunity`
+      }
+    } else if (childTable === 'opportunities' && parentTable === 'buildings' && parentRecord
         && (prefillObj.opportunity_state == null || prefillObj.opportunity_state === '')) {
-      const parentState =
-        parentTable === 'properties' ? parentRecord.property_state :
-        parentTable === 'buildings'  ? parentRecord.building_state  :
-        null
-      if (parentState != null && parentState !== '') prefillObj.opportunity_state = parentState
+      // From a building, at least carry the state so the record-type picker is
+      // state-scoped (the building's other fields don't map 1:1 to opportunity
+      // columns the way a property's do).
+      if (parentRecord.building_state) prefillObj.opportunity_state = parentRecord.building_state
     }
 
     // A building sits at its property's address, so seed the new building's
