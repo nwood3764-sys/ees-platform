@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs></defs><rect x="0" y="0" width="480" height="560" fill="#f2efe8"/><rect x="60" y="380" width="360" height="90" fill="#cdb98f" stroke="#44526a" stroke-width="2.5"/>
+<g stroke="#a98f5f" stroke-width="3"><line x1="130" y1="380" x2="130" y2="470"/><line x1="200" y1="380" x2="200" y2="470"/><line x1="270" y1="380" x2="270" y2="470"/><line x1="340" y1="380" x2="340" y2="470"/></g>
+<path d="M60 380 Q95 356 130 380 Q165 354 200 380 Q235 356 270 380 Q305 354 340 380 Q375 356 420 380 L420 380 L60 380 Z" fill="#f0e6c8" stroke="#e6d7ac" stroke-width="2"/>
+<path d="M96 300 Q170 230 250 300 Q330 370 400 290" fill="none" stroke="#aab6c8" stroke-width="34" stroke-linecap="round"/>
+<path d="M96 300 Q170 230 250 300 Q330 370 400 290" fill="none" stroke="#6a7788" stroke-width="34" stroke-linecap="round" stroke-dasharray="4 14" opacity="0.5"/>
+<rect x="80" y="300" width="34" height="60" rx="4" fill="#dde3ec" stroke="#44526a" stroke-width="2"/>
+<rect x="64" y="210" width="356" height="210" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="24" y="34">The exhaust fan duct run</text><text x="150" y="510">Flexible or rigid duct across the attic</text></g></svg>

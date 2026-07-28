@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs></defs><rect x="0" y="0" width="480" height="560" fill="#f2efe8"/>
+<path d="M60 120 L300 120 L420 210 L60 210 Z" fill="#c3ccd8" stroke="#44526a" stroke-width="3"/>
+<!-- eave / soffit underside -->
+<rect x="60" y="210" width="360" height="40" fill="#cdb98f" stroke="#44526a" stroke-width="2.5"/>
+<!-- soffit vents -->
+<g fill="#dde3ec" stroke="#6a7788" stroke-width="2"><rect x="110" y="220" width="70" height="20" rx="3"/><rect x="210" y="220" width="70" height="20" rx="3"/><rect x="310" y="220" width="70" height="20" rx="3"/></g>
+<g stroke="#6a7788" stroke-width="1.6"><line x1="120" y1="224" x2="120" y2="236"/><line x1="130" y1="224" x2="130" y2="236"/><line x1="140" y1="224" x2="140" y2="236"/><line x1="220" y1="224" x2="220" y2="236"/><line x1="230" y1="224" x2="230" y2="236"/><line x1="320" y1="224" x2="320" y2="236"/><line x1="330" y1="224" x2="330" y2="236"/></g>
+<!-- baffle + insulation inside -->
+<path d="M60 250 Q150 250 220 300 L60 300 Z" fill="#f0e6c8" stroke="#e6d7ac" stroke-width="2"/>
+<rect x="64" y="200" width="356" height="120" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="24" y="34">Soffit / eave ventilation</text><text x="150" y="510">Vents at the attic edge</text></g></svg>

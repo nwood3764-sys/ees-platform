@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs><linearGradient id="mt" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#aab6c8"/><stop offset="0.5" stop-color="#f4f8fd"/><stop offset="1" stop-color="#b3bfd0"/></linearGradient></defs><rect x="0" y="0" width="480" height="560" fill="#f2efe8"/><rect x="60" y="360" width="360" height="90" fill="#cdb98f" stroke="#44526a" stroke-width="2.5"/>
+<g stroke="#a98f5f" stroke-width="3"><line x1="130" y1="360" x2="130" y2="450"/><line x1="200" y1="360" x2="200" y2="450"/><line x1="270" y1="360" x2="270" y2="450"/><line x1="340" y1="360" x2="340" y2="450"/></g>
+<path d="M60 360 Q95 336 130 360 Q165 334 200 360 Q235 336 270 360 Q305 334 340 360 Q375 336 420 360 L420 360 L60 360 Z" fill="#f0e6c8" stroke="#e6d7ac" stroke-width="2"/>
+<rect x="216" y="90" width="34" height="280" fill="url(#mt)" stroke="#44526a" stroke-width="3"/>
+<rect x="208" y="90" width="50" height="14" rx="4" fill="#dde3ec" stroke="#44526a" stroke-width="2"/>
+<path d="M233 352 L233 372" stroke="#6a7788" stroke-width="3"/>
+<rect x="160" y="82" width="150" height="310" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="24" y="34">The water heater flue</text><text x="150" y="510">Smaller single-wall pipe in the attic</text></g></svg>

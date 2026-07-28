@@ -1555,6 +1555,14 @@ function fieldSavedString(f) {
   return f.text_value != null ? String(f.text_value) : ''
 }
 
+// A required photo field that opts into "not present" (allow_not_present) can be
+// satisfied by an explicit "not present" mark, stored as the field's text value,
+// instead of a photo — for equipment that genuinely isn't there (e.g. no HVAC
+// flue in this attic). The server evidence gate applies the same rule.
+function fieldMarkedNotPresent(f) {
+  return !!(f && f.allow_not_present && f.text_value != null && String(f.text_value).trim() !== '')
+}
+
 // Evaluate a calculated field's arithmetic expression (+ - * / and parens) over
 // sibling field values. `resolveVar(name)` returns a finite number or null; any
 // missing input, divide-by-zero, or parse error yields null (nothing to show).
@@ -1617,7 +1625,7 @@ function ScreenFlowCard({ step, index, locked, isActionable, onOpen, onMarkNotAp
   // A prompt is "done" when it holds a value, or (for a 'photo' field) when a
   // photo tagged with its name exists on the step.
   const promptDone = (f) => f.type === 'photo'
-    ? stepPhotos.some((p) => (p.photo_type || '') === f.name)
+    ? (stepPhotos.some((p) => (p.photo_type || '') === f.name) || fieldMarkedNotPresent(f))
     : fieldHasValue(f)
   // Progress counts required prompts only — the SnuggPro detail fields are
   // optional, so they don't hold the section back.
@@ -1678,7 +1686,9 @@ function ScreenFlowCard({ step, index, locked, isActionable, onOpen, onMarkNotAp
                   <strong style={{ color: C.textPrimary }}>{f.label}:</strong>{' '}
                   {n > 0
                     ? <span style={{ fontFamily: MONO }}>{n} captured</span>
-                    : <span style={{ color: C.textMuted }}>none</span>}
+                    : fieldMarkedNotPresent(f)
+                      ? <span style={{ fontFamily: MONO }}>not present</span>
+                      : <span style={{ color: C.textMuted }}>none</span>}
                 </div>
               )
             }
@@ -1856,10 +1866,27 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
     busy ||
     (screen.kind === 'photo' && !photoSatisfied) ||
     (screen.kind === 'field' && curField.required && curEmpty) ||
-    (screen.kind === 'photofield' && curField.required && curPhotoN === 0)
+    (screen.kind === 'photofield' && curField.required && curPhotoN === 0 && !fieldMarkedNotPresent(curField))
   const fieldSkippable =
     (screen.kind === 'field' && !curField.required && curEmpty) ||
     (screen.kind === 'photofield' && !curField.required && curPhotoN === 0)
+
+  // Mark a "not present" photo field (e.g. no HVAC flue in this attic): record
+  // the marker as the field's value so the evidence gate is satisfied, then move
+  // on. Only offered on required photo fields that opt in via allow_not_present.
+  const markNotPresent = async () => {
+    const f = screen.field
+    setBusy(true)
+    try {
+      await saveWorkStepFieldValue(live.work_step_id, f.field_id, 'Not Present')
+      await refresh()
+      next()
+    } catch (e) {
+      onFlash(e.message || 'Could not update the item.', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   // Continue on a field screen: save the value (if changed) then advance; an
   // empty optional field is skipped. The bottom Continue is the single action.
@@ -1981,6 +2008,23 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
               done={curPhotoN > 0}
             />
             {uploading && <div style={{ fontSize: 12, color: C.textMuted, marginTop: 8 }}>Uploading photo…</div>}
+            {screen.field.allow_not_present && curPhotoN === 0 && (
+              fieldMarkedNotPresent(screen.field)
+                ? <div style={{ marginTop: 12, fontSize: 13, fontWeight: 600, color: C.emeraldMid, textAlign: 'center' }}>
+                    Marked “Not present.” Take a photo above to override.
+                  </div>
+                : <button
+                    onClick={markNotPresent}
+                    disabled={busy}
+                    style={{
+                      appearance: 'none', background: 'none', border: 'none', cursor: 'pointer',
+                      display: 'block', margin: '12px auto 0', padding: 6,
+                      fontFamily: FONT, fontSize: 12.5, fontWeight: 600, color: C.textMuted, textDecoration: 'underline',
+                    }}
+                  >
+                    This item isn’t present here — mark Not Present
+                  </button>
+            )}
             {photosOfType(screen.field.name).length > 0 && (
               <div style={{ marginTop: 12 }}>
                 <PhotoStrip photos={photosOfType(screen.field.name)} />
@@ -2061,7 +2105,8 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
                 )
               }
 
-              const has = isPhoto ? n > 0 : fieldHasValue(f)
+              const notPresent = isPhoto && fieldMarkedNotPresent(f)
+              const has = isPhoto ? (n > 0 || notPresent) : fieldHasValue(f)
               const val = f.numeric_value ?? f.text_value
               const color = has ? C.textPrimary : (f.required ? C.amber : C.textMuted)
               return (
@@ -2078,7 +2123,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontFamily: MONO, fontWeight: 700, textAlign: 'right', color }}>
                       {has
-                        ? (isPhoto ? `${n} captured` : `${val}${f.unit ? ` ${f.unit}` : ''}`)
+                        ? (isPhoto ? (n > 0 ? `${n} captured` : 'not present') : `${val}${f.unit ? ` ${f.unit}` : ''}`)
                         : (f.required ? (isPhoto ? 'photo required' : 'required') : '—')}
                     </span>
                     <ReviewChevron />

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" font-family="Inter, -apple-system, sans-serif"><defs></defs><rect x="0" y="0" width="480" height="560" fill="#f2efe8"/>
+<rect x="60" y="400" width="360" height="90" fill="#cdb98f" stroke="#44526a" stroke-width="2.5"/>
+<g stroke="#a98f5f" stroke-width="3"><line x1="130" y1="400" x2="130" y2="490"/><line x1="200" y1="400" x2="200" y2="490"/><line x1="270" y1="400" x2="270" y2="490"/><line x1="340" y1="400" x2="340" y2="490"/></g>
+<path d="M60 400 Q95 376 130 400 Q165 374 200 400 Q235 376 270 400 Q305 374 340 400 Q375 376 420 400 L420 400 L60 400 Z" fill="#f0e6c8" stroke="#e6d7ac" stroke-width="2"/>
+<path d="M120 300 L240 216 L360 300 Z" fill="#c3ccd8" stroke="#44526a" stroke-width="3"/>
+<path d="M120 260 A120 60 0 1 1 360 260" fill="none" stroke="#3ecf8e" stroke-width="7" stroke-linecap="round"/>
+<path d="M120 260 A120 60 0 0 0 240 320" fill="none" stroke="#3ecf8e" stroke-width="7" stroke-linecap="round"/>
+<path d="M232 308 L242 322 L256 314" fill="none" stroke="#3ecf8e" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="100" y="200" width="280" height="250" rx="14" fill="none" stroke="#3ecf8e" stroke-width="5" stroke-dasharray="14 10"/><g font-size="17" font-weight="700" fill="#0d1a2e" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round"><text x="24" y="34">Pan a 360 of the whole attic</text><text x="150" y="510">One slow, continuous video</text></g></svg>
