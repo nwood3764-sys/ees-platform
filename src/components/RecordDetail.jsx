@@ -1070,6 +1070,14 @@ function EmailTemplatePreviewModal({
 // inline insert would create a half-provisioned row that can't sign in.
 const QUICK_CREATE_EXCLUDED_TABLES = new Set(['users', 'portal_users'])
 
+// Account record-type values (picklist_object='accounts', picklist_field=
+// 'record_type') for which the Property Owner Research panel is offered. These
+// are the only account types that represent an ownership group worth
+// researching decision makers for; the panel is hidden on every other type
+// (Contractor, Vendor, Service Provider, Utility, etc.). Matched by picklist
+// value string, so it stays stable across record-type UUID changes.
+const OWNER_RESEARCH_ACCOUNT_RECORD_TYPES = ['property_owner', 'property_management_company']
+
 // QuickCreateModal — inline "+ New" for a scalar lookup field. Opens the REAL
 // create path for the lookup's target table (same insertRecord +
 // applyInsertDefaults the full form uses), scoped to the table's required
@@ -6420,6 +6428,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   )
 
   const { record, layout, sections, picklists, lookups } = data
+
+  // Property Owner Research only belongs on records that represent a property
+  // or its ownership: every properties record, and accounts whose record type
+  // is Property Owner or Property Management Company. On any other account
+  // type (Contractor, Vendor, Service Provider, Utility, …) there is no owner
+  // group to research, so the panel is hidden. The record type is resolved
+  // from its picklist value (data-driven), never a hardcoded UUID.
+  const showOwnerResearchPanel =
+    tableName === 'properties' ||
+    (tableName === 'accounts' &&
+      OWNER_RESEARCH_ACCOUNT_RECORD_TYPES.includes(
+        picklists?.valueById?.get(record?.account_record_type),
+      ))
+
   // In create mode the breadcrumb reads the prefilled parent FKs (and their
   // names resolved by createCrumbLookups) so it stays hierarchical; otherwise
   // it uses the loaded record and its lookups.
@@ -6966,8 +6988,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             behind this owner-group account or property. Tiered by cost: free
             AI web research → Lusha prospecting search (no credits) →
             per-person contact reveal (paid credits). Candidates promote to
-            real Contacts. Only on accounts and properties, Related tab. */}
-        {!isInsertMode && activeTab === 'Related' && (tableName === 'properties' || tableName === 'accounts') && (
+            real Contacts. Only on properties and Property Owner /
+            Property Management Company accounts, Related tab. */}
+        {!isInsertMode && activeTab === 'Related' && showOwnerResearchPanel && (
           <PropertyOwnerResearchPanel tableName={tableName} recordId={recordId} />
         )}
 
