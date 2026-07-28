@@ -48,8 +48,14 @@ const HEADER_THEME = {
 }
 
 const ACCEPT_BY_MODE = {
-  photos:    'image/*',
-  documents: '.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.heic,.heif',
+  photos: 'image/*',
+  // Documents: no picker filter. The storage bucket governs what's actually
+  // allowed, and drag-and-drop bypasses `accept` regardless — so an over-tight
+  // filter only hides valid files (video, CAD/.dwg, Matterport/point-cloud
+  // exports, 360 captures, archives) from staff in the file dialog. Leaving it
+  // unset lets the picker show everything; a rejected type still fails loudly
+  // at upload with the bucket's message.
+  documents: undefined,
 }
 
 // Gallery sizing — a 4-up grid on desktop drops to 3-up on tablet and 2-up
