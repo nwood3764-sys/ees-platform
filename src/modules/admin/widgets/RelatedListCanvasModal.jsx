@@ -50,6 +50,11 @@ const SORT_DIRECTIONS = [
 // How many levels below the layout's object the browser can drill.
 const MAX_BROWSE_DEPTH = 3
 
+// FK targets that are never "shared-parent" objects — record type / status /
+// picklists resolve to picklist_values, and owner/audit columns to users.
+// Excluding these leaves only real object parents (Property, Account, …).
+const NON_OBJECT_FK_TABLES = new Set(['picklist_values', 'users'])
+
 // System plumbing columns hidden from the display-columns picker.
 const HIDDEN_TARGET_COLUMNS = new Set([
   'created_at', 'updated_at',
@@ -119,12 +124,28 @@ function chainKey(chain) {
 
 // Reconstruct the root-first selection chain from a saved widget config.
 // via may be the current array shape or the legacy single-object shape.
+// A shared-parent config carries no via chain (see sharedParentFromConfig).
 function chainFromConfig(cfg) {
-  if (!cfg || !cfg.table || !cfg.fk) return []
+  if (!cfg || !cfg.table || !cfg.fk || cfg.shared_parent) return []
   const viaArr = Array.isArray(cfg.via)
     ? cfg.via.filter(v => v && v.table && v.fk)
     : (cfg.via && cfg.via.table && cfg.via.fk ? [cfg.via] : [])
   return [...viaArr].reverse().concat([{ table: cfg.table, fk: cfg.fk }])
+}
+
+// Reconstruct a shared-parent (sibling) selection from a saved widget config.
+// Shape: the target sibling (cfg.table) links to the shared parent via cfg.fk;
+// the layout's object links to it via cfg.shared_parent.object_fk.
+function sharedParentFromConfig(cfg) {
+  if (!cfg || !cfg.table || !cfg.fk || !cfg.shared_parent) return null
+  const sp = cfg.shared_parent
+  if (!sp.table || !sp.object_fk) return null
+  return {
+    parentTable: sp.table,     // the shared parent object (e.g. properties)
+    objectFk: sp.object_fk,    // the layout object's FK to the parent
+    targetTable: cfg.table,    // the sibling shown (e.g. enrollments)
+    targetFk: cfg.fk,          // the sibling's FK to the parent
+  }
 }
 
 export default function RelatedListCanvasModal({
@@ -143,6 +164,8 @@ export default function RelatedListCanvasModal({
 
   // Root-first path of {table, fk} picks; last entry is the target table.
   const [chain, setChain] = useState(() => chainFromConfig(cfg))
+  // Shared-parent (sibling) selection, mutually exclusive with `chain`.
+  const [sharedParent, setSharedParent] = useState(() => sharedParentFromConfig(cfg))
   const [selectedCols, setSelectedCols] = useState(
     Array.isArray(cfg.columns) ? cfg.columns.map(c => c.name).filter(Boolean) : [],
   )
@@ -153,6 +176,11 @@ export default function RelatedListCanvasModal({
   const [fksByTable, setFksByTable] = useState({})
   const [loadingRoot, setLoadingRoot] = useState(true)
   const [expanded, setExpanded] = useState(() => new Set())
+  // Shared-parent browsing: the layout object's outgoing FKs to real objects
+  // (its parents), and each parent's OTHER children (this object's siblings).
+  const [parentFks, setParentFks] = useState([])          // [{ objectFk, parentTable }]
+  const [siblingsByParent, setSiblingsByParent] = useState({}) // { [parentTable]: [{targetTable,targetFk}] }
+  const [expandedParents, setExpandedParents] = useState(() => new Set())
   const [search, setSearch] = useState('')
   // Filter text for the Add/Remove Columns list — the target table can have
   // dozens of columns, so let the admin type any part of a column name.
@@ -167,7 +195,9 @@ export default function RelatedListCanvasModal({
   const [busy, setBusy]   = useState(false)
   const [error, setError] = useState(null)
 
-  const targetTable = chain.length ? chain[chain.length - 1].table : ''
+  const targetTable = sharedParent
+    ? sharedParent.targetTable
+    : (chain.length ? chain[chain.length - 1].table : '')
 
   function loadChildren(table) {
     if (fksByTable[table]) return
@@ -184,6 +214,42 @@ export default function RelatedListCanvasModal({
       .finally(() => { if (!cancelled) setLoadingRoot(false) })
     return () => { cancelled = true }
   }, [objectName])
+
+  // Discover the layout object's outgoing FKs to real objects — each is a
+  // "shared parent" whose OTHER children are this object's siblings, reachable
+  // as a shared-parent related list (e.g. Enrollments under a Building's
+  // Property). picklist_values / users targets (record type, status, owner,
+  // audit) are excluded.
+  useEffect(() => {
+    let cancelled = false
+    describeObject(objectName)
+      .then(cols => {
+        if (cancelled) return
+        const parents = (cols || [])
+          .filter(c => c.is_foreign_key && c.references_table
+            && !NON_OBJECT_FK_TABLES.has(c.references_table)
+            && c.references_table !== objectName)
+          .map(c => ({ objectFk: c.column_name, parentTable: c.references_table }))
+        setParentFks(parents)
+      })
+      .catch(() => { /* non-fatal — shared-parent section just won't appear */ })
+    return () => { cancelled = true }
+  }, [objectName])
+
+  // A parent's OTHER children = this object's siblings (drop the layout object
+  // itself and any picklist/user referencing rows).
+  function loadSiblings(parentTable) {
+    if (siblingsByParent[parentTable]) return
+    describeIncomingFKs(parentTable)
+      .then(rows => {
+        const sibs = (rows || [])
+          .filter(r => r.referencing_table !== objectName
+            && !NON_OBJECT_FK_TABLES.has(r.referencing_table))
+          .map(r => ({ targetTable: r.referencing_table, targetFk: r.referencing_column }))
+        setSiblingsByParent(prev => (prev[parentTable] ? prev : { ...prev, [parentTable]: sibs }))
+      })
+      .catch(err => setError(err.message || String(err)))
+  }
 
   useEffect(() => {
     if (!targetTable) { setTargetColumns([]); return }
@@ -223,9 +289,19 @@ export default function RelatedListCanvasModal({
 
   function selectChain(nextChain) {
     setChain(nextChain)
+    setSharedParent(null)
     setDefaultsPending(true)
     if (!titleTouched.current) {
       setTitle(humanizeTableName(nextChain[nextChain.length - 1].table))
+    }
+  }
+
+  function selectSharedParent(sp) {
+    setSharedParent(sp)
+    setChain([])
+    setDefaultsPending(true)
+    if (!titleTouched.current) {
+      setTitle(humanizeTableName(sp.targetTable))
     }
   }
 
@@ -236,6 +312,18 @@ export default function RelatedListCanvasModal({
       else {
         next.add(pathKey)
         loadChildren(childTable)
+      }
+      return next
+    })
+  }
+
+  function toggleExpandedParent(parentTable) {
+    setExpandedParents(prev => {
+      const next = new Set(prev)
+      if (next.has(parentTable)) next.delete(parentTable)
+      else {
+        next.add(parentTable)
+        loadSiblings(parentTable)
       }
       return next
     })
@@ -277,7 +365,7 @@ export default function RelatedListCanvasModal({
 
   function validate() {
     if (!title.trim()) return 'Title is required'
-    if (chain.length === 0) return 'Pick an object to show'
+    if (chain.length === 0 && !sharedParent) return 'Pick an object to show'
     if (selectedCols.length === 0) return 'Pick at least one column to display'
     return null
   }
@@ -329,12 +417,28 @@ export default function RelatedListCanvasModal({
 
       // Carry forward any extra config keys (editable, picker, order_field,
       // hide_when_empty, …) the layout may already have on this widget.
-      const target = chain[chain.length - 1]
-      const config = { ...cfg, table: target.table, fk: target.fk, columns }
-      if (chain.length > 1) {
-        config.via = chain.slice(0, -1).reverse().map(n => ({ table: n.table, fk: n.fk }))
-      } else {
+      const config = { ...cfg, columns }
+      if (sharedParent) {
+        // Sibling-via-shared-parent: target links to the parent through
+        // config.fk; the layout object links to it through object_fk.
+        config.table = sharedParent.targetTable
+        config.fk = sharedParent.targetFk
+        config.shared_parent = {
+          table: sharedParent.parentTable,
+          object_table: objectName,
+          object_fk: sharedParent.objectFk,
+        }
         delete config.via
+      } else {
+        const target = chain[chain.length - 1]
+        config.table = target.table
+        config.fk = target.fk
+        delete config.shared_parent
+        if (chain.length > 1) {
+          config.via = chain.slice(0, -1).reverse().map(n => ({ table: n.table, fk: n.fk }))
+        } else {
+          delete config.via
+        }
       }
       if (sortField) { config.sort_field = sortField; config.sort_dir = sortDir }
       else { delete config.sort_field; delete config.sort_dir }
@@ -463,6 +567,124 @@ export default function RelatedListCanvasModal({
     })
   }
 
+  // Shared-parent (sibling) browser: each of the layout object's parents, with
+  // that parent's OTHER children (this object's siblings) as selectable rows.
+  // e.g. under a Buildings layout → "Through Property" → Enrollments.
+  function renderSharedParentSection() {
+    if (parentFks.length === 0) return null
+    // Only render parent groups that (when searching) contain a matching
+    // sibling — but always keep an expanded group and the selected group open.
+    const groups = parentFks.map(p => {
+      const sibs = siblingsByParent[p.parentTable]
+      const isExpanded = expandedParents.has(p.parentTable)
+      const isSelectedParent = !!sharedParent && sharedParent.parentTable === p.parentTable
+      const matchingSibs = !searchLower || !sibs
+        ? sibs
+        : sibs.filter(s => humanizeTableName(s.targetTable).toLowerCase().includes(searchLower)
+            || s.targetTable.includes(searchLower))
+      // When searching, hide a collapsed group with no matching siblings
+      // (unless it holds the current selection).
+      if (searchLower && !isExpanded && !isSelectedParent
+        && sibs && (!matchingSibs || matchingSibs.length === 0)) return null
+      return { p, sibs, matchingSibs, isExpanded, isSelectedParent }
+    }).filter(Boolean)
+    if (groups.length === 0) return null
+
+    return (
+      <>
+        <div style={{
+          padding: '6px 12px', background: '#f2f6fb',
+          borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
+          fontSize: 10.5, fontWeight: 700, color: C.textSecondary,
+          textTransform: 'uppercase', letterSpacing: '0.05em',
+        }}>
+          Through a shared parent
+        </div>
+        {groups.map(({ p, sibs, matchingSibs, isExpanded }) => (
+          <div key={`sp::${p.parentTable}`}>
+            <div
+              onClick={() => { if (!busy) toggleExpandedParent(p.parentTable) }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '7px 12px',
+                borderBottom: `1px solid ${C.border}`,
+                cursor: 'pointer', fontSize: 12.5,
+              }}
+            >
+              <span style={{
+                padding: '2px 4px', color: C.textMuted, fontSize: 11, lineHeight: 1, flexShrink: 0,
+                transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 150ms ease',
+              }}>›</span>
+              <span style={{ color: C.textPrimary, fontWeight: 500 }}>
+                Through {humanizeTableName(p.parentTable)}
+              </span>
+              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5, color: C.textMuted }}>
+                {p.objectFk}
+              </span>
+            </div>
+            {isExpanded && (
+              !sibs ? (
+                <div style={{ padding: '7px 12px', paddingLeft: 34, color: C.textMuted, fontSize: 12 }}>Loading…</div>
+              ) : matchingSibs.length === 0 ? (
+                <div style={{ padding: '7px 12px', paddingLeft: 34, color: C.textMuted, fontSize: 12, fontStyle: 'italic' }}>
+                  {searchLower ? 'No matching sibling objects.' : 'No sibling objects.'}
+                </div>
+              ) : (
+                matchingSibs.map(s => {
+                  const isSelected = !!sharedParent
+                    && sharedParent.parentTable === p.parentTable
+                    && sharedParent.targetTable === s.targetTable
+                    && sharedParent.targetFk === s.targetFk
+                  const sameTableCount = sibs.filter(x => x.targetTable === s.targetTable).length
+                  return (
+                    <div
+                      key={`${p.parentTable}/${s.targetTable}/${s.targetFk}`}
+                      onClick={() => { if (!busy) selectSharedParent({ ...s, parentTable: p.parentTable, objectFk: p.objectFk }) }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '7px 12px', paddingLeft: 34,
+                        borderBottom: `1px solid ${C.border}`,
+                        background: isSelected ? '#f0f9f5' : 'transparent',
+                        cursor: 'pointer', fontSize: 12.5,
+                      }}
+                    >
+                      <span style={{
+                        width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+                        border: `1.5px solid ${isSelected ? C.emerald : C.borderDark || C.border}`,
+                        background: isSelected ? C.emerald : 'transparent',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {isSelected && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#fff' }} />}
+                      </span>
+                      <span style={{
+                        color: C.textPrimary, fontWeight: isSelected ? 600 : 400,
+                        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {humanizeTableName(s.targetTable)}
+                      </span>
+                      {sameTableCount > 1 && (
+                        <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5, color: C.textMuted, flexShrink: 0 }}>
+                          {s.targetFk}
+                        </span>
+                      )}
+                      <span style={{
+                        background: '#e8f3fb', color: '#1a5a8a', fontSize: 9.5, fontWeight: 600,
+                        padding: '1px 6px', borderRadius: 3, textTransform: 'uppercase',
+                        letterSpacing: '0.04em', flexShrink: 0, marginLeft: 'auto',
+                      }}>
+                        via {humanizeTableName(p.parentTable)}
+                      </span>
+                    </div>
+                  )
+                })
+              )
+            )}
+          </div>
+        ))}
+      </>
+    )
+  }
+
   return (
     <div
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
@@ -504,7 +726,7 @@ export default function RelatedListCanvasModal({
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
           <FormField
             label="Show Records From"
-            hint={`Objects related to ${humanizeTableName(objectName)}. Use › to drill into an object's own related records (e.g. Units under Buildings) — the list on the page gathers them across all of this record's ${humanizeTableName(objectName).toLowerCase()} children.`}
+            hint={`Objects related to ${humanizeTableName(objectName)}. Use › to drill into an object's own related records (e.g. Units under Buildings) — the list on the page gathers them across all of this record's ${humanizeTableName(objectName).toLowerCase()} children. Under "Through a shared parent" you can also show sibling objects that share this record's parent (e.g. Enrollments through Property).`}
             required
           >
             <input
@@ -522,7 +744,12 @@ export default function RelatedListCanvasModal({
             }}>
               {loadingRoot ? (
                 <div style={{ padding: 16, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>Loading objects…</div>
-              ) : renderLevel([], 1)}
+              ) : (
+                <>
+                  {renderLevel([], 1)}
+                  {renderSharedParentSection()}
+                </>
+              )}
             </div>
             {chain.length > 0 && (
               <div style={{
@@ -537,6 +764,21 @@ export default function RelatedListCanvasModal({
                 </span>
                 <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
                   {joinPathLabel(chain, objectName)}
+                </span>
+              </div>
+            )}
+            {sharedParent && (
+              <div style={{
+                ...hintBoxStyle, marginTop: 6, marginBottom: 0,
+                display: 'flex', flexDirection: 'column', gap: 2,
+              }}>
+                <span>
+                  Showing <strong>{humanizeTableName(sharedParent.targetTable)}</strong> that share this
+                  {' '}{humanizeTableName(objectName).toLowerCase().replace(/s$/, '')}'s
+                  {' '}<strong>{humanizeTableName(sharedParent.parentTable).replace(/s$/, '')}</strong>.
+                </span>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
+                  {`${sharedParent.targetTable}.${sharedParent.targetFk} → ${sharedParent.parentTable} ← ${objectName}.${sharedParent.objectFk}`}
                 </span>
               </div>
             )}
@@ -734,7 +976,7 @@ export default function RelatedListCanvasModal({
           display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between',
         }}>
           <div style={{ fontSize: 11, color: C.textMuted }}>
-            {chain.length === 0
+            {!targetTable
               ? 'Pick an object above.'
               : `${humanizeTableName(targetTable)} · ${selectedCols.length} column${selectedCols.length === 1 ? '' : 's'}`}
           </div>

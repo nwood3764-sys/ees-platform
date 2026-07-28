@@ -3641,7 +3641,12 @@ function RelatedListWidget({
   // page instead; rows still navigate normally. via is a chain array (legacy
   // single-object shape tolerated).
   const hasViaPath = Array.isArray(config.via) ? config.via.length > 0 : !!config.via
-  const canCreate = canNavigate && !hasViaPath
+  // Shared-parent (sibling) lists show records that link to this record's
+  // PARENT, not to this record — "New" can't seed a valid parent link either
+  // (an enrollment belongs to the Property, not the Building it's shown on).
+  // Create those from the parent's page; rows still navigate normally.
+  const hasSharedParent = !!config.shared_parent
+  const canCreate = canNavigate && !hasViaPath && !hasSharedParent
 
   // Editable mode gates: config opt-in AND parent wired a refresh callback.
   // If either is missing we render the original read-only card.
