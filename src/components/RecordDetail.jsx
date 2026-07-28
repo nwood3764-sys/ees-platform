@@ -3856,7 +3856,25 @@ function RelatedListWidget({
     // enrollment_state also drives the record-type picker's state filter, so
     // a Milwaukee property offers WI record types only. All values remain
     // user-editable on the form. Only fill blanks; never clobber.
-    if (childTable === 'enrollments' && parentTable === 'properties' && parentRecord) {
+    if (childTable === 'enrollments') {
+      // Resolve the property this enrollment documents — whether we're creating
+      // from the property itself, from its opportunity, or from any path that
+      // already seeded property_id (the generic chain seeder above carries
+      // property_id from an opportunity parent) — so the same prefill runs
+      // regardless of where "New Enrollment" was clicked.
+      const _enrPropId = (parentTable === 'properties' ? parentRecordId : null)
+        || prefillObj.property_id
+        || (parentRecord && parentRecord.property_id)
+      let _enrProp = (parentTable === 'properties') ? parentRecord : null
+      if (!_enrProp && _enrPropId) {
+        try {
+          const { data: _p } = await supabase.from('properties').select('*')
+            .eq('id', _enrPropId).eq('property_is_deleted', false).maybeSingle()
+          _enrProp = _p
+        } catch { /* leave null; the form just opens sparser */ }
+      }
+      if (_enrProp) {
+      const parentRecord = _enrProp
       const copyFromProperty = (src, dst) => {
         const v = parentRecord[src]
         if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
@@ -3889,6 +3907,12 @@ function RelatedListWidget({
       copyFromProperty('property_primary_contract_expiration','enrollment_hud_contract_expiration')
       copyFromProperty('property_is_202_811',                 'enrollment_is_202_811')
       copyFromProperty('property_is_opportunity_zone',        'enrollment_is_opportunity_zone')
+      // Payment address defaults to "same as primary" (No) — the payment
+      // address is then seeded from the contractor account below. The user
+      // flips this to Yes only when payment goes somewhere else.
+      if (prefillObj.enrollment_payment_address_different == null) {
+        prefillObj.enrollment_payment_address_different = false
+      }
       // Owner address is one text field on the enrollment; the property holds
       // it in four parts — compose "street, city, ST zip".
       const composeAddress = (street, city, state, zip) => {
@@ -4043,6 +4067,35 @@ function RelatedListWidget({
             if (leas.length) prefillObj.enrollment_property_lea_numbers = leas.join(', ')
           }
         }
+        // Registered contractor: default to the EES entity for the property's
+        // state so it shows selected on the create form (mirrors the DB default
+        // trigger, which otherwise only fills it on save). Resolved by the same
+        // "Energy Efficiency Services of <state>" naming convention. The payment
+        // address defaults to that contractor's address too (it equals the
+        // primary address unless "payment address different" is set) so the
+        // Payment State/City/ZIP open populated.
+        if (prefillObj.enrollment_contractor_account_id == null) {
+          const stateName = ({
+            WI: 'Wisconsin', NC: 'North Carolina', CO: 'Colorado',
+            MI: 'Michigan', IN: 'Indiana',
+          })[String(parentRecord.property_state || '').trim().toUpperCase()]
+          if (stateName) {
+            const { data: eesAcct } = await supabase.from('accounts')
+              .select('id, billing_street, billing_city, billing_state, billing_zip')
+              .eq('account_is_deleted', false)
+              .ilike('account_name', 'Energy Efficiency Services of ' + stateName)
+              .order('account_record_number')
+              .limit(1)
+              .maybeSingle()
+            if (eesAcct?.id) {
+              prefillObj.enrollment_contractor_account_id = eesAcct.id
+              fill('enrollment_payment_address_line1', eesAcct.billing_street)
+              fill('enrollment_payment_city',          eesAcct.billing_city)
+              fill('enrollment_payment_state',         eesAcct.billing_state)
+              fill('enrollment_payment_zip',           eesAcct.billing_zip)
+            }
+          }
+        }
       } catch (err) {
         console.warn('enrollment prefill: related-record fetch failed', err)
       }
@@ -4068,6 +4121,7 @@ function RelatedListWidget({
       // use). Transient hint — stripped before insert.
       if (parentRecord.property_name) {
         prefillObj.__derivedNameBase = parentRecord.property_name
+      }
       }
     }
 
