@@ -25,6 +25,7 @@ import {
   saveAssistantTask, listAssistantTasks, getAssistantTask, runAssistantTask,
   saveAssistantMessage, loadAssistantMessages,
 } from '../data/assistantService'
+import { emitDataRefresh } from '../lib/dataRefresh'
 
 // Map the app's selected-record shape to the edge function's context shape.
 // selectedRecord carries { table, id, name/label } in this codebase; we read
@@ -372,6 +373,20 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
       if (ok) {
         const links = linksFromResult(result, actions)
         toast.success(actions.length > 1 ? `Created ${links.length} records` : 'Action completed')
+        // Standard behavior: after a committed action, tell every live record
+        // and list view to re-fetch so the change (a new contact, an edited
+        // field) is visible immediately — no manual browser reload. Gather the
+        // tables/ids touched from both the per-action result rows and the
+        // originating actions (an update row still carries its object/id).
+        const touchedTables = new Set()
+        const touchedIds = new Set()
+        ;(result?.results || []).forEach((r, i) => {
+          const table = r?.object || actions[i]?.object
+          if (table) touchedTables.add(table)
+          if (r?.created_id) touchedIds.add(r.created_id)
+          if (actions[i]?.record_id) touchedIds.add(actions[i].record_id)
+        })
+        emitDataRefresh({ source: 'assistant', tables: Array.from(touchedTables), ids: Array.from(touchedIds) })
         setTurns(t => t.map((tn, i) => {
           if (i !== turnIdx) return tn
           const committed = new Set(tn.committed); actionIndices.forEach(ai => committed.add(ai))
