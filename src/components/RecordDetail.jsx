@@ -4051,6 +4051,27 @@ function RelatedListWidget({
           fill('ia_business_entity_email',        acct.account_email)
           fill('ia_building_owner_name',          acct.account_name)
         }
+        // Energy Efficiency Services is the primary contractor on every
+        // application. Pull the contractor's business name / phone / email /
+        // address from the EES account licensed in the program's state — WI
+        // programs draw "Energy Efficiency Services of Wisconsin", NC programs
+        // "…of North Carolina" — matched server-side by contractor record type +
+        // license state (no account id or name hardcoded here).
+        const programState = parentRecord.opportunity_state
+        if (programState) {
+          const { data: contractorRows } = await supabase
+            .rpc('get_primary_contractor_account_for_state', { p_state: programState })
+          const c = Array.isArray(contractorRows) ? contractorRows[0] : contractorRows
+          if (c) {
+            fill('ia_primary_contractor_business_name', c.account_name)
+            fill('ia_primary_contractor_email',         c.account_email)
+            fill('ia_primary_contractor_phone_number',  c.account_phone)
+            fill('ia_primary_contractor_address_street', c.contractor_street)
+            fill('ia_primary_contractor_address_city',   c.contractor_city)
+            fill('ia_primary_contractor_address_state',  c.contractor_state)
+            fill('ia_primary_contractor_address_zip',    c.contractor_zip)
+          }
+        }
       } catch (err) {
         console.warn('incentive application prefill: related-record fetch failed', err)
       }
