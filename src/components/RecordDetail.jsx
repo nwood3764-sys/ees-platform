@@ -3074,7 +3074,9 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
               <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                {f.label}
+                {/* Show just the field name — strip any legacy "Parent · " path
+                    prefix baked into the saved label. */}
+                {typeof f.label === 'string' && f.label.includes(' · ') ? f.label.split(' · ').pop() : f.label}
                 <span
                   title={`Read-only — this value lives on the related ${rel.table || 'record'} and is edited there.`}
                   style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, color: '#1a5a8a', background: '#e8f3fb', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em' }}>

@@ -245,7 +245,10 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack }) {
         related.column_type = 'text'
       }
     }
-    const field = { name, type: 'related_field', label: `${group.label} · ${humanize(col.column_name, group.table)}`, column: 1, related }
+    // Display label on the record page is just the field name — the parent
+    // context ("Opportunity ·") is shown only in the editor tile below, not on
+    // the live page.
+    const field = { name, type: 'related_field', label: humanize(col.column_name, group.table), column: 1, related }
     setSections(s => s.map(sec => {
       if (sec.key !== activeSection) return sec
       const widgets = sec.widgets || []
@@ -1136,7 +1139,12 @@ function FieldTile({ field, object, onRemove }) {
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
     }}>
       <span {...attributes} {...listeners} title="Drag" style={{ cursor: 'grab', color: C.textMuted, touchAction: 'none' }}>⠿</span>
-      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field.label || humanize(field.name, object)}</span>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {field.type === 'related_field' && field.related?.fk_column && (
+          <span style={{ color: C.textMuted }}>{humanize(field.related.fk_column, object)} · </span>
+        )}
+        {field.label || humanize(field.name, object)}
+      </span>
       <button onClick={onRemove} style={miniBtn()}>×</button>
     </div>
   )
