@@ -1602,6 +1602,25 @@ export async function fetchDependentLookupOptions(field, record) {
         label: r.contact_name || r.id.slice(0, 8),
       }))
     }
+    case 'contacts_for_opportunity_roles': {
+      // Opportunity Contact Role → Contact picker. Only people associated with the
+      // opportunity's accounts and its property/building (owner + management
+      // accounts, walked up the ancestor tree) are eligible — nobody else can be
+      // added. The OCR is created from an opportunity's related list, so the draft
+      // always carries opportunity_id.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_contacts_for_opportunity_roles', {
+        p_opportunity_id: dependencyValues[0],
+        p_include_contact_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.contact_name || r.id.slice(0, 8),
+      }))
+    }
     case 'buildings_for_property': {
       if (dependencyValues.length === 0) {
         return []
