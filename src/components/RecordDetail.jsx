@@ -5551,14 +5551,30 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   const meaningfulSectionWidgets = sectionWidgets.filter(w =>
     w.widget_type === 'field_group' ? ((w.widget_config?.fields || []).length > 0) : true)
   if (meaningfulSectionWidgets.length === 0 && cardCount > 0) return null
+  // A section with no title typed in — blank, or the "Untitled Section"
+  // placeholder the save path stores for an unnamed section — must not render
+  // an empty titled box on the record page (Nicholas, 2026-07-29: "if I don't
+  // have anything typed in the section name, it just needs to disappear").
+  // If such an untitled section also has no content to show, it disappears
+  // entirely — no header, no wasted vertical space. If it DOES carry fields,
+  // the fields still render, just with no header bar above them. Named empty
+  // sections keep their header + muted empty state (they still match the
+  // layout editor 1:1); this carve-out is only for the untitled case.
+  const rawLabel = (section.section_label || '').trim()
+  const hasTitle = !!rawLabel && rawLabel.toLowerCase() !== 'untitled section'
+  const hasContent = meaningfulSectionWidgets.length > 0
+  if (!hasTitle && !hasContent) return null
+  const showHeader = hasTitle
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
-      <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
-        style={{ padding: isMobile ? '12px 14px' : '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: section.section_is_collapsible ? 'pointer' : 'default', borderBottom: collapsed ? 'none' : `1px solid ${C.border}`, background: '#fafbfd' }}>
-        <span style={{ fontSize: isMobile ? 14 : 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
-        {section.section_is_collapsible && <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={14} color={C.textMuted} />}
-      </div>
-      {!collapsed && sectionWidgets.length === 0 && (
+      {showHeader && (
+        <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
+          style={{ padding: isMobile ? '12px 14px' : '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: section.section_is_collapsible ? 'pointer' : 'default', borderBottom: collapsed ? 'none' : `1px solid ${C.border}`, background: '#fafbfd' }}>
+          <span style={{ fontSize: isMobile ? 14 : 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
+          {section.section_is_collapsible && <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={14} color={C.textMuted} />}
+        </div>
+      )}
+      {showHeader && !collapsed && sectionWidgets.length === 0 && (
         <div style={{ padding: isMobile ? '14px 14px' : '16px 18px', fontSize: 12.5, color: C.textMuted, fontStyle: 'italic' }}>
           No fields in this section yet — add some in the page layout editor.
         </div>
