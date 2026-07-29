@@ -16,8 +16,8 @@
 //
 // Confirmation model:
 //   • Read-only tools (describe_object, query_records, run_report,
-//     global_search, fuzzy_resolve, search_help_articles) execute immediately
-//     and feed back into the loop.
+//     global_search, fuzzy_resolve, search_help_articles,
+//     search_program_knowledge) execute immediately and feed back into the loop.
 //   • Mutating tools (record_create, record_update, status_change, and the
 //     curated Option-A actions) are NOT executed here. They are returned to
 //     the client as a `proposed_actions` array for explicit user
@@ -37,6 +37,9 @@
 //   Resolution helpers: global_search, fuzzy_resolve
 //   Help / how-to: search_help_articles (reads the help-article library so the
 //     assistant can answer "how do I…" / "where do I find…" questions)
+//   Program knowledge: search_program_knowledge (reads the Admin-curated,
+//     internal-only per-program knowledge base for questions about how a
+//     specific incentive/rebate program works)
 //   All curated tools lower to the same {record_create|record_update|
 //   status_change|report_create} proposed-action shape that
 //   commit_screen_flow_run accepts.
@@ -256,6 +259,20 @@ const TOOLS = [
       required: ["query"],
     },
   },
+  {
+    name: "search_program_knowledge",
+    description:
+      "Search LEAP's internal Program Knowledge Base — Admin-curated, often non-public notes about how a specific incentive/rebate PROGRAM actually works (rates, eligibility, process changes, one-off exceptions). Use this for questions ABOUT A PROGRAM: 'how does the WHEDA rate program handle X', 'what changed in WI-IRA-MF-HOMES this year', 'is this eligible under <program>'. This is program subject-matter knowledge — distinct from search_help_articles, which is how to use the LEAP software. When the user names or implies a program, pass its name/keywords in `program`. Returns curated notes tagged with the program they belong to. Read-only; internal staff only.",
+    input_schema: {
+      type: "object",
+      properties: {
+        program: { type: "string", description: "The program the user named or implied — name or keywords, e.g. 'WHEDA', 'WI-IRA-MF-HOMES', 'Focus on Energy'. Omit only if the user clearly did not scope to a program and you want to search across all programs' knowledge." },
+        query: { type: "string", description: "What the user wants to know about the program, as keywords or a short phrase." },
+        limit: { type: "integer", description: "Max notes to return, default 5, ceiling 10." },
+      },
+      required: ["query"],
+    },
+  },
 ]
 
 // The system prompt is built per request so the model can quote the user's
@@ -278,6 +295,10 @@ Users will ask how to do things in LEAP ("how do I change the stages per record 
 - Base your answer — ESPECIALLY any menu path, button name, or step sequence — ONLY on what the returned articles actually say. Give the concrete steps and name the exact place in the app (e.g. the Object Manager, LEAP Admin / Setup, the Reports module). Cite the article by its title.
 - If search_help_articles returns nothing useful, say plainly that you couldn't find a help article on it and point the user to the Help Center (the Help area) or their LEAP administrator. Do NOT invent a menu path, button, or setting you did not read in an article — a wrong navigation instruction is worse than admitting you don't have one.
 - In LEAP, an opportunity's "stages" are status picklist values scoped to a record type (governed by the Lifecycle Builder / picklist record-type scoping), not a separate "stage" object — so search "stage", "record type", or "picklist scoping" to surface the right article.
+
+## Questions about a specific PROGRAM
+
+When the user asks how a specific incentive/rebate program works — rates, eligibility, process changes, one-off exceptions, "how does the WHEDA program handle X", "what changed in WI-IRA-MF-HOMES this year" — that is program subject-matter knowledge, NOT platform how-to. Use search_program_knowledge (pass the program name in \`program\`), not search_help_articles. Same grounding rule: answer only from the notes returned, cite the note, and if nothing comes back say you don't have a program note on it rather than guessing — program details change on the fly and a wrong answer is worse than none. (search_help_articles is for using the LEAP software; search_program_knowledge is for how a program runs.)
 
 ## Plan the whole request before proposing anything
 
@@ -684,6 +705,32 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
         }
       })
       return JSON.stringify({ query, article_count: articles.length, articles })
+    }
+    if (name === "search_program_knowledge") {
+      const query = String(input.query ?? "").trim()
+      if (!query) return JSON.stringify({ error: "Provide a search query." })
+      const program = input.program && String(input.program).trim() ? String(input.program).trim() : null
+      const limit = Math.min(Math.max(Number(input.limit) || 5, 1), 10)
+      const { data, error } = await userClient.rpc("search_program_knowledge", {
+        p_program_query: program,
+        p_query: query,
+        p_limit: limit,
+      })
+      if (error) return JSON.stringify({ error: error.message })
+      const notes = (Array.isArray(data) ? data : []).map((a: any) => {
+        const bodyRaw = typeof a.pka_body_markdown === "string" ? a.pka_body_markdown : ""
+        const body = bodyRaw.length > 6000 ? bodyRaw.slice(0, 6000) + "\n\n…(truncated)" : bodyRaw
+        return {
+          record_number: a.pka_record_number || undefined,
+          program: a.program_name || undefined,
+          program_short_name: a.program_short_name || undefined,
+          program_state: a.program_state || undefined,
+          title: a.pka_title,
+          category: a.pka_category || undefined,
+          body,
+        }
+      })
+      return JSON.stringify({ query, program, note_count: notes.length, notes })
     }
     return JSON.stringify({ error: `Unknown read tool ${name}` })
   } catch (e) {
