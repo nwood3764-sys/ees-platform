@@ -33,6 +33,8 @@ export const STATUS_CFG = {
   'Project In Progress':          { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
   'Opportunity Closed Won':                     { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
   'Opportunity Closed Lost':                    { bg:'#e8f1fb', color:'#1e466b', dot:'#7eb3e8' },
+  'Closed Won':                                 { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Closed Lost':                                { bg:'#e8f1fb', color:'#1e466b', dot:'#7eb3e8' },
   // Property
   'Prospect':                                   { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
   'Outreach Active':                            { bg:'#e8f1fb', color:'#1e466b', dot:'#7eb3e8' },
