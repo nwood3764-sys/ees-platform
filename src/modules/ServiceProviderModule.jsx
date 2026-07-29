@@ -12,11 +12,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { C } from '../data/constants'
 import {
   fetchServiceProviderApplications,
-  approveServiceProviderApplication,
+  approveWithoutInvite,
+  sendPortalInvite,
   declineServiceProviderApplication,
   advanceApplication,
+  createManualApplication,
   getDocumentSignedUrl,
 } from '../data/serviceProviderService'
+
+const TRADE_OPTS = [
+  { v: 'hvac', l: 'HVAC' }, { v: 'electrical', l: 'Electrical' }, { v: 'weatherization', l: 'Weatherization' },
+  { v: 'plumbing', l: 'Plumbing' }, { v: 'general_contractor', l: 'General Contractor' },
+]
+const STATE_OPTS = ['NC', 'WI', 'MI', 'CO', 'IN']
 
 const MONO = 'JetBrains Mono, ui-monospace, monospace'
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—')
@@ -46,7 +54,7 @@ function StageChip({ value, label }) {
   )
 }
 
-function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApprove }) {
+function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApprove, onInvite }) {
   const [open, setOpen] = useState(false)
   const [w9Busy, setW9Busy] = useState(false)
   const [panel, setPanel] = useState(null) // 'info' | 'decline' | null
@@ -54,7 +62,8 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
   const stageVal = app.stage?.picklist_value
   const contact = [app.spa_contact_first_name, app.spa_contact_last_name].filter(Boolean).join(' ')
   const email = app.spa_contact_email || app.spa_business_email
-  const isTerminal = TERMINAL.has(stageVal)
+  const declined = stageVal === 'Application Declined'
+  const approved = stageVal === 'Application Approved' || app.account?.account_service_provider_is_active
 
   const openW9 = async () => {
     setW9Busy(true)
@@ -116,7 +125,9 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
         <button onClick={() => setOpen((o) => !o)} style={{ background: 'none', border: 'none', color: C.sky, cursor: 'pointer', fontSize: 13, padding: 0 }}>{open ? 'Hide details' : 'View details'}</button>
         <div style={{ flex: 1 }} />
-        {!isTerminal && (
+        {declined ? (
+          btn('Reopen', () => onAdvance(app, 'Application Under Review'), 'ghost')
+        ) : (
           <>
             <label style={{ fontSize: 12, color: C.textMuted }}>Move to</label>
             <select disabled={busy} value="" onChange={(e) => { if (e.target.value) onAdvance(app, e.target.value) }}
@@ -126,12 +137,14 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
             </select>
             {btn('Request info', () => { setPanel(panel === 'info' ? null : 'info'); setNote('') }, 'sky')}
             {btn('Decline', () => { setPanel(panel === 'decline' ? null : 'decline'); setNote('') }, 'ghost')}
-            {btn('Approve & invite', () => onApprove(app), 'primary')}
+            {approved
+              ? btn('Send portal invite', () => onInvite(app), 'primary')
+              : btn('Approve', () => onApprove(app), 'primary')}
           </>
         )}
       </div>
 
-      {panel && !isTerminal && (
+      {panel && !declined && (
         <div style={{ marginTop: 12, background: '#f7f9fc', borderRadius: 8, padding: 12 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textSecondary, marginBottom: 6 }}>
             {panel === 'info' ? 'What do you need from the applicant?' : 'Reason for declining'}
@@ -150,12 +163,54 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
   )
 }
 
+function NewApplicationModal({ onClose, onCreated }) {
+  const [v, setV] = useState({ company: '', firstName: '', lastName: '', email: '', phone: '', trade: 'hvac', state: 'NC' })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const set = (k) => (e) => setV((s) => ({ ...s, [k]: e.target.value }))
+  const inp = { width: '100%', padding: '9px 11px', border: `1px solid ${C.borderDark}`, borderRadius: 7, fontSize: 13.5, fontFamily: 'inherit', boxSizing: 'border-box', background: '#fff', color: C.textPrimary }
+  const lab = { fontSize: 11.5, fontWeight: 600, color: C.textSecondary, display: 'block', marginBottom: 5 }
+  const submit = async () => {
+    if (!v.company.trim()) { setErr('Company name is required.'); return }
+    setBusy(true); setErr('')
+    try {
+      const r = await createManualApplication(v)
+      onCreated?.(`Application ${r?.application_number || ''} created.`.trim())
+    } catch (e) { setErr(e?.message || 'Could not create the application.'); setBusy(false) }
+  }
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 12, width: 520, maxWidth: '94vw', boxShadow: '0 20px 50px -12px rgba(0,0,0,0.28)', maxHeight: '92vh', overflow: 'auto' }}>
+        <div style={{ padding: '16px 18px', borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary }}>Start a provider application</div>
+          <div style={{ fontSize: 12.5, color: C.textSecondary, marginTop: 2 }}>For a provider you're recruiting. It enters the pipeline as a new application (inactive account) you can then work through onboarding.</div>
+        </div>
+        <div style={{ padding: 18, display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          {err && <div style={{ flex: '1 1 100%', background: '#e8f1fb', border: `1px solid ${C.sky}`, color: '#1a5a8a', borderRadius: 7, padding: '8px 12px', fontSize: 13 }}>{err}</div>}
+          <div style={{ flex: '1 1 100%' }}><label style={lab}>Company legal name *</label><input style={inp} value={v.company} onChange={set('company')} /></div>
+          <div style={{ flex: '1 1 200px' }}><label style={lab}>Contact first name</label><input style={inp} value={v.firstName} onChange={set('firstName')} /></div>
+          <div style={{ flex: '1 1 200px' }}><label style={lab}>Contact last name</label><input style={inp} value={v.lastName} onChange={set('lastName')} /></div>
+          <div style={{ flex: '1 1 200px' }}><label style={lab}>Email</label><input style={inp} type="email" value={v.email} onChange={set('email')} /></div>
+          <div style={{ flex: '1 1 200px' }}><label style={lab}>Phone</label><input style={inp} value={v.phone} onChange={set('phone')} /></div>
+          <div style={{ flex: '1 1 200px' }}><label style={lab}>Trade</label><select style={inp} value={v.trade} onChange={set('trade')}>{TRADE_OPTS.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}</select></div>
+          <div style={{ flex: '1 1 200px' }}><label style={lab}>State</label><select style={inp} value={v.state} onChange={set('state')}>{STATE_OPTS.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
+        </div>
+        <div style={{ padding: '12px 18px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button onClick={onClose} disabled={busy} style={{ padding: '9px 16px', background: '#fff', color: C.textSecondary, border: `1px solid ${C.borderDark}`, borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={submit} disabled={busy || !v.company.trim()} style={{ padding: '9px 18px', background: C.emerald, color: '#06231a', border: 'none', borderRadius: 8, fontSize: 13.5, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: (busy || !v.company.trim()) ? 0.6 : 1 }}>{busy ? 'Creating…' : 'Create application'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ServiceProviderModule() {
   const [apps, setApps] = useState(null)
   const [err, setErr] = useState('')
   const [busyId, setBusyId] = useState(null)
   const [toast, setToast] = useState('')
   const [filter, setFilter] = useState('__pending') // stage value | '__pending' | '__all'
+  const [showNew, setShowNew] = useState(false)
 
   const load = useCallback(async () => {
     setErr('')
@@ -173,7 +228,8 @@ export default function ServiceProviderModule() {
   const onAdvance = (app, stage) => act(app, () => advanceApplication(app.id, stage), `Moved to ${STAGE_BY_VALUE[stage]?.label || stage}.`)
   const onRequestInfo = (app, note) => act(app, () => advanceApplication(app.id, 'Application Additional Info Requested', note), 'Marked as information requested.')
   const onDecline = (app, reason) => act(app, () => declineServiceProviderApplication(app.id, reason), 'Application declined.')
-  const onApprove = (app) => act(app, () => approveServiceProviderApplication(app.id), (r) => r?.invited ? `Approved — invite sent to ${r.email}.` : `Approved. ${r?.note || ''}`)
+  const onApprove = (app) => act(app, () => approveWithoutInvite(app.id), 'Approved — account activated. Send the portal invite when ready.')
+  const onInvite = (app) => act(app, () => sendPortalInvite(app.id), (r) => r?.invited ? `Portal invite sent to ${r.email}.` : `${r?.note || 'Invite processed.'}`)
 
   const counts = useMemo(() => {
     const c = {}
@@ -199,10 +255,15 @@ export default function ServiceProviderModule() {
 
   return (
     <div style={{ padding: 24, maxWidth: 1040 }}>
-      <div>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: C.textPrimary, margin: 0 }}>Service Provider Onboarding</h1>
-        <div style={{ fontSize: 13, color: C.textMuted, marginTop: 4 }}>Review subcontractor applications, move them through the pipeline, and invite them to the portal once approved.</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: C.textPrimary, margin: 0 }}>Service Provider Onboarding</h1>
+          <div style={{ fontSize: 13, color: C.textMuted, marginTop: 4 }}>Review subcontractor applications, move them through the pipeline, and invite them to the portal once approved.</div>
+        </div>
+        <button onClick={() => setShowNew(true)} style={{ padding: '10px 16px', background: C.emerald, color: '#06231a', border: 'none', borderRadius: 8, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>+ New Application</button>
       </div>
+
+      {showNew && <NewApplicationModal onClose={() => setShowNew(false)} onCreated={(msg) => { setShowNew(false); setToast(msg); load() }} />}
 
       {/* pipeline dashboard */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 18 }}>
@@ -217,7 +278,7 @@ export default function ServiceProviderModule() {
       <div style={{ marginTop: 18 }}>
         {apps === null ? <div style={{ color: C.textMuted, fontSize: 14 }}>Loading…</div>
           : shown.length === 0 ? <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 22, color: C.textMuted, fontSize: 14 }}>No applications here.</div>
-          : shown.map((app) => <ApplicationCard key={app.id} app={app} busy={busyId === app.id} onAdvance={onAdvance} onRequestInfo={onRequestInfo} onDecline={onDecline} onApprove={onApprove} />)}
+          : shown.map((app) => <ApplicationCard key={app.id} app={app} busy={busyId === app.id} onAdvance={onAdvance} onRequestInfo={onRequestInfo} onDecline={onDecline} onApprove={onApprove} onInvite={onInvite} />)}
       </div>
     </div>
   )
