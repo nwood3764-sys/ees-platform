@@ -179,8 +179,34 @@ function formatPhoneDisplay(raw) {
   return String(raw)
 }
 
+// Full US state / territory name -> USPS two-letter abbreviation. Used by the
+// `us_state_abbrev` field format so program forms (e.g. the IRA HOMES
+// reservation) show "WI" even when the source record stores "Wisconsin".
+// Already-abbreviated or unrecognized values pass through unchanged.
+const US_STATE_ABBREV = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA',
+  colorado: 'CO', connecticut: 'CT', delaware: 'DE', 'district of columbia': 'DC',
+  florida: 'FL', georgia: 'GA', hawaii: 'HI', idaho: 'ID', illinois: 'IL',
+  indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY', louisiana: 'LA',
+  maine: 'ME', maryland: 'MD', massachusetts: 'MA', michigan: 'MI', minnesota: 'MN',
+  mississippi: 'MS', missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV',
+  'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+  'north carolina': 'NC', 'north dakota': 'ND', ohio: 'OH', oklahoma: 'OK',
+  oregon: 'OR', pennsylvania: 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT',
+  virginia: 'VA', washington: 'WA', 'west virginia': 'WV', wisconsin: 'WI',
+  wyoming: 'WY', 'puerto rico': 'PR',
+}
+function usStateAbbrev(v) {
+  if (v == null) return v
+  const s = String(v).trim()
+  return US_STATE_ABBREV[s.toLowerCase()] || s
+}
+
 function formatFieldValue(raw, fieldDef, picklists, lookups) {
   if (raw === null || raw === undefined) return '—'
+  // Value-shaping format hints apply regardless of the underlying type.
+  if (fieldDef.format === 'us_state_abbrev') return usStateAbbrev(raw) || '—'
   switch (fieldDef.type) {
     case 'picklist':   return picklists.byId.get(raw) || String(raw)
     case 'phone':      return formatPhoneDisplay(raw)
@@ -3234,6 +3260,19 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // missing' error before the prefix-map fix landed).
         if (isCreate && isSystemField(f.name)) return null
 
+        // Spacer — a blank placeholder cell (no name, so it's never saved and
+        // the layout-config validator skips it). Occupies a column slot so the
+        // paired field in the other column lines up, mirroring the source form.
+        if (f.type === 'spacer') {
+          return (
+            <div key={f.spacer_id || `sp-${f.column || 1}-${f.label || ''}`} aria-hidden="true"
+              style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', visibility: 'hidden' }}>&nbsp;</span>
+              <span style={{ fontSize: 13, visibility: 'hidden' }}>&nbsp;</span>
+            </div>
+          )
+        }
+
         // Cross-object (related) fields — read-only values pulled from the
         // record a lookup on this record points at (loadRecordDetailData
         // merges them into `record` under the dotted name). Always
@@ -5519,11 +5558,27 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   // merge_field_reference is only relevant when document_templates is in
   // docx authoring mode, so the parent passes {'merge_field_reference'}
   // to hide it in html mode).
-  const sectionWidgets = (section.widgets || []).filter(w => {
+  // Conditional widgets: a widget_config.visible_when { field, equals } shows
+  // the widget only when the record/draft's `field` matches (e.g. the Support
+  // Contractor group appears only when "Will a support contractor…" is Yes).
+  const condValues = editing ? { ...(record || {}), ...(draft || {}) } : (record || {})
+  const isWidgetVisible = (w) => {
+    const vw = w.widget_config?.visible_when
+    if (!vw || !vw.field) return true
+    const actual = condValues?.[vw.field]
+    if (Object.prototype.hasOwnProperty.call(vw, 'equals')) return actual === vw.equals
+    if (Array.isArray(vw.in)) return vw.in.includes(actual)
+    return true
+  }
+  const preVisibilityWidgets = (section.widgets || []).filter(w => {
     if (!inSectionTypes.has(w.widget_type)) return false
     if (hiddenWidgetTypes && hiddenWidgetTypes.has(w.widget_type)) return false
     return true
   })
+  const sectionWidgets = preVisibilityWidgets.filter(isWidgetVisible)
+  // A section whose content is entirely hidden by visible_when disappears
+  // completely (header included) — not an empty "No fields" shell.
+  if (preVisibilityWidgets.length > 0 && sectionWidgets.length === 0) return null
   // Blank sections still render — the record page stays consistent with the
   // page layout editor: every section in the layout shows its header, with a
   // muted empty state in place of content. Two exceptions return null:
