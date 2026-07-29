@@ -286,7 +286,16 @@ export async function uploadPhoto({
     photo_type: photoType,
     caption,
     taken_by: userId,
-    taken_at: new Date().toISOString(),
+    // Capture time comes from the PHOTO, never from the upload. process-photo
+    // overwrites this with the EXIF DateTimeOriginal whenever the image carries
+    // one (the authoritative source). Until it runs — and permanently for an
+    // image that has no EXIF date — we seed taken_at from the file's own
+    // last-modified time, which for a camera original is when the photo was
+    // taken. This is what makes offline / folder / PC uploads correct: a photo
+    // shot in the field and uploaded days later from the library or a computer
+    // keeps its real capture time instead of being stamped with the upload
+    // moment. (compressPhotoForUpload preserves lastModified.)
+    taken_at: file?.lastModified ? new Date(file.lastModified).toISOString() : null,
   }
 
   const { data: photoRow, error: insErr } = await supabase
