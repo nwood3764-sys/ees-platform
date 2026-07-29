@@ -501,7 +501,11 @@ const DERIVED_READONLY = {
   ],
   units: ['unit_name'],
   opportunity_contact_roles: ['ocr_name'],
-  opportunity_line_items: ['oli_name'],
+  // price_book_entry_id is derived from the product + the opportunity's price
+  // book by set_opportunity_line_item_defaults() — the user picks a Product and
+  // the entry (plus list price + description) resolves automatically, exactly
+  // like Salesforce. It is never picked (Nicholas, 2026-07-29).
+  opportunity_line_items: ['oli_name', 'price_book_entry_id'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
   enrollments: ['enrollment_name'],
