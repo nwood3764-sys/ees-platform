@@ -66,6 +66,7 @@ function deriveEditorType({ data_type, is_foreign_key, references_table, field_k
   // display_type override maps onto its base editor.
   if (field_kind === 'formula') return 'formula'
   if (field_kind === 'rollup') return 'rollup'
+  if (field_kind === 'inherited') return 'inherited'
   if (display_type && DISPLAY_TYPE_TO_EDITOR[display_type]) return DISPLAY_TYPE_TO_EDITOR[display_type]
   if (is_foreign_key && references_table === 'picklist_values') return 'picklist'
   if (is_foreign_key) return 'lookup'
@@ -92,8 +93,8 @@ export function getEditableFieldsForTable(tableName) {
     if (error) throw error
     return (data || []).map(c => {
       const editorType = deriveEditorType(c)
-      // Formula and rollup fields are computed-at-read — never hand-editable.
-      const isComputed = editorType === 'formula' || editorType === 'rollup'
+      // Formula, rollup, and inherited fields are computed-at-read — never hand-editable.
+      const isComputed = editorType === 'formula' || editorType === 'rollup' || editorType === 'inherited'
       const isEditable = !isSystemManaged(c.column_name) && !isComputed
       const meta = {
         columnName:      c.column_name,

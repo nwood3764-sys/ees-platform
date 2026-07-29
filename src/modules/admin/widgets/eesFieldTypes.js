@@ -37,6 +37,7 @@ export function deriveEesFieldType(col) {
 
   if (col.field_kind === 'formula') return 'formula'
   if (col.field_kind === 'rollup') return 'rollup'
+  if (col.field_kind === 'inherited') return 'inherited'
   if (col.display_type && DISPLAY_TYPES.has(col.display_type)) return col.display_type
   if (isFk && dt === 'uuid') return 'lookup'
   if (dt === 'date') return 'date'
@@ -63,10 +64,11 @@ export function buildFieldEntryFromColumn(col, overrides = {}) {
     entry.lookup_table = col.references_table
     entry.lookup_field = col.references_column || 'id'
   }
-  // Formula/rollup fields carry their declared return type so the record
-  // renderer formats the computed value (currency, percent, date, …).
+  // Formula/rollup/inherited fields carry their declared return type so the
+  // record renderer formats the computed value (currency, percent, date, …).
   if (type === 'formula') entry.return_type = col.formula_return_type || 'text'
   if (type === 'rollup')  entry.return_type = col.rollup_config?.return_type || 'number'
+  if (type === 'inherited') entry.return_type = col.display_type || 'text'
   return { ...entry, ...overrides }
 }
 

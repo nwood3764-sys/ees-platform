@@ -4,7 +4,7 @@ import { Icon } from '../../components/UI'
 import { useToast } from '../../components/Toast'
 import {
   addCustomField, updateFieldDefinition, fetchFieldMetadata,
-  describeObject, describeIncomingFKs,
+  describeObject, describeIncomingFKs, upsertInheritedField,
 } from '../../data/adminService'
 import { validateFormula } from '../../lib/formula/engine'
 import { OBJECT_CATALOG } from './objectCatalog'
@@ -50,6 +50,7 @@ const TYPE_OPTIONS = [
   { group: 'Relationship', items: [
     { id: 'picklist',  label: 'Picklist',        kind: 'standard', display: 'picklist', physical: 'picklist' },
     { id: 'lookup',    label: 'Lookup (relationship)', kind: 'standard', display: 'lookup', physical: 'lookup' },
+    { id: 'inherited', label: 'Inherited Field (from parent)', kind: 'inherited', display: 'text', physical: null },
   ] },
   { group: 'Advanced', items: [
     { id: 'formula',   label: 'Formula (calculated)',   kind: 'formula', display: 'formula', physical: 'text' },
@@ -102,6 +103,7 @@ function safeAlias(s) {
 function colType(c) {
   if (c.field_kind === 'formula') return 'formula'
   if (c.field_kind === 'rollup') return 'rollup'
+  if (c.field_kind === 'inherited') return 'inherited'
   if (c.display_type) return c.display_type
   if (c.is_foreign_key && c.references_table === 'picklist_values') return 'picklist'
   if (c.is_foreign_key) return 'lookup'
@@ -142,6 +144,14 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
   const [rollupReturn, setRollupReturn] = useState('number')
   const [rollupChildCols, setRollupChildCols] = useState({}) // table -> column list
 
+  // Inherited-field config: a chain of hops (self → … → base) + the source column
+  // on the base table. inheritCols caches each table's column list for the pickers.
+  const [inheritHops, setInheritHops] = useState([]) // [{fk, table}]
+  const [inheritSource, setInheritSource] = useState('')      // column on base table
+  const [inheritDisplay, setInheritDisplay] = useState('text')
+  const [inheritSourceType, setInheritSourceType] = useState('text') // physical data_type of source
+  const [inheritCols, setInheritCols] = useState({}) // table -> full column list
+
   // Schema context
   const [ownCols, setOwnCols] = useState([])         // this object's columns
   const [incomingFks, setIncomingFks] = useState([]) // child tables (for rollup)
@@ -151,6 +161,10 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
   const selType = TYPE_BY_ID[typeId] || TYPE_BY_ID.text
   const isFormula = selType.kind === 'formula'
   const isRollup = selType.kind === 'rollup'
+  const isInherited = selType.kind === 'inherited'
+  // The "tip" of the inherited chain: the table whose fields/FKs the pickers show.
+  // Starts at this object; each hop advances it to the FK's target table.
+  const inheritTipTable = inheritHops.length ? inheritHops[inheritHops.length - 1].table : object
 
   // Load schema + (edit) existing definition on mount.
   useEffect(() => {
@@ -188,6 +202,13 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
             setRollupFn((rc.function || 'COUNT').toUpperCase())
             setRollupField(rc.field || '')
             setRollupReturn(rc.return_type || 'number')
+          }
+          if (m?.fieldKind === 'inherited' && m.inheritConfig) {
+            const ic = m.inheritConfig
+            setInheritHops(Array.isArray(ic.hops) ? ic.hops : [])
+            setInheritSource(ic.source_column || '')
+            setInheritDisplay(ic.display_type || 'text')
+            setInheritSourceType(ic.source_data_type || 'text')
           }
         }
       } catch (e) {
@@ -241,6 +262,55 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rollupChildKey, isRollup])
 
+  // Lazily fetch the inherited tip table's columns for the FK / source pickers.
+  useEffect(() => {
+    if (!isInherited || inheritCols[inheritTipTable]) return
+    describeObject(inheritTipTable).then(cols => {
+      setInheritCols(prev => ({ ...prev, [inheritTipTable]: cols || [] }))
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInherited, inheritTipTable])
+
+  const tipCols = inheritCols[inheritTipTable] || []
+  // Outgoing FKs on the tip table (to add another hop), audit FKs excluded.
+  const tipFks = tipCols.filter(c =>
+    c.is_foreign_key && c.references_table && c.references_table !== 'picklist_values'
+    && !/(_created_by|_updated_by|_deleted_by|_owner)$/.test(c.column_name))
+  // Scalar columns on the tip table that can be shown (v1: no picklist/lookup/uuid).
+  const tipSourceCols = tipCols.filter(c =>
+    !HIDDEN_COL_RE.test(c.column_name) && !c.is_foreign_key
+    && c.data_type !== 'uuid' && c.field_kind !== 'inherited'
+    && c.field_kind !== 'formula' && c.field_kind !== 'rollup')
+
+  // Physical data type → a scalar display type for an inherited source column.
+  function displayForColumn(c) {
+    if (c.display_type && ['text','textarea','number','integer','currency','percent','date','datetime','boolean','email','phone','url'].includes(c.display_type)) return c.display_type
+    if (c.data_type === 'boolean') return 'boolean'
+    if (c.data_type === 'date') return 'date'
+    if ((c.data_type || '').startsWith('timestamp')) return 'datetime'
+    if (NUMERIC_DTS.has(c.data_type)) return 'number'
+    if (/_email$/.test(c.column_name)) return 'email'
+    if (/_phone$/.test(c.column_name)) return 'phone'
+    return 'text'
+  }
+  function addInheritHop(fkCol) {
+    const c = tipFks.find(x => x.column_name === fkCol)
+    if (!c) return
+    setInheritHops(prev => [...prev, { fk: c.column_name, table: c.references_table }])
+    setInheritSource(''); setInheritDisplay('text'); setInheritSourceType('text')
+  }
+  function removeLastHop() {
+    setInheritHops(prev => prev.slice(0, -1))
+    setInheritSource(''); setInheritDisplay('text'); setInheritSourceType('text')
+  }
+  function pickInheritSource(colName) {
+    const c = tipSourceCols.find(x => x.column_name === colName)
+    if (!c) return
+    setInheritSource(c.column_name)
+    setInheritDisplay(displayForColumn(c))
+    setInheritSourceType(c.data_type || 'text')
+  }
+
   const aliasList = refs.map(r => r.alias)
 
   function addExpr(token) {
@@ -276,6 +346,7 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
     if (!rollupChild) canSave = false
     if (rollupFn !== 'COUNT' && !rollupField) canSave = false
   }
+  if (isInherited && (inheritHops.length === 0 || !inheritSource)) canSave = false
 
   async function save() {
     // Formula syntax gate before hitting the server.
@@ -285,6 +356,27 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
     }
     setBusy(true)
     try {
+      // Inherited fields have NO physical column — the whole definition lives in
+      // field_metadata and resolves at read. Separate save path (no addCustomField).
+      if (isInherited) {
+        const col = isEdit ? column : colName
+        await upsertInheritedField({
+          object, column: col, label,
+          config: {
+            hops: inheritHops.map(h => ({ fk: h.fk, table: h.table })),
+            source_column: inheritSource,
+            source_data_type: inheritSourceType,
+            display_type: inheritDisplay,
+          },
+          displayType: inheritDisplay,
+          helpText, financialTier,
+        })
+        toast.success(isEdit ? 'Field saved' : `Inherited field "${label}" created`)
+        onSaved && onSaved()
+        onClose && onClose()
+        setBusy(false)
+        return
+      }
       let col = column
       if (!isEdit) {
         col = colName
@@ -457,9 +549,57 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
               </div>
             )}
 
+            {/* ── Inherited-field configuration ── */}
+            {isInherited && (
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14, background: C.pageAlt || '#f7f9fc' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>Inherit from a parent record</div>
+                <div style={{ fontSize: 10.5, color: C.textMuted, marginBottom: 10 }}>
+                  Follow a relationship up to a base record and show one of its fields — read-only, never re-entered here. Edit the value on the base record.
+                </div>
+
+                {/* Current chain */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 10, fontSize: 11 }}>
+                  <span style={{ fontWeight: 600, color: C.textSecondary }}>{humanize(object)}</span>
+                  {inheritHops.map((h, i) => (
+                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ color: C.textMuted }}>→</span>
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace', background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, padding: '2px 6px', color: C.textPrimary }}>
+                        {humanize(h.table)} <span style={{ color: C.textMuted }}>· via {humanize(h.fk)}</span>
+                      </span>
+                    </span>
+                  ))}
+                  {inheritHops.length > 0 && (
+                    <span onClick={removeLastHop} title="Remove last hop"
+                      style={{ cursor: 'pointer', color: C.textMuted, fontWeight: 700, marginLeft: 2 }}>×</span>
+                  )}
+                </div>
+
+                {field(inheritHops.length ? `Go deeper from ${humanize(inheritTipTable)} (optional)` : 'Relationship to follow',
+                  <select value="" disabled={!inheritCols[inheritTipTable]} onChange={e => { addInheritHop(e.target.value); e.target.value = '' }} style={{ ...inputStyle, background: C.card }}>
+                    <option value="">{!inheritCols[inheritTipTable] ? 'Loading…' : (tipFks.length ? 'Add a relationship hop…' : 'No relationships available')}</option>
+                    {tipFks.map(c => <option key={c.column_name} value={c.column_name}>{humanize(c.references_table)} · via {humanize(c.column_name)}</option>)}
+                  </select>,
+                  inheritHops.length ? 'Add another hop to reach a further-up base record (e.g. Property → Account).' : 'Pick the parent this field inherits through.')}
+
+                {inheritHops.length > 0 && field(`Field to show from ${humanize(inheritTipTable)}`,
+                  <select value={inheritSource} disabled={!inheritCols[inheritTipTable]} onChange={e => pickInheritSource(e.target.value)} style={{ ...inputStyle, background: C.card }}>
+                    <option value="">{!inheritCols[inheritTipTable] ? 'Loading…' : 'Select the field to inherit…'}</option>
+                    {tipSourceCols.map(c => <option key={c.column_name} value={c.column_name}>{c.field_label || humanize(c.column_name)}</option>)}
+                  </select>,
+                  'The base record\'s field whose value shows here (scalar fields only for now).')}
+
+                {inheritSource && field('Display As',
+                  <select value={inheritDisplay} onChange={e => setInheritDisplay(e.target.value)} style={{ ...inputStyle, background: C.card }}>
+                    {['text','textarea','number','integer','currency','percent','date','datetime','boolean','email','phone','url'].map(d => (
+                      <option key={d} value={d}>{d.charAt(0).toUpperCase() + d.slice(1)}</option>
+                    ))}
+                  </select>)}
+              </div>
+            )}
+
             {field('Help Text', <input value={helpText} onChange={e => setHelpText(e.target.value)} placeholder="Short guidance shown near the field" style={inputStyle} />)}
             {field('Description', <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="Internal description of what this field captures" style={{ ...inputStyle, resize: 'vertical' }} />)}
-            {!isFormula && !isRollup && field('Example Value', <input value={exampleValue} onChange={e => setExampleValue(e.target.value)} placeholder="e.g. 48000" style={inputStyle} />)}
+            {!isFormula && !isRollup && !isInherited && field('Example Value', <input value={exampleValue} onChange={e => setExampleValue(e.target.value)} placeholder="e.g. 48000" style={inputStyle} />)}
             {field('Financial / Sensitivity Tier',
               <select value={financialTier} onChange={e => setFinancialTier(Number(e.target.value))} style={inputStyle}>
                 {TIERS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}

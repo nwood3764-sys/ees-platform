@@ -593,6 +593,7 @@ function fmtType(col) {
     const pretty = { COUNT: 'Count', SUM: 'Sum', AVG: 'Average', MIN: 'Min', MAX: 'Max' }[fn] || 'Roll-Up'
     return `Roll-Up (${pretty})`
   }
+  if (col.field_kind === 'inherited') return 'Inherited (from parent)'
   if (col.display_type && DISPLAY_TYPE_LABELS[col.display_type]) return DISPLAY_TYPE_LABELS[col.display_type]
   const t = col.data_type
   if (col.character_maximum_length != null) return `${t}(${col.character_maximum_length})`
