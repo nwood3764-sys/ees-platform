@@ -8,7 +8,7 @@ import UsersPane from './UsersPane'
 import RolesPane from './permissions/RolesPane'
 import PermissionSetsPane from './permissions/PermissionSetsPane'
 import HelpArticlesPane from './help/HelpArticlesPane'
-import ProgramKnowledgePane from './programKnowledge/ProgramKnowledgePane'
+import KnowledgeBasePane from './knowledge/KnowledgeBasePane'
 import LifecycleBuilderPane from './LifecycleBuilderPane'
 import FlowBuilderPane from './FlowBuilderPane'
 import AutomationRunLogPane from './AutomationRunLogPane'
@@ -458,6 +458,7 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager, initialModuleI
     case 'roles':             return <RolesPane />
     case 'permission_sets':   return <PermissionSetsPane />
     case 'help_articles':     return <HelpArticlesPane />
+    case 'knowledge_base':    return <KnowledgeBasePane />
     case 'client_errors':     return <ClientErrorsPane />
     case 'record_types':      return <RecordTypesNodePane onOpenObjectManager={onOpenObjectManager} />
     case 'module_sections':   return <ModuleSectionsPane initialModuleId={initialModuleId} />
@@ -474,7 +475,6 @@ function NodeContent({ nodeId, onOpenRecord, onOpenObjectManager, initialModuleI
     case 'outbound_mailboxes':return <NodePage title="Outbound Mailboxes"      table="outbound_mailboxes" fetcher={fetchOutboundMailboxesForListView} columns={OBM_COLS} newLabel="Outbound Mailbox" onOpenRecord={onOpenRecord} />
     case 'unmatched_inbox':   return <UnmatchedInboxPane />
     case 'programs':          return <NodePage title="Programs"                table="programs"          fetcher={fetchPrograms}          columns={PROG_COLS}           newLabel="Program"          onOpenRecord={onOpenRecord} />
-    case 'program_knowledge_articles': return <ProgramKnowledgePane />
     case 'work_types':        return <NodePage title="Work Types"              table="work_types"        fetcher={fetchWorkTypes}         columns={WT_COLS}             newLabel="Work Type"        onOpenRecord={onOpenRecord} />
     case 'work_plan_templates': return <WorkPlanTemplatesPane onOpenRecord={onOpenRecord} />
     case 'work_step_templates': return <NodePage title="Work Step Templates"   table="work_step_templates" fetcher={fetchWorkStepTemplates} columns={WST_COLS}            newLabel="Work Step Template" onOpenRecord={onOpenRecord} />

@@ -17,7 +17,7 @@
 // Confirmation model:
 //   • Read-only tools (describe_object, query_records, run_report,
 //     global_search, fuzzy_resolve, search_help_articles,
-//     search_program_knowledge) execute immediately and feed back into the loop.
+//     search_knowledge) execute immediately and feed back into the loop.
 //   • Mutating tools (record_create, record_update, status_change, and the
 //     curated Option-A actions) are NOT executed here. They are returned to
 //     the client as a `proposed_actions` array for explicit user
@@ -37,9 +37,9 @@
 //   Resolution helpers: global_search, fuzzy_resolve
 //   Help / how-to: search_help_articles (reads the help-article library so the
 //     assistant can answer "how do I…" / "where do I find…" questions)
-//   Program knowledge: search_program_knowledge (reads the Admin-curated,
-//     internal-only per-program knowledge base for questions about how a
-//     specific incentive/rebate program works)
+//   Knowledge Base: search_knowledge (semantic/embedding search over the
+//     internal-only company knowledge pool — procedures, program/measure
+//     details — for questions about how EES works)
 //   All curated tools lower to the same {record_create|record_update|
 //   status_change|report_create} proposed-action shape that
 //   commit_screen_flow_run accepts.
@@ -260,15 +260,16 @@ const TOOLS = [
     },
   },
   {
-    name: "search_program_knowledge",
+    name: "search_knowledge",
     description:
-      "Search LEAP's internal Program Knowledge Base — Admin-curated, often non-public notes about how a specific incentive/rebate PROGRAM actually works (rates, eligibility, process changes, one-off exceptions). Use this for questions ABOUT A PROGRAM: 'how does the WHEDA rate program handle X', 'what changed in WI-IRA-MF-HOMES this year', 'is this eligible under <program>'. This is program subject-matter knowledge — distinct from search_help_articles, which is how to use the LEAP software. When the user names or implies a program, pass its name/keywords in `program`. Returns curated notes tagged with the program they belong to. Read-only; internal staff only.",
+      "Semantic search over LEAP's Knowledge Base — the company brain of uploaded procedures, install details, rate sheets, program rules, tips, and notes. Use this for ANY question about how EES actually does something or what a program/measure requires ('what's the attic prep procedure', 'income doc requirement for WI multifamily HOMES', 'approved insulation measures in NC'). It matches by MEANING, so pass the user's question naturally — do NOT reduce it to keywords. Distinct from search_help_articles (which is how to use the LEAP software); this is company/field/program subject-matter knowledge. Read-only; internal staff only. Answer only from the returned passages and cite the source document; respect each passage's State/Program scope (never apply a passage scoped to one state/program to a question about another).",
     input_schema: {
       type: "object",
       properties: {
-        program: { type: "string", description: "The program the user named or implied — name or keywords, e.g. 'WHEDA', 'WI-IRA-MF-HOMES', 'Focus on Energy'. Omit only if the user clearly did not scope to a program and you want to search across all programs' knowledge." },
-        query: { type: "string", description: "What the user wants to know about the program, as keywords or a short phrase." },
-        limit: { type: "integer", description: "Max notes to return, default 5, ceiling 10." },
+        query: { type: "string", description: "The user's question in natural language — a full question or phrase, not keywords. Meaning is what's matched." },
+        state: { type: "string", description: "Two-letter state code (WI, NC, MI, CO, IN) when the question is about a specific state, so state-specific docs win and other states are excluded. Omit if not state-specific." },
+        program: { type: "string", description: "The opportunity record type when the question is about a specific program, e.g. 'WI-IRA-MF-HOMES', 'NC-IRA-SF-HEAR'. Omit if not program-specific." },
+        limit: { type: "integer", description: "Max passages to return, default 8, ceiling 20." },
       },
       required: ["query"],
     },
@@ -296,9 +297,13 @@ Users will ask how to do things in LEAP ("how do I change the stages per record 
 - If search_help_articles returns nothing useful, say plainly that you couldn't find a help article on it and point the user to the Help Center (the Help area) or their LEAP administrator. Do NOT invent a menu path, button, or setting you did not read in an article — a wrong navigation instruction is worse than admitting you don't have one.
 - In LEAP, an opportunity's "stages" are status picklist values scoped to a record type (governed by the Lifecycle Builder / picklist record-type scoping), not a separate "stage" object — so search "stage", "record type", or "picklist scoping" to surface the right article.
 
-## Questions about a specific PROGRAM
+## Questions about how EES works, procedures, or program/measure details
 
-When the user asks how a specific incentive/rebate program works — rates, eligibility, process changes, one-off exceptions, "how does the WHEDA program handle X", "what changed in WI-IRA-MF-HOMES this year" — that is program subject-matter knowledge, NOT platform how-to. Use search_program_knowledge (pass the program name in \`program\`), not search_help_articles. Same grounding rule: answer only from the notes returned, cite the note, and if nothing comes back say you don't have a program note on it rather than guessing — program details change on the fly and a wrong answer is worse than none. (search_help_articles is for using the LEAP software; search_program_knowledge is for how a program runs.)
+When the user asks how EES actually does something in the field or office — a procedure, install detail, approved measure, rate, eligibility rule, program specifics ("what's the attic prep procedure", "income doc requirement for WI multifamily HOMES", "approved insulation measures in NC") — that is company/program subject-matter knowledge. Use search_knowledge (the Knowledge Base), NOT search_help_articles (which is only for using the LEAP software). Rules:
+- Pass the user's actual question as \`query\` — it matches by meaning, so don't reduce it to keywords.
+- If the question is about a specific state or program, pass \`state\` (WI/NC/MI/CO/IN) and/or \`program\` (the opportunity record type, e.g. WI-IRA-MF-HOMES) so the right scope wins.
+- Answer ONLY from the returned passages, and cite the source document by its title. Respect each passage's scope — never apply a passage scoped to one state/program to a question about a different one.
+- If nothing relevant comes back, say you don't have knowledge-base material on it rather than guessing — approved measures differ by state/program and a wrong answer is worse than none.
 
 ## Plan the whole request before proposing anything
 
@@ -706,31 +711,38 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
       })
       return JSON.stringify({ query, article_count: articles.length, articles })
     }
-    if (name === "search_program_knowledge") {
+    if (name === "search_knowledge") {
       const query = String(input.query ?? "").trim()
-      if (!query) return JSON.stringify({ error: "Provide a search query." })
+      if (!query) return JSON.stringify({ error: "Provide a question to search." })
+      const state = input.state && String(input.state).trim() ? String(input.state).trim().toUpperCase() : null
       const program = input.program && String(input.program).trim() ? String(input.program).trim() : null
-      const limit = Math.min(Math.max(Number(input.limit) || 5, 1), 10)
-      const { data, error } = await userClient.rpc("search_program_knowledge", {
-        p_program_query: program,
-        p_query: query,
-        p_limit: limit,
+      const limit = Math.min(Math.max(Number(input.limit) || 8, 1), 20)
+      // Embed the question with the in-house model, then vector-match (scope-aware).
+      let embedding: number[]
+      try {
+        const session = new (globalThis as any).Supabase.ai.Session("gte-small")
+        embedding = await session.run(query, { mean_pool: true, normalize: true }) as number[]
+      } catch (e) {
+        return JSON.stringify({ error: `Embedding failed: ${(e as Error).message}` })
+      }
+      const { data, error } = await userClient.rpc("match_knowledge_chunks", {
+        p_query_embedding: JSON.stringify(embedding),
+        p_match_count: limit,
+        p_state: state,
+        p_record_type: program,
       })
       if (error) return JSON.stringify({ error: error.message })
-      const notes = (Array.isArray(data) ? data : []).map((a: any) => {
-        const bodyRaw = typeof a.pka_body_markdown === "string" ? a.pka_body_markdown : ""
-        const body = bodyRaw.length > 6000 ? bodyRaw.slice(0, 6000) + "\n\n…(truncated)" : bodyRaw
-        return {
-          record_number: a.pka_record_number || undefined,
-          program: a.program_name || undefined,
-          program_short_name: a.program_short_name || undefined,
-          program_state: a.program_state || undefined,
-          title: a.pka_title,
-          category: a.pka_category || undefined,
-          body,
-        }
-      })
-      return JSON.stringify({ query, program, note_count: notes.length, notes })
+      const passages = (Array.isArray(data) ? data : []).map((r: any) => ({
+        source: r.kd_title,
+        record_number: r.kd_record_number || undefined,
+        description: r.kd_description || undefined,
+        file: r.kd_file_name || undefined,
+        scope_state: r.kd_state || undefined,
+        scope_program: r.kd_opportunity_record_type || undefined,
+        similarity: typeof r.similarity === "number" ? Math.round(r.similarity * 1000) / 1000 : undefined,
+        text: r.chunk_text,
+      }))
+      return JSON.stringify({ query, state, program, passage_count: passages.length, passages })
     }
     return JSON.stringify({ error: `Unknown read tool ${name}` })
   } catch (e) {

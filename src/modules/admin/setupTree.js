@@ -12,6 +12,7 @@ export const SETUP_TREE = [
       { id: 'roles',            label: 'Roles' },
       { id: 'permission_sets',  label: 'Permission Sets' },
       { id: 'help_articles',    label: 'Help Articles' },
+      { id: 'knowledge_base',   label: 'Knowledge Base' },
       { id: 'client_errors',    label: 'Client Errors' },
     ],
   },
@@ -66,7 +67,6 @@ export const SETUP_TREE = [
     icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4',
     children: [
       { id: 'programs',                  label: 'Programs' },
-      { id: 'program_knowledge_articles', label: 'Program Knowledge' },
       { id: 'work_types',                label: 'Work Types' },
       { id: 'work_plan_templates',       label: 'Work Plan Templates' },
       { id: 'work_step_templates',       label: 'Work Step Templates' },
