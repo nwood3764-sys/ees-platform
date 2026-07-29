@@ -514,6 +514,26 @@ const DERIVED_READONLY = {
 const isDerivedReadonlyField = (table, name) =>
   (DERIVED_READONLY[table] || []).includes(name)
 
+// Columns that USED to be copied from a parent at create but are now shown as
+// live references to the parent (migration 20260729031631 converted the
+// enrollment layouts to property_id.<col> related_fields). The create-prefill
+// still computes these values transiently — the record-type state filter and the
+// derived fields (subsidized share, occupancy, owner type) read them — but they
+// must NOT be written onto the child record, or we'd re-introduce the stale copy.
+// Stripped from the insert; the child reads them live from the parent instead.
+const INHERITED_FROM_PARENT_COLUMNS = {
+  enrollments: [
+    'enrollment_hud_property_id', 'enrollment_property_name', 'enrollment_site_address',
+    'enrollment_city', 'enrollment_state', 'enrollment_zip', 'enrollment_county',
+    'enrollment_total_units', 'enrollment_assisted_units', 'enrollment_property_category',
+    'enrollment_number_of_buildings', 'enrollment_owner_organization', 'enrollment_owner_phone',
+    'enrollment_owner_email', 'enrollment_owner_fein', 'enrollment_management_agent',
+    'enrollment_management_phone', 'enrollment_management_email', 'enrollment_hud_contract_number',
+    'enrollment_hud_tracs_status', 'enrollment_hud_contract_expiration', 'enrollment_is_202_811',
+    'enrollment_is_opportunity_zone',
+  ],
+}
+
 // missing from the provided values object. An empty string is treated as
 // missing; `false` and `0` are valid values. System/auto-populated columns
 // are skipped so they never surface in the error message.
@@ -6669,6 +6689,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               if (f.type === 'formula' || f.type === 'rollup' || f.type === 'inherited') computedInsert.add(f.name)
           for (const k of Object.keys(fields)) if (computedInsert.has(k)) delete fields[k]
         }
+
+        // Stop the copy: columns now inherited live from the parent must not be
+        // written onto the child (the create-prefill computes them only for the
+        // form's transient use — state filter + derived fields).
+        for (const k of (INHERITED_FROM_PARENT_COLUMNS[tableName] || [])) delete fields[k]
 
         // Strip empty string values (convert to null)
         for (const [k, v] of Object.entries(fields)) {
