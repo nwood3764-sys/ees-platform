@@ -179,6 +179,44 @@ function formatPhoneDisplay(raw) {
   return String(raw)
 }
 
+// Normalize a US phone value to the bare 10-digit form the DB check constraint
+// (^\d{10}$) requires. Accepts anything a user types or pastes —
+// "(515) 297-8363", "515-297-8363", "515.297.8363", "+1 515 297 8363",
+// "1-515-297-8363" — and returns "5152978363". A value that can't be reduced
+// to a clean 10-digit US number is returned unchanged, so a genuinely invalid
+// entry still surfaces the constraint error rather than being silently mangled.
+function normalizeUsPhone(value) {
+  if (value == null || value === '') return value
+  const digits = String(value).replace(/\D/g, '')
+  if (digits.length === 10) return digits
+  if (digits.length === 11 && digits[0] === '1') return digits.slice(1)
+  return value
+}
+
+// Collect the names of every field declared as type 'phone' across a layout's
+// field groups — used to normalize only real phone columns at save time.
+function collectPhoneFieldNames(sections) {
+  const names = new Set()
+  for (const sec of (sections || [])) {
+    for (const w of (sec.widgets || [])) {
+      if (w.widget_type !== 'field_group') continue
+      for (const f of (w.widget_config?.fields || [])) {
+        if (f?.type === 'phone' && f.name) names.add(f.name)
+      }
+    }
+  }
+  return names
+}
+
+// Rewrite phone-typed keys of `payload` in place to their normalized 10-digit
+// form. `phoneNames` is a Set of field names known to be phones.
+function normalizePhoneFieldsInPlace(payload, phoneNames) {
+  if (!phoneNames || phoneNames.size === 0) return
+  for (const name of phoneNames) {
+    if (name in payload) payload[name] = normalizeUsPhone(payload[name])
+  }
+}
+
 // Full US state / territory name -> USPS two-letter abbreviation. Used by the
 // `us_state_abbrev` field format so program forms (e.g. the IRA HOMES
 // reservation) show "WI" even when the source record stores "Wisconsin".
@@ -1388,6 +1426,8 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
     try {
       const userId = await getCurrentUserId()
       const payload = applyInsertDefaults(table, { ...(seed || {}), ...draft }, userId)
+      // Normalize phone fields to the bare 10-digit form the DB constraint wants.
+      normalizePhoneFieldsInPlace(payload, new Set(fields.filter(f => f.type === 'phone').map(f => f.name)))
       for (const [k, v] of Object.entries(payload)) if (v === '') payload[k] = null
       const created = await insertRecord(table, payload)
       const label = (labelField && created?.[labelField]) || created?.id?.slice(0, 8) || 'New record'
@@ -6999,6 +7039,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         // form's transient use — state filter + derived fields).
         for (const k of (INHERITED_FROM_PARENT_COLUMNS[tableName] || [])) delete fields[k]
 
+        // Normalize phone fields to the bare 10-digit form the DB constraint
+        // requires, so pasted "(515) 297-8363" / "515-297-8363" save cleanly.
+        normalizePhoneFieldsInPlace(fields, collectPhoneFieldNames(data?.sections))
+
         // Strip empty string values (convert to null)
         for (const [k, v] of Object.entries(fields)) {
           if (v === '') fields[k] = null
@@ -7078,6 +7122,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       if (k.endsWith('_created_at') || k.endsWith('_created_by') || k.endsWith('_updated_at') || k.endsWith('_updated_by') || k.endsWith('_is_deleted')) delete changes[k]
     }
     if (!Object.keys(changes).length) { setEditing(false); setSaving(false); return }
+
+    // Normalize phone fields to the bare 10-digit form the DB constraint
+    // requires, so pasted "(515) 297-8363" / "515-297-8363" save cleanly.
+    normalizePhoneFieldsInPlace(changes, collectPhoneFieldNames(data?.sections))
 
     // Normalise empty strings to null before validation + save
     for (const [k, v] of Object.entries(changes)) {
