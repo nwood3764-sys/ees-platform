@@ -20,6 +20,8 @@ import {
   getDocumentSignedUrl,
   fetchApplicationActivities,
   logApplicationActivity,
+  fetchOnboardingSteps,
+  setOnboardingStep,
 } from '../data/serviceProviderService'
 
 const TRADE_OPTS = [
@@ -70,6 +72,8 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
   const [logType, setLogType] = useState('Note')
   const [logText, setLogText] = useState('')
   const [logBusy, setLogBusy] = useState(false)
+  const [steps, setSteps] = useState(null)
+  const [stepBusyId, setStepBusyId] = useState(null)
   const stageVal = app.stage?.picklist_value
   const contact = [app.spa_contact_first_name, app.spa_contact_last_name].filter(Boolean).join(' ')
   const email = app.spa_contact_email || app.spa_business_email
@@ -99,12 +103,41 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
   const loadActs = useCallback(async () => {
     try { setActs(await fetchApplicationActivities(app.id)) } catch { setActs([]) }
   }, [app.id])
+  const loadSteps = useCallback(async () => {
+    try { setSteps(await fetchOnboardingSteps(app.id)) } catch { setSteps([]) }
+  }, [app.id])
   useEffect(() => { if (open && acts === null) loadActs() }, [open, acts, loadActs])
+  useEffect(() => { if (open && steps === null) loadSteps() }, [open, steps, loadSteps])
   const prevBusy = useRef(false)
   useEffect(() => {
     if (prevBusy.current && !busy && open) loadActs()
     prevBusy.current = busy
   }, [busy, open, loadActs])
+
+  const toggleStep = async (s) => {
+    setStepBusyId(s.id)
+    try {
+      const complete = !s.is_complete
+      await setOnboardingStep(s.id, complete, null)
+      if (complete) await logApplicationActivity(app.id, { activityType: 'Note', subject: `Onboarding: ${s.name} completed` }).catch(() => {})
+      await loadSteps()
+    } catch (e) { alert(e?.message || 'Could not update the step.') } finally { setStepBusyId(null) }
+  }
+  const reqSteps = (steps || []).filter((s) => s.is_required)
+  const reqDone = reqSteps.filter((s) => s.is_complete).length
+  const onboardingComplete = reqSteps.length > 0 && reqDone === reqSteps.length
+
+  // Soft-gate the portal invite on onboarding completeness (staff can override).
+  const handleInvite = async () => {
+    let s = steps
+    if (s === null) { try { s = await fetchOnboardingSteps(app.id) } catch { s = [] } setSteps(s) }
+    const req = (s || []).filter((x) => x.is_required)
+    const done = req.filter((x) => x.is_complete).length
+    if (req.length && done < req.length) {
+      if (!window.confirm(`Onboarding isn't complete (${done}/${req.length} required steps done). Send the portal invite anyway?`)) return
+    }
+    onInvite(app)
+  }
 
   const addLog = async () => {
     const body = logText.trim(); if (!body) return
@@ -163,6 +196,35 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
             {app.spa_coi_document_id
               ? <button onClick={openCoi} disabled={coiBusy} style={{ background: '#eef6ff', border: `1px solid ${C.sky}`, color: '#1a5a8a', borderRadius: 6, padding: '4px 12px', fontSize: 12.5, fontWeight: 600, cursor: coiBusy ? 'default' : 'pointer' }}>{coiBusy ? 'Opening…' : 'View COI'}</button>
               : <span style={{ color: C.textMuted }}>No COI on file</span>}
+          </div>
+
+          {/* onboarding checklist */}
+          <div style={{ marginTop: 14, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textSecondary, letterSpacing: 0.2 }}>ONBOARDING</div>
+              {reqSteps.length > 0 && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: onboardingComplete ? '#1a7a4e' : C.textMuted }}>
+                  {reqDone}/{reqSteps.length} required complete{onboardingComplete ? ' · ready to invite' : ''}
+                </span>
+              )}
+            </div>
+            {steps === null ? <div style={{ fontSize: 12.5, color: C.textMuted }}>Loading checklist…</div>
+              : steps.length === 0 ? <div style={{ fontSize: 12.5, color: C.textMuted }}>No onboarding steps configured.</div>
+              : steps.map((s) => (
+                <button key={s.id} type="button" disabled={stepBusyId === s.id || declined} onClick={() => toggleStep(s)}
+                  style={{ display: 'flex', width: '100%', textAlign: 'left', alignItems: 'flex-start', gap: 10, padding: '7px 0', background: 'none', border: 'none', borderTop: `1px solid ${C.border}`, cursor: (stepBusyId === s.id || declined) ? 'default' : 'pointer', opacity: stepBusyId === s.id ? 0.6 : 1 }}>
+                  <span style={{ width: 18, height: 18, borderRadius: 5, marginTop: 1, flexShrink: 0, border: `1.5px solid ${s.is_complete ? C.emerald : C.borderDark}`, background: s.is_complete ? C.emerald : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {s.is_complete && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#06231a" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{s.name}{s.is_required ? '' : <span style={{ color: C.textMuted, fontWeight: 400 }}> · optional</span>}</span>
+                    {s.is_complete && (s.completed_by_name || s.completed_at) && (
+                      <span style={{ display: 'block', fontSize: 11, color: C.textMuted, marginTop: 1 }}>{[s.completed_by_name, s.completed_at ? fmtDate(s.completed_at) : null].filter(Boolean).join(' · ')}</span>
+                    )}
+                    {s.notes && <span style={{ display: 'block', fontSize: 12, color: C.textSecondary, marginTop: 1 }}>{s.notes}</span>}
+                  </span>
+                </button>
+              ))}
           </div>
 
           {/* communication trail */}
@@ -231,7 +293,7 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
             {btn('Request info', () => { setPanel(panel === 'info' ? null : 'info'); setNote('') }, 'sky')}
             {btn('Decline', () => { setPanel(panel === 'decline' ? null : 'decline'); setNote('') }, 'ghost')}
             {approved
-              ? btn('Send portal invite', () => onInvite(app), 'primary')
+              ? btn('Send portal invite', handleInvite, 'primary')
               : btn('Approve', () => onApprove(app), 'primary')}
           </>
         )}
