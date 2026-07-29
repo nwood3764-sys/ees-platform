@@ -96,14 +96,8 @@ async function resolveRunRecord(enrollmentId) {
     .from('enrollments')
     .select(`
       id, enrollment_record_number, enrollment_name, property_id, opportunity_id,
-      enrollment_hud_property_id, enrollment_property_name, enrollment_site_address,
-      enrollment_city, enrollment_state, enrollment_zip, enrollment_county,
-      enrollment_total_units, enrollment_assisted_units,
-      enrollment_property_category, enrollment_is_202_811, enrollment_is_opportunity_zone,
-      enrollment_owner_organization, enrollment_owner_type, enrollment_owner_address,
-      enrollment_owner_phone, enrollment_owner_email,
-      enrollment_management_agent, enrollment_management_phone, enrollment_management_email,
-      enrollment_hud_program, enrollment_hud_contract_number,
+      enrollment_owner_type, enrollment_owner_address,
+      enrollment_hud_program,
       enrollment_br_studio, enrollment_br_1, enrollment_br_2,
       enrollment_br_3, enrollment_br_4, enrollment_br_5plus,
       properties:property_id (
@@ -454,34 +448,14 @@ export async function runIncomeQualification(enrollmentId) {
     enrollment_required_proof: det.requiredProof,
     enrollment_categorical_eligibility: det.pathways.join('; ') || 'None detected — verify',
     enrollment_determination_date: new Date().toISOString().slice(0, 10),
-    enrollment_total_units: det.totalUnits,
-    enrollment_assisted_units: det.assistedUnits,
     enrollment_subsidized_share_pct: det.subsidizedSharePct,
-    // Unpack the resolved HUD/property/site identity onto the record so a run
-    // fully populates the enrollment (not just the determination). Only write
-    // values that resolved, so an existing populated field is never blanked.
-    enrollment_hud_property_id: r.property_id || undefined,
-    enrollment_property_name: r.name || undefined,
-    enrollment_site_address: r.address || undefined,
-    enrollment_city: r.city || undefined,
-    enrollment_state: r.state || undefined,
-    enrollment_zip: r.zip || undefined,
-    enrollment_county: r.county || undefined,
-    enrollment_property_category: r.category || undefined,
-    enrollment_is_202_811: r.is_202_811 === 'Y' ? true : undefined,
-    enrollment_is_opportunity_zone: r.is_opp_zone === 'Y' ? true : undefined,
-    enrollment_owner_organization: r.owner_org || undefined,
+    // Owner type / owner address / HUD program are enrollment-owned (composed or
+    // classified, not a 1:1 parent copy) — keep persisting them. The property /
+    // site / owner-contact / contract identity fields are now inherited live from
+    // the Property (no enrollment columns), so they are NOT written here.
     enrollment_owner_type: r.owner_type || undefined,
     enrollment_owner_address: r.owner_addr || undefined,
-    enrollment_owner_phone: r.owner_phone || undefined,
-    enrollment_owner_email: r.owner_email || undefined,
-    enrollment_management_agent: r.mgmt_org || undefined,
-    enrollment_management_phone: r.mgmt_phone || undefined,
-    enrollment_management_email: r.mgmt_email || undefined,
     enrollment_hud_program: (r.contracts?.[0]?.program) || undefined,
-    enrollment_hud_contract_number: (r.contracts?.[0]?.contract_number) || undefined,
-    enrollment_hud_tracs_status: (r.contracts?.[0]?.tracs_status) || undefined,
-    enrollment_hud_contract_expiration: (r.contracts?.[0]?.expiration) || undefined,
     enrollment_br_studio: r.br_total?.[0] ?? undefined,
     enrollment_br_1: r.br_total?.[1] ?? undefined,
     enrollment_br_2: r.br_total?.[2] ?? undefined,

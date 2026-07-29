@@ -545,6 +545,9 @@ const INHERITED_FROM_PARENT_COLUMNS = {
     'ia_total_number_of_units', 'ia_total_number_of_occupied_units', 'ia_building_owner_name',
     'ia_building_owner_name_ira', 'ia_building_owner_email_address', 'ia_building_owner_office_phone',
     'ia_income_qualified_confirmation_code', 'ia_electric_account_number', 'ia_natural_gas_account_number',
+    // Business-entity (owner account) fields — now inherited 2 hops up
+    // (application -> property -> account) via Inherited Fields.
+    'ia_business_entity_name', 'ia_business_entity_phone_number', 'ia_business_entity_email',
   ],
 }
 
