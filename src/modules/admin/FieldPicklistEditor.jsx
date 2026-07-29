@@ -17,16 +17,16 @@ import {
 // ---------------------------------------------------------------------------
 // Field Picklist Editor — Salesforce "record type → picklist values" model.
 //
-// Pick a record type, then work in a two-panel transfer UI: Available Values
-// on the left, Selected Values (the ordered work area) on the right. Drag
-// values between panels, drag to reorder, or use the arrow buttons. The
-// Selected order IS the order users see for that record type.
+// Pick a record type, then a two-panel transfer UI:
+//   * Available Values (left)  = every value on the field (searchable/sortable).
+//   * Selected Values (right)  = the values this record type shows, IN ORDER.
+// Drag values between panels, drag or use ↑/↓ to order the Selected side.
 //
-// A record type with no scoping rows is "Universal" — every value applies,
-// including any added later. Customizing seeds Selected with every value so
-// the admin removes/reorders from there; Reset-to-all returns to universal.
+// Selected empty  ⇒  the record type shows ALL values (no restriction), incl.
+// any added later. Putting values on the right restricts + orders it. So the
+// left panel ALWAYS shows the full list — nothing is hidden behind a prompt.
 //
-// Below, a collapsible section manages the field's master value list (add,
+// A collapsible section below manages the field's master value list (add,
 // rename, describe, activate, reorder) — the values that feed both panels.
 // ---------------------------------------------------------------------------
 
@@ -38,13 +38,13 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  // Per-record-type working state.
+  // Per-record-type working state. `selected` is the ordered set of value ids
+  // shown for this record type; EMPTY means universal (all values).
   const [activeRtId, setActiveRtId] = useState(null)
-  const [isUniversal, setIsUniversal] = useState(false)
-  const [selected, setSelected] = useState([])          // ordered value ids (draft)
+  const [selected, setSelected] = useState([])
   const [savedSelected, setSavedSelected] = useState([])
-  const [savedUniversal, setSavedUniversal] = useState(false)
   const [availSearch, setAvailSearch] = useState('')
+  const [availSort, setAvailSort] = useState('master') // 'master' | 'label' | 'value'
   const [saving, setSaving] = useState(false)
   const [savedNote, setSavedNote] = useState('')
 
@@ -78,16 +78,16 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
     return m
   }, [values])
 
-  // Resolve one record type's working state from persisted assignments.
-  async function computeRtState(rtId, asgMap, vals) {
+  // Resolve one record type's ordered value set from persisted assignments.
+  // Returns [] for a universal record type (no scoping rows).
+  async function computeSelected(rtId, asgMap, vals) {
     const set = asgMap[rtId]
-    const globalIds = vals.map(v => v._id)
-    if (!set || set.size === 0) return { universal: true, order: globalIds }
+    if (!set || set.size === 0) return []
     let savedOrder = []
     try { savedOrder = await fetchRecordTypeValueOrder(rtId) } catch { /* fall back to global order */ }
     const scoped = savedOrder.filter(id => set.has(id))
-    const missing = globalIds.filter(id => set.has(id) && !scoped.includes(id))
-    return { universal: false, order: [...scoped, ...missing] }
+    const missing = vals.map(v => v._id).filter(id => set.has(id) && !scoped.includes(id))
+    return [...scoped, ...missing]
   }
 
   useEffect(() => {
@@ -105,11 +105,10 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
       setAssignments(map)
       const firstRt = rts.find(r => r.active) || rts[0]
       if (firstRt) {
-        const st = await computeRtState(firstRt._id, map, vals)
+        const sel = await computeSelected(firstRt._id, map, vals)
         if (cancelled) return
         setActiveRtId(firstRt._id)
-        setIsUniversal(st.universal); setSavedUniversal(st.universal)
-        setSelected(st.order); setSavedSelected(st.universal ? [] : st.order)
+        setSelected(sel); setSavedSelected(sel)
       }
       setLoading(false)
     }).catch(e => { if (!cancelled) { setError(e); setLoading(false) } })
@@ -125,40 +124,20 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   async function selectRt(rtId) {
     if (rtId === activeRtId) return
     setActiveRtId(rtId); setSavedNote(''); setAvailSearch('')
-    const st = await computeRtState(rtId, assignments, values)
-    setIsUniversal(st.universal); setSavedUniversal(st.universal)
-    setSelected(st.order); setSavedSelected(st.universal ? [] : st.order)
+    const sel = await computeSelected(rtId, assignments, values)
+    setSelected(sel); setSavedSelected(sel)
   }
 
   // ── Transfer operations ────────────────────────────────────────────────
-  function customizeFromUniversal() {
-    setSavedNote('')
-    setIsUniversal(false)
-    setSelected(values.map(v => v._id))   // seed with every value, in global order
-  }
-  function resetToUniversal() {
-    setSavedNote('')
-    setIsUniversal(true)
-    setSelected(values.map(v => v._id))
-  }
-  function addOne(id) {
-    setSavedNote('')
-    setSelected(prev => prev.includes(id) ? prev : [...prev, id])
-  }
-  function removeOne(id) {
-    setSavedNote('')
-    setSelected(prev => prev.filter(x => x !== id))
-  }
+  function addOne(id) { setSavedNote(''); setSelected(prev => prev.includes(id) ? prev : [...prev, id]) }
+  function removeOne(id) { setSavedNote(''); setSelected(prev => prev.filter(x => x !== id)) }
   function addAll() {
     setSavedNote('')
     const sel = new Set(selected)
     const additions = values.filter(v => v.active && !sel.has(v._id)).map(v => v._id)
     setSelected(prev => [...prev, ...additions])
   }
-  function removeAll() {
-    setSavedNote('')
-    setSelected([])
-  }
+  function removeAll() { setSavedNote(''); setSelected([]) }
   function moveSelected(index, dir) {
     setSavedNote('')
     setSelected(prev => {
@@ -170,7 +149,6 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
     })
   }
 
-  // Drop drag.id before targetId within Selected (also handles add-from-available).
   function dropBefore(targetId) {
     if (!drag) return
     setSavedNote('')
@@ -195,10 +173,10 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   }
   function clearDrag() { setDrag(null); setOverId(null); setOverSelectedPanel(false); setOverAvailablePanel(false) }
 
-  // Create a brand-new value on the field without leaving the screen. When the
-  // record type is customized, drop the new value straight into Selected so
-  // it's ready to order (Save persists the assignment). Universal already
-  // includes every value, so no placement is needed there.
+  // Create a brand-new value on the field without leaving the screen. If this
+  // record type is already restricted (has a Selected set), drop the new value
+  // into Selected so it's ready to order. If universal, it just joins the field
+  // and shows in Available (universal already includes it).
   async function commitWorkspaceValue() {
     const label = wsLabel.trim()
     const value = wsValue.trim() || label
@@ -208,45 +186,41 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
       const maxOrder = values.reduce((m, v) => Math.max(m, v.sortOrder), -1)
       const created = await addFieldValue(objectName, field, value, label, maxOrder + 1)
       await reloadValues()
-      if (!isUniversal && created?.id) {
+      const restricted = selected.length > 0
+      if (restricted && created?.id) {
         setSelected(prev => prev.includes(created.id) ? prev : [...prev, created.id])
         setSavedNote('')
       }
       setWsAdding(false); setWsLabel(''); setWsValue('')
-      toast.success(isUniversal ? `Added "${label}"` : `Added "${label}" — placed in Selected, Save to keep`)
+      toast.success(restricted ? `Added "${label}" — placed in Selected, Save to keep` : `Added "${label}"`)
     } catch (e) {
       toast.error(`Add failed: ${e.message || e}`)
     } finally { setValBusy(false) }
   }
 
   const dirty = useMemo(() => {
-    if (isUniversal !== savedUniversal) return true
-    if (isUniversal) return false
     if (selected.length !== savedSelected.length) return true
     for (let i = 0; i < selected.length; i++) if (selected[i] !== savedSelected[i]) return true
     return false
-  }, [isUniversal, savedUniversal, selected, savedSelected])
+  }, [selected, savedSelected])
 
   async function save() {
     if (!activeRtId) return
-    if (!isUniversal && selected.length === 0) {
-      toast.error('Select at least one value, or reset this record type to Universal.')
-      return
-    }
     setSaving(true); setSavedNote('')
     try {
-      if (isUniversal) {
-        await setRecordTypePicklistValues(activeRtId, objectName, field, [])
-        setAssignments(prev => { const n = { ...prev }; delete n[activeRtId]; return n })
-        setSavedUniversal(true); setSavedSelected([])
-        setSavedNote('Saved — this record type shows all values (universal).')
-      } else {
-        await setRecordTypePicklistValues(activeRtId, objectName, field, selected)
-        await reorderFieldValuesForRecordType(activeRtId, selected)
-        setAssignments(prev => ({ ...prev, [activeRtId]: new Set(selected) }))
-        setSavedUniversal(false); setSavedSelected([...selected])
-        setSavedNote(`Saved — ${selected.length} value${selected.length === 1 ? '' : 's'} for this record type.`)
-      }
+      // Empty array ⇒ universal (clears scoping). Non-empty ⇒ restricted + order.
+      await setRecordTypePicklistValues(activeRtId, objectName, field, selected)
+      if (selected.length > 0) await reorderFieldValuesForRecordType(activeRtId, selected)
+      setAssignments(prev => {
+        const next = { ...prev }
+        if (selected.length === 0) delete next[activeRtId]
+        else next[activeRtId] = new Set(selected)
+        return next
+      })
+      setSavedSelected([...selected])
+      setSavedNote(selected.length === 0
+        ? 'Saved — this record type shows all values.'
+        : `Saved — ${selected.length} value${selected.length === 1 ? '' : 's'} for this record type.`)
     } catch (e) {
       setSavedNote('Save failed: ' + (e.message || e))
       toast.error(`Save failed: ${e.message || e}`)
@@ -304,18 +278,29 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   }
 
   const activeRt = recordTypes.find(r => r._id === activeRtId)
-  const activeCount = values.length
+  const isUniversal = selected.length === 0
   const selectedSet = useMemo(() => new Set(selected), [selected])
+  // Do labels repeat on this field? If so, the stored value is the only
+  // distinguisher, so we surface it; otherwise we keep the list clean (label only).
+  const labelsAmbiguous = useMemo(() => {
+    const seen = new Set()
+    for (const v of values) { if (seen.has(v.label)) return true; seen.add(v.label) }
+    return false
+  }, [values])
 
   const availableValues = useMemo(() => {
-    if (isUniversal) return []
     let list = values.filter(v => v.active && !selectedSet.has(v._id))
     const q = availSearch.trim().toLowerCase()
     if (q) list = list.filter(v => (v.label || '').toLowerCase().includes(q) || (v.value || '').toLowerCase().includes(q))
+    if (availSort === 'label') list = [...list].sort((a, b) => (a.label || '').localeCompare(b.label || ''))
+    else if (availSort === 'value') list = [...list].sort((a, b) => (a.value || '').localeCompare(b.value || ''))
+    // 'master' keeps fetch order (picklist_sort_order)
     return list
-  }, [values, selectedSet, isUniversal, availSearch])
+  }, [values, selectedSet, availSearch, availSort])
 
   const selectedRows = useMemo(() => selected.map(id => valuesById[id]).filter(Boolean), [selected, valuesById])
+
+  const GRID = 'minmax(0, 1fr) 44px minmax(0, 1fr)'
 
   return (
     <div style={{ padding: '16px 24px' }}>
@@ -336,7 +321,7 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
         {columnName && columnName !== field && (
           <> · values stored under <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{field}</span></>
         )}
-        {' '}· {activeCount} value{activeCount === 1 ? '' : 's'}
+        {' '}· {values.length} value{values.length === 1 ? '' : 's'}
       </div>
 
       {loading && <div style={{ padding: 30, color: C.textMuted, fontSize: 13 }}>Loading field…</div>}
@@ -369,41 +354,25 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
                 alignSelf: 'flex-start', fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 4,
                 background: isUniversal ? '#e8f8f2' : '#e8f3fb', color: isUniversal ? '#1a7a4e' : '#1a5a8a',
               }}>
-                {isUniversal ? 'ALL VALUES' : `${selected.length} VALUE${selected.length === 1 ? '' : 'S'}`}
+                {isUniversal ? 'SHOWS ALL VALUES' : `${selected.length} VALUE${selected.length === 1 ? '' : 'S'}`}
               </span>
               <span style={{ fontSize: 11.5, color: C.textSecondary, lineHeight: 1.4 }}>
-                {isUniversal
-                  ? 'This record type shows every value on the field, including any added later. Choose specific values to restrict and order them.'
-                  : 'Drag values between the panels below, then drag or use ↑ ↓ to set the order users see for this record type.'}
+                Drag values from <strong>Available</strong> into <strong>Selected</strong> to choose and order what this
+                record type shows. Leave Selected empty to show every value.
               </span>
             </div>
           )}
         </div>
 
-        {activeRt && isUniversal && (
-          <div style={{ border: `1px dashed ${C.border}`, borderRadius: 8, background: '#f7faff', padding: '18px 16px', marginBottom: 18, textAlign: 'center' }}>
-            <div style={{ fontSize: 13, color: C.textPrimary, fontWeight: 500, marginBottom: 6 }}>
-              {activeRt.label} shows all {activeCount} values
-            </div>
-            <div style={{ fontSize: 12, color: C.textSecondary, maxWidth: 560, margin: '0 auto 12px', lineHeight: 1.5 }}>
-              Nothing is restricted for this record type. Choose specific values to pick exactly which appear here and set their order.
-            </div>
-            <button onClick={customizeFromUniversal}
-              style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: C.emerald, color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
-              Choose specific values for this record type
-            </button>
-          </div>
-        )}
-
         {/* ── Transfer workspace ── */}
-        {activeRt && !isUniversal && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 44px 1fr', gap: 12, alignItems: 'stretch', marginBottom: 14 }}>
+        {activeRt && (
+          <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 12, alignItems: 'stretch', marginBottom: 14 }}>
             {/* Available */}
             <div
               onDragOver={e => { e.preventDefault(); setOverAvailablePanel(true) }}
               onDragLeave={() => setOverAvailablePanel(false)}
               onDrop={dropRemove}
-              style={{ border: `1px solid ${overAvailablePanel && drag?.from === 'selected' ? C.emerald : C.border}`, borderRadius: 8, background: C.card, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 360 }}
+              style={{ border: `1px solid ${overAvailablePanel && drag?.from === 'selected' ? C.emerald : C.border}`, borderRadius: 8, background: C.card, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 360, minWidth: 0 }}
             >
               <div style={{ padding: '8px 12px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary }}>
@@ -429,13 +398,24 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
                     </button>
                     <button onClick={() => setWsAdding(false)}
                       style={{ padding: '6px 12px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.page, color: C.textSecondary, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
-                    {!isUniversal && <span style={{ fontSize: 11, color: C.textSecondary }}>Adds to Selected for {activeRt.label} — Save to keep.</span>}
                   </div>
                 </div>
               )}
-              <div style={{ padding: 8, borderBottom: `1px solid ${C.border}` }}>
+              {/* Search + sort */}
+              <div style={{ padding: 8, borderBottom: `1px solid ${C.border}`, display: 'flex', gap: 8 }}>
                 <input value={availSearch} onChange={e => setAvailSearch(e.target.value)} placeholder="Search values…"
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12.5, background: C.page, color: C.textPrimary, outline: 'none' }} />
+                  style={{ flex: 1, minWidth: 0, boxSizing: 'border-box', padding: '7px 10px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12.5, background: C.page, color: C.textPrimary, outline: 'none' }} />
+                <select value={availSort} onChange={e => setAvailSort(e.target.value)}
+                  title="Sort the available list"
+                  style={{ padding: '7px 8px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12, background: C.page, color: C.textSecondary, outline: 'none', cursor: 'pointer' }}>
+                  <option value="master">Default order</option>
+                  <option value="label">Label A–Z</option>
+                  {labelsAmbiguous && <option value="value">Stored value A–Z</option>}
+                </select>
+              </div>
+              {/* Column header */}
+              <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr auto 22px', gap: 8, alignItems: 'center', padding: '6px 12px', background: '#fafbfd', borderBottom: `1px solid ${C.border}`, fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <span></span><span>Label</span>{labelsAmbiguous ? <span style={{ textAlign: 'right' }}>Stored value</span> : <span></span>}<span></span>
               </div>
               <div style={{ flex: 1, overflow: 'auto', maxHeight: 440 }}>
                 {availableValues.map(v => (
@@ -444,17 +424,19 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
                     onDragStart={() => setDrag({ id: v._id, from: 'available' })}
                     onDragEnd={clearDrag}
                     onDoubleClick={() => addOne(v._id)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${C.border}`, cursor: 'grab', fontSize: 12.5, opacity: drag?.id === v._id ? 0.5 : 1 }}
+                    style={{ display: 'grid', gridTemplateColumns: '24px 1fr auto 22px', gap: 8, alignItems: 'center', padding: '8px 12px', borderBottom: `1px solid ${C.border}`, cursor: 'grab', fontSize: 12.5, opacity: drag?.id === v._id ? 0.5 : 1 }}
                     title="Drag to Selected, or double-click to add">
                     <span style={{ color: C.textMuted, fontSize: 13 }}>⋮⋮</span>
-                    <span style={{ flex: 1, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.label}</span>
-                    <span style={{ fontSize: 10.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '45%' }}>{v.value}</span>
+                    <span style={{ color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.label}</span>
+                    {labelsAmbiguous
+                      ? <span style={{ fontSize: 10.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }} title={v.value}>{v.value}</span>
+                      : <span />}
                     <button onClick={() => addOne(v._id)} title="Add" style={{ border: 'none', background: 'transparent', color: C.emerald, cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 2px' }}>›</button>
                   </div>
                 ))}
                 {availableValues.length === 0 && (
                   <div style={{ padding: 16, fontSize: 12, color: C.textMuted, textAlign: 'center' }}>
-                    {availSearch.trim() ? 'No matches.' : 'All values are selected.'}
+                    {availSearch.trim() ? 'No matches.' : 'Every value is in Selected.'}
                   </div>
                 )}
               </div>
@@ -477,11 +459,14 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
               onDragOver={e => { e.preventDefault(); setOverSelectedPanel(true) }}
               onDragLeave={() => setOverSelectedPanel(false)}
               onDrop={() => { if (drag) dropAppend() }}
-              style={{ border: `1px solid ${overSelectedPanel && drag ? C.emerald : C.border}`, borderRadius: 8, background: C.card, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 360 }}
+              style={{ border: `1px solid ${overSelectedPanel && drag ? C.emerald : C.border}`, borderRadius: 8, background: C.card, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 360, minWidth: 0 }}
             >
-              <div style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5, fontWeight: 600, color: C.textPrimary, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>Selected Values <span style={{ fontWeight: 400, color: C.textMuted }}>· {activeRt.label}</span></span>
+              <div style={{ padding: '8px 12px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary }}>Selected Values <span style={{ fontWeight: 400, color: C.textMuted }}>· {activeRt.label}</span></span>
                 <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500 }}>{selectedRows.length}</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '20px 22px 1fr auto 56px', gap: 8, alignItems: 'center', padding: '6px 12px', background: '#fafbfd', borderBottom: `1px solid ${C.border}`, fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <span></span><span>#</span><span>Label</span>{labelsAmbiguous ? <span style={{ textAlign: 'right' }}>Stored value</span> : <span />}<span></span>
               </div>
               <div style={{ flex: 1, overflow: 'auto', maxHeight: 486 }}>
                 {selectedRows.map((v, i) => (
@@ -491,26 +476,30 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
                     onDragOver={e => { e.preventDefault(); setOverId(v._id) }}
                     onDrop={e => { e.stopPropagation(); dropBefore(v._id) }}
                     onDragEnd={clearDrag}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5, cursor: 'grab',
+                    style={{ display: 'grid', gridTemplateColumns: '20px 22px 1fr auto 56px', gap: 8, alignItems: 'center', padding: '8px 12px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5, cursor: 'grab',
                       background: overId === v._id && drag?.id !== v._id ? '#eef8f2' : (v.active ? 'transparent' : '#fafbfd'),
                       opacity: drag?.id === v._id ? 0.5 : (v.active ? 1 : 0.7) }}>
                     <span style={{ color: C.textMuted, fontSize: 13 }} title="Drag to reorder">⋮⋮</span>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', minWidth: 22, textAlign: 'right' }}>{i + 1}</span>
-                    <span style={{ flex: 1, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{i + 1}</span>
+                    <span style={{ color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {v.label}{!v.active && <span style={{ color: C.textMuted }}> (inactive)</span>}
                     </span>
-                    <span style={{ display: 'inline-flex', gap: 2 }}>
+                    {labelsAmbiguous
+                      ? <span style={{ fontSize: 10.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }} title={v.value}>{v.value}</span>
+                      : <span />}
+                    <span style={{ display: 'inline-flex', gap: 2, justifyContent: 'flex-end' }}>
                       <button onClick={() => moveSelected(i, -1)} disabled={i === 0} title="Move up"
                         style={{ border: 'none', background: 'transparent', color: i === 0 ? C.textMuted : C.textSecondary, cursor: i === 0 ? 'default' : 'pointer', fontSize: 12, padding: '0 3px' }}>▲</button>
                       <button onClick={() => moveSelected(i, 1)} disabled={i === selectedRows.length - 1} title="Move down"
                         style={{ border: 'none', background: 'transparent', color: i === selectedRows.length - 1 ? C.textMuted : C.textSecondary, cursor: i === selectedRows.length - 1 ? 'default' : 'pointer', fontSize: 12, padding: '0 3px' }}>▼</button>
+                      <button onClick={() => removeOne(v._id)} title="Remove" style={{ border: 'none', background: 'transparent', color: '#1a5a8a', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 2px' }}>‹</button>
                     </span>
-                    <button onClick={() => removeOne(v._id)} title="Remove" style={{ border: 'none', background: 'transparent', color: '#1a5a8a', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 2px' }}>‹</button>
                   </div>
                 ))}
                 {selectedRows.length === 0 && (
-                  <div style={{ padding: 22, fontSize: 12, color: C.textMuted, textAlign: 'center', lineHeight: 1.5 }}>
-                    No values selected yet.<br />Drag values here from Available, or use Add all.
+                  <div style={{ padding: 22, fontSize: 12, color: C.textMuted, textAlign: 'center', lineHeight: 1.6 }}>
+                    Empty — this record type shows <strong>all values</strong> in default order.<br />
+                    Drag values here (or use <em>Add all</em>) to restrict and order them.
                   </div>
                 )}
               </div>
@@ -534,13 +523,6 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
-            {!isUniversal && (
-              <button onClick={resetToUniversal}
-                style={{ padding: '8px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: C.page, color: C.textSecondary, fontSize: 12, cursor: 'pointer' }}
-                title="Clear the custom set — this record type will show all values, including any added later.">
-                Reset to all values
-              </button>
-            )}
             {savedNote && <span style={{ fontSize: 11.5, color: savedNote.startsWith('Save failed') ? '#1a5a8a' : '#1a7a4e' }}>{savedNote}</span>}
             {dirty && !savedNote && <span style={{ fontSize: 11.5, color: C.textMuted }}>Unsaved changes</span>}
           </div>
@@ -601,9 +583,9 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
                     onKeyDown={e => { if (e.key === 'Enter') commitRename(v._id); if (e.key === 'Escape') setEditingValueId(null) }}
                     style={{ padding: '6px 9px', border: `1px solid ${C.emerald}`, borderRadius: 5, fontSize: 12.5, background: C.card, color: C.textPrimary, outline: 'none' }} />
                 ) : (
-                  <div style={{ fontSize: 12.5, color: C.textPrimary }}>{v.label}</div>
+                  <div style={{ fontSize: 12.5, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.label}</div>
                 )}
-                <div style={{ fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{v.value}</div>
+                <div style={{ fontSize: 11.5, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.value}</div>
                 <div style={{ textAlign: 'center' }}>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 3, background: v.active ? '#e8f8f2' : '#eef1f6', color: v.active ? '#1a7a4e' : C.textMuted }}>
                     {v.active ? 'ACTIVE' : 'INACTIVE'}
