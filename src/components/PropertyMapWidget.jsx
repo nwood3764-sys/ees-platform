@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { C } from '../data/constants'
+import { geocodePropertyNow } from '../data/propertyGeocodeService'
 
 // =====================================================================
 // PropertyMapWidget
 //
 // Salesforce-parity "Maps" card for a property record page. Renders an
 // interactive satellite map pinned to the record's stored coordinates
-// (property_latitude / property_longitude) — no per-address geocoding
-// call, because HUD/LIHTC imports already carry lat/long.
+// (property_latitude / property_longitude).
+//
+// Coordinates arrive from two sources: HUD/LIHTC imports already carry
+// lat/long, and a background cron geocodes the rest. But a property the
+// user *just* created has neither yet, so rather than show a dead "no
+// coordinates" card until the next sweep, this widget geocodes the
+// property on demand (geocodePropertyNow → the geocode-property-coordinates
+// edge function) the first time the card opens without coordinates, then
+// pins the returned point. Addresses the geocoder can't resolve fall back
+// to the address + a "Try again" action and the Google Maps link.
 //
 // Registered as the 'map' page-layout widget type and placed via a
 // record layout's "Map" section (see RecordDetail.jsx). Config lives in
@@ -93,8 +102,53 @@ export default function PropertyMapWidget({ widget, record, tableName, embedded 
   const zoom      = toNumber(cfg.zoom) || 17
   const height    = toNumber(cfg.height) || 420
 
-  const lat = toNumber(record?.[latField])
-  const lng = toNumber(record?.[lngField])
+  const storedLat = toNumber(record?.[latField])
+  const storedLng = toNumber(record?.[lngField])
+  const hasStoredCoords = storedLat !== null && storedLng !== null
+
+  // On-demand geocoding. Only for the properties table pinned by the default
+  // coordinate columns — a custom lat/lng mapping on another object has no
+  // geocode pipeline and must not trigger one.
+  const recordId    = record?.id
+  const canGeocode  = tableName === 'properties' && !!recordId &&
+                      latField === 'property_latitude' && lngField === 'property_longitude'
+  const priorStatus = record?.property_geocode_status
+
+  const [resolved,   setResolved]   = useState(null)   // { lat, lng } from an on-demand geocode
+  const [geoPhase,   setGeoPhase]   = useState('idle') // 'idle' | 'locating' | 'no_match' | 'error'
+  const [geoMessage, setGeoMessage] = useState(null)
+  const attemptedRef = useRef(false)
+
+  const runGeocode = async () => {
+    setGeoPhase('locating')
+    setGeoMessage(null)
+    const res = await geocodePropertyNow(recordId)
+    if (res.matched) {
+      setResolved({ lat: res.lat, lng: res.lng })
+      setGeoPhase('idle')
+    } else if (res.error) {
+      setGeoPhase('error')
+      setGeoMessage(res.error)
+    } else {
+      setGeoPhase('no_match')
+      setGeoMessage(res.reason || null)
+    }
+  }
+
+  // First open without coordinates: geocode automatically. Skip properties the
+  // geocoder already failed on (status 'Geocode No Match') so we don't re-hammer
+  // it on every page view — those get the manual "Try again" action instead.
+  useEffect(() => {
+    if (!canGeocode || hasStoredCoords || resolved || attemptedRef.current) return
+    if (priorStatus === 'Geocode No Match') { setGeoPhase('no_match'); return }
+    attemptedRef.current = true
+    runGeocode()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canGeocode, hasStoredCoords, recordId])
+
+  // Effective coordinates: stored on the record, else the on-demand result.
+  const lat = hasStoredCoords ? storedLat : (resolved ? resolved.lat : null)
+  const lng = hasStoredCoords ? storedLng : (resolved ? resolved.lng : null)
   const hasCoords = lat !== null && lng !== null
 
   // Human-readable address (property fields). Used for the marker popup,
@@ -198,18 +252,57 @@ export default function PropertyMapWidget({ widget, record, tableName, embedded 
     </div>
   )
 
-  const body = hasCoords ? (
+  const retryButton = canGeocode && (
+    <button type="button" onClick={runGeocode} disabled={geoPhase === 'locating'}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10,
+        padding: '6px 12px', fontSize: 12, fontWeight: 500,
+        color: C.emeraldMid || '#2aab72', background: C.card,
+        border: `1px solid ${C.borderDark || '#d0d8e8'}`, borderRadius: 6,
+        cursor: geoPhase === 'locating' ? 'default' : 'pointer', fontFamily: 'inherit',
+      }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+      </svg>
+      {geoPhase === 'locating' ? 'Locating…' : 'Try again'}
+    </button>
+  )
+
+  let body
+  if (hasCoords) {
     // position:relative + isolation contain Leaflet's z-indexes (up to 1000)
     // so tiles never paint over app overlays like the LEAP Assistant panel.
-    <div ref={containerRef} style={{ width: '100%', height, background: C.page, position: 'relative', zIndex: 0, isolation: 'isolate' }} />
-  ) : (
-    <div style={{ padding: '20px 16px', fontSize: 12.5, color: C.textSecondary, lineHeight: 1.6 }}>
-      <div style={{ color: C.textMuted, marginBottom: address ? 6 : 0 }}>
-        This property has no map coordinates yet, so it can’t be pinned.
+    body = (
+      <div ref={containerRef} style={{ width: '100%', height, background: C.page, position: 'relative', zIndex: 0, isolation: 'isolate' }} />
+    )
+  } else if (geoPhase === 'locating') {
+    body = (
+      <div style={{ padding: '24px 16px', fontSize: 12.5, color: C.textSecondary, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{
+          width: 15, height: 15, borderRadius: '50%',
+          border: `2px solid ${C.border}`, borderTopColor: C.emerald || '#3ecf8e',
+          display: 'inline-block', animation: 'leapMapSpin 0.7s linear infinite',
+        }} />
+        <span>Locating this property on the map…</span>
+        <style>{'@keyframes leapMapSpin{to{transform:rotate(360deg)}}'}</style>
       </div>
-      {address && <div style={{ color: C.textPrimary }}>{address}</div>}
-    </div>
-  )
+    )
+  } else {
+    // No coordinates: geocoder found no match, errored, or this isn't a
+    // geocodable property. Show the address and (when possible) a retry.
+    const message = geoPhase === 'error'
+      ? (geoMessage || 'Couldn’t reach the geocoder just now.')
+      : geoPhase === 'no_match'
+        ? 'This address couldn’t be located automatically.'
+        : 'This property has no map coordinates yet, so it can’t be pinned.'
+    body = (
+      <div style={{ padding: '20px 16px', fontSize: 12.5, color: C.textSecondary, lineHeight: 1.6 }}>
+        <div style={{ color: C.textMuted, marginBottom: address ? 6 : 0 }}>{message}</div>
+        {address && <div style={{ color: C.textPrimary }}>{address}</div>}
+        {retryButton}
+      </div>
+    )
+  }
 
   // Embedded: rendered inside a page-layout Section card, which already
   // supplies the titled card chrome. Render bare — the map full-bleed with

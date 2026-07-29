@@ -55,6 +55,7 @@ import { createPortal } from 'react-dom'
 import { C } from '../data/constants'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { supabase } from '../lib/supabase'
+import { listRecentlyViewed } from '../data/recentlyViewedService'
 
 // ─── Object type → icon path (lucide-style single-stroke paths) ──────────────
 // Keep paths single-d so they render through the existing Icon convention.
@@ -276,6 +277,12 @@ export function GlobalSearchInline({
   const [open, setOpen] = useState(false)   // dropdown visibility
   const [barRect, setBarRect] = useState(null)
 
+  // Recently viewed records (Salesforce "Recent Items") — shown in the idle
+  // panel before the user types. Refetched each time the dropdown opens so a
+  // record opened moments ago appears at the top.
+  const [recents, setRecents] = useState([])
+  const [recentsLoading, setRecentsLoading] = useState(false)
+
   // Debounced + abortable search.
   const debounceRef = useRef(null)
   const reqIdRef = useRef(0)
@@ -323,6 +330,42 @@ export function GlobalSearchInline({
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
+  // Group results for display. Same logic the modal used.
+  // NOTE: `groups`/`flatRows`/`navRows` are declared HERE — above the keyboard
+  // effect — on purpose. The effect below lists `navRows` in its dependency
+  // array, and a dependency array is evaluated during render at the point the
+  // useEffect() call is made. If these `const`s lived below the effect (as they
+  // originally did) that render-time read hit the const in its temporal dead
+  // zone. It only "worked" when the minifier happened to hoist the const above
+  // the effect; a build that didn't hoist crashed the whole topbar with
+  // "Cannot access 'navRows' before initialization" on every authenticated
+  // page. Declaring before use removes the hazard regardless of build ordering.
+  const groups = useMemo(() => {
+    if (!results.length) return []
+    const byType = new Map()
+    for (const r of results) {
+      const arr = byType.get(r.object_type) || []
+      arr.push(r)
+      byType.set(r.object_type, arr)
+    }
+    const known = SEARCH_GROUP_ORDER.filter(t => byType.has(t))
+    const extras = [...byType.keys()].filter(t => !SEARCH_GROUP_ORDER.includes(t)).sort()
+    return [...known, ...extras].map(type => ({
+      type,
+      label: byType.get(type)[0]?.object_label || type,
+      table: byType.get(type)[0]?.table_name || type,
+      rows: byType.get(type),
+    }))
+  }, [results])
+
+  const flatRows = useMemo(() => groups.flatMap(g => g.rows), [groups])
+
+  // The rows keyboard nav (↑/↓/Enter) walks: search hits once the user has
+  // typed ≥2 chars, otherwise the recent-items list in the idle panel.
+  const isIdle = query.trim().length < 2
+  const navRows = isIdle ? recents : flatRows
+  const safeActiveIdx = Math.min(activeIdx, Math.max(navRows.length - 1, 0))
+
   // ─── Keyboard ─────────────────────────────────────────────────────────────
   // Esc closes dropdown (and on mobile, dismisses the slide-down too).
   // Up/Down move selection within the result list. Enter opens the active
@@ -338,7 +381,7 @@ export function GlobalSearchInline({
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setActiveIdx(i => Math.min(i + 1, Math.max(results.length - 1, 0)))
+        setActiveIdx(i => Math.min(i + 1, Math.max(navRows.length - 1, 0)))
         return
       }
       if (e.key === 'ArrowUp') {
@@ -347,7 +390,7 @@ export function GlobalSearchInline({
         return
       }
       if (e.key === 'Enter') {
-        const r = results[activeIdx]
+        const r = navRows[activeIdx]
         if (r) {
           e.preventDefault()
           handleSelectRow(r)
@@ -357,7 +400,7 @@ export function GlobalSearchInline({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, results, activeIdx, isMobile])
+  }, [open, navRows, activeIdx, isMobile])
 
   // ─── Mobile: focus input as the slide-down opens ──────────────────────────
   useEffect(() => {
@@ -402,27 +445,20 @@ export function GlobalSearchInline({
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [query])
 
-  // Group results for display. Same logic the modal used.
-  const groups = useMemo(() => {
-    if (!results.length) return []
-    const byType = new Map()
-    for (const r of results) {
-      const arr = byType.get(r.object_type) || []
-      arr.push(r)
-      byType.set(r.object_type, arr)
-    }
-    const known = SEARCH_GROUP_ORDER.filter(t => byType.has(t))
-    const extras = [...byType.keys()].filter(t => !SEARCH_GROUP_ORDER.includes(t)).sort()
-    return [...known, ...extras].map(type => ({
-      type,
-      label: byType.get(type)[0]?.object_label || type,
-      table: byType.get(type)[0]?.table_name || type,
-      rows: byType.get(type),
-    }))
-  }, [results])
-
-  const flatRows = useMemo(() => groups.flatMap(g => g.rows), [groups])
-  const safeActiveIdx = Math.min(activeIdx, Math.max(flatRows.length - 1, 0))
+  // ─── Load recent items when the dropdown opens ────────────────────────────
+  // Fetch on every open so the list reflects the latest visits. Cheap RPC
+  // (bounded to a handful of rows); failures resolve to [] and just fall back
+  // to the example-chip hint.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setActiveIdx(0)
+    setRecentsLoading(true)
+    listRecentlyViewed(7)
+      .then(rows => { if (!cancelled) setRecents(rows) })
+      .finally(() => { if (!cancelled) setRecentsLoading(false) })
+    return () => { cancelled = true }
+  }, [open])
 
   const handleSelectRow = (r) => {
     onNavigate?.({ table: r.table_name, id: r.id, mode: 'view' })
@@ -569,22 +605,35 @@ export function GlobalSearchInline({
     >
       {/* Body */}
       <div style={{ flex: 1, overflowY: 'auto', background: C.page }}>
-        {/* Empty / hint state */}
-        {query.trim().length < 2 && !loading && (
+        {/* Idle panel: recent items if the user has any, otherwise the hint. */}
+        {query.trim().length < 2 && !loading && recents.length > 0 && (
+          <RecentGroup
+            rows={recents}
+            activeIdx={safeActiveIdx}
+            onSelect={handleSelectRow}
+            onHover={(idx) => setActiveIdx(idx)}
+          />
+        )}
+        {query.trim().length < 2 && !loading && recents.length === 0 && (
           <div style={{
             padding: '24px 20px',
             textAlign: 'center', color: C.textMuted, fontSize: 13,
           }}>
             <div style={{ marginBottom: 6, color: C.textSecondary, fontWeight: 500, fontSize: 13.5 }}>
-              Start typing to search
+              {recentsLoading ? 'Loading…' : 'Start typing to search'}
             </div>
-            Type at least 2 characters to find accounts, contacts, properties,
-            opportunities, projects, work orders, and more.
-            <div style={{ marginTop: 12, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <ExampleChip text="PROJ-00001" onClick={() => { setQuery('PROJ-00001'); inputRef.current?.focus() }} />
-              <ExampleChip text="willow" onClick={() => { setQuery('willow'); inputRef.current?.focus() }} />
-              <ExampleChip text="IRA HOMES" onClick={() => { setQuery('IRA HOMES'); inputRef.current?.focus() }} />
-            </div>
+            {!recentsLoading && (
+              <>
+                Type at least 2 characters to find accounts, contacts, properties,
+                opportunities, projects, work orders, and more. Records you open will
+                show up here as recent items.
+                <div style={{ marginTop: 12, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <ExampleChip text="PROJ-00001" onClick={() => { setQuery('PROJ-00001'); inputRef.current?.focus() }} />
+                  <ExampleChip text="willow" onClick={() => { setQuery('willow'); inputRef.current?.focus() }} />
+                  <ExampleChip text="IRA HOMES" onClick={() => { setQuery('IRA HOMES'); inputRef.current?.focus() }} />
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -720,6 +769,90 @@ function ResultGroup({ group, flatRows, activeIdx, onSelect, onHover }) {
             aria-selected={active}
             onClick={() => onSelect(r)}
             onMouseEnter={() => onHover(flatIndex)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '10px 16px',
+              background: active ? '#e9f7ef' : C.card,
+              borderLeft: active ? `3px solid ${C.emerald}` : '3px solid transparent',
+              cursor: 'pointer',
+              transition: 'background 80ms',
+            }}
+          >
+            <div style={{
+              width: 28, height: 28, borderRadius: 6,
+              background: C.page, border: `1px solid ${C.border}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <ObjectIcon type={r.object_type} size={14} color={C.textSecondary} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                color: C.textPrimary, fontSize: 13.5, fontWeight: 500,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {r.primary_label || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Unnamed</span>}
+              </div>
+              {r.secondary_label && (
+                <div style={{
+                  color: C.textMuted, fontSize: 12, marginTop: 1,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {r.secondary_label}
+                </div>
+              )}
+            </div>
+            {r.record_number && (
+              <span style={{
+                flexShrink: 0,
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: 11, color: C.textSecondary,
+                background: C.page, border: `1px solid ${C.border}`,
+                padding: '2px 7px', borderRadius: 4,
+              }}>
+                {r.record_number}
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Recent items group ──────────────────────────────────────────────────────
+// Idle-panel list of the user's recently viewed records (Salesforce "Recent
+// Items"). Rows carry the same shape as search hits, so the markup mirrors
+// ResultGroup's rows — each row shows its object icon, name, secondary label,
+// and record number. Keyboard nav highlights the active row (index into the
+// flat recents list, which is navRows when idle).
+function RecentGroup({ rows, activeIdx, onSelect, onHover }) {
+  return (
+    <div style={{ borderBottom: `1px solid ${C.border}` }}>
+      <div style={{
+        padding: '8px 16px 6px',
+        fontSize: 11, fontWeight: 600,
+        color: C.textMuted, letterSpacing: 0.4,
+        textTransform: 'uppercase',
+        background: C.page,
+        display: 'flex', alignItems: 'center', gap: 8,
+      }}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke={C.textMuted} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+        <span>Recent</span>
+      </div>
+      {rows.map((r, idx) => {
+        const active = idx === activeIdx
+        return (
+          <div
+            key={`${r.table_name}:${r.id}`}
+            role="option"
+            aria-selected={active}
+            onClick={() => onSelect(r)}
+            onMouseEnter={() => onHover(idx)}
             style={{
               display: 'flex', alignItems: 'center', gap: 12,
               padding: '10px 16px',

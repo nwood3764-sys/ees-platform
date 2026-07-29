@@ -37,6 +37,7 @@ import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
+import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
@@ -179,7 +180,19 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
     }
     case 'currency':   return `$${Number(raw).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
     case 'percent':    return `${Number(raw)}%`
-    case 'date':       return raw ? new Date(raw + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+    case 'date': {
+      if (!raw) return '—'
+      const d = new Date(String(raw).length <= 10 ? raw + 'T00:00:00' : raw)
+      // Optional per-field display format. 'MM/DD/YY' matches external program
+      // forms that use a 2-digit year (e.g. the pre-approval application).
+      if (fieldDef.format === 'MM/DD/YY') {
+        const mm = String(d.getMonth() + 1).padStart(2, '0')
+        const dd = String(d.getDate()).padStart(2, '0')
+        const yy = String(d.getFullYear()).slice(-2)
+        return `${mm}/${dd}/${yy}`
+      }
+      return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+    }
     case 'datetime':   return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
     case 'boolean':    return raw ? 'Yes' : 'No'
     case 'number':     return raw != null ? Number(raw).toLocaleString() : '—'
@@ -459,6 +472,7 @@ const TRIGGER_DERIVED_REQUIRED = {
   opportunity_line_items: ['oli_name'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
+  enrollments: ['enrollment_name'],
 }
 
 // Per-table name fields populated by a BEFORE INSERT/UPDATE trigger that the
@@ -490,6 +504,7 @@ const DERIVED_READONLY = {
   opportunity_line_items: ['oli_name'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
+  enrollments: ['enrollment_name'],
 }
 const isDerivedReadonlyField = (table, name) =>
   (DERIVED_READONLY[table] || []).includes(name)
@@ -3118,15 +3133,14 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
               padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
-              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+              <span
+                title={`Read-only — this value lives on the related ${rel.table || 'record'} and is edited there.`}
+                style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                 {/* Show just the field name — strip any legacy "Parent · " path
-                    prefix baked into the saved label. */}
+                    prefix baked into the saved label. The RELATED chip is
+                    omitted: a lookup/related field is self-evidently pulled
+                    from a parent record, so the badge was just noise. */}
                 {typeof f.label === 'string' && f.label.includes(' · ') ? f.label.split(' · ').pop() : f.label}
-                <span
-                  title={`Read-only — this value lives on the related ${rel.table || 'record'} and is edited there.`}
-                  style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, color: '#1a5a8a', background: '#e8f3fb', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em' }}>
-                  RELATED
-                </span>
               </span>
               <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>
                 {rel.column_type === 'picklist' && relRaw ? <Badge s={relDisplay} /> : relDisplay}
@@ -3846,7 +3860,25 @@ function RelatedListWidget({
     // enrollment_state also drives the record-type picker's state filter, so
     // a Milwaukee property offers WI record types only. All values remain
     // user-editable on the form. Only fill blanks; never clobber.
-    if (childTable === 'enrollments' && parentTable === 'properties' && parentRecord) {
+    if (childTable === 'enrollments') {
+      // Resolve the property this enrollment documents — whether we're creating
+      // from the property itself, from its opportunity, or from any path that
+      // already seeded property_id (the generic chain seeder above carries
+      // property_id from an opportunity parent) — so the same prefill runs
+      // regardless of where "New Enrollment" was clicked.
+      const _enrPropId = (parentTable === 'properties' ? parentRecordId : null)
+        || prefillObj.property_id
+        || (parentRecord && parentRecord.property_id)
+      let _enrProp = (parentTable === 'properties') ? parentRecord : null
+      if (!_enrProp && _enrPropId) {
+        try {
+          const { data: _p } = await supabase.from('properties').select('*')
+            .eq('id', _enrPropId).eq('property_is_deleted', false).maybeSingle()
+          _enrProp = _p
+        } catch { /* leave null; the form just opens sparser */ }
+      }
+      if (_enrProp) {
+      const parentRecord = _enrProp
       const copyFromProperty = (src, dst) => {
         const v = parentRecord[src]
         if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
@@ -3862,8 +3894,9 @@ function RelatedListWidget({
       copyFromProperty('property_total_number_of_units',      'enrollment_total_units')
       copyFromProperty('property_assisted_units',             'enrollment_assisted_units')
       copyFromProperty('property_category',                   'enrollment_property_category')
-      copyFromProperty('property_number_of_buildings',        'enrollment_number_of_buildings')
-      copyFromProperty('property_total_buildings',            'enrollment_number_of_buildings')
+      // Number of buildings / units-per-building / property addresses / LEA#s
+      // are pre-populated from the property's actual building records below,
+      // not from the property summary columns.
       copyFromProperty('property_mf_property_category',       'enrollment_property_category')
       copyFromProperty('property_mf_raw_property_category_name', 'enrollment_property_category')
       copyFromProperty('property_hud_owner_org',              'enrollment_owner_organization')
@@ -3878,6 +3911,12 @@ function RelatedListWidget({
       copyFromProperty('property_primary_contract_expiration','enrollment_hud_contract_expiration')
       copyFromProperty('property_is_202_811',                 'enrollment_is_202_811')
       copyFromProperty('property_is_opportunity_zone',        'enrollment_is_opportunity_zone')
+      // Payment address defaults to "same as primary" (No) — the payment
+      // address is then seeded from the contractor account below. The user
+      // flips this to Yes only when payment goes somewhere else.
+      if (prefillObj.enrollment_payment_address_different == null) {
+        prefillObj.enrollment_payment_address_different = false
+      }
       // Owner address is one text field on the enrollment; the property holds
       // it in four parts — compose "street, city, ST zip".
       const composeAddress = (street, city, state, zip) => {
@@ -3890,17 +3929,6 @@ function RelatedListWidget({
           parentRecord.property_hud_owner_address, parentRecord.property_hud_owner_city,
           parentRecord.property_hud_owner_state, parentRecord.property_hud_owner_zip)
         if (composed) prefillObj.enrollment_owner_address = composed
-      }
-      // Pre-approval form (WI-IRA-MF-HOMES-ASSESSMENT): the contractor primary
-      // Seed the Property Address(es) list with the property's composed address
-      // so the form opens populated. (Contractor name/email/address now come
-      // from the selected contractor account via related fields, so there is
-      // nothing contractor-side to pre-fill here.)
-      if (prefillObj.enrollment_property_addresses == null || prefillObj.enrollment_property_addresses === '') {
-        const propAddr = composeAddress(
-          parentRecord.property_street, parentRecord.property_city,
-          parentRecord.property_state, parentRecord.property_zip)
-        if (propAddr) prefillObj.enrollment_property_addresses = propAddr
       }
       // HUD program: the MF raw program types when imported, else composed
       // from the program-participation flags.
@@ -3965,13 +3993,16 @@ function RelatedListWidget({
         const fetchRow = (table, id, cols, delCol) => id
           ? supabase.from(table).select(cols).eq('id', id).eq(delCol, false).maybeSingle()
           : Promise.resolve({ data: null })
-        const [contactRes, accountRes, mgmtRes] = await Promise.all([
+        const [contactRes, accountRes, mgmtRes, buildingsRes] = await Promise.all([
           fetchRow('contacts', parentRecord.property_primary_contact_id,
             'contact_name, contact_title, contact_phone, contact_mobile_phone, contact_email', 'contact_is_deleted'),
           fetchRow('accounts', parentRecord.property_account_id,
             'account_name, account_phone, account_email, billing_street, billing_city, billing_state, billing_zip', 'account_is_deleted'),
           fetchRow('accounts', parentRecord.property_management_company_id,
             'account_name, account_phone, account_email', 'account_is_deleted'),
+          supabase.from('buildings')
+            .select('building_address, building_name, building_number_or_name, building_city, building_state, building_zip, building_total_units, building_number_of_units, ira_confirmation_code_lea')
+            .eq('property_id', parentRecord.id).eq('building_is_deleted', false),
         ])
         const fill = (dst, v) => {
           if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
@@ -4006,6 +4037,69 @@ function RelatedListWidget({
           fill('enrollment_management_phone', mgmt.account_phone)
           fill('enrollment_management_email', mgmt.account_email)
         }
+        // Pre-populate the building-derived fields from the property's actual
+        // building records (the pre-approval form asks for these per building):
+        // number of buildings, units per building, the address of each
+        // building, and each building's LEA (IRA confirmation) number.
+        const buildings = buildingsRes?.data || []
+        if (buildings.length) {
+          if (prefillObj.enrollment_number_of_buildings == null)
+            prefillObj.enrollment_number_of_buildings = buildings.length
+
+          const unitCounts = buildings
+            .map(b => Number(b.building_total_units ?? b.building_number_of_units))
+            .filter(n => Number.isFinite(n) && n > 0)
+          if (prefillObj.enrollment_units_per_building == null && unitCounts.length) {
+            const totalUnits = unitCounts.reduce((a, b) => a + b, 0)
+            prefillObj.enrollment_units_per_building = Math.round(totalUnits / buildings.length)
+          }
+
+          if (prefillObj.enrollment_property_addresses == null || prefillObj.enrollment_property_addresses === '') {
+            const addrs = buildings
+              .map(b => composeAddress(
+                b.building_address || b.building_number_or_name || b.building_name,
+                b.building_city, b.building_state, b.building_zip))
+              .filter(Boolean)
+            const uniqAddrs = [...new Set(addrs)]
+            if (uniqAddrs.length) prefillObj.enrollment_property_addresses = uniqAddrs.join('\n')
+          }
+
+          if (prefillObj.enrollment_property_lea_numbers == null || prefillObj.enrollment_property_lea_numbers === '') {
+            const leas = [...new Set(buildings
+              .map(b => String(b.ira_confirmation_code_lea || '').trim())
+              .filter(Boolean))]
+            if (leas.length) prefillObj.enrollment_property_lea_numbers = leas.join(', ')
+          }
+        }
+        // Registered contractor: default to the EES entity for the property's
+        // state so it shows selected on the create form (mirrors the DB default
+        // trigger, which otherwise only fills it on save). Resolved by the same
+        // "Energy Efficiency Services of <state>" naming convention. The payment
+        // address defaults to that contractor's address too (it equals the
+        // primary address unless "payment address different" is set) so the
+        // Payment State/City/ZIP open populated.
+        if (prefillObj.enrollment_contractor_account_id == null) {
+          const stateName = ({
+            WI: 'Wisconsin', NC: 'North Carolina', CO: 'Colorado',
+            MI: 'Michigan', IN: 'Indiana',
+          })[String(parentRecord.property_state || '').trim().toUpperCase()]
+          if (stateName) {
+            const { data: eesAcct } = await supabase.from('accounts')
+              .select('id, billing_street, billing_city, billing_state, billing_zip')
+              .eq('account_is_deleted', false)
+              .ilike('account_name', 'Energy Efficiency Services of ' + stateName)
+              .order('account_record_number')
+              .limit(1)
+              .maybeSingle()
+            if (eesAcct?.id) {
+              prefillObj.enrollment_contractor_account_id = eesAcct.id
+              fill('enrollment_payment_address_line1', eesAcct.billing_street)
+              fill('enrollment_payment_city',          eesAcct.billing_city)
+              fill('enrollment_payment_state',         eesAcct.billing_state)
+              fill('enrollment_payment_zip',           eesAcct.billing_zip)
+            }
+          }
+        }
       } catch (err) {
         console.warn('enrollment prefill: related-record fetch failed', err)
       }
@@ -4031,6 +4125,7 @@ function RelatedListWidget({
       // use). Transient hint — stripped before insert.
       if (parentRecord.property_name) {
         prefillObj.__derivedNameBase = parentRecord.property_name
+      }
       }
     }
 
@@ -5660,6 +5755,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   useEffect(() => {
     setActiveTab(null)
   }, [tableName, recordId])
+
+  // Record the visit for Recent Items (Salesforce parity). Fires once per opened
+  // record, only for the URL-addressed record (so ObjectListSection's non-URL
+  // detail mounts don't count) and only after the record actually loaded in view
+  // mode. Best-effort — recordRecentlyViewed never throws or blocks the page.
+  const recordedViewRef = useRef(null)
+  useEffect(() => {
+    if (isCreate || !recordId) return
+    if (!recordIsUrlAddressed()) return
+    if (data?.record?.id !== recordId) return
+    const key = `${tableName}:${recordId}`
+    if (recordedViewRef.current === key) return
+    recordedViewRef.current = key
+    recordRecentlyViewed(tableName, recordId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableName, recordId, isCreate, data])
 
   // Resolve prefilled parent FK names so the breadcrumb is hierarchical while
   // CREATING a child from a parent's related list — e.g. "New Building" under a
