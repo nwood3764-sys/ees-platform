@@ -34,7 +34,7 @@ function fmtDateTime(v) {
   })
 }
 
-export default function ConversationMessagesWidget({ widget, parentRecordId }) {
+export default function ConversationMessagesWidget({ widget, parentRecordId, embedded = false }) {
   const [messages, setMessages] = useState([])
   const [attByMsg, setAttByMsg] = useState({})
   const [loading, setLoading] = useState(true)
@@ -77,12 +77,8 @@ export default function ConversationMessagesWidget({ widget, parentRecordId }) {
 
   const title = (widget && widget.widget_title) || 'Email'
 
-  return (
-    <div style={{ background: PAL.card, border: `1px solid ${PAL.border}`, borderRadius: 8, overflow: 'hidden' }}>
-      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${PAL.border}`, fontWeight: 600, fontSize: 13.5, color: PAL.text }}>
-        {title}
-      </div>
-      <div style={{ padding: 14 }}>
+  const inner = (
+      <div style={{ padding: embedded ? '2px 0 0' : 14 }}>
         {loading && <div style={{ color: PAL.muted, fontSize: 13 }}>Loading…</div>}
         {error && <div style={{ color: PAL.link, fontSize: 13 }}>{error}</div>}
         {!loading && !error && messages.length === 0 && (
@@ -141,6 +137,15 @@ export default function ConversationMessagesWidget({ widget, parentRecordId }) {
           )
         })}
       </div>
+  )
+
+  if (embedded) return inner
+  return (
+    <div style={{ background: PAL.card, border: `1px solid ${PAL.border}`, borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${PAL.border}`, fontWeight: 600, fontSize: 13.5, color: PAL.text }}>
+        {title}
+      </div>
+      {inner}
     </div>
   )
 }
