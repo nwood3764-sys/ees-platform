@@ -149,6 +149,31 @@ export async function advanceApplication(applicationId, stageValue, note) {
   return data
 }
 
+// ── Communication tracking ──────────────────────────────────────────────
+// Every application carries a full communication/notes trail via the shared
+// activity layer, anchored on the 'service_provider_applications' object.
+
+// The activity log for an application, newest first (internal notes + logged
+// pipeline actions + calls/emails staff record while working the applicant).
+export async function fetchApplicationActivities(applicationId) {
+  const { data, error } = await supabase.rpc('list_activities_for_record', {
+    p_related_object: 'service_provider_applications', p_related_id: applicationId,
+  })
+  if (error) throw error
+  return data || []
+}
+
+// Record a note / logged communication on an application. activityType is one
+// of the shared activity picklist values (Note, Call, Email, Meeting, …).
+export async function logApplicationActivity(applicationId, { activityType = 'Note', subject = null, body = null, direction = null } = {}) {
+  const { data, error } = await supabase.rpc('log_activity', {
+    p_related_object: 'service_provider_applications', p_related_id: applicationId,
+    p_activity_type: activityType, p_subject: subject, p_body: body, p_direction: direction,
+  })
+  if (error) throw error
+  return data
+}
+
 // Decline → stage Declined, account status 'Service Provider Declined'.
 export async function declineServiceProviderApplication(applicationId, reason) {
   const { data, error } = await supabase.rpc('decline_service_provider_application', {

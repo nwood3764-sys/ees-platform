@@ -8,7 +8,7 @@
 // emails the provider a portal invite). Mounted at /m/providers.
 // =============================================================================
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../data/constants'
 import {
   fetchServiceProviderApplications,
@@ -18,6 +18,8 @@ import {
   advanceApplication,
   createManualApplication,
   getDocumentSignedUrl,
+  fetchApplicationActivities,
+  logApplicationActivity,
 } from '../data/serviceProviderService'
 
 const TRADE_OPTS = [
@@ -28,6 +30,10 @@ const STATE_OPTS = ['NC', 'WI', 'MI', 'CO', 'IN']
 
 const MONO = 'JetBrains Mono, ui-monospace, monospace'
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—')
+const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '')
+
+// Activity-type accent (kept within the LEAP palette — no red/orange).
+const ACT_TONE = { Email: '#7eb3e8', Call: '#2aab72', Meeting: '#1e466b', 'Site Visit': '#1e466b', 'Text Message': '#2aab72', Note: '#8fa0b8', Other: '#8fa0b8' }
 
 // The pipeline, in order. `tone` maps to a chip/accent color (no red/orange).
 const STAGE_FLOW = [
@@ -59,6 +65,10 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
   const [w9Busy, setW9Busy] = useState(false)
   const [panel, setPanel] = useState(null) // 'info' | 'decline' | null
   const [note, setNote] = useState('')
+  const [acts, setActs] = useState(null)
+  const [logType, setLogType] = useState('Note')
+  const [logText, setLogText] = useState('')
+  const [logBusy, setLogBusy] = useState(false)
   const stageVal = app.stage?.picklist_value
   const contact = [app.spa_contact_first_name, app.spa_contact_last_name].filter(Boolean).join(' ')
   const email = app.spa_contact_email || app.spa_business_email
@@ -71,6 +81,28 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
       const url = await getDocumentSignedUrl(app.spa_w9_document_id)
       if (url) window.open(url, '_blank', 'noopener'); else alert('The W-9 file could not be found.')
     } catch (e) { alert(e?.message || 'Could not open the W-9.') } finally { setW9Busy(false) }
+  }
+
+  // Communication trail — load lazily when the card is expanded, and refresh
+  // after any parent pipeline action (busy true → false) so logged movements
+  // (approve/decline/request-info/move) appear without a full remount.
+  const loadActs = useCallback(async () => {
+    try { setActs(await fetchApplicationActivities(app.id)) } catch { setActs([]) }
+  }, [app.id])
+  useEffect(() => { if (open && acts === null) loadActs() }, [open, acts, loadActs])
+  const prevBusy = useRef(false)
+  useEffect(() => {
+    if (prevBusy.current && !busy && open) loadActs()
+    prevBusy.current = busy
+  }, [busy, open, loadActs])
+
+  const addLog = async () => {
+    const body = logText.trim(); if (!body) return
+    setLogBusy(true)
+    try {
+      await logApplicationActivity(app.id, { activityType: logType, subject: `${logType} logged`, body })
+      setLogText(''); await loadActs()
+    } catch (e) { alert(e?.message || 'Could not save the entry.') } finally { setLogBusy(false) }
   }
 
   const row = (k, v) => v ? <div style={{ display: 'flex', gap: 8, fontSize: 13, padding: '3px 0' }}><span style={{ color: C.textMuted, minWidth: 150 }}>{k}</span><span style={{ color: C.textPrimary }}>{v}</span></div> : null
@@ -117,6 +149,53 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
             {app.spa_w9_document_id
               ? <button onClick={openW9} disabled={w9Busy} style={{ background: '#eef6ff', border: `1px solid ${C.sky}`, color: '#1a5a8a', borderRadius: 6, padding: '4px 12px', fontSize: 12.5, fontWeight: 600, cursor: w9Busy ? 'default' : 'pointer' }}>{w9Busy ? 'Opening…' : 'View W-9'}</button>
               : <span style={{ color: C.textMuted }}>No W-9 uploaded — request it before approving.</span>}
+          </div>
+
+          {/* communication trail */}
+          <div style={{ marginTop: 14, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textSecondary, marginBottom: 8, letterSpacing: 0.2 }}>COMMUNICATION</div>
+
+            {/* add entry */}
+            <div style={{ background: '#f7f9fc', borderRadius: 8, padding: 10 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                <select value={logType} onChange={(e) => setLogType(e.target.value)} style={{ padding: '5px 8px', borderRadius: 7, border: `1px solid ${C.borderDark}`, fontSize: 12.5, background: '#fff', color: C.textPrimary, cursor: 'pointer' }}>
+                  {['Note', 'Call', 'Email', 'Meeting', 'Text Message', 'Site Visit', 'Other'].map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <span style={{ fontSize: 11.5, color: C.textMuted }}>Log an interaction or leave an internal note.</span>
+              </div>
+              <textarea value={logText} onChange={(e) => setLogText(e.target.value)} rows={2} placeholder="What happened? (e.g. Called the owner to confirm license — left voicemail.)"
+                style={{ width: '100%', padding: 9, border: `1px solid ${C.borderDark}`, borderRadius: 8, fontFamily: 'inherit', fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              <div style={{ marginTop: 6 }}>
+                <button disabled={logBusy || !logText.trim()} onClick={addLog}
+                  style={{ padding: '7px 14px', background: C.emerald, color: '#06231a', border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: logText.trim() ? 'pointer' : 'default', opacity: (logBusy || !logText.trim()) ? 0.6 : 1 }}>
+                  {logBusy ? 'Saving…' : 'Add to log'}
+                </button>
+              </div>
+            </div>
+
+            {/* timeline */}
+            <div style={{ marginTop: 10 }}>
+              {acts === null ? <div style={{ fontSize: 12.5, color: C.textMuted }}>Loading history…</div>
+                : acts.length === 0 ? <div style={{ fontSize: 12.5, color: C.textMuted }}>No communication logged yet.</div>
+                : acts.map((a) => {
+                  const tone = ACT_TONE[a.activity_type] || C.textMuted
+                  return (
+                    <div key={a.id} style={{ display: 'flex', gap: 10, padding: '8px 0', borderTop: `1px solid ${C.border}` }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 999, background: tone, marginTop: 5, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: tone }}>{a.activity_type}</span>
+                          {a.subject && <span style={{ fontSize: 12.5, color: C.textPrimary, fontWeight: 600 }}>{a.subject}</span>}
+                          <span style={{ flex: 1 }} />
+                          <span style={{ fontSize: 11.5, color: C.textMuted, whiteSpace: 'nowrap' }}>{fmtDateTime(a.performed_at)}</span>
+                        </div>
+                        {a.body && <div style={{ fontSize: 12.5, color: C.textSecondary, marginTop: 2, whiteSpace: 'pre-wrap' }}>{a.body}</div>}
+                        {a.performed_by_name && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{a.performed_by_name}</div>}
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
           </div>
         </div>
       )}
@@ -225,11 +304,34 @@ export default function ServiceProviderModule() {
     catch (e) { setToast(e?.message || 'Action failed.') }
     finally { setBusyId(null) }
   }
-  const onAdvance = (app, stage) => act(app, () => advanceApplication(app.id, stage), `Moved to ${STAGE_BY_VALUE[stage]?.label || stage}.`)
-  const onRequestInfo = (app, note) => act(app, () => advanceApplication(app.id, 'Application Additional Info Requested', note), 'Marked as information requested.')
-  const onDecline = (app, reason) => act(app, () => declineServiceProviderApplication(app.id, reason), 'Application declined.')
-  const onApprove = (app) => act(app, () => approveWithoutInvite(app.id), 'Approved — account activated. Send the portal invite when ready.')
-  const onInvite = (app) => act(app, () => sendPortalInvite(app.id), (r) => r?.invited ? `Portal invite sent to ${r.email}.` : `${r?.note || 'Invite processed.'}`)
+  // Each pipeline action records a communication-trail entry so the whole
+  // onboarding history (moves, info requests, decisions, invites) is auditable.
+  const logMove = (app, subject, body) => logApplicationActivity(app.id, { activityType: 'Note', subject, body }).catch(() => {})
+  const onAdvance = (app, stage) => act(app, async () => {
+    const r = await advanceApplication(app.id, stage)
+    await logMove(app, `Moved to ${STAGE_BY_VALUE[stage]?.label || stage}`, null)
+    return r
+  }, `Moved to ${STAGE_BY_VALUE[stage]?.label || stage}.`)
+  const onRequestInfo = (app, note) => act(app, async () => {
+    const r = await advanceApplication(app.id, 'Application Additional Info Requested', note)
+    await logMove(app, 'Information requested from applicant', note)
+    return r
+  }, 'Marked as information requested.')
+  const onDecline = (app, reason) => act(app, async () => {
+    const r = await declineServiceProviderApplication(app.id, reason)
+    await logMove(app, 'Application declined', reason)
+    return r
+  }, 'Application declined.')
+  const onApprove = (app) => act(app, async () => {
+    const r = await approveWithoutInvite(app.id)
+    await logMove(app, 'Approved — account activated', null)
+    return r
+  }, 'Approved — account activated. Send the portal invite when ready.')
+  const onInvite = (app) => act(app, async () => {
+    const r = await sendPortalInvite(app.id)
+    await logMove(app, 'Portal invite sent', r?.email ? `Invite emailed to ${r.email}.` : null)
+    return r
+  }, (r) => r?.invited ? `Portal invite sent to ${r.email}.` : `${r?.note || 'Invite processed.'}`)
 
   const counts = useMemo(() => {
     const c = {}
