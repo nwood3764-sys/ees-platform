@@ -579,6 +579,16 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
     { type: 'sealed_totals_list' },
     { type: 'sealed_signature_block' },
   ],
+  // Combustion Safety Notification (Large Multifamily 5+ Units) — its own engine.
+  combustionSafety: [
+    { type: 'combustion_intro' },
+    { type: 'combustion_common_area' },
+    { type: 'combustion_unit_samples' },
+    { type: 'combustion_ventilation' },
+    { type: 'combustion_property_owner' },
+    { type: 'combustion_signature' },
+    { type: 'combustion_footer' },
+  ],
 })
 
 /**
@@ -606,11 +616,14 @@ export async function buildEesPdf(m, kind, sections, opts = {}) {
  * includes acknowledgment_and_signature yield tabs.
  */
 export async function buildSubmittalPdfWithSignatureTabs(m, kind, sections) {
-  // Sealed documents route through the Sealed engine; today only the EES
-  // documents carry a captured property-owner signature tab. Guard so callers
-  // get a clear signal rather than a silent empty tab list.
-  if (DOCUMENT_KIND_ENGINE[kind] === 'sealed')
+  // Sealed documents route through the Sealed engine and carry no captured
+  // signature tab. The EES documents and the Combustion Safety Notification
+  // both record a property-owner / customer signature tab.
+  const engine = DOCUMENT_KIND_ENGINE[kind]
+  if (engine === 'sealed')
     throw new Error('Signature capture is not implemented for Sealed documents')
+  if (engine === 'combustion_safety')
+    return buildCombustionPdf(m, kind, sections, { collectTabs: true })
   return buildEesPdf(m, kind, sections, { collectTabs: true })
 }
 
@@ -786,28 +799,280 @@ export async function buildSealedPdf(m, kind, sections) {
   return x.d.output('blob')
 }
 
+// ===========================================================================
+// Combustion Safety Notification engine — 'combustion_safety_notification'.
+//
+// A purpose-built engine for the Focus on Energy IRA Multifamily "Notification
+// of Combustion Safety (Large Multifamily 5+ Units)" form. Unlike the EES /
+// Sealed documents (which are COMPUTED from records), this is a CAPTURE form:
+// the model carries inspection results a person filled in, per building and per
+// sampled unit. It shares none of the EES/Sealed sections — its own checkbox
+// grid, per-unit repeating blocks, and its own context helpers.
+//
+// Model shape (assembled in paperworkService.loadCombustionContext):
+//   { building:{name}, property:{name,street,cityStateZip},
+//     owner:{name,address,cityStateZip},
+//     ventilation:{status,cfm,notes},
+//     common:{gas_leak_result,gas_leak_location,gas_detector_installed,
+//             ambient_co_result,co_detector_installed,co_detector_location,
+//             heating_plant_co_status,heating_plant_spillage,
+//             water_heater_co_status,water_heater_spillage,notes},
+//     samples:[{unit_number, ...gas/ambient..., furnace_co_status,
+//               furnace_spillage, water_heater_co_status, water_heater_spillage,
+//               stove_co_status, notes}],
+//     totalUnits, sampleCount }
+// ===========================================================================
+
+// Sampling rate per the form's table (Total units in building → units to sample).
+export function combustionSampleCount(totalUnits) {
+  const n = Number(totalUnits) || 0
+  if (n >= 100) return 20
+  if (n >= 50) return 15
+  if (n >= 30) return 10
+  if (n >= 10) return 7
+  if (n >= 5) return 4
+  return n
+}
+
+const CO_STATUS_OPTS   = ['Not Tested / Not Applicable', 'Acceptable', 'Unacceptable']
+const SPILLAGE_OPTS    = ['Not Tested / Not Applicable', 'None Found', 'Found']
+const GAS_LEAK_OPTS    = ['Not Tested / Not Applicable', 'Found', 'None Found']
+const AMBIENT_CO_OPTS  = ['Not Tested / Not Applicable', '0-8 ppm', '9-35 ppm', '36-69 ppm', '70+ ppm']
+
+/** Shared drawing context for the combustion notification. */
+async function buildCombustionContext(m, kind, opts = {}) {
+  const P = await pdfCanvas(40)
+  const { d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc } = P
+  const INK = C.ink, MUT = C.mut, NAVY = C.navy
+  const boxL = [90, 104, 122]
+
+  // A checkbox: 8pt square; an X when checked.
+  const checkbox = (px, py, on) => {
+    stroke(boxL); d.setLineWidth(.8); d.rect(px, py - 7, 8, 8)
+    if (on) { d.setLineWidth(1.1); tc(NAVY); stroke(NAVY)
+      d.line(px + 1, py - 6, px + 7, py); d.line(px + 7, py - 6, px + 1, py); stroke(boxL) }
+  }
+  // Section band: navy uppercase heading on a light rule.
+  const band = (txt, gap = 12) => { need(26); st.y += gap
+    tc(NAVY); font(9.5, 'bold'); t(M, st.y + 9, String(txt).toUpperCase())
+    st.y += 13; stroke([150, 160, 174]); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 6 }
+  const subHead = (txt) => { need(16); tc([60, 76, 94]); font(8.5, 'bold'); t(M, st.y + 9, txt); st.y += 12 }
+  const para = (txt, sz = 8.5) => { tc(INK); font(sz)
+    const ls = wrap(txt, CW); need(ls.length * (sz + 2.5) + 4)
+    ls.forEach((ln, k) => t(M, st.y + 8 + k * (sz + 2.5), ln)); st.y += ls.length * (sz + 2.5) + 2 }
+
+  // A labelled row of checkbox options that flows across the width and wraps.
+  // `selected` is the chosen value; every option is shown, the chosen one is X'd.
+  const choices = (label, options, selected, indent = 12) => {
+    tc([60, 76, 94]); font(8, 'bold'); need(13)
+    const labW = label ? d.getTextWidth(label) + 8 : 0
+    if (label) { t(M, st.y + 8, label) }
+    font(8.5); tc(INK)
+    let px = M + (label ? labW : indent), rowY = st.y + 8
+    const rightEdge = W - M
+    for (const opt of options) {
+      const on = selected != null && String(selected).trim().toLowerCase() === String(opt).trim().toLowerCase()
+      const w = 8 + 4 + d.getTextWidth(opt) + 14
+      if (px + w > rightEdge) { st.y += 12; rowY = st.y + 8; px = M + indent }
+      checkbox(px, rowY, on); tc(INK); t(px + 12, rowY, opt)
+      px += w
+    }
+    st.y += 12
+  }
+  // A single check + label (for booleans like "Gas detector(s) installed").
+  const flag = (label, on, indent = 12) => { need(13); const py = st.y + 8
+    checkbox(M + indent, py, !!on); tc(INK); font(8.5); t(M + indent + 12, py, label); st.y += 12 }
+  // Inline "field: value" line (blank underline when empty).
+  const fieldLine = (label, value) => { need(13); tc([60, 76, 94]); font(8, 'bold')
+    t(M + 12, st.y + 8, label); const lx = M + 12 + d.getTextWidth(label) + 6
+    tc(INK); font(8.5)
+    if (value != null && String(value).trim() !== '') t(lx, st.y + 8, String(value))
+    else { stroke(boxL); d.setLineWidth(.5); d.line(lx, st.y + 9, W - M, st.y + 9) }
+    st.y += 12 }
+
+  // One appliance's CO + spillage rows (spillage optional — e.g. Stove is CO only).
+  const appliance = (name, coStatus, spillage) => {
+    subHead(name)
+    choices('CO Levels:', CO_STATUS_OPTS, coStatus)
+    if (spillage !== false) choices('Spillage:', SPILLAGE_OPTS, spillage)
+  }
+  // The gas-leak + ambient-CO + detector block shared by common area and units.
+  const gasAndAmbient = (r) => {
+    subHead('Gas Leak')
+    choices('', GAS_LEAK_OPTS, r.gas_leak_result)
+    if (r.gas_leak_location) fieldLine('Location(s): ', r.gas_leak_location)
+    flag('Gas detector(s) installed', r.gas_detector_installed)
+    subHead('Ambient Carbon Monoxide Levels')
+    choices('', AMBIENT_CO_OPTS, r.ambient_co_result)
+    flag('Carbon monoxide detector(s) installed', r.co_detector_installed)
+    if (r.co_detector_location) fieldLine('Location(s): ', r.co_detector_location)
+  }
+  const notes = (txt) => { subHead('Notes / Comments / Reason(s) for not testing:')
+    if (txt && String(txt).trim()) para(txt, 8.5)
+    else { need(14); stroke(boxL); d.setLineWidth(.5); d.line(M, st.y + 6, W - M, st.y + 6); st.y += 12 } }
+
+  return { m, d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc,
+    checkbox, band, subHead, para, choices, flag, fieldLine, appliance, gasAndAmbient, notes,
+    collectTabs: !!opts.collectTabs, signatureTabs: [] }
+}
+
+export const COMBUSTION_SECTION_RENDERERS = {
+  /* Title + the combustion-safety educational preamble. */
+  combustion_intro(x, cfg = {}) {
+    const { W, M, C, st, font, t, tc, para, d, stroke } = x
+    tc(C.navy); font(13, 'bold'); t(M, st.y + 12, cfg.title || 'NOTIFICATION OF COMBUSTION SAFETY')
+    st.y += 16; tc([104, 116, 132]); font(10, 'bold'); t(M, st.y + 10, cfg.subtitle || 'Large Multifamily (5+ Units)')
+    st.y += 14; stroke([150, 160, 174]); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 8
+    para(cfg.body || 'The building’s testing was conducted in accordance with the protocols approved by the U.S. Department of Energy Home Performance with ENERGY STAR® Program. Combustion safety inspections and tests are performed to identify potential health and safety conditions. These issues can be potential life-threatening or hazardous situations. Until these issues have been resolved, you are not eligible for IRA Home Energy Rebates.')
+    para(cfg.body2 || 'Carbon monoxide is a toxic, colorless, odorless gas produced when insufficient combustion air is supplied, the burner is improperly tuned, and/or the appliance is malfunctioning. Maintain equipment per the manufacturer’s instructions, change filters regularly, schedule annual tune-ups for space- and water-heating equipment, keep intake and exhaust ports clear, and test CO alarms monthly (replace units every three to five years).')
+    x.subHead('A separate Combustion Safety Notification form is completed for each building being tested.')
+  },
+
+  /* COMMON AREAS / SHARED EQUIPMENT block. */
+  combustion_common_area(x) {
+    const { m, band, gasAndAmbient, appliance, notes } = x
+    const c = m.common || {}
+    band('Common Areas / Shared Equipment')
+    gasAndAmbient(c)
+    x.subHead('Equipment Carbon Monoxide Levels')
+    appliance('Heating Plant (Furnace, Boiler, Etc.)', c.heating_plant_co_status, c.heating_plant_spillage)
+    appliance('Water Heater(s)', c.water_heater_co_status, c.water_heater_spillage)
+    notes(c.notes)
+  },
+
+  /* IN-UNIT EQUIPMENT — sampling table + one block per sampled unit. */
+  combustion_unit_samples(x) {
+    const { m, W, M, st, font, t, tc, d, stroke, fill, band, subHead, gasAndAmbient, appliance, notes, need, fieldLine } = x
+    band('In-Unit Equipment')
+    subHead('IRA Multifamily Combustion Safety Sampling Rate')
+    // sampling reference table
+    const rows = [['Total Units in Building', 'Units to Sample'], ['5-9', '4'], ['10-29', '7'],
+      ['30-49', '10'], ['50-99', '15'], ['100+', '20']]
+    const tw = 300, cx = M + 150, rh = 14
+    need(rows.length * rh + 6)
+    rows.forEach((r, i) => {
+      if (i === 0) { fill([240, 243, 247]); d.rect(M, st.y, tw, rh, 'F') }
+      stroke([203, 210, 219]); d.setLineWidth(.5); d.rect(M, st.y, tw, rh); d.line(cx, st.y, cx, st.y + rh)
+      tc([34, 43, 53]); font(8, i === 0 ? 'bold' : 'normal')
+      t(M + 6, st.y + 10, r[0]); t(cx + 6, st.y + 10, r[1]); st.y += rh
+    })
+    st.y += 6
+    fieldLine('Total number of units in the building: ', m.totalUnits != null ? String(m.totalUnits) : '')
+    fieldLine('Number of units to sample: ', m.sampleCount != null ? String(m.sampleCount) : '')
+    const samples = m.samples || []
+    samples.forEach((u, i) => {
+      // keep each unit block's header with its first rows
+      need(40); st.y += 8
+      tc(x.C.navy); font(9, 'bold')
+      t(M, st.y + 9, `Sample #${i + 1}` + (u.unit_number ? `  —  Unit ${u.unit_number}` : '  —  Unit #: ____________'))
+      st.y += 13; stroke([203, 210, 219]); d.setLineWidth(.5); d.line(M, st.y, W - M, st.y); st.y += 4
+      gasAndAmbient(u)
+      subHead('Equipment Carbon Monoxide Levels')
+      appliance('Furnace / Boiler(s)', u.furnace_co_status, u.furnace_spillage)
+      appliance('Water Heater(s)', u.water_heater_co_status, u.water_heater_spillage)
+      appliance('Stove(s)', u.stove_co_status, false)
+      notes(u.notes)
+    })
+    if (!samples.length) { subHead('No sampled units recorded.') }
+  },
+
+  /* Mechanical ventilation. */
+  combustion_ventilation(x) {
+    const { m, band, para, choices, fieldLine, notes } = x
+    const v = m.ventilation || {}
+    band('Mechanical Ventilation')
+    para('Size and type of mechanical ventilation required is based on occupancy, number of units, air change rate of the building, and existence of combustion equipment. By confirming below you indicate that the building and individual units have adequate ventilation according to the appropriate code.')
+    choices('Ventilation:', ['Not Tested', 'Tested'], v.status)
+    fieldLine('Existing total CFM: ', v.cfm != null && String(v.cfm) !== '' ? String(v.cfm) : '')
+    notes(v.notes)
+  },
+
+  /* Property / owner information. */
+  combustion_property_owner(x) {
+    const { m, band, fieldLine } = x
+    const o = m.owner || {}, p = m.property || {}
+    band('Property Information')
+    fieldLine('Owner/Management Company Name: ', o.name)
+    fieldLine('Owner/Management Company Address: ', o.address)
+    fieldLine('City / State / ZIP: ', o.cityStateZip)
+    fieldLine('Property / Building: ', [p.name, m.building && m.building.name].filter(Boolean).join(' — '))
+  },
+
+  /* Acknowledgment paragraph + customer signature & date rules (+ sig tabs). */
+  combustion_signature(x, cfg = {}) {
+    const { W, H, M, CW, C, st, font, t, tc, wrap, need, stroke, d, para } = x
+    x.band('Signature')
+    para(cfg.acknowledgment || 'By signing below, you acknowledge that you have been informed of the combustion safety and ventilation recommendation(s), and you agree to correct any issue prior to submitting for a rebate. This notice does not constitute an endorsement or warranty regarding the presence or absence of other real or potential health and safety hazards that may exist at this address or on the premises.')
+    need(50); st.y += 26; stroke([68, 88, 110]); d.setLineWidth(1)
+    d.line(M, st.y, M + 300, st.y); d.line(W - M - 150, st.y, W - M, st.y)
+    tc(C.mut); font(8.5); t(M, st.y + 10, cfg.signer_label || 'Customer Signature'); t(W - M - 150, st.y + 10, 'Date')
+    if (x.collectTabs) {
+      const page = d.getNumberOfPages(), boxH = 26
+      x.signatureTabs.push(
+        { recipient_order: 1, tab_type: 'sig',  page, x: M,           y: H - st.y, width: 300, height: boxH },
+        { recipient_order: 1, tab_type: 'date', page, x: W - M - 150,  y: H - st.y, width: 150, height: boxH },
+      )
+    }
+  },
+
+  /* Focus on Energy program footer. */
+  combustion_footer(x) {
+    const { W, H, M, C, st, font, t, tc, stroke, d } = x
+    const fy = H - 52
+    if (st.y > fy - 10) d.addPage()
+    stroke(C.line); d.setLineWidth(.5); d.line(M, fy, W - M, fy)
+    tc(C.mut); font(7.5)
+    const l1 = 'Focus on Energy, Wisconsin utilities’ statewide program for energy efficiency and renewable energy, helps eligible'
+    const l2 = 'residents and businesses save energy and money. Funding for the Wisconsin IRA Home Energy Rebate programs is'
+    const l3 = 'provided by the U.S. Department of Energy pursuant to the Inflation Reduction Act of 2022.   ©2025 Wisconsin Focus on Energy'
+    t(W / 2, fy + 11, l1, { align: 'center' }); t(W / 2, fy + 20, l2, { align: 'center' })
+    font(7, 'italic'); t(W / 2, fy + 30, l3, { align: 'center' })
+  },
+}
+
+/**
+ * Render the Combustion Safety Notification. `sections` overrides the built-in
+ * list. Returns a Blob, or { blob, tabs } when opts.collectTabs is set.
+ */
+export async function buildCombustionPdf(m, kind, sections, opts = {}) {
+  const x = await buildCombustionContext(m, kind, opts)
+  const list = sections && sections.length ? sections : DEFAULT_DOCUMENT_SECTIONS.combustionSafety
+  if (!list) throw new Error(`Unknown combustion document kind: ${kind}`)
+  for (const s of list) {
+    const render = COMBUSTION_SECTION_RENDERERS[s.type]
+    if (!render) throw new Error(`Unknown combustion section type: ${s.type}`)
+    render(x, s.config || {})
+  }
+  if (opts.collectTabs) return { blob: x.d.output('blob'), tabs: x.signatureTabs }
+  return x.d.output('blob')
+}
+
 // ---------------------------------------------------------------------------
 // Kind → rendering engine, and a single dispatch used by the modal, the
 // template editor, and the live preview. EES kinds render through
-// SECTION_RENDERERS; Sealed kinds through SEALED_SECTION_RENDERERS. Keeping the
+// SECTION_RENDERERS; Sealed kinds through SEALED_SECTION_RENDERERS; the
+// combustion notification through COMBUSTION_SECTION_RENDERERS. Keeping the
 // map here means callers never branch on the kind themselves.
 // ---------------------------------------------------------------------------
 export const DOCUMENT_KIND_ENGINE = Object.freeze({
   audit: 'ees', proposal: 'ees', invoice: 'ees',
   sealed_proposal: 'sealed', sealed_invoice: 'sealed',
+  combustion_safety_notification: 'combustion_safety',
 })
 
 /** Section-type catalogue per engine — the source of truth for the editor palette. */
 export const SECTION_TYPES_BY_ENGINE = Object.freeze({
   ees: Object.keys(SECTION_RENDERERS),
   sealed: Object.keys(SEALED_SECTION_RENDERERS),
+  combustion_safety: Object.keys(COMBUSTION_SECTION_RENDERERS),
 })
 
 /** Render any submittal document by kind, dispatching to the right engine. */
 export async function buildSubmittalPdf(m, kind, sections) {
-  return DOCUMENT_KIND_ENGINE[kind] === 'sealed'
-    ? buildSealedPdf(m, kind, sections)
-    : buildEesPdf(m, kind, sections)
+  const engine = DOCUMENT_KIND_ENGINE[kind]
+  if (engine === 'sealed') return buildSealedPdf(m, kind, sections)
+  if (engine === 'combustion_safety') return buildCombustionPdf(m, kind, sections)
+  return buildEesPdf(m, kind, sections)
 }
 
 // ---------------------------------------------------------------------------

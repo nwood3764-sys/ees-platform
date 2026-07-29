@@ -18,6 +18,7 @@ import { Badge, Icon } from './UI'
 const ProjectReportModal                  = lazy(() => import('./ProjectReportModal'))
 const ProjectSubmittalDocumentsModal      = lazy(() => import('./ProjectSubmittalDocumentsModal'))
 const SubmittalDocumentTemplateEditor     = lazy(() => import('./SubmittalDocumentTemplateEditor'))
+const CombustionSafetyNotificationModal   = lazy(() => import('./CombustionSafetyNotificationModal'))
 const ProjectSchedulerWizard              = lazy(() => import('./scheduler/ProjectSchedulerWizard'))
 const ServiceAppointmentRescheduleModal   = lazy(() => import('./scheduler/ServiceAppointmentRescheduleModal'))
 const WorkOrderScheduleModal              = lazy(() => import('./scheduler/WorkOrderScheduleModal'))
@@ -5673,6 +5674,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Program submittal document generator (projects only). Holds WHICH
   // submittal stage was requested — each program stage is its own filing.
   const [submittalStage, setSubmittalStage] = useState(null)
+  const [showCombustionModal, setShowCombustionModal] = useState(false)
   const [showSubmittalEditor, setShowSubmittalEditor] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
@@ -7226,6 +7228,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       () => setSubmittalStage(SUBMITTAL_STAGES.PROJECT_RESERVATION),
     [ACTION_KEYS.GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL]:
       () => setSubmittalStage(SUBMITTAL_STAGES.FINAL_PROJECT_PAYMENT_REQUEST),
+    [ACTION_KEYS.NOTIFICATION_OF_COMBUSTION_SAFETY]:
+      () => setShowCombustionModal(true),
     [ACTION_KEYS.EDIT_SUBMITTAL_TEMPLATE]: () => setShowSubmittalEditor(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
@@ -7993,6 +7997,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             templateId={recordId}
             onClose={() => setShowSubmittalEditor(false)}
             onSaved={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
+
+        {/* Notification of Combustion Safety line editor (buildings only) */}
+        {showCombustionModal && tableName === 'buildings' && (
+          <CombustionSafetyNotificationModal
+            buildingId={recordId}
+            building={record}
+            onClose={() => { setShowCombustionModal(false); setReloadTick(t => t + 1) }}
           />
         )}
 
