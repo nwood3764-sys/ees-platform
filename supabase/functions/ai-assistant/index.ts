@@ -16,8 +16,8 @@
 //
 // Confirmation model:
 //   • Read-only tools (describe_object, query_records, run_report,
-//     global_search, fuzzy_resolve) execute immediately and feed back into the
-//     loop.
+//     global_search, fuzzy_resolve, search_help_articles) execute immediately
+//     and feed back into the loop.
 //   • Mutating tools (record_create, record_update, status_change, and the
 //     curated Option-A actions) are NOT executed here. They are returned to
 //     the client as a `proposed_actions` array for explicit user
@@ -35,6 +35,8 @@
 //   Option B (generic, any object):
 //     describe_object, query_records, create_record, update_record
 //   Resolution helpers: global_search, fuzzy_resolve
+//   Help / how-to: search_help_articles (reads the help-article library so the
+//     assistant can answer "how do I…" / "where do I find…" questions)
 //   All curated tools lower to the same {record_create|record_update|
 //   status_change|report_create} proposed-action shape that
 //   commit_screen_flow_run accepts.
@@ -241,6 +243,19 @@ const TOOLS = [
       required: ["kind", "term"],
     },
   },
+  {
+    name: "search_help_articles",
+    description:
+      "Search LEAP's built-in help articles — the same Help Center library users can browse — and get their full content. Use this to answer questions about HOW TO USE LEAP itself: 'how do I…', 'where do I find…', 'how do I configure/set up…', 'how does <feature> work', and similar how-to / navigation / feature questions — as distinct from reading the user's business records (use query_records / run_report for data). Returns ranked articles with their markdown body, scoped to what the signed-in user is allowed to see. Read-only. In LEAP an opportunity's 'stages' are status picklist values scoped to a record type — search terms like 'stage', 'record type', or 'picklist scoping' surface the right article.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The key terms of what the user wants to do, e.g. 'change opportunity stages per record type', 'add a user', 'build a report'. Use a short phrase or keywords, not a full sentence." },
+        limit: { type: "integer", description: "Max articles to return, default 5, ceiling 10." },
+      },
+      required: ["query"],
+    },
+  },
 ]
 
 // The system prompt is built per request so the model can quote the user's
@@ -251,7 +266,18 @@ function buildSystemPrompt(appBaseUrl: string): string {
   const URL_FORM = appBaseUrl ? `${appBaseUrl}/<table>/<id>` : "<your LEAP site>/<table>/<id>"
   return `You are the LEAP assistant for Energy Efficiency Services of Wisconsin. LEAP is the company's operations platform (CRM, field service, incentives, inventory).
 
-You help the signed-in user take actions by plain conversation: creating records, updating fields, changing statuses, running reports, looking things up. You operate strictly within the user's own permissions — if an action is refused, explain plainly and stop; never try to work around a permission.
+You help the signed-in user two ways:
+1. Take actions by plain conversation: creating records, updating fields, changing statuses, running reports, looking things up. You operate strictly within the user's own permissions — if an action is refused, explain plainly and stop; never try to work around a permission.
+2. Answer questions about how to USE LEAP: how to do something, where to find a setting or menu, how a feature works. These are fully in scope — answer them from LEAP's built-in help articles (see below). Never tell the user a how-to question is outside what you can do.
+
+## Answering how-to and "where do I…" questions
+
+Users will ask how to do things in LEAP ("how do I change the stages per record type for an opportunity?", "where do I add a user?", "how do I build a report?"). Treat these as in scope and answer them from the help library, not from memory:
+
+- Call search_help_articles with the key terms of the question. It returns matching articles' full content, already scoped to what this user may see.
+- Base your answer — ESPECIALLY any menu path, button name, or step sequence — ONLY on what the returned articles actually say. Give the concrete steps and name the exact place in the app (e.g. the Object Manager, LEAP Admin / Setup, the Reports module). Cite the article by its title.
+- If search_help_articles returns nothing useful, say plainly that you couldn't find a help article on it and point the user to the Help Center (the Help area) or their LEAP administrator. Do NOT invent a menu path, button, or setting you did not read in an article — a wrong navigation instruction is worse than admitting you don't have one.
+- In LEAP, an opportunity's "stages" are status picklist values scoped to a record type (governed by the Lifecycle Builder / picklist record-type scoping), not a separate "stage" object — so search "stage", "record type", or "picklist scoping" to surface the right article.
 
 ## Plan the whole request before proposing anything
 
@@ -635,6 +661,29 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
         record_number: r.record_number || undefined, match_rank: r.match_rank,
       }))
       return JSON.stringify({ kind, term, object: input.object || null, candidates })
+    }
+    if (name === "search_help_articles") {
+      const query = String(input.query ?? "").trim()
+      if (!query) return JSON.stringify({ error: "Provide a search query." })
+      const limit = Math.min(Math.max(Number(input.limit) || 5, 1), 10)
+      const { data, error } = await userClient.rpc("help_search_articles_for_assistant", {
+        p_query: query,
+        p_limit: limit,
+      })
+      if (error) return JSON.stringify({ error: error.message })
+      const articles = (Array.isArray(data) ? data : []).map((a: any) => {
+        const bodyRaw = typeof a.ha_body_markdown === "string" ? a.ha_body_markdown : ""
+        // Cap each body so one long article can't blow the tool-loop context budget.
+        const body = bodyRaw.length > 6000 ? bodyRaw.slice(0, 6000) + "\n\n…(truncated)" : bodyRaw
+        return {
+          record_number: a.ha_record_number || undefined,
+          title: a.ha_title,
+          summary: a.ha_summary || undefined,
+          category: a.ha_category || undefined,
+          body,
+        }
+      })
+      return JSON.stringify({ query, article_count: articles.length, articles })
     }
     return JSON.stringify({ error: `Unknown read tool ${name}` })
   } catch (e) {

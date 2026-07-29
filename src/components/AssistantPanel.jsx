@@ -568,8 +568,9 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
           <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
             {turns.length === 0 && (
               <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.5 }}>
-                Ask me to create a work order, update a record, change a status, run a report, or look something up.
-                I only do what your permissions allow, and I always show you an action before it runs.
+                Ask me to create a work order, update a record, change a status, run a report, or look something up —
+                or ask how to do something in LEAP ("how do I…", "where do I find…"). I only do what your permissions
+                allow, and I always show you an action before it runs.
               </div>
             )}
             {turns.map((turn, ti) => (
