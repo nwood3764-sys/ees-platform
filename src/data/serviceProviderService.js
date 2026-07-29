@@ -5,6 +5,7 @@
 // =============================================================================
 
 import { supabase } from '../lib/supabase'
+import { sendNewEmail, resolveOutboundMailboxForAnchor } from './conversationsService'
 
 // Applications with resolved stage / trade / account, newest first.
 export async function fetchServiceProviderApplications() {
@@ -118,6 +119,40 @@ export async function sendPortalInvite(applicationId) {
   if (error) throw new Error(error.message || 'Invite failed')
   if (data && data.ok === false) throw new Error(data.error || data.detail || 'Invite failed')
   return data
+}
+
+// Email the provider their portal invite link through the Graph pipeline,
+// threaded on their account (reliable DKIM delivery — the Supabase auth mailer
+// isn't configured on this platform). Throws with .code='no_mailbox' if the
+// provider's state has no outbound mailbox so the caller can fall back.
+export async function emailProviderInvite({ accountId, contactId, toEmail, toName, inviteUrl }) {
+  if (!accountId || !toEmail || !inviteUrl) throw new Error('accountId, toEmail and inviteUrl are required')
+  const mb = await resolveOutboundMailboxForAnchor({ anchorObject: 'accounts', anchorRecordId: accountId })
+  if (!mb?.outbound_mailbox_id) {
+    const e = new Error("No outbound mailbox is configured for this provider's state.")
+    e.code = 'no_mailbox'
+    throw e
+  }
+  const body = [
+    `Hello${toName ? ' ' + toName : ''},`,
+    '',
+    'Your application to become an Energy Efficiency Services provider has been approved. Use the link below to set up your login and access the Service Provider Portal, where you can review and accept work orders and track your payments:',
+    '',
+    inviteUrl,
+    '',
+    'If you have any questions, just reply to this email.',
+    '',
+    'Energy Efficiency Services',
+  ].join('\n')
+  await sendNewEmail({
+    anchorObject: 'accounts', anchorRecordId: accountId,
+    to: { email: toEmail, name: toName || toEmail },
+    subject: 'Your Energy Efficiency Services provider portal invite',
+    bodyText: body,
+    outboundMailboxId: mb.outbound_mailbox_id,
+    contactId: contactId || undefined,
+  })
+  return { sent: true, mailbox: mb.obm_address }
 }
 
 // Staff-initiated onboarding: create an application (+ inactive account +

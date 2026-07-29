@@ -81,30 +81,51 @@ Deno.serve(async (req) => {
   const { data: pu } = await adminClient.from("portal_users").select("auth_user_id").eq("id", portalUserId).maybeSingle()
   if (pu?.auth_user_id) return jsonResponse({ ok: true, approved: true, invited: false, portal_user_id: portalUserId, note: "Approved; provider already has portal access." })
 
-  // 3. Auto-send the invite.
-  const { data: invited, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email, {
-    redirectTo: getProviderRedirectUrl(req),
-    data: { full_name: fullName, portal_user: true, provider_user: true },
+  // 3. GENERATE the invite link (do NOT rely on Supabase's built-in auth
+  //    mailer — this platform sends all email through Microsoft Graph, so the
+  //    auth SMTP isn't configured and inviteUserByEmail wouldn't deliver).
+  //    generateLink creates the auth user and returns the action link; the
+  //    caller (client) emails it through the Graph pipeline, threaded on the
+  //    provider's account. We return invite_url either way so it's never lost.
+  const redirectTo = getProviderRedirectUrl(req)
+  const linkData = { full_name: fullName, portal_user: true, provider_user: true }
+  let actionLink: string | undefined
+  let authUserId: string | undefined
+
+  const gen = await adminClient.auth.admin.generateLink({
+    type: "invite", email, options: { redirectTo, data: linkData },
   })
-  if (inviteErr || !invited?.user) {
-    const msg = inviteErr?.message || "Invite failed"
+  if (gen.error || !gen.data?.user) {
+    const msg = gen.error?.message || "Invite link generation failed"
     const already = /registered|already/i.test(msg)
-    return jsonResponse({
-      ok: !already ? false : true, approved: true, invited: false, portal_user_id: portalUserId,
-      error: already ? undefined : "Invite failed",
-      note: already ? `An auth account already exists for ${email}. Link or reset it manually.` : undefined,
-      detail: msg,
-    }, already ? 200 : 400)
+    if (already) {
+      // Auth account already exists — generate a magic sign-in link instead so
+      // there's still a working link to send.
+      const rec = await adminClient.auth.admin.generateLink({ type: "magiclink", email, options: { redirectTo } })
+      if (!rec.error && rec.data) { actionLink = rec.data.properties?.action_link; authUserId = rec.data.user?.id }
+    }
+    if (!actionLink) {
+      return jsonResponse({
+        ok: already ? true : false, approved: true, invited: false, portal_user_id: portalUserId,
+        error: already ? undefined : "Invite link generation failed",
+        note: already ? `An auth account already exists for ${email}.` : undefined, detail: msg,
+      }, already ? 200 : 400)
+    }
+  } else {
+    actionLink = gen.data.properties?.action_link
+    authUserId = gen.data.user.id
   }
 
-  // 4. Link auth user + mark Invited; roll back the auth identity on failure.
-  const { error: linkErr } = await adminClient.from("portal_users").update({
-    auth_user_id: invited.user.id, status: "Portal User Invited", updated_at: new Date().toISOString(),
-  }).eq("id", portalUserId)
-  if (linkErr) {
-    await adminClient.auth.admin.deleteUser(invited.user.id).catch(() => undefined)
-    return jsonResponse({ error: "Failed to link invited user", detail: linkErr.message }, 500)
+  // 4. Link auth user + mark Invited.
+  if (authUserId) {
+    const { error: linkErr } = await adminClient.from("portal_users").update({
+      auth_user_id: authUserId, status: "Portal User Invited", updated_at: new Date().toISOString(),
+    }).eq("id", portalUserId)
+    if (linkErr) return jsonResponse({ error: "Failed to link invited user", detail: linkErr.message }, 500)
   }
 
-  return jsonResponse({ ok: true, approved: true, invited: true, portal_user_id: portalUserId, email, account_id: appr?.account_id })
+  return jsonResponse({
+    ok: true, approved: true, invited: true, portal_user_id: portalUserId,
+    email, invite_url: actionLink, account_id: appr?.account_id,
+  })
 })
