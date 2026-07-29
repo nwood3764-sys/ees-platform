@@ -4169,6 +4169,32 @@ function RelatedListWidget({
         prefillObj.__derivedNameBase = parentRecord.property_name
       }
       }
+
+      // Project-Reservation reservation is for ONE building — the enrollment's
+      // opportunity carries it. Seed building_id (drives the building.* inherited
+      // fields on the layout) and the overridable cost/savings roll-ups from the
+      // opportunity's line items so the form opens populated. Only fills blanks.
+      const _enrOppId = prefillObj.opportunity_id
+        || (parentTable === 'opportunities' ? parentRecordId : null)
+      if (_enrOppId) {
+        try {
+          const { data: _opp } = await supabase.from('opportunities')
+            .select('building_id').eq('id', _enrOppId).maybeSingle()
+          if (_opp?.building_id && !prefillObj.building_id) prefillObj.building_id = _opp.building_id
+        } catch { /* leave building_id unset; the picker still lets them choose */ }
+        try {
+          const { data: _lines } = await supabase.from('opportunity_line_items')
+            .select('oli_total_price, oli_estimated_term_savings')
+            .eq('opportunity_id', _enrOppId).eq('oli_is_deleted', false)
+          if (_lines && _lines.length) {
+            const cost = _lines.reduce((s, l) => s + (Number(l.oli_total_price) || 0), 0)
+            const savings = _lines.reduce((s, l) => s + (Number(l.oli_estimated_term_savings) || 0), 0)
+            if (prefillObj.enrollment_total_project_cost == null && cost) prefillObj.enrollment_total_project_cost = cost
+            if (prefillObj.enrollment_total_ira_homes_cost == null && cost) prefillObj.enrollment_total_ira_homes_cost = cost
+            if (prefillObj.enrollment_modeled_savings == null && savings) prefillObj.enrollment_modeled_savings = savings
+          }
+        } catch { /* roll-ups stay blank; user can enter them */ }
+      }
     }
 
     // An incentive application is a program submittal for one building. However
