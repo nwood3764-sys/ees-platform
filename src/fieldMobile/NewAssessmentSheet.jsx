@@ -189,13 +189,13 @@ export default function NewAssessmentSheet({ onClose, onCreated, onError }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,17,31,0.55)',
-      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
     }}>
       <div style={{
         background: C.card, width: '100%', maxWidth: 520,
-        borderTopLeftRadius: 16, borderTopRightRadius: 16,
-        padding: 20, paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)',
-        maxHeight: '88dvh', overflowY: 'auto',
+        borderRadius: 16,
+        padding: 20,
+        maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto',
       }}>
         <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 18, color: C.textPrimary, marginBottom: 4 }}>
           New Assessment
