@@ -77,3 +77,4 @@ select.lp-input{appearance:auto}
 .lp-status.err{background:rgba(126,179,232,.14);color:#2f5b86;border:1px solid rgba(126,179,232,.5)}
 .lp-status.info{background:var(--card2);color:var(--text2);border:1px solid var(--border)}
 .lp-error{margin-top:10px;color:#2f5b86;font-size:13px}
+.lp-fatal{margin:12px 0;padding:10px 12px;border-radius:8px;background:rgba(126,179,232,.14);color:#2f5b86;border:1px solid rgba(126,179,232,.5);font-size:13px;word-break:break-word}

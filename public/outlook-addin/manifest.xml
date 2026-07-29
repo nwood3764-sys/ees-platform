@@ -22,7 +22,7 @@
   xsi:type="MailApp">
 
   <Id>6b8e5f2a-1c3d-4e7b-9a2f-7d4c1e9b0a56</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.1.0.0</Version>
   <ProviderName>Energy Efficiency Services</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="LEAP — Log Email"/>
@@ -87,6 +87,10 @@
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
                     <SourceLocation resid="taskpaneUrl"/>
+                    <!-- Pinnable pane: the user can pin it open and it stays up
+                         as they move between emails (Salesforce-style). The
+                         task pane handles Office ItemChanged to refresh. -->
+                    <SupportsPinning>true</SupportsPinning>
                   </Action>
                 </Control>
               </Group>

@@ -5,32 +5,64 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>LEAP — Log Email</title>
   <link rel="icon" href="assets/icon-32.png"/>
-  <!-- Office.js: required, served from Microsoft's CDN (the one external
-       dependency every Outlook add-in loads). -->
+
+  <!-- Early error trap: turn any load/JS failure into a visible message so the
+       pane can never just go blank. -->
+  <script>
+    window.__leapOfficeReady = false;
+    window.__leapErrQueue = [];
+    function __leapShowFatal(msg) {
+      var el = document.getElementById('fatal');
+      if (!el) { window.__leapErrQueue.push(msg); return; }
+      el.hidden = false;
+      el.textContent = 'Add-in couldn’t start: ' + msg;
+      var boot = document.getElementById('bootView');
+      if (boot) boot.hidden = true;
+    }
+    window.addEventListener('error', function (e) {
+      __leapShowFatal((e && e.message ? e.message : 'script error') + (e && e.filename ? ' (' + e.filename + ')' : ''));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e && e.reason;
+      __leapShowFatal('Unhandled: ' + (r && r.message ? r.message : String(r)));
+    });
+    document.addEventListener('DOMContentLoaded', function () {
+      if (window.__leapErrQueue.length) __leapShowFatal(window.__leapErrQueue[0]);
+    });
+    // If Office never initializes, say so instead of showing a blank/loading pane forever.
+    setTimeout(function () {
+      if (!window.__leapOfficeReady) {
+        var boot = document.getElementById('bootView');
+        if (boot && !boot.hidden) __leapShowFatal('Office did not initialize (not running inside Outlook, or office.js was blocked).');
+      }
+    }, 8000);
+  </script>
+
+  <!-- Office.js: required, from Microsoft's CDN (every Outlook add-in loads it). -->
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <!-- Supabase JS (UMD global `supabase`), pinned major version. -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <!-- Supabase JS (UMD global `supabase`), self-hosted so no third-party CDN
+       is on the load path. -->
+  <script src="vendor/supabase.js"></script>
   <link rel="stylesheet" href="taskpane.css"/>
 </head>
 <body>
   <div id="app">
+    <div id="fatal" class="lp-fatal" hidden></div>
+
     <header class="lp-topbar">
       <img src="assets/icon-32.png" alt="LEAP" width="22" height="22"/>
       <span class="lp-title">Log Email to LEAP</span>
       <button id="signOutBtn" class="lp-link" type="button" hidden>Sign out</button>
     </header>
 
-    <!-- Loading / host gate -->
     <section id="bootView" class="lp-view">
       <p class="lp-muted">Loading…</p>
     </section>
 
-    <!-- Not-in-Outlook fallback -->
     <section id="unsupportedView" class="lp-view" hidden>
       <p class="lp-muted">This page is the LEAP “Log Email” Outlook add-in. Open it from the <strong>Log to LEAP</strong> button on an email in Outlook.</p>
     </section>
 
-    <!-- Sign-in -->
     <section id="loginView" class="lp-view" hidden>
       <p class="lp-muted">Sign in with your LEAP account to log this email.</p>
       <form id="loginForm">
@@ -43,7 +75,6 @@
       </form>
     </section>
 
-    <!-- Main -->
     <section id="mainView" class="lp-view" hidden>
       <div class="lp-card lp-email-summary">
         <div class="lp-email-line"><span class="lp-email-key">From</span><span id="emFrom" class="lp-email-val"></span></div>
