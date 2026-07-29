@@ -161,10 +161,26 @@ function formatByReturnType(raw, returnType) {
   }
 }
 
+// Format a US phone number for display: 5152978363 -> (515) 297-8363,
+// 15152978363 -> (515) 297-8363. Anything that isn't a clean 10/11-digit US
+// number (extensions, international, already-formatted oddities) is returned
+// untouched so we never mangle a value we don't recognize.
+function formatPhoneDisplay(raw) {
+  const digits = String(raw).replace(/\D/g, '')
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+  }
+  if (digits.length === 11 && digits[0] === '1') {
+    return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`
+  }
+  return String(raw)
+}
+
 function formatFieldValue(raw, fieldDef, picklists, lookups) {
   if (raw === null || raw === undefined) return '—'
   switch (fieldDef.type) {
     case 'picklist':   return picklists.byId.get(raw) || String(raw)
+    case 'phone':      return formatPhoneDisplay(raw)
     // Formula / rollup / inherited fields are computed at read; format by the
     // field's declared return type (falls back to a sensible numeric/text guess).
     case 'formula':
