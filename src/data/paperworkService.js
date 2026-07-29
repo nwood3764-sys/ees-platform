@@ -582,7 +582,10 @@ export async function loadCombustionContext(buildingId) {
   let property = null
   if (building.property_id) {
     const { data } = await supabase.from('properties')
-      .select('id, property_name, property_street, property_city, property_state, property_zip, property_account_id, property_total_units')
+      .select(`id, property_name, property_street, property_city, property_state, property_zip,
+        property_account_id, property_total_units,
+        property_hud_owner_org, property_hud_owner_address, property_hud_owner_city,
+        property_hud_owner_state, property_hud_owner_zip, property_hud_management_org`)
       .eq('id', building.property_id).maybeSingle()
     property = data || null
   }
@@ -681,10 +684,17 @@ export async function loadCombustionContext(buildingId) {
     if (!usedIds.has(u.id)) { samples.push(blankSample(u)); usedIds.add(u.id) }
   }
 
-  const ownerStreet = account?.billing_street || account?.mailing_street || ''
-  const ownerCsz = account?.billing_street
-    ? joinCityStateZip(account.billing_city, account.billing_state, account.billing_zip)
-    : joinCityStateZip(account?.mailing_city, account?.mailing_state, account?.mailing_zip)
+  // Owner / management company is inherited from the PROPERTY record — the HUD
+  // owner fields carry the fullest data (org name + mailing address); the
+  // property's account is the fallback. Never re-typed on the notification.
+  const ownerName = property?.property_hud_owner_org || property?.property_hud_management_org || account?.account_name || ''
+  const ownerAddress = property?.property_hud_owner_address
+    || account?.billing_street || account?.mailing_street || ''
+  const ownerCsz = property?.property_hud_owner_city
+    ? joinCityStateZip(property.property_hud_owner_city, property.property_hud_owner_state, property.property_hud_owner_zip)
+    : account?.billing_street
+      ? joinCityStateZip(account.billing_city, account.billing_state, account.billing_zip)
+      : joinCityStateZip(account?.mailing_city, account?.mailing_state, account?.mailing_zip)
 
   return {
     building: { id: building.id, name: building.building_number_or_name || building.building_name || '' },
@@ -694,7 +704,7 @@ export async function loadCombustionContext(buildingId) {
       street: property?.property_street || '',
       cityStateZip: joinCityStateZip(property?.property_city, property?.property_state, property?.property_zip),
     },
-    owner: { name: account?.account_name || '', address: ownerStreet, cityStateZip: ownerCsz },
+    owner: { name: ownerName, address: ownerAddress, cityStateZip: ownerCsz },
     ownerEmail: account?.account_email || '',
     totalUnits, sampleCount,
     ventilation: {
