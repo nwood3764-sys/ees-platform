@@ -22,15 +22,15 @@ export const CHART_COLORS = ['#3ecf8e','#7eb3e8','#1e466b','#a78bfa','#2aab72','
 
 export const STATUS_CFG = {
   // Opportunity
-  'Opportunity — Property Identified':          { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
-  'Opportunity — Outreach Active':              { bg:'#e8f1fb', color:'#1e466b', dot:'#7eb3e8' },
-  'Opportunity — Decision Maker Identified':    { bg:'#e8f1fb', color:'#1e466b', dot:'#7eb3e8' },
-  'Opportunity — Relationship Active':          { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
-  'Opportunity — Enrollment In Progress':       { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
-  'Opportunity — Assessment Scheduled':         { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
-  'Opportunity — Application Submitted':        { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
-  'Opportunity — Reservation Obtained':         { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
-  'Opportunity — Project In Progress':          { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Property Identified':          { bg:'#f0f3f8', color:'#4a5e7a', dot:'#8fa0b8' },
+  'Outreach Active':              { bg:'#e8f1fb', color:'#1e466b', dot:'#7eb3e8' },
+  'Decision Maker Identified':    { bg:'#e8f1fb', color:'#1e466b', dot:'#7eb3e8' },
+  'Relationship Active':          { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Enrollment In Progress':       { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Assessment Scheduled':         { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Application Submitted':        { bg:'#e8f3fb', color:'#1a5a8a', dot:'#7eb3e8' },
+  'Reservation Obtained':         { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
+  'Project In Progress':          { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
   'Opportunity Closed Won':                     { bg:'#e8f8f2', color:'#1a7a4e', dot:'#2aab72' },
   'Opportunity Closed Lost':                    { bg:'#e8f1fb', color:'#1e466b', dot:'#7eb3e8' },
   // Property
