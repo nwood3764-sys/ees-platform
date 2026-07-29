@@ -133,9 +133,10 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   function removeOne(id) { setSavedNote(''); setSelected(prev => prev.filter(x => x !== id)) }
   function addAll() {
     setSavedNote('')
-    const sel = new Set(selected)
-    const additions = values.filter(v => v.active && !sel.has(v._id)).map(v => v._id)
-    setSelected(prev => [...prev, ...additions])
+    setSelected(prev => {
+      const have = new Set(prev)
+      return [...prev, ...availableValues.filter(v => !have.has(v._id)).map(v => v._id)]
+    })
   }
   function removeAll() { setSavedNote(''); setSelected([]) }
   function moveSelected(index, dir) {
@@ -179,7 +180,11 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   // and shows in Available (universal already includes it).
   async function commitWorkspaceValue() {
     const label = wsLabel.trim()
-    const value = wsValue.trim() || label
+    // Stages are scoped 1:1 to a record type, so the same generic label (e.g.
+    // "Income Qualification") can exist for several record types. The stored
+    // value must stay unique (DB constraint), so default it to a record-type-
+    // scoped key the user never sees — the label stays clean.
+    const value = wsValue.trim() || (activeRt ? `${activeRt.value} - ${label}` : label)
     if (!label) return
     setValBusy(true)
     try {
@@ -280,25 +285,43 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   const activeRt = recordTypes.find(r => r._id === activeRtId)
   const isUniversal = selected.length === 0
   const selectedSet = useMemo(() => new Set(selected), [selected])
-  // Do labels repeat on this field? If so, the stored value is the only
-  // distinguisher, so we surface it; otherwise we keep the list clean (label only).
-  const labelsAmbiguous = useMemo(() => {
-    const seen = new Set()
-    for (const v of values) { if (seen.has(v.label)) return true; seen.add(v.label) }
-    return false
-  }, [values])
+
+  // Values that belong to a DIFFERENT record type. This field's stages are
+  // scoped 1:1 to a record type (never shared), so we hide other record types'
+  // copies — editing one record type never shows another's, no fake duplicates.
+  const scopedElsewhere = useMemo(() => {
+    const s = new Set()
+    for (const [rtId, set] of Object.entries(assignments)) {
+      if (rtId === activeRtId) continue
+      for (const vid of set) s.add(vid)
+    }
+    return s
+  }, [assignments, activeRtId])
 
   const availableValues = useMemo(() => {
-    let list = values.filter(v => v.active && !selectedSet.has(v._id))
+    let list = values.filter(v => v.active && !selectedSet.has(v._id) && !scopedElsewhere.has(v._id))
     const q = availSearch.trim().toLowerCase()
     if (q) list = list.filter(v => (v.label || '').toLowerCase().includes(q) || (v.value || '').toLowerCase().includes(q))
     if (availSort === 'label') list = [...list].sort((a, b) => (a.label || '').localeCompare(b.label || ''))
     else if (availSort === 'value') list = [...list].sort((a, b) => (a.value || '').localeCompare(b.value || ''))
     // 'master' keeps fetch order (picklist_sort_order)
     return list
-  }, [values, selectedSet, availSearch, availSort])
+  }, [values, selectedSet, scopedElsewhere, availSearch, availSort])
 
   const selectedRows = useMemo(() => selected.map(id => valuesById[id]).filter(Boolean), [selected, valuesById])
+
+  // Show the stored-value column only when the VISIBLE labels actually collide
+  // (rare once other record types' copies are hidden). Otherwise the list stays
+  // clean and single-column.
+  const labelsAmbiguous = useMemo(() => {
+    const seen = new Set()
+    for (const v of [...selectedRows, ...availableValues]) {
+      if (!v) continue
+      if (seen.has(v.label)) return true
+      seen.add(v.label)
+    }
+    return false
+  }, [selectedRows, availableValues])
 
   const GRID = 'minmax(0, 1fr) 44px minmax(0, 1fr)'
 
