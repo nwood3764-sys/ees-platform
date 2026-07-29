@@ -1411,6 +1411,33 @@ export function applyInsertDefaults(tableName, fields, userId) {
  * target still shows the right value in edit mode rather than appearing
  * blank.
  */
+// Some lookup targets have many rows with the same or similar labels (people
+// especially). Show a disambiguating subtitle — the parent record's name — so
+// the user picks the right one. Keyed by lookup table: `fk` is the column on
+// that table pointing at the parent, resolved to `table`.`field`.
+const LOOKUP_SUBTITLE = {
+  contacts: { fk: 'contact_account_id', table: 'accounts', field: 'account_name' },
+}
+
+// Best-effort: attach `subtitle` to each option from its parent record's name.
+// One extra batched query over the distinct parent ids; never fatal.
+async function attachLookupSubtitles(lookupTable, rows, data) {
+  const sub = LOOKUP_SUBTITLE[lookupTable]
+  if (!sub || !rows.length) return rows
+  try {
+    const fkIds = [...new Set((data || []).map(r => r[sub.fk]).filter(Boolean).map(String))]
+    if (!fkIds.length) return rows
+    const { data: refs } = await supabase.from(sub.table).select(`id, ${sub.field}`).in('id', fkIds)
+    const nameById = new Map((refs || []).map(x => [String(x.id), x[sub.field]]))
+    const subByRow = new Map((data || []).map(r => [String(r.id), r[sub.fk] ? nameById.get(String(r[sub.fk])) : null]))
+    for (const row of rows) {
+      const s = subByRow.get(String(row.value))
+      if (s) row.subtitle = s
+    }
+  } catch { /* subtitle is best-effort; leave options unadorned */ }
+  return rows
+}
+
 export async function fetchLookupOptions(lookupTable, lookupField, limit = 50, opts = {}) {
   // Discover the soft-delete column for the target table — cached for the
   // session by fetchTableMetadata, so this is essentially free on repeat
@@ -1423,9 +1450,13 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50, o
 
   const { search = null, includeId = null } = opts
 
+  // Pull the subtitle FK too when this table has a configured disambiguator.
+  const subCfg = LOOKUP_SUBTITLE[lookupTable]
+  const selectCols = subCfg ? `id, ${lookupField}, ${subCfg.fk}` : `id, ${lookupField}`
+
   let query = supabase
     .from(lookupTable)
-    .select(`id, ${lookupField}`)
+    .select(selectCols)
     .order(lookupField, { ascending: true })
     .limit(limit)
 
@@ -1461,6 +1492,7 @@ export async function fetchLookupOptions(lookupTable, lookupField, limit = 50, o
     } catch { /* selected row not fetchable — leave as-is */ }
   }
 
+  await attachLookupSubtitles(lookupTable, rows, data)
   return rows
 }
 
