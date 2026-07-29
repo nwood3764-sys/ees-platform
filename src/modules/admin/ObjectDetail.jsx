@@ -8,6 +8,7 @@ import {
   fetchPicklistsFor,
   fetchFieldMetadata,
 } from '../../data/adminService'
+import { getTableColumnPrefix } from '../../data/layoutService'
 import RecordTypesPane from './RecordTypesPane'
 import LayoutsPane from './LayoutsPane'
 import LayoutCanvasEditor from './LayoutCanvasEditor'
@@ -95,6 +96,31 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
     related:     incomingFKs.length,
   }
 
+  // Map each real column → the picklist_field spelling that actually backs it.
+  // Picklist rows use inconsistent field names: some match the column exactly
+  // (opportunity_stage, property_status, work_order_status), others are the
+  // prefix-stripped short form (account_status → 'status', account_type →
+  // 'type'). Fields & Relationships must resolve a column to its picklist the
+  // SAME way the record UI does, so EVERY managed picklist is reachable here —
+  // not just the exact-match ones — and clicking opens the editor keyed to the
+  // spelling the values actually live under. record_type columns are excluded
+  // (they're managed in the Record Types tab).
+  const picklistFieldByColumn = useMemo(() => {
+    const fieldSet = new Set(picklists.filter(p => p.field !== 'record_type').map(p => p.field))
+    const prefix = getTableColumnPrefix(obj.table)
+    const map = {}
+    for (const c of columns) {
+      const name = c.column_name
+      if (name === 'record_type' || /_record_type$/.test(name)) continue
+      if (fieldSet.has(name)) { map[name] = name; continue }   // exact spelling wins
+      if (prefix && name.startsWith(prefix + '_')) {            // fall back to short form
+        const short = name.slice(prefix.length + 1)
+        if (short !== 'record_type' && fieldSet.has(short)) map[name] = short
+      }
+    }
+    return map
+  }, [columns, picklists, obj.table])
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Sticky header — object name, back link, metadata */}
@@ -158,12 +184,13 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
                 ? <FieldPicklistEditor
                     objectName={obj.table}
                     objectLabel={obj.pluralLabel || obj.label}
-                    field={selectedField}
+                    field={selectedField.field}
+                    columnName={selectedField.column}
                     onBack={() => setSelectedField(null)}
                   />
                 : <FieldsPane
                     columns={columns}
-                    picklistFields={new Set(picklists.filter(p => p.field !== 'record_type').map(p => p.field))}
+                    picklistFieldByColumn={picklistFieldByColumn}
                     fieldMeta={fieldMeta}
                     onOpenField={setSelectedField}
                     onNewField={() => setFieldModal({ mode: 'create' })}
@@ -256,7 +283,7 @@ function PaneSearch({ value, onChange, placeholder }) {
   )
 }
 
-function FieldsPane({ columns, picklistFields = new Set(), fieldMeta = {}, onOpenField, onNewField, onEditField }) {
+function FieldsPane({ columns, picklistFieldByColumn = {}, fieldMeta = {}, onOpenField, onNewField, onEditField }) {
   const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState('ordinal')   // 'ordinal' | 'name'
   const [sortDir, setSortDir] = useState('asc')        // 'asc' | 'desc'
@@ -322,7 +349,9 @@ function FieldsPane({ columns, picklistFields = new Set(), fieldMeta = {}, onOpe
           <div style={{ textAlign: 'right' }}>Actions</div>
         </div>
         {shown.map(c => {
-          const isPicklist = picklistFields.has(c.column_name)
+          const pickField = picklistFieldByColumn[c.column_name]
+          const isPicklist = !!pickField
+          const openPicklist = () => onOpenField && onOpenField({ column: c.column_name, field: pickField })
           const meta = fieldMeta[c.column_name]
           return (
           <div key={c.column_name} style={{
@@ -340,7 +369,7 @@ function FieldsPane({ columns, picklistFields = new Set(), fieldMeta = {}, onOpe
             <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
               {isPicklist ? (
                 <span
-                  onClick={() => onOpenField && onOpenField(c.column_name)}
+                  onClick={openPicklist}
                   style={{ color: C.emerald, fontWeight: 500, cursor: 'pointer' }}
                   title="Manage picklist values & per-record-type availability"
                 >
@@ -351,7 +380,7 @@ function FieldsPane({ columns, picklistFields = new Set(), fieldMeta = {}, onOpe
               )}
               {isPicklist && (
                 <span
-                  onClick={() => onOpenField && onOpenField(c.column_name)}
+                  onClick={openPicklist}
                   style={{ cursor: 'pointer', fontFamily: 'Inter, sans-serif', fontSize: 9.5, fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: '#e8f3fb', color: '#1a5a8a' }}
                   title="Manage picklist values & per-record-type availability"
                 >

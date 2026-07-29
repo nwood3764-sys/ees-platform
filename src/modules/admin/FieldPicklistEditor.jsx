@@ -24,7 +24,7 @@ import {
 // values show for that record type (no restriction).
 // ---------------------------------------------------------------------------
 
-export default function FieldPicklistEditor({ objectName, objectLabel, field, onBack }) {
+export default function FieldPicklistEditor({ objectName, objectLabel, field, columnName, onBack }) {
   const toast = useToast()
   const [values, setValues] = useState([])
   const [recordTypes, setRecordTypes] = useState([])
@@ -290,10 +290,14 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, on
       </div>
 
       <div style={{ marginBottom: 4, fontSize: 16, fontWeight: 600, color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>
-        {field}
+        {columnName || field}
       </div>
       <div style={{ marginBottom: 16, fontSize: 12, color: C.textSecondary }}>
-        Picklist field on <strong>{objectLabel}</strong> · {values.length} value{values.length === 1 ? '' : 's'} · manage values below, then set which are available per record type.
+        Picklist field on <strong>{objectLabel}</strong>
+        {columnName && columnName !== field && (
+          <> · values stored under <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{field}</span></>
+        )}
+        {' '}· {values.length} value{values.length === 1 ? '' : 's'} · manage values below, then set which are available per record type.
       </div>
 
       {loading && <div style={{ padding: 30, color: C.textMuted, fontSize: 13 }}>Loading field…</div>}
