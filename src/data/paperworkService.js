@@ -17,7 +17,7 @@
 
 import { supabase } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
-import { parseAssetScoreText, fillPaperworkWorkbook } from './paperworkModel'
+import { parseAssetScoreText, fillPaperworkWorkbook, combustionSampleCount } from './paperworkModel'
 
 /**
  * Load a stored submittal document template — the ordered section list that
@@ -538,6 +538,203 @@ export async function loadPaperworkContext(projectId) {
       endDate: fmtDate(project.project_installation_completion_date || project.project_completion_date),
     },
   }
+}
+
+// ===========================================================================
+// Combustion Safety Notification — a per-BUILDING capture form. Unlike the
+// computed HOMES documents, its data is inspection results entered by a person
+// and stored on diagnostic_tests rows (the purpose-built home). This loads the
+// building → property → account context, the building's units, the picklist
+// option sets, and any previously captured rows, and assembles both the
+// editable draft and the model the combustion PDF renders from.
+// ===========================================================================
+
+const COMBUSTION_DIAG_COLS = `
+  id, unit_id, diagnostic_combustion_scope,
+  diagnostic_gas_leak_result, diagnostic_gas_leak_location, diagnostic_gas_detector_installed,
+  diagnostic_ambient_co_result, diagnostic_co_detector_installed, diagnostic_co_detector_location,
+  diagnostic_heating_plant_co_status, diagnostic_heating_plant_spillage,
+  diagnostic_water_heater_co_status, diagnostic_water_heater_spillage,
+  diagnostic_stove_co_status, diagnostic_combustion_notes`
+
+// Fields whose option sets the editor renders (values are stored on the rows).
+export const COMBUSTION_OPTION_FIELDS = [
+  'combustion_scope', 'gas_leak_result', 'ambient_co_result',
+  'heating_plant_co_status', 'heating_plant_spillage',
+  'water_heater_co_status', 'water_heater_spillage', 'stove_co_status',
+]
+
+export async function loadCombustionContext(buildingId) {
+  if (!buildingId) throw new Error('loadCombustionContext: buildingId is required')
+
+  const { data: building, error: bErr } = await supabase
+    .from('buildings')
+    .select(`
+      id, building_name, building_number_or_name, property_id,
+      building_total_units, building_number_of_units,
+      building_combustion_ventilation_status, building_combustion_ventilation_cfm,
+      building_combustion_ventilation_notes`)
+    .eq('id', buildingId)
+    .maybeSingle()
+  if (bErr) throw new Error(bErr.message)
+  if (!building) throw new Error('Building not found')
+
+  let property = null
+  if (building.property_id) {
+    const { data } = await supabase.from('properties')
+      .select('id, property_name, property_street, property_city, property_state, property_zip, property_account_id, property_total_units')
+      .eq('id', building.property_id).maybeSingle()
+    property = data || null
+  }
+  let account = null
+  if (property?.property_account_id) {
+    const { data } = await supabase.from('accounts')
+      .select('id, account_name, billing_street, billing_city, billing_state, billing_zip, mailing_street, mailing_city, mailing_state, mailing_zip, account_email')
+      .eq('id', property.property_account_id).maybeSingle()
+    account = data || null
+  }
+
+  // Units on this building (the sampling pool).
+  const { data: unitRows } = await supabase.from('units')
+    .select('id, unit_number, unit_name')
+    .eq('building_id', buildingId).eq('unit_is_deleted', false)
+    .order('unit_number', { ascending: true })
+  const allUnits = (unitRows || []).map(u => ({ id: u.id, number: u.unit_number || u.unit_name || '' }))
+  const unitNumberById = Object.fromEntries(allUnits.map(u => [u.id, u.number]))
+
+  // Picklist option sets + id→value resolution for the combustion fields.
+  const { data: pv } = await supabase.from('picklist_values')
+    .select('id, picklist_object, picklist_field, picklist_value, picklist_label, picklist_sort_order')
+    .in('picklist_object', ['diagnostic_tests', 'buildings'])
+    .eq('picklist_is_active', true)
+  const idToValue = {}
+  const options = {}
+  let combustionRtId = null
+  for (const r of (pv || [])) {
+    idToValue[r.id] = r.picklist_value
+    if (r.picklist_object === 'diagnostic_tests' && r.picklist_field === 'record_type'
+        && r.picklist_value === 'COMBUSTION-SAFETY-NOTIFICATION') combustionRtId = r.id
+    const key = r.picklist_field
+    if (COMBUSTION_OPTION_FIELDS.includes(key) || key === 'combustion_ventilation_status') {
+      ;(options[key] ||= []).push({ value: r.picklist_value, label: r.picklist_label || r.picklist_value, sort: r.picklist_sort_order ?? 0 })
+    }
+  }
+  for (const k of Object.keys(options)) options[k].sort((a, b) => a.sort - b.sort)
+
+  // Previously captured combustion rows for this building.
+  let existing = []
+  if (combustionRtId) {
+    const { data } = await supabase.from('diagnostic_tests')
+      .select(COMBUSTION_DIAG_COLS)
+      .eq('building_id', buildingId).eq('diagnostic_record_type', combustionRtId)
+      .eq('diagnostic_is_deleted', false)
+    existing = data || []
+  }
+  const val = (id) => (id ? (idToValue[id] || '') : '')
+  const commonRow = existing.find(r => !r.unit_id) || null
+  const common = {
+    gas_leak_result: val(commonRow?.diagnostic_gas_leak_result),
+    gas_leak_location: commonRow?.diagnostic_gas_leak_location || '',
+    gas_detector_installed: !!commonRow?.diagnostic_gas_detector_installed,
+    ambient_co_result: val(commonRow?.diagnostic_ambient_co_result),
+    co_detector_installed: !!commonRow?.diagnostic_co_detector_installed,
+    co_detector_location: commonRow?.diagnostic_co_detector_location || '',
+    heating_plant_co_status: val(commonRow?.diagnostic_heating_plant_co_status),
+    heating_plant_spillage: val(commonRow?.diagnostic_heating_plant_spillage),
+    water_heater_co_status: val(commonRow?.diagnostic_water_heater_co_status),
+    water_heater_spillage: val(commonRow?.diagnostic_water_heater_spillage),
+    notes: commonRow?.diagnostic_combustion_notes || '',
+  }
+  const sampleFromRow = (r) => ({
+    unit_id: r.unit_id,
+    unit_number: unitNumberById[r.unit_id] || '',
+    gas_leak_result: val(r.diagnostic_gas_leak_result),
+    gas_leak_location: r.diagnostic_gas_leak_location || '',
+    gas_detector_installed: !!r.diagnostic_gas_detector_installed,
+    ambient_co_result: val(r.diagnostic_ambient_co_result),
+    co_detector_installed: !!r.diagnostic_co_detector_installed,
+    co_detector_location: r.diagnostic_co_detector_location || '',
+    furnace_co_status: val(r.diagnostic_heating_plant_co_status),
+    furnace_spillage: val(r.diagnostic_heating_plant_spillage),
+    water_heater_co_status: val(r.diagnostic_water_heater_co_status),
+    water_heater_spillage: val(r.diagnostic_water_heater_spillage),
+    stove_co_status: val(r.diagnostic_stove_co_status),
+    notes: r.diagnostic_combustion_notes || '',
+  })
+  const blankSample = (u) => ({
+    unit_id: u.id, unit_number: u.number,
+    gas_leak_result: '', gas_leak_location: '', gas_detector_installed: false,
+    ambient_co_result: '', co_detector_installed: false, co_detector_location: '',
+    furnace_co_status: '', furnace_spillage: '', water_heater_co_status: '',
+    water_heater_spillage: '', stove_co_status: '', notes: '',
+  })
+
+  const totalUnits = building.building_total_units ?? building.building_number_of_units ?? allUnits.length ?? 0
+  const sampleCount = combustionSampleCount(totalUnits)
+
+  // Seed the sampled-unit list: previously captured rows first, then enough
+  // fresh units from the building to reach the sampling count.
+  const samples = existing.filter(r => r.unit_id).map(sampleFromRow)
+  const usedIds = new Set(samples.map(s => s.unit_id))
+  for (const u of allUnits) {
+    if (samples.length >= sampleCount) break
+    if (!usedIds.has(u.id)) { samples.push(blankSample(u)); usedIds.add(u.id) }
+  }
+
+  const ownerStreet = account?.billing_street || account?.mailing_street || ''
+  const ownerCsz = account?.billing_street
+    ? joinCityStateZip(account.billing_city, account.billing_state, account.billing_zip)
+    : joinCityStateZip(account?.mailing_city, account?.mailing_state, account?.mailing_zip)
+
+  return {
+    building: { id: building.id, name: building.building_number_or_name || building.building_name || '' },
+    property: {
+      id: property?.id || null,
+      name: property?.property_name || '',
+      street: property?.property_street || '',
+      cityStateZip: joinCityStateZip(property?.property_city, property?.property_state, property?.property_zip),
+    },
+    owner: { name: account?.account_name || '', address: ownerStreet, cityStateZip: ownerCsz },
+    ownerEmail: account?.account_email || '',
+    totalUnits, sampleCount,
+    ventilation: {
+      status: idToValue[building.building_combustion_ventilation_status] || '',
+      cfm: building.building_combustion_ventilation_cfm != null ? String(building.building_combustion_ventilation_cfm) : '',
+      notes: building.building_combustion_ventilation_notes || '',
+    },
+    common, samples, allUnits, options,
+  }
+}
+
+/**
+ * Build the model the combustion PDF renders from, out of the editor's draft.
+ */
+export function buildCombustionModel(ctx, draft) {
+  return {
+    building: ctx.building, property: ctx.property, owner: draft.owner || ctx.owner,
+    ventilation: draft.ventilation, common: draft.common, samples: draft.samples,
+    totalUnits: draft.totalUnits ?? ctx.totalUnits,
+    sampleCount: (draft.samples || []).length,
+  }
+}
+
+/**
+ * Persist the whole notification (building ventilation + common-area row +
+ * per-unit rows) through the SECURITY INVOKER upsert RPC. Returns the RPC's
+ * summary. Values are sent as picklist value strings; the RPC resolves ids.
+ */
+export async function saveCombustionSafetyNotification({ buildingId, ventilation, common, samples }) {
+  const clean = (o) => Object.fromEntries(Object.entries(o || {}).map(([k, v]) =>
+    [k, typeof v === 'boolean' ? v : (v == null ? '' : v)]))
+  const units = (samples || []).filter(s => s.unit_id).map(clean)
+  const { data, error } = await supabase.rpc('save_combustion_safety_notification', {
+    p_building_id: buildingId,
+    p_ventilation: ventilation || {},
+    p_common: common ? clean(common) : null,
+    p_units: units,
+  })
+  if (error) throw new Error(error.message)
+  return data
 }
 
 // ---------------------------------------------------------------------------
