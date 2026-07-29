@@ -1151,7 +1151,7 @@ export async function fetchRecordTypeValueOrder(recordTypeId) {
 export async function fetchFieldMetadata(object) {
   const { data, error } = await supabase
     .from('field_metadata')
-    .select('fm_object, fm_column, fm_label, fm_help_text, fm_description, fm_example_value, fm_financial_tier, fm_track_history, fm_data_type, fm_is_custom, fm_field_kind, fm_display_type, fm_formula_expression, fm_formula_return_type, fm_formula_refs, fm_rollup_config')
+    .select('fm_object, fm_column, fm_label, fm_help_text, fm_description, fm_example_value, fm_financial_tier, fm_track_history, fm_data_type, fm_is_custom, fm_field_kind, fm_display_type, fm_formula_expression, fm_formula_return_type, fm_formula_refs, fm_rollup_config, fm_inherit_config')
     .eq('fm_object', object)
     .eq('fm_is_deleted', false)
   if (error) throw error
@@ -1165,9 +1165,38 @@ export async function fetchFieldMetadata(object) {
       fieldKind: r.fm_field_kind || 'standard', displayType: r.fm_display_type,
       formulaExpression: r.fm_formula_expression, formulaReturnType: r.fm_formula_return_type,
       formulaRefs: r.fm_formula_refs, rollupConfig: r.fm_rollup_config,
+      inheritConfig: r.fm_inherit_config,
     }
   }
   return map
+}
+
+// Create/edit an Inherited Field — a read-only value pulled from a base record up
+// the parent chain (Salesforce cross-object formula). No physical column: the
+// definition lives in field_metadata and is resolved at read. config shape:
+//   { hops:[{fk,table},…], source_column, source_data_type, display_type }
+export async function upsertInheritedField(params) {
+  const { data, error } = await supabase.rpc('admin_upsert_inherited_field', {
+    p_object: params.object,
+    p_column: params.column,
+    p_label: params.label,
+    p_config: params.config,
+    p_display_type: params.displayType || 'text',
+    p_help_text: params.helpText || null,
+    p_financial_tier: params.financialTier ?? 1,
+  })
+  if (error) throw error
+  invalidateObjectSchema(params.object)
+  return data
+}
+
+export async function removeInheritedField(object, column) {
+  const { data, error } = await supabase.rpc('admin_remove_inherited_field', {
+    p_object: object, p_column: column,
+  })
+  if (error) throw error
+  invalidateObjectSchema(object)
+  return data
 }
 
 export async function addCustomField(params) {

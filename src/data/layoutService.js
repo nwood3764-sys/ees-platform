@@ -1036,7 +1036,7 @@ export async function computeFieldValues(tableName, recordId, record, sections =
   try {
     const { data, error } = await supabase
       .from('field_metadata')
-      .select('fm_column, fm_field_kind, fm_display_type, fm_formula_expression, fm_formula_return_type, fm_formula_refs, fm_rollup_config')
+      .select('fm_column, fm_field_kind, fm_display_type, fm_formula_expression, fm_formula_return_type, fm_formula_refs, fm_rollup_config, fm_inherit_config')
       .eq('fm_object', tableName)
       .eq('fm_is_deleted', false)
       .or('fm_field_kind.neq.standard,fm_display_type.not.is.null')
@@ -1057,6 +1057,7 @@ export async function computeFieldValues(tableName, recordId, record, sections =
           if (!m) continue
           if (m.fm_field_kind === 'formula') { f.type = 'formula'; f.return_type = m.fm_formula_return_type || 'text' }
           else if (m.fm_field_kind === 'rollup') { f.type = 'rollup'; f.return_type = m.fm_rollup_config?.return_type || 'number' }
+          else if (m.fm_field_kind === 'inherited') { f.type = 'inherited'; f.return_type = m.fm_display_type || m.fm_inherit_config?.display_type || 'text' }
           else if (m.fm_display_type && OVERLAY_DISPLAY_TYPES.has(m.fm_display_type)) { f.type = m.fm_display_type }
         }
       }
@@ -1066,6 +1067,7 @@ export async function computeFieldValues(tableName, recordId, record, sections =
   const computed = rows.filter(r => r.fm_field_kind === 'formula' || r.fm_field_kind === 'rollup')
   const formulaFields = computed.filter(f => f.fm_field_kind === 'formula' && f.fm_formula_expression)
   const hasRollup = computed.some(f => f.fm_field_kind === 'rollup')
+  const inheritedFields = rows.filter(r => r.fm_field_kind === 'inherited' && r.fm_inherit_config)
 
   // ── Rollups (server-side aggregate) ──
   const rollupPromise = hasRollup
@@ -1112,7 +1114,46 @@ export async function computeFieldValues(tableName, recordId, record, sections =
     }
   })()
 
-  await Promise.all([rollupPromise, formulaPromise])
+  // ── Inherited fields (read-only value from a base record up the chain) ──
+  // Each inherited field carries hops[] (self → … → base) + source_column. Walk
+  // the chain to the base record's id (one fetch per intermediate hop), then read
+  // the source column. Fields sharing the same hop path resolve their base id in
+  // one walk and batch-fetch their source columns together. Read-only,
+  // RLS-respecting; any failure degrades to a blank value.
+  const inheritPromise = (async () => {
+    if (!inheritedFields.length) return
+    const groups = new Map()   // JSON(hops) → { hops, cols:Set, fieldsBySource:Map }
+    for (const f of inheritedFields) {
+      const cfg = f.fm_inherit_config || {}
+      const hops = Array.isArray(cfg.hops) ? cfg.hops : null
+      const src = cfg.source_column
+      if (!hops || !hops.length || !src || !hops[0]?.fk || !hops[0]?.table) continue
+      const key = JSON.stringify(hops)
+      if (!groups.has(key)) groups.set(key, { hops, cols: new Set(), fields: [] })
+      const g = groups.get(key)
+      g.cols.add(src)
+      g.fields.push({ column: f.fm_column, source: src })
+    }
+    await Promise.all([...groups.values()].map(async ({ hops, cols, fields }) => {
+      try {
+        // Walk to the base record id.
+        let curId = record[hops[0].fk]
+        for (let i = 1; i < hops.length && curId; i += 1) {
+          const { data: row } = await supabase
+            .from(hops[i - 1].table).select(hops[i].fk).eq('id', curId).maybeSingle()
+          curId = row ? row[hops[i].fk] : null
+        }
+        if (!curId) return
+        const baseTable = hops[hops.length - 1].table
+        const { data: baseRow } = await supabase
+          .from(baseTable).select([...cols].join(',')).eq('id', curId).maybeSingle()
+        if (!baseRow) return
+        for (const f of fields) record[f.column] = baseRow[f.source]
+      } catch { /* leave the inherited columns blank */ }
+    }))
+  })()
+
+  await Promise.all([rollupPromise, formulaPromise, inheritPromise])
   return record
 }
 

@@ -164,10 +164,11 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
   if (raw === null || raw === undefined) return '—'
   switch (fieldDef.type) {
     case 'picklist':   return picklists.byId.get(raw) || String(raw)
-    // Formula / rollup fields are computed at read; format by the field's
-    // declared return type (falls back to a sensible numeric/text guess).
+    // Formula / rollup / inherited fields are computed at read; format by the
+    // field's declared return type (falls back to a sensible numeric/text guess).
     case 'formula':
-    case 'rollup':     return formatByReturnType(raw, fieldDef.return_type || fieldDef.formula_return_type)
+    case 'rollup':
+    case 'inherited':  return formatByReturnType(raw, fieldDef.return_type || fieldDef.formula_return_type)
     case 'lookup':
     case 'polymorphic_lookup': {
       const entry = lookups.get(raw)
@@ -3147,15 +3148,18 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             </div>
           )
         }
-        // Formula / rollup fields — computed at read (loadRecordDetailData
-        // merges the value into `record` under the column name). Always
-        // display-only, with a chip, on every tab. Nothing to show before the
-        // record exists, so hide on the create form.
-        if (f.type === 'formula' || f.type === 'rollup') {
+        // Formula / rollup / inherited fields — computed at read
+        // (loadRecordDetailData merges the value into `record` under the column
+        // name). Always display-only, with a chip, on every tab. Nothing to show
+        // before the record exists, so hide on the create form.
+        if (f.type === 'formula' || f.type === 'rollup' || f.type === 'inherited') {
           if (isCreate) return null
           const cRaw = record[f.name]
           const cDisplay = formatFieldValue(cRaw, f, picklists, lookups)
-          const isFormula = f.type === 'formula'
+          const chip = f.type === 'formula' ? 'FORMULA' : f.type === 'rollup' ? 'ROLLUP' : 'INHERITED'
+          const chipTitle = f.type === 'formula' ? 'Read-only — calculated by a formula.'
+            : f.type === 'rollup' ? 'Read-only — rolled up from related records.'
+            : 'Read-only — inherited from a parent record. Edit it on the base record.'
           return (
             <div key={f.name} style={{
               padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
@@ -3164,9 +3168,9 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
               <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                 {typeof f.label === 'string' && f.label.includes(' · ') ? f.label.split(' · ').pop() : f.label}
                 <span
-                  title={isFormula ? 'Read-only — calculated by a formula.' : 'Read-only — rolled up from related records.'}
+                  title={chipTitle}
                   style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 700, color: '#1a5a8a', background: '#e8f3fb', padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em' }}>
-                  {isFormula ? 'FORMULA' : 'ROLLUP'}
+                  {chip}
                 </span>
               </span>
               <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>{cDisplay}</span>
@@ -6650,6 +6654,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         // real columns on this table, so they must never reach the insert.
         for (const k of Object.keys(fields)) if (k.includes('.')) delete fields[k]
 
+        // Formula / rollup / inherited fields are computed at read and have no
+        // (or a computed) backing column — strip them so an insert can't try to
+        // write a non-existent column.
+        {
+          const computedInsert = new Set()
+          for (const sec of (data?.sections || [])) for (const w of (sec.widgets || []))
+            for (const f of (w.widget_config?.fields || []))
+              if (f.type === 'formula' || f.type === 'rollup' || f.type === 'inherited') computedInsert.add(f.name)
+          for (const k of Object.keys(fields)) if (computedInsert.has(k)) delete fields[k]
+        }
+
         // Strip empty string values (convert to null)
         for (const [k, v] of Object.entries(fields)) {
           if (v === '') fields[k] = null
@@ -6715,13 +6730,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // Cross-object (related) field values live under dotted keys — they are
     // display-only copies of a parent record's columns, never writable here.
     for (const k of Object.keys(changes)) if (k.includes('.')) delete changes[k]
-    // Formula / rollup fields are computed at read — never written back to the
-    // underlying column, even if a stale copy sits in the draft.
+    // Formula / rollup / inherited fields are computed at read — never written
+    // back to the underlying column (inherited fields have no column at all),
+    // even if a stale copy sits in the draft.
     {
       const computedNames = new Set()
       for (const sec of (data?.sections || [])) for (const w of (sec.widgets || []))
         for (const f of (w.widget_config?.fields || []))
-          if (f.type === 'formula' || f.type === 'rollup') computedNames.add(f.name)
+          if (f.type === 'formula' || f.type === 'rollup' || f.type === 'inherited') computedNames.add(f.name)
       for (const k of Object.keys(changes)) if (computedNames.has(k)) delete changes[k]
     }
     for (const k of Object.keys(changes)) {

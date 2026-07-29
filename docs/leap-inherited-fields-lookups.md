@@ -21,6 +21,25 @@ Salesforce framing: parent data belongs on the child as a **Lookup relationship*
 (the FK) or a **cross-object formula / related field** (a read-only reflection),
 never as re-keyed columns that drift.
 
+## 1b. Shipped 2026-07-29 — Inherited Field type (Phase 2, first-class)
+
+The **Inherited Field** is now a first-class, admin-createable field type — the
+Salesforce cross-object formula. You need **both** relationship primitives and
+they work together:
+
+- **Lookup** (already existed) = the relationship to the parent record.
+- **Inherited Field** (new) = a read-only value pulled from a **base record up the
+  chain**, resolved live at read. No physical column; the definition lives in
+  `field_metadata` (`fm_field_kind='inherited'` + `fm_inherit_config` hops/source),
+  exposed as a virtual column by `describe_object_columns` and resolved multi-hop
+  in `computeFieldValues`. Created from Object Manager → New Field → *Inherited
+  Field (from parent)* with a cascading hop picker (self → … → base) + source
+  field; renders read-only with an **INHERITED** chip; stripped from every save.
+  Migration `20260729000407` (+ help HA-00161). Scalar source fields in v1;
+  picklist/lookup sources are the next follow-up. Next: convert the duplicated
+  `enrollment_*` / `ia_*` columns (§5 Phase 3) to Inherited Fields — pending the
+  additive-vs-drop decision in §6.
+
 ## 2. What just shipped (Phase 0 — the reported bug)
 
 **Symptom (Nicholas, 2026-07-28):** created a new Opportunity from a *Building*;
