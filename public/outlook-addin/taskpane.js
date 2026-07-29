@@ -23,6 +23,8 @@
   var myAddress = '';
   var selected = null;      // { rec_object, rec_id, rec_label, rec_sublabel }
   var searchTimer = null;
+  var participants = [];    // [{ email, name, role, contactId, contactName, accountId, accountName }]
+  var linkContactId = null; // contact the email will also be logged against
 
   // ── DOM helpers ──────────────────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
@@ -133,7 +135,231 @@
       renderEmailSummary();
       setupAttachments();
       runSearch();
+      refreshParticipants();
     }
+  }
+
+  // ── People on the email → LEAP contacts ──────────────────────────────────
+  function gatherParticipants() {
+    // from + to + cc, minus the signed-in user's own address, de-duped by email.
+    var rows = [];
+    var f = fromAddress();
+    if (f) rows.push({ email: f.email, name: f.name, role: 'from' });
+    toList().forEach(function (r) { rows.push({ email: r.email, name: r.name, role: 'to' }); });
+    ccList().forEach(function (r) { rows.push({ email: r.email, name: r.name, role: 'cc' }); });
+    var seen = {}, out = [];
+    rows.forEach(function (r) {
+      if (!r.email) return;
+      var key = r.email.toLowerCase();
+      if (key === myAddress) return;      // skip myself
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push(r);
+    });
+    return out;
+  }
+
+  // Which participant to link the email to by default: the external counterpart —
+  // the sender for an inbound email, the first recipient for an outbound one.
+  function primaryEmail() {
+    var dir = detectDirection();
+    if (dir === 'inbound') { var f = fromAddress(); return f ? f.email.toLowerCase() : null; }
+    var t = toList().find(function (r) { return r.email && r.email.toLowerCase() !== myAddress; });
+    return t ? t.email.toLowerCase() : null;
+  }
+
+  function refreshParticipants() {
+    participants = []; linkContactId = null;
+    var people = gatherParticipants();
+    if (!people.length) { hide('peopleSection'); return; }
+    var emails = people.map(function (p) { return p.email; });
+    sb.rpc('lookup_email_participants', { p_emails: emails }).then(function (res) {
+      var byEmail = {};
+      if (!res.error && Array.isArray(res.data)) {
+        res.data.forEach(function (row) { byEmail[(row.participant_email || '').toLowerCase()] = row; });
+      }
+      var primary = primaryEmail();
+      participants = people.map(function (p) {
+        var m = byEmail[p.email.toLowerCase()] || {};
+        return {
+          email: p.email, name: p.name, role: p.role,
+          contactId: m.contact_id || null,
+          contactName: m.contact_name || null,
+          accountId: m.account_id || null,
+          accountName: m.account_name || null
+        };
+      });
+      // Default link = the primary external participant, if it's a known contact.
+      var prim = participants.find(function (p) { return primary && p.email.toLowerCase() === primary; });
+      if (prim && prim.contactId) linkContactId = prim.contactId;
+      renderPeople();
+    }).catch(function () { hide('peopleSection'); });
+  }
+
+  function renderPeople() {
+    var ul = $('peopleList');
+    ul.innerHTML = '';
+    show('peopleSection');
+
+    // "Don't link a contact" option.
+    var noneLi = document.createElement('li');
+    noneLi.className = 'lp-none-row';
+    var noneRadio = document.createElement('input');
+    noneRadio.type = 'radio'; noneRadio.name = 'lpLinkContact'; noneRadio.className = 'lp-person-radio';
+    noneRadio.checked = !linkContactId;
+    noneRadio.addEventListener('change', function () { linkContactId = null; });
+    noneLi.appendChild(noneRadio);
+    var noneLbl = document.createElement('span'); noneLbl.textContent = 'Don’t link to a contact';
+    noneLi.appendChild(noneLbl);
+    ul.appendChild(noneLi);
+
+    participants.forEach(function (p, idx) {
+      var li = document.createElement('li');
+      li.className = 'lp-person';
+
+      var top = document.createElement('div');
+      top.className = 'lp-person-top';
+
+      if (p.contactId) {
+        var radio = document.createElement('input');
+        radio.type = 'radio'; radio.name = 'lpLinkContact'; radio.className = 'lp-person-radio';
+        radio.checked = (linkContactId === p.contactId);
+        radio.addEventListener('change', function () { linkContactId = p.contactId; });
+        top.appendChild(radio);
+      } else {
+        var spacer = document.createElement('span'); spacer.className = 'lp-person-radio'; spacer.style.visibility = 'hidden';
+        top.appendChild(spacer);
+      }
+
+      var main = document.createElement('div');
+      main.className = 'lp-person-main';
+      var nameEl = document.createElement('div');
+      nameEl.className = 'lp-person-name';
+      nameEl.textContent = p.contactName || p.name || p.email;
+      if (p.contactId) {
+        var chip = document.createElement('span'); chip.className = 'lp-chip lp-chip-linked'; chip.textContent = 'contact';
+        nameEl.appendChild(chip);
+      } else {
+        var chipN = document.createElement('span'); chipN.className = 'lp-chip lp-chip-new'; chipN.textContent = 'not in LEAP';
+        nameEl.appendChild(chipN);
+      }
+      main.appendChild(nameEl);
+      var emailEl = document.createElement('div'); emailEl.className = 'lp-person-email'; emailEl.textContent = p.email;
+      main.appendChild(emailEl);
+      if (p.accountName) {
+        var meta = document.createElement('div'); meta.className = 'lp-person-meta'; meta.textContent = p.accountName;
+        main.appendChild(meta);
+      }
+      top.appendChild(main);
+      li.appendChild(top);
+
+      if (!p.contactId) {
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'lp-person-btn'; btn.textContent = '+ Create contact';
+        btn.addEventListener('click', function () { openCreateForm(li, idx); });
+        li.appendChild(btn);
+      }
+      ul.appendChild(li);
+    });
+  }
+
+  // Inline create-contact form for an unmatched participant.
+  function openCreateForm(li, idx) {
+    var p = participants[idx];
+    if (li.querySelector('.lp-create')) return; // already open
+    var nameParts = (p.name && p.name.indexOf('@') === -1 ? p.name : '').trim().split(/\s+/).filter(Boolean);
+    var first = nameParts.length ? nameParts[0] : '';
+    var last = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
+    var box = document.createElement('div');
+    box.className = 'lp-create';
+    box.innerHTML =
+      '<div class="lp-row2">' +
+        '<input class="lp-input" data-f="first" placeholder="First name">' +
+        '<input class="lp-input" data-f="last" placeholder="Last name">' +
+      '</div>' +
+      '<input class="lp-input" data-f="email" placeholder="Email">' +
+      '<input class="lp-input" data-f="acct" placeholder="Search for the company (account)…" autocomplete="off">' +
+      '<ul class="lp-acct-results"></ul>' +
+      '<div class="lp-acct-chosen" hidden></div>' +
+      '<p class="lp-error" data-f="err" hidden></p>' +
+      '<div class="lp-create-actions">' +
+        '<button type="button" class="lp-btn-sm primary" data-f="save" disabled>Create contact</button>' +
+        '<button type="button" class="lp-btn-sm ghost" data-f="cancel">Cancel</button>' +
+      '</div>';
+    li.appendChild(box);
+
+    var q = function (s) { return box.querySelector(s); };
+    q('[data-f="first"]').value = first;
+    q('[data-f="last"]').value = last;
+    q('[data-f="email"]').value = p.email;
+
+    var chosenAccount = null;
+    var acctInput = q('[data-f="acct"]');
+    var acctResults = q('.lp-acct-results');
+    var chosenEl = q('.lp-acct-chosen');
+    var saveBtn = q('[data-f="save"]');
+    var errEl = q('[data-f="err"]');
+    var acctTimer = null;
+
+    function updateSaveState() { saveBtn.disabled = !chosenAccount; }
+
+    acctInput.addEventListener('input', function () {
+      clearTimeout(acctTimer);
+      chosenAccount = null; chosenEl.hidden = true; updateSaveState();
+      var term = acctInput.value.trim();
+      acctTimer = setTimeout(function () {
+        sb.rpc('search_records_for_email_log', { p_object: 'accounts', p_query: term || null, p_limit: 8 })
+          .then(function (r) {
+            acctResults.innerHTML = '';
+            if (r.error || !Array.isArray(r.data)) return;
+            r.data.forEach(function (row) {
+              var opt = document.createElement('li');
+              opt.className = 'lp-acct-opt';
+              opt.textContent = row.rec_label + (row.rec_sublabel ? ' · ' + row.rec_sublabel : '');
+              opt.addEventListener('click', function () {
+                chosenAccount = row;
+                acctResults.innerHTML = '';
+                acctInput.value = row.rec_label;
+                chosenEl.textContent = 'Company: ' + row.rec_label;
+                chosenEl.hidden = false;
+                updateSaveState();
+              });
+              acctResults.appendChild(opt);
+            });
+          });
+      }, 250);
+    });
+
+    q('[data-f="cancel"]').addEventListener('click', function () { box.remove(); });
+
+    saveBtn.addEventListener('click', function () {
+      errEl.hidden = true;
+      if (!chosenAccount) return;
+      saveBtn.disabled = true; saveBtn.textContent = 'Creating…';
+      sb.rpc('create_contact_from_email', {
+        p_first_name: q('[data-f="first"]').value.trim(),
+        p_last_name:  q('[data-f="last"]').value.trim(),
+        p_email:      q('[data-f="email"]').value.trim(),
+        p_account_id: chosenAccount.rec_id
+      }).then(function (r) {
+        if (r.error || !Array.isArray(r.data) || !r.data.length) {
+          errEl.textContent = (r.error && r.error.message) || 'Could not create the contact.';
+          errEl.hidden = false; saveBtn.disabled = false; saveBtn.textContent = 'Create contact';
+          return;
+        }
+        var made = r.data[0];
+        participants[idx].contactId = made.contact_id;
+        participants[idx].contactName = made.contact_name;
+        participants[idx].accountId = made.account_id;
+        participants[idx].accountName = made.account_name;
+        linkContactId = made.contact_id;   // link the email to the just-created contact
+        renderPeople();
+      }).catch(function (e) {
+        errEl.textContent = (e && e.message) || 'Could not create the contact.';
+        errEl.hidden = false; saveBtn.disabled = false; saveBtn.textContent = 'Create contact';
+      });
+    });
   }
 
   // ── Main view ────────────────────────────────────────────────────────────
@@ -142,7 +368,8 @@
     renderEmailSummary();
     setupAttachments();
     show('mainView');
-    runSearch();        // seed with recent records for the default object
+    runSearch();          // seed with recent records for the default object
+    refreshParticipants(); // match the people on the email to LEAP contacts
   }
 
   function fromAddress() {
@@ -323,6 +550,7 @@
       var payload = {
         target_object: selected.rec_object,
         target_record_id: selected.rec_id,
+        contact_id: linkContactId || null,
         email: {
           subject: mailboxItem.subject || '',
           from: f,
@@ -355,6 +583,10 @@
       var skipped = (data.attachments_skipped || []).length;
       var loggedN = (data.attachments_logged || []).length;
       var msg = 'Logged to ' + selected.rec_label + ' (' + (data.msg_record_number || 'saved') + ').';
+      if (linkContactId) {
+        var lc = participants.find(function (p) { return p.contactId === linkContactId; });
+        if (lc && (lc.contactName || lc.name)) msg += ' Linked to ' + (lc.contactName || lc.name) + '.';
+      }
       if (loggedN) msg += ' ' + loggedN + ' attachment' + (loggedN === 1 ? '' : 's') + ' included.';
       if (skipped) msg += ' ' + skipped + ' attachment' + (skipped === 1 ? '' : 's') + ' skipped.';
       setStatus(msg, 'ok');
