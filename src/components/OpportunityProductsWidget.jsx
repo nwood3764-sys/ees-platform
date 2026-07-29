@@ -16,6 +16,9 @@ import {
   updateOpportunityProductField,
   removeOpportunityProduct,
   reorderOpportunityProducts,
+  getOpportunityPriceBook,
+  listSelectablePriceBooks,
+  setOpportunityPriceBook,
 } from '../data/opportunityProductsService'
 
 const CARD_SECONDARY = '#f7f9fc'
@@ -46,12 +49,23 @@ export default function OpportunityProductsWidget({
   const [addOptions, setAddOptions] = useState(null) // null = not loaded
   const [addSearch, setAddSearch] = useState('')
   const [adding, setAdding] = useState(false)
+  // Price book — lives on the opportunity.
+  const [priceBook, setPriceBook] = useState({ price_book_id: null, price_book_name: null })
+  const [choosingBook, setChoosingBook] = useState(false) // add panel is on the book-picker step
+  const [bookOptions, setBookOptions] = useState(null)    // null = not loaded
+  const [settingBook, setSettingBook] = useState(false)
 
   const title = widget?.widget_config?.label || 'Products'
+  const hasBook = !!priceBook.price_book_id
 
   const load = useCallback(async () => {
     try {
-      setRows(await listOpportunityProducts(opportunityId))
+      const [products, book] = await Promise.all([
+        listOpportunityProducts(opportunityId),
+        getOpportunityPriceBook(opportunityId),
+      ])
+      setRows(products)
+      setPriceBook(book)
     } catch (e) {
       console.error('Load opportunity products failed', e)
       toast.error('Could not load products')
@@ -140,17 +154,50 @@ export default function OpportunityProductsWidget({
   }
 
   // --- add ----------------------------------------------------------------
+  const loadBookOptions = async () => {
+    if (bookOptions != null) return
+    try {
+      setBookOptions(await listSelectablePriceBooks())
+    } catch (e) {
+      console.error('Load price books failed', e)
+      toast.error('Could not load price books')
+      setBookOptions([])
+    }
+  }
+  const loadProductOptions = async () => {
+    try {
+      setAddOptions(await listAddableProducts(opportunityId))
+    } catch (e) {
+      console.error('Load addable products failed', e)
+      toast.error('Could not load products')
+      setAddOptions([])
+    }
+  }
   const openAdd = async () => {
     setAddOpen(true)
     setAddSearch('')
-    if (addOptions == null) {
-      try {
-        setAddOptions(await listAddableProducts(opportunityId))
-      } catch (e) {
-        console.error('Load addable products failed', e)
-        toast.error('Could not load products')
-        setAddOptions([])
-      }
+    if (!hasBook) {
+      // First product: the opportunity has no price book — prompt to pick one.
+      setChoosingBook(true)
+      loadBookOptions()
+    } else {
+      setChoosingBook(false)
+      if (addOptions == null) loadProductOptions()
+    }
+  }
+  const chooseBook = async (priceBookId, priceBookName) => {
+    setSettingBook(true)
+    try {
+      await setOpportunityPriceBook(opportunityId, priceBookId)
+      setPriceBook({ price_book_id: priceBookId, price_book_name: priceBookName })
+      setAddOptions(null)
+      setChoosingBook(false)
+      await loadProductOptions()
+    } catch (e) {
+      console.error('Set price book failed', e)
+      toast.error('Could not set the price book')
+    } finally {
+      setSettingBook(false)
     }
   }
   const addProduct = async (productId) => {
@@ -237,12 +284,19 @@ export default function OpportunityProductsWidget({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: collapsed ? 'none' : `1px solid ${C.border}` }}>
         <button
           onClick={() => setCollapsed(c => !c)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
         >
-          <span style={{ color: C.textMuted, fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
-          <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>{title}</span>
-          <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 400 }}>
-            ({rows.length})
+          <span style={{ color: C.textMuted, fontSize: 11, marginTop: 3 }}>{collapsed ? '▸' : '▾'}</span>
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>{title}</span>
+              <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 400, marginLeft: 6 }}>({rows.length})</span>
+            </span>
+            {!loading && (
+              <span style={{ fontSize: 11.5, color: C.textMuted }}>
+                {hasBook ? <>Price Book: <span style={{ color: C.textSecondary, fontWeight: 500 }}>{priceBook.price_book_name || '—'}</span></> : 'No price book yet'}
+              </span>
+            )}
           </span>
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -265,36 +319,80 @@ export default function OpportunityProductsWidget({
           {/* add panel */}
           {addOpen && (
             <div style={{ padding: '10px 14px', background: CARD_SECONDARY, borderBottom: `1px solid ${C.border}` }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                <input
-                  autoFocus
-                  placeholder="Search products…"
-                  value={addSearch}
-                  onChange={e => setAddSearch(e.target.value)}
-                  style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: `1px solid ${C.borderDark}`, borderRadius: 6, outline: 'none' }}
-                />
-                <button onClick={() => setAddOpen(false)} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
-              </div>
-              <div style={{ maxHeight: 220, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, background: '#fff' }}>
-                {addOptions == null ? (
-                  <div style={{ padding: 12, fontSize: 13, color: C.textMuted }}>Loading…</div>
-                ) : filteredAdd.length === 0 ? (
-                  <div style={{ padding: 12, fontSize: 13, color: C.textMuted }}>
-                    {addOptions.length === 0 ? 'No products are priced into this opportunity’s price book yet.' : 'No matches.'}
+              {choosingBook ? (
+                // Step 1 (only when the opportunity has no price book yet):
+                // choose the price book. It is then stored on the opportunity.
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textSecondary }}>Select a price book for this opportunity</span>
+                    <button onClick={() => setAddOpen(false)} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
                   </div>
-                ) : (
-                  filteredAdd.map(o => (
-                    <button
-                      key={o.value}
-                      disabled={adding}
-                      onClick={() => addProduct(o.value)}
-                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: adding ? 'wait' : 'pointer', color: C.textPrimary }}
-                    >
-                      {o.label}
-                    </button>
-                  ))
-                )}
-              </div>
+                  <div style={{ maxHeight: 240, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, background: '#fff' }}>
+                    {bookOptions == null ? (
+                      <div style={{ padding: 12, fontSize: 13, color: C.textMuted }}>Loading price books…</div>
+                    ) : bookOptions.length === 0 ? (
+                      <div style={{ padding: 12, fontSize: 13, color: C.textMuted }}>No price books are set up yet.</div>
+                    ) : (
+                      bookOptions.map(b => (
+                        <button
+                          key={b.value}
+                          disabled={settingBook}
+                          onClick={() => chooseBook(b.value, b.label)}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', fontSize: 13, background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: settingBook ? 'wait' : 'pointer', color: C.textPrimary }}
+                        >
+                          {b.label}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                // Step 2: browse the whole product list for the opportunity's
+                // price book (search is an optional filter, not required).
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textSecondary }}>
+                      Products in {priceBook.price_book_name || 'this price book'}
+                    </span>
+                    {rows.length === 0 && (
+                      <button
+                        onClick={() => { setChoosingBook(true); loadBookOptions() }}
+                        style={{ background: 'none', border: 'none', color: '#1e466b', fontSize: 12, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+                      >Change price book</button>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                    <input
+                      autoFocus
+                      placeholder="Filter products…"
+                      value={addSearch}
+                      onChange={e => setAddSearch(e.target.value)}
+                      style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: `1px solid ${C.borderDark}`, borderRadius: 6, outline: 'none' }}
+                    />
+                    <button onClick={() => setAddOpen(false)} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer', color: C.textSecondary }}>Close</button>
+                  </div>
+                  <div style={{ maxHeight: 260, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, background: '#fff' }}>
+                    {addOptions == null ? (
+                      <div style={{ padding: 12, fontSize: 13, color: C.textMuted }}>Loading…</div>
+                    ) : filteredAdd.length === 0 ? (
+                      <div style={{ padding: 12, fontSize: 13, color: C.textMuted }}>
+                        {addOptions.length === 0 ? 'No products are priced into this price book yet.' : 'No matches.'}
+                      </div>
+                    ) : (
+                      filteredAdd.map(o => (
+                        <button
+                          key={o.value}
+                          disabled={adding}
+                          onClick={() => addProduct(o.value)}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: adding ? 'wait' : 'pointer', color: C.textPrimary }}
+                        >
+                          {o.label}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
 

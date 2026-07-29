@@ -114,3 +114,46 @@ export async function reorderOpportunityProducts(orderedIds) {
     orderedIds.map((id, i) => saveRecord(OLI, id, { oli_sort_order: i + 1 })),
   )
 }
+
+// ---------------------------------------------------------------------------
+// Price book — lives on the opportunity. Derived from the record type when it
+// maps to a book (unchangeable); otherwise chosen by the user on the first
+// product add and preserved (see migration 20260729032447).
+// ---------------------------------------------------------------------------
+
+/** The opportunity's current price book (id + name), or nulls if none set. */
+export async function getOpportunityPriceBook(opportunityId) {
+  const { data, error } = await supabase
+    .from('opportunities')
+    .select('price_book_id, book:price_book_id ( price_book_name )')
+    .eq('id', opportunityId)
+    .single()
+  if (error) throw error
+  return {
+    price_book_id: data?.price_book_id ?? null,
+    price_book_name: data?.book?.price_book_name ?? null,
+  }
+}
+
+/** Active price books a user can assign (excludes the empty Standard book). */
+export async function listSelectablePriceBooks() {
+  const { data, error } = await supabase
+    .from('price_books')
+    .select('id, price_book_name')
+    .eq('price_book_is_deleted', false)
+    .or('price_book_is_active.is.null,price_book_is_active.eq.true')
+    .or('price_book_is_standard.is.null,price_book_is_standard.eq.false')
+    .order('price_book_name', { ascending: true })
+  if (error) throw error
+  return (data || []).map(r => ({ value: r.id, label: r.price_book_name || r.id.slice(0, 8) }))
+}
+
+/**
+ * Assign the opportunity's price book. Persists only when the record type has
+ * no mapping (the trigger re-forces the mapped book otherwise) — the caller
+ * only prompts in the unmapped case.
+ */
+export async function setOpportunityPriceBook(opportunityId, priceBookId) {
+  const row = await saveRecord('opportunities', opportunityId, { price_book_id: priceBookId })
+  return row?.price_book_id ?? priceBookId
+}
