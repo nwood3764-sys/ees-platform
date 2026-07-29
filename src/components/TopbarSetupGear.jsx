@@ -175,13 +175,20 @@ export default function TopbarSetupGear({
       // Previously this opened RecordDetail on the page_layouts row itself,
       // which just shows the metadata row, not the real editor with
       // sections/fields/drag-and-drop.
+      // The record to return to on Close/Save — carried into the URL (?ret=)
+      // so it survives a reload / editor re-mount, not just the in-memory stash
+      // above. Only set when opened from an actual record page (a list open has
+      // no record to return to).
+      const layoutReturn = (selectedRecord?.table && selectedRecord?.id)
+        ? { table: selectedRecord.table, id: selectedRecord.id, module: activeModule }
+        : null
       if (onOpenSetup) {
         if (layoutId) {
-          onOpenSetup('objects', tableName, { initialSubTab: 'layouts', initialLayoutId: layoutId })
+          onOpenSetup('objects', tableName, { initialSubTab: 'layouts', initialLayoutId: layoutId, layoutReturn })
         } else {
           // No matching layout — fall back to the Page Layouts list for
           // this object so the admin can pick one or create one.
-          onOpenSetup('objects', tableName, { initialSubTab: 'layouts' })
+          onOpenSetup('objects', tableName, { initialSubTab: 'layouts', layoutReturn })
         }
       }
     } finally {
