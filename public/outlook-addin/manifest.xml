@@ -22,7 +22,7 @@
   xsi:type="MailApp">
 
   <Id>6b8e5f2a-1c3d-4e7b-9a2f-7d4c1e9b0a56</Id>
-  <Version>1.1.0.0</Version>
+  <Version>1.2.0.0</Version>
   <ProviderName>Energy Efficiency Services</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="LEAP — Log Email"/>
@@ -96,6 +96,11 @@
               </Group>
             </OfficeTab>
           </ExtensionPoint>
+          <!-- Activate the add-in on messages in shared mailboxes / delegated
+               folders (EES program mailboxes: EES-WI_Sealed, WI-IRA, WI
+               Assessments, NC-IRA, etc.), not just the user's primary mailbox.
+               Requires a client on Mailbox requirement set 1.8+. -->
+          <SupportsSharedFolders>true</SupportsSharedFolders>
         </DesktopFormFactor>
       </Host>
     </Hosts>
