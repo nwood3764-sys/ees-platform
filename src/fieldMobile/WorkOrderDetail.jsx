@@ -167,6 +167,14 @@ function VideoIcon() {
     </svg>
   )
 }
+function FolderIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
+  )
+}
 function CheckIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -586,7 +594,9 @@ function UnableModal({ busy, onCancel, onSubmit }) {
           }}
         />
 
-        <input ref={fileRef} type="file" accept="image/*" capture="environment"
+        {/* No capture attribute → the tech can take a new photo OR attach one
+            already saved on the device (e.g. shot earlier, offline). */}
+        <input ref={fileRef} type="file" accept="image/*"
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value=''; if (f) setPhotoFile(f) }}
           style={{ display: 'none' }} />
         <button onClick={() => fileRef.current?.click()}
@@ -619,9 +629,11 @@ function UnableModal({ busy, onCancel, onSubmit }) {
 
 // ─── StepCard ────────────────────────────────────────────────────────────────
 function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, onMarkNotApplicable, onPhotoUploaded, onPhotoError }) {
-  const fileRef  = useRef(null)
-  const videoRef = useRef(null)
-  const legRef   = useRef('general')  // synchronous — no state race with the picker
+  const fileRef        = useRef(null)
+  const folderRef      = useRef(null)  // library / folder picker (offline uploads)
+  const videoRef       = useRef(null)
+  const folderVideoRef = useRef(null)  // library / folder picker for video
+  const legRef         = useRef('general')  // synchronous — no state race with the picker
   const [uploading, setUploading] = useState(false)
 
   const done = isStepDone(step)
@@ -645,6 +657,16 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
   const triggerCapture = (leg) => {
     legRef.current = leg
     if (fileRef.current) fileRef.current.click()
+  }
+
+  // Same as triggerCapture, but opens the photo library / folder picker instead
+  // of the camera — for a photo already taken (often offline, or being uploaded
+  // from a PC). The leg is stored in the same ref so onFile tags it Before /
+  // After / general exactly as a live capture, and the click stays synchronous
+  // inside the tap for the same mobile user-gesture reason as the camera.
+  const triggerFolder = (leg) => {
+    legRef.current = leg
+    if (folderRef.current) folderRef.current.click()
   }
 
   const onFile = async (e) => {
@@ -831,8 +853,18 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
             ref={fileRef} type="file" accept="image/*" capture="environment"
             onChange={onFile} style={{ display: 'none' }}
           />
+          {/* No capture attribute → opens the library / folder picker so a
+              photo taken offline can be uploaded later with its own metadata. */}
+          <input
+            ref={folderRef} type="file" accept="image/*"
+            onChange={onFile} style={{ display: 'none' }}
+          />
           <input
             ref={videoRef} type="file" accept="video/*" capture="environment"
+            onChange={onVideoFile} style={{ display: 'none' }}
+          />
+          <input
+            ref={folderVideoRef} type="file" accept="video/*"
             onChange={onVideoFile} style={{ display: 'none' }}
           />
           {step.reference_photo_url && (
@@ -859,19 +891,19 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
           )}
           <div style={{ display: 'flex', gap: 8, marginBottom: gap ? 8 : 0, flexWrap: 'wrap' }}>
             {isVideoStep ? (
-              <CaptureBtn label="Record Video" icon="video" onClick={() => videoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />
+              <CaptureBtn label="Record Video" icon="video" onClick={() => videoRef.current?.click()} onFolder={() => folderVideoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />
             ) : (
               <>
                 {needsBefore && (
-                  <CaptureBtn label="Before" onClick={() => triggerCapture('before')} disabled={uploading || busy} done={step.before_count > 0} />
+                  <CaptureBtn label="Before" onClick={() => triggerCapture('before')} onFolder={() => triggerFolder('before')} disabled={uploading || busy} done={step.before_count > 0} />
                 )}
                 {needsAfter && (
-                  <CaptureBtn label="After" onClick={() => triggerCapture('after')} disabled={uploading || busy} done={step.after_count > 0} />
+                  <CaptureBtn label="After" onClick={() => triggerCapture('after')} onFolder={() => triggerFolder('after')} disabled={uploading || busy} done={step.after_count > 0} />
                 )}
                 {/* General capture when the step needs a count but no specific leg,
                     or to add beyond before/after toward the required count. */}
                 {(reqCount > 0 || (!needsBefore && !needsAfter)) && (
-                  <CaptureBtn label="Photo" onClick={() => triggerCapture('general')} disabled={uploading || busy} />
+                  <CaptureBtn label="Photo" onClick={() => triggerCapture('general')} onFolder={() => triggerFolder('general')} disabled={uploading || busy} />
                 )}
               </>
             )}
@@ -1315,23 +1347,44 @@ function StepFieldInput({ field, stepId, disabled, onSaved, onError, embedded = 
   )
 }
 
-function CaptureBtn({ label, icon = 'camera', onClick, disabled, done }) {
-  return (
+// A capture control. `onClick` opens the camera (straight-to-camera, the fast
+// field path). When `onFolder` is supplied, a companion button is attached on
+// the right that opens the file / photo-library picker instead — for photos or
+// videos taken offline and uploaded later from the phone's library or a PC. The
+// leg / photo-type tagging is identical for both, so a folder upload lands with
+// the same Before/After/step-name tag as a live capture.
+function CaptureBtn({ label, icon = 'camera', onClick, onFolder, disabled, done }) {
+  const base = {
+    appearance: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    background: done ? '#e8f8f0' : C.cardSecondary,
+    color: done ? C.emeraldMid : C.textPrimary,
+    border: `1px solid ${done ? C.emerald : C.borderDark}`,
+    fontFamily: FONT, fontWeight: 600, fontSize: 14, minHeight: 44,
+    justifyContent: 'center',
+  }
+  const main = (
     <button
       onClick={onClick} disabled={disabled}
-      style={{
-        appearance: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        background: done ? '#e8f8f0' : C.cardSecondary,
-        color: done ? C.emeraldMid : C.textPrimary,
-        border: `1px solid ${done ? C.emerald : C.borderDark}`,
-        borderRadius: 8, padding: '10px 14px', fontFamily: FONT,
-        fontWeight: 600, fontSize: 14, minHeight: 44, flex: '1 1 auto',
-        justifyContent: 'center',
-      }}
+      style={{ ...base, borderRadius: onFolder ? '8px 0 0 8px' : 8, padding: '10px 14px', flex: '1 1 auto' }}
     >
       {icon === 'video' ? <VideoIcon /> : <CameraIcon />} {label}{done ? ' ✓' : ''}
     </button>
+  )
+  if (!onFolder) return main
+  const kind = icon === 'video' ? 'video' : 'photo'
+  return (
+    <div style={{ display: 'inline-flex', flex: '1 1 auto', minWidth: 0 }}>
+      {main}
+      <button
+        onClick={onFolder} disabled={disabled}
+        aria-label={`Upload a saved ${kind} from a folder`}
+        title={`Upload a saved ${kind} — taken offline or on another device`}
+        style={{ ...base, gap: 0, borderRadius: '0 8px 8px 0', borderLeft: 'none', padding: '10px 13px', flex: '0 0 auto' }}
+      >
+        <FolderIcon />
+      </button>
+    </div>
   )
 }
 
@@ -1756,6 +1809,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const [pending, setPending] = useState({}) // field_id -> current (unsaved) editor value
   const [exampleZoom, setExampleZoom] = useState(null) // illustration URL viewed full-screen
   const fileRef = useRef(null)
+  const folderRef = useRef(null)         // library / folder picker (offline uploads)
   const photoTypeRef = useRef('general') // which photo_type the next capture tags
 
   const refresh = useCallback(async () => {
@@ -1812,6 +1866,9 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const back = () => setIdx((i) => Math.max(i - 1, 0))
 
   const triggerPhoto = (ptype) => { photoTypeRef.current = ptype || 'general'; fileRef.current?.click() }
+  // Opens the library / folder picker instead of the camera, for a photo taken
+  // offline and uploaded later; same photo-type tagging as a live capture.
+  const triggerPhotoFolder = (ptype) => { photoTypeRef.current = ptype || 'general'; folderRef.current?.click() }
 
   const onFile = async (e) => {
     const file = e.target.files && e.target.files[0]
@@ -1946,9 +2003,11 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
                 : `${reqPhotos} photo${reqPhotos === 1 ? '' : 's'} required.`}
             </div>
             <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
+            <input ref={folderRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
             <CaptureBtn
               label={photoCount > 0 ? 'Add / Retake Photo' : 'Take Photo'}
               onClick={() => triggerPhoto('general')}
+              onFolder={() => triggerPhotoFolder('general')}
               disabled={uploading}
               done={photoSatisfied}
             />
@@ -2001,9 +2060,11 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
               </div>
             )}
             <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
+            <input ref={folderRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
             <CaptureBtn
               label={curPhotoN > 0 ? 'Add / Retake Photo' : 'Take Photo'}
               onClick={() => triggerPhoto(screen.field.name)}
+              onFolder={() => triggerPhotoFolder(screen.field.name)}
               disabled={uploading}
               done={curPhotoN > 0}
             />
