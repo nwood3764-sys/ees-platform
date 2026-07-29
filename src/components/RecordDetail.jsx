@@ -39,6 +39,7 @@ import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
+import OpportunityProductsWidget from './OpportunityProductsWidget'
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
 import PropertyMapWidget from './PropertyMapWidget'
@@ -7365,6 +7366,19 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   createRelatedValues={createRelatedValues} />
                 {cards.map(w => {
                   if (w.widget_type === 'related_list') {
+                    // Opportunity line items render as the Salesforce-style
+                    // inline-editable Opportunity Products table instead of the
+                    // read-only related list, wherever that list is placed.
+                    if (w.widget_config?.table === 'opportunity_line_items' && tableName === 'opportunities') {
+                      return (
+                        <OpportunityProductsWidget
+                          key={w.id}
+                          widget={w}
+                          opportunityId={recordId}
+                          onNavigateToRecord={onNavigateToRecord}
+                        />
+                      )
+                    }
                     // Lock child related_lists when the parent template is
                     // Active or Archived. We match the widget's table against
                     // the lifecycle's childrenTable (e.g.
@@ -7503,16 +7517,25 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                       {(sec.widgets || [])
                         .filter(w => w.widget_type === 'related_list')
                         .map(w => (
-                          <RelatedListWidget
-                            key={w.id}
-                            widget={w}
-                            picklists={picklists}
-                            onNavigateToRecord={onNavigateToRecord}
-                            parentRecordId={recordId}
-                            parentTable={tableName}
-                            parentRecord={data?.record}
-                            parentRecordName={displayName}
-                          />
+                          w.widget_config?.table === 'opportunity_line_items' && tableName === 'opportunities' ? (
+                            <OpportunityProductsWidget
+                              key={w.id}
+                              widget={w}
+                              opportunityId={recordId}
+                              onNavigateToRecord={onNavigateToRecord}
+                            />
+                          ) : (
+                            <RelatedListWidget
+                              key={w.id}
+                              widget={w}
+                              picklists={picklists}
+                              onNavigateToRecord={onNavigateToRecord}
+                              parentRecordId={recordId}
+                              parentTable={tableName}
+                              parentRecord={data?.record}
+                              parentRecordName={displayName}
+                            />
+                          )
                         ))}
                       {(sec.widgets || [])
                         .filter(w => w.widget_type === 'conversation_panel')
