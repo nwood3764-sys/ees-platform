@@ -4168,32 +4168,30 @@ function RelatedListWidget({
       }
     }
 
-    // An incentive application is a program submittal for one building, so a new
-    // one created from an Opportunity's related list should open with everything
-    // the system already holds about that opportunity's building and property —
-    // installation address, square footage, floors, year built, unit counts,
-    // utility providers/accounts, owner and business-entity info — leaving only
-    // genuinely application-specific answers to type (Nicholas: "very little
-    // information should be manually entered here"). The generic chain seeder has
-    // already carried opportunity_id/property_id/building_id (the NOT NULL FKs)
-    // from TABLE_META; here we fetch the building, property and owner-account rows
-    // and copy their attributes. ia_installation_address_state also drives the
-    // record-type picker's state filter (prefillState). All values stay
-    // user-editable; only fill blanks, never clobber.
-    if (childTable === 'incentive_applications' && parentTable === 'opportunities' && parentRecord) {
+    // An incentive application is a program submittal for one building. However
+    // it is created — from the building's or property's related list, from an
+    // Opportunity, or elsewhere — it should open with everything the system
+    // already knows so almost nothing is typed (Nicholas: "these should not have
+    // to be manually entered"). The generic chain seeder above has already
+    // resolved whatever FKs it could into prefillObj (building_id, property_id,
+    // and — when created from an opportunity — opportunity_id). Here we read
+    // those parent rows and copy their attributes: installation address, square
+    // footage, floors, year built, unit counts and utility providers from the
+    // BUILDING; owner and occupancy from the PROPERTY; the business-entity from
+    // the property's OWNER ACCOUNT; program name/year, income code and utility
+    // account numbers from the OPPORTUNITY; and the primary contractor (EES) for
+    // the program's state. When no opportunity was carried (created from a
+    // building or property) we resolve the building's — else the property's —
+    // most recent live opportunity so the program fields inherit too and the
+    // Opportunity lookup links up. ia_installation_address_state also drives the
+    // record-type picker's state filter (prefillState). Only fill blanks; never
+    // clobber a chain-seeded value; every value stays user-editable.
+    if (childTable === 'incentive_applications') {
       const fill = (dst, v) => {
         if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
       }
-      // Straight from the opportunity we're creating from.
-      fill('ia_program_name',                    parentRecord.opportunity_program)
-      fill('ia_program_year',                    parentRecord.opportunity_program_year)
-      fill('ia_income_qualified_confirmation_code',
-        parentRecord.opportunity_income_qualified_confirmation_code || parentRecord.opportunity_ira_income_code)
-      fill('ia_electric_account_number',         parentRecord.opportunity_electric_account_number)
-      fill('ia_natural_gas_account_number',      parentRecord.opportunity_gas_account_number)
-      // The building's "how is this building heated" answer is a picklist label;
-      // resolve the building_heating_fuel_type UUID against the loaded picklists
-      // so we seed a readable value, never a raw UUID.
+      // The building's "how is this building heated" answer is a picklist UUID;
+      // resolve it against the loaded picklists so we seed a readable label.
       const resolvePicklistLabel = (uuid) => {
         if (!uuid) return null
         for (const key of Object.keys(picklists || {})) {
@@ -4202,33 +4200,71 @@ function RelatedListWidget({
         }
         return null
       }
-      // Building, property and owner-account attributes live on other rows —
-      // fetch them (any failure just leaves those fields blank for manual entry).
       try {
+        let oppId   = prefillObj.opportunity_id || null
+        const bldId = prefillObj.building_id || null
+        let propId  = prefillObj.property_id || null
+
+        // No opportunity carried (created from a building/property): resolve the
+        // building's — else the property's — most recent live opportunity. It is
+        // a default the user can repoint; a building in a program has one.
+        if (!oppId && (bldId || propId)) {
+          let q = supabase.from('opportunities')
+            .select('id, property_id')
+            .eq('opportunity_is_deleted', false)
+            .order('opportunity_created_at', { ascending: false })
+            .limit(1)
+          q = bldId ? q.eq('building_id', bldId) : q.eq('property_id', propId)
+          const { data: oppRows } = await q
+          const found = Array.isArray(oppRows) ? oppRows[0] : oppRows
+          if (found?.id) {
+            oppId = found.id
+            fill('opportunity_id', found.id)
+            if (!propId && found.property_id) propId = found.property_id
+          }
+        }
+
+        // Read the parent rows we now have ids for (any failure leaves those
+        // fields blank for manual entry).
         const fetchRow = (table, id, cols, delCol) => id
           ? supabase.from(table).select(cols).eq('id', id).eq(delCol, false).maybeSingle()
           : Promise.resolve({ data: null })
-        const accountId = parentRecord.opportunity_account_id
-        const [buildingRes, propertyRes, accountRes] = await Promise.all([
-          fetchRow('buildings', parentRecord.building_id,
+        const [oppRes, buildingRes, propertyRes] = await Promise.all([
+          fetchRow('opportunities', oppId,
+            'opportunity_program, opportunity_program_year, ' +
+            'opportunity_income_qualified_confirmation_code, opportunity_ira_income_code, ' +
+            'opportunity_electric_account_number, opportunity_gas_account_number, ' +
+            'opportunity_state, opportunity_account_id, opportunity_name, property_id', 'opportunity_is_deleted'),
+          fetchRow('buildings', bldId,
             'building_square_footage, building_sq_ft, building_stories, building_stories_of_building, ' +
             'building_year_built, building_total_units, building_number_of_units, ' +
             'building_address, building_city, building_state, building_zip, ' +
             'building_electric_utility, building_electric_fuel_provider, building_electric_account_number, ' +
             'building_gas_utility, building_gas_fuel_provider, building_gas_account_number, ' +
             'building_heating_fuel_type, building_heating_fuel_provider', 'building_is_deleted'),
-          fetchRow('properties', parentRecord.property_id,
+          fetchRow('properties', propId,
             'property_street, property_city, property_state, property_zip, property_total_units, ' +
-            'property_ph_total_occupied, property_account_id, ' +
+            'property_ph_total_occupied, property_account_id, property_name, ' +
             'property_hud_owner_org, property_hud_owner_email, property_hud_owner_phone', 'property_is_deleted'),
-          fetchRow('accounts', accountId,
-            'account_name, account_phone, account_email', 'account_is_deleted'),
         ])
-        const b = buildingRes?.data
+        const opp = oppRes?.data
+        const b   = buildingRes?.data
+        const p   = propertyRes?.data
+
+        // Program fields — from the opportunity.
+        if (opp) {
+          fill('ia_program_name',                    opp.opportunity_program)
+          fill('ia_program_year',                    opp.opportunity_program_year)
+          fill('ia_income_qualified_confirmation_code',
+            opp.opportunity_income_qualified_confirmation_code || opp.opportunity_ira_income_code)
+          fill('ia_electric_account_number',         opp.opportunity_electric_account_number)
+          fill('ia_natural_gas_account_number',      opp.opportunity_gas_account_number)
+        }
+
+        // Building attributes. (ia_building_name is a bare uuid with no FK/lookup
+        // wiring — it renders as raw text, so we leave it blank rather than show
+        // a UUID; the real relationship is the NOT NULL building_id FK.)
         if (b) {
-          // (ia_building_name is a bare uuid with no FK/lookup wiring — it renders
-          // as raw text, so we leave it blank rather than show a UUID. The real
-          // building relationship is carried in the NOT NULL building_id FK.)
           const sqft = b.building_square_footage ?? b.building_sq_ft
           fill('ia_building_square_footage',      sqft)
           fill('ia_total_building_square_footage', sqft)
@@ -4250,36 +4286,45 @@ function RelatedListWidget({
           fill('ia_other_heating_fuel_provider',  b.building_heating_fuel_provider)
           fill('ia_how_is_this_building_heated',  resolvePicklistLabel(b.building_heating_fuel_type))
         }
-        const p = propertyRes?.data
+
+        // Property owner + installation-address / unit-count fallbacks.
         if (p) {
-          // Installation address / unit-count fallbacks when the building is blank.
           fill('ia_installation_address_street',  p.property_street)
           fill('ia_installation_address_city',    p.property_city)
           fill('ia_installation_address_state',   p.property_state)
           fill('ia_installation_address_zip',     p.property_zip)
           fill('ia_total_number_of_units',        p.property_total_units)
           fill('ia_total_number_of_occupied_units', p.property_ph_total_occupied)
-          // Owner (the "who" of the building).
           fill('ia_building_owner_name',          p.property_hud_owner_org)
           fill('ia_building_owner_name_ira',      p.property_hud_owner_org)
           fill('ia_building_owner_email_address', p.property_hud_owner_email)
           fill('ia_building_owner_office_phone',  p.property_hud_owner_phone)
         }
-        const acct = accountRes?.data
-        if (acct) {
-          // The opportunity's account is the owner company — the business entity.
-          fill('ia_business_entity_name',         acct.account_name)
-          fill('ia_business_entity_phone_number', acct.account_phone)
-          fill('ia_business_entity_email',        acct.account_email)
-          fill('ia_building_owner_name',          acct.account_name)
+
+        // Business entity = the property's owner account (one account per real
+        // company), falling back to the opportunity's account.
+        const ownerAccountId = p?.property_account_id || opp?.opportunity_account_id || null
+        if (ownerAccountId) {
+          const { data: acct } = await supabase.from('accounts')
+            .select('account_name, account_phone, account_email')
+            .eq('id', ownerAccountId).eq('account_is_deleted', false).maybeSingle()
+          if (acct) {
+            fill('ia_business_entity_name',         acct.account_name)
+            fill('ia_business_entity_phone_number', acct.account_phone)
+            fill('ia_business_entity_email',        acct.account_email)
+            fill('ia_building_owner_name',          acct.account_name)
+          }
         }
+
         // Energy Efficiency Services is the primary contractor on every
-        // application. Pull the contractor's business name / phone / email /
-        // address from the EES account licensed in the program's state — WI
-        // programs draw "Energy Efficiency Services of Wisconsin", NC programs
-        // "…of North Carolina" — matched server-side by contractor record type +
-        // license state (no account id or name hardcoded here).
-        const programState = parentRecord.opportunity_state
+        // application. Pull business name / phone / email / address from the EES
+        // account licensed in the program's state — WI programs draw "Energy
+        // Efficiency Services of Wisconsin", NC "…of North Carolina" — matched
+        // server-side by contractor record type + license state (no id/name
+        // hardcoded). State comes from the opportunity, else the building/
+        // property we just read.
+        const programState = opp?.opportunity_state || b?.building_state
+          || p?.property_state || prefillObj.ia_installation_address_state
         if (programState) {
           const { data: contractorRows } = await supabase
             .rpc('get_primary_contractor_account_for_state', { p_state: programState })
@@ -4294,13 +4339,14 @@ function RelatedListWidget({
             fill('ia_primary_contractor_address_zip',    c.contractor_zip)
           }
         }
+
+        // Application name composes "<base> - <record type label>" once the user
+        // picks a record type (same derived-name mechanism projects use). Base is
+        // the opportunity name, else the property name.
+        const nameBase = opp?.opportunity_name || p?.property_name
+        if (nameBase) prefillObj.__derivedNameBase = nameBase
       } catch (err) {
         console.warn('incentive application prefill: related-record fetch failed', err)
-      }
-      // Application name composes "<opportunity name> - <record type label>" once
-      // the user picks a record type (same derived-name mechanism projects use).
-      if (parentRecord.opportunity_name) {
-        prefillObj.__derivedNameBase = parentRecord.opportunity_name
       }
     }
 
