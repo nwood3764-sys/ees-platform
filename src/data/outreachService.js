@@ -411,11 +411,8 @@ export async function fetchEnrollments() {
         enrollment_name,
         enrollment_record_type,
         enrollment_status,
-        enrollment_state,
-        enrollment_total_units,
         enrollment_qualifying_mode,
         enrollment_determination_date,
-        enrollment_site_address,
         property_id,
         properties:property_id ( property_name, property_street, property_city, property_state, property_zip, property_total_units )
       `)
