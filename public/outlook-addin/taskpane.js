@@ -37,6 +37,7 @@
 
   // ── Office bootstrap ─────────────────────────────────────────────────────
   Office.onReady(function (info) {
+    window.__leapOfficeReady = true;
     if (!info || info.host !== Office.HostType.Outlook) {
       hide('bootView'); show('unsupportedView');
       return;
@@ -55,6 +56,14 @@
                   Office.context.mailbox.userProfile.emailAddress) || '').toLowerCase();
 
     wireEvents();
+
+    // When the pane is pinned open, Outlook fires ItemChanged as the user
+    // clicks through emails — re-read the newly selected message so the pane
+    // always reflects the email in view (Salesforce-style). Harmless when the
+    // pane isn't pinned.
+    try {
+      Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, onItemChanged);
+    } catch (e) { /* older hosts: no pinning, single-item mode */ }
 
     // Restore an existing session if the user logged in before.
     sb.auth.getSession().then(function (res) {
@@ -110,6 +119,21 @@
       hide('mainView'); hide('signOutBtn'); setStatus('', 'info');
       show('loginView');
     });
+  }
+
+  // Pinned pane: the selected email changed — refresh the summary, attachments,
+  // and clear any prior status/selection so a log always targets the email now
+  // in view.
+  function onItemChanged() {
+    mailboxItem = Office.context.mailbox.item;
+    if (!mailboxItem) return;
+    if (!$('mainView').hidden) {
+      setStatus('', 'info');
+      clearSelection();
+      renderEmailSummary();
+      setupAttachments();
+      runSearch();
+    }
   }
 
   // ── Main view ────────────────────────────────────────────────────────────
