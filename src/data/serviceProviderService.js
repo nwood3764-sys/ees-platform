@@ -31,7 +31,7 @@ export async function fetchServiceProviderApplications() {
 export async function fetchActiveServiceProviders() {
   const { data: rt } = await supabase
     .from('picklist_values').select('id')
-    .eq('picklist_object', 'accounts').eq('picklist_field', 'record_type').eq('picklist_value', 'SERVICE-PROVIDER')
+    .eq('picklist_object', 'accounts').eq('picklist_field', 'record_type').eq('picklist_value', 'service_provider')
     .maybeSingle()
   let q = supabase
     .from('accounts')
@@ -94,6 +94,48 @@ export async function approveServiceProviderApplication(applicationId) {
   })
   if (error) throw new Error(error.message || 'Approval failed')
   if (data && data.ok === false) throw new Error(data.error || data.detail || 'Approval failed')
+  return data
+}
+
+// Approve WITHOUT emailing — activates the account and provisions the provider
+// portal login as pending. The invite is sent separately, when staff choose.
+export async function approveWithoutInvite(applicationId) {
+  const { data, error } = await supabase.rpc('approve_service_provider_application', {
+    p_application_id: applicationId, p_portal_role: 'service_provider_admin',
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
+// Send the portal invite when staff decide the provider is ready. Idempotent:
+// re-runs approve (harmless) and emails the invite if not already sent.
+export async function sendPortalInvite(applicationId) {
+  const { data, error } = await supabase.functions.invoke('approve-service-provider', {
+    body: { application_id: applicationId },
+  })
+  if (error) throw new Error(error.message || 'Invite failed')
+  if (data && data.ok === false) throw new Error(data.error || data.detail || 'Invite failed')
+  return data
+}
+
+// Staff-initiated onboarding: create an application (+ inactive account +
+// contact) for a provider EES recruited, source 'Manual Entry'.
+export async function createManualApplication({ company, firstName, lastName, email, phone, trade, state }) {
+  const { data, error } = await supabase.rpc('create_service_provider_application', {
+    p_payload: {
+      company_legal_name: company,
+      contact_first_name: firstName || null,
+      contact_last_name: lastName || null,
+      contact_email: email || null,
+      contact_phone: phone || null,
+      service_provider_type: trade || null,
+      home_state: state || 'NC',
+      source: 'Manual Entry',
+    },
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
   return data
 }
 
