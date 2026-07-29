@@ -324,8 +324,8 @@ export default function ProviderIntakeRoot() {
                   <UploadTile file={w9File} onPick={setW9File} hint="Click to upload your W-9" />
                 </div>
                 <div style={{ marginTop: 20 }}>
-                  <label style={labelStyle}>Anything else?<span style={{ color: C.textMuted, fontWeight: 400 }}> · optional</span></label>
-                  <textarea className="spi-area" value={f.notes} onChange={set('notes')} rows={3} placeholder="Certifications, crews, notes…" style={{ ...inputStyle, resize: 'vertical' }} />
+                  <label style={labelStyle}>Anything else you'd like us to know?<span style={{ color: C.textMuted, fontWeight: 400 }}> · optional</span></label>
+                  <textarea className="spi-area" value={f.notes} onChange={set('notes')} rows={3} placeholder="Certifications, crew size, specialties, or anything about your organization that would be helpful for us to know…" style={{ ...inputStyle, resize: 'vertical' }} />
                 </div>
               </>
             )}
