@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../data/constants'
+import ConversationPanelWidget from '../components/ConversationPanel'
 import {
   fetchServiceProviderApplications,
   approveWithoutInvite,
@@ -22,6 +23,7 @@ import {
   logApplicationActivity,
   fetchOnboardingSteps,
   setOnboardingStep,
+  emailProviderInvite,
 } from '../data/serviceProviderService'
 
 const TRADE_OPTS = [
@@ -227,15 +229,29 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
               ))}
           </div>
 
-          {/* communication trail */}
+          {/* email — real two-way email threaded on the provider's account,
+              exactly like any other record (send via Graph, replies auto-thread) */}
+          {app.account?.id && (
+            <div style={{ marginTop: 14, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textSecondary, marginBottom: 8, letterSpacing: 0.2 }}>EMAIL</div>
+              <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>Send emails to this provider and read their replies here — threaded on their account. Use <strong>New Email</strong> below.</div>
+              <ConversationPanelWidget
+                widget={{ widget_title: 'Emails with this provider', widget_config: { fk: 'account_id', channel_filter: 'email' } }}
+                parentRecordId={app.account.id}
+              />
+            </div>
+          )}
+
+          {/* internal communication log — calls, meetings, notes, and
+              auto-recorded pipeline actions (not customer-facing) */}
           <div style={{ marginTop: 14, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textSecondary, marginBottom: 8, letterSpacing: 0.2 }}>COMMUNICATION</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textSecondary, marginBottom: 8, letterSpacing: 0.2 }}>INTERNAL LOG — CALLS, MEETINGS &amp; NOTES</div>
 
             {/* add entry */}
             <div style={{ background: '#f7f9fc', borderRadius: 8, padding: 10 }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
                 <select value={logType} onChange={(e) => setLogType(e.target.value)} style={{ padding: '5px 8px', borderRadius: 7, border: `1px solid ${C.borderDark}`, fontSize: 12.5, background: '#fff', color: C.textPrimary, cursor: 'pointer' }}>
-                  {['Note', 'Call', 'Email', 'Meeting', 'Text Message', 'Site Visit', 'Other'].map((t) => <option key={t} value={t}>{t}</option>)}
+                  {['Note', 'Call', 'Meeting', 'Text Message', 'Site Visit', 'Other'].map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <span style={{ fontSize: 11.5, color: C.textMuted }}>Log an interaction or leave an internal note.</span>
               </div>
@@ -405,9 +421,22 @@ export default function ServiceProviderModule() {
   }, 'Approved — account activated. Send the portal invite when ready.')
   const onInvite = (app) => act(app, async () => {
     const r = await sendPortalInvite(app.id)
-    await logMove(app, 'Portal invite sent', r?.email ? `Invite emailed to ${r.email}.` : null)
+    // Always save the invite link to the trail so it's never lost.
+    if (r?.invite_url) await logApplicationActivity(app.id, { activityType: 'Note', subject: 'Portal invite link generated', body: r.invite_url }).catch(() => {})
+    // Email it through the Graph pipeline (reliable delivery), threaded on the account.
+    if (r?.invite_url && r?.email && app.account?.id) {
+      try {
+        const res = await emailProviderInvite({ accountId: app.account.id, contactId: app.spa_primary_contact_id, toEmail: r.email, toName: app.spa_company_legal_name, inviteUrl: r.invite_url })
+        r._emailed = true; r._mailbox = res.mailbox
+        await logApplicationActivity(app.id, { activityType: 'Email', subject: 'Portal invite emailed', body: `Invite sent to ${r.email} from ${res.mailbox}.`, direction: 'outbound' }).catch(() => {})
+      } catch (e) { r._emailErr = e?.message || 'email failed' }
+    }
     return r
-  }, (r) => r?.invited ? `Portal invite sent to ${r.email}.` : `${r?.note || 'Invite processed.'}`)
+  }, (r) => r?._emailed
+      ? `Portal invite emailed to ${r.email}.`
+      : r?._emailErr
+        ? `Approved & invite link generated, but the email didn't send (${r._emailErr}). The link is saved in the log — send it from the Email panel.`
+        : (r?.note || 'Invite processed.'))
 
   const counts = useMemo(() => {
     const c = {}
