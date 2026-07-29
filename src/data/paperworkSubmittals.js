@@ -79,6 +79,7 @@ export const DOCUMENTS = Object.freeze({
   SEALED_PROPOSAL:           'sealed_proposal',
   SEALED_INVOICE:            'sealed_invoice',
   PAPERWORK_WORKBOOK:        'paperwork_workbook',
+  COMBUSTION_SAFETY_NOTIFICATION: 'combustion_safety_notification',
 })
 
 export const DOCUMENT_DEFINITIONS = Object.freeze({
@@ -122,6 +123,13 @@ export const DOCUMENT_DEFINITIONS = Object.freeze({
     format: 'Excel · all sheets',
     note: 'Reference workbook carrying the audit invoice, proposal-contract, and project invoice sheets together.',
     requiresAssetScoreReports: true,
+  },
+  [DOCUMENTS.COMBUSTION_SAFETY_NOTIFICATION]: {
+    key: DOCUMENTS.COMBUSTION_SAFETY_NOTIFICATION,
+    label: 'Notification of Combustion Safety',
+    format: 'PDF · filled in per building',
+    note: 'Per-building combustion safety inspection results — filled in from the building’s diagnostic tests, not from the Asset Score reports.',
+    requiresAssetScoreReports: false,
   },
 })
 
@@ -178,6 +186,7 @@ export const PROGRAM_SUBMITTALS = Object.freeze({
         DOCUMENTS.HOMES_PROJECT_INVOICE,
         DOCUMENTS.SEALED_INVOICE,
         DOCUMENTS.PAPERWORK_WORKBOOK,
+        DOCUMENTS.COMBUSTION_SAFETY_NOTIFICATION,
       ],
     },
   },

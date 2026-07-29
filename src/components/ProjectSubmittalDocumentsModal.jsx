@@ -19,7 +19,7 @@
 // See docs/leap-project-paperwork-port.md and docs/leap-project-lifecycle.md.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { C } from '../data/constants'
 import { blockNegativeKeys, clampNonNegative } from '../lib/numberInput'
 import { Icon } from './UI'
@@ -36,6 +36,10 @@ import {
   SUBMITTAL_STAGE_DEFINITIONS, DOCUMENTS, DOCUMENT_DEFINITIONS,
   documentDefinitionsForSubmittal, programsWithDocumentsForStage, PROGRAM_SUBMITTALS,
 } from '../data/paperworkSubmittals'
+
+// The Combustion Safety Notification is a per-building CAPTURE form (a line
+// editor), not a computed document — it opens its own modal.
+const CombustionSafetyNotificationModal = lazy(() => import('./CombustionSafetyNotificationModal'))
 
 const FIELD_GROUPS = [
   { title: 'Bill To (Property Owner)', fields: [
@@ -182,7 +186,17 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
   const baseName = (fields?.propertyName || project?.project_record_number || 'Project').replace(/[\\/:*?"<>|]/g, '')
   const programLabel = PROGRAM_SUBMITTALS[programKey]?.label || ''
 
+  // The combustion notification is a per-building capture form, opened as its
+  // own line editor rather than a one-click generate.
+  const [combustionOpen, setCombustionOpen] = useState(false)
+  const buildingId = project?.building_id || null
+
   const generate = async (docKey) => {
+    if (docKey === DOCUMENTS.COMBUSTION_SAFETY_NOTIFICATION) {
+      if (!buildingId) { setGenError('This project has no building, so the combustion notification cannot be filled in.'); return }
+      setCombustionOpen(true)
+      return
+    }
     if (!model) return
     setBusyDoc(docKey)
     setGenError(null)
@@ -471,13 +485,15 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
                       <div key={doc.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <DocButton
                           label={doc.label}
-                          sub={doc.requiresSignature
-                            ? `${doc.format || 'PDF'} · signature required`
-                            : doc.format}
+                          sub={doc.key === DOCUMENTS.COMBUSTION_SAFETY_NOTIFICATION
+                            ? (doc.format || 'PDF · fill in')
+                            : doc.requiresSignature
+                              ? `${doc.format || 'PDF'} · signature required`
+                              : doc.format}
                           title={doc.note}
                           onClick={() => generate(doc.key)}
-                          busy={busyDoc === doc.key} disabled={!!busyDoc || blocked} />
-                        {doc.requiresSignature && (
+                          busy={busyDoc === doc.key} disabled={!!busyDoc || (doc.key !== DOCUMENTS.COMBUSTION_SAFETY_NOTIFICATION && blocked)} />
+                        {doc.requiresSignature && doc.key !== DOCUMENTS.COMBUSTION_SAFETY_NOTIFICATION && (
                           <button type="button"
                             onClick={() => openSend(doc)}
                             disabled={!!busyDoc || blocked || !model}
@@ -595,6 +611,17 @@ export default function ProjectSubmittalDocumentsModal({ projectId, project, sub
           </div>
         </div>
       </div>
+    )}
+
+    {combustionOpen && buildingId && (
+      <Suspense fallback={null}>
+        <CombustionSafetyNotificationModal
+          buildingId={buildingId}
+          building={project}
+          attachTo={{ object: 'projects', id: projectId }}
+          onClose={() => setCombustionOpen(false)}
+        />
+      </Suspense>
     )}
     </>
   )
