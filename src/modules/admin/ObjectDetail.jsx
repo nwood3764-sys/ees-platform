@@ -31,7 +31,7 @@ const SUB_TABS = [
   { id: 'related',     label: 'Related Lookups' },
 ]
 
-export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', initialLayoutId = null, onOpenRecord = null }) {
+export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', initialLayoutId = null, layoutReturn = null, onOpenRecord = null }) {
   const [sub, setSub] = useState(initialSubTab)
   const [selectedField, setSelectedField] = useState(null)
   const [columns, setColumns] = useState([])
@@ -204,6 +204,11 @@ export default function ObjectDetail({ obj, onBack, initialSubTab = 'details', i
                     objectLabel={obj.pluralLabel || obj.label}
                     onBack={() => setSelectedLayoutId(null)}
                     onNavigateToRecord={onOpenRecord}
+                    // Honor the URL's return-to-record target only while editing
+                    // the exact layout the gear deep-linked to. If the admin
+                    // navigates to a different layout (row click, local state),
+                    // the stale return target no longer applies.
+                    returnRecordFromUrl={selectedLayoutId === initialLayoutId ? layoutReturn : null}
                   />
                 : <LayoutsPane
                     objectName={obj.table}

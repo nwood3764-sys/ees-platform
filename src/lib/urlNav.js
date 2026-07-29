@@ -265,6 +265,37 @@ function encodeListScope(params, scope) {
   if (token) params.set('rel', token)
 }
 
+// ── Page-layout editor return target (URL-encoded) ───────────────────────
+//
+// When the Setup gear opens the page-layout editor FROM a record, the record
+// to return to on Close/Save rides in the URL as a compact `ret` token — the
+// same base64url scheme as the listScope `rel` token. Unlike the in-memory
+// stash (setLayoutReturnRecord below), a URL param survives a page reload and
+// an editor re-mount, so the "return to the record" behavior holds up even
+// after the admin refreshes the layout editor. Carries only table/id/module —
+// the id is a plain record UUID, exactly what a normal record URL already
+// exposes, so no new PII lands in the address bar.
+function encodeLayoutReturn(ret) {
+  if (!ret || !ret.table || !ret.id) return null
+  try {
+    return b64urlEncode(JSON.stringify({ t: ret.table, id: ret.id, m: ret.module || null }))
+  } catch {
+    return null
+  }
+}
+function decodeLayoutReturn(search) {
+  const params = new URLSearchParams(search || '')
+  const raw = params.get('ret')
+  if (!raw) return null
+  try {
+    const p = JSON.parse(b64urlDecode(raw))
+    if (!p || !p.t || !p.id) return null
+    return { table: p.t, id: p.id, module: p.m || null }
+  } catch {
+    return null
+  }
+}
+
 // Unicode-safe base64url (RFC 4648 §5) — the JSON scope may carry a parent
 // label with non-ASCII characters, so round-trip through UTF-8 bytes.
 function b64urlEncode(str) {
@@ -350,6 +381,7 @@ export function parsePath(pathname, search = '') {
     subsection: null,
     adminTab: null,
     adminLayoutId: null,
+    adminLayoutReturn: null,
     searchQuery: null,
     searchType: null,
     helpSlug: null,
@@ -412,6 +444,10 @@ export function parsePath(pathname, search = '') {
         subsection: parts[3] || null,
         adminTab: params.get('tab') || null,
         adminLayoutId: params.get('layout') || null,
+        // The record (if any) the page-layout editor should return to on
+        // Close/Save — encoded in the URL so it survives a reload or a
+        // re-mount, unlike the in-memory stash below. See decodeLayoutReturn.
+        adminLayoutReturn: decodeLayoutReturn(search),
         // A related-list "View All" scopes the section's list to one parent.
         listScope: decodeListScope(search),
       }
@@ -443,7 +479,7 @@ export function parsePath(pathname, search = '') {
  * state. Inverse of parsePath. Returns the full path including any query
  * string the search route needs.
  */
-export function buildPath({ activeModule, selectedRecord, section, subsection, adminTab, adminLayoutId, searchQuery, searchType, helpSlug, listScope }) {
+export function buildPath({ activeModule, selectedRecord, section, subsection, adminTab, adminLayoutId, adminLayoutReturn, searchQuery, searchType, helpSlug, listScope }) {
   if (selectedRecord?.table) {
     if (selectedRecord.mode === 'create') return `/${selectedRecord.table}/new`
     if (selectedRecord.id) return `/${selectedRecord.table}/${selectedRecord.id}`
@@ -466,6 +502,8 @@ export function buildPath({ activeModule, selectedRecord, section, subsection, a
   const params = new URLSearchParams()
   if (adminTab) params.set('tab', adminTab)
   if (adminLayoutId) params.set('layout', adminLayoutId)
+  const retToken = encodeLayoutReturn(adminLayoutReturn)
+  if (retToken) params.set('ret', retToken)
   encodeListScope(params, listScope)
   const qs = params.toString()
   return qs ? `${base}?${qs}` : base
@@ -653,6 +691,10 @@ export function useUrlNavigation() {
       subsection: subsectionId || null,
       adminTab: options.initialSubTab || options.initialModule || null,
       adminLayoutId: options.initialLayoutId || null,
+      // The page-layout editor's return-to-record target, carried in the URL
+      // (?ret=) so it survives a reload / editor re-mount. Set by the Setup
+      // gear when Edit Page Layout is opened from a record.
+      adminLayoutReturn: options.layoutReturn || null,
       searchQuery: null,
       searchType: null,
     }
@@ -760,6 +802,7 @@ export function useUrlNavigation() {
     subsectionFromUrl: state.subsection,
     adminTabFromUrl: state.adminTab,
     adminLayoutIdFromUrl: state.adminLayoutId,
+    adminLayoutReturnFromUrl: state.adminLayoutReturn,
     searchQuery: state.searchQuery,
     searchType: state.searchType,
     helpSlug: state.helpSlug,

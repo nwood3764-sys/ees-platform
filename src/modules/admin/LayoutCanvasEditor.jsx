@@ -143,11 +143,13 @@ function dragFamily(id) {
   return 'field'
 }
 
-export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNavigateToRecord = null }) {
+export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNavigateToRecord = null, returnRecordFromUrl = null }) {
   // The record the admin opened this editor FROM via the Setup gear, if any.
-  // Consumed once at mount so saving/closing returns them to it (Salesforce
-  // behavior) instead of leaving them stranded in Object Manager.
-  const [returnRecord] = useState(() => consumeLayoutReturnRecord())
+  // Saving/closing returns them to it (Salesforce behavior) instead of leaving
+  // them stranded in Object Manager. Prefer the URL-carried target (survives a
+  // reload / editor re-mount); fall back to the legacy in-memory stash, which
+  // is consumed once at mount.
+  const [returnRecord] = useState(() => returnRecordFromUrl || consumeLayoutReturnRecord())
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
   const [meta, setMeta]       = useState(null)
