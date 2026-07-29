@@ -8,6 +8,7 @@ import {
   createPageLayout,
   cloneFromLayout,
   softDeletePageLayout,
+  updatePageLayoutMeta,
 } from '../../data/pageLayoutBuilderService'
 import {
   FormField,
@@ -36,6 +37,7 @@ export default function LayoutsPane({
   const [error, setError] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [renameTarget, setRenameTarget] = useState(null)
   const [roles, setRoles] = useState([])
   const [recordTypes, setRecordTypes] = useState([])
   const [q, setQ] = useState('')
@@ -101,6 +103,14 @@ export default function LayoutsPane({
     } catch (err) {
       toast.error(`Could not delete: ${err.message || err}`)
     }
+  }
+
+  async function handleRename(newName) {
+    if (!renameTarget || !newName.trim()) return
+    await updatePageLayoutMeta(renameTarget._id, { name: newName.trim() })
+    toast.success(`Renamed to "${newName.trim()}"`)
+    setRenameTarget(null)
+    await refresh()
   }
 
   if (loading) {
@@ -178,6 +188,7 @@ export default function LayoutsPane({
               key={l._id}
               layout={l}
               onOpen={() => onSelectLayout(l._id)}
+              onRename={() => setRenameTarget(l)}
               onDelete={() => setDeleteTarget(l)}
             />
           ))}
@@ -201,6 +212,15 @@ export default function LayoutsPane({
         />
       )}
 
+      {renameTarget && (
+        <RenameLayoutModal
+          layout={renameTarget}
+          existingLayouts={rows}
+          onClose={() => setRenameTarget(null)}
+          onConfirm={handleRename}
+        />
+      )}
+
       {deleteTarget && (
         <DeleteLayoutModal
           layout={deleteTarget}
@@ -214,7 +234,7 @@ export default function LayoutsPane({
 
 // ─── Row ───────────────────────────────────────────────────────────────
 
-function LayoutRow({ layout, onOpen, onDelete }) {
+function LayoutRow({ layout, onOpen, onRename, onDelete }) {
   const [hover, setHover] = useState(false)
   return (
     <div
@@ -251,6 +271,12 @@ function LayoutRow({ layout, onOpen, onDelete }) {
         {layout.updatedAt}
       </div>
       <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+        <button
+          style={buttonSmSecondaryStyle}
+          onClick={e => { e.stopPropagation(); onRename() }}
+        >
+          Rename
+        </button>
         <button
           style={buttonSmDangerStyle}
           onClick={e => { e.stopPropagation(); onDelete() }}
@@ -549,6 +575,106 @@ function ModeButton({ label, hint, active, onClick, disabled }) {
   )
 }
 
+// ─── Rename Layout modal ───────────────────────────────────────────────
+
+function RenameLayoutModal({ layout, existingLayouts, onClose, onConfirm }) {
+  const isMobile = useIsMobile()
+  const [name, setName] = useState(layout.name || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const nameRef = useRef(null)
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      nameRef.current?.focus()
+      nameRef.current?.select()
+    })
+    return () => cancelAnimationFrame(id)
+  }, [])
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape' && !busy) onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose, busy])
+
+  const trimmed = name.trim()
+  const unchanged = trimmed === (layout.name || '').trim()
+  // Warn (soft) if another layout on this object already carries the name.
+  const duplicate = (existingLayouts || []).some(
+    l => l._id !== layout._id && (l.name || '').trim().toLowerCase() === trimmed.toLowerCase(),
+  )
+
+  async function confirm() {
+    if (!trimmed) { setError('Name is required'); return }
+    if (unchanged) { onClose(); return }
+    setBusy(true)
+    setError(null)
+    try {
+      await onConfirm(trimmed)
+    } catch (e) {
+      setError(e.message || String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
+        display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',
+        padding: isMobile ? 0 : 16,
+      }}
+    >
+      <div role="dialog" aria-modal="true" aria-label="Rename layout" style={{
+        background: C.card,
+        borderRadius: isMobile ? '12px 12px 0 0' : 10,
+        padding: isMobile ? '22px 20px calc(20px + env(safe-area-inset-bottom))' : 26,
+        width: isMobile ? '100%' : 440,
+        maxWidth: '100%',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 8 }}>Rename layout</div>
+        <div style={{ fontSize: 12.5, color: C.textSecondary, marginBottom: 14, lineHeight: 1.5 }}>
+          Renaming only changes the label shown in this list. The layout's record type,
+          role, and content are unaffected.
+        </div>
+
+        <FormField label="Name" required>
+          <input
+            ref={nameRef}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !busy) confirm() }}
+            disabled={busy}
+            style={inputStyle}
+          />
+        </FormField>
+
+        {duplicate && (
+          <div style={hintBoxStyle}>
+            <strong>Heads up:</strong> another layout on this object already uses this name.
+            Names don't have to be unique, but distinct names are easier to tell apart.
+          </div>
+        )}
+
+        {error && <div style={dangerBoxStyle}>{error}</div>}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+          <button onClick={onClose} disabled={busy} style={buttonSecondaryStyle}>Cancel</button>
+          <button
+            onClick={confirm}
+            disabled={busy || !trimmed}
+            style={buttonPrimaryStyle}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Delete Layout modal ───────────────────────────────────────────────
 
 function DeleteLayoutModal({ layout, onClose, onConfirm }) {
@@ -628,7 +754,7 @@ function SortArrow({ active, dir }) {
   )
 }
 
-const GRID_COLS = '120px 2fr 1.2fr 1.1fr 80px 110px 100px'
+const GRID_COLS = '120px 2fr 1.2fr 1.1fr 80px 110px 170px'
 
 const tableHeaderStyle = {
   display: 'grid',
