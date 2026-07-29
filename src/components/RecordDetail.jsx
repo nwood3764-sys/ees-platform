@@ -197,6 +197,11 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
     case 'datetime':   return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
     case 'boolean':    return raw ? 'Yes' : 'No'
     case 'number':     return raw != null ? Number(raw).toLocaleString() : '—'
+    case 'multiselect': {
+      if (!Array.isArray(raw) || raw.length === 0) return '—'
+      const labelByValue = new Map((fieldDef.options || []).map(o => [o.value, o.label]))
+      return raw.map(v => labelByValue.get(v) || v).join(', ')
+    }
     case 'json':       return typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)
     default:           return String(raw)
   }
@@ -1886,12 +1891,63 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
 
     case 'picklist': {
       const opts = picklistOpts || []
+      // Radio-button rendering (field.display === 'radio') for picklists that
+      // mirror a radio-group on an external form, so the LEAP field matches the
+      // source form's input type instead of collapsing to a dropdown. Same
+      // stored value; only the control differs. Default stays a <select>.
+      if (field.display === 'radio') {
+        return (
+          <div role="radiogroup" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {opts.map(o => {
+              const on = (v || '') === o.value
+              return (
+                <label key={o.value}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: C.textPrimary }}>
+                  <input type="radio" name={`rf-${field.name}`} checked={on}
+                    onChange={() => onChange(field.name, o.value)}
+                    style={{ accentColor: C.emerald, cursor: 'pointer' }} />
+                  {o.label}
+                </label>
+              )
+            })}
+          </div>
+        )
+      }
       return (
         <select style={{ ...inputBase, cursor: 'pointer' }}
           value={v || ''} onChange={e => onChange(field.name, e.target.value || null)}>
           <option value="">— Select —</option>
           {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
+      )
+    }
+
+    case 'multiselect': {
+      // Checkbox group backed by the field's inline `options`. Value is an
+      // array of selected option values (stored to a jsonb/array column).
+      // Mirrors an external form's checkbox list (e.g. "What work will be
+      // completed?"). Empty selection saves null.
+      const opts = field.options || []
+      const selected = new Set(Array.isArray(value) ? value : [])
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {opts.map(o => {
+            const on = selected.has(o.value)
+            return (
+              <label key={o.value}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: C.textPrimary }}>
+                <input type="checkbox" checked={on}
+                  onChange={() => {
+                    const next = new Set(selected)
+                    if (on) next.delete(o.value); else next.add(o.value)
+                    onChange(field.name, next.size ? Array.from(next) : null)
+                  }}
+                  style={{ accentColor: C.emerald, cursor: 'pointer' }} />
+                {o.label}
+              </label>
+            )
+          })}
+        </div>
       )
     }
 
