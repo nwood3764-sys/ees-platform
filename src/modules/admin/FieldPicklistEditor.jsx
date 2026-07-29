@@ -54,6 +54,11 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
   const [overSelectedPanel, setOverSelectedPanel] = useState(false)
   const [overAvailablePanel, setOverAvailablePanel] = useState(false)
 
+  // Inline "New Value" from the Available panel (create without leaving the screen).
+  const [wsAdding, setWsAdding] = useState(false)
+  const [wsLabel, setWsLabel] = useState('')
+  const [wsValue, setWsValue] = useState('')
+
   // Master value-list management (collapsible).
   const [showMaster, setShowMaster] = useState(false)
   const [addingValue, setAddingValue] = useState(false)
@@ -189,6 +194,30 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
     clearDrag()
   }
   function clearDrag() { setDrag(null); setOverId(null); setOverSelectedPanel(false); setOverAvailablePanel(false) }
+
+  // Create a brand-new value on the field without leaving the screen. When the
+  // record type is customized, drop the new value straight into Selected so
+  // it's ready to order (Save persists the assignment). Universal already
+  // includes every value, so no placement is needed there.
+  async function commitWorkspaceValue() {
+    const label = wsLabel.trim()
+    const value = wsValue.trim() || label
+    if (!label) return
+    setValBusy(true)
+    try {
+      const maxOrder = values.reduce((m, v) => Math.max(m, v.sortOrder), -1)
+      const created = await addFieldValue(objectName, field, value, label, maxOrder + 1)
+      await reloadValues()
+      if (!isUniversal && created?.id) {
+        setSelected(prev => prev.includes(created.id) ? prev : [...prev, created.id])
+        setSavedNote('')
+      }
+      setWsAdding(false); setWsLabel(''); setWsValue('')
+      toast.success(isUniversal ? `Added "${label}"` : `Added "${label}" — placed in Selected, Save to keep`)
+    } catch (e) {
+      toast.error(`Add failed: ${e.message || e}`)
+    } finally { setValBusy(false) }
+  }
 
   const dirty = useMemo(() => {
     if (isUniversal !== savedUniversal) return true
@@ -327,14 +356,11 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
               style={{ minWidth: 320, padding: '8px 10px', border: `1px solid ${C.borderDark || C.border}`, borderRadius: 6, fontSize: 13, background: C.page, color: C.textPrimary, outline: 'none', cursor: 'pointer' }}
             >
               {recordTypes.length === 0 && <option value="">No record types on this object</option>}
-              {recordTypes.map(rt => {
-                const scoped = !!assignments[rt._id]
-                return (
-                  <option key={rt._id} value={rt._id}>
-                    {rt.label}{!rt.active ? ' (inactive)' : ''} · {scoped ? 'custom values' : 'all values'}
-                  </option>
-                )
-              })}
+              {recordTypes.map(rt => (
+                <option key={rt._id} value={rt._id}>
+                  {rt.label}{!rt.active ? ' (inactive)' : ''}
+                </option>
+              ))}
             </select>
           </div>
           {activeRt && (
@@ -343,11 +369,11 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
                 alignSelf: 'flex-start', fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 4,
                 background: isUniversal ? '#e8f8f2' : '#e8f3fb', color: isUniversal ? '#1a7a4e' : '#1a5a8a',
               }}>
-                {isUniversal ? 'UNIVERSAL — ALL VALUES' : `CUSTOM — ${selected.length} VALUE${selected.length === 1 ? '' : 'S'}`}
+                {isUniversal ? 'ALL VALUES' : `${selected.length} VALUE${selected.length === 1 ? '' : 'S'}`}
               </span>
               <span style={{ fontSize: 11.5, color: C.textSecondary, lineHeight: 1.4 }}>
                 {isUniversal
-                  ? 'This record type shows every value on the field, including any added later. Customize to choose and order a specific set.'
+                  ? 'This record type shows every value on the field, including any added later. Choose specific values to restrict and order them.'
                   : 'Drag values between the panels below, then drag or use ↑ ↓ to set the order users see for this record type.'}
               </span>
             </div>
@@ -357,14 +383,14 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
         {activeRt && isUniversal && (
           <div style={{ border: `1px dashed ${C.border}`, borderRadius: 8, background: '#f7faff', padding: '18px 16px', marginBottom: 18, textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: C.textPrimary, fontWeight: 500, marginBottom: 6 }}>
-              {activeRt.label} uses all {activeCount} values (universal)
+              {activeRt.label} shows all {activeCount} values
             </div>
             <div style={{ fontSize: 12, color: C.textSecondary, maxWidth: 560, margin: '0 auto 12px', lineHeight: 1.5 }}>
-              Nothing is restricted. Customize to pick exactly which values appear for this record type and set their order.
+              Nothing is restricted for this record type. Choose specific values to pick exactly which appear here and set their order.
             </div>
             <button onClick={customizeFromUniversal}
               style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: C.emerald, color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
-              Customize values for this record type
+              Choose specific values for this record type
             </button>
           </div>
         )}
@@ -379,10 +405,34 @@ export default function FieldPicklistEditor({ objectName, objectLabel, field, co
               onDrop={dropRemove}
               style={{ border: `1px solid ${overAvailablePanel && drag?.from === 'selected' ? C.emerald : C.border}`, borderRadius: 8, background: C.card, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 360 }}
             >
-              <div style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}`, fontSize: 12.5, fontWeight: 600, color: C.textPrimary, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>Available Values</span>
-                <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500 }}>{availableValues.length}</span>
+              <div style={{ padding: '8px 12px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary }}>
+                  Available Values <span style={{ fontWeight: 400, color: C.textMuted }}>· {availableValues.length}</span>
+                </span>
+                <button onClick={() => { setWsAdding(true); setWsLabel(''); setWsValue('') }}
+                  style={{ padding: '5px 10px', borderRadius: 5, border: 'none', background: C.emerald, color: '#fff', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                  <Icon path="M12 5v14M5 12h14" size={11} color="currentColor" /> New Value
+                </button>
               </div>
+              {wsAdding && (
+                <div style={{ padding: '10px 12px', borderBottom: `1px solid ${C.border}`, background: '#f7faff', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <input autoFocus value={wsLabel} onChange={e => setWsLabel(e.target.value)} placeholder="Label (shown to users)"
+                    onKeyDown={e => { if (e.key === 'Enter') commitWorkspaceValue(); if (e.key === 'Escape') setWsAdding(false) }}
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12.5, background: C.card, color: C.textPrimary, outline: 'none' }} />
+                  <input value={wsValue} onChange={e => setWsValue(e.target.value)} placeholder="Stored value (optional, defaults to label)"
+                    onKeyDown={e => { if (e.key === 'Enter') commitWorkspaceValue(); if (e.key === 'Escape') setWsAdding(false) }}
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12.5, background: C.card, color: C.textPrimary, outline: 'none', fontFamily: 'JetBrains Mono, monospace' }} />
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button onClick={commitWorkspaceValue} disabled={valBusy || !wsLabel.trim()}
+                      style={{ padding: '6px 14px', borderRadius: 5, border: 'none', background: wsLabel.trim() ? C.emerald : '#cfe9da', color: '#fff', fontSize: 12, fontWeight: 600, cursor: wsLabel.trim() ? 'pointer' : 'default' }}>
+                      {valBusy ? 'Adding…' : 'Add value'}
+                    </button>
+                    <button onClick={() => setWsAdding(false)}
+                      style={{ padding: '6px 12px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.page, color: C.textSecondary, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+                    {!isUniversal && <span style={{ fontSize: 11, color: C.textSecondary }}>Adds to Selected for {activeRt.label} — Save to keep.</span>}
+                  </div>
+                </div>
+              )}
               <div style={{ padding: 8, borderBottom: `1px solid ${C.border}` }}>
                 <input value={availSearch} onChange={e => setAvailSearch(e.target.value)} placeholder="Search values…"
                   style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12.5, background: C.page, color: C.textPrimary, outline: 'none' }} />
