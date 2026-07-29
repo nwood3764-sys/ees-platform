@@ -175,6 +175,30 @@ export async function logApplicationActivity(applicationId, { activityType = 'No
   return data
 }
 
+// ── Onboarding checklist ─────────────────────────────────────────────────
+// The multi-step onboarding process (documents reviewed, initial interview,
+// onboarding session, training) is tracked as a per-application checklist,
+// instantiated from configurable templates. The portal invite is gated on it.
+
+// Instantiate (idempotent) + return an application's onboarding steps in order.
+export async function fetchOnboardingSteps(applicationId) {
+  const { data, error } = await supabase.rpc('ensure_service_provider_onboarding_steps', {
+    p_application_id: applicationId,
+  })
+  if (error) throw error
+  return data || []
+}
+
+// Mark an onboarding step complete/incomplete (records who + when server-side).
+export async function setOnboardingStep(stepId, complete, notes) {
+  const { data, error } = await supabase.rpc('set_service_provider_onboarding_step', {
+    p_step_id: stepId, p_complete: complete, p_notes: notes || null,
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
 // Decline → stage Declined, account status 'Service Provider Declined'.
 export async function declineServiceProviderApplication(applicationId, reason) {
   const { data, error } = await supabase.rpc('decline_service_provider_application', {
