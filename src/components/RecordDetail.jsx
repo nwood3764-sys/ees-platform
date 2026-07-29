@@ -40,6 +40,7 @@ import { runIncomeQualification } from '../data/incomeQualificationService'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
+import ConversationListWidget from './ConversationListWidget'
 import OpportunityProductsWidget from './OpportunityProductsWidget'
 import StatusPathWidget from './StatusPathWidget'
 import { ReportWidget } from './ReportWidget'
@@ -5538,7 +5539,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
     allSectionWidgets.every(w => hiddenWidgetTypes.has(w.widget_type))
   if (sectionWidgets.length === 0 && allSuppressed) return null
   const cardCount = allSectionWidgets.filter(w =>
-    ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'report', 'prtsn_history'].includes(w.widget_type)).length
+    ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'conversation_list', 'report', 'prtsn_history'].includes(w.widget_type)).length
   // An empty field group (zero fields) renders nothing — FieldGroupWidget
   // returns null for it — yet the canvas editor auto-adds a "Fields" group to
   // every section. On a card-only section (e.g. the Buildings / Units related
@@ -7608,7 +7609,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               }
             }
             const cards = isInsertMode ? [] : (sec.widgets || []).filter(w =>
-              ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'prtsn_history', 'report'].includes(w.widget_type))
+              ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'conversation_list', 'prtsn_history', 'report'].includes(w.widget_type))
             return (
               <div key={sec.id}>
                 <Section section={sec} record={record} picklists={picklists} lookups={lookups}
@@ -7683,6 +7684,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   }
                   if (w.widget_type === 'conversation_messages') {
                     return <ConversationMessagesWidget key={w.id} widget={w} parentRecordId={recordId} />
+                  }
+                  if (w.widget_type === 'conversation_list') {
+                    return <ConversationListWidget key={w.id} widget={w} parentRecordId={recordId} />
                   }
                   if (w.widget_type === 'prtsn_history') {
                     return <PrtsnHistoryWidget key={w.id} widget={w} parentRecordId={recordId} />
@@ -7808,6 +7812,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                         .filter(w => w.widget_type === 'conversation_messages')
                         .map(w => (
                           <ConversationMessagesWidget
+                            key={w.id}
+                            widget={w}
+                            parentRecordId={recordId}
+                          />
+                        ))}
+                      {(sec.widgets || [])
+                        .filter(w => w.widget_type === 'conversation_list')
+                        .map(w => (
+                          <ConversationListWidget
                             key={w.id}
                             widget={w}
                             parentRecordId={recordId}
