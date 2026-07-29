@@ -1904,9 +1904,13 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
       // source form's input type instead of collapsing to a dropdown. Same
       // stored value; only the control differs. Default stays a <select>.
       if (field.display === 'radio') {
+        // Radio groups mirror an external form, where option order is
+        // meaningful — render in picklist sort_order, not the alphabetical
+        // order the loader returns for choice lists.
+        const radioOpts = [...opts].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
         return (
           <div role="radiogroup" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {opts.map(o => {
+            {radioOpts.map(o => {
               const on = (v || '') === o.value
               return (
                 <label key={o.value}
@@ -5875,6 +5879,43 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         return d
       }
 
+      // Mirror the Project-Reservation BEFORE INSERT defaults on the create
+      // form (fill blanks only), so the radios / contractor show selected
+      // before the first save. Resolves picklist/account ids by value/name.
+      const seedReservationDefaultsOnCreate = async (recordTypeId) => {
+        let rtVal = pickedRecordType?.value || pickedRecordType?.picklist_value || getRecordTypeValue(prefill)
+        if (!rtVal && recordTypeId) {
+          const { data: rt } = await supabase.from('picklist_values')
+            .select('picklist_value').eq('id', recordTypeId).maybeSingle()
+          rtVal = rt?.picklist_value || null
+        }
+        if (!rtVal || !/Project-Reservation/i.test(rtVal)) return
+        const pv = async (field, value) => {
+          const { data } = await supabase.from('picklist_values').select('id')
+            .eq('picklist_object', 'enrollments').eq('picklist_field', field)
+            .eq('picklist_value', value).eq('picklist_is_active', true).maybeSingle()
+          return data?.id || null
+        }
+        const [appFor, bType, bProj, eesRow] = await Promise.all([
+          pv('application_for', 'Project Reservation'),
+          pv('building_type', 'Existing'),
+          pv('building_project_type', 'Multifamily - Central 5 Units'),
+          supabase.from('accounts').select('id')
+            .eq('account_name', 'Energy Efficiency Services of Wisconsin')
+            .eq('account_is_deleted', false).maybeSingle().then(r => r.data?.id || null),
+        ])
+        if (cancelled) return
+        setDraft(prev => {
+          const next = { ...prev }
+          if (appFor && next.enrollment_application_for == null) next.enrollment_application_for = appFor
+          if (bType && next.enrollment_building_type == null) next.enrollment_building_type = bType
+          if (bProj && next.enrollment_building_project_type == null) next.enrollment_building_project_type = bProj
+          if (eesRow && next.enrollment_contractor_account_id == null) next.enrollment_contractor_account_id = eesRow
+          if (next.enrollment_has_support_contractor == null) next.enrollment_has_support_contractor = false
+          return next
+        })
+      }
+
       // Create mode: fetch layout + picklists only, no record.
       // Layout selection uses the picked RT (if any) so the right
       // record-type-specific layout loads.
@@ -5899,6 +5940,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             const initialDraft = seedDraft(prefill)
             loadAllEditOpts(layoutData.sections, initialDraft)
           }
+          // Pre-select the Project-Reservation defaults on the create form so
+          // the radios / contractor aren't blank before the first save (the
+          // BEFORE INSERT trigger sets the same values server-side; this just
+          // mirrors them in the form). Resolve ids by value/name; fill blanks.
+          if (tableName === 'enrollments') seedReservationDefaultsOnCreate(rtId).catch(() => {})
         })
         .catch(err => { if (!cancelled) setError(err) })
         .finally(() => { if (!cancelled) setLoading(false) })

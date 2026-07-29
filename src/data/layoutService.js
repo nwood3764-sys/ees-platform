@@ -1229,6 +1229,7 @@ export async function fetchPicklistOptions(objectName, fieldName) {
     id: r.id,
     value: r.id,        // the UUID stored in the record
     label: r.picklist_label || r.picklist_value,
+    sortOrder: r.picklist_sort_order ?? 0,
   }))
 }
 
