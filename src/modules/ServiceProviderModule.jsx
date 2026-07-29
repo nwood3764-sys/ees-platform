@@ -63,6 +63,7 @@ function StageChip({ value, label }) {
 function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApprove, onInvite }) {
   const [open, setOpen] = useState(false)
   const [w9Busy, setW9Busy] = useState(false)
+  const [coiBusy, setCoiBusy] = useState(false)
   const [panel, setPanel] = useState(null) // 'info' | 'decline' | null
   const [note, setNote] = useState('')
   const [acts, setActs] = useState(null)
@@ -75,13 +76,22 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
   const declined = stageVal === 'Application Declined'
   const approved = stageVal === 'Application Approved' || app.account?.account_service_provider_is_active
 
-  const openW9 = async () => {
-    setW9Busy(true)
+  // All declared trades (primary first), falling back to the single trade FK.
+  const tradeList = (app.trades || [])
+    .filter((t) => t.spt_is_deleted !== true)
+    .sort((a, b) => (b.spt_is_primary ? 1 : 0) - (a.spt_is_primary ? 1 : 0))
+    .map((t) => t.spt_name)
+  const tradeText = tradeList.length ? tradeList.join(', ') : app.trade?.picklist_label
+
+  const openDoc = async (documentId, label, setBusy) => {
+    setBusy(true)
     try {
-      const url = await getDocumentSignedUrl(app.spa_w9_document_id)
-      if (url) window.open(url, '_blank', 'noopener'); else alert('The W-9 file could not be found.')
-    } catch (e) { alert(e?.message || 'Could not open the W-9.') } finally { setW9Busy(false) }
+      const url = await getDocumentSignedUrl(documentId)
+      if (url) window.open(url, '_blank', 'noopener'); else alert(`The ${label} file could not be found.`)
+    } catch (e) { alert(e?.message || `Could not open the ${label}.`) } finally { setBusy(false) }
   }
+  const openW9 = () => openDoc(app.spa_w9_document_id, 'W-9', setW9Busy)
+  const openCoi = () => openDoc(app.spa_coi_document_id, 'COI', setCoiBusy)
 
   // Communication trail — load lazily when the card is expanded, and refresh
   // after any parent pipeline action (busy true → false) so logged movements
@@ -121,8 +131,8 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
         <div>
           <div style={{ fontFamily: MONO, fontSize: 12, color: C.textMuted }}>{app.spa_record_number}</div>
           <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginTop: 2 }}>{app.spa_company_legal_name}</div>
-          <div style={{ fontSize: 13, color: C.textSecondary, marginTop: 3 }}>{[app.trade?.picklist_label, app.spa_home_state, contact].filter(Boolean).join(' · ')}</div>
-          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>Submitted {fmtDate(app.spa_submitted_at)} · {app.spa_source || 'Manual Entry'}{app.spa_w9_document_id ? ' · W-9 on file' : ' · no W-9'}</div>
+          <div style={{ fontSize: 13, color: C.textSecondary, marginTop: 3 }}>{[tradeText, app.spa_home_state, contact].filter(Boolean).join(' · ')}</div>
+          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>Submitted {fmtDate(app.spa_submitted_at)} · {app.spa_source || 'Manual Entry'}{app.spa_w9_document_id ? ' · W-9' : ' · no W-9'}{app.spa_coi_document_id ? ' · COI' : ''}</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
           <StageChip value={stageVal} label={app.stage?.picklist_label} />
@@ -132,6 +142,7 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
 
       {open && (
         <div style={{ marginTop: 12, borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+          {row('Trades', tradeText)}
           {row('Contact', [contact, app.spa_contact_title].filter(Boolean).join(', '))}
           {row('Email', email)}
           {row('Phone', app.spa_contact_phone || app.spa_business_phone)}
@@ -144,11 +155,14 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
           {row('Applicant notes', app.spa_notes)}
           {row('Review notes', app.spa_decision_notes)}
           {row('Declined reason', app.spa_declined_reason)}
-          <div style={{ display: 'flex', gap: 8, fontSize: 13, padding: '6px 0 0', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, fontSize: 13, padding: '6px 0 0', alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ color: C.textMuted, minWidth: 150 }}>Documents</span>
             {app.spa_w9_document_id
               ? <button onClick={openW9} disabled={w9Busy} style={{ background: '#eef6ff', border: `1px solid ${C.sky}`, color: '#1a5a8a', borderRadius: 6, padding: '4px 12px', fontSize: 12.5, fontWeight: 600, cursor: w9Busy ? 'default' : 'pointer' }}>{w9Busy ? 'Opening…' : 'View W-9'}</button>
-              : <span style={{ color: C.textMuted }}>No W-9 uploaded — request it before approving.</span>}
+              : <span style={{ color: C.textMuted }}>No W-9 on file</span>}
+            {app.spa_coi_document_id
+              ? <button onClick={openCoi} disabled={coiBusy} style={{ background: '#eef6ff', border: `1px solid ${C.sky}`, color: '#1a5a8a', borderRadius: 6, padding: '4px 12px', fontSize: 12.5, fontWeight: 600, cursor: coiBusy ? 'default' : 'pointer' }}>{coiBusy ? 'Opening…' : 'View COI'}</button>
+              : <span style={{ color: C.textMuted }}>No COI on file</span>}
           </div>
 
           {/* communication trail */}
