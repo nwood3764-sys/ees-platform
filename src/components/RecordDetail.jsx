@@ -217,8 +217,34 @@ function normalizePhoneFieldsInPlace(payload, phoneNames) {
   }
 }
 
+// Full US state / territory name -> USPS two-letter abbreviation. Used by the
+// `us_state_abbrev` field format so program forms (e.g. the IRA HOMES
+// reservation) show "WI" even when the source record stores "Wisconsin".
+// Already-abbreviated or unrecognized values pass through unchanged.
+const US_STATE_ABBREV = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA',
+  colorado: 'CO', connecticut: 'CT', delaware: 'DE', 'district of columbia': 'DC',
+  florida: 'FL', georgia: 'GA', hawaii: 'HI', idaho: 'ID', illinois: 'IL',
+  indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY', louisiana: 'LA',
+  maine: 'ME', maryland: 'MD', massachusetts: 'MA', michigan: 'MI', minnesota: 'MN',
+  mississippi: 'MS', missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV',
+  'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+  'north carolina': 'NC', 'north dakota': 'ND', ohio: 'OH', oklahoma: 'OK',
+  oregon: 'OR', pennsylvania: 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT',
+  virginia: 'VA', washington: 'WA', 'west virginia': 'WV', wisconsin: 'WI',
+  wyoming: 'WY', 'puerto rico': 'PR',
+}
+function usStateAbbrev(v) {
+  if (v == null) return v
+  const s = String(v).trim()
+  return US_STATE_ABBREV[s.toLowerCase()] || s
+}
+
 function formatFieldValue(raw, fieldDef, picklists, lookups) {
   if (raw === null || raw === undefined) return '—'
+  // Value-shaping format hints apply regardless of the underlying type.
+  if (fieldDef.format === 'us_state_abbrev') return usStateAbbrev(raw) || '—'
   switch (fieldDef.type) {
     case 'picklist':   return picklists.byId.get(raw) || String(raw)
     case 'phone':      return formatPhoneDisplay(raw)
@@ -3274,6 +3300,19 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // missing' error before the prefix-map fix landed).
         if (isCreate && isSystemField(f.name)) return null
 
+        // Spacer — a blank placeholder cell (no name, so it's never saved and
+        // the layout-config validator skips it). Occupies a column slot so the
+        // paired field in the other column lines up, mirroring the source form.
+        if (f.type === 'spacer') {
+          return (
+            <div key={f.spacer_id || `sp-${f.column || 1}-${f.label || ''}`} aria-hidden="true"
+              style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', visibility: 'hidden' }}>&nbsp;</span>
+              <span style={{ fontSize: 13, visibility: 'hidden' }}>&nbsp;</span>
+            </div>
+          )
+        }
+
         // Cross-object (related) fields — read-only values pulled from the
         // record a lookup on this record points at (loadRecordDetailData
         // merges them into `record` under the dotted name). Always
@@ -5559,11 +5598,27 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   // merge_field_reference is only relevant when document_templates is in
   // docx authoring mode, so the parent passes {'merge_field_reference'}
   // to hide it in html mode).
-  const sectionWidgets = (section.widgets || []).filter(w => {
+  // Conditional widgets: a widget_config.visible_when { field, equals } shows
+  // the widget only when the record/draft's `field` matches (e.g. the Support
+  // Contractor group appears only when "Will a support contractor…" is Yes).
+  const condValues = editing ? { ...(record || {}), ...(draft || {}) } : (record || {})
+  const isWidgetVisible = (w) => {
+    const vw = w.widget_config?.visible_when
+    if (!vw || !vw.field) return true
+    const actual = condValues?.[vw.field]
+    if (Object.prototype.hasOwnProperty.call(vw, 'equals')) return actual === vw.equals
+    if (Array.isArray(vw.in)) return vw.in.includes(actual)
+    return true
+  }
+  const preVisibilityWidgets = (section.widgets || []).filter(w => {
     if (!inSectionTypes.has(w.widget_type)) return false
     if (hiddenWidgetTypes && hiddenWidgetTypes.has(w.widget_type)) return false
     return true
   })
+  const sectionWidgets = preVisibilityWidgets.filter(isWidgetVisible)
+  // A section whose content is entirely hidden by visible_when disappears
+  // completely (header included) — not an empty "No fields" shell.
+  if (preVisibilityWidgets.length > 0 && sectionWidgets.length === 0) return null
   // Blank sections still render — the record page stays consistent with the
   // page layout editor: every section in the layout shows its header, with a
   // muted empty state in place of content. Two exceptions return null:
@@ -5591,14 +5646,30 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
   const meaningfulSectionWidgets = sectionWidgets.filter(w =>
     w.widget_type === 'field_group' ? ((w.widget_config?.fields || []).length > 0) : true)
   if (meaningfulSectionWidgets.length === 0 && cardCount > 0) return null
+  // A section with no title typed in — blank, or the "Untitled Section"
+  // placeholder the save path stores for an unnamed section — must not render
+  // an empty titled box on the record page (Nicholas, 2026-07-29: "if I don't
+  // have anything typed in the section name, it just needs to disappear").
+  // If such an untitled section also has no content to show, it disappears
+  // entirely — no header, no wasted vertical space. If it DOES carry fields,
+  // the fields still render, just with no header bar above them. Named empty
+  // sections keep their header + muted empty state (they still match the
+  // layout editor 1:1); this carve-out is only for the untitled case.
+  const rawLabel = (section.section_label || '').trim()
+  const hasTitle = !!rawLabel && rawLabel.toLowerCase() !== 'untitled section'
+  const hasContent = meaningfulSectionWidgets.length > 0
+  if (!hasTitle && !hasContent) return null
+  const showHeader = hasTitle
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: isMobile ? 10 : 12, overflow: 'hidden' }}>
-      <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
-        style={{ padding: isMobile ? '12px 14px' : '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: section.section_is_collapsible ? 'pointer' : 'default', borderBottom: collapsed ? 'none' : `1px solid ${C.border}`, background: '#fafbfd' }}>
-        <span style={{ fontSize: isMobile ? 14 : 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
-        {section.section_is_collapsible && <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={14} color={C.textMuted} />}
-      </div>
-      {!collapsed && sectionWidgets.length === 0 && (
+      {showHeader && (
+        <div onClick={() => section.section_is_collapsible && setCollapsed(c => !c)}
+          style={{ padding: isMobile ? '12px 14px' : '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: section.section_is_collapsible ? 'pointer' : 'default', borderBottom: collapsed ? 'none' : `1px solid ${C.border}`, background: '#fafbfd' }}>
+          <span style={{ fontSize: isMobile ? 14 : 13, fontWeight: 600, color: C.textPrimary }}>{section.section_label}</span>
+          {section.section_is_collapsible && <Icon path={collapsed ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'} size={14} color={C.textMuted} />}
+        </div>
+      )}
+      {showHeader && !collapsed && sectionWidgets.length === 0 && (
         <div style={{ padding: isMobile ? '14px 14px' : '16px 18px', fontSize: 12.5, color: C.textMuted, fontStyle: 'italic' }}>
           No fields in this section yet — add some in the page layout editor.
         </div>
