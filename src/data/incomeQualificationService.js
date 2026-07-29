@@ -108,8 +108,11 @@ async function resolveRunRecord(enrollmentId) {
       enrollment_br_3, enrollment_br_4, enrollment_br_5plus,
       properties:property_id (
         id, property_name, property_hud_property_id,
-        property_street, property_city, property_state, property_zip,
-        property_total_units, property_hud_contracts
+        property_street, property_city, property_state, property_zip, property_county,
+        property_total_units, property_assisted_units, property_category, property_hud_contracts,
+        property_hud_owner_org, property_hud_owner_phone, property_hud_owner_email, fein,
+        property_hud_management_org, property_hud_management_phone, property_hud_management_email,
+        property_primary_contract_number, property_is_202_811, property_is_opportunity_zone
       )
     `)
     .eq('id', enrollmentId)
@@ -131,12 +134,13 @@ async function resolveRunRecord(enrollmentId) {
   const brSum = brTotal.reduce((a, b) => a + b, 0)
 
   const totalUnits = Number(enr.enrollment_total_units) || Number(prop.property_total_units) || 0
-  const assistedUnits = Number(enr.enrollment_assisted_units) || (brSum > 0 ? brSum : totalUnits)
+  const assistedUnits = Number(enr.enrollment_assisted_units) || Number(prop.property_assisted_units)
+    || (brSum > 0 ? brSum : totalUnits)
 
   // value-with-fallback helper: enrollment field, then property/HUD source
   const v = (enrVal, fallback) => (enrVal != null && enrVal !== '' ? enrVal : (fallback ?? ''))
 
-  const category = v(enr.enrollment_property_category, hud?.category)
+  const category = v(enr.enrollment_property_category, prop.property_category ?? hud?.category)
   const programString = [
     enr.enrollment_hud_program, hud?.primary_program, hud?.elig_pathway,
   ].filter(Boolean).join(' ')
@@ -155,23 +159,26 @@ async function resolveRunRecord(enrollmentId) {
     city: v(enr.enrollment_city, prop.property_city),
     state: v(enr.enrollment_state, prop.property_state) || 'WI',
     zip: v(enr.enrollment_zip, prop.property_zip),
-    county: v(enr.enrollment_county, ''),
+    county: v(enr.enrollment_county, prop.property_county),
     total_units: totalUnits,
     assisted_units: assistedUnits,
     category,
-    owner_org: v(enr.enrollment_owner_organization, ''),
+    // Owner / management now live on the Property (the enrollment no longer keeps
+    // its own copy) — fall back to the property's HUD fields when the enrollment
+    // column is empty, so a determination on a fresh enrollment is fully populated.
+    owner_org: v(enr.enrollment_owner_organization, prop.property_hud_owner_org),
     owner_type: v(enr.enrollment_owner_type, ''),
     owner_addr: v(enr.enrollment_owner_address, ''),
     owner_city: '',
     owner_state: v(enr.enrollment_state, prop.property_state) || 'WI',
     owner_zip: '',
-    owner_phone: v(enr.enrollment_owner_phone, ''),
-    owner_email: v(enr.enrollment_owner_email, ''),
-    mgmt_org: v(enr.enrollment_management_agent, ''),
-    mgmt_phone: v(enr.enrollment_management_phone, ''),
-    mgmt_email: v(enr.enrollment_management_email, ''),
-    is_202_811: enr.enrollment_is_202_811 || hud?.is_202_811 ? 'Y' : 'N',
-    is_opp_zone: enr.enrollment_is_opportunity_zone || hud?.is_opp_zone ? 'Y' : 'N',
+    owner_phone: v(enr.enrollment_owner_phone, prop.property_hud_owner_phone),
+    owner_email: v(enr.enrollment_owner_email, prop.property_hud_owner_email),
+    mgmt_org: v(enr.enrollment_management_agent, prop.property_hud_management_org),
+    mgmt_phone: v(enr.enrollment_management_phone, prop.property_hud_management_phone),
+    mgmt_email: v(enr.enrollment_management_email, prop.property_hud_management_email),
+    is_202_811: enr.enrollment_is_202_811 || prop.property_is_202_811 || hud?.is_202_811 ? 'Y' : 'N',
+    is_opp_zone: enr.enrollment_is_opportunity_zone || prop.property_is_opportunity_zone || hud?.is_opp_zone ? 'Y' : 'N',
     programs: [enr.enrollment_hud_program, hud?.primary_program, hud?.elig_pathway].filter(Boolean),
     _programString: programString,
     br_total: brTotal,
