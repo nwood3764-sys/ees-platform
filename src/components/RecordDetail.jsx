@@ -1501,7 +1501,9 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
     // doesn't substring-match the raw query could be hidden.
     if (onSearch) return sorted
     if (!q) return sorted
-    return sorted.filter(o => String(o.label ?? '').toLowerCase().includes(q))
+    // Match the subtitle (e.g. a contact's account) too, so you can narrow by
+    // account when several people share a name.
+    return sorted.filter(o => `${o.label ?? ''} ${o.subtitle ?? ''}`.toLowerCase().includes(q))
   }, [sorted, query, onSearch])
 
   const selectedLabel = useMemo(() => {
@@ -1571,13 +1573,18 @@ function SearchableLookup({ value, options, onChange, placeholder = '— Select 
             ) : filtered.map(o => {
               const isSel = String(o.value) === String(value)
               return (
-                <div key={o.value} onClick={() => pick(o.value)} title={o.label}
+                <div key={o.value} onClick={() => pick(o.value)} title={o.subtitle ? `${o.label} · ${o.subtitle}` : o.label}
                   style={{ padding: '7px 10px', fontSize: 13, cursor: 'pointer',
                     background: isSel ? C.emerald : '#fff', color: isSel ? '#fff' : C.textPrimary,
                     whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.3 }}
                   onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = '#f1f5f9' }}
                   onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = '#fff' }}>
                   {o.label}
+                  {o.subtitle && (
+                    <div style={{ fontSize: 11, marginTop: 1, color: isSel ? 'rgba(255,255,255,0.82)' : C.textMuted }}>
+                      {o.subtitle}
+                    </div>
+                  )}
                 </div>
               )
             })}
