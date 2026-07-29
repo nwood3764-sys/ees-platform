@@ -532,6 +532,20 @@ const INHERITED_FROM_PARENT_COLUMNS = {
     'enrollment_hud_tracs_status', 'enrollment_hud_contract_expiration', 'enrollment_is_202_811',
     'enrollment_is_opportunity_zone',
   ],
+  // Incentive applications now reference building/property/opportunity for these
+  // fields (migration 20260729153704) — stop writing the copies. Nothing else in
+  // the app reads these ia_* columns, so the child simply reads them live from the
+  // parent. (The state-computed contractor fields and the 2-hop business-entity
+  // account fields are NOT converted and keep being populated.)
+  incentive_applications: [
+    'ia_building_square_footage', 'ia_total_building_square_footage', 'ia_total_floors_in_building',
+    'ia_year_the_building_was_built', 'ia_multifamily_of_units_in_building', 'ia_installation_address_street',
+    'ia_installation_address_city', 'ia_installation_address_state', 'ia_installation_address_zip',
+    'ia_electric_provider', 'ia_natural_gas_provider', 'ia_other_heating_fuel_provider',
+    'ia_total_number_of_units', 'ia_total_number_of_occupied_units', 'ia_building_owner_name',
+    'ia_building_owner_name_ira', 'ia_building_owner_email_address', 'ia_building_owner_office_phone',
+    'ia_income_qualified_confirmation_code', 'ia_electric_account_number', 'ia_natural_gas_account_number',
+  ],
 }
 
 // missing from the provided values object. An empty string is treated as
