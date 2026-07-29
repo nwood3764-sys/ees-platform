@@ -32,11 +32,14 @@
     "@tiptap/react": "^3.23.5",
     "@tiptap/starter-kit": "^3.23.5",
     "@tiptap/suggestion": "^3.23.5",
+    "@turf/boolean-point-in-polygon": "^7.3.5",
+    "@turf/helpers": "^7.3.5",
     "dompurify": "^3.4.2",
     "echarts": "^6.1.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "jszip": "^3.10.1",
+    "leaflet": "^1.9.4",
     "mammoth": "^1.12.0",
     "mathjs": "^12.4.3",
     "react": "^18.3.1",
@@ -49,6 +52,7 @@
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.1",
+    "us-zips": "^2022.9.1",
     "vite": "^5.4.2"
   }
 }

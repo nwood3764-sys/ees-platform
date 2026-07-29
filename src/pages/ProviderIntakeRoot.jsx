@@ -7,10 +7,13 @@
 // inactive Service Provider account for review.
 // =============================================================================
 
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../data/constants'
 import { blockNegativeKeys } from '../lib/numberInput'
+
+// Lazy so Leaflet + the ZIP-centroid asset only load on the coverage step.
+const ServiceAreaMap = lazy(() => import('../components/ServiceAreaMap'))
 
 const FONT = 'Inter, -apple-system, BlinkMacSystemFont, sans-serif'
 const MONO = 'JetBrains Mono, ui-monospace, monospace'
@@ -96,12 +99,20 @@ export default function ProviderIntakeRoot() {
   })
   const [w9File, setW9File] = useState(null)
   const [coiFile, setCoiFile] = useState(null)
+  const [mapZips, setMapZips] = useState([]) // ZIPs derived from the drawn map areas
+  const [manualZips, setManualZips] = useState(false) // fallback: type ZIPs instead
   const [phase, setPhase] = useState('form') // form | submitting | done
   const [errMsg, setErrMsg] = useState('')
   const [appNumber, setAppNumber] = useState(null)
 
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
   const toggleTrade = (v) => setF((s) => ({ ...s, trades: s.trades.includes(v) ? s.trades.filter((t) => t !== v) : [...s.trades, v] }))
+
+  // Union of the map-derived ZIPs and any manually typed ZIPs, de-duplicated.
+  const combinedZips = () => {
+    const typed = f.zips.split(/[^0-9]+/).map((z) => z.trim()).filter((z) => z.length >= 5)
+    return Array.from(new Set([...mapZips, ...typed]))
+  }
 
   const stepValid = () => {
     if (step === 0) return f.company_legal_name.trim().length > 0
@@ -134,7 +145,7 @@ export default function ProviderIntakeRoot() {
     try {
       const w9 = await fileToPayload(w9File, 'W-9')
       const coi = await fileToPayload(coiFile, 'Certificate of insurance')
-      const zip_codes = f.zips.split(/[^0-9]+/).map((z) => z.trim()).filter((z) => z.length >= 5)
+      const zip_codes = combinedZips()
       const { zips, trades, ...rest } = f
       const { data, error } = await supabase.functions.invoke('service-provider-intake', {
         body: { ...rest, service_provider_types: trades, zip_codes, w9, coi },
@@ -292,10 +303,22 @@ export default function ProviderIntakeRoot() {
 
             {step === 4 && (
               <>
-                <h2 style={{ fontSize: 20, fontWeight: 800, color: C.textPrimary, margin: '0 0 4px' }}>Coverage &amp; documents</h2>
-                <p style={{ fontSize: 14, color: C.textSecondary, margin: '0 0 18px' }}>Where you work, and your W-9 if you have it ready.</p>
-                <label style={labelStyle}>ZIP codes you serve<span style={{ color: C.textMuted, fontWeight: 400 }}> · separate with commas or spaces</span></label>
-                <textarea className="spi-area" value={f.zips} onChange={set('zips')} rows={2} placeholder="27601, 27603, 27605" style={{ ...inputStyle, resize: 'vertical' }} />
+                <h2 style={{ fontSize: 20, fontWeight: 800, color: C.textPrimary, margin: '0 0 4px' }}>Where do you work?</h2>
+                <p style={{ fontSize: 14, color: C.textSecondary, margin: '0 0 18px' }}>Trace the areas you serve on the map — we'll figure out the ZIP codes for you. Add your W-9 too if it's handy.</p>
+                <label style={labelStyle}>Service area<span style={{ color: C.textMuted, fontWeight: 400 }}> · draw one or more areas on the map</span></label>
+                {manualZips ? (
+                  <>
+                    <textarea className="spi-area" value={f.zips} onChange={set('zips')} rows={2} placeholder="27601, 27603, 27605" style={{ ...inputStyle, resize: 'vertical' }} />
+                    <button type="button" onClick={() => setManualZips(false)} style={{ marginTop: 8, background: 'none', border: 'none', color: C.sky, cursor: 'pointer', fontSize: 13, padding: 0 }}>← Draw on the map instead</button>
+                  </>
+                ) : (
+                  <>
+                    <Suspense fallback={<div style={{ height: 340, borderRadius: 11, border: `1px solid ${C.borderDark}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading map…</div>}>
+                      <ServiceAreaMap homeState={f.home_state} onChange={setMapZips} />
+                    </Suspense>
+                    <button type="button" onClick={() => setManualZips(true)} style={{ marginTop: 8, background: 'none', border: 'none', color: C.sky, cursor: 'pointer', fontSize: 13, padding: 0 }}>Prefer to type ZIP codes? Enter them manually →</button>
+                  </>
+                )}
                 <div style={{ marginTop: 20 }}>
                   <label style={labelStyle}>W-9 document<span style={{ color: C.textMuted, fontWeight: 400 }}> · PDF or image, up to 10 MB — optional</span></label>
                   <UploadTile file={w9File} onPick={setW9File} hint="Click to upload your W-9" />
@@ -319,7 +342,7 @@ export default function ProviderIntakeRoot() {
                   ['State', f.home_state],
                   ['License', f.license_number || '—'],
                   ['Certificate of insurance', coiFile ? coiFile.name : 'Not attached'],
-                  ['ZIP areas', f.zips ? f.zips.split(/[^0-9]+/).filter((z) => z.length >= 5).length + ' ZIP codes' : '—'],
+                  ['Service area', combinedZips().length ? combinedZips().length + ' ZIP codes' : '—'],
                   ['W-9', w9File ? w9File.name : 'Not attached'],
                 ].map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: `1px solid ${C.border}`, fontSize: 14 }}>
