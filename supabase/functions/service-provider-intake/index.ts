@@ -20,15 +20,42 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
-const MAX_W9_BYTES = 10 * 1024 * 1024 // 10 MB
-const ALLOWED_W9_MIME = ["application/pdf", "image/jpeg", "image/png", "image/heic"]
+const MAX_DOC_BYTES = 10 * 1024 * 1024 // 10 MB
+const ALLOWED_DOC_MIME = ["application/pdf", "image/jpeg", "image/png", "image/heic"]
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } })
 }
 
-function sanitizeFileName(name: string): string {
-  return (name || "w9").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120)
+function sanitizeFileName(name: string, fallback = "file"): string {
+  return (name || fallback).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120)
+}
+
+// Decode + validate + upload one base64 document to the private bucket.
+// Returns document metadata for the RPC, or a Response on error.
+async function uploadDoc(
+  supabase: ReturnType<typeof createClient>,
+  doc: { file_name?: string; mime_type?: string; base64?: string } | undefined,
+  kind: string,
+): Promise<Record<string, unknown> | null | Response> {
+  if (!doc || typeof doc.base64 !== "string" || doc.base64.length === 0) return null
+  const mime = String(doc.mime_type || "application/pdf")
+  if (!ALLOWED_DOC_MIME.includes(mime)) return json({ ok: false, error: `${kind} must be a PDF or image.` }, 400)
+  let bytes: Uint8Array
+  try {
+    const raw = doc.base64.includes(",") ? doc.base64.split(",")[1] : doc.base64
+    const bin = atob(raw)
+    bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  } catch { return json({ ok: false, error: `Could not read the ${kind} file.` }, 400) }
+  if (bytes.length > MAX_DOC_BYTES) return json({ ok: false, error: `${kind} file is too large (max 10 MB).` }, 400)
+
+  const bucket = "service-provider-documents"
+  const safe = sanitizeFileName(String(doc.file_name || kind), kind)
+  const path = `applications/${crypto.randomUUID()}/${safe}`
+  const up = await supabase.storage.from(bucket).upload(path, bytes, { contentType: mime, upsert: false })
+  if (up.error) return json({ ok: false, error: `${kind} upload failed: ${up.error.message}` }, 500)
+  return { storage_bucket: bucket, storage_path: path, mime_type: mime, file_size_bytes: bytes.length, file_name: safe }
 }
 
 Deno.serve(async (req) => {
@@ -54,32 +81,24 @@ Deno.serve(async (req) => {
   if (!supabaseUrl || !serviceRoleKey) return json({ ok: false, error: "Server misconfiguration" }, 500)
   const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
 
-  // Optional W-9 upload (base64) -> private bucket
-  let w9meta: Record<string, unknown> | null = null
-  const w9 = body.w9 as { file_name?: string; mime_type?: string; base64?: string } | undefined
-  if (w9 && typeof w9.base64 === "string" && w9.base64.length > 0) {
-    const mime = String(w9.mime_type || "application/pdf")
-    if (!ALLOWED_W9_MIME.includes(mime)) return json({ ok: false, error: "W-9 must be a PDF or image." }, 400)
-    let bytes: Uint8Array
-    try {
-      const raw = w9.base64.includes(",") ? w9.base64.split(",")[1] : w9.base64
-      const bin = atob(raw)
-      bytes = new Uint8Array(bin.length)
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    } catch { return json({ ok: false, error: "Could not read the W-9 file." }, 400) }
-    if (bytes.length > MAX_W9_BYTES) return json({ ok: false, error: "W-9 file is too large (max 10 MB)." }, 400)
-
-    const bucket = "service-provider-documents"
-    const path = `applications/${crypto.randomUUID()}/${sanitizeFileName(String(w9.file_name || "w9"))}`
-    const up = await supabase.storage.from(bucket).upload(path, bytes, { contentType: mime, upsert: false })
-    if (up.error) return json({ ok: false, error: `W-9 upload failed: ${up.error.message}` }, 500)
-    w9meta = { storage_bucket: bucket, storage_path: path, mime_type: mime, file_size_bytes: bytes.length, file_name: sanitizeFileName(String(w9.file_name || "w9")) }
+  // Optional document uploads (base64) -> private bucket
+  const w9res = await uploadDoc(supabase, body.w9 as never, "W-9")
+  if (w9res instanceof Response) return w9res
+  const w9meta = w9res
+  const coires = await uploadDoc(supabase, body.coi as never, "Certificate of insurance")
+  if (coires instanceof Response) {
+    if (w9meta) await supabase.storage.from("service-provider-documents").remove([String(w9meta.storage_path)]).catch(() => undefined)
+    return coires
   }
+  const coimeta = coires
 
   // Assemble the RPC payload from whitelisted fields only.
   const F = (k: string) => (typeof body[k] === "string" ? String(body[k]).trim() : undefined)
   const zipCodes = Array.isArray(body.zip_codes)
-    ? (body.zip_codes as unknown[]).map((z) => String(z).trim()).filter(Boolean).slice(0, 500)
+    ? (body.zip_codes as unknown[]).map((z) => String(z).trim()).filter(Boolean).slice(0, 2000)
+    : []
+  const tradeTypes = Array.isArray(body.service_provider_types)
+    ? (body.service_provider_types as unknown[]).map((t) => String(t).trim()).filter(Boolean).slice(0, 12)
     : []
 
   const payload: Record<string, unknown> = {
@@ -87,6 +106,7 @@ Deno.serve(async (req) => {
     company_legal_name: company,
     dba_name: F("dba_name"),
     service_provider_type: F("service_provider_type"),
+    service_provider_types: tradeTypes,
     entity_type: F("entity_type"),
     home_state: F("home_state") || "NC",
     business_phone: F("business_phone"),
@@ -115,12 +135,14 @@ Deno.serve(async (req) => {
     notes: F("notes"),
     zip_codes: zipCodes,
     w9: w9meta,
+    coi: coimeta,
   }
 
   const { data, error } = await supabase.rpc("create_service_provider_application", { p_payload: payload })
   if (error) {
-    // Clean up the orphaned W-9 upload if the cascade failed.
-    if (w9meta) await supabase.storage.from("service-provider-documents").remove([String(w9meta.storage_path)]).catch(() => undefined)
+    // Clean up orphaned uploads if the cascade failed.
+    const orphans = [w9meta, coimeta].filter(Boolean).map((m) => String((m as Record<string, unknown>).storage_path))
+    if (orphans.length) await supabase.storage.from("service-provider-documents").remove(orphans).catch(() => undefined)
     return json({ ok: false, error: error.message }, 500)
   }
   return json({ ok: true, application_number: (data as { application_number?: string })?.application_number ?? null })

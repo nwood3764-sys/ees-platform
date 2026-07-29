@@ -16,9 +16,10 @@ export async function fetchServiceProviderApplications() {
              spa_contact_email, spa_contact_phone, spa_business_phone, spa_business_email, spa_website,
              spa_license_number, spa_license_type, spa_license_state, spa_license_expiration_date,
              spa_general_liability_carrier, spa_workers_comp_carrier,
-             spa_w9_document_id, spa_declined_reason, spa_notes, spa_decision_notes, spa_reviewed_at, spa_primary_contact_id,
+             spa_w9_document_id, spa_coi_document_id, spa_declined_reason, spa_notes, spa_decision_notes, spa_reviewed_at, spa_primary_contact_id,
              stage:spa_stage(picklist_value,picklist_label),
              trade:spa_service_provider_type(picklist_label),
+             trades:service_provider_trades!spt_application_id(spt_name,spt_is_primary,spt_is_deleted),
              account:spa_account_id(id,account_name,account_service_provider_is_active)`)
     .eq('spa_is_deleted', false)
     .order('spa_submitted_at', { ascending: false, nullsFirst: false })
