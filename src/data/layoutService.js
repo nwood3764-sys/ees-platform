@@ -1526,6 +1526,27 @@ export async function fetchDependentLookupOptions(field, record) {
         label: r.contact_name || r.id.slice(0, 8),
       }))
     }
+    case 'contacts_for_account_hierarchy': {
+      // Like contacts_for_accounts, but walks UP the account ownership tree:
+      // the given account(s) plus every ancestor via parent_account_id. An
+      // opportunity is on a child LLC (e.g. LSS HOUSING, INC.) while the
+      // decision-maker / site contact lives on the parent or grandparent
+      // account (e.g. Lutheran Social Services). Contacts are never duplicated
+      // across a family tree, so the picker must span the whole ancestor chain
+      // rather than only the record's own account.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_contacts_for_account_hierarchy', {
+        p_account_ids: dependencyValues,
+        p_include_contact_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.contact_name || r.id.slice(0, 8),
+      }))
+    }
     case 'signer_contacts_for_opportunity': {
       // Once the opportunity exists, scope by its id — that path applies the
       // Decision-Maker / Opportunity-Contact-Role tiers in
