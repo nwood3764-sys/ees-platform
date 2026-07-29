@@ -606,6 +606,14 @@ function ThreadListItem({ thread, selected, onSelect }) {
           {relativeTime(thread.conv_last_message_at)}
         </span>
       </div>
+      {thread.conv_subject && (
+        <div style={{
+          fontSize: 12.5, fontWeight: 600, color: C.textPrimary, marginBottom: 3,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {thread.conv_subject}
+        </div>
+      )}
       <div style={{
         fontSize: 12, color: C.textSecondary, marginBottom: 2,
         fontFamily: 'JetBrains Mono, monospace',

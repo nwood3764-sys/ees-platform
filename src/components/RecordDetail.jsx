@@ -3705,6 +3705,15 @@ function ConfigFieldRow({ field, value, editing, onChange }) {
 
 const RELATED_LIST_MAX_ROWS = 7
 
+// Format a full timestamp (ISO / Zulu) into a readable local date + time,
+// e.g. "Jul 29, 2026, 6:48 PM". Related-list datetime/timestamp columns use
+// this so a raw "2026-07-29T18:48:19.013+00:00" never surfaces to users.
+function formatRelatedDateTime(v) {
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return v
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
 // Render a single cell. Extracted so the editable and read-only paths can
 // share formatting without duplicating the picklist / date / number logic.
 function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
@@ -3712,6 +3721,9 @@ function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
   if (col.type === 'picklist' && shown) shown = picklists.byId.get(shown) || shown
   if (col.type === 'date' && shown) {
     shown = new Date(shown + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+  if ((col.type === 'datetime' || col.type === 'timestamp' || col.type === 'timestamptz') && shown) {
+    shown = formatRelatedDateTime(shown)
   }
   if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
   if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
@@ -3737,6 +3749,9 @@ function renderRelatedValue(col, val, picklists) {
   if (col.type === 'picklist' && shown) shown = picklists.byId.get(shown) || shown
   if (col.type === 'date' && shown) {
     shown = new Date(shown + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+  if ((col.type === 'datetime' || col.type === 'timestamp' || col.type === 'timestamptz') && shown) {
+    shown = formatRelatedDateTime(shown)
   }
   if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
   if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
