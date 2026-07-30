@@ -56,3 +56,23 @@ export async function listRecentlyViewed(limit = 7) {
     return []
   }
 }
+
+/**
+ * Load the current user's most-recently-viewed records of a SINGLE object,
+ * newest first — the data source for the "Recently Viewed" home card. Rows are
+ * { id, primary_label, secondary_label, record_number, last_viewed_at }.
+ * Returns [] on any error (best-effort, never throws to the card).
+ */
+export async function listRecentlyViewedForObject(objectTable, limit = 8) {
+  if (!objectTable) return []
+  try {
+    const { data, error } = await supabase.rpc('list_recently_viewed_for_object', {
+      p_object_table: objectTable,
+      p_limit: limit,
+    })
+    if (error) return []
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
