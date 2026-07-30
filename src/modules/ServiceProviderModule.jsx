@@ -24,6 +24,7 @@ import {
   fetchOnboardingSteps,
   setOnboardingStep,
   emailProviderInvite,
+  emailApplicationInvitation,
 } from '../data/serviceProviderService'
 
 const TRADE_OPTS = [
@@ -336,39 +337,72 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
 
 function NewApplicationModal({ onClose, onCreated }) {
   const [v, setV] = useState({ company: '', firstName: '', lastName: '', email: '', phone: '', trade: 'hvac', state: 'NC' })
+  const [sendInvite, setSendInvite] = useState(true)
+  const [inviteNote, setInviteNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const set = (k) => (e) => setV((s) => ({ ...s, [k]: e.target.value }))
   const inp = { width: '100%', padding: '9px 11px', border: `1px solid ${C.borderDark}`, borderRadius: 7, fontSize: 13.5, fontFamily: 'inherit', boxSizing: 'border-box', background: '#fff', color: C.textPrimary }
   const lab = { fontSize: 11.5, fontWeight: 600, color: C.textSecondary, display: 'block', marginBottom: 5 }
+  const wantsInvite = sendInvite && v.email.trim()
   const submit = async () => {
     if (!v.company.trim()) { setErr('Company name is required.'); return }
+    if (sendInvite && !v.email.trim()) { setErr('Add an email address to send the invitation, or turn the invitation off.'); return }
     setBusy(true); setErr('')
     try {
       const r = await createManualApplication(v)
-      onCreated?.(`Application ${r?.application_number || ''} created.`.trim())
+      let msg = `Application ${r?.application_number || ''} created.`.trim()
+      if (wantsInvite && r?.account_id) {
+        try {
+          await emailApplicationInvitation({
+            accountId: r.account_id, toEmail: v.email.trim(),
+            toName: [v.firstName, v.lastName].filter(Boolean).join(' ') || v.company,
+            personalNote: inviteNote,
+          })
+          msg = `Application ${r?.application_number || ''} created and invitation emailed to ${v.email.trim()}.`.trim()
+        } catch (e2) {
+          msg = `Application ${r?.application_number || ''} created, but the invitation email didn't send (${e2?.message || 'failed'}). You can email them from the record.`.trim()
+        }
+      }
+      onCreated?.(msg)
     } catch (e) { setErr(e?.message || 'Could not create the application.'); setBusy(false) }
   }
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, borderRadius: 12, width: 520, maxWidth: '94vw', boxShadow: '0 20px 50px -12px rgba(0,0,0,0.28)', maxHeight: '92vh', overflow: 'auto' }}>
         <div style={{ padding: '16px 18px', borderBottom: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary }}>Start a provider application</div>
-          <div style={{ fontSize: 12.5, color: C.textSecondary, marginTop: 2 }}>For a provider you're recruiting. It enters the pipeline as a new application (inactive account) you can then work through onboarding.</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary }}>Invite a provider to apply</div>
+          <div style={{ fontSize: 12.5, color: C.textSecondary, marginTop: 2 }}>For a contractor you're recruiting. It enters the pipeline as a new application and, if you like, emails them a welcome message with a link to submit their full application.</div>
         </div>
         <div style={{ padding: 18, display: 'flex', flexWrap: 'wrap', gap: 12 }}>
           {err && <div style={{ flex: '1 1 100%', background: '#e8f1fb', border: `1px solid ${C.sky}`, color: '#1a5a8a', borderRadius: 7, padding: '8px 12px', fontSize: 13 }}>{err}</div>}
           <div style={{ flex: '1 1 100%' }}><label style={lab}>Company legal name *</label><input style={inp} value={v.company} onChange={set('company')} /></div>
           <div style={{ flex: '1 1 200px' }}><label style={lab}>Contact first name</label><input style={inp} value={v.firstName} onChange={set('firstName')} /></div>
           <div style={{ flex: '1 1 200px' }}><label style={lab}>Contact last name</label><input style={inp} value={v.lastName} onChange={set('lastName')} /></div>
-          <div style={{ flex: '1 1 200px' }}><label style={lab}>Email</label><input style={inp} type="email" value={v.email} onChange={set('email')} /></div>
+          <div style={{ flex: '1 1 200px' }}><label style={lab}>Email{sendInvite ? ' *' : ''}</label><input style={inp} type="email" value={v.email} onChange={set('email')} /></div>
           <div style={{ flex: '1 1 200px' }}><label style={lab}>Phone</label><input style={inp} value={v.phone} onChange={set('phone')} /></div>
           <div style={{ flex: '1 1 200px' }}><label style={lab}>Trade</label><select style={inp} value={v.trade} onChange={set('trade')}>{TRADE_OPTS.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}</select></div>
           <div style={{ flex: '1 1 200px' }}><label style={lab}>State</label><select style={inp} value={v.state} onChange={set('state')}>{STATE_OPTS.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
+
+          <div style={{ flex: '1 1 100%', marginTop: 4, background: '#f7f9fc', border: `1px solid ${C.border}`, borderRadius: 8, padding: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
+              <input type="checkbox" checked={sendInvite} onChange={(e) => setSendInvite(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16, accentColor: C.emerald, cursor: 'pointer' }} />
+              <span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Email them an invitation to apply</span>
+                <span style={{ display: 'block', fontSize: 12, color: C.textMuted, marginTop: 1 }}>A friendly welcome email with a link to submit their full application (company info, trades, service area, W-9, and Certificate of Insurance).</span>
+              </span>
+            </label>
+            {sendInvite && (
+              <div style={{ marginTop: 10 }}>
+                <label style={lab}>Add a personal note <span style={{ color: C.textMuted, fontWeight: 400 }}>· optional</span></label>
+                <textarea value={inviteNote} onChange={(e) => setInviteNote(e.target.value)} rows={2} placeholder="e.g. Great meeting you at the trade show — looking forward to working together." style={{ ...inp, resize: 'vertical' }} />
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ padding: '12px 18px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button onClick={onClose} disabled={busy} style={{ padding: '9px 16px', background: '#fff', color: C.textSecondary, border: `1px solid ${C.borderDark}`, borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={submit} disabled={busy || !v.company.trim()} style={{ padding: '9px 18px', background: C.emerald, color: '#06231a', border: 'none', borderRadius: 8, fontSize: 13.5, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: (busy || !v.company.trim()) ? 0.6 : 1 }}>{busy ? 'Creating…' : 'Create application'}</button>
+          <button onClick={submit} disabled={busy || !v.company.trim()} style={{ padding: '9px 18px', background: C.emerald, color: '#06231a', border: 'none', borderRadius: 8, fontSize: 13.5, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: (busy || !v.company.trim()) ? 0.6 : 1 }}>{busy ? (wantsInvite ? 'Sending…' : 'Creating…') : (wantsInvite ? 'Create & send invitation' : 'Create application')}</button>
         </div>
       </div>
     </div>
@@ -467,7 +501,7 @@ export default function ServiceProviderModule() {
           <h1 style={{ fontSize: 20, fontWeight: 800, color: C.textPrimary, margin: 0 }}>Service Provider Onboarding</h1>
           <div style={{ fontSize: 13, color: C.textMuted, marginTop: 4 }}>Review subcontractor applications, move them through the pipeline, and invite them to the portal once approved.</div>
         </div>
-        <button onClick={() => setShowNew(true)} style={{ padding: '10px 16px', background: C.emerald, color: '#06231a', border: 'none', borderRadius: 8, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>+ New Application</button>
+        <button onClick={() => setShowNew(true)} style={{ padding: '10px 16px', background: C.emerald, color: '#06231a', border: 'none', borderRadius: 8, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>+ Invite a Provider</button>
       </div>
 
       {showNew && <NewApplicationModal onClose={() => setShowNew(false)} onCreated={(msg) => { setShowNew(false); setToast(msg); load() }} />}
