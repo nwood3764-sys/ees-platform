@@ -27,10 +27,6 @@ import {
   emailApplicationInvitation,
 } from '../data/serviceProviderService'
 
-const TRADE_OPTS = [
-  { v: 'hvac', l: 'HVAC' }, { v: 'electrical', l: 'Electrical' }, { v: 'weatherization', l: 'Weatherization' },
-  { v: 'plumbing', l: 'Plumbing' }, { v: 'general_contractor', l: 'General Contractor' },
-]
 const STATE_OPTS = ['NC', 'WI', 'MI', 'CO', 'IN']
 
 const MONO = 'JetBrains Mono, ui-monospace, monospace'
@@ -336,7 +332,7 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
 }
 
 function NewApplicationModal({ onClose, onCreated }) {
-  const [v, setV] = useState({ company: '', firstName: '', lastName: '', email: '', phone: '', trade: 'hvac', state: 'NC' })
+  const [v, setV] = useState({ company: '', firstName: '', lastName: '', email: '', phone: '', state: 'NC' })
   const [sendInvite, setSendInvite] = useState(true)
   const [inviteNote, setInviteNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -381,7 +377,6 @@ function NewApplicationModal({ onClose, onCreated }) {
           <div style={{ flex: '1 1 200px' }}><label style={lab}>Contact last name</label><input style={inp} value={v.lastName} onChange={set('lastName')} /></div>
           <div style={{ flex: '1 1 200px' }}><label style={lab}>Email{sendInvite ? ' *' : ''}</label><input style={inp} type="email" value={v.email} onChange={set('email')} /></div>
           <div style={{ flex: '1 1 200px' }}><label style={lab}>Phone</label><input style={inp} value={v.phone} onChange={set('phone')} /></div>
-          <div style={{ flex: '1 1 200px' }}><label style={lab}>Trade</label><select style={inp} value={v.trade} onChange={set('trade')}>{TRADE_OPTS.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}</select></div>
           <div style={{ flex: '1 1 200px' }}><label style={lab}>State</label><select style={inp} value={v.state} onChange={set('state')}>{STATE_OPTS.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
 
           <div style={{ flex: '1 1 100%', marginTop: 4, background: '#f7f9fc', border: `1px solid ${C.border}`, borderRadius: 8, padding: 12 }}>
