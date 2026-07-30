@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-20 · build 61 — table header repeats on page 2; one consistent type scale; narrower margins</div>
+    Last updated 2026-07-26 · build 62 — measure parser handles wrapped report layouts (fixes dropped attic measures / mispriced invoices); target attic R defaults to R-49; measure-coverage pre-export check</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -537,14 +537,21 @@ function parseAssetScore(t){
     const endM=region.slice(30).search(/Upgrade Opportunit|Health and Safety|BUILDING CHARACTERISTICS|\f/);
     if(endM>0)region=region.slice(0,30+endM);
     const out=[]; let cur=null;
+    // A bullet ends when its accumulated text contains "Learn More" — but in
+    // some report layouts the link wraps ("… - Learn <cost>\n More"), so the
+    // test must run on the ACCUMULATED text, and a section boundary (the next
+    // system heading or a no-opportunities notice) force-closes the bullet so
+    // one measure can never swallow the sections after it.
+    const boundary=/^(Building Envelope|Lighting Systems|HVAC Systems|Service Hot Water Systems|Water Systems|Health and Safety|No opportunities)/i;
     for(let line of region.split('\n')){
       line=line.trim();
       if(!line||line==='†')continue;
-      if(/^•/.test(line)){ if(cur)out.push(cur); cur=line.replace(/^•\s*/,''); if(/Learn More/.test(cur)){out.push(cur);cur=null;} continue; }
-      if(cur){ cur+=' '+line; if(/Learn More/.test(line)){out.push(cur);cur=null;} }
+      if(/^•/.test(line)){ if(cur)out.push(cur); cur=line.replace(/^•\s*/,''); if(/Learn\s+More/.test(cur)){out.push(cur);cur=null;} continue; }
+      if(cur&&boundary.test(line)){ out.push(cur); cur=null; continue; }
+      if(cur){ cur+=' '+line; if(/Learn\s+More/.test(cur)){out.push(cur);cur=null;} }
     }
     if(cur)out.push(cur);
-    const clean=x=>x.replace(/-?\s*Learn More.*$/,'')
+    const clean=x=>x.replace(/-?\s*Learn(\s+More)?\b.*$/,'')
       .replace(/\s+(?:Low|Medium|High)\s+\${1,3}(?=\s|$)/g,'')
       .replace(/\s+\${1,3}(?=\s|$)/g,'')
       .replace(/†/g,'').replace(/\s+/g,' ').trim();
@@ -2345,6 +2352,22 @@ function evaluateAutoChecks(dg){
       ck('Paperwork: measure costs sum exactly to total rebates',rowSum===iv.total,
         '$'+rowSum+' vs $'+iv.total+' (TOTAL DUE must be $0)');
     }
+    // Every upgrade measure in the improved report must map to an invoice row —
+    // a dropped attic measure silently reprices the whole invoice onto the
+    // low-flow rows (the 7400 W Center St failure), so this check is loud.
+    try{
+      const cats=iv.rows.map(r=>r.name.toLowerCase());
+      for(const mm of (eemState||effectiveMeasures())){
+        const txt2=((mm.title||'')+' '+(mm.desc||'')).toLowerCase();
+        let covered;
+        if(/roof|attic|ceiling/.test(txt2)&&/insulat/.test(txt2)) covered=cats.some(c=>/attic insulation/.test(c));
+        else if(/air.?infiltrat|air.?seal|envelope/.test(txt2)) covered=cats.some(c=>/air sealing/.test(c));
+        else if(/low.?flow|aerator|shower|hot water fixture/.test(txt2)) covered=cats.some(c=>/low flow/.test(c));
+        else covered=null; // measure type the paperwork has no line for
+        if(covered===null) ck('Paperwork: report measure has no invoice line',false,mm.title);
+        else ck('Paperwork: report measure covered — '+mm.title,covered,covered?'mapped to an invoice row':'MISSING from the invoice');
+      }
+    }catch(e2){ck('Paperwork: measure coverage check',false,e2.message);}
     if(iv.foe) ck('Paperwork: FOE tier matches baseline attic R',
       (iv.baseAtticR<11&&iv.foe.rate===1)||(iv.baseAtticR>=11&&iv.baseAtticR<=19&&iv.foe.rate===0.70)||(iv.baseAtticR>=20&&iv.baseAtticR<=38&&iv.foe.rate===0.55),
       'R-'+iv.baseAtticR+' → $'+iv.foe.rate+'/sq ft × '+iv.roofSqFt+' = $'+iv.foeAmt);
@@ -2664,8 +2687,15 @@ function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
   try{localStorage.setItem(k,JSON.stringify(Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))));}catch(e){}}
+let _pjLastKey=null;
 function pjLoadAndPrefill(){
   const as=data.asImp||data.asBase, asB=data.asBase; if(!as)return;
+  // Switching to a DIFFERENT building must not carry the previous building's
+  // form values (they mixed one property's bill-to with another's paperwork).
+  const k=pjStorageKey();
+  if(_pjLastKey&&k!==_pjLastKey)
+    for(const f of PJ_FIELDS){const e=document.getElementById(f); if(e)e.value='';}
+  _pjLastKey=k;
   let saved={}; try{saved=JSON.parse(localStorage.getItem(pjStorageKey())||'{}');}catch(e){}
   for(const f of PJ_FIELDS){const e=document.getElementById(f); if(e&&!e.value&&saved[f])e.value=saved[f];}
   const set=(id,v)=>{const e=document.getElementById(id); if(e&&!e.value&&v)e.value=v;};
@@ -2704,7 +2734,15 @@ function invoiceModel(){
   // Attic sq ft: straight from the Asset Score report's roof area — the audit
   // reports are the source of record for every quantity; no manual inputs.
   const roofSqFt=asB&&asB.roofArea!=null?Math.round(asB.roofArea):null;
-  const iMin=(asI&&asI.roofRs&&asI.roofRs.length)?Math.min(...asI.roofRs):49;
+  const _msrs=(eemState||effectiveMeasures());
+  const _hasAtticMeasure=_msrs.some(m=>/roof|attic|ceiling/i.test((m.title||'')+' '+(m.desc||'')));
+  const _iRaw=(asI&&asI.roofRs&&asI.roofRs.length)?Math.min(...asI.roofRs):null;
+  const _bRaw=(asB&&asB.roofRs&&asB.roofRs.length)?Math.min(...asB.roofRs):null;
+  // Target attic R: the improved model's value when it actually restates a
+  // higher assembly; otherwise (upgrade selected via the report checkbox, block
+  // page unchanged) the EES standard R-49 — but only when an attic measure
+  // exists in the improved report.
+  const iMin=(_iRaw!=null&&_bRaw!=null&&_iRaw>_bRaw)?_iRaw:(_hasAtticMeasure?49:(_iRaw!=null?_iRaw:49));
   const bRs=(asB&&asB.roofRs)?asB.roofRs.filter(r=>r<iMin):[];
   const baseAtticR=bRs.length?Math.min(...bRs):null;
   const fmtR=r=>(r%1?r:Math.round(r));
@@ -2716,7 +2754,7 @@ function invoiceModel(){
     :{perUnit:0,desc:'Modeled savings below 20% — not HOMES eligible',note:''});
   const homesAmt=(units&&tier)?units*tier.perUnit:0;
   // FOE tier from the BASELINE attic R (published multifamily guidelines)
-  const hasAttic=(eemState||effectiveMeasures()).some(m=>/roof|attic|ceiling/i.test((m.title||'')+' '+(m.desc||'')));
+  const hasAttic=_hasAtticMeasure;
   let foe=null;
   if(hasAttic&&roofSqFt&&baseAtticR!=null){
     if(baseAtticR<11)      foe={rate:1.00,desc:'Air Sealing & Attic Insulation, Existing < R-11',  note:'$1.00 per Sq. Ft.'};
