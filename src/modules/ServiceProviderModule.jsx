@@ -504,7 +504,8 @@ export default function ServiceProviderModule() {
   )
 
   return (
-    <div style={{ padding: 24, maxWidth: 1040 }}>
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div style={{ padding: 24, maxWidth: 1040 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 800, color: C.textPrimary, margin: 0 }}>Service Provider Onboarding</h1>
@@ -529,6 +530,7 @@ export default function ServiceProviderModule() {
         {apps === null ? <div style={{ color: C.textMuted, fontSize: 14 }}>Loading…</div>
           : shown.length === 0 ? <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 22, color: C.textMuted, fontSize: 14 }}>No applications here.</div>
           : shown.map((app) => <ApplicationCard key={app.id} app={app} busy={busyId === app.id} onAdvance={onAdvance} onRequestInfo={onRequestInfo} onDecline={onDecline} onApprove={onApprove} onInvite={onInvite} />)}
+      </div>
       </div>
     </div>
   )
