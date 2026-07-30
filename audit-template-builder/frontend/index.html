@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-30 · build 63 — measure quantity overrides: offer-letter attic sq ft and water-saver quantities take precedence over report values</div>
+    Last updated 2026-07-30 · build 64 — quantity fields show the live report values; an edited value takes over and is flagged as an override</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -246,7 +246,7 @@
       <label>Actual Completion Date<input id="pjEnd" placeholder="m/d/yyyy"></label>
     </div>
     <div style="margin-top:14px;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)">Measure quantity overrides</div>
-    <div style="font-size:12px;color:var(--mut);margin-top:2px">When the offer letter's quantities differ from the reports, enter them here — entered values take precedence on every document. Blank = use the report values.</div>
+    <div style="font-size:12px;color:var(--mut);margin-top:2px">Populated from the reports (attic = Total Gross Roof Area; water savers = dwelling units) so you can see exactly what will print. Edit any value — e.g. to match the offer letter — and the entered number takes precedence on every document.</div>
     <div class="pjgrid">
       <label>Attic Sq Ft<input id="pjQtyAttic" inputmode="numeric" placeholder="from reports"></label>
       <label>Bath Aerators Qty<input id="pjQtyBath" inputmode="numeric" placeholder="= units"></label>
@@ -2376,12 +2376,14 @@ function evaluateAutoChecks(dg){
         else ck('Paperwork: report measure covered — '+mm.title,covered,covered?'mapped to an invoice row':'MISSING from the invoice');
       }
     }catch(e2){ck('Paperwork: measure coverage check',false,e2.message);}
-    {const ovList=[['Attic Sq Ft','pjQtyAttic'],['Bath Aerators Qty','pjQtyBath'],
+    {const qd=pjQtyDefaults();
+     const ovList=[['Attic Sq Ft','pjQtyAttic'],['Bath Aerators Qty','pjQtyBath'],
        ['Kitchen Aerators Qty','pjQtyKitchen'],['Showerheads Qty','pjQtyShower']]
-       .map(([n,id])=>{const v=parseFloat(pj(id));return (Number.isFinite(v)&&v>0)?n+' = '+v:null;})
+       .map(([n,id])=>{const v=parseFloat(pj(id));
+         return (Number.isFinite(v)&&v>0&&qd[id]!=null&&v!==qd[id])?n+' = '+v+' (reports: '+qd[id]+')':null;})
        .filter(Boolean);
      if(ovList.length) ck('Paperwork: manual quantity overrides in effect',true,
-       ovList.join(' \u00b7 ')+' (entered values take precedence over the reports)');}
+       ovList.join(' \u00b7 ')+' — entered values take precedence over the reports');}
     if(iv.foe) ck('Paperwork: FOE tier matches baseline attic R',
       (iv.baseAtticR<11&&iv.foe.rate===1)||(iv.baseAtticR>=11&&iv.baseAtticR<=19&&iv.foe.rate===0.70)||(iv.baseAtticR>=20&&iv.baseAtticR<=38&&iv.foe.rate===0.55),
       'R-'+iv.baseAtticR+' → $'+iv.foe.rate+'/sq ft × '+iv.roofSqFt+' = $'+iv.foeAmt);
@@ -2702,6 +2704,12 @@ function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
   try{localStorage.setItem(k,JSON.stringify(Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))));}catch(e){}}
+function pjQtyDefaults(){
+  const asB=data.asBase;
+  const u=parseInt((document.getElementById('occUnits')||{}).value,10)||null;
+  return {pjQtyAttic:(asB&&asB.roofArea!=null)?Math.round(asB.roofArea):null,
+          pjQtyBath:u,pjQtyKitchen:u,pjQtyShower:u};
+}
 let _pjLastKey=null;
 function pjLoadAndPrefill(){
   const as=data.asImp||data.asBase, asB=data.asBase; if(!as)return;
@@ -2709,7 +2717,7 @@ function pjLoadAndPrefill(){
   // form values (they mixed one property's bill-to with another's paperwork).
   const k=pjStorageKey();
   if(_pjLastKey&&k!==_pjLastKey)
-    for(const f of PJ_FIELDS){const e=document.getElementById(f); if(e)e.value='';}
+    for(const f of PJ_FIELDS){const e=document.getElementById(f); if(e){e.value=''; delete e.dataset.auto;}}
   _pjLastKey=k;
   let saved={}; try{saved=JSON.parse(localStorage.getItem(pjStorageKey())||'{}');}catch(e){}
   for(const f of PJ_FIELDS){const e=document.getElementById(f); if(e&&!e.value&&saved[f])e.value=saved[f];}
@@ -2720,10 +2728,18 @@ function pjLoadAndPrefill(){
   set('pjCsz',(asB||as).cityStateZip);
   const t=new Date(); set('pjInvDate',(t.getMonth()+1)+'/'+t.getDate()+'/'+t.getFullYear());
   set('pjInvNo','INV-WI-');
+  // Quantity fields show the live report-derived numbers until the user edits
+  // one — an edited field takes over permanently (dataset.auto cleared below).
+  const qd=pjQtyDefaults();
+  for(const [id,v] of Object.entries(qd)){
+    const e=document.getElementById(id); if(!e)continue;
+    if(v!=null&&(e.value===''||e.dataset.auto==='1')){e.value=v; e.dataset.auto='1';}
+  }
 }
 (function(){for(const f of PJ_FIELDS){const e=document.getElementById(f);
   if(e)e.addEventListener('input',()=>{pjSave();
-    if(/^pjQty/.test(f)&&typeof scheduleAutoChecks==='function')scheduleAutoChecks();});}})();
+    if(/^pjQty/.test(f)){delete e.dataset.auto;
+      if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();}});}})();
 
 // The Measure Description Bank (from the workbook), with R-value substitution slots.
 const BANK={
