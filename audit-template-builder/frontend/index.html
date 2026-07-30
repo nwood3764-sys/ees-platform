@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated 2026-07-26 · build 62 — measure parser handles wrapped report layouts (fixes dropped attic measures / mispriced invoices); target attic R defaults to R-49; measure-coverage pre-export check</div>
+    Last updated 2026-07-26 · build 63 — measure quantity overrides: offer-letter attic sq ft and water-saver quantities take precedence over report values</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -244,6 +244,14 @@
       <label>Est. Completion Date<input id="pjEstEnd" placeholder="m/d/yyyy"></label>
       <label>Actual Start Date<input id="pjStart" placeholder="m/d/yyyy"></label>
       <label>Actual Completion Date<input id="pjEnd" placeholder="m/d/yyyy"></label>
+    </div>
+    <div style="margin-top:14px;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)">Measure quantity overrides</div>
+    <div style="font-size:12px;color:var(--mut);margin-top:2px">When the offer letter's quantities differ from the reports, enter them here — entered values take precedence on every document. Blank = use the report values.</div>
+    <div class="pjgrid">
+      <label>Attic Sq Ft<input id="pjQtyAttic" inputmode="numeric" placeholder="from reports"></label>
+      <label>Bath Aerators Qty<input id="pjQtyBath" inputmode="numeric" placeholder="= units"></label>
+      <label>Kitchen Aerators Qty<input id="pjQtyKitchen" inputmode="numeric" placeholder="= units"></label>
+      <label>Showerheads Qty<input id="pjQtyShower" inputmode="numeric" placeholder="= units"></label>
     </div>
   </div>
 
@@ -2368,6 +2376,12 @@ function evaluateAutoChecks(dg){
         else ck('Paperwork: report measure covered — '+mm.title,covered,covered?'mapped to an invoice row':'MISSING from the invoice');
       }
     }catch(e2){ck('Paperwork: measure coverage check',false,e2.message);}
+    {const ovList=[['Attic Sq Ft','pjQtyAttic'],['Bath Aerators Qty','pjQtyBath'],
+       ['Kitchen Aerators Qty','pjQtyKitchen'],['Showerheads Qty','pjQtyShower']]
+       .map(([n,id])=>{const v=parseFloat(pj(id));return (Number.isFinite(v)&&v>0)?n+' = '+v:null;})
+       .filter(Boolean);
+     if(ovList.length) ck('Paperwork: manual quantity overrides in effect',true,
+       ovList.join(' \u00b7 ')+' (entered values take precedence over the reports)');}
     if(iv.foe) ck('Paperwork: FOE tier matches baseline attic R',
       (iv.baseAtticR<11&&iv.foe.rate===1)||(iv.baseAtticR>=11&&iv.baseAtticR<=19&&iv.foe.rate===0.70)||(iv.baseAtticR>=20&&iv.baseAtticR<=38&&iv.foe.rate===0.55),
       'R-'+iv.baseAtticR+' → $'+iv.foe.rate+'/sq ft × '+iv.roofSqFt+' = $'+iv.foeAmt);
@@ -2682,7 +2696,8 @@ function buildMappedForReview(){
      bath aerators .0033, kitchen aerators .0035, showerheads .0049), largest row absorbs
      the rounding so Gross Total = Total Rebates exactly → TOTAL DUE $0.                    */
 const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone','pjPropName',
-  'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd'];
+  'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd',
+  'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower'];
 function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
@@ -2706,7 +2721,9 @@ function pjLoadAndPrefill(){
   const t=new Date(); set('pjInvDate',(t.getMonth()+1)+'/'+t.getDate()+'/'+t.getFullYear());
   set('pjInvNo','INV-WI-');
 }
-(function(){for(const f of PJ_FIELDS){const e=document.getElementById(f); if(e)e.addEventListener('input',()=>{pjSave();});}})();
+(function(){for(const f of PJ_FIELDS){const e=document.getElementById(f);
+  if(e)e.addEventListener('input',()=>{pjSave();
+    if(/^pjQty/.test(f)&&typeof scheduleAutoChecks==='function')scheduleAutoChecks();});}})();
 
 // The Measure Description Bank (from the workbook), with R-value substitution slots.
 const BANK={
@@ -2733,7 +2750,9 @@ function invoiceModel(){
   const units=parseInt((document.getElementById('occUnits')||{}).value,10)||null;
   // Attic sq ft: straight from the Asset Score report's roof area — the audit
   // reports are the source of record for every quantity; no manual inputs.
-  const roofSqFt=asB&&asB.roofArea!=null?Math.round(asB.roofArea):null;
+  const _ovr=id=>{const v=parseFloat(pj(id)); return (Number.isFinite(v)&&v>0)?v:null;};
+  const roofSqFt=_ovr('pjQtyAttic')!=null?_ovr('pjQtyAttic')
+    :(asB&&asB.roofArea!=null?Math.round(asB.roofArea):null);
   const _msrs=(eemState||effectiveMeasures());
   const _hasAtticMeasure=_msrs.some(m=>/roof|attic|ceiling/i.test((m.title||'')+' '+(m.desc||'')));
   const _iRaw=(asI&&asI.roofRs&&asI.roofRs.length)?Math.min(...asI.roofRs):null;
@@ -2771,9 +2790,9 @@ function invoiceModel(){
     push('Attic Insulation',0.44,roofSqFt,'Sq Ft',BANK.atticIns(fmtR(baseAtticR!=null?baseAtticR:0))(fmtR(iMin)));
     push('Attic Air Sealing',0.5483,roofSqFt,'Sq Ft',BANK.airSeal(fmtR(baseAtticR!=null?baseAtticR:0)));
   }
-  push('Low Flow Devices: Bath Aerators',0.0033,units,'Unit',BANK.bath);
-  push('Low Flow Devices: Kitchen Aerators',0.0035,units,'Unit',BANK.kitchen);
-  push('Low Flow Devices: Showerheads',0.0049,units,'Unit',BANK.shower);
+  push('Low Flow Devices: Bath Aerators',0.0033,_ovr('pjQtyBath')!=null?_ovr('pjQtyBath'):units,'Unit',BANK.bath);
+  push('Low Flow Devices: Kitchen Aerators',0.0035,_ovr('pjQtyKitchen')!=null?_ovr('pjQtyKitchen'):units,'Unit',BANK.kitchen);
+  push('Low Flow Devices: Showerheads',0.0049,_ovr('pjQtyShower')!=null?_ovr('pjQtyShower'):units,'Unit',BANK.shower);
   // renormalize when attic rows are absent, then reconcile to the exact total
   const fracSum=rows.reduce((a,r)=>a+r.frac,0);
   if(Math.abs(fracSum-1)>1e-6&&fracSum>0)rows.forEach(r=>{r.cost=Math.round(total*r.frac/fracSum*100)/100;});
