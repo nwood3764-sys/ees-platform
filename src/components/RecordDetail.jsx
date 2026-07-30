@@ -561,6 +561,10 @@ const TRIGGER_DERIVED_REQUIRED = {
   projects: ['project_name'],
   work_orders: ['work_order_name'],
   enrollments: ['enrollment_name'],
+  // ia_name is composed from the opportunity/property + record type by
+  // trg_ia_autoname; ia_program_name is a defaulted legacy column. Neither is
+  // part of any intake form, so the create form must never demand them.
+  incentive_applications: ['ia_name', 'ia_program_name'],
 }
 
 // Per-table name fields populated by a BEFORE INSERT/UPDATE trigger that the
@@ -597,6 +601,10 @@ const DERIVED_READONLY = {
   projects: ['project_name'],
   work_orders: ['work_order_name'],
   enrollments: ['enrollment_name'],
+  // ia_name is composed from the opportunity/property + record type by
+  // trg_ia_autoname; ia_program_name is a defaulted legacy column. Neither is
+  // part of any intake form, so the create form must never demand them.
+  incentive_applications: ['ia_name', 'ia_program_name'],
 }
 const isDerivedReadonlyField = (table, name) =>
   (DERIVED_READONLY[table] || []).includes(name)
