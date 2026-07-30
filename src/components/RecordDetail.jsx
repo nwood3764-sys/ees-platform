@@ -6516,6 +6516,41 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
   }, [runningIncomeQual, recordId])
 
+  // Verify Fields — one-tap completeness check for the JotForm-mirrored
+  // submittal (e.g. the Project Payment Request). Walks every field_group on the
+  // record's own layout and flags editable fields that are still empty, so the
+  // preparer knows what's outstanding before keying the form into the program
+  // portal. Inherited related_fields are read-only (skipped), but the lookups
+  // that drive them (Property / Building / Opportunity / contractor account) ARE
+  // checked — an unset parent means the inherited values won't resolve either.
+  // Booleans are treated as answered (false is a valid answer).
+  const handleVerifyFields = useCallback(() => {
+    const rec = data?.record || {}
+    const sections = data?.sections || []
+    const isEmpty = (v) =>
+      v == null || v === '' || (Array.isArray(v) && v.length === 0)
+    const missing = []
+    for (const sec of sections) {
+      for (const w of sec.widgets || []) {
+        if (w.widget_type !== 'field_group' || !w.widget_config?.fields) continue
+        for (const f of w.widget_config.fields) {
+          if (f.type === 'related_field' || f.type === 'boolean') continue
+          if (isEmpty(rec[f.name])) missing.push(f.label || f.name)
+        }
+      }
+    }
+    if (typeof window === 'undefined') return
+    if (missing.length === 0) {
+      window.alert('Verify Fields: every field is complete. The forms are ready to export.')
+    } else {
+      window.alert(
+        `Verify Fields — ${missing.length} field${missing.length === 1 ? '' : 's'} still ` +
+        `need${missing.length === 1 ? 's' : ''} attention before export:\n\n• ` +
+        missing.join('\n• ')
+      )
+    }
+  }, [data])
+
   // Deep clone for any lifecycle template (PRT / ET / DT) — calls the
   // table-specific clone RPC from TEMPLATE_LIFECYCLES, which atomically
   // copies the template (and any child rows the RPC chooses to copy, e.g.
@@ -7291,6 +7326,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.CLONE]:                  handleClone,
     [ACTION_KEYS.ADVANCE_TO_OPPORTUNITY]: handleAdvanceToOpportunity,
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: handleRunIncomeQualification,
+    [ACTION_KEYS.VERIFY_FIELDS]:          handleVerifyFields,
     [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
     [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_SUBMITTAL]:

@@ -53,6 +53,7 @@ export const ACTION_KEYS = Object.freeze({
   LOG_ACTIVITY:            'log_activity',
   ADVANCE_TO_OPPORTUNITY:  'advance_to_opportunity',
   RUN_INCOME_QUALIFICATION:'run_income_qualification',
+  VERIFY_FIELDS:           'verify_fields',
   GENERATE_REPORT:         'generate_report',
   GENERATE_PROJECT_RESERVATION_SUBMITTAL:   'generate_project_reservation_submittal',
   GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL: 'generate_final_payment_request_submittal',
@@ -218,6 +219,21 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultTier:         'primary',
     defaultSortOrder:    15,
     isAvailable: ({ tableName, editing }) => !editing && tableName === 'enrollments',
+  },
+  // ── Incentive Applications ────────────────────────────────────────────────
+  // Verify Fields checks every editable field on the record's layout is
+  // populated (inherited/read-only related fields are skipped, but the lookups
+  // that drive them are checked) so the JotForm-mirrored submittal is confirmed
+  // ready to export before it's keyed into the program portal.
+  verify_fields: {
+    key:                 ACTION_KEYS.VERIFY_FIELDS,
+    label:               'Verify Fields',
+    icon:                'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['incentive_applications'],
+    defaultTier:         'primary',
+    defaultSortOrder:    16,
+    isAvailable: ({ tableName, editing }) => !editing && tableName === 'incentive_applications',
   },
   schedule_work_orders: {
     key:                 ACTION_KEYS.SCHEDULE_WORK_ORDERS,
