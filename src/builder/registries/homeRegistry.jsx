@@ -15,7 +15,13 @@
 import { C } from '../../data/constants'
 import { makeHelpers, fieldVisible } from './registryHelpers'
 import { Field, inputStyle, FieldControl } from '../inspectorControls'
-import HomeComponentRenderer from '../../modules/admin/HomeComponentRenderer'
+import HomeComponentRenderer, { RECENTLY_VIEWED_OBJECT_LABELS } from '../../modules/admin/HomeComponentRenderer'
+
+// Object picker for the Recently Viewed card — the tables the per-user view log
+// tracks, alphabetised by label.
+const RECENTLY_VIEWED_OBJECT_OPTIONS = Object.entries(RECENTLY_VIEWED_OBJECT_LABELS)
+  .map(([value, label]) => ({ value, label }))
+  .sort((a, b) => a.label.localeCompare(b.label))
 
 // dataSource: 'dashboard' | 'report' | 'list_view' bind to a saved source;
 // 'none' components are self-driven (cards / task list).
@@ -32,6 +38,13 @@ const HOME_ENTRIES = [
   { id: 'task_list', label: 'Task List', category: 'Operational', dataSource: 'none',
     icon: 'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11',
     defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 2 }, defaultConfig: {}, configSchema: [] },
+  { id: 'recently_viewed', label: 'Recently Viewed', category: 'Operational', dataSource: 'none',
+    icon: 'M12 8v4l3 3M3 12a9 9 0 1018 0 9 9 0 00-18 0z',
+    defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 2 }, defaultConfig: { objectTable: 'opportunities' },
+    configSchema: [
+      { key: 'objectTable', label: 'Object', type: 'select', options: RECENTLY_VIEWED_OBJECT_OPTIONS,
+        help: 'Which object this card tracks. It shows the records of this type the current user opened most recently — no saved list view needed.' },
+    ] },
   { id: 'metric_card', label: 'Metric Card', category: 'Metrics & KPIs', dataSource: 'none',
     icon: 'M3 3h18v18H3zM9 9h6v6H9z',
     defaultSize: { w: 3, h: 2 }, minSize: { w: 2, h: 2 }, defaultConfig: { value: '', subtitle: '' },

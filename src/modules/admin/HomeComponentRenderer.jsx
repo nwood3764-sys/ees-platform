@@ -11,7 +11,7 @@ import { Icon } from '../../components/UI'
 export default function HomeComponentRenderer({ component, preview = false, sources = {}, onNavigate, onOpenReport, onOpenDashboard, onDrillToRecords }) {
   const { type, sourceId, title, config = {} } = component
 
-  const label = title || defaultTitle(type, sourceId, sources)
+  const label = title || defaultTitle(type, sourceId, sources, config)
 
   if (preview) {
     return (
@@ -32,14 +32,31 @@ export default function HomeComponentRenderer({ component, preview = false, sour
     case 'dashboard':       return <EmbeddedDashboard title={label} sourceId={sourceId} onNavigate={onNavigate} onOpenReport={onOpenReport} onOpenDashboard={onOpenDashboard} onDrillToRecords={onDrillToRecords} />
     case 'report_chart':    return <EmbeddedReport title={label} sourceId={sourceId} />
     case 'list_view':       return <EmbeddedListView title={label} sourceId={sourceId} sources={sources} onNavigate={onNavigate} />
+    case 'recently_viewed': return <RecentlyViewedCard title={label} config={config} onNavigate={onNavigate} />
     default:                return <CardShell title={label}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>Unknown component</div></CardShell>
   }
 }
 
-function defaultTitle(type, sourceId, sources) {
+// Object table → friendly plural label, for the Recently Viewed card's default
+// title, empty state, and header. Mirrors the tables the recents log tracks.
+export const RECENTLY_VIEWED_OBJECT_LABELS = {
+  accounts: 'Accounts', contacts: 'Contacts', properties: 'Properties',
+  buildings: 'Buildings', units: 'Units', opportunities: 'Opportunities',
+  projects: 'Projects', work_orders: 'Work Orders',
+  incentive_applications: 'Incentive Applications', assessments: 'Assessments',
+  programs: 'Programs', vehicles: 'Vehicles', equipment: 'Equipment',
+  product_items: 'Product Items', users: 'Users', envelopes: 'Signature Envelopes',
+  service_appointments: 'Service Appointments',
+}
+
+function defaultTitle(type, sourceId, sources, config = {}) {
   if (type === 'dashboard') return sources.dashboards?.find(d => d.id === sourceId)?.name || 'Dashboard'
   if (type === 'report_chart') return sources.reports?.find(r => r.id === sourceId)?.name || 'Report Chart'
   if (type === 'list_view') return sources.listViews?.find(v => v.id === sourceId)?.name || 'List View'
+  if (type === 'recently_viewed') {
+    const obj = RECENTLY_VIEWED_OBJECT_LABELS[config.objectTable]
+    return obj ? `Recent ${obj}` : 'Recently Viewed'
+  }
   const map = { task_list: 'Tasks', metric_card: 'Metric', gauge: 'Gauge', percentage_card: 'Percentage', rich_text: 'Note' }
   return map[type] || 'Component'
 }
@@ -48,6 +65,7 @@ function previewHint(type, sourceId, sources) {
   if (type === 'dashboard') return sourceId ? `Dashboard: ${sources.dashboards?.find(d => d.id === sourceId)?.name || '—'}` : 'Pick a dashboard in the properties panel'
   if (type === 'report_chart') return sourceId ? `Report: ${sources.reports?.find(r => r.id === sourceId)?.name || '—'}` : 'Pick a report in the properties panel'
   if (type === 'list_view') return sourceId ? `List View: ${sources.listViews?.find(v => v.id === sourceId)?.name || '—'}` : 'Pick a list view in the properties panel'
+  if (type === 'recently_viewed') return 'Recently Viewed (records the current user has opened, newest first)'
   if (type === 'task_list') return 'Task list (renders the current user’s tasks)'
   if (type === 'metric_card') return 'Metric card'
   if (type === 'gauge') return 'Gauge'
@@ -156,6 +174,67 @@ function TaskListCard({ title, onNavigate }) {
           </div>
         ))}
       </div>
+    </CardShell>
+  )
+}
+
+// Recently Viewed: the current user's most-recently-OPENED records of one
+// object, newest first. Reads the per-user view log (RecordDetail records every
+// opened record) via list_recently_viewed_for_object — no saved list view, and
+// it moves on view, not just on save/edit.
+function RecentlyViewedCard({ title, config, onNavigate }) {
+  const objectTable = config.objectTable || null
+  const [rows, setRows] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    if (!objectTable) { setRows([]); return }
+    import('../../data/recentlyViewedService')
+      .then(m => m.listRecentlyViewedForObject(objectTable, 8))
+      .then(data => { if (!cancelled) setRows(Array.isArray(data) ? data : []) })
+      .catch(() => { if (!cancelled) setRows([]) })
+    return () => { cancelled = true }
+  }, [objectTable])
+
+  const objLabel = RECENTLY_VIEWED_OBJECT_LABELS[objectTable] || 'records'
+  const count = Array.isArray(rows) ? rows.length : null
+
+  if (!objectTable) {
+    return <CardShell title={title}><div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>No object selected.</div></CardShell>
+  }
+
+  return (
+    <CardShell title={title} right={count !== null ? <span style={{ fontSize: 11, color: C.textMuted }}>{count}</span> : null}>
+      {rows === null && <div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>Loading…</div>}
+      {rows && rows.length === 0 && (
+        <div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>
+          No recently viewed {objLabel.toLowerCase()}. Open a record and it appears here.
+        </div>
+      )}
+      {rows && rows.length > 0 && (
+        <div>
+          {rows.map(r => (
+            <div key={r.id}
+              onClick={() => onNavigate && onNavigate(objectTable, r.id)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 14px', borderTop: `1px solid ${C.border}`, cursor: onNavigate ? 'pointer' : 'default' }}
+              onMouseEnter={e => { if (onNavigate) e.currentTarget.style.background = '#f7faf9' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 500, color: onNavigate ? C.emerald : C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {r.primary_label || r.record_number || '—'}
+                </div>
+                {r.secondary_label && (
+                  <div style={{ fontSize: 11, color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
+                    {r.secondary_label}
+                  </div>
+                )}
+              </div>
+              {r.record_number && (
+                <span style={{ flexShrink: 0, fontSize: 10.5, fontFamily: 'JetBrains Mono, monospace', color: C.textMuted }}>{r.record_number}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </CardShell>
   )
 }
