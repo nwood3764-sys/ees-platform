@@ -128,6 +128,48 @@ export function providerSignupUrl() {
   return `${origin}/provider-signup`
 }
 
+// Normalize a US phone number to E.164 (+1XXXXXXXXXX). Returns null if it
+// doesn't look like a valid number the SMS pipeline will accept.
+export function toE164US(raw) {
+  if (!raw) return null
+  const trimmed = String(raw).trim()
+  if (trimmed.startsWith('+')) {
+    const e = '+' + trimmed.slice(1).replace(/\D/g, '')
+    return /^\+[1-9]\d{6,14}$/.test(e) ? e : null
+  }
+  const digits = trimmed.replace(/\D/g, '')
+  if (digits.length === 10) return `+1${digits}`
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  return null
+}
+
+// Text a prospective contractor the application signup link through the
+// existing Twilio pipeline (send-notification-sms), threaded on the account.
+// Runs in mock mode until Twilio is configured — returns { mode:'mock' } with
+// no real delivery rather than erroring. .code='bad_phone' on a bad number.
+export async function smsApplicationInvitation({ accountId, contactId, toPhone, toName }) {
+  const phone = toE164US(toPhone)
+  if (!phone) {
+    const e = new Error('A valid US mobile number is required to text the invitation.')
+    e.code = 'bad_phone'
+    throw e
+  }
+  const link = providerSignupUrl()
+  const body = `Hi${toName ? ' ' + toName : ''}, you're invited to join the Energy Efficiency Services provider network. Start your application here: ${link}\n\nReply STOP to opt out.`
+  const { data, error } = await supabase.functions.invoke('send-notification-sms', {
+    body: {
+      trigger_event: 'service_provider_application_invite',
+      recipient_phone: phone,
+      body_text: body,
+      account_id: accountId || undefined,
+      contact_id: contactId || undefined,
+    },
+  })
+  if (error) throw new Error(error.message || 'Text failed at the network layer')
+  if (data?.status === 'failed') throw new Error(data.failure_reason || 'Text failed to send')
+  return { sent: data?.mode === 'real', mode: data?.mode || 'unknown', phone }
+}
+
 // Welcome / recruiting email: invite a prospective contractor to submit their
 // application into the service provider network. Sent through the Graph
 // pipeline, threaded on their (shell) account. .code='no_mailbox' if the

@@ -25,6 +25,8 @@ import {
   setOnboardingStep,
   emailProviderInvite,
   emailApplicationInvitation,
+  smsApplicationInvitation,
+  toE164US,
 } from '../data/serviceProviderService'
 
 const STATE_OPTS = ['NC', 'WI', 'MI', 'CO', 'IN']
@@ -334,6 +336,7 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
 function NewApplicationModal({ onClose, onCreated }) {
   const [v, setV] = useState({ company: '', firstName: '', lastName: '', email: '', phone: '', state: 'NC' })
   const [sendInvite, setSendInvite] = useState(true)
+  const [sendText, setSendText] = useState(false)
   const [inviteNote, setInviteNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -341,25 +344,29 @@ function NewApplicationModal({ onClose, onCreated }) {
   const inp = { width: '100%', padding: '9px 11px', border: `1px solid ${C.borderDark}`, borderRadius: 7, fontSize: 13.5, fontFamily: 'inherit', boxSizing: 'border-box', background: '#fff', color: C.textPrimary }
   const lab = { fontSize: 11.5, fontWeight: 600, color: C.textSecondary, display: 'block', marginBottom: 5 }
   const wantsInvite = sendInvite && v.email.trim()
+  const wantsText = sendText && v.phone.trim()
   const submit = async () => {
     if (!v.company.trim()) { setErr('Company name is required.'); return }
-    if (sendInvite && !v.email.trim()) { setErr('Add an email address to send the invitation, or turn the invitation off.'); return }
+    if (sendInvite && !v.email.trim()) { setErr('Add an email address to send the email invitation, or turn it off.'); return }
+    if (sendText && !toE164US(v.phone)) { setErr('Add a valid US mobile number to text the invitation, or turn it off.'); return }
     setBusy(true); setErr('')
     try {
       const r = await createManualApplication(v)
-      let msg = `Application ${r?.application_number || ''} created.`.trim()
+      const name = [v.firstName, v.lastName].filter(Boolean).join(' ') || v.company
+      const sent = []
       if (wantsInvite && r?.account_id) {
         try {
-          await emailApplicationInvitation({
-            accountId: r.account_id, toEmail: v.email.trim(),
-            toName: [v.firstName, v.lastName].filter(Boolean).join(' ') || v.company,
-            personalNote: inviteNote,
-          })
-          msg = `Application ${r?.application_number || ''} created and invitation emailed to ${v.email.trim()}.`.trim()
-        } catch (e2) {
-          msg = `Application ${r?.application_number || ''} created, but the invitation email didn't send (${e2?.message || 'failed'}). You can email them from the record.`.trim()
-        }
+          await emailApplicationInvitation({ accountId: r.account_id, toEmail: v.email.trim(), toName: name, personalNote: inviteNote })
+          sent.push(`emailed to ${v.email.trim()}`)
+        } catch (e2) { sent.push(`email failed (${e2?.message || 'error'})`) }
       }
+      if (wantsText && r?.account_id) {
+        try {
+          const res = await smsApplicationInvitation({ accountId: r.account_id, toPhone: v.phone, toName: name })
+          sent.push(res.mode === 'real' ? `texted to ${res.phone}` : `text queued in test mode (Twilio not live yet)`)
+        } catch (e3) { sent.push(`text failed (${e3?.message || 'error'})`) }
+      }
+      const msg = `Application ${r?.application_number || ''} created${sent.length ? ' · ' + sent.join(' · ') : ''}.`.trim()
       onCreated?.(msg)
     } catch (e) { setErr(e?.message || 'Could not create the application.'); setBusy(false) }
   }
@@ -393,11 +400,18 @@ function NewApplicationModal({ onClose, onCreated }) {
                 <textarea value={inviteNote} onChange={(e) => setInviteNote(e.target.value)} rows={2} placeholder="e.g. Great meeting you at the trade show — looking forward to working together." style={{ ...inp, resize: 'vertical' }} />
               </div>
             )}
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
+              <input type="checkbox" checked={sendText} onChange={(e) => setSendText(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16, accentColor: C.emerald, cursor: 'pointer' }} />
+              <span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>Also text them the application link</span>
+                <span style={{ display: 'block', fontSize: 12, color: C.textMuted, marginTop: 1 }}>A short SMS with the signup link (uses the Phone above). Includes a STOP opt-out. Delivers once Twilio is live; until then it's saved in test mode.</span>
+              </span>
+            </label>
           </div>
         </div>
         <div style={{ padding: '12px 18px', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button onClick={onClose} disabled={busy} style={{ padding: '9px 16px', background: '#fff', color: C.textSecondary, border: `1px solid ${C.borderDark}`, borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={submit} disabled={busy || !v.company.trim()} style={{ padding: '9px 18px', background: C.emerald, color: '#06231a', border: 'none', borderRadius: 8, fontSize: 13.5, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: (busy || !v.company.trim()) ? 0.6 : 1 }}>{busy ? (wantsInvite ? 'Sending…' : 'Creating…') : (wantsInvite ? 'Create & send invitation' : 'Create application')}</button>
+          <button onClick={submit} disabled={busy || !v.company.trim()} style={{ padding: '9px 18px', background: C.emerald, color: '#06231a', border: 'none', borderRadius: 8, fontSize: 13.5, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: (busy || !v.company.trim()) ? 0.6 : 1 }}>{busy ? ((wantsInvite || wantsText) ? 'Sending…' : 'Creating…') : ((wantsInvite || wantsText) ? 'Create & send invitation' : 'Create application')}</button>
         </div>
       </div>
     </div>
