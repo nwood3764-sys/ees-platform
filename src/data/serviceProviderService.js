@@ -121,6 +121,54 @@ export async function sendPortalInvite(applicationId) {
   return data
 }
 
+// The public application (signup) URL — same origin as the app, so it's
+// correct whatever domain fronts LEAP.
+export function providerSignupUrl() {
+  const origin = (typeof window !== 'undefined' && window.location?.origin) || 'https://ees-ops.netlify.app'
+  return `${origin}/provider-signup`
+}
+
+// Welcome / recruiting email: invite a prospective contractor to submit their
+// application into the service provider network. Sent through the Graph
+// pipeline, threaded on their (shell) account. .code='no_mailbox' if the
+// provider's state has no outbound mailbox.
+export async function emailApplicationInvitation({ accountId, contactId, toEmail, toName, personalNote }) {
+  if (!accountId || !toEmail) throw new Error('accountId and toEmail are required')
+  const mb = await resolveOutboundMailboxForAnchor({ anchorObject: 'accounts', anchorRecordId: accountId })
+  if (!mb?.outbound_mailbox_id) {
+    const e = new Error("No outbound mailbox is configured for this provider's state.")
+    e.code = 'no_mailbox'
+    throw e
+  }
+  const link = providerSignupUrl()
+  const note = (personalNote || '').trim()
+  const body = [
+    `Hello${toName ? ' ' + toName : ''},`,
+    '',
+    "We'd like to invite your company to join the Energy Efficiency Services provider network. We partner with trade contractors — HVAC, electrical, weatherization, plumbing, and general contractors — to deliver energy-efficiency and home-performance work across the programs we run.",
+    '',
+    'To get started, please complete a short application at the link below — it only takes a few minutes:',
+    '',
+    link,
+    '',
+    "You'll be asked for some basic company and contact details, the types of work you do, the areas you serve, and — if you have them handy — a W-9 and a Certificate of Insurance. You can finish even if you don't have every document ready.",
+    ...(note ? ['', note] : []),
+    '',
+    'Once you submit, our team will review your application and follow up with next steps. We look forward to working with you.',
+    '',
+    'Energy Efficiency Services',
+  ].join('\n')
+  await sendNewEmail({
+    anchorObject: 'accounts', anchorRecordId: accountId,
+    to: { email: toEmail, name: toName || toEmail },
+    subject: 'Join the Energy Efficiency Services provider network',
+    bodyText: body,
+    outboundMailboxId: mb.outbound_mailbox_id,
+    contactId: contactId || undefined,
+  })
+  return { sent: true, mailbox: mb.obm_address }
+}
+
 // Email the provider their portal invite link through the Graph pipeline,
 // threaded on their account (reliable DKIM delivery — the Supabase auth mailer
 // isn't configured on this platform). Throws with .code='no_mailbox' if the
