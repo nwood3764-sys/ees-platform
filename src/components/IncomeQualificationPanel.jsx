@@ -46,7 +46,7 @@ function ModeBadge({ mode }) {
   )
 }
 
-export default function IncomeQualificationPanel({ enrollmentId }) {
+export default function IncomeQualificationPanel({ enrollmentId, alreadyRun = false }) {
   const [preview, setPreview] = useState(null)
   const [previewing, setPreviewing] = useState(false)
   const [running, setRunning] = useState(false)
@@ -104,19 +104,34 @@ export default function IncomeQualificationPanel({ enrollmentId }) {
             Income Qualification
           </h3>
         </div>
-        <button
-          onClick={handleRun}
-          disabled={running || previewing}
-          style={{
+        {alreadyRun ? (
+          // Run-once: income qualification is a one-time step. Once it has been
+          // run (enrollment_determination_date is set) the panel shows the
+          // determination and generated files read-only — no re-run.
+          <span style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
-            background: running ? '#f7f9fc' : C.emerald,
-            color: running ? C.textMuted : '#fff',
-            border: 'none', borderRadius: 6, padding: '9px 16px',
-            fontWeight: 600, fontSize: 13, cursor: running ? 'default' : 'pointer',
-            transition: 'all 200ms ease',
+            background: 'rgba(62,207,142,0.12)', color: C.emeraldMid || '#2aab72',
+            border: `1px solid ${C.emerald}`, borderRadius: 6, padding: '8px 14px',
+            fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap',
           }}>
-          {running ? 'Generating files…' : 'Run Income Qualification'}
-        </button>
+            <Icon path="M22 11.08V12a10 10 0 11-5.93-9.14 M22 4L12 14.01l-3-3" size={15} color={C.emeraldMid || '#2aab72'} />
+            Income Qualification Complete
+          </span>
+        ) : (
+          <button
+            onClick={handleRun}
+            disabled={running || previewing}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              background: running ? '#f7f9fc' : C.emerald,
+              color: running ? C.textMuted : '#fff',
+              border: 'none', borderRadius: 6, padding: '9px 16px',
+              fontWeight: 600, fontSize: 13, cursor: running ? 'default' : 'pointer',
+              transition: 'all 200ms ease',
+            }}>
+            {running ? 'Generating files…' : 'Run Income Qualification'}
+          </button>
+        )}
       </div>
 
       {error && (

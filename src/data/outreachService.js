@@ -22,7 +22,7 @@ export function loadPicklists() {
     const data = await fetchAllPaged((from, to) =>
       supabase
         .from('picklist_values')
-        .select('id, picklist_object, picklist_field, picklist_value, picklist_label, picklist_is_active, picklist_sort_order, picklist_icon, picklist_color')
+        .select('id, picklist_object, picklist_field, picklist_value, picklist_label, picklist_is_active, picklist_sort_order, picklist_icon, picklist_color, picklist_requires_income_qualification')
         .order('picklist_object',     { ascending: true })
         .order('picklist_field',      { ascending: true })
         .order('picklist_sort_order', { ascending: true })
@@ -53,6 +53,9 @@ export function loadPicklists() {
         field: row.picklist_field,
         icon: row.picklist_icon || null,
         color: row.picklist_color || null,
+        // Record-type workflow flag: this enrollment record type runs the
+        // one-time Income Qualification step. Read by the record-action guard.
+        incomeQualification: row.picklist_requires_income_qualification === true,
       })
       if (row.picklist_is_active === false) continue
       const k = `${row.picklist_object}.${row.picklist_field}`

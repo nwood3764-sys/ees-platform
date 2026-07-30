@@ -217,7 +217,16 @@ export const ACTION_REGISTRY = Object.freeze({
     applicableObjects:   ['enrollments'],
     defaultTier:         'primary',
     defaultSortOrder:    15,
-    isAvailable: ({ tableName, editing }) => !editing && tableName === 'enrollments',
+    // Only on enrollments whose RECORD TYPE runs income qualification (flagged
+    // on the record type — the six IRA programs, not the HOMES Assessment /
+    // Project-Reservation stages), and only until it has been run once. The
+    // run persists enrollment_determination_date; once set, it never runs
+    // again, so the action drops off.
+    isAvailable: ({ tableName, editing, recordTypeRequiresIncomeQualification, incomeQualificationComplete }) =>
+      !editing
+      && tableName === 'enrollments'
+      && recordTypeRequiresIncomeQualification === true
+      && !incomeQualificationComplete,
   },
   schedule_work_orders: {
     key:                 ACTION_KEYS.SCHEDULE_WORK_ORDERS,
