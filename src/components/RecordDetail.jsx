@@ -7228,6 +7228,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const recordTypeMeta = recordTypeId ? (picklists.metaById?.get(recordTypeId) || null) : null
   const recordTypeLabel = recordTypeMeta?.label || (recordTypeId ? picklists.byId.get(recordTypeId) : null) || null
 
+  // Income Qualification is a record-type-scoped, run-once enrollment step.
+  // The record type carries the flag (the six IRA programs, not the HOMES
+  // Assessment / Project-Reservation enrollment stages); the run persists
+  // enrollment_determination_date, so once set it never runs again.
+  const recordTypeRequiresIncomeQualification =
+    tableName === 'enrollments' && recordTypeMeta?.incomeQualification === true
+  const incomeQualificationComplete = !!record.enrollment_determination_date
+
   if (!layout) return (
     <div style={{
       flex: 1,
@@ -7286,6 +7294,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     envelopeIsResendable,
     envelopeIsVoidable,
     hasRelatedObject:     !!data?.record?.related_object,
+    recordTypeRequiresIncomeQualification,
+    incomeQualificationComplete,
   }
 
   const topbarActionHandlers = {
@@ -7780,9 +7790,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             enrollment (own fields, property HUD fallback), generates the IRA
             application PDF and tenant data XLSX, saves both to the record, and
             writes the determination back onto the enrollment. Only on
-            enrollments, Related tab. */}
-        {!isInsertMode && activeTab === 'Related' && tableName === 'enrollments' && (
-          <IncomeQualificationPanel enrollmentId={recordId} />
+            income-qualification enrollment record types (the six IRA programs),
+            Related tab. Once run, the panel shows the determination read-only
+            and offers no re-run. */}
+        {!isInsertMode && activeTab === 'Related' && recordTypeRequiresIncomeQualification && (
+          <IncomeQualificationPanel enrollmentId={recordId} alreadyRun={incomeQualificationComplete} />
         )}
 
         {/* Property Owner Research — finds the decision makers (CEO, asset
