@@ -7157,9 +7157,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       }
 
       const updated = await saveRecord(tableName, recordId, changes)
-      setData(prev => ({ ...prev, record: updated }))
       setEditing(false); setDraft({})
       toast.success('Changes saved')
+      // Optimistic: show this row's own edited columns immediately, and keep
+      // any previously-merged cross-object keys so inherited fields don't blank
+      // out for a frame.
+      setData(prev => ({ ...prev, record: { ...prev.record, ...updated } }))
+      // saveRecord returns ONLY this row's own columns — it does not carry the
+      // dotted `related_field` keys (e.g. <fk>.account_phone) that reflect a
+      // parent record. When a lookup changes, those must be re-read from the
+      // NEW parent, otherwise inherited fields stay blank/stale until a manual
+      // refresh. Re-run the same merge loadRecordDetailData does on mount, in
+      // the background (no setLoading, so no full-page spinner flash).
+      try {
+        const fresh = await loadRecordDetailData(tableName, recordId)
+        setData(fresh)
+      } catch { /* keep the optimistic record if the re-merge fetch fails */ }
     } catch (err) {
       toast.error(`Save failed — ${err.message || String(err)}`)
     } finally {
