@@ -16,6 +16,7 @@ import {
   formatBytes,
 } from '../data/conversationsService'
 import ComposeEmailModal from './ComposeEmailModal'
+import ComposeSmsModal from './ComposeSmsModal'
 
 // FK column on conversations → anchor object name expected by send-email-v1.
 // The widget knows its parent only through widget_config.fk, so the modal
@@ -101,6 +102,14 @@ export default function ConversationPanelWidget({
     config.channel_filter === 'sms' || config.channel_filter === 'email'
       ? config.channel_filter
       : null
+  // SMS compose context: the account/contact/project the new thread anchors to
+  // (derived from this panel's own FK when it matches, else from config), plus
+  // an optional prefilled recipient phone + name for the composer.
+  const smsAccountId = fk === 'account_id' ? parentRecordId : (config.sms_account_id || null)
+  const smsContactId = fk === 'contact_id' ? parentRecordId : (config.sms_contact_id || null)
+  const smsProjectId = fk === 'project_id' ? parentRecordId : (config.sms_project_id || null)
+  const smsToPhone = config.sms_to_phone || null
+  const smsRecipientName = config.sms_recipient_name || null
   const isMobile = useIsMobile()
   const toast = useToast()
 
@@ -121,6 +130,8 @@ export default function ConversationPanelWidget({
   const [sending, setSending] = useState(false)
   // New-email composer modal — opens via the header "New Email" button.
   const [showCompose, setShowCompose] = useState(false)
+  // New-text composer modal — opens via the header "New Text" button on SMS panels.
+  const [showSmsCompose, setShowSmsCompose] = useState(false)
 
   const messagesScrollRef = useRef(null)
   const composerRef = useRef(null)
@@ -343,7 +354,27 @@ export default function ConversationPanelWidget({
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {FK_TO_ANCHOR_OBJECT[fk] && (
+          {channelFilter === 'sms' ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowSmsCompose(true) }}
+              title="Send a new text message anchored to this record"
+              style={{
+                background: C.emerald || '#3ecf8e',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 5,
+                padding: isMobile ? '8px 10px' : '4px 10px',
+                fontSize: isMobile ? 13 : 11.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                minHeight: isMobile ? 36 : undefined,
+              }}
+            >
+              <Icon path="M12 5v14 M5 12h14" size={isMobile ? 13 : 11} color="currentColor" />
+              {isMobile ? '' : 'New Text'}
+            </button>
+          ) : FK_TO_ANCHOR_OBJECT[fk] && (
             <button
               onClick={(e) => { e.stopPropagation(); setShowCompose(true) }}
               title="Compose a new email anchored to this record"
@@ -437,7 +468,7 @@ export default function ConversationPanelWidget({
                     <div style={{ marginBottom: 6, fontWeight: 600, color: C.textSecondary }}>
                       No conversations yet
                     </div>
-                    Threads appear here when an SMS or email is sent to — or received from — this record's contact. Click <strong>New Email</strong> above to start one.
+                    Threads appear here when an SMS or email is sent to — or received from — this record's contact. Click <strong>{channelFilter === 'sms' ? 'New Text' : 'New Email'}</strong> above to start one.
                   </div>
                 )}
                 {threads.map(thread => (
@@ -466,7 +497,9 @@ export default function ConversationPanelWidget({
                   color: C.textMuted, fontSize: 12.5, lineHeight: 1.6,
                 }}>
                   {threads.length === 0
-                    ? 'Send an SMS notification to this record\'s contact to start a thread.'
+                    ? (channelFilter === 'sms'
+                        ? 'Click New Text above to send this provider a text and start a thread.'
+                        : 'Send an SMS notification to this record\'s contact to start a thread.')
                     : 'Select a thread on the left to view messages and reply.'}
                 </div>
               ) : (
@@ -545,6 +578,17 @@ export default function ConversationPanelWidget({
         anchorObject={FK_TO_ANCHOR_OBJECT[fk] || null}
         anchorRecordId={parentRecordId}
         defaultContactId={fk === 'contact_id' ? parentRecordId : null}
+      />
+      {/* Compose new text modal — opened by the header "New Text" button on SMS panels */}
+      <ComposeSmsModal
+        open={showSmsCompose}
+        onClose={() => setShowSmsCompose(false)}
+        onSent={handleComposeSent}
+        defaultToPhone={smsToPhone}
+        recipientName={smsRecipientName}
+        accountId={smsAccountId}
+        contactId={smsContactId}
+        projectId={smsProjectId}
       />
     </>
   )
