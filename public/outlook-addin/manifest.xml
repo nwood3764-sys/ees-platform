@@ -27,9 +27,9 @@
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="LEAP — Log Email"/>
   <Description DefaultValue="Log the open email onto a LEAP record — opportunity, property, account, contact, project, or work order — including attachments."/>
-  <IconUrl DefaultValue="https://ees-ops.netlify.app/outlook-addin/assets/icon-64.png"/>
-  <HighResolutionIconUrl DefaultValue="https://ees-ops.netlify.app/outlook-addin/assets/icon-128.png"/>
-  <SupportUrl DefaultValue="https://ees-ops.netlify.app/"/>
+  <IconUrl DefaultValue="https://leap.energyefficiencyservices.org/outlook-addin/assets/icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://leap.energyefficiencyservices.org/outlook-addin/assets/icon-128.png"/>
+  <SupportUrl DefaultValue="https://leap.energyefficiencyservices.org/"/>
 
   <Hosts>
     <Host Name="Mailbox"/>
@@ -45,7 +45,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://ees-ops.netlify.app/outlook-addin/taskpane.html"/>
+        <SourceLocation DefaultValue="https://leap.energyefficiencyservices.org/outlook-addin/taskpane.html"/>
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -106,13 +106,13 @@
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="icon16" DefaultValue="https://ees-ops.netlify.app/outlook-addin/assets/icon-16.png"/>
-        <bt:Image id="icon32" DefaultValue="https://ees-ops.netlify.app/outlook-addin/assets/icon-32.png"/>
-        <bt:Image id="icon80" DefaultValue="https://ees-ops.netlify.app/outlook-addin/assets/icon-80.png"/>
+        <bt:Image id="icon16" DefaultValue="https://leap.energyefficiencyservices.org/outlook-addin/assets/icon-16.png"/>
+        <bt:Image id="icon32" DefaultValue="https://leap.energyefficiencyservices.org/outlook-addin/assets/icon-32.png"/>
+        <bt:Image id="icon80" DefaultValue="https://leap.energyefficiencyservices.org/outlook-addin/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="taskpaneUrl" DefaultValue="https://ees-ops.netlify.app/outlook-addin/taskpane.html"/>
-        <bt:Url id="functionFile" DefaultValue="https://ees-ops.netlify.app/outlook-addin/taskpane.html"/>
+        <bt:Url id="taskpaneUrl" DefaultValue="https://leap.energyefficiencyservices.org/outlook-addin/taskpane.html"/>
+        <bt:Url id="functionFile" DefaultValue="https://leap.energyefficiencyservices.org/outlook-addin/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="groupLabel" DefaultValue="LEAP"/>
