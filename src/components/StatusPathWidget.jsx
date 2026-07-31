@@ -64,11 +64,17 @@ function ChevronSegment({
     return 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 12px 50%)'
   })()
 
+  // Only the active (current) stage is maximized: it sizes to its full label
+  // so the text is always readable. Every other stage is minimized — it
+  // compresses to share the remaining width and truncates with an ellipsis.
+  const isCurrent = state === 'current'
+
   return (
     <div
+      title={label}
       style={{
-        flex: 1,
-        minWidth: 0,
+        flex: isCurrent ? '0 0 auto' : '1 1 0',
+        minWidth: isCurrent ? 'auto' : 0,
         height: 36,
         display: 'flex',
         alignItems: 'center',
@@ -78,7 +84,7 @@ function ChevronSegment({
         color: palette.text,
         clipPath: clip,
         fontSize: 12,
-        fontWeight: state === 'current' ? 700 : 500,
+        fontWeight: isCurrent ? 700 : 500,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
