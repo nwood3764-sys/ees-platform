@@ -27,6 +27,7 @@ const AccountMergeModal                    = lazy(() => import('./AccountMergeMo
 const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
 const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
 const QualityInstallVerificationModal      = lazy(() => import('./QualityInstallVerificationModal'))
+const QualityInstallPhotoPackageModal      = lazy(() => import('./QualityInstallPhotoPackageModal'))
 
 import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
@@ -5819,6 +5820,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [submittalStage, setSubmittalStage] = useState(null)
   const [showSubmittalEditor, setShowSubmittalEditor] = useState(false)
   const [showQivModal, setShowQivModal] = useState(false)
+  const [showQivPackageModal, setShowQivPackageModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
   const [showLogCall, setShowLogCall] = useState(false)
@@ -7424,6 +7426,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     hasRelatedObject:     !!data?.record?.related_object,
     recordTypeRequiresIncomeQualification,
     incomeQualificationComplete,
+    recordTypeLabel,
   }
 
   const topbarActionHandlers = {
@@ -7440,6 +7443,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       () => setSubmittalStage(SUBMITTAL_STAGES.FINAL_PROJECT_PAYMENT_REQUEST),
     [ACTION_KEYS.EDIT_SUBMITTAL_TEMPLATE]: () => setShowSubmittalEditor(true),
     [ACTION_KEYS.CREATE_QUALITY_INSTALL_VERIFICATION]: () => setShowQivModal(true),
+    [ACTION_KEYS.GENERATE_QUALITY_INSTALL_PHOTO_PACKAGE]: () => setShowQivPackageModal(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -8210,6 +8214,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             opportunity={record}
             onClose={() => setShowQivModal(false)}
             onNavigateToRecord={onNavigateToRecord}
+          />
+        )}
+
+        {/* Quality Install Verification photo package (ZIP + PDF) — on the
+            verification work order, feeds the final payment application. */}
+        {showQivPackageModal && tableName === 'work_orders' && (
+          <QualityInstallPhotoPackageModal
+            workOrderId={recordId}
+            workOrder={record}
+            onClose={() => setShowQivPackageModal(false)}
           />
         )}
 
