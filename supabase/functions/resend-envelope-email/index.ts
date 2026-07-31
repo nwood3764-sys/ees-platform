@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
   const signingBase = body.signing_base_url
     || req.headers.get("Origin")
     || req.headers.get("Referer")?.split("/").slice(0, 3).join("/")
-    || "https://ees-ops.netlify.app"
+    || "https://leap.energyefficiencyservices.org"
   const signingUrl = `${signingBase}/sign/${env.env_record_number}/${target.recipient_signing_token}`
 
   // ── Send via the envelope OWNER's Outlook (stored tokens) ─────────────────

@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
   const serviceRoleKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
   const resendApiKey    = Deno.env.get("RESEND_API_KEY")
   const fromAddress     = Deno.env.get("RESEND_FROM_ADDRESS") || "EES Reports <reports@EES-WI.org>"
-  const baseUrl         = Deno.env.get("APP_BASE_URL") || "https://ees-ops.netlify.app"
+  const baseUrl         = Deno.env.get("APP_BASE_URL") || "https://leap.energyefficiencyservices.org"
 
   if (!supabaseUrl || !serviceRoleKey) {
     return json({ error: "Server misconfiguration — missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" }, 500)

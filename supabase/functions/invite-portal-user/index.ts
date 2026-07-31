@@ -37,9 +37,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 function getPortalRedirectUrl(req: Request): string {
   const origin = req.headers.get("origin")
   const base =
-    origin && /^https?:\/\/(localhost(:\d+)?|.+\.netlify\.app)$/.test(origin)
+    origin && /^https?:\/\/(localhost(:\d+)?|.+\.netlify\.app|leap\.energyefficiencyservices\.org)$/.test(origin)
       ? origin
-      : "https://ees-ops.netlify.app"
+      : "https://leap.energyefficiencyservices.org"
   return `${base}/project-portal`
 }
 

@@ -272,7 +272,7 @@ Deno.serve(async (req) => {
     // Origin: https://evil.com and the next recipient would then receive a
     // genuine EES email carrying their valid signing token pointed at the
     // attacker's host — silent token theft / envelope hijack.
-    const signingBase = Deno.env.get("APP_BASE_URL") || "https://ees-ops.netlify.app"
+    const signingBase = Deno.env.get("APP_BASE_URL") || "https://leap.energyefficiencyservices.org"
     const nextSigningUrl = `${signingBase}/sign/${env.env_record_number}/${nextRecipient.recipient_signing_token}`
 
     if (eventAdvancedId) {

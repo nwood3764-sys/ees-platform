@@ -124,7 +124,7 @@ export async function sendPortalInvite(applicationId) {
 // The public application (signup) URL — same origin as the app, so it's
 // correct whatever domain fronts LEAP.
 export function providerSignupUrl() {
-  const origin = (typeof window !== 'undefined' && window.location?.origin) || 'https://ees-ops.netlify.app'
+  const origin = (typeof window !== 'undefined' && window.location?.origin) || 'https://leap.energyefficiencyservices.org'
   return `${origin}/provider-signup`
 }
 

@@ -42,7 +42,7 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
-const APP_BASE_URL = Deno.env.get("APP_BASE_URL") || "https://ees-ops.netlify.app"
+const APP_BASE_URL = Deno.env.get("APP_BASE_URL") || "https://leap.energyefficiencyservices.org"
 
 const VALID_TRIGGER_EVENTS = new Set([
   "booking_confirmation",

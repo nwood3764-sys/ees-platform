@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")
   const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
-  const siteUrl     = Deno.env.get("LEAP_SITE_URL") || "https://ees-ops.netlify.app"
+  const siteUrl     = Deno.env.get("LEAP_SITE_URL") || "https://leap.energyefficiencyservices.org"
   if (!supabaseUrl || !serviceKey) {
     return json({ ok: false, error: "Server misconfiguration" }, 500)
   }
