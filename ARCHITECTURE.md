@@ -4,7 +4,7 @@ This document is the canonical reference for how Anura is built, deployed, and
 secured. Read this before making changes — especially changes that touch
 deployment, authentication, or database access.
 
-The live site is at **https://anura-ops.netlify.app**.
+The live site is at **https://leap.energyefficiencyservices.org**.
 
 ---
 
@@ -68,7 +68,7 @@ The live site is at **https://anura-ops.netlify.app**.
    from `[build.environment]` in `netlify.toml` injected into the process
 5. Vite build inlines the env vars into the JavaScript bundle (everything
    prefixed `VITE_` is public and compiled in)
-6. Netlify publishes the `dist/` folder to the CDN at `anura-ops.netlify.app`
+6. Netlify publishes the `dist/` folder to the CDN at `leap.energyefficiencyservices.org`
 7. SPA redirect rule in `netlify.toml` routes all paths to `index.html` so
    the React app owns client-side routing
 
@@ -110,7 +110,7 @@ code is a secret.
   because the user isn't authenticated, or (b) the env vars didn't make it
   into the build. Both are diagnosable from the browser devtools network tab.
 - If the site loads with the old UI after a push, Netlify likely rejected
-  the build silently. Check `app.netlify.com/projects/anura-ops/deploys`
+  the build silently. Check `app.netlify.com/projects/ees-ops/deploys`
   for the deploy status of the top commit.
 
 ---
@@ -124,7 +124,7 @@ login form until a valid session exists.
 
 ### Session lifecycle
 
-1. User lands on `anura-ops.netlify.app`
+1. User lands on `leap.energyefficiencyservices.org`
 2. `AuthGate` mounts, calls `supabase.auth.getSession()` to check for an
    existing session in `localStorage`
 3. If a session exists and its JWT is not expired → render the app

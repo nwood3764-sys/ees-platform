@@ -317,7 +317,7 @@ Deno.serve(async (req) => {
   const signingBase = body.signing_base_url
     || req.headers.get("Origin")
     || req.headers.get("Referer")?.split("/").slice(0, 3).join("/")
-    || "https://ees-ops.netlify.app"
+    || "https://leap.energyefficiencyservices.org"
   const signingUrls = insertedRecips
     .slice()
     .sort((a, b) => a.recipient_order - b.recipient_order)

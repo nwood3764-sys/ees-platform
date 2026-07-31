@@ -30,9 +30,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 function getProviderRedirectUrl(req: Request): string {
   const origin = req.headers.get("origin")
   const base =
-    origin && /^https?:\/\/(localhost(:\d+)?|.+\.netlify\.app|app\.ees-wi\.org)$/.test(origin)
+    origin && /^https?:\/\/(localhost(:\d+)?|.+\.netlify\.app|app\.ees-wi\.org|leap\.energyefficiencyservices\.org)$/.test(origin)
       ? origin
-      : "https://ees-ops.netlify.app"
+      : "https://leap.energyefficiencyservices.org"
   return `${base}/provider-portal`
 }
 

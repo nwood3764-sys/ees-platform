@@ -43,10 +43,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function getInviteRedirectUrl(req: Request): string {
   const origin = req.headers.get("origin")
-  if (origin && /^https?:\/\/(localhost(:\d+)?|.+\.netlify\.app)$/.test(origin)) {
+  if (origin && /^https?:\/\/(localhost(:\d+)?|.+\.netlify\.app|leap\.energyefficiencyservices\.org)$/.test(origin)) {
     return origin
   }
-  return "https://ees-ops.netlify.app"
+  return "https://leap.energyefficiencyservices.org"
 }
 
 // Normalize a free-form phone entry to the storage format the DB enforces:

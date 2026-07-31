@@ -23,7 +23,7 @@
 //   3. Loads the app already-authenticated and exercises the lists.
 //
 // ── Required environment (secrets — never hard-coded, never in chat) ─────────
-//   SMOKE_BASE_URL                 default https://ees-ops.netlify.app
+//   SMOKE_BASE_URL                 default https://leap.energyefficiencyservices.org
 //   VITE_SUPABASE_URL              the project URL (already public)
 //   SUPABASE_SERVICE_ROLE_KEY      service-role key, Supabase → Settings → API
 //   VITE_SUPABASE_ANON_KEY         publishable/anon key (already public)
@@ -40,7 +40,7 @@
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 
-const BASE_URL  = process.env.SMOKE_BASE_URL || 'https://ees-ops.netlify.app';
+const BASE_URL  = process.env.SMOKE_BASE_URL || 'https://leap.energyefficiencyservices.org';
 const SB_URL    = process.env.VITE_SUPABASE_URL;
 const SB_ANON   = process.env.VITE_SUPABASE_ANON_KEY;
 const SB_SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
