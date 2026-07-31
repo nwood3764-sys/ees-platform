@@ -26,6 +26,7 @@ const SendForSignatureModal               = lazy(() => import('./SendForSignatur
 const AccountMergeModal                    = lazy(() => import('./AccountMergeModal'))
 const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
 const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
+const QualityInstallVerificationModal      = lazy(() => import('./QualityInstallVerificationModal'))
 
 import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
@@ -5817,6 +5818,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // submittal stage was requested — each program stage is its own filing.
   const [submittalStage, setSubmittalStage] = useState(null)
   const [showSubmittalEditor, setShowSubmittalEditor] = useState(false)
+  const [showQivModal, setShowQivModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
   const [showLogCall, setShowLogCall] = useState(false)
@@ -7437,6 +7439,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL]:
       () => setSubmittalStage(SUBMITTAL_STAGES.FINAL_PROJECT_PAYMENT_REQUEST),
     [ACTION_KEYS.EDIT_SUBMITTAL_TEMPLATE]: () => setShowSubmittalEditor(true),
+    [ACTION_KEYS.CREATE_QUALITY_INSTALL_VERIFICATION]: () => setShowQivModal(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -8196,6 +8199,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             project={record}
             submittalStage={submittalStage}
             onClose={() => setSubmittalStage(null)}
+          />
+        )}
+
+        {/* Quality Install Verification create flow (opportunities only) — builds
+            a building-scoped verification work order for the final payment request. */}
+        {showQivModal && tableName === 'opportunities' && (
+          <QualityInstallVerificationModal
+            opportunityId={recordId}
+            opportunity={record}
+            onClose={() => setShowQivModal(false)}
+            onNavigateToRecord={onNavigateToRecord}
           />
         )}
 

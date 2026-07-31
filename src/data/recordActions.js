@@ -57,6 +57,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_REPORT:         'generate_report',
   GENERATE_PROJECT_RESERVATION_SUBMITTAL:   'generate_project_reservation_submittal',
   GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL: 'generate_final_payment_request_submittal',
+  CREATE_QUALITY_INSTALL_VERIFICATION:      'create_quality_install_verification',
   SCHEDULE_WORK_ORDERS:    'schedule_work_orders',
   RESCHEDULE_WORK_ORDERS:  'reschedule_work_orders',
   SCHEDULE_WORK_ORDER:     'schedule_work_order',
@@ -209,6 +210,23 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultTier:         'menu',
     defaultSortOrder:    26,
     isAvailable: ({ tableName, editing }) => !editing && tableName === 'projects',
+  },
+  // Quality Install Verification (IRA Multifamily) — part of the Final Project
+  // Payment Request verification, launched from the OPPORTUNITY (the WO is
+  // opportunity-tied; the DB RPC resolves the building's install project). It
+  // creates a building-scoped work order whose photo steps are gated to a
+  // sample of the building's units. Menu tier like the sibling submittal
+  // actions; object-level (admins can restrict per layout via
+  // page_layout_actions if a program shouldn't offer it).
+  create_quality_install_verification: {
+    key:                 ACTION_KEYS.CREATE_QUALITY_INSTALL_VERIFICATION,
+    label:               'Create Quality Install Verification',
+    icon:                'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['opportunities'],
+    defaultTier:         'menu',
+    defaultSortOrder:    27,
+    isAvailable: ({ tableName, editing }) => !editing && tableName === 'opportunities',
   },
   run_income_qualification: {
     key:                 ACTION_KEYS.RUN_INCOME_QUALIFICATION,
