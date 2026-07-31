@@ -57,6 +57,29 @@ const MODEL = "claude-sonnet-4-6"
 const PRICE_INPUT_PER_MTOK  = 3.00
 const PRICE_OUTPUT_PER_MTOK = 15.00
 const MAX_TURNS = 8   // tool-use loop ceiling per request
+// Output budget per model call. Must be large enough to emit a whole batch of
+// tool calls at once — a 17-record create is ~2k tokens of tool_use alone, so
+// the old 1500 truncated mid-batch and the proposed cards never materialised.
+const MAX_TOKENS = 8192
+const CLOSE_MAX_TOKENS = 2048
+// Cap the replayed history sent to the model (chars). Conversation memory can
+// balloon to 100k+ tokens over a long session; that degrades the model and can
+// starve the output budget. Keep the most recent slice.
+const HISTORY_CHAR_BUDGET = 60000
+
+// Keep the most recent history messages within a char budget (newest-first),
+// so a long-running conversation can't bloat the request to 100k+ tokens.
+function trimHistory(history: AnthropicMessage[]): AnthropicMessage[] {
+  if (!Array.isArray(history)) return []
+  let total = 0
+  const kept: AnthropicMessage[] = []
+  for (let i = history.length - 1; i >= 0; i--) {
+    const len = JSON.stringify(history[i] ?? "").length
+    if (total + len > HISTORY_CHAR_BUDGET && kept.length) break
+    kept.unshift(history[i]); total += len
+  }
+  return kept
+}
 
 interface RecordContext {
   object?:      string   // table name of the record the user is viewing
@@ -309,6 +332,8 @@ When the user asks how EES actually does something in the field or office — a 
 
 When the user asks for several related records in one breath ("create an account with a property, a building, and a contact"), treat it as ONE job. Plan all of it, then propose it as ONE batch the user confirms once — never do one record and wait. The records are created together, in dependency order, in a single confirmation.
 
+Emit the whole batch as tool calls in ONE turn: call create_record once per record, all in the same response. Keep any preamble to at most ONE short sentence and do NOT list or describe the records in prose before creating them — the confirmation cards already show each record's details, so narrating them wastes your output budget and can cut the batch off before the tool calls are emitted. If you find yourself writing "I'll create Unit 1, Unit 2, …", stop and emit the create_record calls instead.
+
 Dependency order is always parent then child: account → property → building → unit, and contacts/opportunities hang off the account. A child record needs its parent's id, which does not exist until the batch runs. To link them, give each create a short 'ref' (e.g. "acct", "prop") and put the token {{ref:NAME}} in the child's foreign-key value. Example for "account + property + building + contact":
 1. create_record accounts, ref "acct", values {account_name: ...}
 2. create_record properties, ref "prop", values {..., property_account_id: "{{ref:acct}}"}
@@ -422,7 +447,7 @@ Deno.serve(async (req) => {
   }
 
   // ── Build the running message list ──────────────────────────────────────────
-  const messages: AnthropicMessage[] = [...(body.history || [])]
+  const messages: AnthropicMessage[] = [...trimHistory(body.history || [])]
   if (body.message) {
     let userText = body.message
     if (body.context?.object) {
@@ -455,7 +480,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           model: MODEL,
-          max_tokens: 1500,
+          max_tokens: MAX_TOKENS,
           system: systemPrompt,
           tools: TOOLS.map(({ mutating, ...t }) => t),
           messages,
@@ -481,7 +506,18 @@ Deno.serve(async (req) => {
       if (textBlocks.length) finalText = textBlocks.join("\n")
 
       const toolUses = blocks.filter(b => b.type === "tool_use")
-      if (toolUses.length === 0) { endedNaturally = true; break }   // model is done
+      if (toolUses.length === 0) {
+        // Model produced only text. If it was cut off at the output cap without
+        // emitting its tool calls (the classic big-batch failure: it narrates,
+        // runs out of budget, proposes nothing), nudge it to emit them and
+        // continue — otherwise it's genuinely done.
+        if (data?.stop_reason === "max_tokens" && turn < MAX_TURNS - 1) {
+          messages.push({ role: "assistant", content: blocks })
+          messages.push({ role: "user", content: "You were cut off before finishing and proposed nothing. Continue now: emit the create/update/status tool calls for the records directly, with no preamble — the confirmation cards will show the details." })
+          continue
+        }
+        endedNaturally = true; break   // model is done
+      }
 
       // Record the assistant turn, then answer each tool_use.
       messages.push({ role: "assistant", content: blocks })
@@ -529,7 +565,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           model: MODEL,
-          max_tokens: 1000,
+          max_tokens: CLOSE_MAX_TOKENS,
           system: systemPrompt,
           tools: TOOLS.map((t) => { const c = { ...t }; delete (c as any).mutating; return c }),
           tool_choice: { type: "none" },
