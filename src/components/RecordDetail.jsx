@@ -3543,6 +3543,31 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         )
   }
 
+  // Row-major layout with full-width spanning. Opt-in via widget_config.layout
+  // === 'rows' or any field carrying `full_width`. Fields render in reading
+  // (array) order across a 2-column grid: `column: 2` pins a field to the right
+  // slot, everything else fills the left; `full_width: true` spans the whole
+  // width (address blocks stacked Street/City/State/Zip, radio groups, checkbox
+  // lists — matching a source form 1:1). This replaces the older column-fill
+  // approach (two independent left/right stacks + blank spacers) which
+  // mis-aligned whenever one column held more fields than the other. Layouts
+  // that opt in neither way are untouched (legacy paths below).
+  const useRowMajor = widget.widget_config?.layout === 'rows' || fields.some(f => f.full_width)
+  if (useRowMajor) {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridAutoFlow: 'row', alignItems: 'start' }}>
+        {fields.map((f, i) => {
+          const el = renderField(f)
+          if (el == null) return null
+          const cellStyle = f.full_width
+            ? { gridColumn: '1 / -1' }
+            : { gridColumnStart: f.column === 2 ? 2 : 1 }
+          return <div key={f.name || f.spacer_id || `rm-${i}`} style={cellStyle}>{el}</div>
+        })}
+      </div>
+    )
+  }
+
   // Column-aware layout: when fields carry an explicit `column` (set in the new
   // page-layout builder) render fixed columns (Left / Center / Right) and stack
   // each column's fields in order. Layouts without `column` keep the responsive
