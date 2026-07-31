@@ -241,6 +241,26 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
             </div>
           )}
 
+          {/* text messages — real two-way SMS threaded on the provider's
+              account (send via Twilio, replies auto-thread). Send a new text
+              with the "New Text" button; reply inline on any thread. */}
+          {app.account?.id && (
+            <div style={{ marginTop: 14, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textSecondary, marginBottom: 8, letterSpacing: 0.2 }}>TEXT MESSAGES</div>
+              <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>Text this provider and read their replies here — threaded on their account. Use <strong>New Text</strong> below.</div>
+              <ConversationPanelWidget
+                widget={{ widget_title: 'Texts with this provider', widget_config: {
+                  fk: 'account_id',
+                  channel_filter: 'sms',
+                  sms_to_phone: app.spa_contact_phone || app.spa_business_phone || null,
+                  sms_contact_id: app.spa_primary_contact_id || null,
+                  sms_recipient_name: app.spa_company_legal_name || [app.spa_contact_first_name, app.spa_contact_last_name].filter(Boolean).join(' ') || null,
+                } }}
+                parentRecordId={app.account.id}
+              />
+            </div>
+          )}
+
           {/* internal communication log — calls, meetings, notes, and
               auto-recorded pipeline actions (not customer-facing) */}
           <div style={{ marginTop: 14, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
@@ -250,7 +270,7 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
             <div style={{ background: '#f7f9fc', borderRadius: 8, padding: 10 }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
                 <select value={logType} onChange={(e) => setLogType(e.target.value)} style={{ padding: '5px 8px', borderRadius: 7, border: `1px solid ${C.borderDark}`, fontSize: 12.5, background: '#fff', color: C.textPrimary, cursor: 'pointer' }}>
-                  {['Note', 'Call', 'Meeting', 'Text Message', 'Site Visit', 'Other'].map((t) => <option key={t} value={t}>{t}</option>)}
+                  {['Note', 'Call', 'Meeting', 'Site Visit', 'Other'].map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <span style={{ fontSize: 11.5, color: C.textMuted }}>Log an interaction or leave an internal note.</span>
               </div>

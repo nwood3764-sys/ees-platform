@@ -295,6 +295,59 @@ export async function sendReplyToConversation(conversation, bodyText, opts = {})
   throw new Error(`Replies on '${channel}' threads are not supported.`)
 }
 
+// Normalize a US phone number to E.164 (+1XXXXXXXXXX). Returns null if it
+// doesn't look like a number the SMS pipeline (Twilio) will accept.
+export function normalizePhoneE164(raw) {
+  if (!raw) return null
+  const t = String(raw).trim()
+  if (t.startsWith('+')) {
+    const e = '+' + t.slice(1).replace(/\D/g, '')
+    return /^\+[1-9]\d{6,14}$/.test(e) ? e : null
+  }
+  const d = t.replace(/\D/g, '')
+  if (d.length === 10) return `+1${d}`
+  if (d.length === 11 && d.startsWith('1')) return `+${d}`
+  return null
+}
+
+/**
+ * Start a NEW outbound SMS thread. Sends the text via send-notification-sms,
+ * which creates/threads the conversation (find_or_create_conversation) on the
+ * supplied account/contact and writes the outbound message — so the text then
+ * appears in the record's SMS conversation panel and inbound replies auto-
+ * thread onto it. Runs in mock mode until Twilio is configured (no throw;
+ * data.mode === 'mock'). Throws with .code='bad_phone' on an unusable number.
+ */
+export async function sendNewSms({
+  toPhone, bodyText,
+  accountId = null, contactId = null, projectId = null, serviceAppointmentId = null,
+  triggerEvent = 'staff_outbound_sms',
+}) {
+  const phone = normalizePhoneE164(toPhone)
+  if (!phone) { const e = new Error('A valid US mobile number is required.'); e.code = 'bad_phone'; throw e }
+  const trimmed = (bodyText || '').trim()
+  if (!trimmed) throw new Error('Message body is empty')
+  if (trimmed.length > 1600) throw new Error('Message exceeds the 1600-character SMS limit. Shorten and try again.')
+  const { data, error } = await supabase.functions.invoke('send-notification-sms', {
+    body: {
+      trigger_event: triggerEvent,
+      recipient_phone: phone,
+      body_text: trimmed,
+      account_id: accountId || undefined,
+      contact_id: contactId || undefined,
+      project_id: projectId || undefined,
+      service_appointment_id: serviceAppointmentId || undefined,
+    },
+  })
+  if (error) throw new Error(error.message || 'Text failed at the network layer')
+  if (data?.status === 'failed') {
+    const e = new Error(data.failure_reason || 'Text failed to send')
+    e.code = data.failure_code || null
+    throw e
+  }
+  return data // { conversation_id, message_id, mode: 'real'|'mock', ... }
+}
+
 /**
  * Active outbound mailboxes for the Compose Email mailbox picker.
  * Soft-deleted and inactive rows are excluded.
