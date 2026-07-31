@@ -107,11 +107,14 @@ export default function QualityInstallVerificationModal({ opportunityId, opportu
     if (e || !row || row.outcome !== 'success') {
       const msg = (e?.message) || row?.message || 'Could not create the work order.'
       // The RPC asks the caller to name the install project when it can't pick
-      // one — reveal the project picker and load the options once.
+      // one on its own — that's a normal prompt, not a failure: reveal the
+      // project picker (loaded once) and DON'T show the raw message as an error.
       if (!needsProject && PROJECT_NEEDED_HINTS.some(h => msg.toLowerCase().includes(h))) {
         const opts = await loadProjectsForOpportunity()
         setProjects(opts)
         setNeedsProject(true)
+        setSubmitting(false)
+        return
       }
       setError(msg)
       setSubmitting(false)
@@ -184,17 +187,20 @@ export default function QualityInstallVerificationModal({ opportunityId, opportu
                 <div style={{ marginTop: 16 }}>
                   <label style={labelStyle} htmlFor="qiv-project">Install project to verify</label>
                   {projects.length === 0 ? (
-                    <div style={errorBox}>No project was found on this opportunity to verify. Create the install project first.</div>
+                    <div style={errorBox}>No install project was found on this opportunity to verify. Create the install project first.</div>
                   ) : (
-                    <select
-                      id="qiv-project"
-                      style={inputStyle}
-                      value={projectId}
-                      onChange={(ev) => { setProjectId(ev.target.value); setError(null) }}
-                    >
-                      <option value="">Select the install project…</option>
-                      {projects.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                    </select>
+                    <>
+                      <div style={infoBox}>This opportunity has more than one install project on this building. Choose which one this Quality Install Verification covers.</div>
+                      <select
+                        id="qiv-project"
+                        style={inputStyle}
+                        value={projectId}
+                        onChange={(ev) => { setProjectId(ev.target.value); setError(null) }}
+                      >
+                        <option value="">Select the install project…</option>
+                        {projects.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                      </select>
+                    </>
                   )}
                 </div>
               )}
@@ -258,6 +264,11 @@ const inputStyle = {
 }
 const hintStyle = { fontSize: 11.5, color: C.textMuted, marginTop: 6, lineHeight: 1.45 }
 const strongStyle = { color: C.textPrimary }
+const infoBox = {
+  background: '#f7f9fc', border: `1px solid ${C.border}`, borderLeft: '3px solid #7eb3e8',
+  borderRadius: 6, padding: '8px 12px', fontSize: 11.5, color: C.textSecondary,
+  lineHeight: 1.5, marginBottom: 8,
+}
 const reviewBox = {
   background: CARD_SECONDARY, border: `1px solid ${C.border}`,
   borderRadius: 6, padding: '10px 14px', marginBottom: 16,
