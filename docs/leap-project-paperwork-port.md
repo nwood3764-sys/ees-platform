@@ -538,3 +538,140 @@ signature box sits on the Property Owner line, sign, and verify the stamped
 > settled — do not redesign them. Verify against the doc's §7 Phase-1 fixture
 > numbers, run `npm run build:safe`, ship per the standard cycle (commit as
 > Nicholas Wood, PR, merge), and write the help article in the same session.
+
+---
+
+## 11. INCREMENT (2026-07-30, Nicholas): measure quantity overrides that persist on the record
+
+Shipped and proven in the standalone tool at **build 64**. This increment brings
+that behavior into LEAP and — per Nicholas — **persists the override values on
+the record that owns each submittal**: the **enrollment** for the Project
+Reservation, the **incentive application** for the Final Project Payment
+Request. Same principle as everywhere else in this port: the quantities default
+from the Asset Score reports, but a user can override any of them (e.g. to match
+an offer-letter number the final paperwork must equal), and the entered value
+takes precedence on every generated document.
+
+### 11.1 What the standalone does (source to copy — `audit-template-builder/frontend/index.html` @ build 64)
+
+- **Four quantity fields** (form markup lines 248–255): `pjQtyAttic`
+  (attic square footage) + `pjQtyBath` / `pjQtyKitchen` / `pjQtyShower`
+  (per-measure water-saver counts).
+- **They populate with the real report-derived numbers** so the user sees
+  exactly what will print — `pjQtyDefaults()` (lines 2707–2712): attic =
+  `Math.round(asBase.roofArea)` (baseline report's Total Gross Roof Area),
+  the three water savers = the dwelling-unit count. The prefill loop
+  (lines 2733–2737) fills each field and tags it `dataset.auto='1'`; auto-tagged
+  fields keep tracking report/unit changes.
+- **An edit takes over permanently, per field** — the input listener
+  (lines 2739–2742) clears `dataset.auto` on the edited field so it stops
+  following the reports; the others keep tracking.
+- **The model consumes overrides with precedence** — `_ovr(id)` returns the
+  entered value only when it's a positive number, else null. `roofSqFt`
+  (lines 2770–2771) = `_ovr('pjQtyAttic') ?? Math.round(asB.roofArea)`; the
+  three water-saver `push(...)` calls (lines 2809–2811) use
+  `_ovr('pjQtyBath') ?? units`, etc. **The attic override flows through the
+  money**: Focus on Energy = the effective attic sq ft × tier rate, so totals
+  re-derive and TOTAL DUE still reconciles to $0.00.
+- **The pre-export check flags only values that DIFFER from the reports**
+  (lines 2379–2386), showing both sides: `Bath Aerators Qty = 14 (reports: 12)`.
+
+### 11.2 LEAP integration (verified against the live code 2026-07-30)
+
+The single code hook is **`buildPaperworkModel(...)`** in
+`src/data/paperworkModel.js:148`, whose only call site is the model `useMemo`
+in `src/components/ProjectSubmittalDocumentsModal.jsx:136–146`. Today the model
+signature is
+`{ units, assetScoreBase, assetScoreImp, includeAttic, fields, textBlocks }`;
+`roofSqFt` derives only from `assetScoreBase.roofArea` (line 152) and the three
+low-flow rows are hardcoded to `units` (lines 194–196). `includeAttic` is the
+existing precedent for an optional override input; the Dwelling Units input and
+the Include-Attic checkbox in the modal (lines 439–456) are the UI precedent.
+
+**Build steps:**
+
+1. **Model** — add a `quantities` input to `buildPaperworkModel`'s destructured
+   signature: `{ atticSqFt, bathQty, kitchenQty, showerQty }`, each nullable.
+   Apply with precedence exactly like the standalone `_ovr`: effective attic =
+   `atticSqFt ?? Math.round(assetScoreBase.roofArea)`; effective bath/kitchen/
+   shower = `bathQty ?? units`, etc. The attic value must feed the Focus on
+   Energy computation, not just the display `qty`, so the totals re-derive.
+   Node-test that null overrides reproduce today's numbers byte-for-byte and a
+   set override reprices FOE + total with TOTAL DUE still $0.
+
+2. **Persist on the owning record** (net-new — the paperwork path touches
+   neither table today). Add nullable columns via one migration
+   (`YYYYMMDDHHMMSS_...` real UTC stamp; pattern:
+   `supabase/migrations/20260729174350_enrollment_project_reservation_layout.sql`):
+   - **`enrollments`** (prefix `enrollment_`) — for the Project Reservation
+     stage. Recommended names (confirm with Nicholas):
+     `enrollment_attic_square_feet` (numeric),
+     `enrollment_bath_aerator_quantity` / `enrollment_kitchen_aerator_quantity`
+     / `enrollment_showerhead_quantity` (integer).
+   - **`incentive_applications`** (prefix `ia`) — for the Final Project Payment
+     Request stage. Parallel names: `ia_attic_square_feet`,
+     `ia_bath_aerator_quantity`, `ia_kitchen_aerator_quantity`,
+     `ia_showerhead_quantity`.
+   **Semantics: null = use the report-derived default; a stored number = an
+   explicit override that takes precedence** (mirrors `_ovr`). Expose each
+   column on the record page by adding it to a `field_group` widget's
+   `widget_config.fields[]` (type `number`/`integer`) exactly as the reference
+   migration does, and end with `NOTIFY pgrst, 'reload schema';`. Run
+   `get_advisors(security)` after the DDL.
+
+3. **Modal + service wiring** — the shared `ProjectSubmittalDocumentsModal` is
+   already stage-differentiated by its `submittalStage` prop
+   (`PROJECT_RESERVATION` vs `FINAL_PROJECT_PAYMENT_REQUEST`). Route the
+   override read/write by stage:
+   - Reservation stage → the **enrollment** record; Final Payment stage → the
+     **incentive application** record.
+   - **FIRST verify the project→enrollment and project→incentive_application
+     links** — `loadPaperworkContext` (paperworkService.js:422) is keyed on the
+     project/opportunity/property and does NOT read either table today. Resolve
+     the correct record (likely via the shared opportunity or property) in
+     `describe_object_columns` before wiring; do not assume an FK name.
+   - Prefill each field from the record column when non-null, else show the
+     report-derived default (label it as the default, like the standalone's
+     `dataset.auto`). On generate/save, write edited values back to the owning
+     record's columns (null out a field the user cleared back to the default).
+   - Surface the same "overrides in effect" note (entered value + report value)
+     in the modal or its pre-generate summary.
+
+4. **Also carry over the build-62 parser fixes** (same `parseAssetScoreText`
+   the LEAP port copied): the wrapped-`Learn More` measure-close fix
+   (index.html:553 `boundary` regex + 562 `clean` regex) and the **target
+   attic R defaults to R-49** rule (index.html:2773, 2780) when the improved
+   report applies the roof upgrade via checkbox without restating a higher
+   assembly R. Without these, a report like 7400 W Center St silently drops the
+   attic measures and misprices the whole invoice onto the low-flow rows.
+
+### 11.3 Verification
+
+Node-test `buildPaperworkModel`: (a) all-null overrides = current Hampton
+fixture to the penny ($87,150 / FOE $7,150 / $80,000 / TOTAL DUE $0.00);
+(b) attic override 6,800 → FOE $6,800, total $86,800, rows re-derived,
+TOTAL DUE $0.00; (c) water-saver 11/11/12 honored on the rows; (d) 7400 W
+Center St reports parse all three measures after the parser fix. Then
+round-trip a persisted override through the enrollment and the incentive
+application records. `npm run build:safe`, ship per the standard cycle, update
+the help article.
+
+### 11.4 Kickoff (paste verbatim)
+
+> Read `docs/leap-project-paperwork-port.md` §11 and add **measure quantity
+> overrides** to the Project Paperwork generation. Extend
+> `buildPaperworkModel` (`src/data/paperworkModel.js:148`) to accept a nullable
+> `quantities` input ({atticSqFt, bathQty, kitchenQty, showerQty}) applied with
+> precedence over the report-derived defaults (attic feeds Focus on Energy, not
+> just display). Persist the overrides on the owning record — **enrollments**
+> for the Project Reservation stage, **incentive_applications** for the Final
+> Project Payment Request stage — via a migration adding nullable columns
+> (null = use the report default) exposed on each record page; verify the
+> project→enrollment / project→incentive_application links first. Wire
+> `ProjectSubmittalDocumentsModal` (stage-differentiated already) to prefill
+> from the record, show report defaults when null, and write edited values
+> back. Also carry over the build-62 `parseAssetScoreText` fixes (wrapped
+> Learn-More close + R-49 target default) from
+> `audit-template-builder/frontend/index.html`. Node-test the §11.3 fixtures,
+> `npm run build:safe`, run `get_advisors(security)` after the DDL, ship per the
+> standard cycle, and update the help article.
