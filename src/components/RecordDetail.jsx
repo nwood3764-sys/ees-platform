@@ -6159,6 +6159,37 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     setActiveTab(null)
   }, [tableName, recordId])
 
+  // Pre-populate the reservation "What work will be completed?" multiselect from
+  // the opportunity's line items, mapped to work measures (product_work_measure_
+  // map / derive_reservation_work_measures). Fill-if-empty only — a user's own
+  // selection is never overwritten. Runs whenever the opportunity changes on a
+  // reservation enrollment (create form or on entering edit), mirroring the
+  // BEFORE INSERT/UPDATE trigger so the value shows before the first save.
+  const hasWorkMeasuresField = useMemo(() => (data?.sections || []).some(s =>
+    (s.widgets || []).some(w => w.widget_type === 'field_group' &&
+      (w.widget_config?.fields || []).some(f => f.name === 'enrollment_work_measures'))
+  ), [data?.sections])
+  useEffect(() => {
+    if (tableName !== 'enrollments' || !hasWorkMeasuresField || !editing) return
+    const oppId = draft?.opportunity_id
+    if (!oppId) return
+    const cur = draft?.enrollment_work_measures
+    if (Array.isArray(cur) && cur.length > 0) return // don't clobber a selection
+    let cancelled = false
+    ;(async () => {
+      const { data: measures, error } = await supabase
+        .rpc('derive_reservation_work_measures', { p_opportunity_id: oppId })
+      if (cancelled || error || !Array.isArray(measures) || measures.length === 0) return
+      setDraft(prev => {
+        const c = prev?.enrollment_work_measures
+        if (Array.isArray(c) && c.length > 0) return prev
+        return { ...prev, enrollment_work_measures: measures }
+      })
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableName, hasWorkMeasuresField, editing, draft?.opportunity_id])
+
   // Record the visit for Recent Items (Salesforce parity). Fires once per opened
   // record, only for the URL-addressed record (so ObjectListSection's non-URL
   // detail mounts don't count) and only after the record actually loaded in view
