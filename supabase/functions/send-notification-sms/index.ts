@@ -91,7 +91,15 @@ Deno.serve(async (req) => {
 
   // The real from-number if we have one (explicit override or env default);
   // empty string means Twilio is not yet configured with a sending number.
-  const fromNumber = body.from_number || twilioFromDef || ""
+  // An explicit from_number is only honored when it's a real phone number —
+  // a conversation created during mock/pre-launch carries the sentinel
+  // our-address (sms:pending-config), and replying on it would otherwise send
+  // that sentinel to Twilio as From (error 21910). Sentinel/garbage → ignored,
+  // so we fall back to the configured default number. The env default is
+  // normalized to E.164 too (a number saved without the leading + still works).
+  const requestedFrom = toE164Sender(body.from_number)
+  const defaultFrom   = toE164Sender(twilioFromDef)
+  const fromNumber    = requestedFrom || defaultFrom || ""
   // What we thread the conversation under — always non-empty so the record
   // is created; falls back to the sentinel in pre-launch.
   const threadOurAddr = fromNumber || PENDING_FROM_ADDRESS
@@ -287,6 +295,23 @@ Deno.serve(async (req) => {
     }, 200)
   }
 })
+
+// Normalize a candidate sender to E.164, or "" if it isn't a real phone number
+// (e.g. the sms:pending-config sentinel, which has no digits). Accepts a number
+// saved without the leading + and stamps one on.
+function toE164Sender(s: string | undefined | null): string {
+  if (!s) return ""
+  const t = String(s).trim()
+  if (t.startsWith("+")) {
+    const e = "+" + t.slice(1).replace(/\D/g, "")
+    return /^\+[1-9]\d{6,14}$/.test(e) ? e : ""
+  }
+  const d = t.replace(/\D/g, "")
+  if (d.length === 11 && d.startsWith("1")) return "+" + d
+  if (d.length === 10) return "+1" + d
+  if (d.length >= 7 && d.length <= 15) return "+" + d
+  return ""
+}
 
 function validate(b: ReqBody): string | null {
   if (!b || typeof b !== "object") return "Body must be a JSON object"
