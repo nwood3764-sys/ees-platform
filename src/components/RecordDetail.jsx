@@ -86,6 +86,7 @@ import {
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
+import RecordLink from './RecordLink'
 
 // ---------------------------------------------------------------------------
 // Template lifecycle registry
@@ -476,15 +477,19 @@ function Breadcrumbs({ tableName, record, lookups, onBack, onNavigateToRecord })
         <span key={i} style={{ display: 'flex', alignItems: 'center' }}>
           {sep}
           {c.table && onNavigateToRecord ? (
-            <button
-              onClick={() => onNavigateToRecord({ table: c.table, id: c.id, mode: 'view' })}
+            // Real anchor so a breadcrumb parent supports open-in-new-tab /
+            // middle-click / Cmd-click, while plain click stays in-app.
+            <RecordLink
+              table={c.table}
+              id={c.id}
+              onActivate={() => onNavigateToRecord({ table: c.table, id: c.id, mode: 'view' })}
               style={{
-                fontSize: 12, color: '#1a5a8a', background: 'none', border: 'none',
-                cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2,
+                fontSize: 12, color: '#1a5a8a',
+                cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 2,
               }}
             >
               {c.label}
-            </button>
+            </RecordLink>
           ) : (
             <span style={{ fontSize: 12, color: C.textSecondary }}>{c.label}</span>
           )}
@@ -3504,19 +3509,24 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
                 picklistOpts={allPicklistOpts?.[f.name]} lookupOpts={allLookupOpts?.[f.name]}
                 recordId={recordId} />
             ) : lookupLinkTarget ? (
-              <button
-                type="button"
-                onClick={() => onNavigateToRecord(lookupLinkTarget)}
+              // Render as a REAL anchor (RecordLink) so the browser's native
+              // "Open link in new tab", middle-click, and Ctrl/Cmd-click all
+              // work on a lookup field — a plain <button> gives none of that.
+              // A plain left-click still does fast in-app navigation.
+              <RecordLink
+                table={lookupLinkTarget.table}
+                id={lookupLinkTarget.id}
+                onActivate={() => onNavigateToRecord(lookupLinkTarget)}
                 style={{
-                  fontSize: 13, color: '#1a5a8a', background: 'none', border: 'none',
-                  padding: 0, textAlign: 'left', cursor: 'pointer',
+                  fontSize: 13, color: '#1a5a8a',
+                  textAlign: 'left', cursor: 'pointer',
                   textDecoration: 'underline', textUnderlineOffset: 2,
                   fontFamily: 'inherit', wordBreak: 'break-word',
                 }}
                 title={`Open ${display}`}
               >
                 {display}
-              </button>
+              </RecordLink>
             ) : (
               <span style={{
                 fontSize: 13,
@@ -3832,7 +3842,7 @@ function formatRelatedDateTime(v) {
 
 // Render a single cell. Extracted so the editable and read-only paths can
 // share formatting without duplicating the picklist / date / number logic.
-function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
+function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate, childTable, rowId, onActivate }) {
   let shown = val
   if (col.type === 'picklist' && shown) shown = picklists.byId.get(shown) || shown
   if (col.type === 'date' && shown) {
@@ -3843,6 +3853,14 @@ function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
   }
   if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
   if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
+  const content = col.type === 'picklist' && shown
+    ? <Badge s={shown} />
+    : (shown != null && shown !== '' ? shown : '—')
+  // The first column is the record's name — render it as a REAL anchor so the
+  // browser's "Open link in new tab", middle-click, and Ctrl/Cmd-click work on
+  // a related-list row exactly like a Salesforce list. Plain click still does
+  // fast in-app navigation (and the whole <tr> stays clickable for convenience).
+  const asLink = isFirstCol && canNavigate && childTable && rowId && col.type !== 'picklist'
   return (
     <td key={col.name} style={{
       padding: '10px 14px',
@@ -3852,7 +3870,10 @@ function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate }) {
       fontFamily: col.type === 'number' ? 'JetBrains Mono, monospace' : 'inherit',
       whiteSpace: 'nowrap', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis',
     }}>
-      {col.type === 'picklist' && shown ? <Badge s={shown} /> : (shown != null && shown !== '' ? shown : '—')}
+      {asLink
+        ? <RecordLink table={childTable} id={rowId} onActivate={onActivate}
+            style={{ color: 'inherit', textDecoration: 'none' }}>{content}</RecordLink>
+        : content}
     </td>
   )
 }
@@ -5012,6 +5033,9 @@ function RelatedListWidget({
                             renderRelatedCell(col, row[col.name], picklists, {
                               isFirstCol: ci === 0,
                               canNavigate: canNavigate && !editableReorder,
+                              childTable,
+                              rowId: row.id,
+                              onActivate: () => handleRowClick(row),
                             })
                           )}
                           {editable && (
