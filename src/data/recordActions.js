@@ -58,6 +58,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_PROJECT_RESERVATION_SUBMITTAL:   'generate_project_reservation_submittal',
   GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL: 'generate_final_payment_request_submittal',
   CREATE_QUALITY_INSTALL_VERIFICATION:      'create_quality_install_verification',
+  GENERATE_QUALITY_INSTALL_PHOTO_PACKAGE:   'generate_quality_install_photo_package',
   SCHEDULE_WORK_ORDERS:    'schedule_work_orders',
   RESCHEDULE_WORK_ORDERS:  'reschedule_work_orders',
   SCHEDULE_WORK_ORDER:     'schedule_work_order',
@@ -227,6 +228,21 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultTier:         'menu',
     defaultSortOrder:    27,
     isAvailable: ({ tableName, editing }) => !editing && tableName === 'opportunities',
+  },
+  // On the Quality Install Verification WORK ORDER: assemble its evidence photos
+  // into the payment-application package — a ZIP of photos named per category /
+  // work step, and a PDF grouped the same way. Gated to the Quality Install
+  // Verification record type via the resolved record-type label in ctx.
+  generate_quality_install_photo_package: {
+    key:                 ACTION_KEYS.GENERATE_QUALITY_INSTALL_PHOTO_PACKAGE,
+    label:               'Generate Quality Install Photo Package',
+    icon:                'M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M4 6h16v12H4z',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['work_orders'],
+    defaultTier:         'menu',
+    defaultSortOrder:    28,
+    isAvailable: ({ tableName, editing, recordTypeLabel }) =>
+      !editing && tableName === 'work_orders' && recordTypeLabel === 'Quality Install Verification',
   },
   run_income_qualification: {
     key:                 ACTION_KEYS.RUN_INCOME_QUALIFICATION,
