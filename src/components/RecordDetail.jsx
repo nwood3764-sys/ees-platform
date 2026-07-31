@@ -3931,7 +3931,14 @@ function RelatedListWidget({
   // (an enrollment belongs to the Property, not the Building it's shown on).
   // Create those from the parent's page; rows still navigate normally.
   const hasSharedParent = !!config.shared_parent
+  // row_href_field: rows open a URL (e.g. documents.file_url) in a new tab
+  // instead of navigating to a record page. Used by document related lists,
+  // which have no record detail page but do have a viewable file.
+  const rowHrefField = config.row_href_field
+  // allow_new:false suppresses the New button — for lists whose rows aren't
+  // form-created (documents are uploaded, not entered on a create form).
   const canCreate = canNavigate && !hasViaPath && !hasSharedParent
+    && !rowHrefField && config.allow_new !== false
 
   // Editable mode gates: config opt-in AND parent wired a refresh callback.
   // If either is missing we render the original read-only card.
@@ -3976,6 +3983,12 @@ function RelatedListWidget({
   }
 
   const handleRowClick = (row) => {
+    // Document-style lists open the file directly rather than a record page.
+    if (rowHrefField) {
+      const href = row?.[rowHrefField]
+      if (href) window.open(href, '_blank', 'noopener,noreferrer')
+      return
+    }
     if (!canNavigate || !row?.id) return
     onNavigateToRecord({ table: childTable, id: row.id, mode: 'view' })
   }
@@ -5034,7 +5047,9 @@ function RelatedListWidget({
                           {columns.map((col, ci) =>
                             renderRelatedCell(col, row[col.name], picklists, {
                               isFirstCol: ci === 0,
-                              canNavigate: canNavigate && !editableReorder,
+                              // row_href_field rows open a file, not a record page,
+                              // so don't render the name as a record-link anchor.
+                              canNavigate: canNavigate && !editableReorder && !rowHrefField,
                               childTable,
                               rowId: row.id,
                               onActivate: () => handleRowClick(row),
@@ -6060,13 +6075,27 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             .eq('picklist_value', value).eq('picklist_is_active', true).maybeSingle()
           return data?.id || null
         }
-        const [appFor, bType, bProj, eesRow] = await Promise.all([
+        const acct = async (name) => {
+          const { data } = await supabase.from('accounts').select('id')
+            .eq('account_name', name).eq('account_is_deleted', false).maybeSingle()
+          return data?.id || null
+        }
+        const contactOf = async (name, accountName) => {
+          const aId = await acct(accountName)
+          if (!aId) return null
+          const { data } = await supabase.from('contacts').select('id')
+            .eq('contact_name', name).eq('contact_account_id', aId)
+            .eq('contact_is_deleted', false).maybeSingle()
+          return data?.id || null
+        }
+        const [appFor, bType, bProj, sealedRow, eesRow, tylerRow, nickRow] = await Promise.all([
           pv('application_for', 'Project Reservation'),
           pv('building_type', 'Existing'),
           pv('building_project_type', 'Multifamily - Central 5 Units'),
-          supabase.from('accounts').select('id')
-            .eq('account_name', 'Energy Efficiency Services of Wisconsin')
-            .eq('account_is_deleted', false).maybeSingle().then(r => r.data?.id || null),
+          acct('Sealed Inc'),
+          acct('Energy Efficiency Services of Wisconsin'),
+          contactOf('Tyler Wallace', 'Sealed Inc'),
+          contactOf('Nicholas Wood', 'Energy Efficiency Services of Wisconsin'),
         ])
         if (cancelled) return
         setDraft(prev => {
@@ -6074,8 +6103,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           if (appFor && next.enrollment_application_for == null) next.enrollment_application_for = appFor
           if (bType && next.enrollment_building_type == null) next.enrollment_building_type = bType
           if (bProj && next.enrollment_building_project_type == null) next.enrollment_building_project_type = bProj
-          if (eesRow && next.enrollment_contractor_account_id == null) next.enrollment_contractor_account_id = eesRow
-          if (next.enrollment_has_support_contractor == null) next.enrollment_has_support_contractor = false
+          // Primary contractor = Sealed Inc / Tyler Wallace; support = Yes ->
+          // Energy Efficiency Services of Wisconsin / Nicholas Wood. Fill blanks
+          // only, so the user can change any of them before saving.
+          if (sealedRow && next.enrollment_contractor_account_id == null) next.enrollment_contractor_account_id = sealedRow
+          if (tylerRow && next.enrollment_contractor_contact_id == null) next.enrollment_contractor_contact_id = tylerRow
+          if (next.enrollment_has_support_contractor == null) next.enrollment_has_support_contractor = true
+          if (eesRow && next.enrollment_support_contractor_account_id == null) next.enrollment_support_contractor_account_id = eesRow
+          if (nickRow && next.enrollment_support_contractor_contact_id == null) next.enrollment_support_contractor_contact_id = nickRow
           return next
         })
       }
