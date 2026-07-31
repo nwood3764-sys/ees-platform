@@ -6467,6 +6467,58 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     return next
   })
 
+  // ── Project Payment Request ↔ reservation link ──────────────────────────
+  // The WI-IRA-MF-HOMES reservation (an enrollment) and the Project Payment
+  // Request (an incentive_application) are the same program on the same
+  // opportunity at two stages. When a payment request is created, pull forward
+  // everything the reservation already captured (contractor + support
+  // contractor, building/project type, income level, heating, who-gets-paid,
+  // tax classification, modeling software, work measures, project cost) via
+  // build_ia_payment_request_prefill, which translates each picklist by value
+  // string. Fills blanks only — never clobbers what the preparer already set.
+  const [ppRequestRtId, setPpRequestRtId] = useState(null)
+  useEffect(() => {
+    if (tableName !== 'incentive_applications' || !isCreate) return
+    let cancelled = false
+    supabase.from('picklist_values').select('id')
+      .eq('picklist_object', 'incentive_applications')
+      .eq('picklist_field', 'record_type')
+      .eq('picklist_value', 'WI-IRA-MF-HOMES-PROJECT-PAYMENT-REQUEST')
+      .maybeSingle()
+      .then(({ data }) => { if (!cancelled) setPpRequestRtId(data?.id || null) })
+    return () => { cancelled = true }
+  }, [tableName, isCreate])
+
+  const applyPaymentRequestPrefill = useCallback(async (oppId) => {
+    if (!oppId) return
+    try {
+      const { data: pf, error } = await supabase.rpc('build_ia_payment_request_prefill', { p_opportunity_id: oppId })
+      if (error || !pf || typeof pf !== 'object' || Array.isArray(pf)) return
+      setDraft(prev => {
+        const next = { ...prev }
+        for (const [k, v] of Object.entries(pf)) {
+          if (v === null || v === undefined) continue
+          if (next[k] === null || next[k] === undefined || next[k] === '') next[k] = v
+        }
+        return next
+      })
+    } catch (e) { console.warn('payment request prefill from reservation failed', e) }
+  }, [])
+
+  // Fire once per opportunity: at init when created from the opportunity (RT +
+  // opportunity_id already seeded) and when the opportunity is chosen on the
+  // global New Application form. The ref stops it re-running for the same
+  // opportunity so it can't stomp later edits.
+  const prefilledReservationOppRef = useRef(null)
+  useEffect(() => {
+    if (!isCreate || tableName !== 'incentive_applications') return
+    if (!ppRequestRtId || draft.ia_record_type !== ppRequestRtId) return
+    const oppId = draft.opportunity_id
+    if (!oppId || prefilledReservationOppRef.current === oppId) return
+    prefilledReservationOppRef.current = oppId
+    applyPaymentRequestPrefill(oppId)
+  }, [isCreate, tableName, ppRequestRtId, draft.ia_record_type, draft.opportunity_id, applyPaymentRequestPrefill])
+
   // Dependent-lookup re-fetch: when any field listed in a dependent
   // lookup's depends_on array changes value in the draft, re-query the
   // options for that dependent field. The effect derives a comma-joined
