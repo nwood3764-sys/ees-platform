@@ -1,4 +1,9 @@
 // ─── send-notification-sms ─────────────────────────────────────────────
+// v8 — supports Twilio API-key auth (SK key SID + secret), the Twilio-
+// recommended credential (scoped + independently revocable), falling back to
+// the legacy Account SID + Auth Token when no API key is set. The Account SID
+// is still required either way (it's in the Messages URL path).
+//
 // v7 — ALWAYS threads the outbound message into a conversation + messages
 // row, even in pre-launch/mock mode and even when no Twilio from-number is
 // configured yet. (v6 only threaded when a from-number was set, so a staff
@@ -19,10 +24,11 @@
 //
 // Auth model: server-to-server only. Public verify_jwt=false.
 //
-// Mock mode: until TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM_NUMBER
-// are all set the function writes the notification_logs + messages rows with
-// provider_message_id 'mock-<uuid>' but does NOT call Twilio. The response
-// carries mode:'mock' plus which Twilio settings are still missing.
+// Mock mode: until the Account SID, a credential pair (API key SID+secret,
+// or the legacy Auth Token), and a from-number are all set, the function
+// writes the notification_logs + messages rows with provider_message_id
+// 'mock-<uuid>' but does NOT call Twilio. The response carries mode:'mock'
+// plus which Twilio settings are still missing.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4"
@@ -62,12 +68,22 @@ Deno.serve(async (req) => {
   const v = validate(body)
   if (v) return json({ error: v }, 400)
 
-  const supabaseUrl   = Deno.env.get("SUPABASE_URL")
-  const serviceKey    = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
-  const twilioSid     = Deno.env.get("TWILIO_ACCOUNT_SID")
-  const twilioToken   = Deno.env.get("TWILIO_AUTH_TOKEN")
-  const twilioFromDef = Deno.env.get("TWILIO_FROM_NUMBER")
+  const supabaseUrl    = Deno.env.get("SUPABASE_URL")
+  const serviceKey     = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+  const twilioSid      = Deno.env.get("TWILIO_ACCOUNT_SID")     // AC… — always required (URL path)
+  const twilioToken    = Deno.env.get("TWILIO_AUTH_TOKEN")      // legacy full-access token (fallback)
+  const twilioApiKey   = Deno.env.get("TWILIO_API_KEY_SID")     // SK… — Twilio-recommended
+  const twilioApiSecret= Deno.env.get("TWILIO_API_KEY_SECRET")
+  const twilioFromDef  = Deno.env.get("TWILIO_FROM_NUMBER")
   if (!supabaseUrl || !serviceKey) return json({ error: "Server misconfiguration: Supabase keys missing" }, 500)
+
+  // Resolve the Basic-auth credential pair: prefer API key (SK sid + secret),
+  // else fall back to Account SID + Auth Token. The URL always uses the
+  // Account SID regardless of which auth pair we send.
+  const useApiKey = !!(twilioApiKey && twilioApiSecret)
+  const authUser  = useApiKey ? twilioApiKey    : twilioSid
+  const authPass  = useApiKey ? twilioApiSecret : twilioToken
+  const haveAuth  = !!(twilioSid && authUser && authPass)
 
   const supabase = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -83,8 +99,10 @@ Deno.serve(async (req) => {
 
   // Which Twilio settings are still missing (for a clear pre-launch response).
   const missing: string[] = []
-  if (!twilioSid)     missing.push("TWILIO_ACCOUNT_SID")
-  if (!twilioToken)   missing.push("TWILIO_AUTH_TOKEN")
+  if (!twilioSid) missing.push("TWILIO_ACCOUNT_SID")
+  if (!useApiKey && !twilioToken) {
+    missing.push("TWILIO_API_KEY_SID + TWILIO_API_KEY_SECRET (or TWILIO_AUTH_TOKEN)")
+  }
   if (!twilioFromDef && !body.from_number) missing.push("TWILIO_FROM_NUMBER")
 
   // 1. notification_logs row in 'queued' (legacy low-level provider audit)
@@ -162,8 +180,8 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 4. Mock mode if Twilio not fully configured
-  const mockMode = !twilioSid || !twilioToken || !fromNumber
+  // 4. Mock mode if Twilio not fully configured (no auth pair, or no from-number)
+  const mockMode = !haveAuth || !fromNumber
   if (mockMode) {
     const mockId = `mock-${crypto.randomUUID()}`
     await supabase.from("notification_logs").update({
@@ -190,13 +208,14 @@ Deno.serve(async (req) => {
       provider_message_id: mockId,
       mode: "mock",
       missing_config: missing,
+      auth_mode: useApiKey ? "api_key" : (twilioToken ? "auth_token" : "none"),
       from_number: fromNumber || "(unset)",
     }, 200)
   }
 
   // 5. Real Twilio send
   try {
-    const credentials = btoa(`${twilioSid}:${twilioToken}`)
+    const credentials = btoa(`${authUser}:${authPass}`)
     const twilioRes = await fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
       {
