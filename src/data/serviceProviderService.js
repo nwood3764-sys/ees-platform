@@ -210,7 +210,10 @@ function escHtml(s) {
 // on the button — so the recipient never sees a raw URL. Table-based layout with
 // inline styles for cross-client (Gmail/Outlook/Apple Mail) rendering.
 function buildProviderInvitationHtml({ greetingName, link, note }) {
-  const name = greetingName ? escHtml(greetingName) : 'there'
+  // Greet by first name only (per Nicholas) — take the first whitespace token,
+  // so "First Last" → "First"; fall back to a friendly default.
+  const first = String(greetingName == null ? '' : greetingName).trim().split(/\s+/)[0]
+  const name = first ? escHtml(first) : 'there'
   const href = escHtml(link)
   const p = 'margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#3a4a60;'
   const noteBlock = note
