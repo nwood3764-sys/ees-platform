@@ -704,7 +704,7 @@ export async function resolvePolymorphicLookups(requests) {
  * Fetch related records for a related_list widget.
  */
 export async function fetchRelatedRecords(config, parentRecordId) {
-  const { table, fk, via, shared_parent, is_deleted_col, columns, sort_field, sort_dir } = config
+  const { table, fk, via, shared_parent, is_deleted_col, columns, sort_field, sort_dir, match, row_href_field } = config
 
   // Shared-parent (sibling) related lists: the target is not a descendant of
   // the layout's object but a SIBLING sharing a common parent — e.g.
@@ -747,6 +747,11 @@ export async function fetchRelatedRecords(config, parentRecordId) {
       selectParts.push(c.name)
     }
   }
+  // row_href_field: a column whose value is a URL the row should open on click
+  // (e.g. documents.file_url). Fetched even though it isn't a display column.
+  if (row_href_field && !selectParts.includes(row_href_field)) {
+    selectParts.push(row_href_field)
+  }
 
   // Related-record (multi-hop) lists: config.via holds the chain of
   // intermediate tables between the target and the layout's object, ordered
@@ -787,6 +792,16 @@ export async function fetchRelatedRecords(config, parentRecordId) {
     // Direct child (directFilterValue === parentRecordId) or shared-parent
     // sibling (directFilterValue === the resolved shared-parent id).
     query = query.eq(fk, directFilterValue)
+  }
+
+  // Constant equality filters — used for polymorphic parents that key on more
+  // than the FK column. Documents attach via (related_id, related_object), so a
+  // documents related list sets fk='related_id' plus match={related_object:'…'}
+  // to scope to this object type. Applies to both the rows and the exact count.
+  if (match && typeof match === 'object') {
+    for (const [k, v] of Object.entries(match)) {
+      query = query.eq(k, v)
+    }
   }
 
   if (is_deleted_col) {
