@@ -5,7 +5,7 @@
 // =============================================================================
 
 import { supabase } from '../lib/supabase'
-import { sendNewEmail, resolveOutboundMailboxForAnchor } from './conversationsService'
+import { sendNewEmail, sendNewEmailHtml, resolveOutboundMailboxForAnchor } from './conversationsService'
 
 // Applications with resolved stage / trade / account, newest first.
 export async function fetchServiceProviderApplications() {
@@ -184,31 +184,74 @@ export async function emailApplicationInvitation({ accountId, contactId, toEmail
   }
   const link = providerSignupUrl()
   const note = (personalNote || '').trim()
-  const body = [
-    `Hello${toName ? ' ' + toName : ''},`,
-    '',
-    "We'd like to invite your company to join the Energy Efficiency Services provider network. We partner with trade contractors — HVAC, electrical, weatherization, plumbing, and general contractors — to deliver energy-efficiency and home-performance work across the programs we run.",
-    '',
-    'To get started, please complete a short application at the link below — it only takes a few minutes:',
-    '',
-    link,
-    '',
-    "You'll be asked for some basic company and contact details, the types of work you do, the areas you serve, and — if you have them handy — a W-9 and a Certificate of Insurance. You can finish even if you don't have every document ready.",
-    ...(note ? ['', note] : []),
-    '',
-    'Once you submit, our team will review your application and follow up with next steps. We look forward to working with you.',
-    '',
-    'Energy Efficiency Services',
-  ].join('\n')
-  await sendNewEmail({
+  const bodyHtml = buildProviderInvitationHtml({ greetingName: toName, link, note })
+  await sendNewEmailHtml({
     anchorObject: 'accounts', anchorRecordId: accountId,
     to: { email: toEmail, name: toName || toEmail },
-    subject: 'Join the Energy Efficiency Services provider network',
-    bodyText: body,
+    subject: 'Invitation to Join the Service Provider Network',
+    bodyHtml,
     outboundMailboxId: mb.outbound_mailbox_id,
     contactId: contactId || undefined,
   })
   return { sent: true, mailbox: mb.obm_address }
+}
+
+// Escape user-supplied text for safe inclusion in the HTML email body.
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+// Build the formatted (HTML) Service Provider invitation email. The application
+// URL is only ever a hyperlink — on the "complete a short application" phrase and
+// on the button — so the recipient never sees a raw URL. Table-based layout with
+// inline styles for cross-client (Gmail/Outlook/Apple Mail) rendering.
+function buildProviderInvitationHtml({ greetingName, link, note }) {
+  const name = greetingName ? escHtml(greetingName) : 'there'
+  const href = escHtml(link)
+  const p = 'margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#3a4a60;'
+  const noteBlock = note
+    ? `<tr><td style="padding:4px 32px 4px;">
+         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+           <tr><td style="border-left:3px solid #3ecf8e;background:#f7f9fc;padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#4a5e7a;">${escHtml(note).replace(/\n/g, '<br>')}</td></tr>
+         </table>
+       </td></tr>`
+    : ''
+  return `<div style="background:#f0f3f8;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" align="center" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;margin:0 auto;background:#ffffff;border:1px solid #e4e9f2;border-radius:10px;overflow:hidden;">
+    <tr>
+      <td style="padding:22px 32px;border-bottom:3px solid #3ecf8e;">
+        <div style="font-size:18px;font-weight:bold;color:#0d1a2e;">Energy Efficiency Services</div>
+        <div style="font-size:11px;font-weight:bold;color:#2aab72;letter-spacing:1.2px;text-transform:uppercase;margin-top:3px;">Service Provider Network</div>
+      </td>
+    </tr>
+    <tr><td style="padding:28px 32px 0;">
+      <p style="${p}">Hello ${name},</p>
+      <p style="${p}">We'd like to invite your company to join the <strong>Service Provider Network</strong> for Energy Efficiency Services, Inc. We partner with trade contractors — HVAC, electrical, weatherization, plumbing, and general contractors — to deliver energy-efficiency and home-performance work across the programs we run.</p>
+      <p style="${p}">To get started, please <a href="${href}" style="color:#2aab72;font-weight:bold;text-decoration:underline;">complete a short application</a>. It only takes a few minutes.</p>
+    </td></tr>
+    <tr><td style="padding:4px 32px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+        <td align="center" bgcolor="#3ecf8e" style="border-radius:8px;">
+          <a href="${href}" style="display:inline-block;padding:13px 30px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;color:#06231a;text-decoration:none;border-radius:8px;">Start Your Application</a>
+        </td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="padding:0 32px;">
+      <p style="${p}">You'll be asked for some basic company and contact details, the types of work you do, the areas you serve, and — if you have them handy — a W-9 and a Certificate of Insurance. You can finish even if you don't have every document ready.</p>
+    </td></tr>
+    ${noteBlock}
+    <tr><td style="padding:8px 32px 0;">
+      <p style="${p}">Once you submit, our team will review your application and follow up with next steps.</p>
+      <p style="${p}">We look forward to working with you.</p>
+      <p style="margin:20px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#0d1a2e;font-weight:bold;">Energy Efficiency Services</p>
+    </td></tr>
+    <tr><td style="padding:28px 32px 26px;"></td></tr>
+  </table>
+</div>`
 }
 
 // Email the provider their portal invite link through the Graph pipeline,
