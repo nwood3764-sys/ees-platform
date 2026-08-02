@@ -22,6 +22,10 @@
 [build.environment]
   VITE_SUPABASE_URL      = "https://flyjigrijjjtcsvpgzvk.supabase.co"
   VITE_SUPABASE_ANON_KEY = "sb_publishable_qkmVXJMofrUrSoVA3bhZ2g_XNsdE9lq"
+  # Browser Maps JS key for the customer scheduler address autofill (Places +
+  # Maps JavaScript API only, HTTP-referrer restricted to the LEAP domains).
+  # Public by design — same rationale as the Supabase publishable key above.
+  VITE_GOOGLE_MAPS_API_KEY = "AIzaSyCekN5PTYET9x8-99U6QruQoojyeR6eesQ"
   NODE_VERSION           = "20"
 
 # Security response headers applied to every route. Deliberately conservative
