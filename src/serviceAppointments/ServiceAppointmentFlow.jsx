@@ -10,12 +10,46 @@
 // Mobile-first layout: cards stack vertically, form fields are 16px (no iOS
 // zoom on focus), tap targets are ≥ 44px tall.
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { computeAvailability, createServiceAppointment, requestDispatcherFollowup } from './serviceAppointmentService'
 import {
   C, card, label, input, inputFocus, buttonPrimary, buttonSecondary,
   errorBanner, RADIUS, formatSlot, formatTimeRange,
 } from './styles'
+
+// ─── Google Places address autofill ─────────────────────────────────────────
+// Optional: active only when VITE_GOOGLE_MAPS_API_KEY is set at build time — a
+// browser Maps JS key with the Places API enabled and HTTP-referrer restricted.
+// When absent, the address fields stay plain text and the form works unchanged.
+const GOOGLE_MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
+let gmapsLoader = null
+function loadGoogleMaps() {
+  if (!GOOGLE_MAPS_KEY || typeof window === 'undefined') return Promise.resolve(null)
+  if (window.google?.maps?.places) return Promise.resolve(window.google)
+  if (gmapsLoader) return gmapsLoader
+  gmapsLoader = new Promise(resolve => {
+    const cbName = '__leapGmapsReady'
+    window[cbName] = () => resolve(window.google)
+    const s = document.createElement('script')
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_KEY)}&libraries=places&callback=${cbName}`
+    s.async = true
+    s.defer = true
+    s.onerror = () => resolve(null)
+    document.head.appendChild(s)
+  })
+  return gmapsLoader
+}
+function parseGooglePlace(place) {
+  const comp = (type, short = false) => {
+    const c = (place.address_components || []).find(x => x.types.includes(type))
+    return c ? (short ? c.short_name : c.long_name) : ''
+  }
+  const street = [comp('street_number'), comp('route')].filter(Boolean).join(' ')
+  const city = comp('locality') || comp('sublocality_level_1') || comp('sublocality') || comp('postal_town') || ''
+  const state = comp('administrative_area_level_1', true)
+  const zip = comp('postal_code')
+  return { street, city, state, zip }
+}
 
 // ─── slug → display metadata + intake config ────────────────────────────────
 // Mirrors WT-00072..00075. The `intake` array lists per-slug extra form fields
@@ -349,6 +383,38 @@ function IntakeStep({ meta, initial, onSubmit }) {
   const [form, setForm] = useState(initial)
   const [focused, setFocused] = useState(null)
   const [validation, setValidation] = useState(null)
+  const streetRef = useRef(null)
+
+  // Attach Google Places autofill to the street field (no-op without a key).
+  // Selecting a suggestion fills street + city + state + zip in one tap.
+  useEffect(() => {
+    let autocomplete = null
+    loadGoogleMaps().then(google => {
+      if (!google || !streetRef.current) return
+      autocomplete = new google.maps.places.Autocomplete(streetRef.current, {
+        types: ['address'],
+        componentRestrictions: { country: 'us' },
+        fields: ['address_components'],
+      })
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace()
+        if (!place || !place.address_components) return
+        const p = parseGooglePlace(place)
+        setForm(f => ({
+          ...f,
+          street: p.street || f.street,
+          city:   p.city   || f.city,
+          state:  p.state  || f.state,
+          zip:    p.zip    || f.zip,
+        }))
+      })
+    })
+    return () => {
+      if (autocomplete && window.google?.maps?.event) {
+        window.google.maps.event.clearInstanceListeners(autocomplete)
+      }
+    }
+  }, [])
 
   function update(field, value) {
     setForm(f => ({ ...f, [field]: value }))
@@ -424,9 +490,12 @@ function IntakeStep({ meta, initial, onSubmit }) {
       </div>
 
       <Field label="Service address">
-        <input type="text" value={form.street} onChange={e => update('street', e.target.value)}
+        <input type="text" ref={streetRef} value={form.street} onChange={e => update('street', e.target.value)}
                onFocus={() => setFocused('street')} onBlur={() => setFocused(null)}
-               style={{ ...styledInput('street'), marginBottom: 8 }} placeholder="Street address" autoComplete="street-address" required />
+               onKeyDown={e => { if (e.key === 'Enter') e.preventDefault() }}
+               style={{ ...styledInput('street'), marginBottom: 8 }}
+               placeholder={GOOGLE_MAPS_KEY ? 'Start typing your address…' : 'Street address'}
+               autoComplete={GOOGLE_MAPS_KEY ? 'off' : 'street-address'} required />
       </Field>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
