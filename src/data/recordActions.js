@@ -58,6 +58,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_PROJECT_RESERVATION_SUBMITTAL:   'generate_project_reservation_submittal',
   GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL: 'generate_final_payment_request_submittal',
   GENERATE_QUALITY_INSTALL_TOOL:            'generate_quality_install_tool',
+  GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
   SCHEDULE_WORK_ORDERS:    'schedule_work_orders',
   RESCHEDULE_WORK_ORDERS:  'reschedule_work_orders',
   SCHEDULE_WORK_ORDER:     'schedule_work_order',
@@ -227,6 +228,23 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultSortOrder:    27,
     isAvailable: ({ tableName, editing, recordTypeLabel }) =>
       !editing && tableName === 'incentive_applications' && recordTypeLabel === 'WI-IRA-MF-HOMES-PROJECT-PAYMENT-REQUEST',
+  },
+  // Open the Focus On Energy pre-approval application (hosted on Formstack),
+  // pre-filled from THIS enrollment, in a new tab. The assessor reviews, attaches
+  // the required documents (which a URL cannot pre-fill), and submits. Gated to
+  // the WI-IRA-MF-HOMES assessment pre-approval record type via the resolved
+  // record-type label in ctx. The target form + field wiring are data-driven
+  // (external_form_targets / external_form_field_map).
+  generate_preapproval_application: {
+    key:                 ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION,
+    label:               'Open Pre-Approval Application',
+    icon:                'M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5M15 3h6m0 0v6m0-6L10 14',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['enrollments'],
+    defaultTier:         'primary',
+    defaultSortOrder:    22,
+    isAvailable: ({ tableName, editing, recordTypeLabel }) =>
+      !editing && tableName === 'enrollments' && recordTypeLabel === 'WI-IRA-MF-HOMES-Assessment-Preapproval',
   },
   run_income_qualification: {
     key:                 ACTION_KEYS.RUN_INCOME_QUALIFICATION,
