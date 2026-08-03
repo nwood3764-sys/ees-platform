@@ -6271,38 +6271,70 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableName, hasWorkMeasuresField, editing, draft?.opportunity_id])
 
-  // Multifamily create defaults (Nicholas, 2026-08-03): when creating an
-  // enrollment and the chosen Property Type is any Multifamily ("apartment"),
-  // pre-fill the two required fields — Modeling Approach = "Whole Building -
-  // DOE-2-based software" and Requested Incentive Amount = 2000 (the MF 4+
-  // basis, applied to all multifamily buildings). Only fills blanks, so it never
-  // clobbers a value the user already chose. The picklist UUIDs are resolved
-  // from the loaded options by label (nothing hardcoded). Runs live as the
-  // property type is selected. Both fields are required, so the default must
-  // land in the form here — a save-time DB default can't (validation would block
-  // the empty required field first).
+  // Multifamily create defaults from the BUILDING's type (Nicholas, 2026-08-03):
+  // enrollments are building-specific, so the multifamily decision is INHERITED
+  // from the linked building's record type — not a manual dropdown. When that
+  // building is a Multifamily type, pre-fill the two required fields: Modeling
+  // Approach = "Whole Building - DOE-2-based software" and Requested Incentive
+  // Amount = 2000. Fills blanks only, so it never clobbers a chosen value. The
+  // modeling UUID is resolved from the loaded options by label (nothing
+  // hardcoded). Both fields are required, so the default has to land in the form
+  // here — a save-time DB default can't (validation blocks the empty save first).
   useEffect(() => {
     if (!isCreate || tableName !== 'enrollments') return
-    const ptId = draft?.enrollment_property_type
-    if (!ptId) return
-    const ptOpt = (allPicklistOpts?.enrollment_property_type || [])
-      .find(o => String(o.value) === String(ptId))
-    if (!ptOpt || !/^multifamily/i.test(ptOpt.label || '')) return
-    setDraft(prev => {
-      const next = { ...prev }
-      let changed = false
-      if (next.enrollment_modeling_approach == null || next.enrollment_modeling_approach === '') {
-        const doe2 = (allPicklistOpts?.enrollment_modeling_approach || [])
-          .find(o => (o.label || '') === 'Whole Building - DOE-2-based software')
-        if (doe2) { next.enrollment_modeling_approach = doe2.value; changed = true }
-      }
-      if (next.enrollment_requested_incentive_amount == null || next.enrollment_requested_incentive_amount === '') {
-        next.enrollment_requested_incentive_amount = 2000; changed = true
-      }
-      return changed ? next : prev
-    })
+    const bId = draft?.building_id
+    if (!bId) return
+    let cancelled = false
+    ;(async () => {
+      const { data: b } = await supabase.from('buildings')
+        .select('building_record_type').eq('id', bId).maybeSingle()
+      if (cancelled || !b?.building_record_type) return
+      const { data: rt } = await supabase.from('picklist_values')
+        .select('picklist_value,picklist_label').eq('id', b.building_record_type).maybeSingle()
+      if (cancelled || !rt) return
+      const isMultifamily = /multifamily/i.test(rt.picklist_value || '') || /multifamily/i.test(rt.picklist_label || '')
+      if (!isMultifamily) return
+      setDraft(prev => {
+        if (prev.building_id !== bId) return prev
+        const next = { ...prev }
+        let changed = false
+        if (next.enrollment_modeling_approach == null || next.enrollment_modeling_approach === '') {
+          const doe2 = (allPicklistOpts?.enrollment_modeling_approach || [])
+            .find(o => (o.label || '') === 'Whole Building - DOE-2-based software')
+          if (doe2) { next.enrollment_modeling_approach = doe2.value; changed = true }
+        }
+        if (next.enrollment_requested_incentive_amount == null || next.enrollment_requested_incentive_amount === '') {
+          next.enrollment_requested_incentive_amount = 2000; changed = true
+        }
+        return changed ? next : prev
+      })
+    })()
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCreate, tableName, draft?.enrollment_property_type, allPicklistOpts])
+  }, [isCreate, tableName, draft?.building_id, allPicklistOpts])
+
+  // Contractor contact inherits from the account's primary contact (Nicholas,
+  // 2026-08-03): when creating an enrollment and a Registered Contractor account
+  // is chosen, default the contractor contact to that account's primary contact
+  // (accounts.account_contact_id) if one isn't already set — e.g. picking Johnson
+  // Controls auto-sets the contact to Jeff Van Ess. Fills blanks only.
+  useEffect(() => {
+    if (!isCreate || tableName !== 'enrollments') return
+    const acctId = draft?.enrollment_contractor_account_id
+    if (!acctId || draft?.enrollment_contractor_contact_id) return
+    let cancelled = false
+    ;(async () => {
+      const { data: a } = await supabase.from('accounts')
+        .select('account_contact_id').eq('id', acctId).maybeSingle()
+      if (cancelled || !a?.account_contact_id) return
+      setDraft(prev => {
+        if (prev.enrollment_contractor_account_id !== acctId || prev.enrollment_contractor_contact_id) return prev
+        return { ...prev, enrollment_contractor_contact_id: a.account_contact_id }
+      })
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreate, tableName, draft?.enrollment_contractor_account_id])
 
   // Record the visit for Recent Items (Salesforce parity). Fires once per opened
   // record, only for the URL-addressed record (so ObjectListSection's non-URL
