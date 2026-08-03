@@ -27,6 +27,20 @@ import {
 } from '../data/assistantService'
 import { emitDataRefresh } from '../lib/dataRefresh'
 
+// Action types that run the moment the assistant proposes them — no confirmation
+// card, no waiting. These are the everyday, permission-scoped, reversible
+// operations (create a record / log a call / edit a field / change a status /
+// create a report). Everything is audit-logged and soft-deleted, so an errant
+// one is visible and recoverable. Any other type (e.g. a bulk or admin action)
+// falls through to the confirmation card. The assistant has no delete action, so
+// nothing destructive auto-runs.
+const AUTO_COMMIT_TYPES = new Set([
+  'record_create', 'record_update', 'status_change', 'report_create',
+])
+const isAutoCommittable = (actions) =>
+  Array.isArray(actions) && actions.length > 0 &&
+  actions.every(a => AUTO_COMMIT_TYPES.has(a?.type))
+
 // Map the app's selected-record shape to the edge function's context shape.
 // selectedRecord carries { table, id, name/label } in this codebase; we read
 // defensively since not every surface sets every field.
@@ -309,42 +323,6 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     return () => { cancelled = true }
   }, [open, objForContext])
 
-  const send = useCallback(async () => {
-    const message = input.trim()
-    if (!message || busy) return
-    setInput('')
-    setTurns(t => [...t, { role: 'user', text: message }])
-    setBusy(true)
-    try {
-      const ctx = buildContext(selectedRecord, listTable)
-      const res = await sendAssistantMessage({ message, history, context: ctx })
-      if (res.mock) {
-        setTurns(t => [...t, { role: 'assistant', text: res.reply, actions: [] }])
-      } else {
-        setTurns(t => [...t, {
-          role: 'assistant',
-          text: res.reply || '(no reply)',
-          actions: res.proposed_actions || [],
-          committed: new Set(),
-        }])
-        setHistory(h => [...h,
-          { role: 'user', content: message },
-          { role: 'assistant', content: res.reply || '' },
-        ])
-        // Persist this turn so it survives refresh / a new day. Best-effort:
-        // never let a memory write break the conversation.
-        const ctxJson = ctx ? { object: ctx.object || null, record_id: ctx.record_id || null } : null
-        saveAssistantMessage({ role: 'user', content: message, context: ctxJson }).catch(() => {})
-        if (res.reply) saveAssistantMessage({ role: 'assistant', content: res.reply }).catch(() => {})
-      }
-    } catch (e) {
-      toast.error(e.message || 'Assistant request failed')
-      setTurns(t => [...t, { role: 'assistant', text: `Error: ${e.message || e}`, actions: [] }])
-    } finally {
-      setBusy(false)
-    }
-  }, [input, busy, history, selectedRecord, listTable, toast])
-
   // Build a {table,id,label} link list from a commit result's per-action rows.
   const linksFromResult = useCallback((result, actions) => {
     const rows = result?.results || []
@@ -359,64 +337,122 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     return links
   }, [])
 
-  // Commit a set of actions together (one RPC call so {{ref:...}} links resolve),
-  // mark them committed, surface created-record links, and feed a short note
-  // back into history so the next turn knows the records exist.
+  // Run a set of actions through commit_screen_flow_run in ONE RPC call (so
+  // {{ref:...}} parent→child links resolve together), refresh any touched
+  // records/lists, and feed a created-records note back into history so a
+  // follow-up turn knows they exist. Returns { ok, links } and updates NO turn
+  // state — the caller attaches the result to the right turn. Shared by the
+  // auto-run path (send) and the manual Confirm path (commitSet).
+  const performCommit = useCallback(async (actions, ctx) => {
+    const result = await commitAssistantActions({ actions, context: ctx })
+    const ok = result?.ok !== false
+    if (!ok) {
+      const msg = result?.results?.find(r => r.outcome === 'error')?.message || 'Action was refused'
+      toast.error(msg)
+      return { ok: false, links: [] }
+    }
+    const links = linksFromResult(result, actions)
+    toast.success(actions.length > 1 ? `Created ${links.length} records` : 'Action completed')
+    // Tell every live record and list view to re-fetch so the change (a new
+    // contact, an edited field) is visible immediately — no manual reload.
+    const touchedTables = new Set()
+    const touchedIds = new Set()
+    ;(result?.results || []).forEach((r, i) => {
+      const table = r?.object || actions[i]?.object
+      if (table) touchedTables.add(table)
+      if (r?.created_id) touchedIds.add(r.created_id)
+      if (actions[i]?.record_id) touchedIds.add(actions[i].record_id)
+    })
+    emitDataRefresh({ source: 'assistant', tables: Array.from(touchedTables), ids: Array.from(touchedIds) })
+    // Feed created ids AND their real URLs back so a follow-up ("give me the
+    // link", "add a contact to it") has everything and never invents an id.
+    if (links.length) {
+      const note = 'Created — these records now exist and each has a real shareable URL: ' +
+        links.map(l => `${l.table} ${l.id} (${recordUrl(l.table, l.id)})`).join('; ') + '.'
+      const sysContent = `[system: ${note}]`
+      setHistory(h => [...h, { role: 'user', content: sysContent }])
+      // Persist the note (hidden from the visible thread on reload, kept in
+      // context) so a later-day follow-up still works. Best-effort.
+      saveAssistantMessage({ role: 'user', content: sysContent }).catch(() => {})
+    }
+    return { ok: true, links }
+  }, [toast, linksFromResult])
+
+  const send = useCallback(async () => {
+    const message = input.trim()
+    if (!message || busy) return
+    setInput('')
+    setTurns(t => [...t, { role: 'user', text: message }])
+    setBusy(true)
+    try {
+      const ctx = buildContext(selectedRecord, listTable)
+      const res = await sendAssistantMessage({ message, history, context: ctx })
+      if (res.mock) {
+        setTurns(t => [...t, { role: 'assistant', text: res.reply, actions: [] }])
+      } else {
+        const actions = res.proposed_actions || []
+        // Record continuity + persist the turn (best-effort) BEFORE running, so
+        // the auto-run's created-records note lands after the assistant reply.
+        setHistory(h => [...h,
+          { role: 'user', content: message },
+          { role: 'assistant', content: res.reply || '' },
+        ])
+        const ctxJson = ctx ? { object: ctx.object || null, record_id: ctx.record_id || null } : null
+        saveAssistantMessage({ role: 'user', content: message, context: ctxJson }).catch(() => {})
+        if (res.reply) saveAssistantMessage({ role: 'assistant', content: res.reply }).catch(() => {})
+
+        // Everyday actions run immediately — no confirmation card. Commit the
+        // whole proposed set together (one RPC so {{ref:...}} links resolve) and
+        // render the turn already-done, with links. Sensitive/unknown types (or
+        // a batch mixing one in) fall through to the confirmation cards.
+        let committed = new Set()
+        let createdLinks = []
+        if (isAutoCommittable(actions)) {
+          const { ok, links } = await performCommit(actions, ctx)
+          if (ok) {
+            committed = new Set(actions.map((_, i) => i))
+            createdLinks = links
+          }
+        }
+        setTurns(t => [...t, {
+          role: 'assistant',
+          text: res.reply || '(no reply)',
+          actions,
+          committed,
+          createdLinks,
+        }])
+      }
+    } catch (e) {
+      toast.error(e.message || 'Assistant request failed')
+      setTurns(t => [...t, { role: 'assistant', text: `Error: ${e.message || e}`, actions: [] }])
+    } finally {
+      setBusy(false)
+    }
+  }, [input, busy, history, selectedRecord, listTable, toast, performCommit])
+
+  // Manual Confirm path (used only for the sensitive action types that still
+  // show a card): commit the chosen actions and mark that turn done.
   const commitSet = useCallback(async (turnIdx, actionIndices) => {
     setBusy(true)
     try {
       const turn = turns[turnIdx]
       const actions = actionIndices.map(i => turn.actions[i])
       const ctx = buildContext(selectedRecord, listTable)
-      const result = await commitAssistantActions({ actions, context: ctx })
-      const ok = result?.ok !== false
+      const { ok, links } = await performCommit(actions, ctx)
       if (ok) {
-        const links = linksFromResult(result, actions)
-        toast.success(actions.length > 1 ? `Created ${links.length} records` : 'Action completed')
-        // Standard behavior: after a committed action, tell every live record
-        // and list view to re-fetch so the change (a new contact, an edited
-        // field) is visible immediately — no manual browser reload. Gather the
-        // tables/ids touched from both the per-action result rows and the
-        // originating actions (an update row still carries its object/id).
-        const touchedTables = new Set()
-        const touchedIds = new Set()
-        ;(result?.results || []).forEach((r, i) => {
-          const table = r?.object || actions[i]?.object
-          if (table) touchedTables.add(table)
-          if (r?.created_id) touchedIds.add(r.created_id)
-          if (actions[i]?.record_id) touchedIds.add(actions[i].record_id)
-        })
-        emitDataRefresh({ source: 'assistant', tables: Array.from(touchedTables), ids: Array.from(touchedIds) })
         setTurns(t => t.map((tn, i) => {
           if (i !== turnIdx) return tn
           const committed = new Set(tn.committed); actionIndices.forEach(ai => committed.add(ai))
           const createdLinks = [...(tn.createdLinks || []), ...links]
           return { ...tn, committed, createdLinks }
         }))
-        // Feed created ids AND their real URLs back so a follow-up ("give me
-        // the link", "add a contact to it") has everything and never goes blind
-        // or invents an id. The assistant only treats a record as real once it
-        // sees one of these system notes.
-        if (links.length) {
-          const note = 'Created — these records now exist and each has a real shareable URL: ' +
-            links.map(l => `${l.table} ${l.id} (${recordUrl(l.table, l.id)})`).join('; ') + '.'
-          const sysContent = `[system: ${note}]`
-          setHistory(h => [...h, { role: 'user', content: sysContent }])
-          // Persist the created-records note (hidden from the visible thread on
-          // reload, but kept in context) so a follow-up like "give me that
-          // building's link" works on a later day. Best-effort.
-          saveAssistantMessage({ role: 'user', content: sysContent }).catch(() => {})
-        }
-      } else {
-        const msg = result?.results?.find(r => r.outcome === 'error')?.message || 'Action was refused'
-        toast.error(msg)
       }
     } catch (e) {
       toast.error(e.message || 'Could not complete the action')
     } finally {
       setBusy(false)
     }
-  }, [turns, selectedRecord, listTable, toast, linksFromResult])
+  }, [turns, selectedRecord, listTable, toast, performCommit])
 
   const confirmAction = useCallback((turnIdx, actionIdx) => commitSet(turnIdx, [actionIdx]), [commitSet])
 
@@ -569,8 +605,9 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
             {turns.length === 0 && (
               <div style={{ color: C.textMuted, fontSize: 13, lineHeight: 1.5 }}>
                 Ask me to create a work order, update a record, change a status, run a report, or look something up —
-                or ask how to do something in LEAP ("how do I…", "where do I find…"). I only do what your permissions
-                allow, and I always show you an action before it runs.
+                or ask how to do something in LEAP ("how do I…", "where do I find…"). Everyday actions run right away
+                and I show you what I did with a link — I only pause to confirm bulk or destructive changes. I do only
+                what your permissions allow, and everything is logged and reversible.
               </div>
             )}
             {turns.map((turn, ti) => (
