@@ -35,6 +35,12 @@
   # "Exposed secrets detected" (exit 2) and nothing deploys. Omitting ONLY these
   # known-public keys keeps scanning ON for any genuinely secret value.
   SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,VITE_GOOGLE_MAPS_API_KEY"
+  # OMIT_KEYS alone is not enough: Netlify's pattern-based ("enhanced") detection
+  # also flags the Maps key by its Google `AIza…` shape regardless of the env-var
+  # name. OMIT_VALUES tells the scanner these exact public strings are expected
+  # wherever they appear in the build output, which is the documented fix for
+  # framework-inlined public keys. Any OTHER secret value is still caught.
+  SECRETS_SCAN_OMIT_VALUES = "https://flyjigrijjjtcsvpgzvk.supabase.co,sb_publishable_qkmVXJMofrUrSoVA3bhZ2g_XNsdE9lq,AIzaSyCekN5PTYET9x8-99U6QruQoojyeR6eesQ"
 
 # Security response headers applied to every route. Deliberately conservative
 # so nothing in the app breaks:
