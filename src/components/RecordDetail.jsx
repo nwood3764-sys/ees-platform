@@ -6271,6 +6271,39 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableName, hasWorkMeasuresField, editing, draft?.opportunity_id])
 
+  // Multifamily create defaults (Nicholas, 2026-08-03): when creating an
+  // enrollment and the chosen Property Type is any Multifamily ("apartment"),
+  // pre-fill the two required fields — Modeling Approach = "Whole Building -
+  // DOE-2-based software" and Requested Incentive Amount = 2000 (the MF 4+
+  // basis, applied to all multifamily buildings). Only fills blanks, so it never
+  // clobbers a value the user already chose. The picklist UUIDs are resolved
+  // from the loaded options by label (nothing hardcoded). Runs live as the
+  // property type is selected. Both fields are required, so the default must
+  // land in the form here — a save-time DB default can't (validation would block
+  // the empty required field first).
+  useEffect(() => {
+    if (!isCreate || tableName !== 'enrollments') return
+    const ptId = draft?.enrollment_property_type
+    if (!ptId) return
+    const ptOpt = (allPicklistOpts?.enrollment_property_type || [])
+      .find(o => String(o.value) === String(ptId))
+    if (!ptOpt || !/^multifamily/i.test(ptOpt.label || '')) return
+    setDraft(prev => {
+      const next = { ...prev }
+      let changed = false
+      if (next.enrollment_modeling_approach == null || next.enrollment_modeling_approach === '') {
+        const doe2 = (allPicklistOpts?.enrollment_modeling_approach || [])
+          .find(o => (o.label || '') === 'Whole Building - DOE-2-based software')
+        if (doe2) { next.enrollment_modeling_approach = doe2.value; changed = true }
+      }
+      if (next.enrollment_requested_incentive_amount == null || next.enrollment_requested_incentive_amount === '') {
+        next.enrollment_requested_incentive_amount = 2000; changed = true
+      }
+      return changed ? next : prev
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreate, tableName, draft?.enrollment_property_type, allPicklistOpts])
+
   // Record the visit for Recent Items (Salesforce parity). Fires once per opened
   // record, only for the URL-addressed record (so ObjectListSection's non-URL
   // detail mounts don't count) and only after the record actually loaded in view
