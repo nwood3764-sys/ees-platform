@@ -10,14 +10,14 @@ const SERVICES = [
   {
     slug:        'single-family-assessment',
     title:       'Single-Family Energy Assessment',
-    description: 'A 90-minute home energy assessment for single-family residences. A BPI-certified auditor inspects insulation, air sealing, HVAC, and appliances and identifies eligible incentives.',
-    duration:    '90 minutes',
+    description: 'A 45-minute home energy assessment for single-family residences. A BPI-certified auditor inspects insulation, air sealing, HVAC, and appliances and identifies eligible incentives.',
+    duration:    '45 minutes',
   },
   {
     slug:        'townhome-assessment',
     title:       'Townhome Energy Assessment',
-    description: 'A 90-minute energy assessment for attached townhome residences. Same scope as single-family with attention to shared-wall conditions.',
-    duration:    '90 minutes',
+    description: 'A 45-minute energy assessment for attached townhome residences. Same scope as single-family with attention to shared-wall conditions.',
+    duration:    '45 minutes',
   },
   {
     slug:        'multifamily-energy-assessment',

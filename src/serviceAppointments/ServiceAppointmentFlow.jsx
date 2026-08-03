@@ -56,6 +56,16 @@ function parseGooglePlace(place) {
 // beyond the base contact + address. When more work_types ship, this gets
 // driven by the work_type record itself (intake_fields_json).
 
+// Multifamily intake collects the owner/property identity alongside the
+// property address (the base address block, relabeled "Property address") and
+// the building count that scales the visit length.
+const MULTIFAMILY_INTAKE = [
+  { name: 'company_name',        label: 'Company name',                     type: 'text',   placeholder: 'Property management or owner company' },
+  { name: 'property_name',       label: 'Property name',                    type: 'text',   placeholder: 'e.g. Alden Court Apartments' },
+  { name: 'building_name',       label: 'Building address name or number',  type: 'text',   placeholder: 'e.g. Building A or 1837' },
+  { name: 'number_of_buildings', label: 'How many buildings on the property?', type: 'number', placeholder: 'e.g. 3', min: 1, max: 50 },
+]
+
 const SLUG_META = {
   'nc-energy-savers-site-visit': {
     title:        'North Carolina Energy Savers — Site Visit',
@@ -66,37 +76,25 @@ const SLUG_META = {
   },
   'single-family-assessment': {
     title:    'Single-Family Energy Assessment',
-    durationLabel: '90 minutes',
+    durationLabel: '45 minutes',
     intake:   [],
   },
   'townhome-assessment': {
     title:    'Townhome Energy Assessment',
-    durationLabel: '90 minutes',
+    durationLabel: '45 minutes',
     intake:   [],
   },
   'multifamily-energy-assessment': {
     title:    'Multifamily Energy Assessment',
     durationLabel: '60 minutes per building',
-    intake: [{
-      name:        'number_of_buildings',
-      label:       'How many buildings on the property?',
-      type:        'number',
-      placeholder: 'e.g. 3',
-      min:         1,
-      max:         50,
-    }],
+    addressLabel: 'Property address',
+    intake: MULTIFAMILY_INTAKE,
   },
   'multifamily-diagnostic-assessment': {
     title:    'Multifamily Diagnostic Assessment',
     durationLabel: '120 minutes per building',
-    intake: [{
-      name:        'number_of_buildings',
-      label:       'How many buildings on the property?',
-      type:        'number',
-      placeholder: 'e.g. 3',
-      min:         1,
-      max:         50,
-    }],
+    addressLabel: 'Property address',
+    intake: MULTIFAMILY_INTAKE,
   },
 }
 
@@ -489,7 +487,7 @@ function IntakeStep({ meta, initial, onSubmit }) {
         </Field>
       </div>
 
-      <Field label="Service address">
+      <Field label={meta.addressLabel || 'Service address'}>
         <input type="text" ref={streetRef} value={form.street} onChange={e => update('street', e.target.value)}
                onFocus={() => setFocused('street')} onBlur={() => setFocused(null)}
                onKeyDown={e => { if (e.key === 'Enter') e.preventDefault() }}
