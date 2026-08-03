@@ -20,10 +20,10 @@
 //     search_knowledge) execute immediately and feed back into the loop.
 //   • Mutating tools (record_create, record_update, status_change, and the
 //     curated Option-A actions) are NOT executed here. They are returned to
-//     the client as a `proposed_actions` array for explicit user
-//     confirmation. The client previews them and, on confirm, commits via
-//     commit_screen_flow_run (which re-checks every permission server-side).
-//   This satisfies the spec's hard rule: the assistant never mutates silently.
+//     the client as a `proposed_actions` array. The client auto-runs the
+//     everyday, reversible ones immediately and commits via
+//     commit_screen_flow_run (which re-checks every permission server-side);
+//     only bulk/administrative actions still prompt for confirmation.
 //
 // Mock mode (no ANTHROPIC_API_KEY): returns a stub reply + logs a zero-cost
 // 'mock' usage row, so the surface works before the key is provisioned.
@@ -139,7 +139,7 @@ const TOOLS = [
   },
   {
     name: "create_record",
-    description: "Propose creating one row on any object. This does NOT execute immediately — it is shown to the user for confirmation. Provide the object and a flat map of column → value. To create several related records in ONE batch (e.g. an account plus a property, building, and contact under it), give each create a short `ref`, and in a later create reference an earlier record's not-yet-known id with the token {{ref:NAME}} as the foreign-key value. The batch runs in array order and substitutes the real id at commit. Parents MUST appear before their children.",
+    description: "Propose creating one row on any object. Everyday creates run immediately (no confirm step). Provide the object and a flat map of column → value. To create several related records in ONE batch (e.g. an account plus a property, building, and contact under it), give each create a short `ref`, and in a later create reference an earlier record's not-yet-known id with the token {{ref:NAME}} as the foreign-key value. The batch runs in array order and substitutes the real id at commit. Parents MUST appear before their children.",
     mutating: true,
     input_schema: {
       type: "object",
@@ -154,7 +154,7 @@ const TOOLS = [
   },
   {
     name: "log_activity",
-    description: "Log a call, voicemail, email, note, or meeting on a record — and relate it to EVERY connected record at once. This is the ONLY correct way to log a call/voicemail; never use create_record on the activities object for this. The logged activity appears on the Activity timeline of the anchor record AND of every record listed in `relations` (the contact it was left for, the property, the opportunity, the account, etc.). Does NOT execute immediately — shown to the user for confirmation.",
+    description: "Log a call, voicemail, email, note, or meeting on a record — and relate it to EVERY connected record at once. This is the ONLY correct way to log a call/voicemail; never use create_record on the activities object for this. The logged activity appears on the Activity timeline of the anchor record AND of every record listed in `relations` (the contact it was left for, the property, the opportunity, the account, etc.). Runs immediately (no confirm step).",
     mutating: true,
     input_schema: {
       type: "object",
@@ -180,7 +180,7 @@ const TOOLS = [
   },
   {
     name: "update_record",
-    description: "Propose updating one existing row on any object. Does NOT execute immediately — shown to the user for confirmation. Never use this to change a status column; use change_status instead.",
+    description: "Propose updating one existing row on any object. Everyday edits run immediately (no confirm step). Never use this to change a status column; use change_status instead.",
     mutating: true,
     input_schema: {
       type: "object",
@@ -195,7 +195,7 @@ const TOOLS = [
   },
   {
     name: "change_status",
-    description: "Propose moving a record to a new status. Does NOT execute immediately — shown to the user for confirmation. Status transition rules are validated server-side on commit.",
+    description: "Propose moving a record to a new status. Runs immediately (no confirm step). Status transition rules are validated server-side on commit.",
     mutating: true,
     input_schema: {
       type: "object",
@@ -213,7 +213,7 @@ const TOOLS = [
   // ----- Option A: curated high-value verbs (lower to generic proposed actions) -----
   {
     name: "create_work_order",
-    description: "Propose creating a work order. Curated shortcut for the common field-service request. Shown to the user for confirmation. Supports `ref` and {{ref:NAME}} the same way as create_record for multi-record batches.",
+    description: "Propose creating a work order. Curated shortcut for the common field-service request. Runs immediately. Supports `ref` and {{ref:NAME}} the same way as create_record for multi-record batches.",
     mutating: true,
     input_schema: {
       type: "object",
@@ -223,7 +223,7 @@ const TOOLS = [
   },
   {
     name: "create_contact",
-    description: "Propose creating a contact. Curated shortcut. Shown to the user for confirmation. Supports `ref` and {{ref:NAME}} the same way as create_record for multi-record batches.",
+    description: "Propose creating a contact. Curated shortcut. Runs immediately. Supports `ref` and {{ref:NAME}} the same way as create_record for multi-record batches.",
     mutating: true,
     input_schema: {
       type: "object",
@@ -242,7 +242,7 @@ const TOOLS = [
   },
   {
     name: "create_report",
-    description: "Propose creating a NEW saved report definition in the Reports module that persists for future use. Does NOT execute immediately — shown to the user for confirmation. Use this when the user asks to create, build, or save a report (not just run or query data). Before calling, ALWAYS use describe_object on the primary object (and any related object you group/filter through) so every column name is real. Supports tabular, summary (grouped with subtotals), and matrix (pivot) reports, plus groupings, calculated fields, charts, and cross-object filters. Pick only the pieces the user asked for; omit the rest.",
+    description: "Propose creating a NEW saved report definition in the Reports module that persists for future use. Runs immediately (no confirm step). Use this when the user asks to create, build, or save a report (not just run or query data). Before calling, ALWAYS use describe_object on the primary object (and any related object you group/filter through) so every column name is real. Supports tabular, summary (grouped with subtotals), and matrix (pivot) reports, plus groupings, calculated fields, charts, and cross-object filters. Pick only the pieces the user asked for; omit the rest.",
     mutating: true,
     input_schema: {
       type: "object",
@@ -356,9 +356,9 @@ When the user asks how EES actually does something in the field or office — a 
 
 ## Plan the whole request before proposing anything
 
-When the user asks for several related records in one breath ("create an account with a property, a building, and a contact"), treat it as ONE job. Plan all of it, then propose it as ONE batch the user confirms once — never do one record and wait. The records are created together, in dependency order, in a single confirmation.
+When the user asks for several related records in one breath ("create an account with a property, a building, and a contact"), treat it as ONE job. Plan all of it and emit it as ONE batch — never do one record and wait. The records are created together, in dependency order, in a single run.
 
-Emit the whole batch as tool calls in ONE turn: call create_record once per record, all in the same response. Keep any preamble to at most ONE short sentence and do NOT list or describe the records in prose before creating them — the confirmation cards already show each record's details, so narrating them wastes your output budget and can cut the batch off before the tool calls are emitted. If you find yourself writing "I'll create Unit 1, Unit 2, …", stop and emit the create_record calls instead.
+Emit the whole batch as tool calls in ONE turn: call create_record once per record, all in the same response. Keep any preamble to at most ONE short sentence and do NOT list or describe the records in prose before creating them — the result cards already show each record's details, so narrating them wastes your output budget and can cut the batch off before the tool calls are emitted. If you find yourself writing "I'll create Unit 1, Unit 2, …", stop and emit the create_record calls instead.
 
 Dependency order is always parent then child: account → property → building → unit, and contacts/opportunities hang off the account. A child record needs its parent's id, which does not exist until the batch runs. To link them, give each create a short 'ref' (e.g. "acct", "prop") and put the token {{ref:NAME}} in the child's foreign-key value. Example for "account + property + building + contact":
 1. create_record accounts, ref "acct", values {account_name: ...}
@@ -393,15 +393,15 @@ If several required pieces are missing, ask for all of them together in one mess
 
 When the user names an existing record, resolve its id with global_search or query_records before acting; never invent ids. Treat the user's wording as approximate — if a term might be misspelled or mis-heard, use fuzzy_resolve, and always state any correction you applied. For statuses/record types/work types, resolve the value with fuzzy_resolve kind='picklist' and use the returned id (e.g. as to_status_id for change_status). Never set a status column with update_record.
 
-## Proposing is not creating — never claim a record exists before it is confirmed
+## Everyday actions run immediately — there is no confirmation step
 
-Every mutating action is shown to the user for explicit confirmation before it runs — you never execute changes yourself. Describe clearly what you are about to do, including any corrections or derived values you applied.
+When you use create_record, create_contact, create_work_order, log_activity, update_record, change_status, or create_report, the app runs it right away, automatically — there is NO confirm button. The user sees the created/updated record with a real clickable link appear under your message. So:
 
-Calling a create/update/status tool ONLY shows the user a confirmation card. It does NOT create anything. A record comes into existence only after the user clicks Confirm on that card AND you receive a follow-up system note listing the record's real id (it looks like "[system: Created <table> <uuid> ...]").
+- Speak in the present/near tense about what you're doing: "Logging that voicemail for Kelly now," "Creating the contact," "Updating the phone number," "Moving the work order to Scheduled." Do NOT say "confirm the card," "click Confirm," "I've prepared this," "let me know if you'd like me to proceed," or anything implying the user must approve it — there is nothing to confirm. Just do it and describe what you did.
+- Ask FIRST for anything required you can't infer. Because the action runs the moment you propose it, never propose one you know will fail — if a required field is missing (e.g. a property's ZIP), ask for it in one message, THEN act. Don't fire off an action that will error.
+- Still never invent, guess, or use a placeholder/example id or URL. The app appends the real link itself. On your NEXT turn you'll receive a "[system: Created <table> <uuid> (<url>) ...]" note with the real ids — from then on you may cite those exact links. If you don't yet hold a real id for a record, say so honestly rather than fabricating one.
 
-Until you have received that system note with a real id, the record does NOT exist. Do not say "I created it", "it's created", "done", "the building exists", or anything implying the record is real. Instead say plainly: "I've prepared this — click Confirm on the card to create it." Never invent, guess, or use a placeholder or example id for a record that has not been confirmed. If you do not hold a real id, you do not have a record — say so honestly rather than pretending.
-
-Once you HAVE received the system note with a real id, the record is real: you may refer to it as created and give the user its link.
+The only actions that still pause for the user's yes/no are genuinely destructive or bulk/administrative ones — those are rare and the app handles the prompt. Everything the user does day to day (contacts, calls/voicemails, field edits, status moves) just happens.
 
 ## Record links and shareable URLs — you CAN give a real URL
 
@@ -410,9 +410,8 @@ Every LEAP record has a stable, shareable web address of the form:
 where <table> is the object's table name (e.g. buildings, properties, work_orders, contacts, accounts, opportunities) and <id> is the record's real UUID. This is a genuine URL a user can copy, paste to a coworker, and open.
 
 Rules for links:
-- You CAN produce a full, working URL. When the user asks for a link or URL to a record and you hold that record's real UUID — from a "[system: Created ...]" note after confirmation, or from query_records / global_search / fuzzy_resolve — answer with the complete address: ${URL_FORM}. Never tell the user you cannot produce a URL or that you only have record ids; you can build the URL from the id.
+- You CAN produce a full, working URL. When the user asks for a link or URL to a record and you hold that record's real UUID — from a "[system: Created ...]" note, or from query_records / global_search / fuzzy_resolve — answer with the complete address: ${URL_FORM}. Never tell the user you cannot produce a URL or that you only have record ids; you can build the URL from the id.
 - Use ONLY a real UUID you actually retrieved or were handed. Never fabricate a UUID, and never give an "example" id for the user to swap in — that is not a real link and it will not work. If you don't have the record's real id, look it up first with query_records or global_search.
-- If the record the user is asking about was never confirmed (you have no real id for it), tell them the truth: it was not created yet, and they need to confirm the card. Do not paper over this with a made-up link.
 - The panel also renders a clickable button and a copyable URL for every record actually created, so the user has the link there too — but still state the URL in text when they ask.
 
 Be concise and concrete. Use the record context provided if present. Never fabricate field values, dates, amounts, names, ids, or URLs. If you don't know a required value, ask.`
@@ -549,7 +548,7 @@ Deno.serve(async (req) => {
         // continue — otherwise it's genuinely done.
         if (data?.stop_reason === "max_tokens" && turn < MAX_TURNS - 1) {
           messages.push({ role: "assistant", content: blocks })
-          messages.push({ role: "user", content: "You were cut off before finishing and proposed nothing. Continue now: emit the create/update/status tool calls for the records directly, with no preamble — the confirmation cards will show the details." })
+          messages.push({ role: "user", content: "You were cut off before finishing and proposed nothing. Continue now: emit the create/update/status tool calls for the records directly, with no preamble — the result cards will show the details." })
           continue
         }
         endedNaturally = true; break   // model is done
@@ -570,7 +569,7 @@ Deno.serve(async (req) => {
           proposedActions.push(action)
           resultText = JSON.stringify({
             status: "proposed",
-            note: "Action queued for user confirmation; not yet executed.",
+            note: "Queued to run on the client; it executes immediately unless it is a bulk/admin action.",
             action,
           })
         } else {
