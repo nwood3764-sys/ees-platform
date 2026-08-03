@@ -38,6 +38,7 @@ import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
+import { openAssessmentPreapprovalForm } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
@@ -7570,6 +7571,25 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     recordTypeLabel,
   }
 
+  // Open the pre-approval application form, pre-filled from this enrollment.
+  // The blank tab is opened synchronously (within the click's user gesture) so
+  // popup blockers don't fire; the async prefill build then redirects it.
+  const [openingPreapproval, setOpeningPreapproval] = useState(false)
+  const handleOpenPreapprovalForm = useCallback(async () => {
+    if (openingPreapproval) return
+    const win = window.open('', '_blank')
+    setOpeningPreapproval(true)
+    try {
+      const { url, error } = await openAssessmentPreapprovalForm(recordId, win)
+      if (error || !url) {
+        if (win) win.close()
+        window.alert(error || 'Could not open the pre-approval application.')
+      }
+    } finally {
+      setOpeningPreapproval(false)
+    }
+  }, [recordId, openingPreapproval])
+
   const topbarActionHandlers = {
     [ACTION_KEYS.EDIT]:                   startEditing,
     [ACTION_KEYS.CLONE]:                  handleClone,
@@ -7584,6 +7604,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       () => setSubmittalStage(SUBMITTAL_STAGES.FINAL_PROJECT_PAYMENT_REQUEST),
     [ACTION_KEYS.EDIT_SUBMITTAL_TEMPLATE]: () => setShowSubmittalEditor(true),
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
+    [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
     [ACTION_KEYS.SCHEDULE_WORK_ORDER]:    () => setShowWoSchedule(true),
@@ -7610,6 +7631,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // gates so the runtime feel matches.
   const topbarPendingByKey = {
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: runningIncomeQual,
+    [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: openingPreapproval,
     [ACTION_KEYS.RESEND_SIGNING_EMAIL]: envelopeBusy,
     [ACTION_KEYS.VOID_ENVELOPE]:        envelopeBusy,
     [ACTION_KEYS.PREVIEW_PDF]:          previewingPdf,
