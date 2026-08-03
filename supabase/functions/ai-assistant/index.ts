@@ -153,6 +153,32 @@ const TOOLS = [
     },
   },
   {
+    name: "log_activity",
+    description: "Log a call, voicemail, email, note, or meeting on a record — and relate it to EVERY connected record at once. This is the ONLY correct way to log a call/voicemail; never use create_record on the activities object for this. The logged activity appears on the Activity timeline of the anchor record AND of every record listed in `relations` (the contact it was left for, the property, the opportunity, the account, etc.). Does NOT execute immediately — shown to the user for confirmation.",
+    mutating: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        object: { type: "string", description: "The anchor record's object/table, e.g. accounts, contacts, properties, opportunities." },
+        record_id: { type: "string", description: "The anchor record's id. May be the token {{ref:NAME}} to link to a record created earlier in this same batch." },
+        activity_type: { type: "string", description: "Capitalized type: Call, Email, Note, Meeting, SMS, or Task. For a voicemail use Call." },
+        subject: { type: "string", description: "Short subject line, e.g. 'Voicemail left for Kelly Barringer' or 'Left voicemail — unable to leave message'." },
+        body: { type: "string", description: "Optional details/comments of the call or note." },
+        direction: { type: "string", description: "Capitalized: Outbound or Inbound. Use Outbound for a call/voicemail the user placed." },
+        performed_at: { type: "string", description: "ISO timestamp of when it happened, e.g. 2026-08-03T10:25:00. Defaults to now if omitted." },
+        contact_id: { type: "string", description: "The contact this activity is with (who was called / left a voicemail). Relates the activity to that contact's timeline. May be {{ref:NAME}} for a contact created earlier in this batch." },
+        relations: {
+          type: "array",
+          description: "Additional records to relate this activity to, beyond the anchor and contact — e.g. a property and an opportunity. Each appears on its own Activity timeline. Ids may be {{ref:NAME}} tokens.",
+          items: { type: "object", properties: { object: { type: "string", description: "e.g. properties, opportunities, accounts" }, id: { type: "string" } }, required: ["object","id"] },
+        },
+        ref: { type: "string", description: "Optional short label so later records in this batch can link to this activity." },
+        summary: { type: "string", description: "One-line human summary, e.g. 'Log outbound voicemail to Kelly Barringer'." },
+      },
+      required: ["object","record_id","activity_type","subject","summary"],
+    },
+  },
+  {
     name: "update_record",
     description: "Propose updating one existing row on any object. Does NOT execute immediately — shown to the user for confirmation. Never use this to change a status column; use change_status instead.",
     mutating: true,
@@ -340,6 +366,16 @@ Dependency order is always parent then child: account → property → building 
 3. create_record buildings, ref "bldg", values {..., property_id: "{{ref:prop}}"}
 4. create_record contacts, values {..., contact_account_id: "{{ref:acct}}"}
 List parents before children. The batch substitutes the real ids at commit time.
+
+## Logging calls, voicemails, notes, and other activities
+
+When the user wants to log a call, voicemail, email, note, or meeting, ALWAYS use the log_activity tool — never create_record on the activities object. log_activity is the only path that makes the entry show up on the Activity timeline; a raw create on activities does not, so the user would see nothing on the record.
+
+- Set activity_type to a capitalized value — Call, Email, Note, Meeting, SMS, or Task. A voicemail is a Call. Set direction capitalized — Outbound for a call the user placed, Inbound for one received. Do not use lowercase ("call"/"outbound"); it renders and filters inconsistently with everything else.
+- Anchor it on the most relevant record (object + record_id): usually the account or the contact the user named. Put the person spoken to / left a voicemail for in contact_id so it lands on that contact's timeline.
+- Relate it to everything it touches. If the user mentions (or the context makes clear) a property and/or an opportunity as well as the contact and account, pass them in relations so the activity appears on each one's Activity tab. "Relate this to the property, the opportunity, and the contact" is exactly what relations is for — resolve each record's id first and include them all.
+- If you are creating the contact in the SAME batch (e.g. "create this contact and log a voicemail"), emit the create_record/create_contact for the contact FIRST with a ref, then the log_activity referencing it via contact_id: "{{ref:NAME}}". The contact must come before the activity in the batch or the link will fail at commit.
+- performed_at: use the time the user gives (e.g. "at 10:25" today → today's date at 10:25 in ISO form); otherwise omit and it defaults to now.
 
 ## No holes — gather every required field first
 
@@ -617,6 +653,35 @@ function lowerToAction(name: string, input: any): Record<string, unknown> {
       return { type: "record_create", object: "contacts", values: input.values, ref: input.ref || undefined, summary: input.summary }
     case "create_record":
       return { type: "record_create", object: input.object, values: input.values, ref: input.ref || undefined, summary: input.summary }
+    case "log_activity": {
+      // Lower to a record_create on activities: anchor + contact go in the
+      // inline columns (mirrored into activity_relations by the DB trigger);
+      // any extra links ride as a top-level `relations` array the commit RPC
+      // writes into activity_relations directly.
+      const values: Record<string, unknown> = {
+        activity_type: input.activity_type,
+        subject: input.subject,
+        related_object: input.object,
+        related_id: input.record_id,
+      }
+      if (input.body) values.body = input.body
+      if (input.direction) values.direction = input.direction
+      if (input.performed_at) values.performed_at = input.performed_at
+      if (input.contact_id) {
+        values.secondary_object = "contacts"
+        values.secondary_id = input.contact_id
+      }
+      const action: Record<string, unknown> = {
+        type: "record_create", object: "activities", values,
+        ref: input.ref || undefined, summary: input.summary,
+      }
+      if (Array.isArray(input.relations) && input.relations.length) {
+        action.relations = input.relations
+          .filter((r: any) => r && r.object && r.id)
+          .map((r: any) => ({ object: r.object, id: r.id, role: r.role || "related" }))
+      }
+      return action
+    }
     case "update_record":
       return { type: "record_update", object: input.object, record_id: input.record_id, values: input.values, summary: input.summary }
     case "change_status":
