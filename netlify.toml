@@ -27,6 +27,14 @@
   # Public by design — same rationale as the Supabase publishable key above.
   VITE_GOOGLE_MAPS_API_KEY = "AIzaSyCekN5PTYET9x8-99U6QruQoojyeR6eesQ"
   NODE_VERSION           = "20"
+  # Netlify secrets scanning flags these VITE_* values because Vite inlines them
+  # into the client bundle — but that inlining is the whole point: they are
+  # public by design (the Supabase key is the publishable/anon key gated by RLS;
+  # the Maps key is an HTTP-referrer-restricted browser key). Without this,
+  # every production build fails at the "secrets scanning" stage with
+  # "Exposed secrets detected" (exit 2) and nothing deploys. Omitting ONLY these
+  # known-public keys keeps scanning ON for any genuinely secret value.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,VITE_GOOGLE_MAPS_API_KEY"
 
 # Security response headers applied to every route. Deliberately conservative
 # so nothing in the app breaks:
