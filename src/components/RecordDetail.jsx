@@ -5808,6 +5808,28 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Which tab is active on the record detail page. Null until data loads,
   // then initialized to the first tab (Details) by the useEffect below.
   const [activeTab, setActiveTab] = useState(null)
+  // "Open Pre-Approval Application" action state. MUST live here with the other
+  // top-level hooks (before any early return below, e.g. loading/error/!data/
+  // !layout) so the hook call order is identical on every render — otherwise
+  // React throws #310 ("rendered fewer hooks than expected"). Opens the Focus On
+  // Energy pre-approval form pre-filled from this enrollment: the blank tab is
+  // opened synchronously (within the click gesture) so popup blockers don't
+  // fire, then the async prefill build redirects it.
+  const [openingPreapproval, setOpeningPreapproval] = useState(false)
+  const handleOpenPreapprovalForm = useCallback(async () => {
+    if (openingPreapproval) return
+    const win = window.open('', '_blank')
+    setOpeningPreapproval(true)
+    try {
+      const { url, error } = await openAssessmentPreapprovalForm(recordId, win)
+      if (error || !url) {
+        if (win) win.close()
+        window.alert(error || 'Could not open the pre-approval application.')
+      }
+    } finally {
+      setOpeningPreapproval(false)
+    }
+  }, [recordId, openingPreapproval])
   // Parent-name lookups for the breadcrumb in CREATE mode. The loaded record is
   // empty while creating, so prefilled parent FKs (e.g. property_id on a new
   // Building, or opportunity_id on a new Contact Role) can't resolve to names —
@@ -7570,25 +7592,6 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     incomeQualificationComplete,
     recordTypeLabel,
   }
-
-  // Open the pre-approval application form, pre-filled from this enrollment.
-  // The blank tab is opened synchronously (within the click's user gesture) so
-  // popup blockers don't fire; the async prefill build then redirects it.
-  const [openingPreapproval, setOpeningPreapproval] = useState(false)
-  const handleOpenPreapprovalForm = useCallback(async () => {
-    if (openingPreapproval) return
-    const win = window.open('', '_blank')
-    setOpeningPreapproval(true)
-    try {
-      const { url, error } = await openAssessmentPreapprovalForm(recordId, win)
-      if (error || !url) {
-        if (win) win.close()
-        window.alert(error || 'Could not open the pre-approval application.')
-      }
-    } finally {
-      setOpeningPreapproval(false)
-    }
-  }, [recordId, openingPreapproval])
 
   const topbarActionHandlers = {
     [ACTION_KEYS.EDIT]:                   startEditing,
