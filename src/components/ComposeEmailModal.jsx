@@ -31,6 +31,7 @@ import { useToast } from './Toast'
 import TiptapEmailComposer from './TiptapEmailComposer'
 import {
   resolveOutboundMailboxForAnchor,
+  resolveDefaultRecipientForAnchor,
   sendNewEmail,
   sendNewEmailHtml,
   sendTemplateEmail,
@@ -213,6 +214,25 @@ export default function ComposeEmailModal({
     setActiveTemplate(null)
     setEditableRegionsByTemplate({})
   }, [open, defaultRecipientEmail, defaultRecipientName])
+
+  // ── Default recipient fallback ──────────────────────────────────────
+  // When the caller didn't pass an explicit recipient, resolve one from the
+  // anchor record (the contact's email, or the account's / its primary
+  // contact's email) so the To field opens pre-addressed. Explicit props
+  // always win, and we never clobber something the user has already typed.
+  useEffect(() => {
+    if (!open) return
+    if (defaultRecipientEmail) return   // explicit default wins — skip lookup
+    let alive = true
+    resolveDefaultRecipientForAnchor({ anchorObject, anchorRecordId })
+      .then(res => {
+        if (!alive || !res?.email) return
+        setToEmail(prev => (prev ? prev : res.email))
+        setToName(prev => (prev ? prev : (res.name || '')))
+      })
+      .catch(() => { /* best-effort — leave blank on failure */ })
+    return () => { alive = false }
+  }, [open, anchorObject, anchorRecordId, defaultRecipientEmail])
 
   // ── Resolve outbound mailbox once per open ──────────────────────────
   // Programmatic, not user-selectable. Walks the anchor's parent chain

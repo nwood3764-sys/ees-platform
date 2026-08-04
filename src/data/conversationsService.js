@@ -444,6 +444,70 @@ function textToMinimalHtml(text) {
 }
 
 /**
+ * Resolve a sensible default recipient (email + name) for a compose anchor
+ * so the "New Email" modal opens pre-addressed to the record instead of a
+ * blank To field. Used everywhere the ConversationPanel composer is mounted.
+ *
+ * Explicit props passed by a caller (e.g. the service-provider panel, which
+ * carries the provider's application email) always win — this is only the
+ * fallback when no explicit recipient was supplied.
+ *
+ *   • contacts anchor → the contact's own email + name.
+ *   • accounts anchor → account_email if set, otherwise the account's
+ *     primary (or first emailable) contact.
+ *   • any other anchor → null (no single "record email" to default to).
+ *
+ * Returns { email, name } or null. Never throws — a resolution failure just
+ * leaves the To field blank for the user to fill in.
+ */
+export async function resolveDefaultRecipientForAnchor({ anchorObject, anchorRecordId } = {}) {
+  if (!anchorObject || !anchorRecordId) return null
+  try {
+    if (anchorObject === 'contacts') {
+      const { data } = await supabase
+        .from('contacts')
+        .select('contact_email, contact_name, contact_first_name, contact_last_name')
+        .eq('id', anchorRecordId)
+        .maybeSingle()
+      if (!data?.contact_email) return null
+      const name = data.contact_name
+        || [data.contact_first_name, data.contact_last_name].filter(Boolean).join(' ')
+        || ''
+      return { email: data.contact_email, name }
+    }
+
+    if (anchorObject === 'accounts') {
+      const { data: acct } = await supabase
+        .from('accounts')
+        .select('account_email, account_name')
+        .eq('id', anchorRecordId)
+        .maybeSingle()
+      if (acct?.account_email) {
+        return { email: acct.account_email, name: acct.account_name || '' }
+      }
+      // Fall back to a contact under the account — primary first.
+      const { data: contacts } = await supabase
+        .from('contacts')
+        .select('contact_email, contact_name, contact_first_name, contact_last_name, contact_is_primary, contact_is_deleted')
+        .eq('contact_account_id', anchorRecordId)
+        .order('contact_is_primary', { ascending: false, nullsFirst: false })
+        .limit(10)
+      const c = (contacts || []).find(x => !x.contact_is_deleted && x.contact_email)
+      if (c?.contact_email) {
+        const name = c.contact_name
+          || [c.contact_first_name, c.contact_last_name].filter(Boolean).join(' ')
+          || acct?.account_name || ''
+        return { email: c.contact_email, name }
+      }
+      return null
+    }
+  } catch {
+    /* resolution is best-effort — leave the field blank on any failure */
+  }
+  return null
+}
+
+/**
  * Channel-aware display helper for the thread list.
  * Returned shape: { label, iconPath, color, bg }
  */
