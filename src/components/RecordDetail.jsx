@@ -6760,6 +6760,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     setEditing(true)
   }, [data, recordId, loadAllEditOpts])
 
+  // Launch mode: when opened via a list-view "Edit" or "Clone" row action the
+  // record arrives with mode='edit' / 'clone'. Once the record has loaded,
+  // enter the corresponding state exactly once (edit → editable form seeded
+  // with the record; clone → insert-mode copy). Guarded so re-renders and
+  // post-save data reloads don't re-trigger it.
+  const launchModeAppliedRef = useRef(false)
+  useEffect(() => {
+    if (launchModeAppliedRef.current || isCreate || !data?.record) return
+    if (mode === 'edit') { launchModeAppliedRef.current = true; startEditing() }
+    else if (mode === 'clone') { launchModeAppliedRef.current = true; handleClone() }
+  // startEditing is a stable closure over data; handleClone is memoized.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, data, isCreate])
+
   // Advance to Opportunity — from a Property, create a new Opportunity with the
   // property's data carried over (linkage, account/management company/site
   // contact, location, building & unit characteristics), then land the user on

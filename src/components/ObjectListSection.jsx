@@ -163,6 +163,18 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
     })
   }, [fetchRows])
 
+  // Background refetch of the current rows — used after a list-view bulk
+  // action (edit/delete/clone) so counts and rows reflect the new server state
+  // WITHOUT the full-screen loading flash `load()` would cause.
+  const refreshRowsInBackground = useCallback(async () => {
+    try {
+      const rows = await fetchRows(activeRelated)
+      lastRowsRef.current = rows
+      setData(rows)
+      setColumns(cols => deriveColumnOptions(cols, rows))
+    } catch { /* keep prior rows on failure */ }
+  }, [fetchRows, activeRelated])
+
   // Open a record. With NavContext present, push a record URL so the address
   // bar carries the id and the open record is shareable; otherwise fall back to
   // local detail state. rec: { id, mode?, table?, prefill? }.
@@ -239,6 +251,13 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
       listObject={objectTable}
       listModule={moduleId}
       onRefresh={load}
+      // Edit mode (Salesforce-parity): multi-select, inline cell edit, bulk
+      // edit/clone/delete, and per-row Edit/Clone/Delete on every object list.
+      // Row-scoped writes go through the bulk RPCs against this object's table.
+      tableName={objectTable}
+      onRecordsUpdated={refreshRowsInBackground}
+      onEditRecord={(row) => { if (row?._id) openRecord({ id: row._id, mode: 'edit', name: row.name, table: row.table }) }}
+      onCloneRecord={(row) => { if (row?._id) openRecord({ id: row._id, mode: 'clone', name: row.name, table: row.table }) }}
       onOpenRecord={(row) => { if (row?._id) openRecord({ id: row._id, mode: 'view', name: row.name }) }}
       onNew={() => openRecord({ id: null, mode: 'create' })}
       renderCell={(col, r) => {
