@@ -56,6 +56,8 @@ import { C } from '../data/constants'
 import { useIsMobile } from '../lib/useMediaQuery'
 import { supabase } from '../lib/supabase'
 import { listRecentlyViewed } from '../data/recentlyViewedService'
+import RecordLink from './RecordLink'
+import NavLink from './NavLink'
 
 // ─── Object type → icon path (lucide-style single-stroke paths) ──────────────
 // Keep paths single-d so they render through the existing Icon convention.
@@ -169,52 +171,57 @@ export function SearchResultRow({ row, active = false, compact = false, onSelect
     <div
       role="option"
       aria-selected={active}
-      onClick={() => onSelect?.(row)}
       onMouseEnter={onMouseEnter}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: compact ? '10px 16px' : '12px 16px',
-        background: active ? '#e9f7ef' : C.card,
-        borderLeft: active ? `3px solid ${C.emerald}` : '3px solid transparent',
-        cursor: 'pointer',
-        transition: 'background 80ms',
-      }}
     >
-      <div style={{
-        width: 28, height: 28, borderRadius: 6,
-        background: C.page, border: `1px solid ${C.border}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        flexShrink: 0,
-      }}>
-        <ObjectIcon type={row.object_type} size={14} color={C.textSecondary} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <RecordLink
+        table={row.table_name}
+        id={row.id}
+        onActivate={() => onSelect?.(row)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: compact ? '10px 16px' : '12px 16px',
+          background: active ? '#e9f7ef' : C.card,
+          borderLeft: active ? `3px solid ${C.emerald}` : '3px solid transparent',
+          cursor: 'pointer',
+          transition: 'background 80ms',
+        }}
+      >
         <div style={{
-          color: C.textPrimary, fontSize: 13.5, fontWeight: 500,
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          width: 28, height: 28, borderRadius: 6,
+          background: C.page, border: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
         }}>
-          {row.primary_label || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Unnamed</span>}
+          <ObjectIcon type={row.object_type} size={14} color={C.textSecondary} />
         </div>
-        {row.secondary_label && (
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            color: C.textMuted, fontSize: 12, marginTop: 1,
+            color: C.textPrimary, fontSize: 13.5, fontWeight: 500,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
-            {row.secondary_label}
+            {row.primary_label || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Unnamed</span>}
           </div>
+          {row.secondary_label && (
+            <div style={{
+              color: C.textMuted, fontSize: 12, marginTop: 1,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {row.secondary_label}
+            </div>
+          )}
+        </div>
+        {row.record_number && (
+          <span style={{
+            flexShrink: 0,
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: 11, color: C.textSecondary,
+            background: C.page, border: `1px solid ${C.border}`,
+            padding: '2px 7px', borderRadius: 4,
+          }}>
+            {row.record_number}
+          </span>
         )}
-      </div>
-      {row.record_number && (
-        <span style={{
-          flexShrink: 0,
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 11, color: C.textSecondary,
-          background: C.page, border: `1px solid ${C.border}`,
-          padding: '2px 7px', borderRadius: 4,
-        }}>
-          {row.record_number}
-        </span>
-      )}
+      </RecordLink>
     </div>
   )
 }
@@ -670,8 +677,9 @@ export function GlobalSearchInline({
 
         {/* View all results CTA */}
         {groups.length > 0 && onViewAll && (
-          <button
-            onClick={handleViewAll}
+          <NavLink
+            to={{ activeModule: 'search', searchQuery: query.trim() }}
+            onActivate={handleViewAll}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               gap: 8,
@@ -693,7 +701,7 @@ export function GlobalSearchInline({
               stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 12h14 M12 5l7 7-7 7" />
             </svg>
-          </button>
+          </NavLink>
         )}
       </div>
 
@@ -767,52 +775,57 @@ function ResultGroup({ group, flatRows, activeIdx, onSelect, onHover }) {
             key={`${r.table_name}:${r.id}`}
             role="option"
             aria-selected={active}
-            onClick={() => onSelect(r)}
             onMouseEnter={() => onHover(flatIndex)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '10px 16px',
-              background: active ? '#e9f7ef' : C.card,
-              borderLeft: active ? `3px solid ${C.emerald}` : '3px solid transparent',
-              cursor: 'pointer',
-              transition: 'background 80ms',
-            }}
           >
-            <div style={{
-              width: 28, height: 28, borderRadius: 6,
-              background: C.page, border: `1px solid ${C.border}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
-            }}>
-              <ObjectIcon type={r.object_type} size={14} color={C.textSecondary} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <RecordLink
+              table={r.table_name}
+              id={r.id}
+              onActivate={() => onSelect(r)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 16px',
+                background: active ? '#e9f7ef' : C.card,
+                borderLeft: active ? `3px solid ${C.emerald}` : '3px solid transparent',
+                cursor: 'pointer',
+                transition: 'background 80ms',
+              }}
+            >
               <div style={{
-                color: C.textPrimary, fontSize: 13.5, fontWeight: 500,
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                width: 28, height: 28, borderRadius: 6,
+                background: C.page, border: `1px solid ${C.border}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
               }}>
-                {r.primary_label || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Unnamed</span>}
+                <ObjectIcon type={r.object_type} size={14} color={C.textSecondary} />
               </div>
-              {r.secondary_label && (
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  color: C.textMuted, fontSize: 12, marginTop: 1,
+                  color: C.textPrimary, fontSize: 13.5, fontWeight: 500,
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>
-                  {r.secondary_label}
+                  {r.primary_label || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Unnamed</span>}
                 </div>
+                {r.secondary_label && (
+                  <div style={{
+                    color: C.textMuted, fontSize: 12, marginTop: 1,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {r.secondary_label}
+                  </div>
+                )}
+              </div>
+              {r.record_number && (
+                <span style={{
+                  flexShrink: 0,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: 11, color: C.textSecondary,
+                  background: C.page, border: `1px solid ${C.border}`,
+                  padding: '2px 7px', borderRadius: 4,
+                }}>
+                  {r.record_number}
+                </span>
               )}
-            </div>
-            {r.record_number && (
-              <span style={{
-                flexShrink: 0,
-                fontFamily: 'JetBrains Mono, monospace',
-                fontSize: 11, color: C.textSecondary,
-                background: C.page, border: `1px solid ${C.border}`,
-                padding: '2px 7px', borderRadius: 4,
-              }}>
-                {r.record_number}
-              </span>
-            )}
+            </RecordLink>
           </div>
         )
       })}
@@ -851,52 +864,57 @@ function RecentGroup({ rows, activeIdx, onSelect, onHover }) {
             key={`${r.table_name}:${r.id}`}
             role="option"
             aria-selected={active}
-            onClick={() => onSelect(r)}
             onMouseEnter={() => onHover(idx)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '10px 16px',
-              background: active ? '#e9f7ef' : C.card,
-              borderLeft: active ? `3px solid ${C.emerald}` : '3px solid transparent',
-              cursor: 'pointer',
-              transition: 'background 80ms',
-            }}
           >
-            <div style={{
-              width: 28, height: 28, borderRadius: 6,
-              background: C.page, border: `1px solid ${C.border}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
-            }}>
-              <ObjectIcon type={r.object_type} size={14} color={C.textSecondary} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <RecordLink
+              table={r.table_name}
+              id={r.id}
+              onActivate={() => onSelect(r)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 16px',
+                background: active ? '#e9f7ef' : C.card,
+                borderLeft: active ? `3px solid ${C.emerald}` : '3px solid transparent',
+                cursor: 'pointer',
+                transition: 'background 80ms',
+              }}
+            >
               <div style={{
-                color: C.textPrimary, fontSize: 13.5, fontWeight: 500,
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                width: 28, height: 28, borderRadius: 6,
+                background: C.page, border: `1px solid ${C.border}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
               }}>
-                {r.primary_label || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Unnamed</span>}
+                <ObjectIcon type={r.object_type} size={14} color={C.textSecondary} />
               </div>
-              {r.secondary_label && (
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  color: C.textMuted, fontSize: 12, marginTop: 1,
+                  color: C.textPrimary, fontSize: 13.5, fontWeight: 500,
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>
-                  {r.secondary_label}
+                  {r.primary_label || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>Unnamed</span>}
                 </div>
+                {r.secondary_label && (
+                  <div style={{
+                    color: C.textMuted, fontSize: 12, marginTop: 1,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {r.secondary_label}
+                  </div>
+                )}
+              </div>
+              {r.record_number && (
+                <span style={{
+                  flexShrink: 0,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: 11, color: C.textSecondary,
+                  background: C.page, border: `1px solid ${C.border}`,
+                  padding: '2px 7px', borderRadius: 4,
+                }}>
+                  {r.record_number}
+                </span>
               )}
-            </div>
-            {r.record_number && (
-              <span style={{
-                flexShrink: 0,
-                fontFamily: 'JetBrains Mono, monospace',
-                fontSize: 11, color: C.textSecondary,
-                background: C.page, border: `1px solid ${C.border}`,
-                padding: '2px 7px', borderRadius: 4,
-              }}>
-                {r.record_number}
-              </span>
-            )}
+            </RecordLink>
           </div>
         )
       })}

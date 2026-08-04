@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { C } from '../../data/constants'
 import { Icon } from '../../components/UI'
+import RecordLink from '../../components/RecordLink'
 
 // Renders a single home-page component by type. Used both in the builder canvas
 // (preview=true shows a labeled placeholder where live data would load) and on
@@ -165,13 +166,13 @@ function TaskListCard({ title, onNavigate }) {
         {tasks === null && <div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>Loading tasks…</div>}
         {tasks && tasks.length === 0 && <div style={{ padding: 14, color: C.textMuted, fontSize: 12 }}>No open tasks.</div>}
         {tasks && tasks.slice(0, 8).map(t => (
-          <div key={t._id} onClick={() => onNavigate && onNavigate('tasks', t._id)}
+          <RecordLink key={t._id} table="tasks" id={t._id} onActivate={() => onNavigate && onNavigate('tasks', t._id)}
             style={{ padding: '8px 14px', borderTop: `1px solid ${C.border}`, fontSize: 12.5, color: C.textPrimary, cursor: onNavigate ? 'pointer' : 'default', display: 'flex', justifyContent: 'space-between', gap: 10 }}
             onMouseEnter={e => { if (onNavigate) e.currentTarget.style.background = '#f7faf9' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subject}</span>
             {t.isOverdue && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: '#1a5a8a' }}>OVERDUE</span>}
-          </div>
+          </RecordLink>
         ))}
       </div>
     </CardShell>
@@ -213,8 +214,8 @@ function RecentlyViewedCard({ title, config, onNavigate }) {
       {rows && rows.length > 0 && (
         <div>
           {rows.map(r => (
-            <div key={r.id}
-              onClick={() => onNavigate && onNavigate(objectTable, r.id)}
+            <RecordLink key={r.id} table={objectTable} id={r.id}
+              onActivate={() => onNavigate && onNavigate(objectTable, r.id)}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 14px', borderTop: `1px solid ${C.border}`, cursor: onNavigate ? 'pointer' : 'default' }}
               onMouseEnter={e => { if (onNavigate) e.currentTarget.style.background = '#f7faf9' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
@@ -231,7 +232,7 @@ function RecentlyViewedCard({ title, config, onNavigate }) {
               {r.record_number && (
                 <span style={{ flexShrink: 0, fontSize: 10.5, fontFamily: 'JetBrains Mono, monospace', color: C.textMuted }}>{r.record_number}</span>
               )}
-            </div>
+            </RecordLink>
           ))}
         </div>
       )}
@@ -366,8 +367,8 @@ function EmbeddedListView({ title, sourceId, sources, onNavigate }) {
             {cols.map(c => <div key={c} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{humanizeColumn(c, def.object)}</div>)}
           </div>
           {rows.map(r => (
-            <div key={r.id}
-              onClick={() => onNavigate && onNavigate(def.object, r.id)}
+            <RecordLink key={r.id} table={def.object} id={r.id}
+              onActivate={() => onNavigate && onNavigate(def.object, r.id)}
               style={{ display: 'grid', gridTemplateColumns: cols.map((_, i) => i === 0 ? '1.6fr' : '1fr').join(' '), padding: '8px 14px', borderBottom: `1px solid ${C.border}`, fontSize: 12, color: C.textPrimary, cursor: onNavigate ? 'pointer' : 'default' }}
               onMouseEnter={e => { if (onNavigate) e.currentTarget.style.background = '#f7faf9' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
@@ -376,7 +377,7 @@ function EmbeddedListView({ title, sourceId, sources, onNavigate }) {
                   {formatCell(r[c])}
                 </div>
               ))}
-            </div>
+            </RecordLink>
           ))}
         </div>
       )}

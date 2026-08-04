@@ -6,6 +6,7 @@ import { Badge, Icon, SectionTabs, LoadingState, ErrorState } from '../component
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
+import NavLink from '../components/NavLink'
 import {
   fetchProducts,
   fetchProductItems,
@@ -309,9 +310,9 @@ export default function StockModule({ selectedRecord: navSelectedRecord, section
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div data-module-topbar="1" style={{ height: 54, background:C.card, borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', flexShrink:0 }}>
         <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-          <span onClick={() => { closeRecord(); setSec(SECTIONS[0]?.id) }} style={{ color:C.emeraldMid, cursor:'pointer', fontWeight:500 }}>Stock</span>
+          <NavLink to={{ activeModule: 'stock' }} onActivate={() => { closeRecord(); setSec(SECTIONS[0]?.id) }} style={{ color:C.emeraldMid, cursor:'pointer', fontWeight:500 }}>Stock</NavLink>
           <span style={{ color:C.textMuted }}>/</span>
-          <span style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }} onClick={() => selectedRecord && closeRecord()}>{SECTIONS.find(s=>s.id===sec)?.label}</span>
+          <NavLink to={{ activeModule: 'stock', section: sec }} onActivate={() => selectedRecord && closeRecord()} style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }}>{SECTIONS.find(s=>s.id===sec)?.label}</NavLink>
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name}</span></>}
         </div>
         <button style={{ display:'flex', alignItems:'center', gap:6, background:C.page, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12.5, color:C.textSecondary, cursor:'pointer', fontWeight:500 }}>
