@@ -8,6 +8,7 @@ import ConfiguredHome from '../components/ConfiguredHome'
 import HelpIcon from '../components/help/HelpIcon'
 import { OutreachMap } from '../components/OutreachMap'
 import OutreachPropertyCard from '../components/OutreachPropertyCard'
+import RecordLink from '../components/RecordLink'
 import OwnerResearchQueue from '../components/OwnerResearchQueue'
 import OutreachFilterPanel, {
   EMPTY_FILTERS,
@@ -412,7 +413,11 @@ function ViewportPropertyList({ rows, onOpenProperty }) {
                 style={{ cursor:'pointer', borderBottom:`1px solid ${C.border}`, transition:'background 80ms' }}
                 onMouseEnter={(e) => e.currentTarget.style.background = C.cardSecondary || '#f7f9fc'}
                 onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-              <td style={{ padding:'7px 14px', color:C.textPrimary, fontWeight:500 }}>{r.name || '—'}</td>
+              <td style={{ padding:'7px 14px', color:C.textPrimary, fontWeight:500 }}>
+                {r._id
+                  ? <RecordLink table="properties" id={r._id} onActivate={() => onOpenProperty?.(r._id)} style={{ color:C.textPrimary, fontWeight:500 }}>{r.name || '—'}</RecordLink>
+                  : (r.name || '—')}
+              </td>
               <td style={{ padding:'7px 8px',  color:C.textSecondary }}>{(r.address || '').split(',')[1]?.trim() || (r.address || '').split(',')[0] || '—'}</td>
               <td style={{ padding:'7px 8px',  color:C.textSecondary }}>{r.state || '—'}</td>
               <td style={{ padding:'7px 8px',  color:C.textSecondary, textAlign:'right', fontFamily:'JetBrains Mono, monospace' }}>{r.units ?? '—'}</td>

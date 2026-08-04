@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { C } from '../data/constants'
 import { fetchPropertyDetail } from '../data/outreachPropertiesService'
+import RecordLink from './RecordLink'
 
 // ---------------------------------------------------------------------------
 // OutreachPropertyCard.jsx
@@ -279,10 +280,9 @@ export default function OutreachPropertyCard({ propertyId, onClose, onOpenAccoun
               <Section icon={ICONS.user} title="Owner / Management">
                 {data.accountId && data.accountName ? (
                   <Row label="Owner Account">
-                    <button onClick={() => onOpenAccount?.(data.accountId)} style={{
-                      background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+                    <RecordLink table="accounts" id={data.accountId} onActivate={() => onOpenAccount?.(data.accountId)} style={{
                       color: C.emeraldMid, fontWeight: 700, fontSize: 12.5, textDecoration: 'underline', textUnderlineOffset: 2,
-                    }}>{data.accountName}</button>
+                    }}>{data.accountName}</RecordLink>
                   </Row>
                 ) : (
                   <Row label="Owner Account">{dash(data.accountName)}</Row>
@@ -352,10 +352,11 @@ export default function OutreachPropertyCard({ propertyId, onClose, onOpenAccoun
         {/* sticky action footer — preserves advance/open-record from the card */}
         {data && !loading && (
           <div style={{ borderTop: `1px solid ${C.border}`, padding: '12px 16px', display: 'flex', gap: 10, background: C.card }}>
-            <button onClick={() => onOpenRecord?.(data.id)} style={{
+            <RecordLink table="properties" id={data.id} onActivate={() => onOpenRecord?.(data.id)} style={{
               flex: 1, padding: '9px 12px', background: C.card, border: `1px solid ${C.borderDark}`, borderRadius: 7,
               color: C.textPrimary, fontWeight: 600, fontSize: 12.5, cursor: 'pointer',
-            }}>Open Property Record</button>
+              display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+            }}>Open Property Record</RecordLink>
             <button onClick={() => onAdvance?.(data)} style={{
               flex: 1, padding: '9px 12px', background: C.emerald, border: 'none', borderRadius: 7,
               color: '#fff', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',

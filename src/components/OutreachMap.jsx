@@ -220,7 +220,7 @@ export function OutreachMap({ properties, onOpenProperty, onBoundsChange }) {
           ${p.units    ? `<div style="color:#4a5e7a;">Units: <b>${p.units}</b></div>` : ''}
           ${p.account  ? `<div style="color:#4a5e7a;">Account: <b>${escapeHtml(p.account)}</b></div>` : ''}
           ${p.hudPropertyId ? `<div style="color:#4a5e7a; font-family:'JetBrains Mono', monospace;">HUD ${escapeHtml(p.hudPropertyId)}</div>` : ''}
-          <button data-leap-open-property="${p._id}" style="margin-top:8px; padding:5px 10px; background:#3ecf8e; color:#fff; border:none; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;">Open property →</button>
+          <a href="/properties/${p._id}" data-leap-open-property="${p._id}" style="display:inline-block; margin-top:8px; padding:5px 10px; background:#3ecf8e; color:#fff; border:none; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; text-decoration:none;">Open property →</a>
         </div>
       `)
       return m
@@ -260,8 +260,15 @@ export function OutreachMap({ properties, onOpenProperty, onBoundsChange }) {
     const container = containerRef.current
     if (!container) return
     const handler = (e) => {
-      const t = e.target
+      const t = e.target?.closest?.('[data-leap-open-property]') || e.target
       if (t && t.dataset && t.dataset.leapOpenProperty && openCbRef.current) {
+        // The trigger is a real <a href="/properties/<id>"> anchor, so a
+        // modified click (Ctrl/Cmd/Shift/Alt or non-left button) is left to
+        // the browser for native new-tab/new-window/copy-link; right-click and
+        // middle-click never fire 'click' at all. Only a plain left-click is
+        // intercepted for the fast in-app slide-in card.
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+        e.preventDefault()
         openCbRef.current(t.dataset.leapOpenProperty)
       }
     }
