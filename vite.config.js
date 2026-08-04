@@ -91,6 +91,10 @@ export default defineConfig({
           // mammoth (DOCX preview) → its own chunk, loaded only when a Word
           // document is previewed via the dynamic import in FileGallery.
           if (id.includes('mammoth')) return 'vendor-mammoth'
+          // exceljs (writes the Bulk Property Import template WITH native Excel
+          // dropdowns) → own leaf chunk, lazy-loaded only when Download Template
+          // is clicked. The browser build is self-contained; forward edges only.
+          if (id.includes('exceljs')) return 'vendor-exceljs'
           // react-grid-layout (the WYSIWYG builder canvas: free positioning,
           // resize handles, responsive breakpoints) + its drag/resize stack →
           // its own chunk, downloaded only with the lazy-loaded builder. These
