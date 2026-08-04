@@ -88,6 +88,24 @@ export async function fetchServiceAreas(accountId) {
   return data || []
 }
 
+// ZIP areas of operation the applicant selected during intake, keyed by their
+// application (the intake writes one row per ZIP, stamped with both the
+// application and the account). Used by the Service Provider review card to
+// show the coverage map + ZIP list. Always present even before the account is
+// activated, since the application id is stamped at submit time.
+export async function fetchServiceAreasForApplication(applicationId) {
+  if (!applicationId) return []
+  const { data, error } = await supabase
+    .from('service_provider_service_areas')
+    .select('spsa_zip_code, spsa_state')
+    .eq('spsa_application_id', applicationId)
+    .eq('spsa_is_deleted', false)
+    .order('spsa_state')
+    .order('spsa_zip_code')
+  if (error) throw error
+  return data || []
+}
+
 // Approve → activates the account + provisions the provider portal login +
 // AUTO-SENDS the auth invite (via the approve-service-provider edge function).
 export async function approveServiceProviderApplication(applicationId) {
