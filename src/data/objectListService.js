@@ -244,8 +244,10 @@ export async function buildObjectColumnCatalog(table) {
   const catalog = []
   const groups = [objectGroup]
 
-  // Identity columns first (always available, always shown — the picker marks
-  // them locked, but they belong in the catalog so search finds them).
+  // Identity columns first. `locked: true` keeps them OUT of the filter-field
+  // picker (they're filtered via their column headers instead); it does NOT
+  // make them unhideable as columns — the column picker lets users hide id/name
+  // like any other column.
   if (recordNumber) catalog.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup, locked: true })
   if (nameCol) catalog.push({ field: 'name', label: 'Name', type: 'text', group: objectGroup, locked: true })
 
