@@ -89,6 +89,25 @@ export function buildPrefillUrl(map, payload) {
   return { url: query ? `${map.base_url}?${query}` : map.base_url, filledCount: params.length }
 }
 
+// Which required form fields are still blank in the resolved payload. The
+// payload is built from the enrollment AND its inherited parent records
+// (account / property / building) by build_wi_ira_assessment_prefill, so a
+// blank here means the data is genuinely missing upstream, not just unmapped.
+// `required` and `field_label` are per-field flags stored on the field map
+// (external_form_field_map), so which fields are mandatory is admin-editable,
+// never hardcoded. Returns an array of human-readable field labels.
+export function findMissingRequiredFields(payload, fields) {
+  const out = []
+  for (const f of fields || []) {
+    if (!f.required) continue
+    const v = payload?.[f.leap_field]
+    if (v === null || v === undefined || String(v).trim() === '') {
+      out.push(f.field_label || f.leap_field)
+    }
+  }
+  return out
+}
+
 // Load the resolved record values + the field map for a target.
 export async function loadAssessmentPrefill(enrollmentId, targetKey = WI_IRA_ASSESSMENT_PREAPPROVAL_KEY) {
   const [{ data: payload, error: pErr }, { data: map, error: mErr }] = await Promise.all([
@@ -108,6 +127,12 @@ export async function openAssessmentPreapprovalForm(enrollmentId, targetWindow) 
     if (!enrollmentId) return { error: 'No record selected.' }
     const { payload, map } = await loadAssessmentPrefill(enrollmentId)
     if (!map || !map.base_url) return { error: 'This program has no pre-approval form configured.' }
+    // Completeness gate: every required field (resolved from the enrollment and
+    // its parent records) must be populated before the form can be submitted.
+    // If any are blank, don't open the form — return the list so the caller can
+    // ask the user to complete them first.
+    const missing = findMissingRequiredFields(payload, map.fields)
+    if (missing.length) return { missing }
     const { url, filledCount } = buildPrefillUrl(map, payload)
     if (targetWindow) targetWindow.location = url
     else window.open(url, '_blank', 'noopener')

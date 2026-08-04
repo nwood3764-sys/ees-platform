@@ -169,7 +169,7 @@ export const ACTION_REGISTRY = Object.freeze({
     applicableObjects:   ALL_OBJECTS,
     defaultTier:         'primary',
     defaultSortOrder:    10,
-    isAvailable: ({ editing, lifecycleIsLocked }) => !editing && !lifecycleIsLocked,
+    isAvailable: ({ editing, lifecycleIsLocked, recordIsLocked }) => !editing && !lifecycleIsLocked && !recordIsLocked,
   },
 
   // ── Projects ────────────────────────────────────────────────────────────

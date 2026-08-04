@@ -38,7 +38,7 @@ import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
-import { openAssessmentPreapprovalForm } from '../data/preapprovalPrefill'
+import { openAssessmentPreapprovalForm, loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
@@ -75,6 +75,7 @@ import {
   fetchPageLayout,
   loadPicklists as loadAllPicklists,
   getCurrentUserId,
+  getCurrentUserProfile,
   fetchRelatedRecords,
   resolveLookups,
   reorderJunctionRows,
@@ -5944,12 +5945,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // opened synchronously (within the click gesture) so popup blockers don't
   // fire, then the async prefill build redirects it.
   const [openingPreapproval, setOpeningPreapproval] = useState(false)
+  // Required fields still blank when the user tried to open the pre-approval
+  // form. Non-empty → the completion modal is shown and the form is NOT opened.
+  const [preapprovalMissing, setPreapprovalMissing] = useState(null)
   const handleOpenPreapprovalForm = useCallback(async () => {
     if (openingPreapproval) return
     const win = window.open('', '_blank')
     setOpeningPreapproval(true)
     try {
-      const { url, error } = await openAssessmentPreapprovalForm(recordId, win)
+      const { url, error, missing } = await openAssessmentPreapprovalForm(recordId, win)
+      if (missing && missing.length) {
+        // Data is incomplete — don't submit a half-filled form. Close the blank
+        // tab and tell the user exactly which fields to complete first.
+        if (win) win.close()
+        setPreapprovalMissing(missing)
+        return
+      }
       if (error || !url) {
         if (win) win.close()
         window.alert(error || 'Could not open the pre-approval application.')
@@ -5958,6 +5969,40 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       setOpeningPreapproval(false)
     }
   }, [recordId, openingPreapproval])
+
+  // ── Record locking ─────────────────────────────────────────────────────
+  // A record is locked once its status reaches a value flagged
+  // picklist_locks_record (e.g. an enrollment that's been Submitted). Locked
+  // records are read-only for everyone EXCEPT System Administrators, who can
+  // still edit to unlock/correct. Both signals load before any early return so
+  // the hook order is stable on every render (avoids React #310).
+  const [isSystemAdmin, setIsSystemAdmin] = useState(false)
+  useEffect(() => {
+    let alive = true
+    getCurrentUserProfile()
+      .then(p => { if (alive) setIsSystemAdmin(p?.roleName === 'Admin') })
+      .catch(() => { if (alive) setIsSystemAdmin(false) })
+    return () => { alive = false }
+  }, [])
+
+  const [statusLocksRecord, setStatusLocksRecord] = useState(false)
+  useEffect(() => {
+    const statusCol = TABLE_META[tableName]?.statusColumn
+    const statusId = statusCol ? data?.record?.[statusCol] : null
+    if (!statusId) { setStatusLocksRecord(false); return }
+    let alive = true
+    supabase
+      .from('picklist_values')
+      .select('picklist_locks_record')
+      .eq('id', statusId)
+      .maybeSingle()
+      .then(({ data: row }) => { if (alive) setStatusLocksRecord(row?.picklist_locks_record === true) })
+      .catch(() => { if (alive) setStatusLocksRecord(false) })
+    return () => { alive = false }
+  }, [tableName, data?.record])
+
+  // Locked *for this user* — admins are never locked out.
+  const recordLockedForUser = statusLocksRecord && !isSystemAdmin
   // Parent-name lookups for the breadcrumb in CREATE mode. The loaded record is
   // empty while creating, so prefilled parent FKs (e.g. property_id on a new
   // Building, or opportunity_id on a new Contact Role) can't resolve to names —
@@ -6687,6 +6732,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
 
   const startEditing = () => {
     if (!data?.record) return
+    // Locked-record guard (belt-and-suspenders — the Edit action is also hidden
+    // for locked records via recordActions isAvailable). Admins are exempt.
+    if (statusLocksRecord && !isSystemAdmin) {
+      toast.error('This record is locked. Only a System Administrator can edit it once it has been submitted.')
+      return
+    }
     setDraft({ ...data.record }); setEditing(true)
     if (data.sections) loadAllEditOpts(data.sections, data.record)
   }
@@ -7584,6 +7635,38 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         return
       }
 
+      // Submit gate: a record cannot be moved to a locking status (e.g.
+      // "Submitted — Awaiting Program Response") until every required field is
+      // populated. For the assessment pre-approval enrollment the required set
+      // is the Focus On Energy form's required fields (resolved from this record
+      // and its parents); a still-blank one blocks the status change and lists
+      // what to complete. Fields being set in THIS save count as populated.
+      const statusCol = TABLE_META[tableName]?.statusColumn
+      if (statusCol && changes[statusCol]) {
+        const { data: stRow } = await supabase
+          .from('picklist_values').select('picklist_locks_record')
+          .eq('id', changes[statusCol]).maybeSingle()
+        if (stRow?.picklist_locks_record === true
+            && tableName === 'enrollments'
+            && recordTypeLabel === 'WI-IRA-MF-HOMES-Assessment-Preapproval') {
+          const { payload, map } = await loadAssessmentPrefill(recordId)
+          let missingSubmit = findMissingRequiredFields(payload, map.fields)
+          if (missingSubmit.length) {
+            // Don't flag a field the user is filling in this very save.
+            missingSubmit = missingSubmit.filter(lbl => {
+              const f = (map.fields || []).find(ff => (ff.field_label || ff.leap_field) === lbl)
+              const pending = f?.leap_field ? changes[f.leap_field] : undefined
+              return !(pending !== undefined && pending !== null && String(pending).trim() !== '')
+            })
+          }
+          if (missingSubmit.length) {
+            setPreapprovalMissing(missingSubmit)
+            setSaving(false)
+            return
+          }
+        }
+      }
+
       const updated = await saveRecord(tableName, recordId, changes)
       setEditing(false); setDraft({})
       toast.success('Changes saved')
@@ -7784,6 +7867,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     recordTypeRequiresIncomeQualification,
     incomeQualificationComplete,
     recordTypeLabel,
+    recordIsLocked:       recordLockedForUser,
   }
 
   const topbarActionHandlers = {
@@ -7955,7 +8039,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   {recordNumber && <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted }}>{recordNumber}</span>}
                 </div>
                 <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px' }}>{displayName}</h1>
-                {statusLabel && <Badge s={statusLabel} />}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {statusLabel && <Badge s={statusLabel} />}
+                  {statusLocksRecord && (
+                    <span title={isSystemAdmin
+                      ? 'This record is locked. As a System Administrator you can still edit it.'
+                      : 'This record is locked. Only a System Administrator can edit it.'}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5,
+                        background: '#eef5fc', border: `1px solid #bcd9f2`, color: '#1a5a8a',
+                        borderRadius: 4, padding: '2px 9px', fontSize: 11.5, fontWeight: 600 }}>
+                      <Icon path="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" size={12} color="#1a5a8a" />
+                      Locked{isSystemAdmin ? ' · admin can edit' : ''}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -8481,6 +8578,50 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           onConfirm={handleDelete}
           onCancel={() => setShowDeleteConfirm(false)}
         />
+      )}
+
+      {/* Pre-approval completion check — when Open Pre-Approval Application is
+          clicked but required fields (resolved from this enrollment and its
+          parent records) are still blank, list them and block opening the form
+          until they're filled. Documentation-first: this only gates the
+          external submission, never the record itself. */}
+      {preapprovalMissing && preapprovalMissing.length > 0 && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(13,26,46,0.48)', zIndex: 1100,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setPreapprovalMissing(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 10,
+            border: `1px solid ${C.border}`, width: 'min(520px, 96vw)', maxHeight: '85vh',
+            overflow: 'auto', boxShadow: '0 12px 40px rgba(7,17,31,0.28)' }}>
+            <div style={{ padding: '18px 20px 12px', borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Icon path="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                  size={20} color={C.sky} />
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary }}>
+                  Complete these fields before submitting
+                </div>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
+                The Focus On Energy pre-approval form can't be submitted until every required
+                field has a value. These are still blank on this enrollment (or its property,
+                building, and contractor records they're inherited from):
+              </div>
+            </div>
+            <div style={{ padding: '12px 20px' }}>
+              <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {preapprovalMissing.map((label, i) => (
+                  <li key={i} style={{ fontSize: 13.5, color: C.textPrimary }}>{label}</li>
+                ))}
+              </ul>
+            </div>
+            <div style={{ padding: '12px 20px 18px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setPreapprovalMissing(null)} style={{ background: C.emerald,
+                color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13,
+                fontWeight: 600, cursor: 'pointer' }}>
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Void envelope confirmation — only mounted on envelope records when
