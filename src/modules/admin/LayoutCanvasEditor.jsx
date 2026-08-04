@@ -111,6 +111,40 @@ function relatedFieldColumnType(col) {
   return 'text'
 }
 
+// Renderer field type for one of THIS object's OWN columns placed from the
+// palette. The palette column shape (from listObjectColumns) carries the raw
+// pg `type` (data_type) plus is_foreign_key / references_table. FK columns
+// become 'lookup' (name-resolved) or 'picklist' (picklist_values FKs); date
+// and timestamp columns become 'date' / 'datetime'; etc. Without a type the
+// record renderer (formatFieldValue) falls back to String(raw) — which is why
+// Created At showed a raw ISO string and Created By / owner showed a raw user
+// UUID instead of the user's name.
+function ownColumnFieldType(col) {
+  const dt = col.type || col.data_type || ''
+  if (col.is_foreign_key && dt === 'uuid') {
+    return col.references_table === 'picklist_values' ? 'picklist' : 'lookup'
+  }
+  if (dt === 'date') return 'date'
+  if (dt === 'timestamp with time zone' || dt === 'timestamp without time zone') return 'datetime'
+  if (dt === 'boolean') return 'boolean'
+  if (['integer', 'bigint', 'smallint', 'numeric', 'real', 'double precision'].includes(dt)) return 'number'
+  if (dt === 'jsonb' || dt === 'json') return 'json'
+  return 'text'
+}
+
+// Best display column for a lookup into `refTable`: prefer its
+// "<singular>_name" column (users → user_name = the full name "Nicholas
+// Wood"), then a bare `name`, then any *_name column. Preferring the singular
+// match keeps a users lookup showing the full name rather than user_first_name.
+function pickLookupDisplayField(refCols, refTable) {
+  const names = (refCols || []).map(c => c.column_name)
+  const singular = String(refTable || '').replace(/s$/, '')
+  return names.find(n => n === `${singular}_name`)
+    || names.find(n => n === 'name')
+    || names.find(n => /_name$/.test(n))
+    || null
+}
+
 // System plumbing columns hidden from the related-fields drill-down.
 const RELATED_HIDDEN_COLUMNS = /(^id$|^created_at$|^updated_at$|_created_at$|_updated_at$|_created_by$|_updated_by$|is_deleted|_deleted_at$|_deleted_by$|deletion_reason|^auth_user_id$)/
 
@@ -243,8 +277,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
     const related = { fk_column: group.fk, table: group.table, column: col.column_name, column_type: columnType }
     if (columnType === 'lookup') {
       const refCols = await describeObject(col.references_table).catch(() => [])
-      const displayField = (refCols || []).find(c => /_name$/.test(c.column_name))?.column_name
-        || (refCols || []).find(c => c.column_name === 'name')?.column_name
+      const displayField = pickLookupDisplayField(refCols, col.references_table)
       if (displayField) {
         related.lookup_table = col.references_table
         related.lookup_field = displayField
@@ -524,12 +557,30 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
     setActiveSection(key)
   }
 
-  const addField = (sectionKey, col) => {
+  const addField = async (sectionKey, col) => {
+    // Derive the renderer type from the column metadata so the placed field
+    // formats correctly (datetime, number, picklist, boolean, …) instead of
+    // rendering the raw value. Lookup FKs (owner, created_by, related records)
+    // additionally get display wiring so the page shows the referenced
+    // record's name, not its UUID.
+    const type = ownColumnFieldType(col)
+    const field = { name: col.name, type, label: humanize(col.name, meta.object), column: 1 }
+    if (type === 'lookup' && col.references_table) {
+      const refCols = await describeObject(col.references_table).catch(() => [])
+      const displayField = pickLookupDisplayField(refCols, col.references_table)
+      if (displayField) {
+        field.lookup_table = col.references_table
+        field.lookup_field = displayField
+      } else {
+        // No display column on the referenced table — show the raw value
+        // rather than emit an unresolvable lookup.
+        field.type = 'text'
+      }
+    }
     setSections(s => s.map(sec => {
       if (sec.key !== sectionKey) return sec
       const widgets = sec.widgets || []
       const fg = widgets.find(w => w.type === 'field_group')
-      const field = { name: col.name, label: humanize(col.name, meta.object), column: 1 }
       if (!fg) {
         return { ...sec, widgets: [{ key: `w-new-${Date.now()}`, type: 'field_group', title: 'Fields', column: 1, size: 'medium', isRequired: false, config: { fields: [field] } }, ...widgets] }
       }
