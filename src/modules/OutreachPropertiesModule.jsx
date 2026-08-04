@@ -372,6 +372,8 @@ function countActiveFiltersLocal(f) {
   if (f.subsidyType !== 'all') n++
   if (f.unitsMin != null) n++
   if (f.unitsMax != null) n++
+  if (f.yearBuiltMin != null) n++
+  if (f.yearBuiltMax != null) n++
   if (f.hasDisaster !== 'all') n++
   if (f.contractExpiringWithin !== 'all') n++
   if (f.energyBurdenMin != null) n++

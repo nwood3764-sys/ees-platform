@@ -23,6 +23,8 @@ import { Icon } from './UI'
 //     subsidyType: 'all',
 //     unitsMin: null,
 //     unitsMax: null,
+//     yearBuiltMin: null,      // property age — construction year lower bound
+//     yearBuiltMax: null,      // property age — construction year upper bound
 //     hasDisaster: 'all',      // 'all' | 'yes' | 'no'
 //     contractExpiringWithin: 'all',  // 'all' | '2' | '5' | '10'  (years)
 //     energyBurdenMin: null,
@@ -42,6 +44,8 @@ export const EMPTY_FILTERS = {
   subsidyType: 'all',
   unitsMin: null,
   unitsMax: null,
+  yearBuiltMin: null,
+  yearBuiltMax: null,
   hasDisaster: 'all',
   contractExpiringWithin: 'all',
   energyBurdenMin: null,
@@ -57,6 +61,8 @@ export function countActiveFilters(f) {
   if (f.subsidyType !== 'all') n++
   if (f.unitsMin != null) n++
   if (f.unitsMax != null) n++
+  if (f.yearBuiltMin != null) n++
+  if (f.yearBuiltMax != null) n++
   if (f.hasDisaster !== 'all') n++
   if (f.contractExpiringWithin !== 'all') n++
   if (f.energyBurdenMin != null) n++
@@ -90,6 +96,12 @@ export function applyFilters(rows, f) {
 
   if (f.unitsMin != null) out = out.filter(r => (r.units ?? 0) >= f.unitsMin)
   if (f.unitsMax != null) out = out.filter(r => (r.units ?? 0) <= f.unitsMax)
+
+  // Property age — filter on construction year. Rows with an unknown
+  // year built are excluded whenever a bound is set (they can't be
+  // proven to fall inside the requested range).
+  if (f.yearBuiltMin != null) out = out.filter(r => r.yearBuilt != null && r.yearBuilt >= f.yearBuiltMin)
+  if (f.yearBuiltMax != null) out = out.filter(r => r.yearBuilt != null && r.yearBuilt <= f.yearBuiltMax)
 
   if (f.hasDisaster === 'yes') out = out.filter(r => r.hasDisasterExposure)
   if (f.hasDisaster === 'no')  out = out.filter(r => !r.hasDisasterExposure)
@@ -321,6 +333,26 @@ export default function OutreachFilterPanel({
             style={inputStyle}
           />
         </div>
+      </div>
+
+      {/* Year built (property age) min / max */}
+      <div style={sectionStyle}>
+        <label style={labelStyle}>Year Built</label>
+        <div style={{ display:'flex', gap:8 }}>
+          <input
+            type="number" min={1800} max={2100} step={1} placeholder="From"
+            value={filters.yearBuiltMin ?? ''}
+            onChange={(e) => updateFilter('yearBuiltMin', e.target.value === '' ? null : Number(e.target.value))}
+            style={inputStyle}
+          />
+          <input
+            type="number" min={1800} max={2100} step={1} placeholder="To"
+            value={filters.yearBuiltMax ?? ''}
+            onChange={(e) => updateFilter('yearBuiltMax', e.target.value === '' ? null : Number(e.target.value))}
+            style={inputStyle}
+          />
+        </div>
+        <div style={{ fontSize:10.5, color:C.textMuted, marginTop:4 }}>Construction year — older buildings first for weatherization</div>
       </div>
 
       {/* Disaster exposure */}
