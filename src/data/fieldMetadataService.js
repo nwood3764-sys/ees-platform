@@ -337,3 +337,51 @@ export async function bulkUpdateRecords(tableName, recordIds, updates) {
   if (error) throw error
   return data
 }
+
+// Resolve the caller's public.users.id — shared by the bulk RPC wrappers.
+async function _resolveActorId() {
+  const { data: actorId, error } = await supabase.rpc('current_app_user_id')
+  if (error) throw error
+  if (!actorId) throw new Error('Caller is not a registered LEAP user')
+  return actorId
+}
+
+/**
+ * Soft-delete (move to recycle bin) a set of records in one call. Wraps the
+ * bulk_soft_delete_records RPC. Returns { records_total, records_deleted,
+ * records_errored, errors }.
+ */
+export async function bulkSoftDeleteRecords(tableName, recordIds, reason = null) {
+  if (!Array.isArray(recordIds) || recordIds.length === 0) {
+    throw new Error('recordIds must be a non-empty array')
+  }
+  const actorId = await _resolveActorId()
+  const { data, error } = await supabase.rpc('bulk_soft_delete_records', {
+    p_table:      tableName,
+    p_record_ids: recordIds,
+    p_actor_id:   actorId,
+    p_reason:     reason || null,
+  })
+  if (error) throw error
+  return data
+}
+
+/**
+ * Clone a set of records in one call. Wraps the bulk_clone_records RPC. Each
+ * clone gets a fresh id + record number, reset audit/soft-delete columns, and
+ * " (Copy)" appended to its primary name. Returns { records_total,
+ * records_cloned, records_errored, new_ids, errors }.
+ */
+export async function bulkCloneRecords(tableName, recordIds) {
+  if (!Array.isArray(recordIds) || recordIds.length === 0) {
+    throw new Error('recordIds must be a non-empty array')
+  }
+  const actorId = await _resolveActorId()
+  const { data, error } = await supabase.rpc('bulk_clone_records', {
+    p_table:      tableName,
+    p_record_ids: recordIds,
+    p_actor_id:   actorId,
+  })
+  if (error) throw error
+  return data
+}

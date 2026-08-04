@@ -12,6 +12,8 @@ import {
   getPicklistOptions,
   searchLookupOptions,
   bulkUpdateRecords,
+  bulkSoftDeleteRecords,
+  bulkCloneRecords,
 } from '../data/fieldMetadataService';
 import {
   fetchSavedViewsForObject,
@@ -1690,10 +1692,15 @@ function FilterValueEditor({ row, onChange }) {
 //                      the bulk_update_records RPC. When omitted, the
 //                      ListView renders exactly as it did before — pure
 //                      read-only, all existing call sites unchanged.
-//   onRecordsUpdated — fires after any successful inline or bulk edit
+//   onRecordsUpdated — fires after any successful bulk edit, delete, or clone
 //                      with the RPC summary. Parent should reload its
 //                      data on this callback so the table reflects the
 //                      new server state.
+//   onEditRecord     — (row) => void. Opens the row's record in edit mode
+//                      (the per-row "Edit" action). When omitted the action
+//                      falls back to onOpenRecord.
+//   onCloneRecord    — (row) => void. Opens the row's record in clone mode
+//                      (a pre-filled create form). The per-row "Clone" action.
 export function ListView({
   data: dataProp,
   columns: columnsProp,
@@ -1704,6 +1711,7 @@ export function ListView({
   defaultViewId, newLabel,
   renderCell, renderDetail, onNew, onOpenRecord, onRefresh,
   tableName, onRecordsUpdated, storageKey,
+  onEditRecord, onCloneRecord,
   listObject, listModule,
   // When true (the default), the user's persisted default view is applied on
   // first load — its filters/sort/columns become the opening state, matching
@@ -1888,7 +1896,9 @@ export function ListView({
   // that when the columns don't fit the pane the table overflows and the
   // horizontal scrollbar appears — reachable even before any column is resized.
   const tableMinWidth = useMemo(() => {
-    const base = editMode ? 36 : 0;
+    // Edit mode adds a 36px checkbox column (left) and a 44px row-actions
+    // column (right).
+    const base = editMode ? 36 + 44 : 0;
     return base + effectiveColumns.reduce((sum, col) => {
       const w = colWidths[col.field];
       return sum + (w != null ? w : defaultColWidth(col));
@@ -1974,6 +1984,11 @@ export function ListView({
   const [editError, setEditError]       = useState(null);
   const [overlay, setOverlay]           = useState(new Map());
   const [bulkPanelOpen, setBulkPanelOpen] = useState(false);
+  // Bulk delete/clone state. confirmDelete carries the ids pending a
+  // recycle-bin confirmation (bulk selection or a single row action).
+  const [bulkBusy, setBulkBusy]         = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null); // { ids } | null
+  const [bulkActionError, setBulkActionError] = useState(null);
 
   // Load field metadata once per tableName. Stays null in non-edit mode.
   useEffect(() => {
@@ -2225,6 +2240,50 @@ export function ListView({
       setSavingCell(null);
     }
   };
+
+  // ── Bulk delete / clone (edit mode only) ────────────────────────────────
+  // Both route through the server RPCs (soft-delete / clone) and then ask the
+  // parent to reload via onRecordsUpdated so counts and derived data refresh.
+  const runDelete = async (ids) => {
+    if (!ids || ids.length === 0) return;
+    setBulkBusy(true); setBulkActionError(null);
+    try {
+      const summary = await bulkSoftDeleteRecords(tableName, ids);
+      setConfirmDelete(null);
+      setSelected(new Set());
+      if (summary.records_errored > 0) {
+        setBulkActionError(`${summary.records_deleted} deleted, ${summary.records_errored} could not be deleted.`);
+      }
+      if (onRecordsUpdated) onRecordsUpdated(summary);
+    } catch (e) {
+      setBulkActionError(e.message || String(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const runClone = async (ids) => {
+    if (!ids || ids.length === 0) return;
+    setBulkBusy(true); setBulkActionError(null);
+    try {
+      const summary = await bulkCloneRecords(tableName, ids);
+      setSelected(new Set());
+      if (summary.records_errored > 0) {
+        setBulkActionError(`${summary.records_cloned} cloned, ${summary.records_errored} could not be cloned.`);
+      }
+      if (onRecordsUpdated) onRecordsUpdated(summary);
+    } catch (e) {
+      setBulkActionError(e.message || String(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  // Per-row actions. Edit/Clone open the record (falling back to onOpenRecord
+  // for Edit); Delete goes through the same confirm + RPC path as bulk delete.
+  const handleRowEdit  = (r) => { (onEditRecord || onOpenRecord)?.(r); };
+  const handleRowClone = (r) => { if (onCloneRecord) onCloneRecord(r); else { const k = rowKey(r); if (k) runClone([k]); } };
+  const handleRowDelete = (r) => { const k = rowKey(r); if (k) setConfirmDelete({ ids: [k] }); };
 
   // Returns the value to display for (row, col) — honoring optimistic
   // overlay first. Used both for the cell's read state and as the seed
@@ -2724,22 +2783,36 @@ export function ListView({
           <div style={{ fontSize: 12.5, color: '#1a7a4e', fontWeight: 600 }}>
             {selected.size.toLocaleString()} selected
           </div>
-          <button onClick={() => setBulkPanelOpen(true)}
+          <button onClick={() => setBulkPanelOpen(true)} disabled={bulkBusy}
             style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 600,
                      background: '#3ecf8e', border: '1px solid #2aab72', borderRadius: 6,
-                     color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                     color: '#fff', cursor: bulkBusy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon path="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" size={13} color="#fff" />
-            Edit selected
+            Edit fields
           </button>
-          <button onClick={() => setSelected(new Set())}
+          <button onClick={() => runClone([...selected])} disabled={bulkBusy}
+            style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 600,
+                     background: C.card, border: '1px solid #2aab72', borderRadius: 6,
+                     color: '#1a7a4e', cursor: bulkBusy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon path="M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" size={13} color="#1a7a4e" />
+            {bulkBusy ? 'Working…' : 'Clone'}
+          </button>
+          <button onClick={() => setConfirmDelete({ ids: [...selected] })} disabled={bulkBusy}
+            style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 600,
+                     background: C.card, border: `1px solid ${C.skyBlue || '#7eb3e8'}`, borderRadius: 6,
+                     color: '#1a5a8a', cursor: bulkBusy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon path="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" size={13} color="#1a5a8a" />
+            Delete
+          </button>
+          <button onClick={() => setSelected(new Set())} disabled={bulkBusy}
             style={{ padding: '6px 12px', fontSize: 12.5, fontWeight: 500,
                      background: 'transparent', border: '1px solid #2aab72', borderRadius: 6,
-                     color: '#1a7a4e', cursor: 'pointer' }}>
+                     color: '#1a7a4e', cursor: bulkBusy ? 'not-allowed' : 'pointer' }}>
             Clear selection
           </button>
-          {fieldMetaErr && (
+          {(fieldMetaErr || bulkActionError) && (
             <div style={{ fontSize: 11.5, color: '#1a5a8a', marginLeft: 'auto' }}>
-              Field metadata failed to load: {fieldMetaErr.message}
+              {bulkActionError || `Field metadata failed to load: ${fieldMetaErr.message}`}
             </div>
           )}
         </div>
@@ -2776,6 +2849,7 @@ export function ListView({
                   const colW = w != null ? w : (hasCustomWidths ? defaultColWidth(col) : undefined);
                   return <col key={col.field} style={colW != null ? { width: colW } : undefined} />;
                 })}
+                {editMode && <col style={{ width: 44 }} />}
               </colgroup>
               <thead>
                 <tr>
@@ -2807,11 +2881,17 @@ export function ListView({
                       isColDragging={colDrag.from === col.field}
                       isColDragOver={!!colDrag.from && colDrag.over === col.field && colDrag.from !== col.field} />
                   ))}
+                  {editMode && (
+                    <th style={{
+                      width: 44, borderBottom: `1px solid ${C.border}`,
+                      background: C.card, position: 'sticky', top: 0, zIndex: 4,
+                    }} aria-label="Row actions" />
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
-                  <tr><td colSpan={columns.length + (editMode ? 1 : 0)} style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+                  <tr><td colSpan={effectiveColumns.length + (editMode ? 2 : 0)} style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
                     {data.length === 0
                       ? <>No {pluralizeLabel(newLabel ? newLabel.toLowerCase() : '')} yet. <span onClick={onNew} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Create one</span></>
                       : <>No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span></>
@@ -2872,6 +2952,22 @@ export function ListView({
                         }
                         return defaultCell(col, r);
                       })}
+                      {editMode && (
+                        <td style={{
+                          width: 44, padding: '4px 6px', textAlign: 'center',
+                          borderBottom: `1px solid ${C.border}`,
+                          background: isSelected ? '#f0faf6' : undefined,
+                        }} onClick={(e) => e.stopPropagation()}>
+                          {key && (
+                            <RowActionMenu
+                              disabled={bulkBusy}
+                              onEdit={() => handleRowEdit(r)}
+                              onClone={() => handleRowClone(r)}
+                              onDelete={() => handleRowDelete(r)}
+                            />
+                          )}
+                        </td>
+                      )}
                     </TableRow>
                   );
                 })}
@@ -2971,6 +3067,124 @@ export function ListView({
           }}
         />
       )}
+      {editMode && confirmDelete && (
+        <ConfirmDeleteModal
+          count={confirmDelete.ids.length}
+          label={newLabel}
+          busy={bulkBusy}
+          onCancel={() => { if (!bulkBusy) setConfirmDelete(null); }}
+          onConfirm={() => runDelete(confirmDelete.ids)}
+        />
+      )}
+    </div>
+  );
+}
+
+// RowActionMenu — the trailing per-row "⋯" menu (Edit / Clone / Delete). The
+// dropdown is portaled to <body> and fixed-positioned to the button so it is
+// never clipped by the table's overflow:auto scroll container. Closes on
+// outside click, Escape, or scroll.
+function RowActionMenu({ onEdit, onClone, onDelete, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    // Capture-phase scroll so scrolling any ancestor (incl. the table) closes it.
+    window.addEventListener('mousedown', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const toggle = (e) => {
+    e.stopPropagation();
+    setRect(e.currentTarget.getBoundingClientRect());
+    setOpen(o => !o);
+  };
+
+  const item = (label, handler, danger) => (
+    <button
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(false); handler(); }}
+      style={{
+        display: 'flex', alignItems: 'center', width: '100%', gap: 8,
+        padding: '8px 12px', fontSize: 12.5, textAlign: 'left',
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        color: danger ? '#1a5a8a' : C.textPrimary,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = C.page; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >{label}</button>
+  );
+
+  return (
+    <>
+      <button
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={toggle}
+        disabled={disabled}
+        title="Row actions"
+        style={{
+          width: 28, height: 28, borderRadius: 6, border: 'none',
+          background: open ? C.page : 'transparent', cursor: disabled ? 'not-allowed' : 'pointer',
+          color: C.textSecondary, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 18, lineHeight: 1,
+        }}
+      >⋯</button>
+      {open && rect && createPortal(
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed', top: rect.bottom + 4, left: Math.max(8, rect.right - 168),
+            width: 168, background: C.card, border: `1px solid ${C.border}`,
+            borderRadius: 8, boxShadow: '0 8px 28px rgba(7,17,31,0.18)', zIndex: 9500,
+            padding: '4px 0', overflow: 'hidden',
+          }}
+        >
+          {item('Edit', onEdit)}
+          {item('Clone', onClone)}
+          <div style={{ height: 1, background: C.border, margin: '4px 0' }} />
+          {item('Delete', onDelete, true)}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+// ConfirmDeleteModal — recycle-bin confirmation for bulk or single-row delete.
+function ConfirmDeleteModal({ count, label, busy, onCancel, onConfirm }) {
+  const noun = count === 1 ? (label ? label.toLowerCase() : 'record') : pluralizeLabel(label ? label.toLowerCase() : 'record');
+  return (
+    <div onClick={onCancel}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,0.55)', zIndex: 9600,
+               display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ background: C.card, borderRadius: 10, width: 'min(440px, 100%)',
+                 boxShadow: '0 12px 40px rgba(7,17,31,0.4)', overflow: 'hidden' }}>
+        <div style={{ padding: '16px 20px 4px', fontSize: 15, fontWeight: 600, color: C.textPrimary }}>
+          Move {count.toLocaleString()} {noun} to the recycle bin?
+        </div>
+        <div style={{ padding: '4px 20px 16px', fontSize: 12.5, color: C.textSecondary, lineHeight: 1.5 }}>
+          {count === 1 ? 'This record' : 'These records'} will be soft-deleted and can be restored
+          from the recycle bin. Related records are handled by the standard cascade rules.
+        </div>
+        <div style={{ padding: '12px 20px', borderTop: `1px solid ${C.border}`,
+                      display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} disabled={busy} style={bulkSecondaryBtn}>Cancel</button>
+          <button onClick={onConfirm} disabled={busy}
+            style={{ ...bulkPrimaryBtn, background: busy ? C.border : '#7eb3e8',
+                     cursor: busy ? 'not-allowed' : 'pointer' }}>
+            {busy ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3178,6 +3392,9 @@ function LookupInlineEditor({ meta, value, setValue, commit, onCancel }) {
   );
 }
 
+// BulkEditModal — Salesforce-style "Edit fields" across the selected records.
+// Supports editing MULTIPLE fields in a single apply (add as many field/value
+// rows as you like); all changes are written in one bulk_update_records call.
 function BulkEditModal({ tableName, fieldMeta, columns, recordIds, onClose, onApplied }) {
   const editableFields = useMemo(() => {
     if (!fieldMeta) return [];
@@ -3191,22 +3408,34 @@ function BulkEditModal({ tableName, fieldMeta, columns, recordIds, onClose, onAp
     return out;
   }, [fieldMeta, columns]);
 
-  const [field, setField] = useState('');
-  const [value, setValue] = useState('');
+  // Each entry is one field being set: { id, field, value }.
+  const [entries, setEntries] = useState([{ id: 1, field: '', value: '' }]);
+  const nextId = useRef(2);
   const [working, setWorking] = useState(false);
   const [result, setResult]   = useState(null);
   const [error, setError]     = useState(null);
-  const selectedMeta = field ? fieldMeta.get(field) : null;
+
+  const chosen = new Set(entries.map(e => e.field).filter(Boolean));
+  const updateEntry = (id, patch) =>
+    setEntries(prev => prev.map(e => (e.id === id ? { ...e, ...patch } : e)));
+  const addEntry = () => setEntries(prev => [...prev, { id: nextId.current++, field: '', value: '' }]);
+  const removeEntry = (id) => setEntries(prev => (prev.length > 1 ? prev.filter(e => e.id !== id) : prev));
+
+  const activeEntries = entries.filter(e => e.field);
 
   const apply = async () => {
-    if (!field) return;
+    if (activeEntries.length === 0) return;
     setWorking(true); setError(null); setResult(null);
     try {
-      const sendValue = value === '' || value === null ? null
-                       : selectedMeta?.editorType === 'number'  ? Number(value)
-                       : selectedMeta?.editorType === 'boolean' ? (value === 'true')
-                       : value;
-      const summary = await bulkUpdateRecords(tableName, recordIds, { [field]: sendValue });
+      const updates = {};
+      for (const e of activeEntries) {
+        const meta = fieldMeta.get(e.field);
+        updates[e.field] = e.value === '' || e.value === null ? null
+          : meta?.editorType === 'number'  ? Number(e.value)
+          : meta?.editorType === 'boolean' ? (e.value === 'true')
+          : e.value;
+      }
+      const summary = await bulkUpdateRecords(tableName, recordIds, updates);
       setResult(summary);
       if (summary.records_errored === 0 && onApplied) onApplied(summary);
     } catch (e) {
@@ -3225,29 +3454,56 @@ function BulkEditModal({ tableName, fieldMeta, columns, recordIds, onClose, onAp
         <div style={{ padding: '14px 18px', borderBottom: `1px solid ${C.border}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary }}>
-            Edit field across {recordIds.length.toLocaleString()} record{recordIds.length === 1 ? '' : 's'}
+            Edit fields across {recordIds.length.toLocaleString()} record{recordIds.length === 1 ? '' : 's'}
           </div>
           <button onClick={onClose}
             style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: C.textMuted, fontSize: 18, lineHeight: 1 }}>✕</button>
         </div>
         <div style={{ padding: '14px 18px', overflowY: 'auto', flex: 1 }}>
-          <div style={{ marginBottom: 12 }}>
-            <label style={bulkLabel}>Field</label>
-            <select value={field} onChange={(e) => { setField(e.target.value); setValue(''); }} style={bulkInput}>
-              <option value="">— Select a field —</option>
-              {editableFields.map(f => (
-                <option key={f.columnName} value={f.columnName}>{f.label} ({f.meta.editorType})</option>
-              ))}
-            </select>
-          </div>
-          {field && (
-            <div style={{ marginBottom: 12 }}>
-              <label style={bulkLabel}>New value</label>
-              <BulkValueEditor meta={selectedMeta} value={value} setValue={setValue} />
-              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-                Leave blank to clear the field on all selected records.
+          {entries.map((entry, idx) => {
+            const meta = entry.field ? fieldMeta.get(entry.field) : null;
+            // Options: this row's own field plus any field not chosen elsewhere.
+            const opts = editableFields.filter(f => f.columnName === entry.field || !chosen.has(f.columnName));
+            return (
+              <div key={entry.id} style={{
+                marginBottom: 12, paddingBottom: 12,
+                borderBottom: idx < entries.length - 1 ? `1px dashed ${C.border}` : 'none',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <label style={{ ...bulkLabel, marginBottom: 0, flex: 1 }}>Field {entries.length > 1 ? idx + 1 : ''}</label>
+                  {entries.length > 1 && (
+                    <button onClick={() => removeEntry(entry.id)}
+                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: C.textMuted, fontSize: 12 }}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <select value={entry.field} onChange={(e) => updateEntry(entry.id, { field: e.target.value, value: '' })} style={bulkInput}>
+                  <option value="">— Select a field —</option>
+                  {opts.map(f => (
+                    <option key={f.columnName} value={f.columnName}>{f.label} ({f.meta.editorType})</option>
+                  ))}
+                </select>
+                {entry.field && (
+                  <div style={{ marginTop: 8 }}>
+                    <label style={bulkLabel}>New value</label>
+                    <BulkValueEditor meta={meta} value={entry.value} setValue={(v) => updateEntry(entry.id, { value: v })} />
+                    <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                      Leave blank to clear this field on all selected records.
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+            );
+          })}
+          {editableFields.length > chosen.size && (
+            <button onClick={addEntry}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'transparent',
+                       border: `1px dashed ${C.borderDark || C.border}`, borderRadius: 6, padding: '6px 12px',
+                       fontSize: 12.5, color: C.textSecondary, cursor: 'pointer', marginBottom: 8 }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M12 5v14M5 12h14" /></svg>
+              Add another field
+            </button>
           )}
           {error && (
             <div style={{ padding: '10px 12px', background: '#e8f1fb', color: '#1a5a8a', fontSize: 12, borderRadius: 6, marginBottom: 12 }}>
@@ -3278,11 +3534,11 @@ function BulkEditModal({ tableName, fieldMeta, columns, recordIds, onClose, onAp
         <div style={{ padding: '12px 18px', borderTop: `1px solid ${C.border}`,
                       display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={bulkSecondaryBtn}>Close</button>
-          <button onClick={apply} disabled={!field || working}
+          <button onClick={apply} disabled={activeEntries.length === 0 || working}
             style={{ ...bulkPrimaryBtn,
-                     background: (!field || working) ? C.border : '#3ecf8e',
-                     cursor: (!field || working) ? 'not-allowed' : 'pointer' }}>
-            {working ? 'Applying…' : 'Apply'}
+                     background: (activeEntries.length === 0 || working) ? C.border : '#3ecf8e',
+                     cursor: (activeEntries.length === 0 || working) ? 'not-allowed' : 'pointer' }}>
+            {working ? 'Applying…' : `Apply${activeEntries.length > 1 ? ` (${activeEntries.length} fields)` : ''}`}
           </button>
         </div>
       </div>
