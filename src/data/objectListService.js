@@ -101,15 +101,21 @@ function columnType(c) {
 //   { kind: 'lookup',   table }          — search records in a referenced table
 //   undefined                            — free text/number/date (manual entry)
 function ownColumnDescriptor(c, group, ownerTable) {
+  // columnName is the real DB column the ListView writes back to for inline /
+  // bulk edit. For FK columns the visible `field` is the *__label display
+  // column, but edits target the underlying FK column — so carry both, and tell
+  // the editor which display field to refresh after a save (labelField).
   if (c.is_foreign_key && c.references_table === 'picklist_values') {
     return {
       field: `${c.column_name}__label`, label: titleize(c.column_name), type: 'text', group,
+      columnName: c.column_name, labelField: `${c.column_name}__label`,
       valueSource: { kind: 'picklist', object: ownerTable, field: c.column_name },
     }
   }
   if (c.is_foreign_key && c.references_table === 'users') {
     return {
       field: `${c.column_name}__label`, label: userFkLabel(c.column_name), type: 'text', group,
+      columnName: c.column_name, labelField: `${c.column_name}__label`,
       valueSource: { kind: 'lookup', table: 'users' },
     }
   }
@@ -117,7 +123,7 @@ function ownColumnDescriptor(c, group, ownerTable) {
   // (object, column_name); the sidebar resolves this lazily and falls back to
   // free text when no definition exists.
   const type = columnType(c)
-  const base = { field: c.column_name, label: titleize(c.column_name), type, group }
+  const base = { field: c.column_name, label: titleize(c.column_name), type, group, columnName: c.column_name }
   if (type === 'text') base.valueSource = { kind: 'picklist', object: ownerTable, field: c.column_name, maybe: true }
   return base
 }
