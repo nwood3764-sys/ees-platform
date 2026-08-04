@@ -235,7 +235,13 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
               <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textSecondary, marginBottom: 8, letterSpacing: 0.2 }}>EMAIL</div>
               <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>Send emails to this provider and read their replies here — threaded on their account. Use <strong>New Email</strong> below.</div>
               <ConversationPanelWidget
-                widget={{ widget_title: 'Emails with this provider', widget_config: { fk: 'account_id', channel_filter: 'email' } }}
+                widget={{ widget_title: 'Emails with this provider', widget_config: {
+                  fk: 'account_id',
+                  channel_filter: 'email',
+                  email_to: email || null,
+                  email_recipient_name: contact || app.spa_company_legal_name || null,
+                  email_contact_id: app.spa_primary_contact_id || null,
+                } }}
                 parentRecordId={app.account.id}
               />
             </div>

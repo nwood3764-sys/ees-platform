@@ -110,6 +110,12 @@ export default function ConversationPanelWidget({
   const smsProjectId = fk === 'project_id' ? parentRecordId : (config.sms_project_id || null)
   const smsToPhone = config.sms_to_phone || null
   const smsRecipientName = config.sms_recipient_name || null
+  // Email compose defaults — mirror the SMS ones. A caller (e.g. the
+  // service-provider panel) can seed the composer's recipient directly;
+  // otherwise the composer resolves a default from the anchor record.
+  const emailToEmail = config.email_to || null
+  const emailRecipientName = config.email_recipient_name || null
+  const emailContactId = fk === 'contact_id' ? parentRecordId : (config.email_contact_id || null)
   const isMobile = useIsMobile()
   const toast = useToast()
 
@@ -577,7 +583,9 @@ export default function ConversationPanelWidget({
         onSent={handleComposeSent}
         anchorObject={FK_TO_ANCHOR_OBJECT[fk] || null}
         anchorRecordId={parentRecordId}
-        defaultContactId={fk === 'contact_id' ? parentRecordId : null}
+        defaultRecipientEmail={emailToEmail || ''}
+        defaultRecipientName={emailRecipientName || ''}
+        defaultContactId={emailContactId}
       />
       {/* Compose new text modal — opened by the header "New Text" button on SMS panels */}
       <ComposeSmsModal

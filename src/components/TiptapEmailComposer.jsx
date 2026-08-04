@@ -56,6 +56,69 @@ import {
   loadFieldsForObject,
 } from '../data/mergeFieldCatalog'
 
+// ── Paste + serialization helpers ─────────────────────────────────────────
+// Copy-paste from Word, Outlook, Google Docs, or web pages arrives as HTML
+// wrapped in vendor cruft (mso-* styles, class soup, <style>/<meta> blocks,
+// empty spans). ProseMirror silently drops most of it, which is why pasted
+// content used to lose its paragraph breaks and blank-line spacing. We clean
+// the incoming HTML while KEEPING the structure that carries formatting —
+// paragraphs, line breaks, lists, headings, bold/italic/underline, links,
+// and text alignment — so what the user pasted survives into the editor.
+
+const KEEP_INLINE_STYLE = /(text-align|font-weight|font-style|text-decoration)\s*:\s*[^;]+/gi
+
+function cleanPastedHtml(html) {
+  if (!html || typeof html !== 'string') return html || ''
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    // Drop non-content nodes entirely (these carry the mso-* junk).
+    doc.querySelectorAll('style, meta, link, script, title, xml, o\\:p').forEach(n => n.remove())
+    // Normalize every element: strip identifying/junk attributes but preserve
+    // the handful of inline styles that actually encode visible formatting.
+    doc.body.querySelectorAll('*').forEach(el => {
+      el.removeAttribute('class')
+      el.removeAttribute('id')
+      el.removeAttribute('lang')
+      el.removeAttribute('align')
+      const raw = el.getAttribute('style')
+      if (raw) {
+        const kept = (raw.match(KEEP_INLINE_STYLE) || [])
+          .map(s => s.replace(/\s+/g, ' ').trim())
+          .join(';')
+        if (kept) el.setAttribute('style', kept)
+        else el.removeAttribute('style')
+      }
+    })
+    return doc.body.innerHTML
+  } catch {
+    return html
+  }
+}
+
+// TipTap emits clean semantic HTML (<p>, <ul>, <strong>…) with no inline
+// spacing. Bare <p> tags render flush in many email clients (notably Outlook
+// desktop), collapsing the paragraph breaks the author saw while composing.
+// Before the body leaves the composer we inline modest block spacing so the
+// recipient sees the same paragraph and list rhythm. Idempotent — skips any
+// element that already carries a margin.
+function inlineEmailSpacing(html) {
+  if (!html || typeof html !== 'string') return html || ''
+  try {
+    const doc = new DOMParser().parseFromString(`<div id="__leaproot">${html}</div>`, 'text/html')
+    const root = doc.getElementById('__leaproot')
+    if (!root) return html
+    root.querySelectorAll('p, ul, ol, blockquote, h1, h2, h3').forEach(el => {
+      const existing = el.getAttribute('style') || ''
+      if (/margin/i.test(existing)) return
+      const spacing = 'margin:0 0 10px 0'
+      el.setAttribute('style', existing ? `${existing};${spacing}` : spacing)
+    })
+    return root.innerHTML
+  } catch {
+    return html
+  }
+}
+
 // ── Visual constants ──────────────────────────────────────────────────────
 
 const TOOLBAR_STYLE = {
@@ -604,6 +667,11 @@ const TiptapEmailComposer = forwardRef(function TiptapEmailComposer({
     ],
     content: initialContent,
     editable: !disabled,
+    editorProps: {
+      // Clean vendor cruft out of pasted HTML while keeping the structure
+      // that carries formatting (paragraphs, breaks, lists, alignment).
+      transformPastedHTML: cleanPastedHtml,
+    },
     onUpdate: ({ editor }) => {
       // Eagerly load merge fields on first edit so the `{{` trigger
       // doesn't stall the first time a user uses it.
@@ -626,7 +694,9 @@ const TiptapEmailComposer = forwardRef(function TiptapEmailComposer({
 
   // Imperative API exposed to the modal.
   useImperativeHandle(ref, () => ({
-    getHtml: () => editor?.getHTML() || '',
+    // getHtml is the send snapshot — inline block spacing so the recipient's
+    // mail client renders the same paragraph rhythm the author composed.
+    getHtml: () => inlineEmailSpacing(editor?.getHTML() || ''),
     getText: () => editor?.getText() || '',
     isEmpty: () => {
       const t = editor?.getText() || ''
@@ -781,6 +851,17 @@ const TiptapEmailComposer = forwardRef(function TiptapEmailComposer({
           pointer-events: none;
         }
         .ProseMirror ul, .ProseMirror ol { padding-left: 1.4rem; margin: 0.3rem 0; }
+        /* Paragraph spacing so pasted multi-paragraph / blank-line content
+           reads with real spacing while composing — matching what the
+           recipient sees (inlineEmailSpacing applies the same rhythm on send). */
+        .ProseMirror p { margin: 0 0 10px 0; }
+        .ProseMirror p:last-child { margin-bottom: 0; }
+        .ProseMirror blockquote {
+          border-left: 3px solid ${C.border};
+          margin: 0 0 10px 0;
+          padding-left: 12px;
+          color: ${C.textSecondary};
+        }
         .ProseMirror a { color: #2aab72; text-decoration: underline; }
         .ProseMirror .leap-merge-chip {
           display: inline-flex;
