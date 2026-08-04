@@ -21,6 +21,8 @@
   var sb = null;
   var mailboxItem = null;
   var myAddress = '';
+  var sharedMailboxAddress = ''; // SMTP of the shared mailbox when the open item
+                                 // is in one (ees-nc.org / ees-wi.org boxes)
   var selected = null;      // { rec_object, rec_id, rec_label, rec_sublabel }
   var searchTimer = null;
   var participants = [];    // [{ email, name, role, contactId, contactName, accountId, accountName }]
@@ -132,10 +134,12 @@
     if (!$('mainView').hidden) {
       setStatus('', 'info');
       clearSelection();
-      renderEmailSummary();
-      setupAttachments();
-      runSearch();
-      refreshParticipants();
+      refreshSharedContext(function () {
+        renderEmailSummary();
+        setupAttachments();
+        runSearch();
+        refreshParticipants();
+      });
     }
   }
 
@@ -151,7 +155,7 @@
     rows.forEach(function (r) {
       if (!r.email) return;
       var key = r.email.toLowerCase();
-      if (key === myAddress) return;      // skip myself
+      if (isOurAddress(key)) return;      // skip our own / the shared mailbox
       if (seen[key]) return;
       seen[key] = true;
       out.push(r);
@@ -164,7 +168,7 @@
   function primaryEmail() {
     var dir = detectDirection();
     if (dir === 'inbound') { var f = fromAddress(); return f ? f.email.toLowerCase() : null; }
-    var t = toList().find(function (r) { return r.email && r.email.toLowerCase() !== myAddress; });
+    var t = toList().find(function (r) { return r.email && !isOurAddress(r.email); });
     return t ? t.email.toLowerCase() : null;
   }
 
@@ -365,11 +369,15 @@
   // ── Main view ────────────────────────────────────────────────────────────
   function enterMain() {
     show('signOutBtn');
-    renderEmailSummary();
-    setupAttachments();
     show('mainView');
-    runSearch();          // seed with recent records for the default object
-    refreshParticipants(); // match the people on the email to LEAP contacts
+    // Resolve shared-mailbox context first, then render so direction/addresses
+    // are correct for mail in ees-nc.org / ees-wi.org shared boxes.
+    refreshSharedContext(function () {
+      renderEmailSummary();
+      setupAttachments();
+      runSearch();          // seed with recent records for the default object
+      refreshParticipants(); // match the people on the email to LEAP contacts
+    });
   }
 
   function fromAddress() {
@@ -394,9 +402,37 @@
               .filter(function (r) { return r.email; });
   }
 
+  // When the open email lives in a shared mailbox (e.g. ncira@ees-nc.org,
+  // ira@ees-wi.org), Office.getSharedPropertiesAsync tells us the shared
+  // mailbox's address. We treat that as "ours" alongside the signed-in user's
+  // own address, so direction and the customer/our-address split are correct
+  // for shared-mailbox mail — not attributed to the delegate reading it.
+  function refreshSharedContext(done) {
+    sharedMailboxAddress = '';
+    try {
+      var supported = Office.context.requirements.isSetSupported('Mailbox', '1.8');
+      if (supported && mailboxItem && typeof mailboxItem.getSharedPropertiesAsync === 'function') {
+        mailboxItem.getSharedPropertiesAsync(function (r) {
+          if (r && r.status === Office.AsyncResultStatus.Succeeded && r.value) {
+            sharedMailboxAddress = (r.value.targetMailbox || r.value.owner || '').toLowerCase();
+          }
+          if (done) done();
+        });
+        return;
+      }
+    } catch (e) { /* not a shared item / older host */ }
+    if (done) done();
+  }
+
+  function isOurAddress(email) {
+    if (!email) return false;
+    var e = email.toLowerCase();
+    return e === myAddress || (!!sharedMailboxAddress && e === sharedMailboxAddress);
+  }
+
   function detectDirection() {
     var f = fromAddress();
-    if (f && myAddress && f.email && f.email.toLowerCase() === myAddress) return 'outbound';
+    if (f && f.email && isOurAddress(f.email)) return 'outbound';
     return 'inbound';
   }
 
