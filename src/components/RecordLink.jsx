@@ -34,7 +34,7 @@ function isModifiedClick(e) {
   return e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey
 }
 
-export default function RecordLink({ table, id, onActivate, children, style, className, title }) {
+export default function RecordLink({ table, id, onActivate, children, style, className, title, onMouseEnter, onMouseLeave }) {
   const href = recordHref(table, id)
 
   // No real URL for this table (or no id) → keep the prior plain-span behavior
@@ -47,6 +47,8 @@ export default function RecordLink({ table, id, onActivate, children, style, cla
         className={className}
         title={title}
         style={{ cursor: 'pointer', ...style }}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
         onClick={(e) => { e.stopPropagation(); onActivate?.(e) }}
       >
         {children}
@@ -60,6 +62,8 @@ export default function RecordLink({ table, id, onActivate, children, style, cla
       className={className}
       title={title}
       style={{ textDecoration: 'none', cursor: 'pointer', ...style }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       onClick={(e) => {
         // Don't let the row's own onClick (select/open) also fire.
         e.stopPropagation()

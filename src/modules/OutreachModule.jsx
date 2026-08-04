@@ -6,6 +6,7 @@ import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
+import NavLink from '../components/NavLink'
 import { fetchProperties, fetchBuildings, fetchUnits, fetchOpportunities, fetchContacts, fetchEnrollments, fetchAccounts } from '../data/outreachService'
 import { useCachedFetch, invalidatePrefix } from '../lib/useCachedFetch'
 
@@ -331,19 +332,21 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
       {/* Topbar */}
       <div data-module-topbar="1" style={{ height: 54, background: C.card, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-          <span
-            onClick={() => { setSec('home'); closeRecord() }}
+          <NavLink
+            to={{ activeModule: 'enrollment' }}
+            onActivate={() => { setSec('home'); closeRecord() }}
             style={{ color: C.textMuted, cursor: 'pointer' }}
             onMouseEnter={e => { e.currentTarget.style.color = C.textSecondary }}
             onMouseLeave={e => { e.currentTarget.style.color = C.textMuted }}
-          >Enrollment</span>
+          >Enrollment</NavLink>
           <span style={{ color: C.textMuted }}>/</span>
-          <span
-            onClick={() => { if (selectedRecord) closeRecord(); else if (sec !== 'home') setSec('home') }}
+          <NavLink
+            to={{ activeModule: 'enrollment', section: sec }}
+            onActivate={() => { if (selectedRecord) closeRecord(); else if (sec !== 'home') setSec('home') }}
             style={{ color: (selectedRecord || sec !== 'home') ? C.textMuted : C.textPrimary, fontWeight: (selectedRecord || sec !== 'home') ? 400 : 500, cursor: (selectedRecord || sec !== 'home') ? 'pointer' : 'default' }}
             onMouseEnter={e => { if (selectedRecord || sec !== 'home') e.currentTarget.style.color = C.textSecondary }}
             onMouseLeave={e => { if (selectedRecord || sec !== 'home') e.currentTarget.style.color = C.textMuted }}
-          >{SECTIONS.find(s => s.id === sec)?.label}</span>
+          >{SECTIONS.find(s => s.id === sec)?.label}</NavLink>
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name}</span></>}
         </div>
         <button style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.page, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 12px', fontSize: 12.5, color: C.textSecondary, cursor: 'pointer', fontWeight: 500 }}>
@@ -352,7 +355,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
         </button>
       </div>
 
-      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} moduleId="enrollment" active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {selectedRecord ? (

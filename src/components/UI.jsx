@@ -4,6 +4,7 @@ import { useIsMobile } from '../lib/useMediaQuery';
 import { useSwipeToDismiss } from '../lib/useSwipeToDismiss';
 import { getCurrentUserProfile } from '../data/layoutService';
 import UserMenu from './UserMenu';
+import NavLink from './NavLink';
 
 export function Badge({ s }) {
   const cfg = STATUS_CFG[s] || { bg: '#f0f3f8', color: '#4a5e7a', dot: '#8fa0b8' };
@@ -94,7 +95,12 @@ export function Topbar({ breadcrumb, onReports }) {
   );
 }
 
-export function SectionTabs({ sections, active, onChange, counts = {}, urgentSections = {} }) {
+// `moduleId` (optional): when provided, each tab renders as a real <a href>
+// (/m/<moduleId>/<sectionId>) via NavLink so right-click → open-in-new-window,
+// middle-click, and Cmd-click work — plain left-click still does fast in-app
+// section switching. Omit it (e.g. deep admin sub-tabs with a non-section URL
+// scheme) to keep the plain <button> behavior.
+export function SectionTabs({ sections, active, onChange, counts = {}, urgentSections = {}, moduleId }) {
   const isMobile = useIsMobile();
   return (
     <div className={isMobile ? 'ees-hscroll' : ''} style={{
@@ -106,24 +112,38 @@ export function SectionTabs({ sections, active, onChange, counts = {}, urgentSec
       {sections.map(s => {
         const on = s.id === active;
         const urgent = urgentSections[s.id];
-        return (
-          <button key={s.id} onClick={() => onChange(s.id)} style={{
-            padding: isMobile ? '12px 14px' : '10px 16px',
-            background: 'none', border: 'none',
-            borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
-            color: on ? C.textPrimary : C.textMuted,
-            fontSize: isMobile ? 14 : 13,
-            fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
-            display: 'flex', alignItems: 'center', gap: 6,
-            whiteSpace: 'nowrap', flexShrink: 0,
-            ...(isMobile ? { scrollSnapAlign: 'start' } : {}),
-          }}>
+        const tabStyle = {
+          padding: isMobile ? '12px 14px' : '10px 16px',
+          background: 'none', border: 'none',
+          borderBottom: on ? `2px solid ${C.emerald}` : '2px solid transparent',
+          color: on ? C.textPrimary : C.textMuted,
+          fontSize: isMobile ? 14 : 13,
+          fontWeight: on ? 500 : 400, cursor: 'pointer', marginBottom: -1,
+          display: 'flex', alignItems: 'center', gap: 6,
+          whiteSpace: 'nowrap', flexShrink: 0,
+          ...(isMobile ? { scrollSnapAlign: 'start' } : {}),
+        };
+        const inner = (
+          <>
             {s.label}
             {urgent > 0 && (
               <span style={{ background: C.danger, color: '#fff', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10 }}>
                 {urgent}
               </span>
             )}
+          </>
+        );
+        if (moduleId) {
+          return (
+            <NavLink key={s.id} to={{ activeModule: moduleId, section: s.id }}
+              onActivate={() => onChange(s.id)} style={tabStyle}>
+              {inner}
+            </NavLink>
+          );
+        }
+        return (
+          <button key={s.id} onClick={() => onChange(s.id)} style={tabStyle}>
+            {inner}
           </button>
         );
       })}
@@ -440,9 +460,10 @@ export function Sidebar({
             : isCollapsed ? '11px 0' : '9px 20px';
           const rowFontSize = isMobile ? 15 : 13.5;
           return (
-            <div
+            <NavLink
               key={m.id}
-              onClick={() => handleModuleClick(m.id)}
+              to={{ activeModule: m.id }}
+              onActivate={() => handleModuleClick(m.id)}
               title={isCollapsed ? m.label : undefined}
               style={{
                 display: 'flex', alignItems: 'center',
@@ -460,7 +481,7 @@ export function Sidebar({
             >
               <Icon path={m.icon} color="currentColor" size={isMobile ? 17 : 15} />
               {!isCollapsed && m.label}
-            </div>
+            </NavLink>
           );
         })}
       </nav>

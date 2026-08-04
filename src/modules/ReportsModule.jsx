@@ -4,6 +4,7 @@ import { C } from '../data/constants'
 import { Icon, SectionTabs, LoadingState, ErrorState } from '../components/UI'
 import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
+import NavLink from '../components/NavLink'
 import {
   fetchReportFolders, fetchReports, fetchScheduledReports,
   fetchDashboardFolders, fetchDashboards,
@@ -289,13 +290,13 @@ export default function ReportsModule({
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div data-module-topbar="1" style={{ height:54, background:C.card, borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', flexShrink:0 }}>
         <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-          <span onClick={() => { closeRecord(); setSec(SECTIONS[0]?.id) }} style={{ color:C.emeraldMid, cursor:'pointer', fontWeight:500 }}>Reports & Dashboards</span>
+          <NavLink to={{ activeModule: 'reports' }} onActivate={() => { closeRecord(); setSec(SECTIONS[0]?.id) }} style={{ color:C.emeraldMid, cursor:'pointer', fontWeight:500 }}>Reports & Dashboards</NavLink>
           <span style={{ color:C.textMuted }}>/</span>
-          <span style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }} onClick={() => selectedRecord && closeRecord()}>{SECTIONS.find(s=>s.id===sec)?.label}</span>
+          <NavLink to={{ activeModule: 'reports', section: sec }} onActivate={() => selectedRecord && closeRecord()} style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }}>{SECTIONS.find(s=>s.id===sec)?.label}</NavLink>
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name || 'Record'}</span></>}
         </div>
       </div>
-      <SectionTabs sections={SECTIONS} active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} />
+      <SectionTabs sections={SECTIONS} moduleId="reports" active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
           selectedRecord.table === 'reports' ? (

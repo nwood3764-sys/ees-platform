@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
+import RecordLink from './RecordLink'
 import { supabase } from '../lib/supabase'
 import {
   loadUnreadCount,
@@ -291,28 +292,33 @@ export default function NotificationBell({ onNavigateToRecord }) {
 
 function NotificationRow({ n, onClick, busy }) {
   const unread = !n.is_read
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      role="menuitem"
-      style={{
-        display: 'block',
-        width: '100%',
-        textAlign: 'left',
-        background: unread ? '#f5fbf8' : '#fff',
-        borderTop: 'none',
-        borderRight: 'none',
-        borderLeft: unread ? `3px solid ${C.emerald}` : '3px solid transparent',
-        borderBottom: `1px solid ${C.border}`,
-        padding: '10px 14px',
-        cursor: busy ? 'wait' : 'pointer',
-        opacity: busy ? 0.6 : 1,
-      }}
-      onMouseEnter={(e) => { if (!busy) e.currentTarget.style.background = unread ? '#ecf7f1' : '#f8fafc' }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = unread ? '#f5fbf8' : '#fff' }}
-    >
+  // A notification is navigable only when it carries a source record. Those
+  // rows become real <a href> anchors (RecordLink) so right-click / middle-
+  // click / Cmd-click open the record in a new tab; a plain click still runs
+  // onClick (mark-as-read + close popover + SPA navigate). Notifications with
+  // no record target stay a plain button that only marks read + closes.
+  const hasTarget = !!(n.related_object && n.related_id)
+  // Hover-highlight is driven by local state here because RecordLink renders an
+  // anchor and doesn't forward onMouseEnter/onMouseLeave (unlike the original
+  // button, which mutated e.currentTarget.style directly).
+  const [hover, setHover] = useState(false)
+
+  const rowStyle = {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    background: unread ? '#f5fbf8' : '#fff',
+    borderTop: 'none',
+    borderRight: 'none',
+    borderLeft: unread ? `3px solid ${C.emerald}` : '3px solid transparent',
+    borderBottom: `1px solid ${C.border}`,
+    padding: '10px 14px',
+    cursor: busy ? 'wait' : 'pointer',
+    opacity: busy ? 0.6 : 1,
+  }
+
+  const content = (
+    <>
       <div style={{
         fontSize: 12.5,
         fontWeight: unread ? 600 : 500,
@@ -352,6 +358,41 @@ function NotificationRow({ n, onClick, busy }) {
           <span style={{ color: C.textMuted }}>· {prettyTable(n.related_object)}</span>
         )}
       </div>
+    </>
+  )
+
+  if (hasTarget) {
+    return (
+      <div
+        onMouseEnter={() => { if (!busy) setHover(true) }}
+        onMouseLeave={() => setHover(false)}
+      >
+        <RecordLink
+          table={n.related_object}
+          id={n.related_id}
+          onActivate={onClick}
+          style={{
+            ...rowStyle,
+            background: hover ? (unread ? '#ecf7f1' : '#f8fafc') : (unread ? '#f5fbf8' : '#fff'),
+          }}
+        >
+          {content}
+        </RecordLink>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      role="menuitem"
+      style={rowStyle}
+      onMouseEnter={(e) => { if (!busy) e.currentTarget.style.background = unread ? '#ecf7f1' : '#f8fafc' }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = unread ? '#f5fbf8' : '#fff' }}
+    >
+      {content}
     </button>
   )
 }
