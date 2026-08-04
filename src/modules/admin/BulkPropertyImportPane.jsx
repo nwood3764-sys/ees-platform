@@ -59,7 +59,6 @@ const UNIT_TEMPLATE_COLUMNS = [
   { key: 'bathrooms',        label: 'Bathrooms',        required: false, example: 1 },
   { key: 'square_footage',   label: 'Square Footage',   required: false, example: 850 },
   { key: 'floor',            label: 'Floor',            required: false, example: 1 },
-  { key: 'notes',            label: 'Unit Notes',       required: false, example: '' },
 ]
 // Live units.record_type picklist. Blank on import defaults to DWELLING-UNIT.
 const VALID_UNIT_RECORD_TYPES = ['ATTIC-SPACE','COMMON-AREA','DWELLING-UNIT','HALLWAY','MECHANICAL-ROOM','OFFICE','STANDARD']
@@ -147,7 +146,8 @@ async function downloadTemplate() {
     ['Fill in the Data tab (one row per building) and, optionally, the Units tab (one row per unit).'],
     ['Do not change the column headers. Add your rows starting on row 2.'],
     ['The example rows are for reference — delete or overwrite them before uploading.'],
-    ['Cells with a drop-down arrow (Subsidy Type, Property State, Unit Record Type) only accept a value from the list.'],
+    ['Cells with a drop-down arrow only accept a value from the list. On the Units tab, Property Name and Building Name are'],
+    ['drop-downs built from what you type on the Data tab — so fill in the Data tab FIRST, then pick each unit\'s building.'],
     [''],
     ['DATA TAB — one row per BUILDING.'],
     ['Repeat the Owner and Property columns on every building row at the same property; the importer deduplicates automatically.'],
@@ -165,7 +165,7 @@ async function downloadTemplate() {
     ]),
     [''],
     ['UNITS TAB (optional — for real unit names/numbers):'],
-    ['Each row is ONE unit. Tie it to its building with the same Property Name + Building Name used on the Data tab.'],
+    ['Each row is ONE unit. Pick its Property and Building from the drop-downs (they list what you entered on the Data tab).'],
     ['A unit needs a Unit Name OR a Unit Number (at least one). The other is filled from it if left blank.'],
     ['Unit Record Type is a drop-down; blank defaults to DWELLING-UNIT.'],
     ['Bedrooms / Floor are whole numbers; Bathrooms / Square Footage may be decimals. All optional.'],
@@ -188,27 +188,39 @@ async function downloadTemplate() {
   // Second example: a second building at the SAME test property (dedup demo).
   wsD.addRow(['Test Owner Name','Test Property Name','123 Main St','Madison','WI','53703','LIHTC','Building B',1987,18])
   styleHeaderRow(wsD.getRow(1))
+  wsD.views = [{ state: 'frozen', ySplit: 1 }]
   wsD.columns = TEMPLATE_COLUMNS.map(c => ({ width: Math.max(c.label.length + 2, 16) }))
+  const propColLetter  = columnLetter(TEMPLATE_COLUMNS.findIndex(c => c.key === 'property_name') + 1)
+  const bldgColLetter  = columnLetter(TEMPLATE_COLUMNS.findIndex(c => c.key === 'building_name') + 1)
   const stateCol = columnLetter(TEMPLATE_COLUMNS.findIndex(c => c.key === 'property_state') + 1)
   const subCol   = columnLetter(TEMPLATE_COLUMNS.findIndex(c => c.key === 'property_subsidy_type') + 1)
   for (let r = 2; r <= DV_ROWS; r++) {
     wsD.getCell(`${stateCol}${r}`).dataValidation = listDropdown(LIST_SOURCE.state)
     wsD.getCell(`${subCol}${r}`).dataValidation   = listDropdown(LIST_SOURCE.subsidyType)
   }
+  // The Units tab's Property / Building drop-downs read straight from the Data
+  // tab, so a unit can only point at a property/building you actually entered.
+  const DATA_PROPERTY_SOURCE = `Data!$${propColLetter}$2:$${propColLetter}$${DV_ROWS}`
+  const DATA_BUILDING_SOURCE = `Data!$${bldgColLetter}$2:$${bldgColLetter}$${DV_ROWS}`
 
   // ── Tab 3: Units ────────────────────────────────────────────────────────
   const wsU = wb.addWorksheet('Units')
   wsU.addRow(UNIT_TEMPLATE_COLUMNS.map(c => c.label))
   ;[
-    ['Test Property Name','Building A','Apt 101','101','DWELLING-UNIT',2,1,850,1,''],
-    ['Test Property Name','Building A','Apt 102','102','DWELLING-UNIT',1,1,650,1,''],
-    ['Test Property Name','Building A','Community Room','CR','COMMON-AREA','','','',1,'Shared tenant space'],
+    ['Test Property Name','Building A','Apt 101','101','DWELLING-UNIT',2,1,850,1],
+    ['Test Property Name','Building A','Apt 102','102','DWELLING-UNIT',1,1,650,1],
+    ['Test Property Name','Building A','Community Room','CR','COMMON-AREA','','','',1],
   ].forEach(r => wsU.addRow(r))
   styleHeaderRow(wsU.getRow(1))
+  wsU.views = [{ state: 'frozen', ySplit: 1 }]
   wsU.columns = UNIT_TEMPLATE_COLUMNS.map(c => ({ width: Math.max(c.label.length + 2, 14) }))
-  const urtCol = columnLetter(UNIT_TEMPLATE_COLUMNS.findIndex(c => c.key === 'unit_record_type') + 1)
+  const uPropCol = columnLetter(UNIT_TEMPLATE_COLUMNS.findIndex(c => c.key === 'property_name') + 1)
+  const uBldgCol = columnLetter(UNIT_TEMPLATE_COLUMNS.findIndex(c => c.key === 'building_name') + 1)
+  const urtCol   = columnLetter(UNIT_TEMPLATE_COLUMNS.findIndex(c => c.key === 'unit_record_type') + 1)
   for (let r = 2; r <= DV_ROWS; r++) {
-    wsU.getCell(`${urtCol}${r}`).dataValidation = listDropdown(LIST_SOURCE.unitRecordType)
+    wsU.getCell(`${uPropCol}${r}`).dataValidation = listDropdown(DATA_PROPERTY_SOURCE)
+    wsU.getCell(`${uBldgCol}${r}`).dataValidation = listDropdown(DATA_BUILDING_SOURCE)
+    wsU.getCell(`${urtCol}${r}`).dataValidation   = listDropdown(LIST_SOURCE.unitRecordType)
   }
 
   // ── Tab 4: Lists (drop-down source; also human-readable) ────────────────
@@ -318,7 +330,6 @@ function cleanUnit(u) {
       bathrooms:        u.bathrooms || '',
       square_footage:   u.square_footage || '',
       floor:            u.floor || '',
-      notes:            u.notes || '',
     },
     invalidRecordType,
   }
