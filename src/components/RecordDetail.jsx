@@ -4627,6 +4627,134 @@ function RelatedListWidget({
       }
     }
 
+    // An assessment documents ONE building's existing conditions for a program.
+    // However it's created — from the Opportunity's related list, from the
+    // building or property, or elsewhere — it should open with everything the
+    // system already knows so the assessor only records what they measure on
+    // site (Nicholas: inherit "from the opportunity, from the building, from the
+    // property"). The generic chain seeder above already resolved property_id and
+    // building_id from an opportunity parent (assessments' TABLE_META parents),
+    // but the assessment page layouts bind the Opportunity and Building fields to
+    // the legacy uuid columns assessment_opportunity / assessment_building_del —
+    // NOT the opportunity_id / building_id FKs the seeder fills — so those looked
+    // empty. Here we resolve the opportunity/building/property, then copy the
+    // building's physical attributes (square footage, unit count, attic sizing +
+    // existing insulation, utility provider) and the property's owner-level
+    // occupancy, and seed BOTH the real FK and the layout's display column so the
+    // form shows the context regardless of which record type's layout is used.
+    // Only fill blanks; never clobber a chain-seeded value; all stay editable.
+    if (childTable === 'assessments') {
+      const fill = (dst, v) => {
+        if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
+      }
+      try {
+        let oppId  = prefillObj.opportunity_id || prefillObj.assessment_opportunity
+          || (parentTable === 'opportunities' ? parentRecordId : null)
+        let bldId  = prefillObj.building_id || prefillObj.assessment_building_del
+          || (parentTable === 'buildings' ? parentRecordId : null)
+        let propId = prefillObj.property_id || (parentTable === 'properties' ? parentRecordId : null)
+
+        // No opportunity carried (created from a building/property): resolve the
+        // building's — else the property's — most recent live opportunity so the
+        // Opportunity field links up. A default the user can repoint.
+        if (!oppId && (bldId || propId)) {
+          let q = supabase.from('opportunities')
+            .select('id, property_id, building_id')
+            .eq('opportunity_is_deleted', false)
+            .order('opportunity_created_at', { ascending: false })
+            .limit(1)
+          q = bldId ? q.eq('building_id', bldId) : q.eq('property_id', propId)
+          const { data: oppRows } = await q
+          const found = Array.isArray(oppRows) ? oppRows[0] : oppRows
+          if (found?.id) {
+            oppId = found.id
+            if (!bldId && found.building_id) bldId = found.building_id
+            if (!propId && found.property_id) propId = found.property_id
+          }
+        }
+
+        // Read the parent rows we now have ids for (any failure leaves those
+        // fields blank for manual entry).
+        const fetchRow = (table, id, cols, delCol) => id
+          ? supabase.from(table).select(cols).eq('id', id).eq(delCol, false).maybeSingle()
+          : Promise.resolve({ data: null })
+        const [oppRes, buildingRes, propertyRes] = await Promise.all([
+          fetchRow('opportunities', oppId,
+            'building_id, property_id, opportunity_name, opportunity_gas_account_number', 'opportunity_is_deleted'),
+          fetchRow('buildings', bldId,
+            'building_sq_ft, building_square_footage, building_total_units, building_number_of_units, ' +
+            'building_units_at_attic_plane, building_attic_square_footage, building_sq_ft_attic_plane, ' +
+            'building_number_of_bedrooms, building_year_built, ' +
+            'building_existing_attic_insulation_type, building_existing_attic_insulation_depth, ' +
+            'building_existing_attic_insulation_r_value, building_gas_fuel_provider, building_gas_utility, ' +
+            'building_primary_contact_id', 'building_is_deleted'),
+          fetchRow('properties', propId,
+            'property_total_units, property_gas_utility, property_year_built, ' +
+            'property_mf_raw_pct_occupied, property_ph_pct_occupied, property_primary_contact_id', 'property_is_deleted'),
+        ])
+        const opp = oppRes?.data
+        const b   = buildingRes?.data
+        const p   = propertyRes?.data
+
+        // An opportunity can supply the building/property ids we still lack.
+        if (opp) {
+          if (!bldId && opp.building_id) bldId = opp.building_id
+          if (!propId && opp.property_id) propId = opp.property_id
+        }
+
+        // Seed the relationship columns — both the real FK and the legacy display
+        // column each layout binds to — so the Opportunity/Building/Property
+        // fields all show populated.
+        if (oppId)  { fill('opportunity_id', oppId);   fill('assessment_opportunity', oppId) }
+        if (bldId)  { fill('building_id', bldId);       fill('assessment_building_del', bldId) }
+        if (propId) fill('property_id', propId)
+
+        // Building physical attributes — the assessment's primary source.
+        if (b) {
+          fill('assessment_building_sq_ft',   b.building_sq_ft ?? b.building_square_footage)
+          fill('assessment_number_of_units',  b.building_total_units ?? b.building_number_of_units)
+          fill('assessment_units_at_attic_plane', b.building_units_at_attic_plane)
+          fill('assessment_attic_sq_ft',      b.building_attic_square_footage ?? b.building_sq_ft_attic_plane)
+          fill('assessment_number_of_bedrooms', b.building_number_of_bedrooms)
+          fill('assessment_existing_attic_insulation_type',    b.building_existing_attic_insulation_type)
+          fill('assessment_existing_attic_insulation_depth',   b.building_existing_attic_insulation_depth)
+          fill('assessment_existing_attic_insulation_r_value', b.building_existing_attic_insulation_r_value)
+          fill('assessment_gas_fuel_provider', b.building_gas_fuel_provider ?? b.building_gas_utility)
+          if (b.building_year_built != null && b.building_year_built !== '') {
+            fill('assessment_year_built', b.building_year_built)
+          }
+          fill('assessment_property_contact_for_iq_assessment', b.building_primary_contact_id)
+        }
+
+        // Property fallbacks — owner-level utility + occupancy the building row
+        // may not carry (occupancy % is a whole-property figure used as a proxy).
+        if (p) {
+          fill('assessment_gas_fuel_provider', p.property_gas_utility)
+          fill('assessment_building_occupancy_rate', p.property_mf_raw_pct_occupied ?? p.property_ph_pct_occupied)
+          if (p.property_year_built != null && p.property_year_built !== '') {
+            fill('assessment_year_built', p.property_year_built)
+          }
+          fill('assessment_property_contact_for_iq_assessment', p.property_primary_contact_id)
+        }
+
+        // Assessment name composes "<base> - <record type label>" once the user
+        // picks a record type (same derived-name mechanism projects/enrollments
+        // use — assessments has a nameColumn in TABLE_META). Base is the
+        // opportunity name, else the property name.
+        let nameBase = opp?.opportunity_name
+        if (!nameBase && propId) {
+          try {
+            const { data: pn } = await supabase.from('properties')
+              .select('property_name').eq('id', propId).maybeSingle()
+            nameBase = pn?.property_name
+          } catch { /* leave name blank */ }
+        }
+        if (nameBase) prefillObj.__derivedNameBase = nameBase
+      } catch (err) {
+        console.warn('assessment prefill: related-record fetch failed', err)
+      }
+    }
+
     // An opportunity documents a program pursuit on a property, so a new one
     // created from a property (or building) inherits everything the system
     // already knows — the same rich carry-over the "Advance to Opportunity"
