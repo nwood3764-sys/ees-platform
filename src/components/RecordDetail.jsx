@@ -5816,12 +5816,22 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // opened synchronously (within the click gesture) so popup blockers don't
   // fire, then the async prefill build redirects it.
   const [openingPreapproval, setOpeningPreapproval] = useState(false)
+  // Required fields still blank when the user tried to open the pre-approval
+  // form. Non-empty → the completion modal is shown and the form is NOT opened.
+  const [preapprovalMissing, setPreapprovalMissing] = useState(null)
   const handleOpenPreapprovalForm = useCallback(async () => {
     if (openingPreapproval) return
     const win = window.open('', '_blank')
     setOpeningPreapproval(true)
     try {
-      const { url, error } = await openAssessmentPreapprovalForm(recordId, win)
+      const { url, error, missing } = await openAssessmentPreapprovalForm(recordId, win)
+      if (missing && missing.length) {
+        // Data is incomplete — don't submit a half-filled form. Close the blank
+        // tab and tell the user exactly which fields to complete first.
+        if (win) win.close()
+        setPreapprovalMissing(missing)
+        return
+      }
       if (error || !url) {
         if (win) win.close()
         window.alert(error || 'Could not open the pre-approval application.')
@@ -8353,6 +8363,50 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           onConfirm={handleDelete}
           onCancel={() => setShowDeleteConfirm(false)}
         />
+      )}
+
+      {/* Pre-approval completion check — when Open Pre-Approval Application is
+          clicked but required fields (resolved from this enrollment and its
+          parent records) are still blank, list them and block opening the form
+          until they're filled. Documentation-first: this only gates the
+          external submission, never the record itself. */}
+      {preapprovalMissing && preapprovalMissing.length > 0 && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(13,26,46,0.48)', zIndex: 1100,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setPreapprovalMissing(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 10,
+            border: `1px solid ${C.border}`, width: 'min(520px, 96vw)', maxHeight: '85vh',
+            overflow: 'auto', boxShadow: '0 12px 40px rgba(7,17,31,0.28)' }}>
+            <div style={{ padding: '18px 20px 12px', borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Icon path="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                  size={20} color={C.sky} />
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary }}>
+                  Complete these fields before submitting
+                </div>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
+                The Focus On Energy pre-approval form can't be submitted until every required
+                field has a value. These are still blank on this enrollment (or its property,
+                building, and contractor records they're inherited from):
+              </div>
+            </div>
+            <div style={{ padding: '12px 20px' }}>
+              <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {preapprovalMissing.map((label, i) => (
+                  <li key={i} style={{ fontSize: 13.5, color: C.textPrimary }}>{label}</li>
+                ))}
+              </ul>
+            </div>
+            <div style={{ padding: '12px 20px 18px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setPreapprovalMissing(null)} style={{ background: C.emerald,
+                color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13,
+                fontWeight: 600, cursor: 'pointer' }}>
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Void envelope confirmation — only mounted on envelope records when
