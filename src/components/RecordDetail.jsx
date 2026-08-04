@@ -38,7 +38,7 @@ import FileGalleryWidget from './FileGallery'
 import IncomeQualificationPanel from './IncomeQualificationPanel'
 import PropertyOwnerResearchPanel from './PropertyOwnerResearchPanel'
 import { runIncomeQualification } from '../data/incomeQualificationService'
-import { openAssessmentPreapprovalForm } from '../data/preapprovalPrefill'
+import { openAssessmentPreapprovalForm, loadAssessmentPrefill, findMissingRequiredFields } from '../data/preapprovalPrefill'
 import { recordRecentlyViewed } from '../data/recentlyViewedService'
 import ConversationPanelWidget from './ConversationPanel'
 import ConversationMessagesWidget from './ConversationMessagesWidget'
@@ -75,6 +75,7 @@ import {
   fetchPageLayout,
   loadPicklists as loadAllPicklists,
   getCurrentUserId,
+  getCurrentUserProfile,
   fetchRelatedRecords,
   resolveLookups,
   reorderJunctionRows,
@@ -5840,6 +5841,40 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       setOpeningPreapproval(false)
     }
   }, [recordId, openingPreapproval])
+
+  // ── Record locking ─────────────────────────────────────────────────────
+  // A record is locked once its status reaches a value flagged
+  // picklist_locks_record (e.g. an enrollment that's been Submitted). Locked
+  // records are read-only for everyone EXCEPT System Administrators, who can
+  // still edit to unlock/correct. Both signals load before any early return so
+  // the hook order is stable on every render (avoids React #310).
+  const [isSystemAdmin, setIsSystemAdmin] = useState(false)
+  useEffect(() => {
+    let alive = true
+    getCurrentUserProfile()
+      .then(p => { if (alive) setIsSystemAdmin(p?.roleName === 'Admin') })
+      .catch(() => { if (alive) setIsSystemAdmin(false) })
+    return () => { alive = false }
+  }, [])
+
+  const [statusLocksRecord, setStatusLocksRecord] = useState(false)
+  useEffect(() => {
+    const statusCol = TABLE_META[tableName]?.statusColumn
+    const statusId = statusCol ? data?.record?.[statusCol] : null
+    if (!statusId) { setStatusLocksRecord(false); return }
+    let alive = true
+    supabase
+      .from('picklist_values')
+      .select('picklist_locks_record')
+      .eq('id', statusId)
+      .maybeSingle()
+      .then(({ data: row }) => { if (alive) setStatusLocksRecord(row?.picklist_locks_record === true) })
+      .catch(() => { if (alive) setStatusLocksRecord(false) })
+    return () => { alive = false }
+  }, [tableName, data?.record])
+
+  // Locked *for this user* — admins are never locked out.
+  const recordLockedForUser = statusLocksRecord && !isSystemAdmin
   // Parent-name lookups for the breadcrumb in CREATE mode. The loaded record is
   // empty while creating, so prefilled parent FKs (e.g. property_id on a new
   // Building, or opportunity_id on a new Contact Role) can't resolve to names —
@@ -6569,6 +6604,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
 
   const startEditing = () => {
     if (!data?.record) return
+    // Locked-record guard (belt-and-suspenders — the Edit action is also hidden
+    // for locked records via recordActions isAvailable). Admins are exempt.
+    if (statusLocksRecord && !isSystemAdmin) {
+      toast.error('This record is locked. Only a System Administrator can edit it once it has been submitted.')
+      return
+    }
     setDraft({ ...data.record }); setEditing(true)
     if (data.sections) loadAllEditOpts(data.sections, data.record)
   }
@@ -7466,6 +7507,38 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         return
       }
 
+      // Submit gate: a record cannot be moved to a locking status (e.g.
+      // "Submitted — Awaiting Program Response") until every required field is
+      // populated. For the assessment pre-approval enrollment the required set
+      // is the Focus On Energy form's required fields (resolved from this record
+      // and its parents); a still-blank one blocks the status change and lists
+      // what to complete. Fields being set in THIS save count as populated.
+      const statusCol = TABLE_META[tableName]?.statusColumn
+      if (statusCol && changes[statusCol]) {
+        const { data: stRow } = await supabase
+          .from('picklist_values').select('picklist_locks_record')
+          .eq('id', changes[statusCol]).maybeSingle()
+        if (stRow?.picklist_locks_record === true
+            && tableName === 'enrollments'
+            && recordTypeLabel === 'WI-IRA-MF-HOMES-Assessment-Preapproval') {
+          const { payload, map } = await loadAssessmentPrefill(recordId)
+          let missingSubmit = findMissingRequiredFields(payload, map.fields)
+          if (missingSubmit.length) {
+            // Don't flag a field the user is filling in this very save.
+            missingSubmit = missingSubmit.filter(lbl => {
+              const f = (map.fields || []).find(ff => (ff.field_label || ff.leap_field) === lbl)
+              const pending = f?.leap_field ? changes[f.leap_field] : undefined
+              return !(pending !== undefined && pending !== null && String(pending).trim() !== '')
+            })
+          }
+          if (missingSubmit.length) {
+            setPreapprovalMissing(missingSubmit)
+            setSaving(false)
+            return
+          }
+        }
+      }
+
       const updated = await saveRecord(tableName, recordId, changes)
       setEditing(false); setDraft({})
       toast.success('Changes saved')
@@ -7666,6 +7739,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     recordTypeRequiresIncomeQualification,
     incomeQualificationComplete,
     recordTypeLabel,
+    recordIsLocked:       recordLockedForUser,
   }
 
   const topbarActionHandlers = {
@@ -7837,7 +7911,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   {recordNumber && <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted }}>{recordNumber}</span>}
                 </div>
                 <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px' }}>{displayName}</h1>
-                {statusLabel && <Badge s={statusLabel} />}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {statusLabel && <Badge s={statusLabel} />}
+                  {statusLocksRecord && (
+                    <span title={isSystemAdmin
+                      ? 'This record is locked. As a System Administrator you can still edit it.'
+                      : 'This record is locked. Only a System Administrator can edit it.'}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5,
+                        background: '#eef5fc', border: `1px solid #bcd9f2`, color: '#1a5a8a',
+                        borderRadius: 4, padding: '2px 9px', fontSize: 11.5, fontWeight: 600 }}>
+                      <Icon path="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" size={12} color="#1a5a8a" />
+                      Locked{isSystemAdmin ? ' · admin can edit' : ''}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
