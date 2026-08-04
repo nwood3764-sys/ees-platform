@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { C } from '../../data/constants'
 import { Icon, LoadingState, ErrorState } from '../../components/UI'
+import NavLink from '../../components/NavLink'
 import { ListView } from '../../components/ListView'
 import { useIsMobile } from '../../lib/useMediaQuery'
 import { SETUP_TREE } from './setupTree'
@@ -252,11 +253,16 @@ function TreePane({ search, setSearch, filteredTree, expanded, setExpanded, sele
               </div>
               {isOpen && group.children.map(node => {
                 const isActive = selectedId === node.id
+                const nodeTo = node.id === 'object_manager'
+                  ? { activeModule: 'admin', section: 'objects' }
+                  : { activeModule: 'admin', section: node.id }
                 return (
-                  <div
+                  <NavLink
                     key={node.id}
-                    onClick={() => onSelect(node.id)}
+                    to={nodeTo}
+                    onActivate={() => onSelect(node.id)}
                     style={{
+                      display: 'block',
                       padding: isMobile ? '12px 14px 12px 40px' : '6px 14px 6px 40px',
                       fontSize: isMobile ? 14.5 : 12.5,
                       color: isActive ? C.textPrimary : C.textSecondary,
@@ -270,7 +276,7 @@ function TreePane({ search, setSearch, filteredTree, expanded, setExpanded, sele
                     onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
                   >
                     {node.label}
-                  </div>
+                  </NavLink>
                 )
               })}
             </div>
@@ -383,20 +389,22 @@ function WelcomePane({ onOpenObjectManager, onNavigate }) {
               <div style={statValue(false)}>{health.permissionSets}</div>
               <div style={statLabel}>Active Permission Sets</div>
             </div>
-            <div
-              style={{ ...statCard(false), cursor: 'pointer' }}
-              onClick={() => onNavigate && onNavigate('audit_log')}
+            <NavLink
+              to={{ activeModule: 'admin', section: 'audit_log' }}
+              onActivate={() => onNavigate && onNavigate('audit_log')}
+              style={{ ...statCard(false), display: 'block', cursor: 'pointer' }}
               title="Open Audit Log">
               <div style={statValue(false)}>{health.audit24h}</div>
               <div style={statLabel}>Audit Events (24h)</div>
-            </div>
-            <div
-              style={{ ...statCard(health.recycleBinTotal > 0), cursor: 'pointer' }}
-              onClick={() => onNavigate && onNavigate('recycle_bin')}
+            </NavLink>
+            <NavLink
+              to={{ activeModule: 'admin', section: 'recycle_bin' }}
+              onActivate={() => onNavigate && onNavigate('recycle_bin')}
+              style={{ ...statCard(health.recycleBinTotal > 0), display: 'block', cursor: 'pointer' }}
               title="Open Recycle Bin">
               <div style={statValue(health.recycleBinTotal > 0)}>{health.recycleBinTotal}</div>
               <div style={statLabel}>In Recycle Bin</div>
-            </div>
+            </NavLink>
             <div style={statCard(false)}>
               <div style={{ ...statValue(false), fontSize: 14, fontWeight: 600 }}>
                 {fmtRelativeTime(health.lastDispatch)}
@@ -420,10 +428,17 @@ function WelcomePane({ onOpenObjectManager, onNavigate }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
         {quickLinks.map(link => {
           const clickable = !!(link.onClick || (link.nodeId && onNavigate))
+          // Object Manager has no nodeId (it deep-links to /m/admin/objects);
+          // every other quick link maps to /m/admin/<nodeId>.
+          const linkTo = link.onClick
+            ? { activeModule: 'admin', section: 'objects' }
+            : link.nodeId ? { activeModule: 'admin', section: link.nodeId } : null
           return (
-            <div key={link.label}
-              onClick={clickable ? () => handleQuickLinkClick(link) : undefined}
+            <NavLink key={link.label}
+              to={linkTo}
+              onActivate={clickable ? () => handleQuickLinkClick(link) : undefined}
               style={{
+                display: 'block',
                 background: link.highlight ? '#f0f9f5' : C.card,
                 border: `1px solid ${link.highlight ? C.emerald : C.border}`,
                 borderRadius: 8, padding: '12px 14px',
@@ -437,7 +452,7 @@ function WelcomePane({ onOpenObjectManager, onNavigate }) {
                 {link.label}
               </div>
               <div style={{ fontSize: 11.5, color: C.textMuted }}>{link.hint}</div>
-            </div>
+            </NavLink>
           )
         })}
       </div>
