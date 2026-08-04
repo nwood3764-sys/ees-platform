@@ -4001,10 +4001,10 @@ function RelatedListWidget({
   // True total for the header count, accurate beyond the fetch cap
   // (fetchRelatedRecords attaches _total via PostgREST count:'exact').
   const totalCount = (typeof allRows._total === 'number') ? allRows._total : localRows.length
-  // "View All →" is now the escape hatch for lists larger than we fetched into
-  // the scroll window — the server has more rows than are loaded here. (Never
-  // shown in editable mode, which manages membership directly.)
-  const hiddenCount = editable ? 0 : Math.max(0, totalCount - localRows.length)
+  // True when the server holds more rows than the scroll window loaded (list
+  // larger than the fetch cap) — used to enrich the "View All →" label so the
+  // user knows the window isn't showing every record.
+  const hasMoreThanLoaded = !editable && totalCount > localRows.length
 
   // hide_when_empty: opt-in widget_config flag for related lists that
   // should disappear entirely when no rows exist (rather than rendering
@@ -5255,7 +5255,12 @@ function RelatedListWidget({
               </div>
             )}
 
-            {hiddenCount > 0 && (() => {
+            {!editable && shownRows.length > 0 && (() => {
+              // "View All →" is ALWAYS offered on a populated read-only list —
+              // not just when rows overflow the in-widget scroll window. The
+              // full list view exposes columns this compact widget doesn't, so
+              // the user needs a way into it for every related section, however
+              // few rows there are.
               // Wire View All to the table's list view, SCOPED to this parent
               // record (Salesforce related-list page parity) so the user lands
               // on only these related records — not the whole object. Works for
@@ -5288,7 +5293,7 @@ function RelatedListWidget({
                       onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline' }}
                       onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none' }}
                     >
-                      View All →
+                      {hasMoreThanLoaded ? `View All (${totalCount.toLocaleString()}) →` : 'View All →'}
                     </a>
                   ) : (
                     <span
