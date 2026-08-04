@@ -5928,6 +5928,58 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
 }
 
 // ---------------------------------------------------------------------------
+// MergedAccountNotice — rendered in place of the record when you open an
+// account that was merged away by the Merge Accounts tool (a soft-deleted
+// loser). The account no longer exists as a live record, so instead of showing
+// it as an editable page we tell the user it was merged and point them at the
+// surviving master (Salesforce parity: a merged account resolves to the
+// winner). `info` is null while the survivor resolves, then
+// { status:'merged', master, mergedAt } or { status:'deleted' } when the loser
+// was deleted without a recoverable master in the log.
+// ---------------------------------------------------------------------------
+function MergedAccountNotice({ loserName, loserNumber, info, onNavigateToRecord, onBack }) {
+  const master = info?.status === 'merged' ? info.master : null
+  const resolving = info == null
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ maxWidth: 520, width: '100%', background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12, padding: '28px 28px 22px', textAlign: 'center', boxShadow: '0 2px 12px rgba(13,26,46,.07)' }}>
+        <div style={{ width: 46, height: 46, borderRadius: '50%', background: '#e8f1fb', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#1a5a8a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 8l-4 4 4 4M3 12h12a4 4 0 004-4V4M17 16l4-4-4-4" />
+          </svg>
+        </div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 6 }}>
+          This account was merged and removed
+        </div>
+        <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.55, marginBottom: 18 }}>
+          <strong style={{ color: C.textPrimary }}>{loserName}</strong>{loserNumber ? ` (${loserNumber})` : ''} was merged into another account.
+          {resolving
+            ? ' Finding the surviving account…'
+            : master
+              ? ' All of its records now live on the surviving account below.'
+              : ' It is no longer an active account.'}
+        </div>
+        {master && (
+          <RecordLink
+            table="accounts"
+            id={master.id}
+            onActivate={() => onNavigateToRecord?.({ table: 'accounts', id: master.id, mode: 'view' })}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: C.emerald, color: '#fff', borderRadius: 8, padding: '10px 18px', fontSize: 13, fontWeight: 600 }}
+          >
+            Go to {master.account_name}{master.account_record_number ? ` (${master.account_record_number})` : ''} →
+          </RecordLink>
+        )}
+        <div style={{ marginTop: master ? 14 : 4 }}>
+          <button onClick={onBack} style={{ background: 'transparent', border: 'none', color: C.textMuted, fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Back to Accounts
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // RecordDetail — main component
 // ---------------------------------------------------------------------------
 
@@ -6079,6 +6131,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showSubmittalEditor, setShowSubmittalEditor] = useState(false)
   const [showQiToolModal, setShowQiToolModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
+  // Set when the loaded account was merged away by the Merge Accounts tool
+  // (soft-deleted loser). Null = live record, or still resolving the survivor.
+  // Shape: { status: 'merged'|'deleted', master?, mergedAt? }
+  const [mergedInfo, setMergedInfo] = useState(null)
   const [showPortalModal, setShowPortalModal] = useState(false)
   const [showLogCall, setShowLogCall] = useState(false)
   // Bumped when a call is logged from the header action so the Activity tab's
@@ -6399,6 +6455,55 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
     return () => { cancelled = true }
   }, [tableName, recordId, isCreate, reloadTick, pickerEvaluated, pickedRecordType])
+
+  // Merged-away accounts must not masquerade as live records. The Merge
+  // Accounts tool soft-deletes the loser (account_is_deleted = true) — it's
+  // correctly hidden from list views and global search, but its direct
+  // /accounts/<id> page still loads the row, so opening it (bookmark, browser
+  // history, an old link) showed the dead account as if it were a normal,
+  // editable record. That's the "the account I merged from is still there"
+  // report. When the loaded account is soft-deleted, resolve the surviving
+  // master from account_merge_log — following the chain to the final live
+  // account so a chained merge (A→B, B→C) lands on C — and render a clear
+  // "merged into X" interstitial instead (Salesforce parity: a merged
+  // account's URL points you at the winner).
+  useEffect(() => {
+    if (isCreate || tableName !== 'accounts' || data?.record?.account_is_deleted !== true) {
+      setMergedInfo(null)
+      return undefined
+    }
+    let cancelled = false
+    setMergedInfo(null)
+    ;(async () => {
+      let loserId = recordId
+      let master = null
+      let mergedAt = null
+      for (let hop = 0; hop < 10; hop++) {
+        const { data: log } = await supabase
+          .from('account_merge_log')
+          .select('aml_master_account_id, created_at')
+          .eq('aml_merged_account_id', loserId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (cancelled) return
+        if (!log?.aml_master_account_id) break
+        if (hop === 0) mergedAt = log.created_at
+        const { data: acct } = await supabase
+          .from('accounts')
+          .select('id, account_name, account_record_number, account_is_deleted')
+          .eq('id', log.aml_master_account_id)
+          .maybeSingle()
+        if (cancelled) return
+        if (!acct) break
+        if (acct.account_is_deleted !== true) { master = acct; break } // live survivor
+        loserId = acct.id                                              // keep following the chain
+      }
+      if (cancelled) return
+      setMergedInfo(master ? { status: 'merged', master, mergedAt } : { status: 'deleted' })
+    })()
+    return () => { cancelled = true }
+  }, [data, isCreate, tableName, recordId])
 
   // True when THIS record is the one currently addressed in the browser URL
   // (/<table>/<id>). Only then do we sync the active tab into the URL — this
@@ -7783,6 +7888,23 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   )
 
   const { record, layout, sections, picklists, lookups } = data
+
+  // A merged-away (soft-deleted) account is no longer a live record — show the
+  // merged/deleted notice with a path to the surviving account instead of
+  // rendering the dead row as if it were editable. Rendered as soon as the
+  // soft-deleted state is known (mergedInfo may still be resolving the
+  // survivor) so the dead record never flashes as live.
+  if (!isCreate && tableName === 'accounts' && record?.account_is_deleted === true) {
+    return (
+      <MergedAccountNotice
+        loserName={record.account_name}
+        loserNumber={record.account_record_number}
+        info={mergedInfo}
+        onNavigateToRecord={onNavigateToRecord}
+        onBack={onBack}
+      />
+    )
+  }
 
   // Property Owner Research only belongs on records that represent a property
   // or its ownership: every properties record, and accounts whose record type
