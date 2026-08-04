@@ -33,17 +33,42 @@ const TEMPLATE_COLUMNS = [
   { key: 'property_street',        label: 'Property Street',        required: true,  example: '123 Main St' },
   { key: 'property_city',          label: 'Property City',          required: true,  example: 'Madison' },
   { key: 'property_state',         label: 'Property State',         required: true,  example: 'WI' },
-  { key: 'property_zip',           label: 'Property Zip',           required: false, example: '53703' },
+  { key: 'property_zip',           label: 'Property Zip',           required: true,  example: '53703' },
   { key: 'property_subsidy_type',  label: 'Subsidy Type',           required: false, example: 'LIHTC' },
   { key: 'building_name',          label: 'Building Name',          required: true,  example: 'Building A' },
   { key: 'building_year_built',    label: 'Year Built',             required: false, example: 1985 },
-  { key: 'building_unit_count',    label: 'Unit Count',             required: true,  example: 12 },
+  { key: 'building_unit_count',    label: 'Unit Count',             required: false, example: 12 },
   { key: 'building_notes',         label: 'Building Notes',         required: false, example: '' },
 ]
 
 const REQUIRED_KEYS = TEMPLATE_COLUMNS.filter(c => c.required).map(c => c.key)
 const VALID_STATES = ['WI','MI','NC','CO','IN']  // EES-WI's five-state list — warning if outside
-const VALID_SUBSIDY = ['Section 8 / HUD','LIHTC','NOAH','DAC','NEST Community','Other']
+// Matches the live properties.property_subsidy_type picklist.
+const VALID_SUBSIDY = ['Section 8 / HUD','LIHTC','NOAH','DAC','NEST Community','Public Housing Authority Owned','Other']
+
+// ── Units sheet definition ───────────────────────────────────────────────
+// One row per unit on the "Units" sheet, tied back to its building by
+// Property Name + Building Name (the same values used on the Data sheet).
+// Buildings with no unit rows here fall back to Unit Count auto-generation.
+const UNIT_TEMPLATE_COLUMNS = [
+  { key: 'property_name',    label: 'Property Name',    required: true,  example: 'Maple Heights Apartments' },
+  { key: 'building_name',    label: 'Building Name',    required: true,  example: 'Building A' },
+  { key: 'unit_name',        label: 'Unit Name',        required: false, example: 'Apt 101' },
+  { key: 'unit_number',      label: 'Unit Number',      required: false, example: '101' },
+  { key: 'unit_record_type', label: 'Unit Record Type', required: false, example: 'DWELLING-UNIT' },
+  { key: 'bedrooms',         label: 'Bedrooms',         required: false, example: 2 },
+  { key: 'bathrooms',        label: 'Bathrooms',        required: false, example: 1 },
+  { key: 'square_footage',   label: 'Square Footage',   required: false, example: 850 },
+  { key: 'floor',            label: 'Floor',            required: false, example: 1 },
+  { key: 'notes',            label: 'Unit Notes',       required: false, example: '' },
+]
+// Live units.record_type picklist. Blank on import defaults to DWELLING-UNIT.
+const VALID_UNIT_RECORD_TYPES = ['ATTIC-SPACE','COMMON-AREA','DWELLING-UNIT','HALLWAY','MECHANICAL-ROOM','OFFICE','STANDARD']
+
+// Key a unit row to its building the same way on both sheets.
+function unitBuildingKey(propertyName, buildingName) {
+  return `${normalizeName(propertyName)}||${normalizeName(buildingName)}`
+}
 
 // ── Address normalization (must match server normalize_property_address) ──
 function normalizeAddress(street, city, state) {
@@ -98,23 +123,64 @@ function buildTemplateWorkbook() {
     ...TEMPLATE_COLUMNS.map(c => [
       `${c.label}${c.required ? ' (required)' : ' (optional)'}`,
       c.key === 'property_state'        ? `2-letter state code. EES-WI's five states: ${VALID_STATES.join(', ')}. Other states allowed with a warning.`
+      : c.key === 'property_zip'          ? '5-digit ZIP (or ZIP+4). Required — the database stores a valid ZIP on every property.'
       : c.key === 'property_subsidy_type' ? `Affordability category. Valid values: ${VALID_SUBSIDY.join(', ')}.`
-      : c.key === 'building_unit_count' ? 'Integer ≥ 1. Importer auto-creates that many Unit records (Unit 1, Unit 2, …) under the building.'
+      : c.key === 'building_unit_count' ? 'Integer ≥ 1. If you do NOT list this building on the Units sheet, the importer auto-creates that many placeholder units (Unit 1, Unit 2, …). If you DO list units on the Units sheet, those are used instead and this count is ignored.'
       : c.key === 'building_year_built' ? 'Integer year (e.g. 1985). Leave blank if unknown.'
       : '',
       `Example: ${c.example}`,
     ]),
     [''],
+    ['UNITS SHEET (optional — for real unit names/numbers):'],
+    ['Use the "Units" sheet to define the actual units in a building instead of generic Unit 1…N placeholders.'],
+    ['Each row is ONE unit. Tie it to its building with the same Property Name + Building Name you used on the Data sheet.'],
+    ['A unit needs a Unit Name OR a Unit Number (at least one). The other is filled from it if left blank.'],
+    ['Unit Record Type must be one of: ' + VALID_UNIT_RECORD_TYPES.join(', ') + '. Blank defaults to DWELLING-UNIT. See the Lists sheet.'],
+    ['Bedrooms / Floor are whole numbers; Bathrooms / Square Footage may be decimals. All optional.'],
+    ['A building listed on the Units sheet ignores its Unit Count — the listed units win.'],
+    [''],
     ['DEDUPLICATION:'],
-    ['• Owner Name matched exact (case + whitespace insensitive). Variants ("Mercy Housing" vs "Mercy Housing Inc.") stay separate — clean your data first.'],
+    ['• Owner Name matched by normalized name across record types (entity words like LLC/Inc. are ignored). An existing Property Owner account is reused.'],
     ['• Property matched on normalized Street + City + State. "123 Main St" and "123 Main Street" are treated as the same address.'],
     ['• Building matched on Property + Building Name. Two buildings cannot share a name within the same property.'],
+    ['• Unit matched on Building + Unit Number. Re-running an import will not duplicate a unit that already exists.'],
     [''],
     ['SUBSIDY TYPE valid values: ' + VALID_SUBSIDY.join(' | ')],
   ]
   const wsI = XLSX.utils.aoa_to_sheet(instructions)
-  wsI['!cols'] = [{ wch: 30 }, { wch: 80 }, { wch: 35 }]
+  wsI['!cols'] = [{ wch: 30 }, { wch: 90 }, { wch: 35 }]
   XLSX.utils.book_append_sheet(wb, wsI, 'Instructions')
+
+  // Sheet 3: Units (headers + example rows tied to the Data example)
+  const unitHeaders = UNIT_TEMPLATE_COLUMNS.map(c => c.label)
+  const unitExamples = [
+    ['Maple Heights Apartments','Building A','Apt 101','101','DWELLING-UNIT',2,1,850,1,''],
+    ['Maple Heights Apartments','Building A','Apt 102','102','DWELLING-UNIT',1,1,650,1,''],
+    ['Maple Heights Apartments','Building A','Community Room','CR','COMMON-AREA','','','',1,'Shared tenant space'],
+  ]
+  const unitBlank = UNIT_TEMPLATE_COLUMNS.map(() => '')
+  const unitData = [unitHeaders, ...unitExamples, unitBlank, unitBlank, unitBlank, unitBlank]
+  const wsU = XLSX.utils.aoa_to_sheet(unitData)
+  wsU['!cols'] = UNIT_TEMPLATE_COLUMNS.map(c => ({ wch: Math.max(c.label.length + 2, 14) }))
+  XLSX.utils.book_append_sheet(wb, wsU, 'Units')
+
+  // Sheet 4: Lists (valid picklist values to copy from)
+  const listRows = [
+    ['Valid values — copy into the matching column'],
+    [''],
+    ['Unit Record Type', 'Subsidy Type', 'Property State'],
+  ]
+  const maxLen = Math.max(VALID_UNIT_RECORD_TYPES.length, VALID_SUBSIDY.length, VALID_STATES.length)
+  for (let i = 0; i < maxLen; i++) {
+    listRows.push([
+      VALID_UNIT_RECORD_TYPES[i] || '',
+      VALID_SUBSIDY[i] || '',
+      VALID_STATES[i] || '',
+    ])
+  }
+  const wsL = XLSX.utils.aoa_to_sheet(listRows)
+  wsL['!cols'] = [{ wch: 22 }, { wch: 32 }, { wch: 16 }]
+  XLSX.utils.book_append_sheet(wb, wsL, 'Lists')
 
   return wb
 }
@@ -156,7 +222,87 @@ async function parseUploadedFile(file) {
     }
     rows.push(row)
   }
-  return rows
+
+  const unitRows = parseUnitsSheet(wb)
+  return { rows, unitRows }
+}
+
+// Parse the optional "Units" sheet into raw unit records. Silently returns []
+// when the sheet is absent (older templates / single-sheet files).
+function parseUnitsSheet(wb) {
+  const sheetName = wb.SheetNames.find(n => n.toLowerCase() === 'units')
+  if (!sheetName) return []
+  const ws = wb.Sheets[sheetName]
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' })
+  if (aoa.length < 2) return []
+  const headerRow = aoa[0].map(h => String(h || '').trim())
+  const headerToKey = {}
+  for (const col of UNIT_TEMPLATE_COLUMNS) {
+    const idx = headerRow.findIndex(h => h.toLowerCase() === col.label.toLowerCase())
+    if (idx >= 0) headerToKey[col.key] = idx
+  }
+  // Property + Building columns are what tie a unit to its building.
+  if (headerToKey.property_name == null || headerToKey.building_name == null) return []
+
+  const out = []
+  for (let r = 1; r < aoa.length; r++) {
+    const raw = aoa[r]
+    if (!raw || raw.every(v => v === '' || v == null)) continue
+    const u = {}
+    for (const [key, idx] of Object.entries(headerToKey)) {
+      const cell = raw[idx]
+      u[key] = cell == null ? '' : String(cell).trim()
+    }
+    // Skip fully-blank unit rows (only property/building filled, no unit id)
+    if (!u.unit_name && !u.unit_number) continue
+    u._file_row = r + 1
+    out.push(u)
+  }
+  return out
+}
+
+// ── Attach parsed units to their building rows ───────────────────────────
+// Normalize a raw unit record to the RPC payload shape and flag a bad record type.
+function cleanUnit(u) {
+  const rt = String(u.unit_record_type || '').trim()
+  const invalidRecordType = !!rt && !VALID_UNIT_RECORD_TYPES.includes(rt.toUpperCase())
+  return {
+    unit: {
+      unit_name:        u.unit_name || '',
+      unit_number:      u.unit_number || '',
+      unit_record_type: rt,
+      bedrooms:         u.bedrooms || '',
+      bathrooms:        u.bathrooms || '',
+      square_footage:   u.square_footage || '',
+      floor:            u.floor || '',
+      notes:            u.notes || '',
+    },
+    invalidRecordType,
+  }
+}
+
+// Returns rows each carrying a `units` array, plus a summary of unmatched /
+// invalid unit rows to surface in the preview.
+function attachUnitsToRows(rows, unitRows) {
+  const keyToRowIndex = {}
+  rows.forEach((r, i) => {
+    const key = unitBuildingKey(r.property_name, r.building_name)
+    if (!(key in keyToRowIndex)) keyToRowIndex[key] = i
+  })
+  const withUnits = rows.map(r => ({ ...r, units: [] }))
+  const unmatched = []
+  let invalidRecordType = 0
+  let matched = 0
+  for (const u of (unitRows || [])) {
+    const key = unitBuildingKey(u.property_name, u.building_name)
+    const idx = keyToRowIndex[key]
+    if (idx == null) { unmatched.push(u); continue }
+    const { unit, invalidRecordType: bad } = cleanUnit(u)
+    if (bad) invalidRecordType++
+    withUnits[idx].units.push(unit)
+    matched++
+  }
+  return { rows: withUnits, summary: { totalUnits: (unitRows || []).length, matched, unmatched, invalidRecordType } }
 }
 
 // ── Client-side validation + in-file dup detection ───────────────────────
@@ -205,18 +351,43 @@ function analyzeRows(rows) {
         a.errors.push(`Missing required field: ${TEMPLATE_COLUMNS.find(c => c.key === key).label}`)
       }
     }
+    // Zip — required, must be 5 or 9 digits (the DB CHECK enforces ^\d{5}(\d{4})?$)
+    if (r.property_zip) {
+      const digits = String(r.property_zip).replace(/\D/g, '')
+      if (digits.length !== 5 && digits.length !== 9) {
+        a.errors.push(`Property Zip must be 5 or 9 digits (got "${r.property_zip}")`)
+      }
+    }
     // State must be a 2-letter code
     if (r.property_state && !/^[A-Z]{2}$/i.test(r.property_state)) {
       a.errors.push(`State must be a 2-letter code (got "${r.property_state}")`)
     } else if (r.property_state && !VALID_STATES.includes(r.property_state.toUpperCase())) {
       a.warnings.push(`State "${r.property_state.toUpperCase()}" is outside EES-WI's five-state list — will import anyway`)
     }
-    // Unit count
+    // Units: a building is defined either by an explicit unit list (Units sheet)
+    // or by a Unit Count that auto-generates placeholders. Require one.
+    const explicitUnits = Array.isArray(r.units) ? r.units : []
     if (r.building_unit_count) {
       const n = Number(r.building_unit_count)
       if (!Number.isInteger(n) || n < 1) {
         a.errors.push(`Unit Count must be an integer ≥ 1 (got "${r.building_unit_count}")`)
       }
+    } else if (r.building_name && explicitUnits.length === 0) {
+      a.errors.push('Provide a Unit Count, or list this building’s units on the Units sheet')
+    }
+    if (explicitUnits.length > 0) {
+      const badRt = explicitUnits.filter(u => u.unit_record_type && !VALID_UNIT_RECORD_TYPES.includes(String(u.unit_record_type).toUpperCase()))
+      if (badRt.length) {
+        a.warnings.push(`${badRt.length} unit(s) have an unrecognized Unit Record Type — will default to DWELLING-UNIT`)
+      }
+      const seen = new Set()
+      let dupN = 0
+      for (const u of explicitUnits) {
+        const n = String(u.unit_number || u.unit_name || '').trim().toLowerCase()
+        if (!n) continue
+        if (seen.has(n)) dupN++; else seen.add(n)
+      }
+      if (dupN) a.warnings.push(`${dupN} duplicate unit number(s) in this building’s list — duplicates will be skipped`)
     }
     // Year built
     if (r.building_year_built) {
@@ -261,6 +432,7 @@ export default function BulkPropertyImportPane() {
   const [analysis, setAnalysis] = useState([])     // per-row client-side analysis
   const [serverPreview, setServerPreview] = useState([])  // per-row server dedup result
   const [rowActions, setRowActions] = useState([]) // per-row chosen action
+  const [unitSummary, setUnitSummary] = useState(null)  // Units sheet parse summary
   const [parsing, setParsing] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -273,15 +445,17 @@ export default function BulkPropertyImportPane() {
     setParsing(true)
     setParseError(null)
     try {
-      const parsed = await parseUploadedFile(file)
-      if (parsed.length === 0) throw new Error('No data rows found in the file.')
+      const { rows: parsedRows, unitRows } = await parseUploadedFile(file)
+      if (parsedRows.length === 0) throw new Error('No data rows found in the file.')
+      const { rows: rowsWithUnits, summary } = attachUnitsToRows(parsedRows, unitRows)
       setFilename(file.name)
-      setRows(parsed)
-      const localAnalysis = analyzeRows(parsed)
+      setRows(rowsWithUnits)
+      setUnitSummary(summary)
+      const localAnalysis = analyzeRows(rowsWithUnits)
       setAnalysis(localAnalysis)
       // Call server preview
       setPreviewing(true)
-      const { data, error } = await supabase.rpc('preview_property_hierarchy_import', { p_rows: parsed })
+      const { data, error } = await supabase.rpc('preview_property_hierarchy_import', { p_rows: rowsWithUnits })
       if (error) throw error
       const arr = Array.isArray(data) ? data : []
       setServerPreview(arr)
@@ -364,6 +538,7 @@ export default function BulkPropertyImportPane() {
     setAnalysis([])
     setServerPreview([])
     setRowActions([])
+    setUnitSummary(null)
     setFilename('')
     setCommitResult(null)
     setParseError(null)
@@ -433,6 +608,7 @@ export default function BulkPropertyImportPane() {
             serverPreview={serverPreview}
             rowActions={rowActions}
             setRowActions={setRowActions}
+            unitSummary={unitSummary}
             counts={counts}
             onApplyRecommendations={handleApplyRecommendations}
             onStartOver={handleStartOver}
@@ -460,7 +636,7 @@ function Step1Download({ onNext }) {
         Step 1 — Download the template
       </div>
       <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.6, marginBottom: 16 }}>
-        The template is a pre-built Excel workbook with the correct columns, example rows, and an instructions tab. One row per <strong>building</strong>. Repeat the Owner and Property columns on every building row at the same property — the importer deduplicates automatically.
+        The template is a pre-built Excel workbook with four tabs. On <strong>Data</strong>, one row per <strong>building</strong> — repeat the Owner and Property columns on every building row at the same property (the importer deduplicates automatically). On <strong>Units</strong>, one row per unit with its real name/number and attributes, tied to its building by Property + Building Name. <strong>Instructions</strong> and <strong>Lists</strong> (valid picklist values) round out the workbook. Buildings with no rows on the Units sheet auto-generate units from their Unit Count.
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
         <button
@@ -537,7 +713,7 @@ function Step2Upload({ fileInputRef, parsing, parseError, onPick, onFile }) {
 }
 
 // ── Step 3: Preview & Resolve ────────────────────────────────────────────
-function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, setRowActions, counts, onApplyRecommendations, onStartOver, onCommit, committing }) {
+function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, setRowActions, unitSummary, counts, onApplyRecommendations, onStartOver, onCommit, committing }) {
   const setAction = useCallback((idx, action) => {
     setRowActions(prev => {
       const next = [...prev]
@@ -559,6 +735,22 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
         <SummaryCard color="#1e466b" bg="#e8f1fb" label="Errors" value={counts.errors} />
         <SummaryCard color={C.textSecondary} bg="#f0f3f8" label="Skipped" value={counts.skipped} />
       </div>
+
+      {/* Units sheet summary */}
+      {unitSummary && unitSummary.totalUnits > 0 && (
+        <div style={{
+          background: '#e8f1fb', border: '1px solid #bcd9f2', borderRadius: 8,
+          padding: '10px 14px', marginBottom: 16, fontSize: 12.5, color: '#1e466b',
+        }}>
+          <strong>{unitSummary.matched}</strong> unit{unitSummary.matched === 1 ? '' : 's'} from the Units sheet matched a building and will be created with the name/number and attributes you specified.
+          {unitSummary.unmatched.length > 0 && (
+            <span> · <strong>{unitSummary.unmatched.length}</strong> unit row{unitSummary.unmatched.length === 1 ? '' : 's'} did not match any Property + Building on the Data sheet and will be ignored (check spelling: {unitSummary.unmatched.slice(0, 3).map(u => `"${u.property_name} / ${u.building_name}"`).join(', ')}{unitSummary.unmatched.length > 3 ? '…' : ''}).</span>
+          )}
+          {unitSummary.invalidRecordType > 0 && (
+            <span> · <strong>{unitSummary.invalidRecordType}</strong> unit{unitSummary.invalidRecordType === 1 ? '' : 's'} with an unrecognized Unit Record Type will default to DWELLING-UNIT.</span>
+          )}
+        </div>
+      )}
 
       {/* Action bar */}
       <div style={{
@@ -687,7 +879,11 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
                     <td style={TD}>{r.property_name || <span style={{ color: '#7eb3e8' }}>(missing)</span>}</td>
                     <td style={TD}>{[r.property_street, r.property_city, r.property_state].filter(Boolean).join(', ') || <span style={{ color: '#7eb3e8' }}>(missing)</span>}</td>
                     <td style={TD}>{r.building_name || <span style={{ color: '#7eb3e8' }}>(missing)</span>}</td>
-                    <td style={TD_MONO}>{r.building_unit_count || ''}</td>
+                    <td style={TD_MONO}>
+                      {Array.isArray(r.units) && r.units.length > 0
+                        ? <span title="Explicit units from the Units sheet">{r.units.length} listed</span>
+                        : (r.building_unit_count ? `${r.building_unit_count} auto` : '')}
+                    </td>
                     <td style={TD}>
                       {a.errors.length > 0 && (
                         <div style={{ color: '#1e466b', fontSize: 11 }}>
