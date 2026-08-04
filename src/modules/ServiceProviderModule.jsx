@@ -8,7 +8,7 @@
 // emails the provider a portal invite). Mounted at /m/providers.
 // =============================================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../data/constants'
 import ConversationPanelWidget from '../components/ConversationPanel'
 import {
@@ -23,11 +23,16 @@ import {
   logApplicationActivity,
   fetchOnboardingSteps,
   setOnboardingStep,
+  fetchServiceAreasForApplication,
   emailProviderInvite,
   emailApplicationInvitation,
   smsApplicationInvitation,
   toE164US,
 } from '../data/serviceProviderService'
+
+// Read-only coverage map + ZIP list (Leaflet — lazy so it only loads when a
+// reviewer expands an application's details).
+const ServiceAreaViewer = lazy(() => import('../components/ServiceAreaViewer'))
 
 const STATE_OPTS = ['NC', 'WI', 'MI', 'CO', 'IN']
 
@@ -75,6 +80,7 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
   const [logBusy, setLogBusy] = useState(false)
   const [steps, setSteps] = useState(null)
   const [stepBusyId, setStepBusyId] = useState(null)
+  const [areas, setAreas] = useState(null)
   const stageVal = app.stage?.picklist_value
   const contact = [app.spa_contact_first_name, app.spa_contact_last_name].filter(Boolean).join(' ')
   const email = app.spa_contact_email || app.spa_business_email
@@ -107,8 +113,12 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
   const loadSteps = useCallback(async () => {
     try { setSteps(await fetchOnboardingSteps(app.id)) } catch { setSteps([]) }
   }, [app.id])
+  const loadAreas = useCallback(async () => {
+    try { setAreas(await fetchServiceAreasForApplication(app.id)) } catch { setAreas([]) }
+  }, [app.id])
   useEffect(() => { if (open && acts === null) loadActs() }, [open, acts, loadActs])
   useEffect(() => { if (open && steps === null) loadSteps() }, [open, steps, loadSteps])
+  useEffect(() => { if (open && areas === null) loadAreas() }, [open, areas, loadAreas])
   const prevBusy = useRef(false)
   useEffect(() => {
     if (prevBusy.current && !busy && open) loadActs()
@@ -197,6 +207,19 @@ function ApplicationCard({ app, busy, onAdvance, onRequestInfo, onDecline, onApp
             {app.spa_coi_document_id
               ? <button onClick={openCoi} disabled={coiBusy} style={{ background: '#eef6ff', border: `1px solid ${C.sky}`, color: '#1a5a8a', borderRadius: 6, padding: '4px 12px', fontSize: 12.5, fontWeight: 600, cursor: coiBusy ? 'default' : 'pointer' }}>{coiBusy ? 'Opening…' : 'View COI'}</button>
               : <span style={{ color: C.textMuted }}>No COI on file</span>}
+          </div>
+
+          {/* service area — the ZIP codes the applicant selected on the intake
+              coverage step, shown as a map + grouped ZIP list */}
+          <div style={{ marginTop: 14, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.textSecondary, marginBottom: 8, letterSpacing: 0.2 }}>SERVICE AREA — ZIP CODES</div>
+            {areas === null
+              ? <div style={{ fontSize: 12.5, color: C.textMuted }}>Loading service area…</div>
+              : (
+                <Suspense fallback={<div style={{ height: 320, borderRadius: 11, border: `1px solid ${C.borderDark}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textMuted, fontSize: 13 }}>Loading map…</div>}>
+                  <ServiceAreaViewer areas={areas} />
+                </Suspense>
+              )}
           </div>
 
           {/* onboarding checklist */}
