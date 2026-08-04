@@ -3857,7 +3857,11 @@ function ConfigFieldRow({ field, value, editing, onChange }) {
 //   • "View All (N)" footer link when more rows exist
 // ---------------------------------------------------------------------------
 
-const RELATED_LIST_MAX_ROWS = 7
+// Read-only related lists render every fetched row inside a fixed-height
+// scroll window (below) rather than truncating to a handful with a mandatory
+// jump to another page. The scrollbar only appears once the rows exceed this
+// height, so short lists look exactly as before. ~9 rows tall.
+const RELATED_LIST_MAX_HEIGHT = 360
 
 // Format a full timestamp (ISO / Zulu) into a readable local date + time,
 // e.g. "Jul 29, 2026, 6:48 PM". Related-list datetime/timestamp columns use
@@ -3989,13 +3993,18 @@ function RelatedListWidget({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [removingId, setRemovingId] = useState(null)
 
-  // Editable mode shows the full list so drag targets are always visible.
-  // Read-only mode keeps the Salesforce-style truncated card.
-  const shownRows = editable ? localRows : localRows.slice(0, RELATED_LIST_MAX_ROWS)
-  const hiddenCount = editable ? 0 : Math.max(0, localRows.length - shownRows.length)
-  // True total for the header count, accurate beyond the 25-row fetch cap
+  // Both modes now render the full fetched set: editable so drag targets are
+  // always visible, read-only inside a fixed-height scroll window so the user
+  // can scroll through the related records in place instead of leaving the
+  // page. Short lists stay short; long lists gain a scrollbar.
+  const shownRows = localRows
+  // True total for the header count, accurate beyond the fetch cap
   // (fetchRelatedRecords attaches _total via PostgREST count:'exact').
   const totalCount = (typeof allRows._total === 'number') ? allRows._total : localRows.length
+  // "View All →" is now the escape hatch for lists larger than we fetched into
+  // the scroll window — the server has more rows than are loaded here. (Never
+  // shown in editable mode, which manages membership directly.)
+  const hiddenCount = editable ? 0 : Math.max(0, totalCount - localRows.length)
 
   // hide_when_empty: opt-in widget_config flag for related lists that
   // should disappear entirely when no rows exist (rather than rendering
@@ -5051,7 +5060,7 @@ function RelatedListWidget({
                  the record (same as double-click on desktop). Editable
                  lists get a trash icon on the right; drag-to-reorder is
                  disabled on touch. */
-              <div>
+              <div style={editable ? undefined : { maxHeight: RELATED_LIST_MAX_HEIGHT, overflowY: 'auto' }}>
                 {shownRows.map((row, ri) => {
                   const firstCol = columns[0]
                   const restCols = columns.slice(1)
@@ -5146,21 +5155,30 @@ function RelatedListWidget({
                 })}
               </div>
             ) : (
-              /* ── Desktop table layout (unchanged) ─────────────────────── */
-              <div style={{ overflowX: 'auto' }}>
+              /* ── Desktop table layout ─────────────────────────────────────
+                 Read-only lists scroll vertically within a fixed-height
+                 window (scrollbar appears only when rows overflow); the header
+                 stays pinned so column labels remain visible while scrolling.
+                 Editable lists keep full height so drag-reorder targets are all
+                 on screen. */
+              <div style={editable
+                ? { overflowX: 'auto' }
+                : { overflowX: 'auto', overflowY: 'auto', maxHeight: RELATED_LIST_MAX_HEIGHT }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                      {editableReorder && <th style={{ width: 28, padding: '8px 0 8px 14px' }} />}
+                    <tr>
+                      {editableReorder && <th style={{ width: 28, padding: '8px 0 8px 14px', position: 'sticky', top: 0, background: C.card, zIndex: 1, boxShadow: `inset 0 -1px 0 ${C.border}` }} />}
                       {columns.map((col) => (
                         <th key={col.name} style={{
                           textAlign: 'left', padding: '8px 14px',
                           fontSize: 10, fontWeight: 600, color: C.textMuted,
                           textTransform: 'uppercase', letterSpacing: '0.05em',
                           whiteSpace: 'nowrap',
+                          position: 'sticky', top: 0, background: C.card, zIndex: 1,
+                          boxShadow: `inset 0 -1px 0 ${C.border}`,
                         }}>{col.label}</th>
                       ))}
-                      {editable && <th style={{ width: 32, padding: '8px 14px 8px 0' }} />}
+                      {editable && <th style={{ width: 32, padding: '8px 14px 8px 0', position: 'sticky', top: 0, background: C.card, zIndex: 1, boxShadow: `inset 0 -1px 0 ${C.border}` }} />}
                     </tr>
                   </thead>
                   <tbody>

@@ -703,6 +703,12 @@ export async function resolvePolymorphicLookups(requests) {
 /**
  * Fetch related records for a related_list widget.
  */
+// Max rows pulled for a record-page related-list widget. The widget renders
+// them in a fixed-height scroll window, so this is how many a user can scroll
+// through without leaving the record page; beyond it, "View All →" opens the
+// scoped full list view.
+const RELATED_LIST_FETCH_LIMIT = 100
+
 export async function fetchRelatedRecords(config, parentRecordId) {
   const { table, fk, via, shared_parent, is_deleted_col, columns, sort_field, sort_dir, match, row_href_field } = config
 
@@ -812,7 +818,11 @@ export async function fetchRelatedRecords(config, parentRecordId) {
     query = query.order(sort_field, { ascending: sort_dir !== 'desc' })
   }
 
-  query = query.limit(25)
+  // Fetch enough rows that the record-page related-list widget can scroll
+  // through them in place (in-widget scroll window) instead of forcing the
+  // user out to the full list view. Lists larger than this still show a
+  // "View All →" escape hatch (count:'exact' below reports the true total).
+  query = query.limit(RELATED_LIST_FETCH_LIMIT)
 
   const { data, error, count } = await query
   if (error) throw error
