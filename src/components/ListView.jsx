@@ -1989,6 +1989,14 @@ export function ListView({
   const [bulkBusy, setBulkBusy]         = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null); // { ids } | null
   const [bulkActionError, setBulkActionError] = useState(null);
+  // One-time "how to use edit mode" hint, dismissed per browser.
+  const [editHintDismissed, setEditHintDismissed] = useState(() => {
+    try { return localStorage.getItem('ees.listedit.hint') === '1'; } catch { return true; }
+  });
+  const dismissEditHint = () => {
+    setEditHintDismissed(true);
+    try { localStorage.setItem('ees.listedit.hint', '1'); } catch { /* ignore */ }
+  };
 
   // Load field metadata once per tableName. Stays null in non-edit mode.
   useEffect(() => {
@@ -2214,7 +2222,10 @@ export function ListView({
   // Bulk edits DO trigger onRecordsUpdated because they touch enough
   // rows that the parent's source-of-truth view (counts, related
   // derivations, etc.) is worth refreshing.
-  const saveSingleCell = async (rowId, columnName, newValue) => {
+  // displayField is the row key the cell renders from (for FK columns this is
+  // the *__label display column, distinct from the DB columnName we write).
+  // displayValue is the human-readable string to show immediately after save.
+  const saveSingleCell = async (rowId, displayField, columnName, newValue, displayValue) => {
     setSavingCell({ rowId, columnName });
     setEditError(null);
     try {
@@ -2224,11 +2235,12 @@ export function ListView({
         setEditError({ rowId, columnName, message: msg });
         return;
       }
-      // Persist the new value in the local overlay. This is the
-      // authoritative display until the parent reloads on its own.
+      // Persist the display value in the local overlay, keyed by the display
+      // field so the cell shows the new value immediately (authoritative until
+      // the parent reloads on its own).
       setOverlay(prev => {
         const next = new Map(prev);
-        next.set(`${rowId}::${columnName}`, newValue);
+        next.set(`${rowId}::${displayField}`, displayValue !== undefined ? displayValue : newValue);
         return next;
       });
       setEditingCell(null);
@@ -2818,6 +2830,30 @@ export function ListView({
         </div>
       )}
 
+      {/* First-run hint: how to use the list's edit features. Shown only in
+          edit mode when nothing is selected, dismissible per browser. */}
+      {editMode && selected.size === 0 && !editHintDismissed && (
+        <div style={{
+          padding: '7px 24px', display: 'flex', alignItems: 'center', gap: 10,
+          background: '#eef4fb', borderBottom: '1px solid #d0d8e8',
+          fontSize: 12, color: '#0d1a2e',
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1a5a8a" strokeWidth={2} style={{ flexShrink: 0 }}>
+            <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
+          </svg>
+          <span>
+            <strong>Editing this list:</strong> double-click a cell to edit it in place ·
+            check rows to <strong>edit fields, clone, or delete</strong> in bulk ·
+            use the <strong>⋯</strong> menu at the end of a row for Edit, Clone, or Delete.
+          </span>
+          <button onClick={dismissEditHint}
+            style={{ marginLeft: 'auto', background: 'transparent', border: 'none', cursor: 'pointer',
+                     color: '#1a5a8a', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+            Got it
+          </button>
+        </div>
+      )}
+
       {/* Table + detail panel */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
         <div style={{ flex: '1 1 0', minWidth: 0, width: 0, padding: '14px 14px 24px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -2884,7 +2920,8 @@ export function ListView({
                   {editMode && (
                     <th style={{
                       width: 44, borderBottom: `1px solid ${C.border}`,
-                      background: C.card, position: 'sticky', top: 0, zIndex: 4,
+                      background: C.card, position: 'sticky', top: 0, right: 0, zIndex: 6,
+                      boxShadow: '-6px 0 8px -8px rgba(7,17,31,0.25)',
                     }} aria-label="Row actions" />
                   )}
                 </tr>
@@ -2927,7 +2964,9 @@ export function ListView({
                           const errorHere = editError?.rowId   === key && editError?.columnName   === columnName
                                               ? editError.message : null;
                           if (cellEditable || isSaving || errorHere) {
-                            const ov = overlayValue(key, columnName);
+                            // Overlay is keyed by the display field (col.field),
+                            // which for FK columns differs from the DB columnName.
+                            const ov = overlayValue(key, col.field);
                             // Render the underlying-display cell with a wrapper
                             // <td> that handles double-click + error display.
                             const baseCell = (renderCell ? renderCell(col, r) : null) || defaultCell(col, r);
@@ -2940,7 +2979,7 @@ export function ListView({
                                 overlayVal={ov}
                                 onStartEdit={() => { setEditingCell({ rowId: key, columnName }); setEditError(null); }}
                                 onCancel={() => { setEditingCell(null); setEditError(null); }}
-                                onSave={(newValue) => saveSingleCell(key, columnName, newValue)}
+                                onSave={(newValue, displayValue) => saveSingleCell(key, col.field, columnName, newValue, displayValue)}
                               />
                             );
                           }
@@ -2956,7 +2995,9 @@ export function ListView({
                         <td style={{
                           width: 44, padding: '4px 6px', textAlign: 'center',
                           borderBottom: `1px solid ${C.border}`,
-                          background: isSelected ? '#f0faf6' : undefined,
+                          position: 'sticky', right: 0, zIndex: 1,
+                          background: isSelected ? '#f0faf6' : C.card,
+                          boxShadow: '-6px 0 8px -8px rgba(7,17,31,0.25)',
                         }} onClick={(e) => e.stopPropagation()}>
                           {key && (
                             <RowActionMenu
@@ -3239,25 +3280,37 @@ function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSav
     );
   }
 
+  const [hover, setHover] = useState(false);
   return (
     <td style={{
       padding: 0,
       borderBottom: `1px solid ${C.border}`,
       cursor: 'cell',
       position: 'relative',
-      background: errorHere ? '#e8f1fb' : (overlayVal !== undefined ? '#f0faf6' : undefined),
+      background: errorHere ? '#e8f1fb' : (overlayVal !== undefined ? '#f0faf6' : (hover ? '#f7faff' : undefined)),
     }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
         onDoubleClick={(e) => { e.stopPropagation(); if (!isSaving) onStartEdit(); }}
         title="Double-click to edit">
       {isSaving ? (
         <div style={{ padding: '11px 12px', color: C.textMuted, fontStyle: 'italic', fontSize: 12 }}>Saving…</div>
       ) : (
-        // Render the baseCell contents inline. baseCell is already a <td>
-        // produced by defaultCell/renderCell — we strip its outer td by
-        // rendering its `children` inside this td instead. React lets us
-        // grab .props.children directly on the element.
-        <div style={{ padding: '11px 12px', fontSize: 12, color: C.textPrimary }}>
-          {(baseCell?.props?.children !== undefined) ? baseCell.props.children : baseCell}
+        // View state: show the just-saved overlay value when present, else the
+        // baseCell contents. baseCell is already a <td> produced by
+        // defaultCell/renderCell — we render its `children` inside this td.
+        <div style={{ padding: '11px 12px', fontSize: 12, color: C.textPrimary, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {overlayVal !== undefined
+              ? overlayVal
+              : ((baseCell?.props?.children !== undefined) ? baseCell.props.children : baseCell)}
+          </span>
+          {/* Pencil affordance on hover so inline edit is discoverable. */}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2}
+               style={{ opacity: hover ? 0.8 : 0, flexShrink: 0, transition: 'opacity 120ms' }}>
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
         </div>
       )}
       {errorHere && (
@@ -3274,6 +3327,10 @@ function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSav
 // CellEditor: the in-place input for whatever type the field is.
 function CellEditor({ meta, initialValue, onSave, onCancel }) {
   const [value, setValue] = useState(initialValue ?? '');
+  // Human-readable label for the current value — set by the picklist/lookup
+  // editors (which know the chosen option's label). undefined for scalar types,
+  // where the value itself is the display.
+  const displayRef = useRef(undefined);
   const editorType = meta?.editorType || 'text';
 
   const commit = () => {
@@ -3284,12 +3341,22 @@ function CellEditor({ meta, initialValue, onSave, onCancel }) {
       toSend = n;
     }
     if (value === '' || value === null) toSend = null;
-    onSave(toSend);
+    // Compute the display string shown in the cell right after saving.
+    let disp;
+    if (editorType === 'picklist' || editorType === 'lookup') {
+      disp = toSend == null ? '—' : (displayRef.current ?? String(toSend));
+    } else if (editorType === 'boolean') {
+      disp = toSend === true ? 'Yes' : toSend === false ? 'No' : '—';
+    } else {
+      disp = (toSend == null || toSend === '') ? '—' : String(toSend);
+    }
+    onSave(toSend, disp);
   };
   const onKey = (e) => {
     if (e.key === 'Enter')  { e.preventDefault(); commit(); }
     if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
   };
+  const pick = (id, label) => { setValue(id); displayRef.current = label; };
 
   if (editorType === 'boolean') {
     return (
@@ -3301,10 +3368,10 @@ function CellEditor({ meta, initialValue, onSave, onCancel }) {
     );
   }
   if (editorType === 'picklist' && meta?.picklistObject && meta?.picklistField) {
-    return <PicklistInlineEditor meta={meta} value={value} setValue={setValue} commit={commit} onCancel={onCancel} />;
+    return <PicklistInlineEditor meta={meta} value={value} pick={pick} commit={commit} onCancel={onCancel} />;
   }
   if (editorType === 'lookup' && meta?.referencesTable) {
-    return <LookupInlineEditor meta={meta} value={value} setValue={setValue} commit={commit} onCancel={onCancel} />;
+    return <LookupInlineEditor meta={meta} value={value} pick={pick} commit={commit} onCancel={onCancel} />;
   }
   if (editorType === 'date') {
     return <input autoFocus type="date" value={value || ''} onChange={(e) => setValue(e.target.value)}
@@ -3323,7 +3390,7 @@ function CellEditor({ meta, initialValue, onSave, onCancel }) {
                 onBlur={commit} onKeyDown={onKey} style={inlineEditorStyle} />;
 }
 
-function PicklistInlineEditor({ meta, value, setValue, commit, onCancel }) {
+function PicklistInlineEditor({ meta, value, pick, commit, onCancel }) {
   const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -3335,7 +3402,11 @@ function PicklistInlineEditor({ meta, value, setValue, commit, onCancel }) {
   }, [meta.picklistObject, meta.picklistField]);
   return (
     <select autoFocus value={value || ''} onBlur={commit}
-      onChange={(e) => setValue(e.target.value || null)}
+      onChange={(e) => {
+        const id = e.target.value || null;
+        const label = id ? (e.target.options[e.target.selectedIndex]?.text || null) : '—';
+        pick(id, label);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter')  { e.preventDefault(); commit(); }
         if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
@@ -3348,7 +3419,7 @@ function PicklistInlineEditor({ meta, value, setValue, commit, onCancel }) {
   );
 }
 
-function LookupInlineEditor({ meta, value, setValue, commit, onCancel }) {
+function LookupInlineEditor({ meta, value, pick, commit, onCancel }) {
   const [query, setQuery]     = useState('');
   const [options, setOptions] = useState([]);
   useEffect(() => {
@@ -3367,7 +3438,7 @@ function LookupInlineEditor({ meta, value, setValue, commit, onCancel }) {
           if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
           if (e.key === 'Enter' && options[0]) {
             e.preventDefault();
-            setValue(options[0].id);
+            pick(options[0].id, options[0].label);
             setTimeout(() => commit(), 0);
           }
         }}
@@ -3381,7 +3452,7 @@ function LookupInlineEditor({ meta, value, setValue, commit, onCancel }) {
         }}>
           {options.map(o => (
             <div key={o.id}
-                 onMouseDown={(e) => { e.preventDefault(); setValue(o.id); setTimeout(() => commit(), 0); }}
+                 onMouseDown={(e) => { e.preventDefault(); pick(o.id, o.label); setTimeout(() => commit(), 0); }}
                  style={{ padding: '7px 10px', fontSize: 12, cursor: 'pointer', borderBottom: `1px solid ${C.border}` }}>
               {o.label}
             </div>

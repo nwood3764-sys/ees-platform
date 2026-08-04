@@ -143,6 +143,17 @@ export function getPicklistOptions(object, field) {
   const key = `${object}.${field}`
   if (_picklistOptionsCache.has(key)) return _picklistOptionsCache.get(key)
 
+  // Picklist_field is stored inconsistently across (and even within) tables:
+  // some rows use the full column name (enrollment_status), others the
+  // prefix-stripped name (record_type, property_type). Match ANY plausible
+  // spelling so the option list resolves regardless of how the values were
+  // seeded — the same defensive approach loadPicklistLabels uses.
+  const fieldCandidates = Array.from(new Set([
+    field,
+    field.includes('_') ? field.slice(field.indexOf('_') + 1) : field, // strip leading prefix
+    `${guessPrefix(object) || ''}_${field}`.replace(/^_/, ''),          // add the table prefix
+  ].filter(Boolean)))
+
   const promise = (async () => {
     // Status/lifecycle fields keep their workflow sort_order; every other
     // picklist is a choice list and sorts alphabetically by label.
@@ -152,7 +163,7 @@ export function getPicklistOptions(object, field) {
         .from('picklist_values')
         .select('id, picklist_value, picklist_label, picklist_sort_order, picklist_is_active')
         .eq('picklist_object', object)
-        .eq('picklist_field',  field)
+        .in('picklist_field',  fieldCandidates)
         .eq('picklist_is_active', true)
       if (isLifecycle) {
         q = q.order('picklist_sort_order', { ascending: true }).order('id', { ascending: true })
