@@ -28,8 +28,8 @@ import { supabase } from '../../lib/supabase'
 
 // ── Template definition ─────────────────────────────────────────────────
 const TEMPLATE_COLUMNS = [
-  { key: 'owner_name',             label: 'Owner Name',             required: true,  example: 'Mercy Housing Wisconsin' },
-  { key: 'property_name',          label: 'Property Name',          required: true,  example: 'Maple Heights Apartments' },
+  { key: 'owner_name',             label: 'Owner Name',             required: true,  example: 'Test Owner Name' },
+  { key: 'property_name',          label: 'Property Name',          required: true,  example: 'Test Property Name' },
   { key: 'property_street',        label: 'Property Street',        required: true,  example: '123 Main St' },
   { key: 'property_city',          label: 'Property City',          required: true,  example: 'Madison' },
   { key: 'property_state',         label: 'Property State',         required: true,  example: 'WI' },
@@ -38,7 +38,6 @@ const TEMPLATE_COLUMNS = [
   { key: 'building_name',          label: 'Building Name',          required: true,  example: 'Building A' },
   { key: 'building_year_built',    label: 'Year Built',             required: false, example: 1985 },
   { key: 'building_unit_count',    label: 'Unit Count',             required: false, example: 12 },
-  { key: 'building_notes',         label: 'Building Notes',         required: false, example: '' },
 ]
 
 const REQUIRED_KEYS = TEMPLATE_COLUMNS.filter(c => c.required).map(c => c.key)
@@ -51,7 +50,7 @@ const VALID_SUBSIDY = ['Section 8 / HUD','LIHTC','NOAH','DAC','NEST Community','
 // Property Name + Building Name (the same values used on the Data sheet).
 // Buildings with no unit rows here fall back to Unit Count auto-generation.
 const UNIT_TEMPLATE_COLUMNS = [
-  { key: 'property_name',    label: 'Property Name',    required: true,  example: 'Maple Heights Apartments' },
+  { key: 'property_name',    label: 'Property Name',    required: true,  example: 'Test Property Name' },
   { key: 'building_name',    label: 'Building Name',    required: true,  example: 'Building A' },
   { key: 'unit_name',        label: 'Unit Name',        required: false, example: 'Apt 101' },
   { key: 'unit_number',      label: 'Unit Number',      required: false, example: '101' },
@@ -92,102 +91,146 @@ function normalizeName(s) {
   return (s || '').toString().trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
-// ── Template download ────────────────────────────────────────────────────
-function buildTemplateWorkbook() {
-  const wb = XLSX.utils.book_new()
+// ── Template download (exceljs — native in-cell dropdowns) ────────────────
+// exceljs is lazy-loaded only when Download Template is clicked (its own
+// vendor-exceljs chunk), so it never weighs on the app's load path. SheetJS
+// stays the reader; exceljs is only the writer, because it can emit the real
+// Excel data-validation dropdowns SheetJS's community build cannot.
 
-  // Sheet 1: Data (headers + 2 example rows)
-  const headers = TEMPLATE_COLUMNS.map(c => c.label)
-  const example1 = TEMPLATE_COLUMNS.map(c => c.example)
-  const example2 = ['Mercy Housing Wisconsin','Maple Heights Apartments','123 Main St','Madison','WI','53703','LIHTC','Building B',1987,18,'Across the courtyard from Building A']
-  const blank = TEMPLATE_COLUMNS.map(() => '')
-  const data = [headers, example1, example2, blank, blank, blank, blank, blank, blank, blank, blank]
-  const ws = XLSX.utils.aoa_to_sheet(data)
-  // Column widths
-  ws['!cols'] = TEMPLATE_COLUMNS.map(c => ({ wch: Math.max(c.label.length + 2, String(c.example || '').length + 2, 16) }))
-  XLSX.utils.book_append_sheet(wb, ws, 'Data')
+// Convert a 1-based column index to its spreadsheet letter (1→A, 27→AA).
+function columnLetter(idx) {
+  let s = ''
+  while (idx > 0) { const m = (idx - 1) % 26; s = String.fromCharCode(65 + m) + s; idx = Math.floor((idx - 1) / 26) }
+  return s
+}
 
-  // Sheet 2: Instructions
+// Dropdown source ranges on the Lists sheet — computed from list lengths so
+// they're known before the Lists sheet is added (it goes last for tab order).
+const LIST_SOURCE = {
+  unitRecordType: `Lists!$A$2:$A$${VALID_UNIT_RECORD_TYPES.length + 1}`,
+  subsidyType:    `Lists!$B$2:$B$${VALID_SUBSIDY.length + 1}`,
+  state:          `Lists!$C$2:$C$${VALID_STATES.length + 1}`,
+}
+const DV_ROWS = 500  // number of data rows that carry dropdowns
+
+function listDropdown(sourceRange) {
+  return {
+    type: 'list',
+    allowBlank: true,
+    showErrorMessage: true,
+    errorStyle: 'stop',
+    errorTitle: 'Not a valid value',
+    error: 'Pick a value from the drop-down list.',
+    formulae: [sourceRange],
+  }
+}
+
+function styleHeaderRow(row) {
+  row.eachCell(cell => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF07111F' } }
+    cell.alignment = { vertical: 'middle' }
+  })
+  row.height = 18
+}
+
+async function downloadTemplate() {
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  wb.creator = 'LEAP'
+
+  // ── Tab 1: Instructions ────────────────────────────────────────────────
+  const wsI = wb.addWorksheet('Instructions')
   const instructions = [
     ['LEAP Property Hierarchy Import — Instructions'],
     [''],
-    ['Do not change the column headers in the Data sheet. Add your rows starting on row 2.'],
-    ['Example rows are provided for reference — delete or overwrite them before uploading.'],
+    ['Fill in the Data tab (one row per building) and, optionally, the Units tab (one row per unit).'],
+    ['Do not change the column headers. Add your rows starting on row 2.'],
+    ['The example rows are for reference — delete or overwrite them before uploading.'],
+    ['Cells with a drop-down arrow (Subsidy Type, Property State, Unit Record Type) only accept a value from the list.'],
     [''],
-    ['One row per BUILDING.'],
-    ['Repeat the Owner and Property columns on every building row at the same property.'],
-    ['The importer deduplicates by name — if Owner "Mercy Housing Wisconsin" appears 50 times, only one Account is created.'],
-    ['Same for Properties: deduplicated by Street + City + State (the address is the unique key).'],
+    ['DATA TAB — one row per BUILDING.'],
+    ['Repeat the Owner and Property columns on every building row at the same property; the importer deduplicates automatically.'],
     [''],
-    ['COLUMNS:'],
+    ['COLUMNS (Data tab):'],
     ...TEMPLATE_COLUMNS.map(c => [
       `${c.label}${c.required ? ' (required)' : ' (optional)'}`,
-      c.key === 'property_state'        ? `2-letter state code. EES-WI's five states: ${VALID_STATES.join(', ')}. Other states allowed with a warning.`
+      c.key === 'property_state'         ? `2-letter state code (drop-down). EES-WI's five states: ${VALID_STATES.join(', ')}.`
       : c.key === 'property_zip'          ? '5-digit ZIP (or ZIP+4). Required — the database stores a valid ZIP on every property.'
-      : c.key === 'property_subsidy_type' ? `Affordability category. Valid values: ${VALID_SUBSIDY.join(', ')}.`
-      : c.key === 'building_unit_count' ? 'Integer ≥ 1. If you do NOT list this building on the Units sheet, the importer auto-creates that many placeholder units (Unit 1, Unit 2, …). If you DO list units on the Units sheet, those are used instead and this count is ignored.'
-      : c.key === 'building_year_built' ? 'Integer year (e.g. 1985). Leave blank if unknown.'
+      : c.key === 'property_subsidy_type' ? 'Affordability category (drop-down).'
+      : c.key === 'building_unit_count'   ? 'Integer ≥ 1. If you do NOT list this building on the Units tab, the importer auto-creates that many placeholder units (Unit 1, Unit 2, …). If you DO list units, those are used and this count is ignored.'
+      : c.key === 'building_year_built'   ? 'Integer year (e.g. 1985). Leave blank if unknown.'
       : '',
       `Example: ${c.example}`,
     ]),
     [''],
-    ['UNITS SHEET (optional — for real unit names/numbers):'],
-    ['Use the "Units" sheet to define the actual units in a building instead of generic Unit 1…N placeholders.'],
-    ['Each row is ONE unit. Tie it to its building with the same Property Name + Building Name you used on the Data sheet.'],
+    ['UNITS TAB (optional — for real unit names/numbers):'],
+    ['Each row is ONE unit. Tie it to its building with the same Property Name + Building Name used on the Data tab.'],
     ['A unit needs a Unit Name OR a Unit Number (at least one). The other is filled from it if left blank.'],
-    ['Unit Record Type must be one of: ' + VALID_UNIT_RECORD_TYPES.join(', ') + '. Blank defaults to DWELLING-UNIT. See the Lists sheet.'],
+    ['Unit Record Type is a drop-down; blank defaults to DWELLING-UNIT.'],
     ['Bedrooms / Floor are whole numbers; Bathrooms / Square Footage may be decimals. All optional.'],
-    ['A building listed on the Units sheet ignores its Unit Count — the listed units win.'],
+    ['A building listed on the Units tab ignores its Unit Count — the listed units win.'],
     [''],
     ['DEDUPLICATION:'],
-    ['• Owner Name matched by normalized name across record types (entity words like LLC/Inc. are ignored). An existing Property Owner account is reused.'],
-    ['• Property matched on normalized Street + City + State. "123 Main St" and "123 Main Street" are treated as the same address.'],
-    ['• Building matched on Property + Building Name. Two buildings cannot share a name within the same property.'],
-    ['• Unit matched on Building + Unit Number. Re-running an import will not duplicate a unit that already exists.'],
-    [''],
-    ['SUBSIDY TYPE valid values: ' + VALID_SUBSIDY.join(' | ')],
+    ['• Owner — matched by normalized name across record types (LLC/Inc. ignored). An existing Property Owner account is reused.'],
+    ['• Property — matched on normalized Street + City + State. "123 Main St" and "123 Main Street" are the same address.'],
+    ['• Building — matched on Property + Building Name. Two buildings cannot share a name at one property.'],
+    ['• Unit — matched on Building + Unit Number. Re-running an import will not duplicate a unit that already exists.'],
   ]
-  const wsI = XLSX.utils.aoa_to_sheet(instructions)
-  wsI['!cols'] = [{ wch: 30 }, { wch: 90 }, { wch: 35 }]
-  XLSX.utils.book_append_sheet(wb, wsI, 'Instructions')
+  instructions.forEach(r => wsI.addRow(r))
+  wsI.getColumn(1).width = 34; wsI.getColumn(2).width = 96; wsI.getColumn(3).width = 34
+  wsI.getRow(1).font = { bold: true, size: 14 }
 
-  // Sheet 3: Units (headers + example rows tied to the Data example)
-  const unitHeaders = UNIT_TEMPLATE_COLUMNS.map(c => c.label)
-  const unitExamples = [
-    ['Maple Heights Apartments','Building A','Apt 101','101','DWELLING-UNIT',2,1,850,1,''],
-    ['Maple Heights Apartments','Building A','Apt 102','102','DWELLING-UNIT',1,1,650,1,''],
-    ['Maple Heights Apartments','Building A','Community Room','CR','COMMON-AREA','','','',1,'Shared tenant space'],
-  ]
-  const unitBlank = UNIT_TEMPLATE_COLUMNS.map(() => '')
-  const unitData = [unitHeaders, ...unitExamples, unitBlank, unitBlank, unitBlank, unitBlank]
-  const wsU = XLSX.utils.aoa_to_sheet(unitData)
-  wsU['!cols'] = UNIT_TEMPLATE_COLUMNS.map(c => ({ wch: Math.max(c.label.length + 2, 14) }))
-  XLSX.utils.book_append_sheet(wb, wsU, 'Units')
+  // ── Tab 2: Data ─────────────────────────────────────────────────────────
+  const wsD = wb.addWorksheet('Data')
+  wsD.addRow(TEMPLATE_COLUMNS.map(c => c.label))
+  wsD.addRow(TEMPLATE_COLUMNS.map(c => c.example))
+  // Second example: a second building at the SAME test property (dedup demo).
+  wsD.addRow(['Test Owner Name','Test Property Name','123 Main St','Madison','WI','53703','LIHTC','Building B',1987,18])
+  styleHeaderRow(wsD.getRow(1))
+  wsD.columns = TEMPLATE_COLUMNS.map(c => ({ width: Math.max(c.label.length + 2, 16) }))
+  const stateCol = columnLetter(TEMPLATE_COLUMNS.findIndex(c => c.key === 'property_state') + 1)
+  const subCol   = columnLetter(TEMPLATE_COLUMNS.findIndex(c => c.key === 'property_subsidy_type') + 1)
+  for (let r = 2; r <= DV_ROWS; r++) {
+    wsD.getCell(`${stateCol}${r}`).dataValidation = listDropdown(LIST_SOURCE.state)
+    wsD.getCell(`${subCol}${r}`).dataValidation   = listDropdown(LIST_SOURCE.subsidyType)
+  }
 
-  // Sheet 4: Lists (valid picklist values to copy from)
-  const listRows = [
-    ['Valid values — copy into the matching column'],
-    [''],
-    ['Unit Record Type', 'Subsidy Type', 'Property State'],
-  ]
+  // ── Tab 3: Units ────────────────────────────────────────────────────────
+  const wsU = wb.addWorksheet('Units')
+  wsU.addRow(UNIT_TEMPLATE_COLUMNS.map(c => c.label))
+  ;[
+    ['Test Property Name','Building A','Apt 101','101','DWELLING-UNIT',2,1,850,1,''],
+    ['Test Property Name','Building A','Apt 102','102','DWELLING-UNIT',1,1,650,1,''],
+    ['Test Property Name','Building A','Community Room','CR','COMMON-AREA','','','',1,'Shared tenant space'],
+  ].forEach(r => wsU.addRow(r))
+  styleHeaderRow(wsU.getRow(1))
+  wsU.columns = UNIT_TEMPLATE_COLUMNS.map(c => ({ width: Math.max(c.label.length + 2, 14) }))
+  const urtCol = columnLetter(UNIT_TEMPLATE_COLUMNS.findIndex(c => c.key === 'unit_record_type') + 1)
+  for (let r = 2; r <= DV_ROWS; r++) {
+    wsU.getCell(`${urtCol}${r}`).dataValidation = listDropdown(LIST_SOURCE.unitRecordType)
+  }
+
+  // ── Tab 4: Lists (drop-down source; also human-readable) ────────────────
+  const wsL = wb.addWorksheet('Lists')
+  wsL.addRow(['Unit Record Type', 'Subsidy Type', 'Property State'])
+  styleHeaderRow(wsL.getRow(1))
   const maxLen = Math.max(VALID_UNIT_RECORD_TYPES.length, VALID_SUBSIDY.length, VALID_STATES.length)
   for (let i = 0; i < maxLen; i++) {
-    listRows.push([
-      VALID_UNIT_RECORD_TYPES[i] || '',
-      VALID_SUBSIDY[i] || '',
-      VALID_STATES[i] || '',
-    ])
+    wsL.addRow([VALID_UNIT_RECORD_TYPES[i] || '', VALID_SUBSIDY[i] || '', VALID_STATES[i] || ''])
   }
-  const wsL = XLSX.utils.aoa_to_sheet(listRows)
-  wsL['!cols'] = [{ wch: 22 }, { wch: 32 }, { wch: 16 }]
-  XLSX.utils.book_append_sheet(wb, wsL, 'Lists')
+  wsL.columns = [{ width: 22 }, { width: 32 }, { width: 16 }]
 
-  return wb
-}
-
-function downloadTemplate() {
-  const wb = buildTemplateWorkbook()
-  XLSX.writeFile(wb, `LEAP_Property_Hierarchy_Import_Template.xlsx`)
+  const buf = await wb.xlsx.writeBuffer()
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'LEAP_Property_Hierarchy_Import_Template.xlsx'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 // ── File parsing ─────────────────────────────────────────────────────────
@@ -532,6 +575,14 @@ export default function BulkPropertyImportPane() {
     }
   }, [rows, rowActions, analysis, filename, toast])
 
+  const handleDownload = useCallback(async () => {
+    try {
+      await downloadTemplate()
+    } catch (err) {
+      toast.error('Could not build the template: ' + (err?.message || err))
+    }
+  }, [toast])
+
   const handleStartOver = useCallback(() => {
     setStep(1)
     setRows([])
@@ -588,7 +639,7 @@ export default function BulkPropertyImportPane() {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 24, background: '#f7f9fc' }}>
-        {step === 1 && <Step1Download onNext={() => setStep(2)} />}
+        {step === 1 && <Step1Download onNext={() => setStep(2)} onDownload={handleDownload} />}
 
         {step === 2 && (
           <Step2Upload
@@ -626,7 +677,7 @@ export default function BulkPropertyImportPane() {
 }
 
 // ── Step 1: Download Template ────────────────────────────────────────────
-function Step1Download({ onNext }) {
+function Step1Download({ onNext, onDownload }) {
   return (
     <div style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
@@ -636,11 +687,11 @@ function Step1Download({ onNext }) {
         Step 1 — Download the template
       </div>
       <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.6, marginBottom: 16 }}>
-        The template is a pre-built Excel workbook with four tabs. On <strong>Data</strong>, one row per <strong>building</strong> — repeat the Owner and Property columns on every building row at the same property (the importer deduplicates automatically). On <strong>Units</strong>, one row per unit with its real name/number and attributes, tied to its building by Property + Building Name. <strong>Instructions</strong> and <strong>Lists</strong> (valid picklist values) round out the workbook. Buildings with no rows on the Units sheet auto-generate units from their Unit Count.
+        The template is a pre-built Excel workbook. <strong>Instructions</strong> is the first tab. On <strong>Data</strong>, one row per <strong>building</strong> — repeat the Owner and Property columns on every building row at the same property (the importer deduplicates automatically). On <strong>Units</strong>, one row per unit with its real name/number and attributes, tied to its building by Property + Building Name. Subsidy Type, Property State, and Unit Record Type are <strong>drop-downs</strong> — pick a value, don't type it. Buildings with no rows on the Units tab auto-generate units from their Unit Count.
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
         <button
-          onClick={downloadTemplate}
+          onClick={onDownload}
           style={{
             background: '#3ecf8e', color: '#fff', border: 'none', borderRadius: 5,
             padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer',

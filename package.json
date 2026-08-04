@@ -36,6 +36,7 @@
     "@turf/helpers": "^7.3.5",
     "dompurify": "^3.4.2",
     "echarts": "^6.1.0",
+    "exceljs": "^4.4.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "jszip": "^3.10.1",
