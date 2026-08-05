@@ -320,6 +320,7 @@ Deep research is now a staged pipeline and findings flow through a review queue 
 | Project Paperwork port (HOMES invoices/proposals from the Audit Template Builder into LEAP) | `leap-project-paperwork-port.md` |
 | Dashboard rehaul (enterprise-class builder: ECharts, 25+ components, query shapes, parity) | `leap-dashboard-rehaul.md` |
 | Report Builder + viewer + dashboards enterprise rebuild (filters, sort, groupings, group formulas, cross-filter) | `leap-report-builder-enterprise.md` |
+| Multifamily Energy Assessment WO (Asset Score + ASHRAE L2 field capture — build spec) | `leap-multifamily-energy-assessment.md` |
 | Field type system (modifiable types, formula fields, roll-up summaries) | `leap-field-types.md` |
 | Inherited fields & lookups (full-chain inheritance, stop duplicating parent data) | `leap-inherited-fields-lookups.md` |
 | Service Provider portal + intake (subcontractor onboarding, payout book, proposals, AP) | `leap-service-provider-portal.md` |
