@@ -1,0 +1,3 @@
+key,owner_first_name,owner_last_name,owner_email,owner_phone,install_address,unit_number,city,state,zip
+DEMO-001,Jane,Doe,jane.doe@example.com,608-555-0101,123 Main St Madison WI 53703,,Madison,Wisconsin,53703
+DEMO-002,John,Smith,john.smith@example.com,608-555-0102,456 Oak Ave Milwaukee WI 53202,2B,Milwaukee,Wisconsin,53202

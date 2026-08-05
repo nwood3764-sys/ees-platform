@@ -1,0 +1,6 @@
+node_modules/
+.browser-profile/
+data/results.csv
+data/projects.csv
+data/field-report.json
+data/screenshots/

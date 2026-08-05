@@ -1,0 +1,18 @@
+{
+  "name": "clearesult-hear-filler",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bulk form-filler for the ClearResult Focus IRA (Wisconsin HEAR Single Family) Project Reservation portal. Local-only tool — never merge to master / never deploy.",
+  "scripts": {
+    "login": "node src/login.js",
+    "inspect": "node src/inspect.js",
+    "fill": "node src/fill.js",
+    "fill:dry": "DRY_RUN=1 node src/fill.js"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "csv-stringify": "^6.5.1",
+    "playwright": "^1.48.0"
+  }
+}
