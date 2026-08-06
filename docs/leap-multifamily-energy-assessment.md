@@ -1,7 +1,6 @@
 # LEAP — Multifamily Building Energy Assessment Work Order (build spec)
 
-Status: **SPEC — not yet built.** Authored 2026-08-05, revised same day, on branch `claude/multifamily-assessment-wo-spec-lnyugh`.
-Owner to confirm the open decisions in §7 before Phase 1.
+Status: **Phase 1 SHIPPED** (2026-08-06). Foundation live on prod: migrations `20260806113132` (work type WT-00074 + WPT-00020, 15 building-level sections / 99 fields, WO + opportunity record types) and `20260806113133` (`create_mf_building_assessment_work_order` RPC); help article **HA-00158**. Phases 2–4 (utility/energy back-office polish, roll-up + Asset Score/ASHRAE export) queued below. Authored 2026-08-05 on branch `claude/multifamily-assessment-wo-spec-lnyugh`.
 
 ---
 
@@ -110,17 +109,14 @@ Full field-by-field inventory in **Appendix A (Asset Score)** and **Appendix B (
 
 ## 5. Phased build plan (each phase additive and independently shippable)
 
-**Phase 1 — Foundation: work type, record types, building plan, building-level WO.**
-New `work_type` "Multifamily Building Energy Assessment"; new record type `multifamily_building_energy_assessment` on `work_orders`, `opportunities`, `projects` (+ `buildings` record type per the enforce-record-type migration if required); new `work_plan_template` "Multifamily Building Energy Assessment — Standard" (`wpt_allow_any_order=true`, fresh uuid). Sections: Building Photos & 360 · Building Geometry & Use · Whole-Building Envelope (Roof/Ceiling · Walls · Foundation/Floor · Windows & Doors) · Central & Building Systems (Heating · Cooling · Distribution · Service Hot Water) · Common-Area Lighting · Building Diagnostics (optional). `create_mf_building_assessment_work_order` RPC (find-or-create Account→Property→Building→Opportunity→Project→WO at `unit_id=NULL`), paralleling `create_assessment_work_order` incl. the Field Data Verification Review task. Ships a usable whole-building audit.
+**Phase 1 — Foundation: work type, record types, building plan, building-level WO. ✅ SHIPPED 2026-08-06.**
+Adopted the pre-existing stub work type **WT-00074 "Multifamily Energy Assessment"** (found-or-created by name, never duplicated) and the existing `MULTIFAMILY` building + `MULTIFAMILY-ENERGY-ASSESSMENT` project record types; created the `MULTIFAMILY-ENERGY-ASSESSMENT` record type on `work_orders` + `opportunities` (opportunity type carries its own never-shared Open/Completed stages via pvrta). New plan **WPT-00020 "Multifamily Building Energy Assessment - Standard"** (`wpt_allow_any_order=true`) with **all 15 sections / 99 fields** — Building Photos · Building 360 Video · Building Geometry & Use · Roof/Ceiling · Walls · Foundation/Floor · Windows & Doors · Heating Systems · Cooling Systems · Distribution & Ventilation · Service Hot Water · Common-Area Lighting · Building Diagnostics (optional) · Utility & Energy Data (back-office) · Occupancy & Operating Schedules (back-office). All field names `mf_`-prefixed so the `work_step_fields` option lists are independent of the SF flow. `create_mf_building_assessment_work_order` RPC (find-or-create Account→Property→Building(MULTIFAMILY)→Opportunity→Project→WO at `unit_id=NULL`), paralleling `create_assessment_work_order` incl. the Field Data Verification Review task. The back-office Utility/Occupancy sections (originally slated for Phase 2) shipped in Phase 1 — all their fields are optional so they never gate completion (§7 D2). Help article **HA-00158**. Verified: WT-00074 → WPT-00020 wired, 15 sections instantiate via `trg_instantiate_work_plan_on_wo_insert`, advisors unchanged (no new lints).
 
-**Phase 2 — Utility & energy data + occupancy (ASHRAE L2 data blocks, back-office).**
-Building-level "Utility & Energy Data" and "Occupancy & Operating Schedules" sections, **fillable in-office, not a hard evidence gate** (§7 D2 confirmed). ≥12-month all-fuel entry, meter numbers/rates, EUI calc field (`wstf_is_calculated`), ENERGY STAR / Portfolio Manager score, occupancy counts, operating hours. Roll-up target: `buildings` meter/therm columns + new columns as needed.
-
-**Phase 3 — Roll-up, export & report wiring.**
+**Phase 2 — Roll-up, export & report wiring.**
 Map captured field values onto `buildings` / `assessments` columns (roll-up), and wire the Asset Score HPXML/BuildingSync + ASHRAE Level II report deliverables named in the WI HOMES submittal templates. Closes the loop to the submittal documents.
 
-**Phase 4 — Help articles + admin surface.**
-HA article ("Running a Multifamily Building Energy Assessment") and admin management of the `work_step_fields` picklists for all new selects. Per CLAUDE.md, a help article ships in the same session as each user-facing feature; Phase 4 is the consolidation.
+**Phase 3 — Admin surface + EUI calc + polish.**
+Admin management of the `work_step_fields` picklists for all new `mf_` selects (already admin-editable in LEAP Admin), an optional `wstf_is_calculated` Site-EUI field on the Utility section, and any field tweaks from real-world use. (The Phase-1 help article HA-00158 already covers the field workflow.)
 
 ---
 
@@ -150,9 +146,9 @@ Reuse the SF Heating/Cooling/DHW section field sets (type/fuel/capacity/efficien
 
 - **D2 — Utility/energy data is back-office, not gated.** **DECIDED 2026-08-05 (Nicholas):** building-level section, fillable in-office after the visit; not a hard evidence gate.
 
-- **D3 — Snugg Pro vs Asset Score as system of record for the model.** Recommend: **the field WO is the single capture surface; it feeds both** the Snugg Pro model and the Asset Score HPXML export in Phase 3 — no double entry. **DECIDED: pending Nicholas.**
+- **D3 — Snugg Pro vs Asset Score as system of record for the model.** **DECIDED 2026-08-06:** the field WO is the single capture surface; it feeds **both** the Snugg Pro model and the Asset Score HPXML export in Phase 3 — no double entry.
 
-- **D4 — Building diagnostics (blower door / combustion) in the building tool.** Recommend: **include an optional Building Diagnostics section** for whole-building or guarded-zone tests where feasible; treat granular per-unit combustion/airflow testing as part of the separate unit-level tool. **DECIDED: pending Nicholas.**
+- **D4 — Building diagnostics (blower door / combustion) in the building tool.** **DECIDED 2026-08-06:** an **optional Building Diagnostics section** is included (section 13) for whole-building/guarded-zone tests; granular per-unit combustion/airflow testing belongs to the separate unit-level tool.
 
 ---
 
