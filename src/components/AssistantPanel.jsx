@@ -345,25 +345,41 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
   // auto-run path (send) and the manual Confirm path (commitSet).
   const performCommit = useCallback(async (actions, ctx) => {
     const result = await commitAssistantActions({ actions, context: ctx })
+    const rows = result?.results || []
     const ok = result?.ok !== false
-    if (!ok) {
-      const msg = result?.results?.find(r => r.outcome === 'error')?.message || 'Action was refused'
-      toast.error(msg)
-      return { ok: false, links: [] }
-    }
     const links = linksFromResult(result, actions)
-    toast.success(actions.length > 1 ? `Created ${links.length} records` : 'Action completed')
-    // Tell every live record and list view to re-fetch so the change (a new
+
+    // Tell every live record and list view to re-fetch so any change (a new
     // contact, an edited field) is visible immediately — no manual reload.
+    // Do this even on a partial/failed batch, because fail-fast means some
+    // rows earlier in the batch may already exist.
     const touchedTables = new Set()
     const touchedIds = new Set()
-    ;(result?.results || []).forEach((r, i) => {
+    rows.forEach((r, i) => {
       const table = r?.object || actions[i]?.object
       if (table) touchedTables.add(table)
       if (r?.created_id) touchedIds.add(r.created_id)
       if (actions[i]?.record_id) touchedIds.add(actions[i].record_id)
     })
-    emitDataRefresh({ source: 'assistant', tables: Array.from(touchedTables), ids: Array.from(touchedIds) })
+    if (touchedTables.size || touchedIds.size) {
+      emitDataRefresh({ source: 'assistant', tables: Array.from(touchedTables), ids: Array.from(touchedIds) })
+    }
+
+    if (!ok) {
+      const reason = rows.find(r => r.outcome === 'error')?.message || 'Action was refused'
+      toast.error(reason)
+      // Feed the REAL outcome back into history so the assistant corrects itself
+      // on the next turn instead of leaving a premature "done" claim standing.
+      // Report exactly what did and did not save so it never over-claims.
+      const okCount = rows.filter(r => r?.outcome === 'ok').length
+      const savedClause = okCount ? `${okCount} of ${actions.length} record(s) saved; ` : ''
+      const sysContent = `[system: The last action did NOT fully complete. ${savedClause}the rest FAILED and were NOT saved (${reason}). Do not tell the user it succeeded. Verify with a query before making any claim, and tell the user plainly what failed.]`
+      setHistory(h => [...h, { role: 'user', content: sysContent }])
+      saveAssistantMessage({ role: 'user', content: sysContent }).catch(() => {})
+      return { ok: false, links }
+    }
+
+    toast.success(actions.length > 1 ? `Created ${links.length} records` : 'Action completed')
     // Feed created ids AND their real URLs back so a follow-up ("give me the
     // link", "add a contact to it") has everything and never invents an id.
     if (links.length) {

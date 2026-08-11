@@ -329,9 +329,21 @@ const TOOLS = [
 // actual site origin in shareable record URLs. appBaseUrl is the origin the
 // user is on (e.g. https://leap.ees-wi.org); when absent we fall back to a
 // clearly-labelled placeholder rather than inventing a domain.
-function buildSystemPrompt(appBaseUrl: string): string {
+function buildSystemPrompt(
+  appBaseUrl: string,
+  now: { human: string; iso: string; time: string },
+  caller: CallerProfile,
+): string {
   const URL_FORM = appBaseUrl ? `${appBaseUrl}/<table>/<id>` : "<your LEAP site>/<table>/<id>"
+  const callerDesc = caller.role
+    ? `${caller.name} (role: ${caller.role}${caller.title ? `, ${caller.title}` : ""})`
+    : (caller.title ? `${caller.name} (${caller.title})` : caller.name)
   return `You are the LEAP assistant for Energy Efficiency Services of Wisconsin. LEAP is the company's operations platform (CRM, field service, incentives, inventory).
+
+## Right now — the current date/time and who you are helping (these are FACTS you already have; never ask for them)
+
+- Today is ${now.human} (${now.iso}). The current time is ${now.time}, Energy Efficiency Services' local time (US Central). You already know this — NEVER ask the user what today's date or the current time is. When the user says "today", "now", "this morning", "this week", or "schedule it for today", compute the actual date/time from the values above yourself.
+- You are assisting ${callerDesc}. That is the signed-in user. When the user says "me", "my", "for me", or "assign it to me", they mean ${caller.name} — resolve it from this, do not ask who they are.
 
 You help the signed-in user two ways:
 1. Take actions by plain conversation: creating records, updating fields, changing statuses, running reports, looking things up. You operate strictly within the user's own permissions — if an action is refused, explain plainly and stop; never try to work around a permission.
@@ -393,13 +405,17 @@ If several required pieces are missing, ask for all of them together in one mess
 
 When the user names an existing record, resolve its id with global_search or query_records before acting; never invent ids. Treat the user's wording as approximate — if a term might be misspelled or mis-heard, use fuzzy_resolve, and always state any correction you applied. For statuses/record types/work types, resolve the value with fuzzy_resolve kind='picklist' and use the returned id (e.g. as to_status_id for change_status). Never set a status column with update_record.
 
+When the user refers to a COWORKER — a technician, owner, coordinator, or any staff member — by first name or partial name ("schedule these for Logan", "assign it to Priya", "give it to Kelly"), look them up YOURSELF: query_records on the users object (or fuzzy_resolve / global_search) restricted to active users, and use the match's id (e.g. as the owner or assigned-technician field). Do NOT ask the user to type out a person's full name — that is a lookup you are fully capable of doing. Only ask the user to clarify when the lookup finds MORE THAN ONE active person who matches (name them and ask which) or NONE at all. The same applies to the signed-in user: "me"/"my" is the caller named in the current-context block above — never ask who that is.
+
 ## Everyday actions run immediately — there is no confirmation step
 
 When you use create_record, create_contact, create_work_order, log_activity, update_record, change_status, or create_report, the app runs it right away, automatically — there is NO confirm button. The user sees the created/updated record with a real clickable link appear under your message. So:
 
-- Speak in the present/near tense about what you're doing: "Logging that voicemail for Kelly now," "Creating the contact," "Updating the phone number," "Moving the work order to Scheduled." Do NOT say "confirm the card," "click Confirm," "I've prepared this," "let me know if you'd like me to proceed," or anything implying the user must approve it — there is nothing to confirm. Just do it and describe what you did.
+- Speak in the present/near tense about what you're doing: "Logging that voicemail for Kelly now," "Creating the contact," "Updating the phone number," "Moving the work order to Scheduled." Do NOT say "confirm the card," "click Confirm," "I've prepared this," "let me know if you'd like me to proceed," or anything implying the user must approve it — there is nothing to confirm. Describe what you're doing and let the result cards carry the proof.
 - Ask FIRST for anything required you can't infer. Because the action runs the moment you propose it, never propose one you know will fail — if a required field is missing (e.g. a property's ZIP), ask for it in one message, THEN act. Don't fire off an action that will error.
 - Still never invent, guess, or use a placeholder/example id or URL. The app appends the real link itself. On your NEXT turn you'll receive a "[system: Created <table> <uuid> (<url>) ...]" note with the real ids — from then on you may cite those exact links. If you don't yet hold a real id for a record, say so honestly rather than fabricating one.
+- Claim ONLY what you can back with a confirmation. When you emit create/update actions you have NOT yet seen the result — the database write happens after this turn. So do NOT assert a finished, verified outcome from your own intention: never say "all 11 units are now in place," "everything's created and double-checked," or "done" as a statement of completed fact in the same turn you emit the actions. The result cards under your message and the "[system: Created ...]" note on your next turn are the ONLY proof the write succeeded. Describe what you're creating, then state a confirmed count or "these now exist" ONLY once you actually hold that confirmation. If instead you receive a "[system: ... did not fully complete ...]" note, tell the user plainly what failed — do not paper over it.
+- If the user questions or pushes back on whether something actually happened ("did that work?", "you didn't build those", "are you sure?"), do NOT simply repeat your earlier claim or apologize and re-assert. VERIFY: run query_records or global_search against the real data, count what actually exists, and report that real number — even (especially) if it is fewer than you implied. A re-query is the only honest answer to "are you sure?"
 
 The only actions that still pause for the user's yes/no are genuinely destructive or bulk/administrative ones — those are rare and the app handles the prompt. Everything the user does day to day (contacts, calls/voicemails, field edits, status moves) just happens.
 
@@ -455,6 +471,7 @@ Deno.serve(async (req) => {
   const authHeader = req.headers.get("Authorization") || ""
   const callerUserId = await resolveCallerUserId(admin, authHeader)
   if (!callerUserId) return json({ error: "Caller is not a registered LEAP user" }, 401)
+  const callerProfile = await fetchCallerProfile(admin, callerUserId)
 
   // User-scoped client: ALL reads/actions on the user's behalf run through this.
   // Built from the ANON key + the caller's JWT so the user's role (not the
@@ -497,7 +514,7 @@ Deno.serve(async (req) => {
   // shareable record URLs (<origin>/<table>/<id>) instead of refusing or
   // inventing an example id. Only http(s) origins are accepted.
   const appBaseUrl = sanitizeBaseUrl(body.app_base_url)
-  const systemPrompt = buildSystemPrompt(appBaseUrl)
+  const systemPrompt = buildSystemPrompt(appBaseUrl, buildNowContext(), callerProfile)
 
   const proposedActions: unknown[] = []
   let totalIn = 0, totalOut = 0
@@ -873,6 +890,47 @@ async function logUsage(admin: SupabaseClient, u: UsageLog) {
     })
   } catch {
     // Usage logging must never break the assistant response.
+  }
+}
+
+// Current date/time in Energy Efficiency Services' local (Central) time, so the
+// assistant NEVER has to ask the user what "today" is. Computed per request.
+function buildNowContext(): { human: string; iso: string; time: string } {
+  const now = new Date()
+  const human = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago", weekday: "long", year: "numeric", month: "long", day: "numeric",
+  }).format(now)
+  const iso = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(now)
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short",
+  }).format(now)
+  return { human, iso, time }
+}
+
+interface CallerProfile { name: string; role: string; title: string }
+
+// Look up the signed-in user's display name, role, and title so the assistant
+// knows WHO it is helping (for "me"/"my"/"assign it to me") and never asks.
+// Best-effort: identity is a convenience here, not the permission boundary
+// (that is enforced by the user-scoped client + RLS), so failures degrade
+// gracefully to a generic label.
+async function fetchCallerProfile(admin: SupabaseClient, userId: string): Promise<CallerProfile> {
+  try {
+    const { data } = await admin
+      .from("users")
+      .select("user_name, user_first_name, user_last_name, user_title, roles(role_name)")
+      .eq("id", userId)
+      .maybeSingle()
+    const composed = `${data?.user_first_name || ""} ${data?.user_last_name || ""}`.trim()
+    const name = (data?.user_name || composed || "").trim() || "the signed-in user"
+    // deno-lint-ignore no-explicit-any
+    const role = (data as any)?.roles?.role_name || ""
+    const title = data?.user_title || ""
+    return { name, role, title }
+  } catch {
+    return { name: "the signed-in user", role: "", title: "" }
   }
 }
 

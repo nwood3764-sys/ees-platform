@@ -213,19 +213,6 @@ export default function ProjectImplementationModule({ selectedRecord: navSelecte
     if (onSectionChange) onSectionChange(next)
   }
 
-  if (selectedRecord) {
-    return (
-      <RecordDetail
-        tableName={selectedRecord.table}
-        recordId={selectedRecord.id}
-        mode={selectedRecord.mode}
-        onBack={() => { setSelectedRecord(null); if (onCloseRecord) onCloseRecord() }}
-        onNavigateToRecord={onReplaceRecord}
-        onRecordCreated={() => { setSelectedRecord(null); loadAll(); if (onCloseRecord) onCloseRecord() }}
-      />
-    )
-  }
-
   // Resolve the list object for the active section: built-in tabs from
   // SEC_TABLE, admin-added custom sections from their configured objectTable.
   const listTable = sec !== 'home'
@@ -238,6 +225,16 @@ export default function ProjectImplementationModule({ selectedRecord: navSelecte
         <SectionTabs sections={SECTIONS} moduleId="implementation" active={sec} onChange={changeSection} />
       </div>
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {selectedRecord ? (
+          <RecordDetail
+            tableName={selectedRecord.table}
+            recordId={selectedRecord.id}
+            mode={selectedRecord.mode}
+            onBack={() => { setSelectedRecord(null); if (onCloseRecord) onCloseRecord() }}
+            onNavigateToRecord={onReplaceRecord}
+            onRecordCreated={() => { setSelectedRecord(null); loadAll(); if (onCloseRecord) onCloseRecord() }}
+          />
+        ) : (<>
         {sec === 'home' && (
           loading ? <LoadingState /> : error ? <ErrorState error={error} onRetry={loadAll} /> :
           <Dashboard workOrders={workOrders} projects={projects} opportunities={opportunities} onDrill={drillToSection} />
@@ -250,6 +247,7 @@ export default function ProjectImplementationModule({ selectedRecord: navSelecte
             initialFilters={drillFilters}
           />
         )}
+        </>)}
       </div>
     </div>
   )
