@@ -11,5 +11,8 @@ COPY repair.py app.py ./
 
 ENV PORT=8080
 EXPOSE 8080
-# Single worker, generous timeout — model repair is CPU-bound but quick.
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "-w", "2", "-t", "120", "app:app"]
+# Bind to $PORT (Render/Fly set this at runtime; falls back to 8080 locally).
+# One worker keeps memory within the free tier (openstudio is heavy per worker);
+# generous timeout because the first request cold-loads the SDK. Shell form so
+# $PORT expands.
+CMD gunicorn -b 0.0.0.0:${PORT:-8080} -w 1 -t 300 app:app
