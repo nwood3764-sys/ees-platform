@@ -1,0 +1,5 @@
+# Static deploy for the OSM Fixer front-end. Its own Netlify site, independent
+# of the LEAP app and the Audit Template Builder. No build step.
+[build]
+  publish = "."
+  command = ""
