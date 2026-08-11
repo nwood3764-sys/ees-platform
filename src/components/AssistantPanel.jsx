@@ -41,6 +41,21 @@ const isAutoCommittable = (actions) =>
   Array.isArray(actions) && actions.length > 0 &&
   actions.every(a => AUTO_COMMIT_TYPES.has(a?.type))
 
+// After actions run, the panel automatically feeds the REAL results back to the
+// assistant so it can observe what actually happened, confirm it, and correct
+// anything that failed — the verify step that turns a one-shot "propose and
+// hope" into a bounded act → observe → verify → fix agent loop. Capped so a
+// single request can never fan out indefinitely (a cost + latency guard); each
+// pass only continues while the assistant keeps proposing everyday auto-run
+// actions (a retry/continuation), and stops the moment it just confirms or asks.
+const MAX_AUTO_FOLLOWUPS = 3
+const VERIFY_DIRECTIVE =
+  'Automatic verification step (the user did NOT type this — do not address it as a question from them). ' +
+  'The real result of the action(s) you just ran is in the [system: ...] note above. Check it against what you set out to do: ' +
+  'if everything succeeded, confirm briefly — the real count and the record links, nothing more; do not restate the plan. ' +
+  "If anything FAILED or is missing, say so plainly and, when it is within the user's permissions, take the corrective action now to finish the job. " +
+  'If a genuine decision is needed from the user, ask one short question. Never claim a result you cannot see in the note.'
+
 // Map the app's selected-record shape to the edge function's context shape.
 // selectedRecord carries { table, id, name/label } in this codebase; we read
 // defensively since not every surface sets every field.
@@ -365,34 +380,62 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
       emitDataRefresh({ source: 'assistant', tables: Array.from(touchedTables), ids: Array.from(touchedIds) })
     }
 
+    // Build the [system: ...] results note the assistant reads on its verify
+    // pass. Returned to the caller (which threads it into the running
+    // conversation) and persisted here for cross-session memory. NOTE: this
+    // function no longer touches `history` itself — the caller owns that, so a
+    // multi-turn loop can thread results through one local conversation array.
+    let note = null
     if (!ok) {
       const reason = rows.find(r => r.outcome === 'error')?.message || 'Action was refused'
       toast.error(reason)
-      // Feed the REAL outcome back into history so the assistant corrects itself
-      // on the next turn instead of leaving a premature "done" claim standing.
-      // Report exactly what did and did not save so it never over-claims.
+      // Report exactly what did and did not save so the assistant never over-claims.
       const okCount = rows.filter(r => r?.outcome === 'ok').length
       const savedClause = okCount ? `${okCount} of ${actions.length} record(s) saved; ` : ''
-      const sysContent = `[system: The last action did NOT fully complete. ${savedClause}the rest FAILED and were NOT saved (${reason}). Do not tell the user it succeeded. Verify with a query before making any claim, and tell the user plainly what failed.]`
-      setHistory(h => [...h, { role: 'user', content: sysContent }])
-      saveAssistantMessage({ role: 'user', content: sysContent }).catch(() => {})
-      return { ok: false, links }
+      note = `[system: The last action did NOT fully complete. ${savedClause}the rest FAILED and were NOT saved (${reason}). Do not tell the user it succeeded. Verify with a query before making any claim, and tell the user plainly what failed.]`
+    } else {
+      toast.success(actions.length > 1 ? `Created ${links.length} records` : 'Action completed')
+      // Feed created ids AND their real URLs back so the verify pass (and any
+      // follow-up) has everything and never invents an id.
+      if (links.length) {
+        note = '[system: Created — these records now exist and each has a real shareable URL: ' +
+          links.map(l => `${l.table} ${l.id} (${recordUrl(l.table, l.id)})`).join('; ') + '.]'
+      }
     }
-
-    toast.success(actions.length > 1 ? `Created ${links.length} records` : 'Action completed')
-    // Feed created ids AND their real URLs back so a follow-up ("give me the
-    // link", "add a contact to it") has everything and never invents an id.
-    if (links.length) {
-      const note = 'Created — these records now exist and each has a real shareable URL: ' +
-        links.map(l => `${l.table} ${l.id} (${recordUrl(l.table, l.id)})`).join('; ') + '.'
-      const sysContent = `[system: ${note}]`
-      setHistory(h => [...h, { role: 'user', content: sysContent }])
-      // Persist the note (hidden from the visible thread on reload, kept in
-      // context) so a later-day follow-up still works. Best-effort.
-      saveAssistantMessage({ role: 'user', content: sysContent }).catch(() => {})
-    }
-    return { ok: true, links }
+    if (note) saveAssistantMessage({ role: 'user', content: note }).catch(() => {})
+    return { ok, links, note }
   }, [toast, linksFromResult])
+
+  // Commit an auto-run action set, thread its results note into the local
+  // conversation, and render the assistant turn already-done with links.
+  // Returns the (possibly extended) conversation array. Shared by the user
+  // turn and each verify pass so results flow through ONE conversation.
+  const runAndRender = useCallback(async (reply, actions, ctx, convo) => {
+    let committed = new Set()
+    let createdLinks = []
+    let nextConvo = convo
+    let ran = false
+    let ok = true
+    if (isAutoCommittable(actions)) {
+      ran = true
+      const r = await performCommit(actions, ctx)
+      ok = r.ok
+      if (r.ok) { committed = new Set(actions.map((_, i) => i)); createdLinks = r.links }
+      if (r.note) nextConvo = [...nextConvo, { role: 'user', content: r.note }]
+    }
+    // Render the turn only if it carries something to show (text or cards) — a
+    // silent verify pass that produced neither is not worth an empty bubble.
+    if ((reply && reply.trim()) || (actions && actions.length)) {
+      setTurns(t => [...t, { role: 'assistant', text: reply || '(no reply)', actions: actions || [], committed, createdLinks }])
+    }
+    return { convo: nextConvo, ran, ok }
+  }, [performCommit])
+
+  // A verify pass earns its cost only where mistakes actually hide: a
+  // multi-record batch (did every one land?) or any failure (can it be fixed?).
+  // A single successful auto-commit already shows a done card with a link —
+  // no need to spend another model turn confirming it.
+  const warrantsVerify = (ran, ok, count) => ran && (count > 1 || !ok)
 
   const send = useCallback(async () => {
     const message = input.trim()
@@ -400,51 +443,62 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     setInput('')
     setTurns(t => [...t, { role: 'user', text: message }])
     setBusy(true)
+    const ctx = buildContext(selectedRecord, listTable)
+    const ctxJson = ctx ? { object: ctx.object || null, record_id: ctx.record_id || null } : null
+    // One local conversation array threaded through the whole request. React
+    // state updates async, so we can't rely on `history` mid-loop; we build
+    // convo locally and commit it to state once at the end.
+    let convo = [...history]
     try {
-      const ctx = buildContext(selectedRecord, listTable)
-      const res = await sendAssistantMessage({ message, history, context: ctx })
+      // ── The user's turn ──────────────────────────────────────────────────
+      const res = await sendAssistantMessage({ message, history: convo, context: ctx })
       if (res.mock) {
         setTurns(t => [...t, { role: 'assistant', text: res.reply, actions: [] }])
-      } else {
-        const actions = res.proposed_actions || []
-        // Record continuity + persist the turn (best-effort) BEFORE running, so
-        // the auto-run's created-records note lands after the assistant reply.
-        setHistory(h => [...h,
-          { role: 'user', content: message },
-          { role: 'assistant', content: res.reply || '' },
-        ])
-        const ctxJson = ctx ? { object: ctx.object || null, record_id: ctx.record_id || null } : null
-        saveAssistantMessage({ role: 'user', content: message, context: ctxJson }).catch(() => {})
-        if (res.reply) saveAssistantMessage({ role: 'assistant', content: res.reply }).catch(() => {})
-
-        // Everyday actions run immediately — no confirmation card. Commit the
-        // whole proposed set together (one RPC so {{ref:...}} links resolve) and
-        // render the turn already-done, with links. Sensitive/unknown types (or
-        // a batch mixing one in) fall through to the confirmation cards.
-        let committed = new Set()
-        let createdLinks = []
-        if (isAutoCommittable(actions)) {
-          const { ok, links } = await performCommit(actions, ctx)
-          if (ok) {
-            committed = new Set(actions.map((_, i) => i))
-            createdLinks = links
-          }
-        }
-        setTurns(t => [...t, {
-          role: 'assistant',
-          text: res.reply || '(no reply)',
-          actions,
-          committed,
-          createdLinks,
-        }])
+        return
       }
+      convo = [...convo,
+        { role: 'user', content: message },
+        { role: 'assistant', content: res.reply || '' },
+      ]
+      saveAssistantMessage({ role: 'user', content: message, context: ctxJson }).catch(() => {})
+      if (res.reply) saveAssistantMessage({ role: 'assistant', content: res.reply }).catch(() => {})
+
+      let actions = res.proposed_actions || []
+      let r = await runAndRender(res.reply, actions, ctx, convo)
+      convo = r.convo
+      let verify = warrantsVerify(r.ran, r.ok, actions.length)
+
+      // ── Bounded observe → verify → self-correct loop ─────────────────────
+      // Runs only after a batch or a failure. Each pass shows the assistant the
+      // real results note and lets it confirm or fix; it stops as soon as a
+      // pass needs no further correction (a plain confirmation or a question),
+      // and is hard-capped either way.
+      let depth = 0
+      while (depth < MAX_AUTO_FOLLOWUPS && verify) {
+        depth++
+        const fres = await sendAssistantMessage({ message: VERIFY_DIRECTIVE, history: convo, context: ctx })
+        if (fres.mock) break
+        // The verify directive is an internal control turn — kept in context
+        // for the model, never shown to the user and never persisted.
+        convo = [...convo,
+          { role: 'user', content: VERIFY_DIRECTIVE },
+          { role: 'assistant', content: fres.reply || '' },
+        ]
+        if (fres.reply) saveAssistantMessage({ role: 'assistant', content: fres.reply }).catch(() => {})
+        const factions = fres.proposed_actions || []
+        const fr = await runAndRender(fres.reply, factions, ctx, convo)
+        convo = fr.convo
+        verify = warrantsVerify(fr.ran, fr.ok, factions.length)
+      }
+      setHistory(convo)
     } catch (e) {
       toast.error(e.message || 'Assistant request failed')
       setTurns(t => [...t, { role: 'assistant', text: `Error: ${e.message || e}`, actions: [] }])
+      setHistory(convo)
     } finally {
       setBusy(false)
     }
-  }, [input, busy, history, selectedRecord, listTable, toast, performCommit])
+  }, [input, busy, history, selectedRecord, listTable, toast, runAndRender])
 
   // Manual Confirm path (used only for the sensitive action types that still
   // show a card): commit the chosen actions and mark that turn done.
@@ -454,7 +508,8 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
       const turn = turns[turnIdx]
       const actions = actionIndices.map(i => turn.actions[i])
       const ctx = buildContext(selectedRecord, listTable)
-      const { ok, links } = await performCommit(actions, ctx)
+      const { ok, links, note } = await performCommit(actions, ctx)
+      if (note) setHistory(h => [...h, { role: 'user', content: note }])
       if (ok) {
         setTurns(t => t.map((tn, i) => {
           if (i !== turnIdx) return tn
