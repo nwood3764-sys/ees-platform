@@ -49,6 +49,36 @@ OpenStudio, bump the pin in `service/requirements.txt` to match.
 
 ## Deploy runbook
 
+### Recommended for a non-technical setup — Render, no command line
+
+All clicks in a web browser; no CLI, no Docker install. Render builds the engine
+straight from this repo. (Planned but not yet done — saved here for when we pick
+it back up. The intended end state: the upload UI lives as a **new tab inside the
+Audit Template Builder** at `ees-audit-template-builder.netlify.app`, and this
+Render service is the engine behind it.)
+
+1. **Account** — go to render.com → Get Started → **Sign in with GitHub** (the
+   account that owns `nwood3764-sys/ees-platform`). Authorize Render and include
+   the `ees-platform` repo.
+2. **Create** — **New +** → **Web Service** → pick the `ees-platform` repo → Connect.
+3. **Settings** (leave the rest default):
+   - Name: `osm-fixer`
+   - Branch: `master`
+   - Root Directory: `audit-template-builder/osm-fixer/service`
+   - Language/Runtime: **Docker** (auto-detected once Root Directory is set)
+   - Instance Type: **Free**
+   - No environment variables needed (CORS defaults to `*`; set `ALLOWED_ORIGIN`
+     later to lock it to the Audit Template Builder origin).
+4. **Deploy** — Create Web Service. First build is ~5–10 min (installs the
+   OpenStudio library). Wait for **Live** (green).
+5. **Test** — open `https://osm-fixer-xxxx.onrender.com/health` → expect
+   `{"ok":true,"sdk":"3.7.0"}`. Copy that base URL.
+6. **Wire the tab** — put the URL in the Audit Template Builder's OSM Fixer tab
+   config (Claude does this step) and redeploy the site.
+
+Free-tier notes: the service sleeps after ~15 min idle and takes ~50s to wake on
+the next request (then it's fast); the Free instance type is $0.
+
 ### 1. The service (Fly.io example — scale-to-zero, ~free idle)
 
 ```bash
