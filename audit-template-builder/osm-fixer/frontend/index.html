@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OSM Fixer — OpenStudio Model Repair</title>
+<script src="config.js"></script>
+<style>
+  :root{ --ink:#1a2620; --paper:#f7f5ef; --line:#dcd7c8; --card:#fff;
+    --moss:#3ecf8e; --moss-d:#2aab72; --navy:#07111f; --mut:#6c7268; --warn:#9c3a2c; }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    color:var(--ink);background:var(--paper)}
+  header{background:var(--navy);color:#fff;padding:22px 26px}
+  header h1{margin:0;font-size:20px;font-weight:700;letter-spacing:.2px}
+  header p{margin:4px 0 0;font-size:13px;color:rgba(255,255,255,.7)}
+  main{max-width:760px;margin:26px auto;padding:0 20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:22px;margin-bottom:18px}
+  .drop{border:2px dashed var(--line);border-radius:10px;padding:38px 20px;text-align:center;
+    color:var(--mut);cursor:pointer;transition:.15s;background:#fcfbf7}
+  .drop.hover{border-color:var(--moss);background:#f1faf4;color:var(--ink)}
+  .drop strong{color:var(--ink)}
+  input[type=file]{display:none}
+  .files{margin:14px 0 0;font-size:13.5px}
+  .files li{list-style:none;padding:6px 0;border-top:1px solid var(--line);
+    display:flex;justify-content:space-between;gap:12px}
+  .files li:first-child{border-top:0}
+  .btn{appearance:none;border:0;border-radius:8px;background:var(--moss);color:#06210f;
+    font:600 15px/1 inherit;padding:13px 22px;cursor:pointer;margin-top:16px}
+  .btn:disabled{background:#cfd8cf;color:#8a938c;cursor:not-allowed}
+  .btn:hover:not(:disabled){background:var(--moss-d);color:#fff}
+  .status{margin-top:16px;font-size:14px;padding:12px 14px;border-radius:8px;display:none}
+  .status.show{display:block}
+  .status.ok{background:#eef7f0;border:1px solid #bfe3c9;color:#1f5a2f}
+  .status.err{background:#eef2f7;border:1px solid #b9d3ea;color:#1f4e79}
+  .status.work{background:#fbf7ee;border:1px solid #e8d9b0;color:#5c5230}
+  .sum{margin-top:12px;font-size:12.5px;color:var(--mut);white-space:pre-wrap;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .what{font-size:13.5px;color:var(--mut)}
+  .what li{margin:4px 0}
+  code{background:#eef4ed;padding:1px 5px;border-radius:4px;font-size:12.5px}
+</style>
+</head>
+<body>
+<header>
+  <h1>OSM Fixer</h1>
+  <p>Upload OpenStudio models — get them back corrected and ready to run.</p>
+</header>
+<main>
+  <div class="card">
+    <div id="drop" class="drop">
+      <strong>Drop .osm files here</strong> or click to choose<br>
+      <span style="font-size:12.5px">one or more OpenStudio models</span>
+    </div>
+    <input id="picker" type="file" accept=".osm" multiple>
+    <ul id="files" class="files"></ul>
+    <button id="go" class="btn" disabled>Fix &amp; download</button>
+    <div id="status" class="status"></div>
+    <div id="sum" class="sum"></div>
+  </div>
+  <div class="card">
+    <div style="font-weight:600;margin-bottom:8px">What this does to each model</div>
+    <ul class="what">
+      <li>Removes the water-heater <strong>recirculation plant loop</strong> that fails EnergyPlus translation.</li>
+      <li>Pins the <strong>water-heater ambient temperature</strong> to a constant 21&nbsp;°C schedule (the other known translation failure).</li>
+      <li>Removes any <code>Schedule:File</code> objects (dangling external-CSV references).</li>
+      <li>Enables <strong>HTML results output</strong> (AllSummary + monthly meters) so a run produces the Results HTML.</li>
+      <li>The corrected model is <strong>forward-translated to verify it runs</strong> before it's returned.</li>
+    </ul>
+  </div>
+</main>
+<script>
+const drop=document.getElementById('drop'), picker=document.getElementById('picker'),
+  filesUl=document.getElementById('files'), go=document.getElementById('go'),
+  statusEl=document.getElementById('status'), sumEl=document.getElementById('sum');
+let chosen=[];
+
+function show(msg,kind){statusEl.className='status show '+kind;statusEl.textContent=msg;}
+function renderFiles(){
+  filesUl.innerHTML='';
+  chosen.forEach(f=>{const li=document.createElement('li');
+    li.innerHTML='<span>'+f.name+'</span><span>'+(f.size/1024|0)+' KB</span>';
+    filesUl.appendChild(li);});
+  go.disabled=chosen.length===0;
+}
+function addFiles(list){
+  for(const f of list){ if(f.name.toLowerCase().endsWith('.osm') &&
+    !chosen.some(c=>c.name===f.name&&c.size===f.size)) chosen.push(f); }
+  renderFiles();
+}
+drop.onclick=()=>picker.click();
+picker.onchange=e=>addFiles(e.target.files);
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hover');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hover');}));
+drop.addEventListener('drop',e=>addFiles(e.dataTransfer.files));
+
+go.onclick=async ()=>{
+  sumEl.textContent='';
+  const base=(window.OSM_FIXER_URL||'').replace(/\/+$/,'');
+  if(!base){ show('The repair service URL isn’t configured yet. Set window.OSM_FIXER_URL in config.js to the deployed service (see the README).','err'); return; }
+  go.disabled=true; show('Repairing '+chosen.length+' model'+(chosen.length>1?'s':'')+'… (a few seconds each)','work');
+  try{
+    const fd=new FormData();
+    chosen.forEach((f,i)=>fd.append('f'+i,f,f.name));
+    const resp=await fetch(base+'/fix',{method:'POST',body:fd});
+    if(!resp.ok){
+      let msg='Error '+resp.status;
+      try{const j=await resp.json(); if(j.error)msg=j.error;}catch(_){}
+      show(msg,'err'); go.disabled=false; return;
+    }
+    const summary=resp.headers.get('X-OSM-Fixer-Summary');
+    const blob=await resp.blob();
+    const cd=resp.headers.get('Content-Disposition')||'';
+    const m=cd.match(/filename="?([^"]+)"?/);
+    const name=m?m[1]:(chosen.length>1?'fixed_models.zip':'fixed.osm');
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=name; a.click();
+    URL.revokeObjectURL(url);
+    show('Done — downloaded '+name+'. Each model was verified to translate with 0 errors.','ok');
+    if(summary){ try{const s=JSON.parse(summary);
+      sumEl.textContent='Removed recirc loop: '+(s.recirc_loops_removed||[]).join(', ')+
+        '\nWater heaters fixed: '+s.water_heaters_fixed+
+        '\nWeather file: '+(s.weather_file||'none set')+
+        '\nRunnable: '+s.runnable;
+    }catch(_){}}
+  }catch(err){ show('Upload failed: '+err.message+' — check the service is up and the URL is correct.','err'); go.disabled=false; }
+  go.disabled=false;
+};
+</script>
+</body>
+</html>

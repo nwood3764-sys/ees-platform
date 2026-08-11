@@ -1,0 +1,21 @@
+# Fly.io config for the OSM Fixer service. Scale-to-zero so it costs nothing
+# idle and wakes on the first request. `fly launch` from audit-template-builder/
+# osm-fixer/service will generate/confirm most of this; keep the internal port
+# at 8080 to match the Dockerfile.
+app = "osm-fixer"
+primary_region = "ord"
+
+[build]
+  dockerfile = "service/Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
