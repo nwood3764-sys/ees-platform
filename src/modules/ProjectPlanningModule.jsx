@@ -268,19 +268,6 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
     if (onSectionChange) onSectionChange(next)
   }
 
-  if (selectedRecord) {
-    return (
-      <RecordDetail
-        tableName={selectedRecord.table}
-        recordId={selectedRecord.id}
-        mode={selectedRecord.mode}
-        onBack={() => { setSelectedRecord(null); if (onCloseRecord) onCloseRecord() }}
-        onNavigateToRecord={onReplaceRecord}
-        onRecordCreated={() => { setSelectedRecord(null); loadAll(); if (onCloseRecord) onCloseRecord() }}
-      />
-    )
-  }
-
   function LiveListView({ loading, error, data, onRetry, ...rest }) {
     if (loading) return <LoadingState />
     if (error) return <ErrorState error={error} onRetry={onRetry} />
@@ -294,14 +281,26 @@ export default function ProjectPlanningModule({ selectedRecord: navSelectedRecor
         <SectionTabs sections={SECTIONS} moduleId="planning" active={sec} onChange={changeSection} />
       </div>
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {selectedRecord ? (
+          <RecordDetail
+            tableName={selectedRecord.table}
+            recordId={selectedRecord.id}
+            mode={selectedRecord.mode}
+            onBack={() => { setSelectedRecord(null); if (onCloseRecord) onCloseRecord() }}
+            onNavigateToRecord={onReplaceRecord}
+            onRecordCreated={() => { setSelectedRecord(null); loadAll(); if (onCloseRecord) onCloseRecord() }}
+          />
+        ) : (<>
         {sec === 'home' && (
           loading ? <LoadingState /> : error ? <ErrorState error={error} onRetry={loadAll} /> :
           <Dashboard workOrders={workOrders} projects={projects} opportunities={opportunities} technicians={technicians} partners={partners} onGo={changeSection} />
         )}
         {sec === 'workforce'     && <LiveListView loading={loading} error={error} onRefresh={loadAll} onRetry={loadAll} data={workforce}     listObject="workforce_planning"     listModule="planning" columns={WF_COLS}   systemViews={WF_VIEWS}   defaultViewId="PWF-01" onOpenRecord={openWorkforce} />}
+        {SEC_OBJ[sec] && <ObjectListSection key={SEC_OBJ[sec]} objectTable={SEC_OBJ[sec]} moduleId="planning" />}
         {!CODE_SECTIONS.some(cs=>cs.id===sec) && SECTIONS.find(s=>s.id===sec)?.objectTable && (
           <ObjectListSection objectTable={SECTIONS.find(s=>s.id===sec).objectTable} moduleId="planning" />
         )}
+        </>)}
       </div>
     </div>
   )
