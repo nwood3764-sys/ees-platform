@@ -60,7 +60,7 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
         case 'value':  return (r.value || '').toLowerCase()
         case 'order':  return r.sortOrder ?? 0
         case 'state':  return (r.state || '').toLowerCase()
-        case 'status': return (r.status || r.active ? 'a' : 'z')
+        case 'status': return r.isActive ? 'a' : 'z'
         default:       return (r.label || '').toLowerCase()
       }
     }
