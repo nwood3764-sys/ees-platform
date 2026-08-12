@@ -732,13 +732,15 @@ function fuelScaleFactor(os,fuel){
 
 /* ---------- file wiring ---------- */
 // Optional DOE Audit Template documents (no parsing — deliverable pass-through)
-const atDocs={basePdf:null,impPdf:null,baseXml:null,impXml:null};
+const atDocs={basePdf:null,impPdf:null,baseXml:null,impXml:null,baseOwner:null,impOwner:null};
 document.querySelectorAll('.slot[data-atkey]').forEach(slot=>{
   const key=slot.dataset.atkey, inp=slot.querySelector('input');
   slot.onclick=()=>inp.click();
   ['dragover','dragenter'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.add('hot');}));
   ['dragleave','drop'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.remove('hot');}));
-  const take=f=>{atDocs[key]=f;slot.classList.add('ok');slot.querySelector('.got').textContent='✓ '+f.name;refresh();};
+  const take=f=>{atDocs[key]=f;slot.classList.add('ok');slot.querySelector('.got').textContent='✓ '+f.name;refresh();
+    if(key==='baseXml'||key==='impXml'){const ok2=key==='baseXml'?'baseOwner':'impOwner';atDocs[ok2]=null;
+      _parseOwnerFile(f).then(o=>{atDocs[ok2]=o;if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();});}};
   slot.addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])take(ev.dataTransfer.files[0]);});
   inp.addEventListener('change',()=>{if(inp.files[0])take(inp.files[0]);});
 });
@@ -1417,27 +1419,47 @@ function _setInEl(el,tag,val){
 }
 function _cszParts(s){const m=/^(.*?),\s*([A-Za-z]{2})\s*(\d{5})/.exec(s||'');
   return m?{city:m[1].trim(),state:m[2],zip:m[3]}:{city:'',state:'',zip:''};}
-async function _ownerFromUploadedXml(which){
-  const f=(which==='improved'?atDocs.impXml:atDocs.baseXml)||atDocs.baseXml||atDocs.impXml;
+// Prefer the contact tagged "Owner"; otherwise the first non-auditor contact
+// (a management company may be filed under Operator/Agency/Property Manager).
+function _bestContactEl(doc){
+  let owner=null,other=null;
+  for(const c of _q(doc,'Contact')){
+    const roles=[];
+    for(const r of c.getElementsByTagNameNS(NS_AUC,'ContactRole')) roles.push((r.textContent||'').trim().toLowerCase());
+    if(roles.includes('owner')){owner=c;break;}
+    if(!other && !roles.includes('energy auditor')) other=c;
+  }
+  return owner||other;
+}
+// Parse one uploaded Audit Template XML File into an owner object (or null).
+async function _parseOwnerFile(f){
   if(!f) return null;
   try{
     const doc=new DOMParser().parseFromString(await f.text(),'application/xml');
     if(doc.querySelector('parsererror')) return null;
-    const c=_ownerContactEl(doc); if(!c) return null;
+    const c=_bestContactEl(doc); if(!c) return null;
     const g=tag=>{const e=c.getElementsByTagNameNS(NS_AUC,tag)[0];return e?(e.textContent||'').trim():'';};
     const o={name:g('ContactName'),company:g('ContactCompany'),title:g('ContactTitle'),
       email:g('EmailAddress'),phone:g('TelephoneNumber'),
       street:g('StreetAddress'),city:g('City'),state:g('State'),zip:g('PostalCode')};
-    return (o.name||o.company)?o:null;   // only trust it if it actually names an owner
+    return (o.name||o.company)?o:null;   // only trust it if it actually names someone
   }catch(e){ return null; }
 }
-async function _injectOwner(doc,which){
+// The resolved owner for a given side: the cached uploaded-XML owner first
+// (parsed once on upload), then the Project-details owner fields, else null.
+// NEVER the built-in template default.
+function _resolvedOwner(which){
+  const up=(which==='improved'?atDocs.impOwner:atDocs.baseOwner)||atDocs.baseOwner||atDocs.impOwner;
+  if(up&&(up.name||up.company)) return up;
+  const company=pj('pjOwner'), name=pj('pjContact');
+  if(company||name){const csz=_cszParts(pj('pjOwnerCsz'));
+    return {name,company,title:'',email:pj('pjEmail'),phone:pj('pjPhone'),
+      street:pj('pjOwnerAddr'),city:csz.city,state:csz.state,zip:csz.zip};}
+  return null;
+}
+function _injectOwner(doc,which){
   const el=_ownerContactEl(doc); if(!el) return;
-  const owner=await _ownerFromUploadedXml(which);
-  const csz=_cszParts(pj('pjOwnerCsz'));
-  const src=owner||{name:pj('pjContact'),company:pj('pjOwner'),title:'',
-    email:pj('pjEmail'),phone:pj('pjPhone'),
-    street:pj('pjOwnerAddr'),city:csz.city,state:csz.state,zip:csz.zip};
+  const src=_resolvedOwner(which)||{name:'',company:'',title:'',email:'',phone:'',street:'',city:'',state:'',zip:''};
   // Always overwrite (blanks included) so the built-in default can never survive.
   _setInEl(el,'ContactName',src.name||'');
   _setInEl(el,'ContactCompany',src.company||'');
@@ -1448,6 +1470,12 @@ async function _injectOwner(doc,which){
   _setInEl(el,'City',src.city||'');
   _setInEl(el,'State',src.state||'');
   _setInEl(el,'PostalCode',src.zip||'');
+}
+// Hard export gate: no owner => no export, no override. Used by every generator.
+function ownerExportOk(){
+  if(_resolvedOwner('baseline')||_resolvedOwner('improved')) return true;
+  alert('Export blocked — the property owner is missing.\n\nAdd the building’s Audit Template XML (it carries the Owner contact), or fill in the Property Owner field under Project & invoice details. No file can be exported without an owner.');
+  return false;
 }
 // DOE stores the benchmark/target EUI as a 32-bit float and prints the full
 // stored value: 54.5 is exactly representable ('54.5') but 88.1 is not
@@ -2275,7 +2303,7 @@ async function build50121XML(which){
 
   // Replace the built-in template's Owner contact with the real owner (from the
   // uploaded Audit Template XML, else the Project-details fields, else blank).
-  await _injectOwner(doc, which);
+  _injectOwner(doc, which);
 
   let s=new XMLSerializer().serializeToString(doc);
   // The template already carries an XML declaration (and the serializer re-emits
@@ -2329,6 +2357,9 @@ function evaluateAutoChecks(dg){
   const asB=data.asBase, asI=data.asImp;
   const gfa=(asI&&asI.gfa)||(asB&&asB.gfa);
   const udf=(f,n)=>{const u=(f.userDefinedFields||[]).find(x=>x.name===n);return u?u.value:null;};
+  {const ow=_resolvedOwner('baseline')||_resolvedOwner('improved');
+   ck('Owner information present (required for export)', !!ow,
+     ow ? ('owner: '+(ow.company||ow.name)) : 'MISSING — add the building’s Audit Template XML (Owner contact) or fill the Property Owner field');}
   for(const [L,f] of [['Baseline',dg.baseline],['Improved',dg.improved]]){
     if(!f||f.error){ck(L+': XML generated',false,f&&f.error);continue;}
     ck(L+': no values over 2 decimals',f.decimalViolations.length===0,f.decimalViolations.join(', '));
@@ -2481,6 +2512,7 @@ async function runAutoChecks(){
 const scheduleAutoChecks=(()=>{let t;return()=>{clearTimeout(t);t=setTimeout(runAutoChecks,700);};})();
 // Export gate: failing checks demand an explicit override.
 function autoCheckGate(){
+  if(!ownerExportOk()) return false;   // owner is a hard requirement, no override
   const fails=(_autoChk.results||[]).filter(c=>!c.ok);
   if(!fails.length)return true;
   return confirm('⚠ '+fails.length+' automatic check(s) are FAILING:\n\n'
@@ -3311,6 +3343,7 @@ async function makeDocPdfBlob(which){
 }
 async function downloadDoc(which,pdfName){
   const fs=document.getElementById('finalStatus');
+  if(!ownerExportOk()){fs.className='status err';fs.textContent='Canceled — the property owner is required before any export.';return;}
   fs.className='status'; fs.textContent='Building '+pdfName+'…';
   try{
     const blob=await makeDocPdfBlob(which);
