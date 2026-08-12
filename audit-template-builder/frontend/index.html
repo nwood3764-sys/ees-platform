@@ -1398,6 +1398,57 @@ function _setUDF(doc,name,val){
       if(v)v.textContent=String(val);return true;}}
   return false;
 }
+// --- Owner contact injection -------------------------------------------------
+// The generated 50121 file starts from a known-good DOE export whose Owner
+// contact is a leftover (the built-in template's owner). The real owner lives in
+// the uploaded Audit Template XML (its Contact with role "Owner"); the Asset
+// Score reports carry no owner at all. Read the owner from the uploaded XML,
+// fall back to the Project-details owner fields, and NEVER keep the built-in
+// default — an unknown owner is left blank, never a stand-in.
+function _ownerContactEl(doc){
+  for(const c of _q(doc,'Contact'))
+    for(const r of c.getElementsByTagNameNS(NS_AUC,'ContactRole'))
+      if((r.textContent||'').trim().toLowerCase()==='owner') return c;
+  return null;
+}
+function _setInEl(el,tag,val){
+  const e=el&&el.getElementsByTagNameNS(NS_AUC,tag)[0];
+  if(e) e.textContent=(val==null?'':String(val));
+}
+function _cszParts(s){const m=/^(.*?),\s*([A-Za-z]{2})\s*(\d{5})/.exec(s||'');
+  return m?{city:m[1].trim(),state:m[2],zip:m[3]}:{city:'',state:'',zip:''};}
+async function _ownerFromUploadedXml(which){
+  const f=(which==='improved'?atDocs.impXml:atDocs.baseXml)||atDocs.baseXml||atDocs.impXml;
+  if(!f) return null;
+  try{
+    const doc=new DOMParser().parseFromString(await f.text(),'application/xml');
+    if(doc.querySelector('parsererror')) return null;
+    const c=_ownerContactEl(doc); if(!c) return null;
+    const g=tag=>{const e=c.getElementsByTagNameNS(NS_AUC,tag)[0];return e?(e.textContent||'').trim():'';};
+    const o={name:g('ContactName'),company:g('ContactCompany'),title:g('ContactTitle'),
+      email:g('EmailAddress'),phone:g('TelephoneNumber'),
+      street:g('StreetAddress'),city:g('City'),state:g('State'),zip:g('PostalCode')};
+    return (o.name||o.company)?o:null;   // only trust it if it actually names an owner
+  }catch(e){ return null; }
+}
+async function _injectOwner(doc,which){
+  const el=_ownerContactEl(doc); if(!el) return;
+  const owner=await _ownerFromUploadedXml(which);
+  const csz=_cszParts(pj('pjOwnerCsz'));
+  const src=owner||{name:pj('pjContact'),company:pj('pjOwner'),title:'',
+    email:pj('pjEmail'),phone:pj('pjPhone'),
+    street:pj('pjOwnerAddr'),city:csz.city,state:csz.state,zip:csz.zip};
+  // Always overwrite (blanks included) so the built-in default can never survive.
+  _setInEl(el,'ContactName',src.name||'');
+  _setInEl(el,'ContactCompany',src.company||'');
+  _setInEl(el,'ContactTitle',src.title||'');
+  _setInEl(el,'EmailAddress',src.email||'');
+  _setInEl(el,'TelephoneNumber',src.phone||'');
+  _setInEl(el,'StreetAddress',src.street||'');
+  _setInEl(el,'City',src.city||'');
+  _setInEl(el,'State',src.state||'');
+  _setInEl(el,'PostalCode',src.zip||'');
+}
 // DOE stores the benchmark/target EUI as a 32-bit float and prints the full
 // stored value: 54.5 is exactly representable ('54.5') but 88.1 is not
 // ('88.0999984741211'). Keep the tenths digit only when it displays clean;
@@ -2221,6 +2272,10 @@ async function build50121XML(which){
     const t2=(el2.textContent||'').trim();
     if(/^-?\d+\.\d{3,}$/.test(t2)) el2.textContent=(+t2).toFixed(2);
   }
+
+  // Replace the built-in template's Owner contact with the real owner (from the
+  // uploaded Audit Template XML, else the Project-details fields, else blank).
+  await _injectOwner(doc, which);
 
   let s=new XMLSerializer().serializeToString(doc);
   // The template already carries an XML declaration (and the serializer re-emits
