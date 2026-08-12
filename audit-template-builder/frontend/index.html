@@ -2772,6 +2772,9 @@ function buildingState(){
     if(m)st=m[1];}
   return (st||'').toUpperCase();
 }
+// Full state name for the EES legal entity + program labels ("Energy Efficiency
+// Services of <State>", "<State> Inflation Reduction Act HOMES Program").
+function stateFullName(st){return {WI:'Wisconsin',NC:'North Carolina',CO:'Colorado',MI:'Michigan',IN:'Indiana'}[st]||'Wisconsin';}
 
 // Everything the paperwork needs, computed once from the reports + form.
 function invoiceModel(){
@@ -2976,15 +2979,14 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const GL=[203,210,219], HB=[240,243,247];           // grid line + header fill
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
   /* ---- header ---- */
-  tc(C.navy); font(10.5,'bold'); t(M,st.y+15,'ENERGY EFFICIENCY SERVICES of WISCONSIN');
+  tc(C.navy); font(10.5,'bold'); t(M,st.y+15,'ENERGY EFFICIENCY SERVICES of '+stateFullName(m.state).toUpperCase());
   if(isAudit||isInv){
     tc([150,160,174]); font(10.5,'bold'); t(W-M,st.y+15,'INVOICE',{align:'right'});
     st.y+=21;
   }else{
     st.y+=21;
     tc([104,116,132]); font(10.5,'bold');
-    const _stName={WI:'Wisconsin',NC:'North Carolina',CO:'Colorado',MI:'Michigan',IN:'Indiana'}[m.state]||'Wisconsin';
-    t(W/2,st.y+11,_stName+' Inflation Reduction Act HOMES Program Project Proposal',{align:'center'});
+    t(W/2,st.y+11,stateFullName(m.state)+' Inflation Reduction Act HOMES Program Project Proposal',{align:'center'});
     st.y+=16;
   }
   stroke([150,160,174]); d.setLineWidth(.75); d.line(M,st.y,W-M,st.y); st.y+=12;
@@ -3148,9 +3150,10 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   }
   /* ---- acknowledgment + signature ---- */
   head('Acknowledgment & Acceptance',10);
+  const _ees='EES-'+(m.state||'WI');
   const ack=(isAudit||isInv)
-    ?'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes EES-WI to submit for and receive the corresponding program incentive on their behalf.'
-    :'Signed receipt of this proposal constitutes acceptance of the proposed scope of work. The property owner authorizes EES-WI to submit the project for rebate/incentive program preapproval and to begin project planning activities.';
+    ?'Receipt of this invoice constitutes acknowledgment of the services delivered. The property owner confirms the work performed and authorizes '+_ees+' to submit for and receive the corresponding program incentive on their behalf.'
+    :'Signed receipt of this proposal constitutes acceptance of the proposed scope of work. The property owner authorizes '+_ees+' to submit the project for rebate/incentive program preapproval and to begin project planning activities.';
   {const al=wrap(ack,CW); need(al.length*10+6); tc(C.ink); font(9);
    al.forEach((ln,k)=>t(M,st.y+9+k*10,ln)); st.y+=al.length*10+4;}
   need(46); st.y+=28; stroke([68,88,110]); d.setLineWidth(1);
@@ -3162,7 +3165,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   if(st.y>fy-10) d.addPage();
   stroke(C.line); d.setLineWidth(.5); d.line(M,fy,W-M,fy);
   tc(C.mut); font(8.5);
-  t(W/2,fy+12,'Energy Efficiency Services of Wisconsin  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
+  t(W/2,fy+12,'Energy Efficiency Services of '+stateFullName(m.state)+'  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
   font(8,'italic'); t(W/2,fy+23,'ira@ees-wi.org  |  608-460-7419',{align:'center'});
   return d.output('blob');
 }
@@ -3197,7 +3200,7 @@ function buildSealedPdfBlob(kind){                    // 'proposal' | 'invoice'
   const descW=CW-185-80;
   m.rows.forEach((r,i)=>{
     const desc='Qty: '+_qty(r.qty)+' '+(r.unit==='Sq Ft'?'Sq Ft.':'Units.')+' '+r.desc.replace(/\n/g,' ');
-    const dl=wrap(desc,descW), cl=wrap('Energy Efficiency Services of Wisconsin',82), nml=wrap(r.name,85);
+    const dl=wrap(desc,descW), cl=wrap('Energy Efficiency Services of '+stateFullName(m.state),82), nml=wrap(r.name,85);
     let i0=0, firstSeg=true;
     while(i0<dl.length){
       const fit=Math.max(3,Math.floor((H-M-20-st.y)/9.5));
