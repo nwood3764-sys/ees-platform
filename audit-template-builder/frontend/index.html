@@ -2351,8 +2351,10 @@ function evaluateAutoChecks(dg){
     const iv=invoiceModel();
     if(iv.savings!=null&&iv.tier)
       ck('Paperwork: HOMES $/unit matches the modeled savings tier',
-        (iv.savings>=35&&iv.tier.perUnit===10000)||(iv.savings>=20&&iv.savings<35&&iv.tier.perUnit===5000)||(iv.savings<20&&iv.tier.perUnit===0),
-        iv.savings.toFixed(1)+'% → $'+iv.tier.perUnit+'/unit');
+        iv.state==='NC'
+          ?((iv.savings>=20&&iv.tier.perUnit===16000)||(iv.savings<20&&iv.tier.perUnit===0))
+          :((iv.savings>=35&&iv.tier.perUnit===10000)||(iv.savings>=20&&iv.savings<35&&iv.tier.perUnit===5000)||(iv.savings<20&&iv.tier.perUnit===0)),
+        iv.savings.toFixed(1)+'% → $'+iv.tier.perUnit+'/unit ('+(iv.state||'WI')+')');
     if(iv.savings!=null&&iv.savings<20)
       ck('Paperwork: project meets the 20% HOMES floor',false,iv.savings.toFixed(1)+'%');
     if(iv.rows.length){
@@ -2727,7 +2729,7 @@ function pjLoadAndPrefill(){
   set('pjInstallAddr',(asB||as).street);
   set('pjCsz',(asB||as).cityStateZip);
   const t=new Date(); set('pjInvDate',(t.getMonth()+1)+'/'+t.getDate()+'/'+t.getFullYear());
-  set('pjInvNo','INV-WI-');
+  set('pjInvNo','INV-'+(buildingState()||'WI')+'-');
   // Quantity fields show the live report-derived numbers until the user edits
   // one — an edited field takes over permanently (dataset.auto cleared below).
   const qd=pjQtyDefaults();
@@ -2760,6 +2762,17 @@ const BANK={
   shower:'Installation of low flow handheld showerheads in tenant bathrooms for water and energy savings. Model: Niagara Earth Handheld Showerhead N2945CH'
 };
 
+// Building state (2-letter, uppercase) from the Asset Score address, falling
+// back to the entered install/owner city·state·zip. Drives the state-specific
+// incentive rules (NC vs WI) in invoiceModel(). Empty string when unknown.
+function buildingState(){
+  const asB=data.asBase, asI=data.asImp;
+  let st=(asB&&asB.state)||(asI&&asI.state)||'';
+  if(!st){const m=/,\s*([A-Za-z]{2})\s+\d{5}/.exec(pj('pjCsz')||pj('pjOwnerCsz')||'');
+    if(m)st=m[1];}
+  return (st||'').toUpperCase();
+}
+
 // Everything the paperwork needs, computed once from the reports + form.
 function invoiceModel(){
   const asB=data.asBase, asI=data.asImp;
@@ -2783,15 +2796,24 @@ function invoiceModel(){
   const fmtR=r=>(r%1?r:Math.round(r));
   const savings=(asB&&asI&&asB.euiCurrent&&asI.euiUpgraded!=null)
     ?(asB.euiCurrent-asI.euiUpgraded)/asB.euiCurrent*100:null;
-  // HOMES tier (Wisconsin): 35%+ → $10k/unit ; 20–34% → $5k/unit ; <20% → not eligible
-  const tier=savings==null?null:(savings>=35?{perUnit:10000,desc:'IQ at <80% AMI and modeled energy savings of 35% or greater',note:'$10,000.00 per unit'}
+  // Building state (from the Asset Score address; falls back to the entered
+  // install city/state/zip) selects the incentive rules below.
+  const state=buildingState();
+  // HOMES rebate $/unit is STATE-SPECIFIC:
+  //  · North Carolina: flat $16,000/unit at 20%+ modeled savings (no super-tier).
+  //  · Wisconsin (and default): 35%+ -> $10k/unit ; 20-34% -> $5k/unit ; <20% -> none.
+  const tier=savings==null?null:(state==='NC'
+    ?(savings>=20?{perUnit:16000,desc:'North Carolina HOMES - modeled energy savings of 20% or greater',note:'$16,000.00 per unit'}
+      :{perUnit:0,desc:'Modeled savings below 20% - not HOMES eligible',note:''})
+    :(savings>=35?{perUnit:10000,desc:'IQ at <80% AMI and modeled energy savings of 35% or greater',note:'$10,000.00 per unit'}
     :savings>=20?{perUnit:5000,desc:'IQ at <80% AMI and modeled energy savings of 20-34%',note:'$5,000.00 per unit'}
-    :{perUnit:0,desc:'Modeled savings below 20% — not HOMES eligible',note:''});
+    :{perUnit:0,desc:'Modeled savings below 20% — not HOMES eligible',note:''}));
   const homesAmt=(units&&tier)?units*tier.perUnit:0;
-  // FOE tier from the BASELINE attic R (published multifamily guidelines)
+  // Focus on Energy is a WISCONSIN utility program only — there is no utility
+  // rebate for out-of-state (e.g. NC) buildings, so FOE is gated on state.
   const hasAttic=_hasAtticMeasure;
   let foe=null;
-  if(hasAttic&&roofSqFt&&baseAtticR!=null){
+  if(state==='WI'&&hasAttic&&roofSqFt&&baseAtticR!=null){
     if(baseAtticR<11)      foe={rate:1.00,desc:'Air Sealing & Attic Insulation, Existing < R-11',  note:'$1.00 per Sq. Ft.'};
     else if(baseAtticR<=19)foe={rate:0.70,desc:'Air Sealing & Attic Insulation, Existing R-12 to R-19',note:'$0.70 per Sq. Ft.'};
     else if(baseAtticR<=38)foe={rate:0.55,desc:'Insulation & Air Sealing, Existing R20-R38',       note:'$0.55 per Sq. Ft.'};
@@ -2815,7 +2837,7 @@ function invoiceModel(){
   const drift=Math.round((total-rows.reduce((a,r)=>a+r.cost,0))*100)/100;
   if(drift&&rows.length){let mx=0;rows.forEach((r,i)=>{if(r.cost>rows[mx].cost)mx=i;});
     rows[mx].cost=Math.round((rows[mx].cost+drift)*100)/100;}
-  return {units,roofSqFt,baseAtticR,iMin,savings,tier,homesAmt,foe,foeAmt,total,rows,
+  return {units,roofSqFt,baseAtticR,iMin,savings,state,tier,homesAmt,foe,foeAmt,total,rows,
     fields:Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))};
 }
 
@@ -2961,7 +2983,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   }else{
     st.y+=21;
     tc([104,116,132]); font(10.5,'bold');
-    t(W/2,st.y+11,'Wisconsin Inflation Reduction Act HOMES Program Project Proposal',{align:'center'});
+    const _stName={WI:'Wisconsin',NC:'North Carolina',CO:'Colorado',MI:'Michigan',IN:'Indiana'}[m.state]||'Wisconsin';
+    t(W/2,st.y+11,_stName+' Inflation Reduction Act HOMES Program Project Proposal',{align:'center'});
     st.y+=16;
   }
   stroke([150,160,174]); d.setLineWidth(.75); d.line(M,st.y,W-M,st.y); st.y+=12;
