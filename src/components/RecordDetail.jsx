@@ -3910,6 +3910,45 @@ function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate, child
   )
 }
 
+// Sort indicator for related-list column headers. Dimmed neutral arrow when the
+// column isn't the active sort key; solid up/down when it is.
+function RelatedSortArrow({ active, dir }) {
+  return (
+    <span style={{ marginLeft: 4, opacity: active ? 0.9 : 0.22, fontSize: 8, verticalAlign: 'middle' }}>
+      {active ? (dir === 'asc' ? '▲' : '▼') : '▲'}
+    </span>
+  )
+}
+
+// Resolve the value a related-list cell sorts on — mirrors renderRelatedCell's
+// display resolution so the order matches what the user sees. Picklist columns
+// sort by their resolved label (not the raw UUID); lookup columns are already
+// flattened to their display string by fetchRelatedRecords.
+function relatedSortKey(col, row, picklists) {
+  const v = row[col.name]
+  if (col.type === 'picklist' && v) return picklists.byId.get(v) || v
+  return v
+}
+
+// Compare two related rows on a column. Blanks always sort last (both
+// directions); numbers compare numerically; dates compare as ISO strings;
+// everything else is a case-insensitive, numeric-aware string compare. Returns
+// the ascending comparison — the caller negates it for descending.
+function compareRelatedRows(a, b, col, picklists) {
+  const av = relatedSortKey(col, a, picklists)
+  const bv = relatedSortKey(col, b, picklists)
+  const aEmpty = av == null || av === ''
+  const bEmpty = bv == null || bv === ''
+  if (aEmpty && bEmpty) return 0
+  if (aEmpty) return 1
+  if (bEmpty) return -1
+  if (col.type === 'number') return (Number(av) || 0) - (Number(bv) || 0)
+  if (col.type === 'date' || col.type === 'datetime' || col.type === 'timestamp' || col.type === 'timestamptz') {
+    return String(av) < String(bv) ? -1 : String(av) > String(bv) ? 1 : 0
+  }
+  return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' })
+}
+
 // Mobile variant: returns the formatted value as a JSX snippet (no <td> wrapper)
 // for use inside a card layout. Mirrors the type-dispatch logic of
 // renderRelatedCell but omits the table-specific padding / truncation.
@@ -3993,11 +4032,40 @@ function RelatedListWidget({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [removingId, setRemovingId] = useState(null)
 
+  // ── Column-header sorting (view-only) ────────────────────────────────
+  // Click a column header to sort the list by that column; click again to
+  // flip direction. Reorderable lists carry an explicit manual order (drag
+  // handles), so header-sort would fight that — it's offered only when the
+  // list isn't in drag-reorder mode. The sort never persists; it reorders the
+  // rendered rows only.
+  const sortable = !editableReorder
+  const [sortCol, setSortCol] = useState(null)   // column.name, or null for fetch order
+  const [sortDir, setSortDir] = useState('asc')
+  function toggleRelatedSort(col) {
+    if (!sortable) return
+    if (sortCol === col.name) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortCol(col.name)
+      setSortDir('asc')
+    }
+  }
+
   // Both modes now render the full fetched set: editable so drag targets are
   // always visible, read-only inside a fixed-height scroll window so the user
   // can scroll through the related records in place instead of leaving the
   // page. Short lists stay short; long lists gain a scrollbar.
-  const shownRows = localRows
+  const shownRows = useMemo(() => {
+    if (!sortCol) return localRows
+    const col = columns.find(c => c.name === sortCol)
+    if (!col) return localRows
+    const arr = [...localRows]
+    arr.sort((a, b) => {
+      const cmp = compareRelatedRows(a, b, col, picklists)
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return arr
+  }, [localRows, sortCol, sortDir, columns, picklists])
   // True total for the header count, accurate beyond the fetch cap
   // (fetchRelatedRecords attaches _total via PostgREST count:'exact').
   const totalCount = (typeof allRows._total === 'number') ? allRows._total : localRows.length
@@ -5168,16 +5236,28 @@ function RelatedListWidget({
                   <thead>
                     <tr>
                       {editableReorder && <th style={{ width: 28, padding: '8px 0 8px 14px', position: 'sticky', top: 0, background: C.card, zIndex: 1, boxShadow: `inset 0 -1px 0 ${C.border}` }} />}
-                      {columns.map((col) => (
-                        <th key={col.name} style={{
-                          textAlign: 'left', padding: '8px 14px',
-                          fontSize: 10, fontWeight: 600, color: C.textMuted,
-                          textTransform: 'uppercase', letterSpacing: '0.05em',
-                          whiteSpace: 'nowrap',
-                          position: 'sticky', top: 0, background: C.card, zIndex: 1,
-                          boxShadow: `inset 0 -1px 0 ${C.border}`,
-                        }}>{col.label}</th>
-                      ))}
+                      {columns.map((col) => {
+                        const activeSort = sortCol === col.name
+                        return (
+                          <th key={col.name}
+                            onClick={sortable ? () => toggleRelatedSort(col) : undefined}
+                            title={sortable ? `Sort by ${col.label}` : undefined}
+                            style={{
+                              textAlign: 'left', padding: '8px 14px',
+                              fontSize: 10, fontWeight: 600,
+                              color: activeSort ? C.textSecondary : C.textMuted,
+                              textTransform: 'uppercase', letterSpacing: '0.05em',
+                              whiteSpace: 'nowrap',
+                              position: 'sticky', top: 0, background: C.card, zIndex: 1,
+                              boxShadow: `inset 0 -1px 0 ${C.border}`,
+                              cursor: sortable ? 'pointer' : 'default',
+                              userSelect: 'none',
+                            }}>
+                            {col.label}
+                            {sortable && <RelatedSortArrow active={activeSort} dir={sortDir} />}
+                          </th>
+                        )
+                      })}
                       {editable && <th style={{ width: 32, padding: '8px 14px 8px 0', position: 'sticky', top: 0, background: C.card, zIndex: 1, boxShadow: `inset 0 -1px 0 ${C.border}` }} />}
                     </tr>
                   </thead>
