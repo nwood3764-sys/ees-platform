@@ -3166,7 +3166,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   stroke(C.line); d.setLineWidth(.5); d.line(M,fy,W-M,fy);
   tc(C.mut); font(8.5);
   t(W/2,fy+12,'Energy Efficiency Services of '+stateFullName(m.state)+'  |  112 Owen Rd. PO Box 6141, Monona, WI 53716',{align:'center'});
-  font(8,'italic'); t(W/2,fy+23,'ira@ees-wi.org  |  608-460-7419',{align:'center'});
+  const _eesContact=m.state==='NC'?'ncira@ees-nc.org  |  (704) 990-5614':'ira@ees-wi.org  |  608-460-7419';
+  font(8,'italic'); t(W/2,fy+23,_eesContact,{align:'center'});
   return d.output('blob');
 }
 
