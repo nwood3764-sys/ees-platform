@@ -6903,11 +6903,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           }
         }
 
-    // Fetch picklist options
+    // Fetch picklist options — scoped to this record's record type so a status
+    // (or any picklist) dropdown shows ONLY the values selected for that record
+    // type, matching the status path. Falls back to the full set when the record
+    // has no record type.
     if (pickFields.length) {
+      const recordTypeId = getRecordTypeValue(currentRecord)
       const opts = {}
       await Promise.all(pickFields.map(async fn => {
-        try { opts[fn] = await fetchPicklistOptions(tableName, fn) } catch { opts[fn] = [] }
+        try { opts[fn] = await fetchPicklistOptions(tableName, fn, recordTypeId) } catch { opts[fn] = [] }
       }))
       setAllPicklistOpts(opts)
     }

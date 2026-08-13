@@ -1206,12 +1206,48 @@ export async function saveRecord(tableName, recordId, changes) {
  * Fetch picklist options for a given object + field.
  * Used to populate <select> dropdowns in edit mode.
  */
-export async function fetchPicklistOptions(objectName, fieldName) {
+export async function fetchPicklistOptions(objectName, fieldName, recordTypeId = null) {
   // Status / lifecycle fields are the ONE place where sort_order is the
   // logical order (To Be Scheduled -> Scheduled -> In Progress ...). Every
   // other picklist is a choice list and must be alphabetical ascending so the
   // user always sees a predictable, scannable order.
   const isLifecycleField = (f) => f === 'status' || /_status$/.test(f) || f === 'stage' || /_stage$/.test(f)
+  // The record-type field itself is never scoped by a record type (that would
+  // be circular — the record-type dropdown must always offer every type).
+  const isRecordTypeField = (f) => f === 'record_type' || /_record_type$/.test(f)
+
+  // Record-type-scoped path: when the record's record type is known, honor the
+  // admin's per-record-type value selection (picklist_value_record_type_assignments)
+  // via the picklist_values_for_record_type resolver — so a status dropdown shows
+  // ONLY the statuses selected for that record type, matching the status path.
+  // The resolver may legitimately return zero (a record type with no selection),
+  // so we first confirm which field-name spelling actually holds values (to avoid
+  // mistaking a wrong field name for a strict-zero result), then scope that one.
+  if (recordTypeId && !isRecordTypeField(fieldName)) {
+    const prefix = getTableColumnPrefix(objectName)
+    const shortField = (prefix && fieldName.startsWith(`${prefix}_`)) ? fieldName.slice(prefix.length + 1) : null
+    let resolvedField = null
+    for (const f of [fieldName, shortField].filter(Boolean)) {
+      const { count } = await supabase
+        .from('picklist_values')
+        .select('id', { count: 'exact', head: true })
+        .eq('picklist_object', objectName).eq('picklist_field', f).eq('picklist_is_active', true)
+      if (count && count > 0) { resolvedField = f; break }
+    }
+    if (resolvedField) {
+      const { data, error } = await supabase.rpc('picklist_values_for_record_type', {
+        p_object: objectName, p_field: resolvedField, p_record_type: recordTypeId,
+      })
+      if (!error && Array.isArray(data)) {
+        const lc = isLifecycleField(resolvedField)
+        return data
+          .map(r => ({ id: r.id, value: r.id, label: r.picklist_label || r.picklist_value, sortOrder: r.picklist_sort_order ?? 0 }))
+          .sort((a, b) => lc ? (a.sortOrder - b.sortOrder) : String(a.label).localeCompare(String(b.label)))
+      }
+      // On RPC error, fall through to the unscoped path below (never blank a field
+      // because of a transient error).
+    }
+  }
 
   // Picklist values use the *short* field name (e.g. 'record_type', 'status',
   // 'type'), while page-layout widgets pass the actual column name on the
