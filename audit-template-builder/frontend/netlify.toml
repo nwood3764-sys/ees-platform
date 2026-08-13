@@ -13,7 +13,9 @@
 
 [build]
   # Static files only; nothing to compile. publish is this directory itself.
-  command  = ""
+  # Stamp the live deploy date + commit into the "Last updated" line so it can
+  # never go stale (fail-safe: `|| true` never blocks the deploy).
+  command  = 'sed -i "s|<!--STAMP-->.*<!--/STAMP-->|<!--STAMP-->$(date -u +%Y-%m-%d) · $(echo ${COMMIT_REF:-local} | cut -c1-7)<!--/STAMP-->|" index.html || true'
   publish  = "."
 
 # The in-app assistant runs as a serverless function (holds the Anthropic API
