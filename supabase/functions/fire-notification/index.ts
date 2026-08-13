@@ -62,8 +62,21 @@ const VALID_CHANNELS = new Set(["sms", "email"])
 // Customer locale for date/time rendering. All current EES-WI customers
 // are in Central time; future state mailboxes (MI, NC, CO, IN) will
 // override per service territory. v1 hardcodes Chicago.
-const RENDER_TIMEZONE = "America/Chicago"
+const RENDER_TIMEZONE = "America/Chicago"   // default when a state has no mapping
 const RENDER_LOCALE   = "en-US"
+
+// Render appointment times in the CUSTOMER's local timezone (derived from the
+// property state), not a single hardcoded zone. Without this, an NC (Eastern)
+// customer saw Central times — an hour off from what they booked.
+const STATE_TIMEZONES: Record<string, string> = {
+  WI: "America/Chicago", IL: "America/Chicago", MN: "America/Chicago", IA: "America/Chicago",
+  NC: "America/New_York", MI: "America/Detroit",
+  CO: "America/Denver",  IN: "America/Indiana/Indianapolis",
+}
+function tzForState(state?: string | null): string {
+  if (!state) return RENDER_TIMEZONE
+  return STATE_TIMEZONES[state.trim().toUpperCase()] || RENDER_TIMEZONE
+}
 
 interface ReqBody {
   service_appointment_id: string
@@ -138,11 +151,22 @@ Deno.serve(async (req) => {
         from_number:              body.override_from,
       })
     } else if (tpl.nt_channel === "email") {
+      // Email notification templates (nt_body) are authored as HTML — pass
+      // them as body_html so send-notification-email delivers them with
+      // contentType "HTML". Previously they were passed as body_text, which
+      // made the sender HTML-escape the markup, so customers received raw
+      // <div>/<table> source instead of a rendered email. A few templates
+      // (e.g. the internal dispatcher-followup) are still plain text; send
+      // those as body_text so their line breaks are preserved (pre-wrap).
+      const looksLikeHtml = /<[a-z!/][\s\S]*>/i.test(renderedBody)
+      const bodyField = looksLikeHtml
+        ? { body_html: renderedBody }
+        : { body_text: renderedBody }
       dispatchResult = await dispatchEmail(supabaseUrl, serviceKey, {
         trigger_event: body.trigger_event,
         recipient_email: context.contact.email || "",
         subject:         renderedSubject || `EES-WI: ${body.trigger_event}`,
-        body_text:       renderedBody,
+        ...bodyField,
         notification_template_id: tpl.id,
         service_appointment_id:   context.appointment.id,
         contact_id:               context.contact.id,
@@ -226,22 +250,23 @@ async function buildAppointmentContext(
     ? `${APP_BASE_URL}/sa/manage/${tokenRow.sat_token}`
     : ""
 
-  // Format the scheduled window in customer locale.
-  const startDate = sa.sa_scheduled_start_time
-    ? formatDate(sa.sa_scheduled_start_time)
-    : ""
-  const startTime = sa.sa_scheduled_start_time
-    ? formatTime(sa.sa_scheduled_start_time)
-    : ""
-  const endTime = sa.sa_scheduled_end_time
-    ? formatTime(sa.sa_scheduled_end_time)
-    : ""
-
   // Customer + auditor contact rows (auditor may be null if no SAA yet).
   const c  = (sa as Record<string, any>).contact
   const wt = (sa as Record<string, any>).work_type
   const prop = (sa as Record<string, any>).project?.property
   const a    = (assignment as Record<string, any> | null)?.contact
+
+  // Format the scheduled window in the customer's local timezone.
+  const tz = tzForState(prop?.property_state)
+  const startDate = sa.sa_scheduled_start_time
+    ? formatDate(sa.sa_scheduled_start_time, tz)
+    : ""
+  const startTime = sa.sa_scheduled_start_time
+    ? formatTime(sa.sa_scheduled_start_time, tz)
+    : ""
+  const endTime = sa.sa_scheduled_end_time
+    ? formatTime(sa.sa_scheduled_end_time, tz)
+    : ""
 
   const contactPhone = pickPhone(c)
   const auditorPhone = pickPhone(a)
@@ -263,6 +288,9 @@ async function buildAppointmentContext(
       start_time:        startTime,
       end_time:          endTime,
       work_type_name:    wt?.work_type_name || "service appointment",
+      // Templates reference {{appointment.work_type_label}}; keep it as an
+      // alias of the name so those tokens don't render empty.
+      work_type_label:   wt?.work_type_name || "service appointment",
       manage_url:        manageUrl,
     },
     contact: {
@@ -342,20 +370,20 @@ function formatPhoneDisplay(raw: string): string {
 }
 
 // ─── Date/time rendering ────────────────────────────────────────────────
-function formatDate(iso: string): string {
+function formatDate(iso: string, tz: string = RENDER_TIMEZONE): string {
   try {
     return new Intl.DateTimeFormat(RENDER_LOCALE, {
-      weekday: "short", month: "short", day: "numeric",
-      timeZone: RENDER_TIMEZONE,
+      weekday: "long", month: "long", day: "numeric",
+      timeZone: tz,
     }).format(new Date(iso))
   } catch { return "" }
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso: string, tz: string = RENDER_TIMEZONE): string {
   try {
     return new Intl.DateTimeFormat(RENDER_LOCALE, {
       hour: "numeric", minute: "2-digit",
-      timeZone: RENDER_TIMEZONE,
+      timeZone: tz,
     }).format(new Date(iso))
   } catch { return "" }
 }
@@ -528,6 +556,7 @@ interface AppointmentContext {
     start_time: string
     end_time: string
     work_type_name: string
+    work_type_label: string
     manage_url: string
   }
   contact: {
