@@ -498,6 +498,15 @@ function parseAssetScore(t){
     d.heatingFuel=_hf?_hf[1].trim():null;
   }
   d.heatingIsElectric=!!((d.heatingSource&&/electric/i.test(d.heatingSource))||(d.heatingFuel&&/electric/i.test(d.heatingFuel)));
+  // A heat pump is electric but must be modeled as a HEAT PUMP (COP ~2-4), never
+  // as electric resistance (COP 1.0). Capture the heating COP printed in the
+  // Heating Equipment block ("... Thermal Efficiency 3.80 COP").
+  d.heatingIsHeatPump=!!(d.heatingSource&&/heat pump/i.test(d.heatingSource));
+  if(d.heatingIsHeatPump&&d.heatingSource){
+    const _hpi=t.indexOf('Heating Source '+d.heatingSource);
+    const _hc=t.slice(Math.max(0,_hpi),_hpi+240).match(/Efficiency\s+([\d.]+)\s*COP/);
+    d.heatCop=_hc?parseFloat(_hc[1]):null;
+  }
   const _sys=t.match(/Primary Heating\/Cooling System\s+([^\n]+)/);
   d.hvacSystemLabel=_sys?_sys[1].trim():null;
   const _csrc=[...t.matchAll(/Cooling Source\s+([^\n]+)/g)].map(m=>m[1].trim()).filter(x=>!/^No Cooling/i.test(x));
@@ -1981,7 +1990,21 @@ async function build50121XML(which){
   if(as.heatingIsElectric){
     for(const hst of _q(doc,'HeatingSourceType')){
       const ref=hst.getElementsByTagNameNS(NS_AUC,'SourceHeatingPlantID')[0];
-      if(ref){hst.removeChild(ref); hst.appendChild(doc.createElementNS(NS_AUC,'auc:ElectricResistance'));}
+      if(ref){
+        hst.removeChild(ref);
+        if(as.heatingIsHeatPump){
+          // Heat pump: a <HeatPump> source carrying its COP — NOT electric resistance.
+          const hpEl=doc.createElementNS(NS_AUC,'auc:HeatPump');
+          const add=(tag,val)=>{const e=doc.createElementNS(NS_AUC,'auc:'+tag);e.textContent=val;hpEl.appendChild(e);};
+          add('HeatPumpType','Air-to-air');
+          add('AnnualHeatingEfficiencyValue', String(as.heatCop!=null?as.heatCop:3.0));
+          add('AnnualHeatingEfficiencyUnits','COP');
+          add('HeatPumpBackupSystemFuel','Electricity');
+          hst.appendChild(hpEl);
+        } else {
+          hst.appendChild(doc.createElementNS(NS_AUC,'auc:ElectricResistance'));
+        }
+      }
     }
     const hp0=_q(doc,'HeatingPlant')[0];
     if(hp0){let sys=hp0; while(sys&&sys.localName!=='HVACSystem')sys=sys.parentNode;
@@ -2007,10 +2030,15 @@ async function build50121XML(which){
       const cu=hs0.getElementsByTagNameNS(NS_AUC,'CapacityUnits')[0];
       const controls=hs0.getElementsByTagNameNS(NS_AUC,'Controls')[0];
       if(cu){
-        // Electric resistance is ALWAYS 100% efficient; the field is a DECIMAL
-        // rating (1.0 = 100%, EES rule). Capacity as a WHOLE number (float32).
-        mk('AnnualHeatingEfficiencyValue','1.0',cu);
-        mk('AnnualHeatingEfficiencyUnits','Thermal Efficiency',cu);
+        // Heat pump carries its COP; electric resistance is always 100% (1.0
+        // decimal, EES rule). Capacity as a WHOLE number (float32).
+        if(as.heatingIsHeatPump){
+          mk('AnnualHeatingEfficiencyValue', String(as.heatCop!=null?as.heatCop:3.0),cu);
+          mk('AnnualHeatingEfficiencyUnits','COP',cu);
+        } else {
+          mk('AnnualHeatingEfficiencyValue','1.0',cu);
+          mk('AnnualHeatingEfficiencyUnits','Thermal Efficiency',cu);
+        }
         if(as.heatCap!=null)mk('OutputCapacity',String(Math.round(as.heatCap)),cu);
       }
       if(controls){
