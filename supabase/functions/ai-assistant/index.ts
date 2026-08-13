@@ -115,7 +115,7 @@ const TOOLS = [
   // ----- Option B: generic, any object -----
   {
     name: "describe_object",
-    description: "List the columns, types, and picklist fields of a LEAP object (table) so you know what fields exist before reading or proposing writes. Always call this before create_record/update_record on an object you have not yet described in this conversation.",
+    description: "List the columns and types of a LEAP object (table), AND — for every picklist/record-type column — the real valid options as `picklist_options` (each with its id, value, and label). Use those exact ids directly (e.g. for a record_type or status column) instead of guessing a value or calling fuzzy_resolve; only fall back to fuzzy_resolve when the value you need is not in the returned options. Always call this before create_record/update_record on an object you have not yet described in this conversation.",
     input_schema: {
       type: "object",
       properties: { object: { type: "string", description: "Table name, e.g. work_orders, contacts, opportunities" } },
@@ -394,6 +394,8 @@ When the user wants to log a call, voicemail, email, note, or meeting, ALWAYS us
 Before proposing any create, call describe_object on each object so you use real column names AND know which fields are required. Required fields (NOT NULL with no default) MUST be filled. Never propose a create that leaves a required field empty — it will fail.
 
 Use the EXACT column names describe_object returns — never invent a name or assume a prefix. Column prefixes in LEAP are inconsistent: on \`projects\`, for example, the real columns are \`property_id\`, \`opportunity_id\`, \`building_id\`, and \`project_record_type\` — NOT \`project_property_id\`, \`project_building_id\`, or \`record_type_id\`. Do not "regularize" names by prefixing them with the table name. If a create or update ever fails with an "unknown column(s)" error, that error lists the valid columns — map your fields onto those exact names and retry; never re-submit the same rejected names.
+
+describe_object ALSO returns \`picklist_options\` (the real valid values, each with its id) for every picklist and record-type column. Set those columns using an id taken straight from that list — never guess or invent a record type, status, work type, or any other picklist value. If the value you need isn't in the returned options, use fuzzy_resolve (or tell the user it isn't configured); do NOT make one up.
 
 Fill what you can safely derive, and ask the user — in ONE consolidated question — for anything required that you cannot infer. Specifically:
 - A person's full name must be split into first and last name, and most contact records also need a combined full-name field — set all of them (e.g. contact_first_name, contact_last_name, contact_name). If a name is ambiguous to split, ask.
@@ -739,15 +741,49 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
     if (name === "describe_object") {
       const { data, error } = await userClient.rpc("describe_object_columns", { p_table: input.object })
       if (error) return JSON.stringify({ error: error.message })
-      // Trim to essentials — full metadata can be tens of KB and bloats the
-      // loop's context, burning turns. Keep name/type/fk/label only.
-      const cols = (Array.isArray(data) ? data : []).map((c: any) => ({
-        column: c.column_name,
-        type: c.data_type,
-        nullable: c.is_nullable === "YES",
-        pk: c.is_primary_key || undefined,
-        fk: c.is_foreign_key ? (c.references_table || true) : undefined,
-      }))
+      // Also load this object's picklist values so the model sees the REAL valid
+      // options (record types, statuses, etc.) inline on the relevant columns —
+      // and never invents a value or a picklist id again. Record-type columns get
+      // their full (small) list; longer value sets are capped with a note to use
+      // fuzzy_resolve for the rest, keeping the payload bounded.
+      const { data: pvData } = await userClient
+        .from("picklist_values")
+        .select("id, picklist_field, picklist_value, picklist_label")
+        .eq("picklist_object", input.object)
+        .eq("picklist_is_active", true)
+      const byField: Record<string, { id: string; value: string; label: string }[]> = {}
+      for (const r of (Array.isArray(pvData) ? pvData : [])) {
+        ;(byField[r.picklist_field] ||= []).push({
+          id: r.id, value: r.picklist_value, label: r.picklist_label || r.picklist_value,
+        })
+      }
+      // Match a column to its picklist_field: exact name (project_status), or the
+      // short form the column ends with (work_order_record_type -> record_type).
+      // Longest field first so 'record_type' wins over a bare 'type'.
+      const pFields = Object.keys(byField).sort((a, b) => b.length - a.length)
+      const matchField = (col: string) => pFields.find(f => col === f || col.endsWith("_" + f)) || null
+      const cols = (Array.isArray(data) ? data : []).map((c: any) => {
+        const out: any = {
+          column: c.column_name,
+          type: c.data_type,
+          nullable: c.is_nullable === "YES",
+          pk: c.is_primary_key || undefined,
+          fk: c.is_foreign_key ? (c.references_table || true) : undefined,
+        }
+        const f = matchField(c.column_name)
+        if (f) {
+          const opts = byField[f]
+          const isRt = f === "record_type" || /_record_type$/.test(f)
+          const cap = isRt ? 500 : 40   // record types are few — never truncate them
+          out.picklist_field = f
+          out.picklist_options = opts.slice(0, cap)
+          if (opts.length > cap) {
+            out.picklist_options_note =
+              `${opts.length} values total; showing ${cap}. Use fuzzy_resolve kind='picklist' for others.`
+          }
+        }
+        return out
+      })
       return JSON.stringify({ object: input.object, columns: cols })
     }
     if (name === "query_records") {
