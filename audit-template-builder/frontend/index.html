@@ -1993,10 +1993,11 @@ async function build50121XML(which){
       if(ref){
         hst.removeChild(ref);
         if(as.heatingIsHeatPump){
-          // Heat pump: a <HeatPump> source carrying its COP — NOT electric resistance.
-          // HeatPumpType must be a BuildingSync enum (Split | Packaged Terminal |
-          // Packaged Unitary | Other | Unknown). Efficiency is NOT a child of
-          // HeatPump (schema) — it's carried on the HeatingSource level below.
+          // DOE "DX Heating" (a ducted heat-pump coil) maps to the BuildingSync
+          // <HeatPump> element — DX is NOT a valid heating choice in the schema
+          // (heating choices: HeatPump, ElectricResistance, Furnace, Plant,
+          // NoHeating). Cooling gets the matching <DX> below. Efficiency (COP)
+          // is carried on the HeatingSource level, not on the HeatPump element.
           const hpEl=doc.createElementNS(NS_AUC,'auc:HeatPump');
           const add=(tag,val)=>{const e=doc.createElementNS(NS_AUC,'auc:'+tag);e.textContent=val;hpEl.appendChild(e);};
           add('HeatPumpType', /split/i.test(as.hvacSystemLabel||'')?'Split':'Packaged Unitary');
@@ -2085,6 +2086,30 @@ async function build50121XML(which){
   if(hp&&as.boilerYear!=null){
     const yi=hp.getElementsByTagNameNS(NS_AUC,'YearInstalled')[0];
     if(yi)yi.textContent=String(as.boilerYear);
+  }
+  // Cooling source: a template NoCooling block shows "Please select" on a
+  // building that HAS cooling. Convert NoCooling -> DX (DOE "DX Cooling") and
+  // carry the COP + capacity (inserted before CapacityUnits). A packaged heat
+  // pump uses one DX system for both heating and cooling.
+  if(as.coolCop!=null||as.coolingSourceLabel||as.coolingIsWallAC){
+    const coolDx = as.coolingIsWallAC ? 'Packaged terminal air conditioner (PTAC)'
+      : (/split/i.test(as.hvacSystemLabel||as.coolingSourceLabel||'') ? 'Split DX air conditioner'
+      : 'Packaged/unitary direct expansion/RTU');
+    for(const cst of _q(doc,'CoolingSourceType')){
+      const nc=cst.getElementsByTagNameNS(NS_AUC,'NoCooling')[0];
+      if(!nc)continue;
+      cst.removeChild(nc);
+      const dx=doc.createElementNS(NS_AUC,'auc:DX');
+      const dst=doc.createElementNS(NS_AUC,'auc:DXSystemType'); dst.textContent=coolDx;
+      dx.appendChild(dst); cst.appendChild(dx);
+      const cs=cst.parentNode;
+      const cu=cs.getElementsByTagNameNS(NS_AUC,'CapacityUnits')[0];
+      const ins=(tag,val)=>{ if(val==null||!cu||cs.getElementsByTagNameNS(NS_AUC,tag)[0])return;
+        const e=doc.createElementNS(NS_AUC,'auc:'+tag); e.textContent=String(val); cu.parentNode.insertBefore(e,cu); };
+      ins('AnnualCoolingEfficiencyValue', as.coolCop!=null?+Number(as.coolCop).toFixed(2):null);
+      ins('AnnualCoolingEfficiencyUnits','COP');
+      ins('Capacity', as.coolTons!=null?Math.round(as.coolTons*12):null);
+    }
   }
   // Cooling (DX): set efficiency (COP) + capacity (tons -> kBtu/hr) on the
   // cooling source that carries an efficiency value (the DX one; a NoCooling
@@ -2399,8 +2424,8 @@ function evaluateAutoChecks(dg){
           comb>0 ? ('Asset Score = all-electric heating ('+(asb.heatingSource||'?')+'); generated XML has '+comb+' Boiler/Furnace element(s) — a hard-coded template leak')
                  : 'all-electric — no boiler/furnace present');
      if(asb.heatingSource && /heat pump/i.test(asb.heatingSource))
-       ck('Systems: heat-pump heating present in the XML', hp>0,
-          hp>0 ? 'heat pump present' : 'Asset Score heating is a Heat Pump, but the generated XML has no HeatPump element (template leak)');
+       ck('Systems: heat-pump heating present (DOE "DX Heating") in the XML', hp>0,
+          hp>0 ? 'heat-pump (HeatPump) source present' : 'Asset Score heating is a Heat Pump, but the generated XML has no HeatPump source (template leak)');
      const shwFuel=(dgB.shwFuel||'').toLowerCase();
      if(asb.whFuel && /electric/i.test(asb.whFuel) && shwFuel)
        ck('Systems: water-heater fuel matches the Asset Score', !/gas|oil|propane/.test(shwFuel),
@@ -2739,7 +2764,10 @@ async function buildXmlDigest(){
     // on an all-electric building; heat-pump presence; and the SHW fuel. This is
     // where the template's hard-coded gas boiler leaks onto the wrong building.
     d.combustionHeating=all('Boiler').length+all('Furnace').length;
+    // Heat-pump heating = <HeatPump> element (DOE shows this as "DX Heating").
     d.heatPumpElems=all('HeatPump').length;
+    // Cooling DX (DOE "DX Cooling"): CoolingSourceType elements with a DX child.
+    d.coolingDX=all('CoolingSourceType').filter(c=>c.getElementsByTagNameNS(NSA,'DX').length).length;
     d.shwFuel=(()=>{const w=all('DomesticHotWaterSystem')[0];if(!w)return null;
       const e=w.getElementsByTagNameNS(NSA,'FuelType')[0];return e?e.textContent.trim():null;})();
     return d;
