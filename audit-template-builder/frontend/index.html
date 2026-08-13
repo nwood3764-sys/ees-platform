@@ -2560,14 +2560,15 @@ const scheduleAutoChecks=(()=>{let t;return()=>{clearTimeout(t);t=setTimeout(run
 function autoCheckGate(){
   if(!ownerExportOk()) return false;   // owner is a hard requirement, no override
   const fails=(_autoChk.results||[]).filter(c=>!c.ok);
-  // System mismatches are a HARD block, no override — a file whose systems don't
-  // match the Asset Score must never be exported.
+  // System mismatches: a loud, deliberate override rather than a dead stop, so
+  // testing isn't blocked. The exact mismatch still fires every time — a
+  // wrong-systems file must never be SUBMITTED to DOE, but you can push a test
+  // export through with an explicit confirm.
   const sysFails=fails.filter(f=>/^Systems:/.test(f.name));
   if(sysFails.length){
-    alert('Export blocked — the generated file’s systems don’t match the Asset Score (hard-coded template values leaking through):\n\n'
+    return confirm('⚠ SYSTEMS DON’T MATCH THE ASSET SCORE — the generated file’s systems are wrong (template values leaking through):\n\n'
       +sysFails.map(f=>'• '+f.name+(f.detail?'\n    '+f.detail:'')).join('\n\n')
-      +'\n\nThis is a hard block: a file with the wrong systems can never be exported.');
-    return false;
+      +'\n\nDo NOT submit this file to DOE — the systems are wrong. This override is for TESTING only.\n\nExport anyway?');
   }
   if(!fails.length)return true;
   return confirm('⚠ '+fails.length+' automatic check(s) are FAILING:\n\n'
