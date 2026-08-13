@@ -1994,11 +1994,12 @@ async function build50121XML(which){
         hst.removeChild(ref);
         if(as.heatingIsHeatPump){
           // Heat pump: a <HeatPump> source carrying its COP — NOT electric resistance.
+          // HeatPumpType must be a BuildingSync enum (Split | Packaged Terminal |
+          // Packaged Unitary | Other | Unknown). Efficiency is NOT a child of
+          // HeatPump (schema) — it's carried on the HeatingSource level below.
           const hpEl=doc.createElementNS(NS_AUC,'auc:HeatPump');
           const add=(tag,val)=>{const e=doc.createElementNS(NS_AUC,'auc:'+tag);e.textContent=val;hpEl.appendChild(e);};
-          add('HeatPumpType','Air-to-air');
-          add('AnnualHeatingEfficiencyValue', String(as.heatCop!=null?as.heatCop:3.0));
-          add('AnnualHeatingEfficiencyUnits','COP');
+          add('HeatPumpType', /split/i.test(as.hvacSystemLabel||'')?'Split':'Packaged Unitary');
           add('HeatPumpBackupSystemFuel','Electricity');
           hst.appendChild(hpEl);
         } else {
