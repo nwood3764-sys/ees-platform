@@ -339,9 +339,31 @@
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const KWH_KBTU=3.412, THERM_KBTU=100, MMBTU_THERM=10;
-// Wisconsin residential utility rates (EIA state averages, 2026).
-const RATE_ELEC=0.188;  // $ per kWh (EIA WI residential average — all-in)
-const RATE_GAS=0.97;    // $ per therm (EIA WI residential average — all-in)
+// Residential utility rates by building state (EIA state residential averages,
+// 2026 — all-in $/kWh and $/therm). NEVER default silently to Wisconsin: the
+// rate is chosen from the building's location (setRatesForState, below). The
+// national average is the fallback ONLY when the state can't be determined.
+const STATE_UTILITY_RATES={
+  WI:{elec:0.188, gas:0.97},   // Wisconsin
+  NC:{elec:0.135, gas:1.30},   // North Carolina
+  CO:{elec:0.147, gas:0.85},   // Colorado
+  MI:{elec:0.196, gas:0.95},   // Michigan
+  IN:{elec:0.163, gas:0.95},   // Indiana
+  US:{elec:0.166, gas:1.05}    // national average (fallback — unknown state)
+};
+// Live rates — set by setRatesForState() from the building location. Start on
+// the national fallback so nothing reads as "Wisconsin" before a state is known.
+let RATE_ELEC=STATE_UTILITY_RATES.US.elec;  // $ per kWh (all-in)
+let RATE_GAS =STATE_UTILITY_RATES.US.gas;   // $ per therm (all-in)
+let RATE_STATE='US';                        // 2-letter state the live rates belong to
+// Point RATE_ELEC/RATE_GAS at the building's state. Called from refresh() and
+// invoiceModel() so every $ figure (page + XML + paperwork) tracks the location.
+function setRatesForState(st){
+  const key=STATE_UTILITY_RATES[(st||'').toUpperCase()]?(st||'').toUpperCase():'US';
+  const r=STATE_UTILITY_RATES[key];
+  RATE_ELEC=r.elec; RATE_GAS=r.gas; RATE_STATE=key;
+  return key;
+}
 // Fixed meter/customer charges, $ per meter per month. Currently $0.00: the
 // EIA all-in average rates above already spread utility fixed charges across
 // usage, so itemizing them on top would double-count. Set real tariff values
@@ -872,6 +894,8 @@ function occValid(){
   return u.value.trim()!=='' && b.value.trim()!=='' && Number.isFinite(uv) && uv>=1 && Number.isFinite(bv) && bv>=0;
 }
 function refresh(){
+  // Utility rates track the building's location — never default to Wisconsin.
+  setRatesForState(buildingState());
   const filesReady=Object.values(data).every(Boolean);
   const occOk=occValid();
   const canExport=filesReady&&occOk;   // no export until occupancy is entered (no default)
@@ -959,8 +983,16 @@ function refresh(){
   h+='</tbody></table></div>';
 
   h+='<div class="sect"><h3>Building</h3><table class="kv">';
+  // Occupants shown = what the tool EXPORTS: units × (bedrooms + 1) from the
+  // fields above (EES rule), NOT the Asset Score's assumed count. Falls back to
+  // the Asset Score value until units & bedrooms are entered.
+  const _ou=parseInt((document.getElementById('occUnits')||{}).value,10);
+  const _ob=parseInt((document.getElementById('occBeds')||{}).value,10);
+  const _occ=(Number.isFinite(_ou)&&_ou>0&&Number.isFinite(_ob)&&_ob>=0)?_ou*Math.max(1,_ob+1):null;
+  const _occDisp=_occ!=null?(_occ+' &nbsp;<span style="color:var(--mut)">('+_ou+' units × '+Math.max(1,_ob+1)+'/unit)</span>')
+    :(asB.occupants!=null?(asB.occupants+' &nbsp;<span style="color:var(--mut)">(Asset Score — enter units &amp; bedrooms above to set)</span>'):'—');
   const rows=[['Address',`${asB.street}, ${asB.cityStateZip}`],['Gross floor area',`${fmt(asB.gfa)} ft²`],
-    ['Year built',asB.yearBuilt],['Climate zone',asB.climateZone],['Occupants',asB.occupants],
+    ['Year built',asB.yearBuilt],['Climate zone',asB.climateZone],['Occupants',_occDisp],
     ['Baseline building ID',asB.buildingId],['Improved building ID',asI?asI.buildingId:'—']];
   rows.forEach(r=>h+=`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`);
   h+='</table></div>';
@@ -1065,7 +1097,8 @@ function refresh(){
     +`<tr><td>Electric meter charge</td><td>$${METER_CHARGE_ELEC.toFixed(2)} / month</td></tr>`
     +`<tr><td>Cost per therm</td><td>$${RATE_GAS.toFixed(2)}</td></tr>`
     +`<tr><td>Gas meter charge</td><td>$${METER_CHARGE_GAS.toFixed(2)} / month</td></tr>`
-    +'</table><p class="hint">Wisconsin residential averages (EIA, 2026). The all-in $/kWh and $/therm '
+    +'</table><p class="hint">'+(RATE_STATE==='US'?'National average (building state unknown)':stateFullName(RATE_STATE))
+    +' residential averages (EIA, 2026), selected from the building location. The all-in $/kWh and $/therm '
     +'rates already spread utility fixed/meter charges across usage, so the separate meter charges are '
     +'$0.00 until real tariffs are itemized. These are read-only for now — they can be made editable later.</p></div>';
 
@@ -1154,13 +1187,17 @@ function refresh(){
     'EUI and headline savings come from the Asset Score Report (the document of record). '+
     'The monthly metered energy uses the OpenStudio month-to-month shape, scaled so each fuel\'s annual total equals the Asset Score energy (per-fuel EUI × floor area) — so the EUI matches the Asset Score PDF. '+
     'Floor area uses the page-1 value ('+fmt(asB.gfa)+' ft²), not the block-driven figure on later pages. '+
-    'Annual energy cost uses Wisconsin residential averages: $'+RATE_ELEC.toFixed(3)+'/kWh and $'+RATE_GAS.toFixed(2)+'/therm (EIA, 2026).';
+    'Annual energy cost uses '+(RATE_STATE==='US'?'national average':stateFullName(RATE_STATE)+' residential average')+' rates (from the building location): $'+RATE_ELEC.toFixed(3)+'/kWh and $'+RATE_GAS.toFixed(2)+'/therm (EIA, 2026).';
 
   // sanity flags
   const flags=[];
   if(asB&&asI&&asB.street!==asI.street) flags.push('Baseline and improved addresses differ.');
-  if(data.osBase.name&&data.osImp.name&&data.osBase.name===data.osImp.name)
-    flags.push('Both OpenStudio reports carry the same building name — confirm you loaded distinct baseline and improved files.');
+  // The baseline and improved are the SAME building — a matching name is expected
+  // and correct. Only flag the real mistake: identical energy (the same file
+  // loaded for both), which means there are no measures to compare.
+  {const be=annual(data.osBase).kbtu, ie=annual(data.osImp).kbtu;
+   if(be>0 && Math.abs(be-ie)<0.01)
+     flags.push('Baseline and improved have identical energy — you may have loaded the same file for both (there are no measures to compare).');}
   const fl=document.getElementById('rFlag');
   if(flags.length){fl.style.display='block';fl.innerHTML='⚠ '+flags.join('<br>⚠ ');}else fl.style.display='none';
 }
@@ -1483,8 +1520,9 @@ function _injectOwner(doc,which){
 // Hard export gate: no owner => no export, no override. Used by every generator.
 function ownerExportOk(){
   if(_resolvedOwner('baseline')||_resolvedOwner('improved')) return true;
-  alert('Export blocked — the property owner is missing.\n\nAdd the building’s Audit Template XML (it carries the Owner contact), or fill in the Property Owner field under Project & invoice details. No file can be exported without an owner.');
-  return false;
+  // Loud, but overridable — never a dead stop. The owner reads from the uploaded
+  // Audit Template XML (its Owner contact) or the Property Owner field.
+  return confirm('⚠ The property owner is missing (from the Audit Template XML or the Property Owner field).\n\nA real DOE/paperwork submission needs an owner — but you can export for testing.\n\nExport anyway?');
 }
 // DOE stores the benchmark/target EUI as a 32-bit float and prints the full
 // stored value: 54.5 is exactly representable ('54.5') but 88.1 is not
@@ -2957,6 +2995,7 @@ function stateFullName(st){return {WI:'Wisconsin',NC:'North Carolina',CO:'Colora
 // Everything the paperwork needs, computed once from the reports + form.
 function invoiceModel(){
   const asB=data.asBase, asI=data.asImp;
+  setRatesForState(buildingState());   // rates follow the building location
   const units=parseInt((document.getElementById('occUnits')||{}).value,10)||null;
   // Attic sq ft: straight from the Asset Score report's roof area — the audit
   // reports are the source of record for every quantity; no manual inputs.
