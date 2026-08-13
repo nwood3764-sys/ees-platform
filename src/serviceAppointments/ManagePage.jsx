@@ -33,7 +33,7 @@ export default function ManagePage({ token }) {
 
   const [view, setView] = useState('loading')
   // loading | error | view | confirm_cancel | canceling | canceled
-  // | loading_slots | slots | confirm_reschedule | rescheduling
+  // | loading_slots | slots | confirm_reschedule | rescheduling | rescheduled
   const [appointment,     setAppointment]      = useState(null)
   const [error,       setError]        = useState(null)
   const [availability, setAvailability] = useState(null)
@@ -59,6 +59,16 @@ export default function ManagePage({ token }) {
       setError(e.message || 'Could not load your appointment.')
       setView('error')
     }
+  }
+
+  // Refresh the appointment record (new times after a reschedule) WITHOUT
+  // touching `view` — the caller decides which screen to show next.
+  async function refetchAppointmentData() {
+    try {
+      const result = await lookupAppointment(token)
+      if (result.status === 'ok') setAppointment(result)
+      return result
+    } catch { return null }
   }
 
   useEffect(() => { loadAppointment() }, [token])
@@ -131,9 +141,13 @@ export default function ManagePage({ token }) {
         setView('slots')
         return
       }
-      await loadAppointment()
+      // Success — pull the updated appointment (new times) and show a terminal
+      // confirmation screen. Do NOT drop back to the appointment view, which
+      // would re-offer Reschedule/Cancel and read as an endless loop.
+      await refetchAppointmentData()
       setSlotsError(null)
       setSelectedSlot(null)
+      setView('rescheduled')
     } catch (e) {
       setSlotsError(e.message || 'Reschedule failed.')
       setView('slots')
@@ -161,6 +175,7 @@ export default function ManagePage({ token }) {
   }
 
   if (view === 'canceled')           return <CanceledView appointment={appointment} />
+  if (view === 'rescheduled')        return <RescheduledView appointment={appointment} />
   if (view === 'confirm_cancel')     return <ConfirmCancelView appointment={appointment} onConfirm={handleCancel} onBack={() => setView('view')} />
   if (view === 'slots')              return <SlotsView availability={availability} slotsError={slotsError}
                                                        onSelect={slot => { setSelectedSlot(slot); setView('confirm_reschedule') }}
@@ -242,7 +257,7 @@ function AppointmentView({ appointment, slotsError, onReschedule, onCancel }) {
         <DetailRow label="Time"     value={range} />
         <DetailRow label="Auditor"  value={appointment.auditor_name} />
         <DetailRow label="Address"  value={`${appointment.address.street}, ${appointment.address.city}, ${appointment.address.state} ${appointment.address.zip}`} />
-        <DetailRow label="Customer" value={`${appointment.customer.name} · ${appointment.customer.phone} · ${appointment.customer.email}`} />
+        <DetailRow label="Customer" value={[appointment.customer.name, appointment.customer.phone, appointment.customer.email].filter(Boolean).join(' · ')} />
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginTop: 16, flexWrap: 'wrap' }}>
@@ -330,6 +345,54 @@ function CanceledView({ appointment }) {
       <div style={{ textAlign: 'center' }}>
         <a href="/sa" style={{ ...buttonPrimary, display: 'inline-block', textDecoration: 'none', minWidth: 240 }}>
           Schedule another appointment
+        </a>
+      </div>
+    </div>
+  )
+}
+
+// ─── RescheduledView (terminal success) ─────────────────────────────────────
+
+function RescheduledView({ appointment }) {
+  const tz = tzForState(appointment.address?.state)
+  const { date } = formatSlot(appointment.sa_scheduled_start_iso, tz)
+  const range = formatTimeRange(appointment.sa_scheduled_start_iso, appointment.sa_scheduled_end_iso, tz)
+
+  return (
+    <div>
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 64, height: 64, borderRadius: '50%',
+          background: C.emeraldBg, marginBottom: 16,
+        }}>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 13l4 4L19 7" stroke={C.emeraldMid} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>
+          You're rescheduled
+        </h1>
+        <p style={{ color: C.textSecondary, fontSize: 15, lineHeight: 1.5 }}>
+          Your <strong style={{ color: C.textPrimary }}>{appointment.work_type_name}</strong>{' '}
+          is now set for <strong style={{ color: C.textPrimary }}>{date}</strong> at{' '}
+          <strong style={{ color: C.textPrimary }}>{range}</strong>. We've emailed you an
+          updated confirmation.
+        </p>
+      </div>
+
+      <div style={card}>
+        <DetailRow label="Date"    value={date} highlight />
+        <DetailRow label="Time"    value={range} />
+        <DetailRow label="Auditor" value={appointment.auditor_name} />
+        <DetailRow label="Address" value={`${appointment.address.street}, ${appointment.address.city}, ${appointment.address.state} ${appointment.address.zip}`} />
+        <DetailRow label="Reference" value={appointment.sa_record_number} />
+      </div>
+
+      <div style={{ textAlign: 'center', marginTop: 20 }}>
+        <a href="mailto:assessments.wi@EES-WI.org?subject=Help with my appointment"
+           style={{ color: C.textMuted, fontSize: 13, textDecoration: 'none' }}>
+          Need to make another change? Email us →
         </a>
       </div>
     </div>
