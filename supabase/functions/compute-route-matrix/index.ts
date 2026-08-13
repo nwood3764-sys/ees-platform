@@ -261,12 +261,19 @@ async function callGoogleRouteMatrix(args: MatrixCallArgs): Promise<RouteResult[
   const uniqueOrigins      = uniqueWaypoints(args.pairs.map(p => args.origins[p.o]))
   const uniqueDestinations = uniqueWaypoints(args.pairs.map(p => args.destinations[p.d]))
 
-  const reqBody = {
+  // Google Routes rejects a departureTime that isn't clearly in the future
+  // ("Timestamp must be set to a future time"), and a plain "now" is already
+  // in the past by the time the request lands. TRAFFIC_AWARE works without a
+  // departureTime (Google uses current traffic), so only send one when the
+  // caller explicitly asked for a future departure; otherwise omit it.
+  const reqBody: Record<string, unknown> = {
     origins:      uniqueOrigins.map(asGoogleWaypoint),
     destinations: uniqueDestinations.map(asGoogleWaypoint),
     travelMode: "DRIVE",
     routingPreference: args.trafficAware ? "TRAFFIC_AWARE" : "TRAFFIC_UNAWARE",
-    departureTime: args.departureTime.toISOString(),
+  }
+  if (args.departureTime.getTime() > Date.now() + 60_000) {
+    reqBody.departureTime = args.departureTime.toISOString()
   }
 
   const res = await fetch("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix", {
