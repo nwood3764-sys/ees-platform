@@ -519,7 +519,12 @@ function parseAssetScore(t){
     const _hf=t.slice(Math.max(0,_hi),_hi+180).match(/Fuel Type\s+([^\n]+)/);
     d.heatingFuel=_hf?_hf[1].trim():null;
   }
-  d.heatingIsElectric=!!((d.heatingSource&&/electric/i.test(d.heatingSource))||(d.heatingFuel&&/electric/i.test(d.heatingFuel)));
+  // A heat pump ALWAYS runs on electricity — treat any heat-pump source as
+  // electric even when the report's Fuel Type line doesn't spell out "Electric".
+  // Without this, a heat-pump building fell through the electric-heating
+  // conversion below, the template's gas boiler was never removed, and no
+  // <HeatPump> element was emitted (the "template leak" the auto-check flagged).
+  d.heatingIsElectric=!!((d.heatingSource&&/electric|heat pump/i.test(d.heatingSource))||(d.heatingFuel&&/electric/i.test(d.heatingFuel)));
   // A heat pump is electric but must be modeled as a HEAT PUMP (COP ~2-4), never
   // as electric resistance (COP 1.0). Capture the heating COP printed in the
   // Heating Equipment block ("... Thermal Efficiency 3.80 COP").
@@ -2518,7 +2523,12 @@ function evaluateAutoChecks(dg){
     ck(L+': dwelling units 100% occupied',f.identity.unitsOccupiedPct==='100',f.identity.unitsOccupiedPct);
     if(asB&&asB.heatingIsElectric){
       const hs=(f.systems.HeatingSource||[])[0]||{};
-      ck(L+': electric heat efficiency is 1.0 Thermal',hs['AnnualHeatingEfficiencyValue']==='1.0'&&hs['AnnualHeatingEfficiencyUnits']==='Thermal Efficiency',hs['AnnualHeatingEfficiencyValue']+' '+hs['AnnualHeatingEfficiencyUnits']);
+      // Heat pumps carry a COP, not 1.0 Thermal Efficiency — only electric
+      // RESISTANCE heat must read 1.0 Thermal.
+      if(asB.heatingIsHeatPump)
+        ck(L+': heat-pump efficiency is a COP',hs['AnnualHeatingEfficiencyUnits']==='COP'&&parseFloat(hs['AnnualHeatingEfficiencyValue'])>1,hs['AnnualHeatingEfficiencyValue']+' '+hs['AnnualHeatingEfficiencyUnits']);
+      else
+        ck(L+': electric heat efficiency is 1.0 Thermal',hs['AnnualHeatingEfficiencyValue']==='1.0'&&hs['AnnualHeatingEfficiencyUnits']==='Thermal Efficiency',hs['AnnualHeatingEfficiencyValue']+' '+hs['AnnualHeatingEfficiencyUnits']);
       ck(L+': electric heat qty 1 / Interior / year set',hs['Quantity']==='1'&&hs['Location']==='Interior'&&!!hs['YearInstalled'],'qty '+hs['Quantity']+' · '+hs['Location']+' · '+hs['YearInstalled']);
     }
     if(asB&&asB.coolingIsWallAC){
