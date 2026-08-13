@@ -1,7 +1,10 @@
 # LEAP Assistant Reliability — making "it can't happen ever again" true
 
 **Owner:** Nicholas Wood · **Author of this pass:** assistant session 2026-08-12
-**Status:** spec / phased plan. Layer 1 is the guarantee and is buildable immediately.
+**Status:** spec / phased plan. **Phase 1 first increment SHIPPED (2026-08-13)** — see below.
+
+> **SHIPPED 2026-08-13 — record-type eligibility guardrail, work-orders (migration `20260813125255`, live on prod).**
+> Delivered via a **BEFORE INSERT/UPDATE trigger** on `work_orders` rather than a `commit_screen_flow_run` edit — additive, covers the assistant + UI + imports, and end-to-end testable. New `record_type_eligibility` edge table (PVRTA-style "no edges = unconstrained"), resolver `record_type_eligible(parent_object,parent_rt,child_object,child_rt)`, and trigger `trg_wo_record_type_eligibility` / `enforce_work_order_record_type_eligibility()`. Seeded: under an **MF-Exhaust Fan Replacement** project only exhaust-fan work-order record types are allowed — air-sealing ("Advanced Infiltration Reduction") is now **rejected** with a descriptive error that rides the self-correct loop. Verified live: resolver truth table correct; the exact air-sealing-on-exhaust write is blocked (rolled back, nothing changed); advisors add only the 2 standard `authenticated_security_definer_function` lints. **Next in Phase 1:** an admin UI to manage edges, a `projects`-under-`opportunities` trigger, and seeding more program pairs. Then Phases 2-4.
 
 ---
 
