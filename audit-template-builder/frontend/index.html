@@ -2360,6 +2360,23 @@ function evaluateAutoChecks(dg){
   {const ow=_resolvedOwner('baseline')||_resolvedOwner('improved');
    ck('Owner information present (required for export)', !!ow,
      ow ? ('owner: '+(ow.company||ow.name)) : 'MISSING — add the building’s Audit Template XML (Owner contact) or fill the Property Owner field');}
+  // --- System fidelity: the generated XML must reflect the Asset Score's actual
+  //     systems, never the template's hard-coded ones (the gas-boiler leak). ---
+  {const asb=data.asBase, dgB=dg.baseline;
+   if(asb && dgB && !dgB.error){
+     const comb=dgB.combustionHeating||0, hp=dgB.heatPumpElems||0;
+     if(asb.heatingIsElectric)
+       ck('Systems: no fossil-fuel heating on an all-electric building', comb===0,
+          comb>0 ? ('Asset Score = all-electric heating ('+(asb.heatingSource||'?')+'); generated XML has '+comb+' Boiler/Furnace element(s) — a hard-coded template leak')
+                 : 'all-electric — no boiler/furnace present');
+     if(asb.heatingSource && /heat pump/i.test(asb.heatingSource))
+       ck('Systems: heat-pump heating present in the XML', hp>0,
+          hp>0 ? 'heat pump present' : 'Asset Score heating is a Heat Pump, but the generated XML has no HeatPump element (template leak)');
+     const shwFuel=(dgB.shwFuel||'').toLowerCase();
+     if(asb.whFuel && /electric/i.test(asb.whFuel) && shwFuel)
+       ck('Systems: water-heater fuel matches the Asset Score', !/gas|oil|propane/.test(shwFuel),
+          'Asset Score water heater: '+asb.whFuel+' | generated XML: '+dgB.shwFuel);
+   }}
   for(const [L,f] of [['Baseline',dg.baseline],['Improved',dg.improved]]){
     if(!f||f.error){ck(L+': XML generated',false,f&&f.error);continue;}
     ck(L+': no values over 2 decimals',f.decimalViolations.length===0,f.decimalViolations.join(', '));
@@ -2514,6 +2531,15 @@ const scheduleAutoChecks=(()=>{let t;return()=>{clearTimeout(t);t=setTimeout(run
 function autoCheckGate(){
   if(!ownerExportOk()) return false;   // owner is a hard requirement, no override
   const fails=(_autoChk.results||[]).filter(c=>!c.ok);
+  // System mismatches are a HARD block, no override — a file whose systems don't
+  // match the Asset Score must never be exported.
+  const sysFails=fails.filter(f=>/^Systems:/.test(f.name));
+  if(sysFails.length){
+    alert('Export blocked — the generated file’s systems don’t match the Asset Score (hard-coded template values leaking through):\n\n'
+      +sysFails.map(f=>'• '+f.name+(f.detail?'\n    '+f.detail:'')).join('\n\n')
+      +'\n\nThis is a hard block: a file with the wrong systems can never be exported.');
+    return false;
+  }
   if(!fails.length)return true;
   return confirm('⚠ '+fails.length+' automatic check(s) are FAILING:\n\n'
     +fails.slice(0,8).map(f=>'• '+f.name+(f.detail?' ('+f.detail+')':'')).join('\n')
@@ -2679,6 +2705,13 @@ async function buildXmlDigest(){
         const rf=el.getAttribute('IDref');if(rf)refList.push(rf);}
     }
     d.danglingRefs=refList.filter(r2=>!idSet.has(r2)).slice(0,10);
+    // System fidelity signals: combustion heating (Boiler/Furnace) must be absent
+    // on an all-electric building; heat-pump presence; and the SHW fuel. This is
+    // where the template's hard-coded gas boiler leaks onto the wrong building.
+    d.combustionHeating=all('Boiler').length+all('Furnace').length;
+    d.heatPumpElems=all('HeatPump').length;
+    d.shwFuel=(()=>{const w=all('DomesticHotWaterSystem')[0];if(!w)return null;
+      const e=w.getElementsByTagNameNS(NSA,'FuelType')[0];return e?e.textContent.trim():null;})();
     return d;
   }
   return{baseline:await digestOne('baseline'),improved:await digestOne('improved')};
