@@ -73,6 +73,12 @@ Deno.serve(async (req) => {
   if (endDate.getTime() <= startDate.getTime()) {
     return json({ error: "end_iso must be after start_iso" }, 400)
   }
+  // Reject past bookings server-side (defense-in-depth; compute-availability
+  // already excludes past/too-soon slots). A 5-minute grace tolerates the gap
+  // between showing a slot and submitting, plus minor clock skew.
+  if (startDate.getTime() < Date.now() - 5 * 60_000) {
+    return json({ error: "That appointment time has already passed. Please pick an upcoming time." }, 400)
+  }
 
   const { data, error } = await supabase.rpc("create_service_appointment", { payload: body })
 

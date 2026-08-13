@@ -138,11 +138,22 @@ Deno.serve(async (req) => {
         from_number:              body.override_from,
       })
     } else if (tpl.nt_channel === "email") {
+      // Email notification templates (nt_body) are authored as HTML — pass
+      // them as body_html so send-notification-email delivers them with
+      // contentType "HTML". Previously they were passed as body_text, which
+      // made the sender HTML-escape the markup, so customers received raw
+      // <div>/<table> source instead of a rendered email. A few templates
+      // (e.g. the internal dispatcher-followup) are still plain text; send
+      // those as body_text so their line breaks are preserved (pre-wrap).
+      const looksLikeHtml = /<[a-z!/][\s\S]*>/i.test(renderedBody)
+      const bodyField = looksLikeHtml
+        ? { body_html: renderedBody }
+        : { body_text: renderedBody }
       dispatchResult = await dispatchEmail(supabaseUrl, serviceKey, {
         trigger_event: body.trigger_event,
         recipient_email: context.contact.email || "",
         subject:         renderedSubject || `EES-WI: ${body.trigger_event}`,
-        body_text:       renderedBody,
+        ...bodyField,
         notification_template_id: tpl.id,
         service_appointment_id:   context.appointment.id,
         contact_id:               context.contact.id,

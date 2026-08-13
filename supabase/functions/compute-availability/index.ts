@@ -48,6 +48,11 @@ const LUNCH_MINUTES = 45
 const LUNCH_WINDOW_START = "11:30"
 const LUNCH_WINDOW_END   = "13:00"
 const WORKDAY_PRE_START_OFFSET_MINUTES = 30
+// Minimum notice: never offer a slot that starts in the past or within this
+// many minutes of "now". Without this, today's slots were generated straight
+// from operating hours, so a customer could book an already-past time (e.g.
+// 8:00 AM at 10:00 AM). Applies only to today; future days are unaffected.
+const MIN_LEAD_MINUTES = 60
 
 interface ReqBody {
   slug:        string
@@ -577,10 +582,15 @@ function generateSlotsForResourceDay(ctx: SlotCtx): Slot[] {
   const lastSlotStart = combineDateAndTime(date, opHours.oh_last_slot_start_time, tz)
   const workdayStart = new Date(firstSlot.getTime() - WORKDAY_PRE_START_OFFSET_MINUTES * 60_000)
   const apptsSorted = [...existing].sort((a, b) => a.start_iso.localeCompare(b.start_iso))
+  // Earliest bookable moment: now + minimum notice. Slots starting before this
+  // (i.e. already in the past, or too soon) are never offered — this only
+  // trims today's early slots; future days start well after it.
+  const earliestStartMs = Date.now() + MIN_LEAD_MINUTES * 60_000
 
   for (let t = firstSlot.getTime(); t <= lastSlotStart.getTime(); t += SLOT_INCREMENT_MINUTES * 60_000) {
     const candidateStart = new Date(t)
     const candidateEnd   = new Date(t + duration * 60_000)
+    if (candidateStart.getTime() < earliestStartMs) continue    // no past / too-soon slots
     if (candidateEnd.getTime() > lastSlotStart.getTime() + duration * 60_000) break
     if (overlapsAny(apptsSorted, candidateStart, candidateEnd, BUFFER_MINUTES)) continue
     if (absences.some(a => intervalsOverlap(new Date(a.start_iso), new Date(a.end_iso), candidateStart, candidateEnd))) continue
