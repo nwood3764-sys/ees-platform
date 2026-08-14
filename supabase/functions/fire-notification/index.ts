@@ -110,6 +110,13 @@ Deno.serve(async (req) => {
   const context = await buildAppointmentContext(supabase, body.service_appointment_id)
   if (!context) return json({ error: "service appointment not found" }, 404)
 
+  // Sender mailbox: an explicit override wins; otherwise route to the active
+  // Assessments mailbox for the property's state (e.g. NC bookings send from
+  // the NC Assessments inbox instead of the WI default). Null falls through to
+  // send-notification-email's fallback sender.
+  const fromMailbox = body.override_from
+    || await resolveAssessmentsMailbox(supabase, context.property.state)
+
   // ─── 2. Pick template rows ─────────────────────────────────────────
   // Most-specific-first: work_type-matching rows for this trigger,
   // optionally filtered to a single channel, then NULL-work_type fallbacks.
@@ -171,7 +178,7 @@ Deno.serve(async (req) => {
         service_appointment_id:   context.appointment.id,
         contact_id:               context.contact.id,
         project_id:               context.appointment.project_id,
-        from_mailbox:             body.override_from,
+        from_mailbox:             fromMailbox,
       })
     } else {
       // nt_channel === 'both' shouldn't be in the seed (the seed uses one
@@ -334,6 +341,27 @@ async function buildAppointmentContext(
       email: Deno.env.get("COMPANY_EMAIL") || "hello@EES-WI.org",
     },
   }
+}
+
+// Resolve the active "Assessments" outbound mailbox address for a state, so
+// customer scheduling emails send from that state's inbox. Returns null when no
+// active mailbox is configured for the state (caller falls back to the default).
+async function resolveAssessmentsMailbox(
+  supabase: ReturnType<typeof createClient>,
+  state?: string | null,
+): Promise<string | null> {
+  if (!state) return null
+  const { data, error } = await supabase
+    .from("outbound_mailboxes")
+    .select("obm_address")
+    .eq("obm_state", state.trim().toUpperCase())
+    .eq("obm_purpose", "Assessments")
+    .eq("obm_is_active", true)
+    .eq("obm_is_deleted", false)
+    .limit(1)
+    .maybeSingle()
+  if (error) { console.error("resolveAssessmentsMailbox error", error); return null }
+  return (data as { obm_address?: string } | null)?.obm_address || null
 }
 
 function joinName(first?: string | null, last?: string | null): string {
