@@ -505,7 +505,11 @@ function parseAssetScore(t){
   // Cooling equipment's own manufacture year ("Cooling Equipment ... Year of
   // Manufacture 2020") — the year-built rule applies to baseboards/DHW only.
   d.coolYear=num(/Cooling Equipment[\s\S]{0,200}?Year of Manufacture\s+(\d{4})/,t);
-  d.whe=num(/Water Heater Efficiency\s+([\d.]+)\s*Et/,t);
+  // Water-heater efficiency is printed with varying units — UEF (Uniform Energy
+  // Factor), EF, Et, or COP (heat-pump). Accept them all and remember the unit
+  // so the export can pick the right WaterHeaterEfficiencyType.
+  {const _wh=t.match(/Water Heater Efficiency\s+([\d.]+)\s*(UEF|EF|Et|COP)?/i);
+   d.whe=_wh?parseFloat(_wh[1]):null; d.wheUnit=(_wh&&_wh[2])?_wh[2].toUpperCase():null;}
   // Boiler / heating plant detail (page "BUILDING CHARACTERISTICS SUMMARY / Plants").
   d.boilerYear=num(/Year of Manufacture\s+(\d{4})/,t);          // first = heating plant
   d.boilerEff=num(/Thermal Efficiency\s+([\d.]+)%/,t);          // "Thermal Efficiency 80.0% Et"
@@ -1604,14 +1608,10 @@ async function build50121XML(which){
   _setFirst(doc,'State', as.state||'WI');
   _setFirst(doc,'PostalCode', as.zip||asB.zip||'');
   _setFirst(doc,'YearOfConstruction', as.yearBuilt);
-  // Window-to-Wall Ratio: DOE stores this as a 32-bit float and its UI prints
-  // the full stored value — a plain 0.16 lands on the float32 BELOW it and
-  // displays 0.15999999... Encode the value nudged onto the float32 just ABOVE
-  // the 2-decimal target so DOE displays 0.16000001... (rounded UP, per EES).
-  const wwrFloat32Up=v=>{const t=Math.round(v*100)/100;
-    let u=t,i=0; while(Math.fround(u)<t&&i++<50)u=+(u+1e-8).toFixed(10);
-    return String(u);};
-  _setFirst(doc,'OverallWindowToWallRatio', as.wwr==null?null:wwrFloat32Up(as.wwr));
+  // Window-to-Wall Ratio: the schema type is a plain decimal (0-1), so write a
+  // clean value rounded to 2 decimals (0.15) — never a float32-nudged string
+  // like 0.16000001, which is what produced the "crazy decimals" in DOE's field.
+  _setFirst(doc,'OverallWindowToWallRatio', as.wwr==null?null:String(Math.round(as.wwr*100)/100));
   _setFirst(doc,'TotalExteriorAboveGradeWallArea', as.wallArea);
   if(as.floorsAbove!=null)_setFirst(doc,'ConditionedFloorsAboveGrade', as.floorsAbove);
   if(as.floorsBelow!=null)_setFirst(doc,'ConditionedFloorsBelowGrade', as.floorsBelow);
@@ -1902,8 +1902,12 @@ async function build50121XML(which){
   // 100%, matching the electric-resistance heating convention).
   if(as.whe!=null){
     const wv=(as.whe>1.5?as.whe/100:as.whe);
+    // Match the DOE efficiency type to the reported unit: UEF/EF -> Energy Factor
+    // (electric/storage), COP -> heat-pump water heater, else Thermal Efficiency.
+    const wht=(as.wheUnit==='UEF'||as.wheUnit==='EF')?'Energy Factor'
+             :(as.wheUnit==='COP'?'COP':'Thermal Efficiency');
     _setFirst(doc,'WaterHeaterEfficiency', wv===1?'1.0':String(+wv.toFixed(2)));
-    _setFirst(doc,'WaterHeaterEfficiencyType','Thermal Efficiency');
+    _setFirst(doc,'WaterHeaterEfficiencyType', wht);
   }
   if(as.whFuel){
     const dhw=_q(doc,'DomesticHotWaterSystem')[0];
@@ -2030,12 +2034,44 @@ async function build50121XML(which){
   // Cooling: the report DOES print the equipment's own year ("Cooling Equipment
   // ... Year of Manufacture"), so use it; year built only as fallback.
   for(const tag of ['DomesticHotWaterSystem','CoolingSource']){
-    const yr = tag==='CoolingSource' ? (as.coolYear!=null?as.coolYear:as.yearBuilt) : as.yearBuilt;
+    // Use the equipment's own Year of Manufacture from the report (cooling ->
+    // coolYear, water heater -> the first equipment year), year built only as
+    // the fallback — never override a real equipment year with year built.
+    const yr = tag==='CoolingSource' ? (as.coolYear!=null?as.coolYear:as.yearBuilt)
+                                     : (as.boilerYear!=null?as.boilerYear:as.yearBuilt);
     for(const sys of _q(doc,tag)){
       const yi=sys.getElementsByTagNameNS(NS_AUC,'YearInstalled')[0];
       if(yi&&yr!=null)yi.textContent=String(yr);
       const lo=sys.getElementsByTagNameNS(NS_AUC,'Location')[0];
       if(lo)lo.textContent='Interior';
+    }
+  }
+  // Collapse to a SINGLE HVAC system. The 50121 template carries TWO populated
+  // HVAC systems (an artifact of the known-good export it was built from); this
+  // building has one packaged heat pump (heating + cooling). Keep the system
+  // that holds the FIRST heating source — the one the conversion below populates
+  // — and delete every other HVACSystem plus any Delivery that references a
+  // removed heating/cooling source. Without this, DOE shows two systems, one of
+  // them all-N/A. Runs BEFORE the heating/cooling conversion so those only touch
+  // the surviving system.
+  {
+    const hs0=_q(doc,'HeatingSource')[0];
+    let keepSys=hs0; while(keepSys && keepSys.localName!=='HVACSystem') keepSys=keepSys.parentNode;
+    if(keepSys){
+      const removedSrc=new Set();
+      for(const sys of [..._q(doc,'HVACSystem')]){
+        if(sys===keepSys) continue;
+        for(const s of [...sys.getElementsByTagNameNS(NS_AUC,'HeatingSource'),
+                        ...sys.getElementsByTagNameNS(NS_AUC,'CoolingSource')]){
+          const id=s.getAttribute('ID'); if(id) removedSrc.add(id);
+        }
+        sys.parentNode.removeChild(sys);
+      }
+      for(const dv of [..._q(doc,'Delivery')]){
+        const refs=[...dv.getElementsByTagNameNS(NS_AUC,'HeatingSourceID'),
+                    ...dv.getElementsByTagNameNS(NS_AUC,'CoolingSourceID')];
+        if(refs.some(r=>removedSrc.has(r.getAttribute('IDref')))) dv.parentNode.removeChild(dv);
+      }
     }
   }
   // Heating: the report is authoritative. Electric building -> swap the hydronic
@@ -2108,8 +2144,11 @@ async function build50121XML(which){
       const udfs=hs0.getElementsByTagNameNS(NS_AUC,'UserDefinedFields')[0];
       if(udfs){
         mk('Location','Interior',udfs);
-        // Baseboard heaters: year installed = year the building was built (EES rule).
-        if(as.yearBuilt!=null)mk('YearInstalled',String(as.yearBuilt),udfs);
+        // Year installed = the heating equipment's own Year of Manufacture from
+        // the report (boilerYear), NOT the building's year built. Year built is
+        // only the fallback when the report prints no equipment year.
+        const _hyr=(as.boilerYear!=null?as.boilerYear:as.yearBuilt);
+        if(_hyr!=null)mk('YearInstalled',String(_hyr),udfs);
       }
       // Number of pieces of equipment: ALWAYS 1 — whole-building entry (EES rule).
       // XSD order puts Quantity after UserDefinedFields, so append at the end.
@@ -2177,6 +2216,43 @@ async function build50121XML(which){
     if(as.coolCop!=null)eff.textContent=String(+Number(as.coolCop).toFixed(2));
     const cap=cs.getElementsByTagNameNS(NS_AUC,'Capacity')[0];
     if(cap&&as.coolTons!=null)cap.textContent=String(Math.round(as.coolTons*12));
+  }
+  // Fully populate the SURVIVING cooling source. The template's pre-existing DX
+  // source deferred every descriptive field to N/A (fuel/condition/location/
+  // year/quantity), so DOE showed the cooling system all-N/A even with a COP.
+  // Mirror the heating fix: write the report's values in XSD order (PrimaryFuel
+  // + Condition before ControlStrategy; Location + YearInstalled before the
+  // UserDefinedFields; Quantity last) and flip the matching N/A flags to false.
+  if(as.coolCop!=null||as.coolingSourceLabel||as.coolingIsWallAC){
+    const cs0=_q(doc,'CoolingSource')[0];
+    if(cs0){
+      // XSD order: PrimaryFuel, CoolingSourceCondition, Controls, Location,
+      // YearInstalled, UserDefinedFields, Quantity. Anchor fuel/condition on the
+      // Controls WRAPPER (not its nested ControlStrategy) so they land before it.
+      const ctrls=cs0.getElementsByTagNameNS(NS_AUC,'Controls')[0];
+      const cudfs=cs0.getElementsByTagNameNS(NS_AUC,'UserDefinedFields')[0];
+      const put=(tag,txt,before)=>{ if(txt==null||!before)return;
+        if(cs0.getElementsByTagNameNS(NS_AUC,tag)[0])return;
+        const e=doc.createElementNS(NS_AUC,'auc:'+tag); e.textContent=String(txt);
+        before.parentNode.insertBefore(e,before); };
+      put('PrimaryFuel','Electricity',ctrls||cudfs);
+      put('CoolingSourceCondition','Average',ctrls||cudfs);
+      put('Location','Interior',cudfs);
+      const cyr=(as.coolYear!=null?as.coolYear:as.boilerYear);
+      if(cyr!=null)put('YearInstalled',String(cyr),cudfs);
+      if(!cs0.getElementsByTagNameNS(NS_AUC,'Quantity')[0]){
+        const q=doc.createElementNS(NS_AUC,'auc:Quantity'); q.textContent='1'; cs0.appendChild(q);
+      }
+      const cflip={'Primary Fuel Is Not Applicable':'false','Capacity Is Not Applicable':'false',
+        'Annual Cooling Efficiency Value Is Not Applicable':'false','Annual Cooling Efficiency Units Is Not Applicable':'false',
+        'Cooling Source Condition Is Not Applicable':'false','Cooling Plant ID Is Not Applicable':'true',
+        'Location Is Not Applicable':'false','Year Installed Is Not Applicable':'false','Quantity Is Not Applicable':'false'};
+      for(const u of cs0.getElementsByTagNameNS(NS_AUC,'UserDefinedField')){
+        const fn=u.getElementsByTagNameNS(NS_AUC,'FieldName')[0]; if(!fn)continue;
+        const v=cflip[fn.textContent.trim()];
+        if(v!=null){const fv=u.getElementsByTagNameNS(NS_AUC,'FieldValue')[0]; if(fv)fv.textContent=v;}
+      }
+    }
   }
   // Enum/type labels (from the AI extractor; only set when present, and it only
   // ever returns a valid BuildingSync enum value).
