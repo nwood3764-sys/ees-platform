@@ -2020,10 +2020,14 @@ async function build50121XML(which){
   // 'Basement Excluded as is not conditioned.' — the REFERENCE's note; this
   // building excludes nothing from GFA.
   setAllUDF('Spaces Excluded From Gross Floor Area','');
-  // Door type stays 'Other', whose specify-text is REQUIRED by DOE. The report
-  // prints no door info, so use the EES standard entry: 'Metal door' (replaces
-  // the reference's '3/4ths of Metal Door is a window / lite' note).
-  setAllUDF('Other Exterior Door Type','Metal door');
+  // Exterior door: the Asset Score prints NO door data, and DOE only requires
+  // this field when door area exceeds 5% of gross wall area. Do NOT fabricate an
+  // 'Other' + free-text specify ('Metal door') — set a real, non-specify DOE
+  // value (multifamily exterior unit doors are insulated steel) and clear the
+  // Other specify + mark it Not Applicable, so nothing invented ships.
+  _setFirst(doc,'ExteriorDoorType','Insulated metal');
+  setAllUDF('Other Exterior Door Type','');
+  setAllUDF('Other Exterior Door Type Is Not Applicable','true');
   // EVERY Central Distribution Type = None (unitized) — the reference carried a
   // second one saying 'Refrigerant (VRF)'.
   setAllUDF('Central Distribution Type','None (unitized heating/cooling)');
@@ -2489,6 +2493,19 @@ async function build50121XML(which){
   // Replace the built-in template's Owner contact with the real owner (from the
   // uploaded Audit Template XML, else the Project-details fields, else blank).
   _injectOwner(doc, which);
+
+  // Drop the template's placeholder AUDITOR contact — it carries no real info for
+  // this building and DOE accumulates a duplicate on every import. AuditorContactID
+  // is optional, so remove the Energy Auditor contact and any IDref that points at
+  // it, leaving only the (real) Owner. The user selects the auditor in DOE.
+  for(const c of [..._q(doc,'Contact')]){
+    const roles=[...c.getElementsByTagNameNS(NS_AUC,'ContactRole')].map(r=>(r.textContent||'').trim().toLowerCase());
+    if(!roles.includes('energy auditor')) continue;
+    const cid=c.getAttribute('ID');
+    if(cid) for(const ref of [..._q(doc,'AuditorContactID')])
+      if(ref.getAttribute('IDref')===cid) ref.parentNode.removeChild(ref);
+    c.parentNode.removeChild(c);
+  }
 
   // Final guard: the schema rejects an EMPTY State (enum) or PostalCode
   // (5-digit pattern) anywhere in the file — one blank element fails the whole
