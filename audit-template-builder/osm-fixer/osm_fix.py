@@ -86,6 +86,30 @@ def repair(model):
         n += 1
     s["water_heaters_fixed"] = n
 
+    # 3b. Cycle the packaged-heat-pump fans instead of running them 24/7.
+    # DOE Asset Score models set each UnitarySystem's supply-fan operating mode
+    # to "Always_On" (continuous), so the constant-volume fan runs around the
+    # clock and fan energy can exceed heating + cooling — a badly distorted load
+    # shape. A packaged heat pump cycles its fan with the compressor, so point
+    # the fan operating mode at a constant-0 schedule (0 = cycle with the coil).
+    cyc = openstudio.model.ScheduleConstant(model)
+    cyc.setName("Fan Cycling (repair)"); cyc.setValue(0.0)
+    nf = 0
+    for u in model.getAirLoopHVACUnitarySystems():
+        try:
+            u.setSupplyAirFanOperatingModeSchedule(cyc); nf += 1
+        except Exception:
+            pass
+    # Water-to-air / PTAC-style zone heat pumps use the same convention.
+    for u in model.getZoneHVACPackagedTerminalHeatPumps():
+        try:
+            u.setSupplyAirFanOperatingModeSchedule(cyc); nf += 1
+        except Exception:
+            pass
+    if nf == 0:
+        cyc.remove()
+    s["fans_set_to_cycling"] = nf
+
     # 4. HTML output + AllSummary + monthly meters
     ots = model.getOutputControlTableStyle()
     ots.setColumnSeparator("HTMLandColumns"); ots.setUnitConversion("None")
