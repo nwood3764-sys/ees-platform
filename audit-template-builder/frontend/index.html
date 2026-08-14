@@ -1468,6 +1468,16 @@ function _setInEl(el,tag,val){
   const e=el&&el.getElementsByTagNameNS(NS_AUC,tag)[0];
   if(e) e.textContent=(val==null?'':String(val));
 }
+// For schema-facet fields (State is an enum, PostalCode must match [0-9]{5}) an
+// EMPTY element is INVALID — DOE's xmllint rejects the whole file. Both are
+// optional (minOccurs=0) in the BuildingSync Address, so when there's no value
+// we OMIT the element instead of blanking it.
+function _setOrRemoveInEl(el,tag,val){
+  const e=el&&el.getElementsByTagNameNS(NS_AUC,tag)[0];
+  if(!e) return;
+  if(val==null||String(val).trim()==='') e.parentNode.removeChild(e);
+  else e.textContent=String(val).trim();
+}
 function _cszParts(s){const m=/^(.*?),\s*([A-Za-z]{2})\s*(\d{5})/.exec(s||'');
   return m?{city:m[1].trim(),state:m[2],zip:m[3]}:{city:'',state:'',zip:''};}
 // Prefer the contact tagged "Owner"; otherwise the first non-auditor contact
@@ -1519,8 +1529,10 @@ function _injectOwner(doc,which){
   _setInEl(el,'TelephoneNumber',src.phone||'');
   _setInEl(el,'StreetAddress',src.street||'');
   _setInEl(el,'City',src.city||'');
-  _setInEl(el,'State',src.state||'');
-  _setInEl(el,'PostalCode',src.zip||'');
+  // State/PostalCode reject an empty value in the schema — omit when unknown
+  // (a management-company owner often has only a P.O. box + email on file).
+  _setOrRemoveInEl(el,'State',src.state);
+  _setOrRemoveInEl(el,'PostalCode',src.zip);
 }
 // Hard export gate: no owner => no export, no override. Used by every generator.
 function ownerExportOk(){
@@ -2401,6 +2413,14 @@ async function build50121XML(which){
   // Replace the built-in template's Owner contact with the real owner (from the
   // uploaded Audit Template XML, else the Project-details fields, else blank).
   _injectOwner(doc, which);
+
+  // Final guard: the schema rejects an EMPTY State (enum) or PostalCode
+  // (5-digit pattern) anywhere in the file — one blank element fails the whole
+  // upload. Both are optional in every Address, so drop any that came through
+  // empty (owner, building, or any contact) rather than ship an invalid file.
+  for(const tag of ['State','PostalCode'])
+    for(const e of [..._q(doc,tag)])
+      if(!(e.textContent||'').trim()) e.parentNode.removeChild(e);
 
   let s=new XMLSerializer().serializeToString(doc);
   // The template already carries an XML declaration (and the serializer re-emits
