@@ -21,7 +21,13 @@ CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".schema-cache"
 BUILDINGSYNC_XSD_URL = (
     "https://github.com/BuildingSync/schema/releases/download/v2.6.0/BuildingSync.xsd"
 )
-GBXML_XSD_URL = "https://www.gbxml.org/schema/6.01/GreenBuildingXML_Ver6.01.xsd"
+# gbXML 6.01, taken from the BuildingSync release mirror rather than gbxml.org —
+# it is the exact copy BuildingSync.xsd's own <xs:import schemaLocation> points at,
+# and gbxml.org is unreachable from locked-down build/agent environments.
+GBXML_XSD_URL = (
+    "https://github.com/BuildingSync/gbXML_Schemas/releases/download/v6.01/"
+    "GreenBuildingXML_Ver6.01.xsd"
+)
 GBXML_LOCAL = "GreenBuildingXML_Ver6.01.xsd"
 
 
