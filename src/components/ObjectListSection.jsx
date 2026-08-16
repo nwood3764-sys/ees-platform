@@ -192,10 +192,29 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
     }
   }
 
+  // Create is a pop-up, never a page swap: a local create (a table with no
+  // record URL, or a standalone mount with no NavContext) renders RecordDetail
+  // in create mode — which draws itself as a modal — while this list stays
+  // mounted underneath. The URL-driven path never reaches here; App intercepts
+  // mode:'create' and shows the same pop-up above the module.
+  const localCreate = selected && selected.mode === 'create' ? selected : null
+  const localCreateOverlay = localCreate ? (
+    <RecordDetail
+      key={`create:${localCreate.table || objectTable}`}
+      tableName={localCreate.table || objectTable}
+      recordId={null}
+      mode="create"
+      prefill={localCreate.prefill || null}
+      onBack={() => setSelected(null)}
+      onRecordCreated={(r) => setSelected({ id: r.id, mode: 'view', table: localCreate.table || objectTable })}
+      onNavigateToRecord={(r) => setSelected({ id: r.id, mode: r.mode || 'view', table: r.table || objectTable, prefill: r.prefill || null })}
+    />
+  ) : null
+
   // In the URL-driven path this branch never renders (the list unmounts the
   // moment a record is selected — the parent module shows its own RecordDetail
   // from the URL). It remains for standalone mounts with no NavContext.
-  if (selected) {
+  if (selected && !localCreate) {
     // selected.table lets a lookup hyperlink, breadcrumb, or advance-to action
     // open a record on a DIFFERENT object than this list's own. Without it,
     // RecordDetail would query the target id against objectTable and fail with
@@ -216,8 +235,8 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
     )
   }
 
-  if (loading) return <LoadingState />
-  if (error)   return <ErrorState error={error} onRetry={load} />
+  if (loading) return <>{localCreateOverlay}<LoadingState /></>
+  if (error)   return <>{localCreateOverlay}<ErrorState error={error} onRetry={load} /></>
 
   // Drill-down scope: when a caller (e.g. a dashboard widget click) passes
   // initialFilters, prepend a synthetic "Filtered" system view and default to
@@ -291,7 +310,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
     />
   )
 
-  if (!listScope) return listView
+  if (!listScope) return <>{listView}{localCreateOverlay}</>
 
   // Scoped view — a related-list "View All". Header banner names the parent and
   // links back to the full object list (a real anchor so it also opens in a new
@@ -329,6 +348,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {listView}
       </div>
+      {localCreateOverlay}
     </div>
   )
 }

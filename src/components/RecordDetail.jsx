@@ -56,7 +56,7 @@ import DuplicateCheckPanel, { DUPLICATE_CHECK_TABLES, buildDuplicateProbe } from
 import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfigSchemas'
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
 import { MERGE_FIELD_OBJECTS, loadFieldsForObject } from '../data/mergeFieldCatalog'
-import { resolveLookupLabel } from '../data/fieldMetadataService'
+import { resolveLookupLabel, getEditableFieldsForTable } from '../data/fieldMetadataService'
 import {
   uploadDocumentTemplateAsset,
   signedDocumentTemplateAssetUrl,
@@ -88,6 +88,7 @@ import {
   fetchAvailableRecordTypes,
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
+import { buildCreateModalGroups, listUnlaidOutRequiredColumns } from '../lib/createRecordFields'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
 import RecordLink from './RecordLink'
 
@@ -616,6 +617,61 @@ const DERIVED_READONLY = {
 }
 const isDerivedReadonlyField = (table, name) =>
   (DERIVED_READONLY[table] || []).includes(name)
+
+// Columns the create pop-up must never ask for on this table: names a trigger
+// composes (building_name), and fields derived/read-only by policy. Combined
+// with the shared system-column rule in lib/createRecordFields.
+function createNeverAskColumns(tableName) {
+  return new Set([
+    ...(TRIGGER_DERIVED_REQUIRED[tableName] || []),
+    ...(DERIVED_READONLY[tableName] || []),
+  ])
+}
+
+// Best label column for a lookup target: TABLE_META first (it knows the
+// business name column), then the target's own first *_name column.
+async function resolveLookupLabelColumn(targetTable) {
+  const known = TABLE_META[targetTable]?.nameColumn
+  if (known) return known
+  try {
+    const cols = await getEditableFieldsForTable(targetTable)
+    const hit = (cols || []).find(c => /_name$/.test(c.columnName))
+    return hit ? hit.columnName : null
+  } catch { return null }
+}
+
+async function buildUnlaidOutRequiredFieldDefs(columns, tableName, recordTypeId) {
+  if (!columns.length) return { defs: [], picklistOpts: {} }
+  let meta = []
+  try { meta = await getEditableFieldsForTable(tableName) } catch { meta = [] }
+  const byName = new Map((meta || []).map(c => [c.columnName, c]))
+  const defs = []
+  const picklistOpts = {}
+  for (const col of columns) {
+    const label = humanizeFieldName(col)
+    const m = byName.get(col)
+    if (!m) { defs.push({ name: col, label, type: 'text', required: true }); continue }
+    if (m.editorType === 'picklist') {
+      defs.push({ name: col, label, type: 'picklist', required: true })
+      try {
+        picklistOpts[col] = await fetchPicklistOptions(
+          m.picklistObject || tableName, m.picklistField || col, recordTypeId || null)
+      } catch { picklistOpts[col] = [] }
+      continue
+    }
+    if (m.editorType === 'lookup' && m.referencesTable) {
+      const labelCol = await resolveLookupLabelColumn(m.referencesTable)
+      defs.push({
+        name: col, label, type: 'lookup', required: true,
+        lookup_table: m.referencesTable, lookup_field: labelCol || 'id',
+      })
+      continue
+    }
+    // datetime has no editor on the record form either — fall back to text.
+    defs.push({ name: col, label, required: true, type: m.editorType === 'datetime' ? 'text' : m.editorType })
+  }
+  return { defs, picklistOpts }
+}
 
 // Columns that USED to be copied from a parent at create but are now shown as
 // live references to the parent (migration 20260729031631 converted the
@@ -1330,6 +1386,14 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
             if (t && TABLE_META[t]?.nameColumn) parentFkTargets[fk] = t
           })
         }
+        // Column metadata for every other required column, so each one renders
+        // with the editor its type calls for (picklist / lookup / number /
+        // date / checkbox) instead of a bare text box.
+        let columnMeta = new Map()
+        try {
+          const cols = await getEditableFieldsForTable(table)
+          columnMeta = new Map((cols || []).map(c => [c.columnName, c]))
+        } catch { /* fall back to text inputs */ }
         for (const col of required) {
           if (SYSTEM.test(col)) continue
           if (col === rtColumn) continue
@@ -1355,10 +1419,35 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
             })
             continue
           }
+          // Everything else gets the editor its column actually calls for —
+          // a required picklist column (a Type, a Status) has to render as a
+          // dropdown, not a text box the user can't possibly fill correctly.
+          // Column metadata comes from describe_object_columns (cached).
+          const colMeta = columnMeta.get(col) || null
+          const colLabel = col.replace(/^[a-z]+_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+          if (colMeta?.editorType === 'picklist') {
+            fieldDefs.push({
+              name: col, label: colLabel, type: 'picklist', required: true,
+              picklist_object: colMeta.picklistObject || table,
+              picklist_field: colMeta.picklistField || col,
+            })
+            continue
+          }
+          if (colMeta?.editorType === 'lookup' && colMeta.referencesTable) {
+            const t = colMeta.referencesTable
+            fieldDefs.push({
+              name: col, label: colLabel, type: 'lookup', required: true,
+              lookup_table: t,
+              lookup_field: TABLE_META[t]?.nameColumn || 'id',
+              scopedKind: null,
+            })
+            continue
+          }
           fieldDefs.push({
             name: col,
-            label: col.replace(/^[a-z]+_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-            type: col === labelField ? 'text' : 'text',
+            label: colLabel,
+            type: (colMeta?.editorType === 'number' || colMeta?.editorType === 'date'
+              || colMeta?.editorType === 'boolean') ? colMeta.editorType : 'text',
             required: true,
           })
         }
@@ -1384,10 +1473,19 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
               : await fetchLookupOptions(f.lookup_table, f.lookup_field)
           } catch { fkOpts[f.name] = [] }
         }))
+        // Options for required picklist columns. Unscoped here — the record
+        // type is chosen in this same form, and the effect below re-scopes the
+        // lists the moment it changes.
+        const pickOpts = {}
+        await Promise.all(fieldDefs.filter(f => f.type === 'picklist' && f.name !== rtColumn).map(async f => {
+          try { pickOpts[f.name] = await fetchPicklistOptions(f.picklist_object, f.picklist_field, null) }
+          catch { pickOpts[f.name] = [] }
+        }))
         if (cancelled) return
         setFields(fieldDefs)
         setRecordTypes(rts)
         setFkLookupOpts(fkOpts)
+        setPicklistOpts(pickOpts)
         setLoading(false)
       } catch (err) {
         if (!cancelled) { toast.error(`Could not open create form — ${err.message || err}`); onCancel() }
@@ -1398,6 +1496,27 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
   }, [table])
 
   const setVal = (name, v) => setDraft(d => ({ ...d, [name]: v }))
+
+  // Re-scope required picklists to the chosen record type, the same way the
+  // record page does — a record type with its own selected values shows only
+  // those, and one with no selection shows the full active list.
+  const qcRecordTypeValue = rtColumn ? (draft[rtColumn] || null) : null
+  useEffect(() => {
+    if (!qcRecordTypeValue) return undefined
+    const pickFields = fields.filter(f => f.type === 'picklist' && f.name !== rtColumn)
+    if (pickFields.length === 0) return undefined
+    let cancelled = false
+    ;(async () => {
+      const next = {}
+      await Promise.all(pickFields.map(async f => {
+        try { next[f.name] = await fetchPicklistOptions(f.picklist_object, f.picklist_field, qcRecordTypeValue) }
+        catch { /* keep the current list on failure */ }
+      }))
+      if (!cancelled && Object.keys(next).length) setPicklistOpts(prev => ({ ...prev, ...next }))
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qcRecordTypeValue, fields])
 
   // Create-time duplicate probe — same soft gate as the full create form.
   // Quick-create from a lookup (e.g. a new account off a property's owner
@@ -1507,6 +1626,36 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                   }}
                   placeholder="— Select —"
                 />
+              ) : f.type === 'picklist' ? (
+                <SearchableLookup
+                  value={draft[f.name] || ''}
+                  options={picklistOpts[f.name] || []}
+                  onChange={(val) => setVal(f.name, val || null)}
+                  placeholder="— Select —"
+                />
+              ) : f.type === 'number' ? (
+                <input type="number" step="any" min={nonNegativeMin(false)} style={{ ...monoInput }}
+                  value={draft[f.name] ?? ''} onKeyDown={blockNegativeKeys(false)}
+                  onChange={e => setVal(f.name, e.target.value === '' ? null : Number(e.target.value))} />
+              ) : f.type === 'date' ? (
+                <input type="date" style={{ ...monoInput }} value={draft[f.name] || ''}
+                  onChange={e => setVal(f.name, e.target.value || null)} />
+              ) : f.type === 'boolean' ? (
+                <div style={{ display: 'flex', gap: 0, maxWidth: 180 }}>
+                  {[['Yes', true], ['No', false]].map(([lbl, val], i) => {
+                    const active = draft[f.name] === val
+                    return (
+                      <button key={lbl} type="button" onClick={() => setVal(f.name, val)}
+                        style={{
+                          flex: 1, padding: '6px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                          border: `1px solid ${active ? C.emerald : C.border}`,
+                          background: active ? C.emerald : C.card, color: active ? '#fff' : C.textPrimary,
+                          borderRadius: i === 0 ? '5px 0 0 5px' : '0 5px 5px 0',
+                          borderLeftWidth: i === 0 ? 1 : 0, outline: 'none',
+                        }}>{lbl}</button>
+                    )
+                  })}
+                </div>
               ) : (
                 <input type={f.type === 'email' ? 'email' : 'text'} style={{ ...inputBase }} value={draft[f.name] || ''}
                   onChange={e => setVal(f.name, e.target.value)} />
@@ -6196,6 +6345,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // the field-group renderer. Populated once at mount via fetchTableMetadata
   // (which is cached so subsequent calls in handleSave are free).
   const [requiredFields, setRequiredFields] = useState(new Set())
+  // Create modal: "Show all fields" expands the pop-up from the required-only
+  // set to every field on the page layout, for the times a user wants to fill
+  // an optional field (a building's Type, say) while they're already there.
+  // Off by default — required-only is the standard create experience.
+  const [showAllCreateFields, setShowAllCreateFields] = useState(false)
+  // Required columns the page layout doesn't carry, resolved to real editors
+  // from the table's column metadata (see buildUnlaidOutRequiredFieldDefs).
+  const [createExtraFields, setCreateExtraFields] = useState([])
+  const [createExtraPicklistOpts, setCreateExtraPicklistOpts] = useState({})
   // Holds the derived-name base (e.g. a project's source opportunity name)
   // captured from the create prefill, so the name can be recomposed when the
   // user changes record type before saving. Stored in a ref so it persists
@@ -6391,6 +6549,37 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       .catch(() => { if (!cancelled) setRequiredFields(new Set()) })
     return () => { cancelled = true }
   }, [tableName])
+
+  // Create pop-up: resolve any required column the page layout doesn't carry
+  // into a real editor (picklist / lookup / number / date), so the modal can
+  // always ask for everything the insert needs — including on an object with no
+  // layout at all. Re-runs when the record type changes so record-type-scoped
+  // picklist values stay correct.
+  const createRecordTypeDraftValue = getRecordTypeColumn(tableName)
+    ? (draft?.[getRecordTypeColumn(tableName)] || null)
+    : null
+  useEffect(() => {
+    if (!isCreate) { setCreateExtraFields([]); setCreateExtraPicklistOpts({}); return undefined }
+    if (loading) return undefined
+    const neverAsk = createNeverAskColumns(tableName)
+    const { covered } = buildCreateModalGroups(data?.sections || [], {
+      requiredFields, showAll: true, neverAsk,
+    })
+    const missing = listUnlaidOutRequiredColumns(requiredFields, covered, {
+      neverAsk, recordTypeColumn: getRecordTypeColumn(tableName),
+    })
+    if (missing.length === 0) { setCreateExtraFields([]); setCreateExtraPicklistOpts({}); return undefined }
+    let cancelled = false
+    buildUnlaidOutRequiredFieldDefs(missing, tableName, createRecordTypeDraftValue)
+      .then(({ defs, picklistOpts }) => {
+        if (cancelled) return
+        setCreateExtraFields(defs)
+        setCreateExtraPicklistOpts(picklistOpts)
+      })
+      .catch(() => { if (!cancelled) { setCreateExtraFields([]); setCreateExtraPicklistOpts({}) } })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreate, tableName, loading, data?.sections, requiredFields, createRecordTypeDraftValue])
 
   useEffect(() => {
     let cancelled = false
@@ -8048,6 +8237,176 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const recordTypeRequiresIncomeQualification =
     tableName === 'enrollments' && recordTypeMeta?.incomeQualification === true
   const incomeQualificationComplete = !!record.enrollment_determination_date
+
+  // ── CREATE = POP-UP MODAL, REQUIRED FIELDS ONLY ───────────────────────────
+  // Every manual New in LEAP lands here: the related-list New button, a list
+  // view's New, a Setup object's New, a /<table>/new link. Whatever the object,
+  // record type, or page layout, the user gets the same small pop-up asking for
+  // the required fields, and lands on the full record page once it's created.
+  //
+  // This is presentation only — the create engine underneath is unchanged, so
+  // the parent-chain prefill, record-type picker, dependent lookups, per-table
+  // create defaults, duplicate soft gate, and the insert path all behave exactly
+  // as they did on the old full-page create form.
+  if (isCreate) {
+    const createRtId = recordTypeColumn ? (draft[recordTypeColumn] || null) : null
+    const createRtLabel = createRtId
+      ? (picklists.metaById?.get(createRtId)?.label || picklists.byId.get(createRtId) || null)
+      : null
+    const { groups: createGroups } =
+      buildCreateModalGroups(sections, {
+        requiredFields, showAll: showAllCreateFields, neverAsk: createNeverAskColumns(tableName),
+      })
+    if (createExtraFields.length) {
+      createGroups.push({ key: '__required_not_on_layout__', title: '', fields: createExtraFields })
+    }
+    const createPicklistOpts = createExtraFields.length
+      ? { ...allPicklistOpts, ...createExtraPicklistOpts }
+      : allPicklistOpts
+    const createFieldCount = createGroups.reduce((n, g) => n + g.fields.length, 0)
+    // What this record is being created ON — the parent names already resolved
+    // for the breadcrumb (e.g. the property a building is being added to).
+    const parentContext = Array.from(createCrumbLookups.values())
+      .map(v => v?.label).filter(Boolean)
+
+    const modalFieldGroup = (g) => (
+      <div key={g.key} style={{ marginBottom: 12 }}>
+        {g.title && createGroups.length > 1 && (
+          <div style={{
+            padding: '4px 16px 6px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em',
+            textTransform: 'uppercase', color: C.textMuted,
+          }}>{g.title}</div>
+        )}
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+          <FieldGroupWidget
+            widget={{ widget_config: { fields: g.fields } }}
+            record={record}
+            picklists={picklists}
+            lookups={lookups}
+            editing
+            draft={draft}
+            onChange={handleFieldChange}
+            allPicklistOpts={createPicklistOpts}
+            allLookupOpts={allLookupOpts}
+            onRefreshRecord={() => setReloadTick(t => t + 1)}
+            recordId={null}
+            fieldDisabledReasons={null}
+            onNavigateToRecord={onNavigateToRecord}
+            requiredFields={requiredFields}
+            tableName={tableName}
+            createRelatedValues={createRelatedValues}
+          />
+        </div>
+      </div>
+    )
+
+    return createPortal(
+      <div
+        onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onBack() }}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 180, background: 'rgba(7,17,31,0.45)',
+          display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center',
+          padding: isMobile ? 0 : 16,
+        }}
+      >
+        <div style={{
+          background: C.card, borderRadius: isMobile ? 0 : 10,
+          width: isMobile ? '100%' : 'min(760px, 100%)',
+          maxHeight: isMobile ? '100%' : '88vh',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          boxShadow: '0 24px 70px rgba(7,17,31,0.32)',
+        }}>
+          {/* Header — what's being created, its record type, and the parent
+              record it's being created on. */}
+          <div style={{
+            padding: '14px 18px', borderBottom: `1px solid ${C.border}`,
+            display: 'flex', alignItems: 'flex-start', gap: 12,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
+                New {singularizeLabel(objectLabel)}
+              </div>
+              <div style={{ marginTop: 3, fontSize: 12, color: C.textSecondary, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {createRtLabel && (
+                  <span style={{
+                    background: '#eef4fb', color: '#1a5a8a', borderRadius: 4,
+                    padding: '1px 7px', fontSize: 11, fontWeight: 600,
+                  }}>{createRtLabel}</span>
+                )}
+                {parentContext.length > 0 && <span>on {parentContext.join(' · ')}</span>}
+              </div>
+            </div>
+            <button
+              onClick={() => { if (!saving) onBack() }}
+              aria-label="Close"
+              style={{
+                background: 'transparent', border: 'none', cursor: saving ? 'wait' : 'pointer',
+                color: C.textMuted, fontSize: 18, lineHeight: 1, padding: 2,
+              }}
+            >×</button>
+          </div>
+
+          {/* Body — required fields only (or everything, when expanded). */}
+          <div style={{ flex: 1, overflow: 'auto', padding: '14px 6px 4px', background: C.page }}>
+            {createFieldCount === 0 ? (
+              <div style={{ padding: '18px 16px', fontSize: 13, color: C.textSecondary, textAlign: 'center' }}>
+                {showAllCreateFields
+                  ? 'This layout has no editable fields. Save to create the record.'
+                  : 'Nothing is required to create this record. Save to create it, then fill in the details on the record page.'}
+              </div>
+            ) : createGroups.map(modalFieldGroup)}
+            <div style={{ padding: '0 10px' }}>
+              <DuplicateCheckPanel
+                tableName={tableName}
+                matches={dupMatches}
+                confirming={dupAcknowledged}
+                onNavigateToRecord={onNavigateToRecord}
+              />
+            </div>
+            <div style={{ padding: '2px 16px 10px' }}>
+              <button
+                type="button"
+                onClick={() => setShowAllCreateFields(v => !v)}
+                style={{
+                  background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+                  color: '#1a5a8a', fontSize: 12, fontWeight: 500,
+                }}
+              >
+                {showAllCreateFields ? 'Show required fields only' : 'Show all fields'}
+              </button>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{
+            padding: '10px 16px', borderTop: `1px solid ${C.border}`, background: '#fafbfd',
+            display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
+            paddingBottom: isMobile ? 'calc(10px + env(safe-area-inset-bottom))' : 10,
+          }}>
+            <button
+              onClick={() => { if (!saving) onBack() }}
+              disabled={saving}
+              style={{
+                background: C.card, color: C.textPrimary, border: `1px solid ${C.border}`,
+                borderRadius: 6, padding: '7px 16px', fontSize: 13, fontWeight: 500,
+                cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.6 : 1,
+              }}
+            >Cancel</button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                background: C.emerald, color: '#fff', border: 'none', borderRadius: 6,
+                padding: '7px 18px', fontSize: 13, fontWeight: 600,
+                cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1,
+              }}
+            >{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )
+  }
 
   if (!layout) return (
     <div style={{

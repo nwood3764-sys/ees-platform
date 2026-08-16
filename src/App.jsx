@@ -50,6 +50,13 @@ const ServiceProviderModule = lazy(() => import('./modules/ServiceProviderModule
 const SearchResultsPage   = lazy(() => import('./modules/SearchResultsPage'))
 const HelpCenterPage      = lazy(() => import('./pages/HelpCenterPage'))
 
+// Create-record pop-up. RecordDetail in create mode renders itself as a modal
+// (required fields only), so mounting it here — above every module — is what
+// makes "New" behave identically everywhere: the page the user was on stays
+// exactly where it was, underneath the pop-up. Lazy so App's own chunk doesn't
+// carry RecordDetail; the module chunks already share it.
+const CreateRecordModal   = lazy(() => import('./components/RecordDetail'))
+
 // ─── View As control ─────────────────────────────────────────────────────────
 // Topbar dropdown for permitted users (Admin / Project Coordinator) to preview
 // another role's module navigation for troubleshooting. Simulates nav only —
@@ -255,6 +262,46 @@ function AuthedApp({ session }) {
   // once the keyboard has finished opening. Quiet no-op on desktop.
   useInputFocusScroll()
 
+  // ── Create records in a pop-up, everywhere ────────────────────────────────
+  // Standing rule (Nicholas, 2026-08-16): clicking New / Add anywhere in LEAP
+  // opens a modal that asks for the required fields only — no matter the
+  // object, record type, or page layout the user happens to be on. Creating a
+  // record is never a full-page detour.
+  //
+  // Every create path in the app already funnels through navigateToRecord /
+  // replaceRecord with mode:'create' (related-list New, list-view New, Setup
+  // New, the module-specific New buttons), so intercepting it in one place
+  // routes all of them into the pop-up. The URL doesn't change, so the page
+  // behind the modal stays live — cancel and you're exactly where you were.
+  const [createRequest, setCreateRequest] = useState(null)
+  const createSeqRef = useRef(0)
+  const openCreateRecord = (rec) => {
+    createSeqRef.current += 1
+    setCreateRequest({
+      seq: createSeqRef.current,
+      table: rec.table,
+      prefill: rec.prefill || null,
+    })
+  }
+  const isCreateNav = (rec) => !!(rec && rec.mode === 'create' && rec.table && !rec.id)
+  const navigateToRecordOrCreate = (rec) => {
+    if (isCreateNav(rec)) { openCreateRecord(rec); return }
+    navigateToRecord(rec)
+  }
+  const replaceRecordOrCreate = (rec) => {
+    if (isCreateNav(rec)) { openCreateRecord(rec); return }
+    replaceRecord(rec)
+  }
+  // A create URL typed, bookmarked, or linked directly ("/buildings/new") is
+  // the same request: open the pop-up, and drop the create URL so the module's
+  // own list renders behind it.
+  useEffect(() => {
+    if (!isCreateNav(selectedRecord)) return
+    openCreateRecord(selectedRecord)
+    closeRecord()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRecord])
+
   // Edge-swipe to open the mobile nav drawer (iOS-native pattern).
   // Listens for touchstart within 20px of the left screen edge; if the user
   // drags rightward more than 60px and the drawer is closed, opens it.
@@ -342,15 +389,15 @@ function AuthedApp({ session }) {
       adminTabFromUrl,
       adminLayoutIdFromUrl,
       adminLayoutReturnFromUrl,
-      onNavigateToRecord: navigateToRecord,
+      onNavigateToRecord: navigateToRecordOrCreate,
       onCloseRecord: closeRecord,
       onSectionChange: navigateToSection,
       onSubsectionChange: navigateToSubsection,
-      onReplaceRecord: replaceRecord,
+      onReplaceRecord: replaceRecordOrCreate,
       onOpenSetup: navigateToSetup,
     }
     switch (activeModule) {
-      case 'home':          return <HomeModule onNavigate={navigateToModule} onOpenSetup={navigateToSetup} onOpenRecord={navigateToRecord} />
+      case 'home':          return <HomeModule onNavigate={navigateToModule} onOpenSetup={navigateToSetup} onOpenRecord={navigateToRecordOrCreate} />
       case 'tasks':         return <TasksModule {...navProps} />
       case 'enrollment':    return <OutreachModule {...navProps} />
       case 'outreach':      return <OutreachPropertiesModule {...navProps} />
@@ -370,7 +417,7 @@ function AuthedApp({ session }) {
         <SearchResultsPage
           searchQuery={searchQuery}
           searchType={searchType}
-          onNavigateToRecord={navigateToRecord}
+          onNavigateToRecord={navigateToRecordOrCreate}
           onNavigateToSearch={navigateToSearch}
         />
       )
@@ -380,7 +427,7 @@ function AuthedApp({ session }) {
   }
 
   return (
-    <NavContext.Provider value={{ selectedRecord, navigateToRecord, closeRecord, replaceRecord, listScope }}>
+    <NavContext.Provider value={{ selectedRecord, navigateToRecord: navigateToRecordOrCreate, closeRecord, replaceRecord: replaceRecordOrCreate, listScope }}>
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Inter, -apple-system, sans-serif', background: C.page, overflow: 'hidden' }}>
       <Sidebar
         activeModule={activeModule}
@@ -522,6 +569,32 @@ function AuthedApp({ session }) {
         <IntegrationsModal
           onClose={() => setIntegrationsOpen(false)}
         />
+      )}
+
+      {/* Create-record pop-up — required fields only, over whatever page the
+          user was on. Wrapped in its own error boundary so a bad layout can
+          only break the pop-up, never the app behind it. */}
+      {createRequest && (
+        <Suspense fallback={null}>
+          <ErrorBoundary
+            scope={`create:${createRequest.table}`}
+            resetKeys={[createRequest.seq]}
+          >
+            <CreateRecordModal
+              key={`create:${createRequest.table}:${createRequest.seq}`}
+              tableName={createRequest.table}
+              recordId={null}
+              mode="create"
+              prefill={createRequest.prefill}
+              onBack={() => setCreateRequest(null)}
+              onRecordCreated={(r) => {
+                setCreateRequest(null)
+                if (r?.id) navigateToRecord({ table: r.table || createRequest.table, id: r.id })
+              }}
+              onNavigateToRecord={navigateToRecordOrCreate}
+            />
+          </ErrorBoundary>
+        </Suspense>
       )}
 
       <AssistantPanel
