@@ -717,6 +717,99 @@ const INHERITED_FROM_PARENT_COLUMNS = {
   ],
 }
 
+// ---------------------------------------------------------------------------
+// Inherit every relationship the system can already work out
+// ---------------------------------------------------------------------------
+// Standing rule (Nicholas, 2026-08-16): LEAP is an operations system. A user
+// must never be asked for something the platform can derive — "we add records
+// that need to inherit everything that is appropriate."
+//
+// Given the table being created and whatever is already known (the parent
+// record, the draft of the form the create was launched from), this fills in
+// the target's declared parent FKs three ways, in order:
+//
+//   1. the same column, already known;
+//   2. the SAME relationship under a different prefix — work_order_account_id
+//      satisfies project_account_id, both being "the account";
+//   3. one hop up the chain — fetch the ancestors we do know ids for, read
+//      THEIR parents, and use those. A project's account comes from the
+//      property this way, which is why creating a project from a work order
+//      never has to ask who the account is.
+//
+// Data-driven from TABLE_META, so every object benefits without a rule per
+// object. Bounded: it stops as soon as nothing is missing, and never walks more
+// than a few hops. Returns only the values it resolved; the caller decides what
+// to do with them.
+async function resolveInheritedParents(targetTable, known, { maxHops = 6 } = {}) {
+  const meta = TABLE_META[targetTable]
+  if (!meta || !Array.isArray(meta.parents) || meta.parents.length === 0) return {}
+  // "property_id" / "project_account_id" / "work_order_account_id" all reduce to
+  // the relationship they express: property_id, account_id, account_id.
+  const relationshipKey = (col) => {
+    const m = String(col).match(/([a-z]+)_id$/)
+    return m ? m[0] : String(col)
+  }
+  const valueByRelationship = new Map()
+  const noteValue = (col, val) => {
+    if (val == null || val === '') return
+    const key = relationshipKey(col)
+    if (!valueByRelationship.has(key)) valueByRelationship.set(key, val)
+  }
+  for (const [k, v] of Object.entries(known || {})) {
+    if (k.includes('.') || k.startsWith('__') || !/_id$/.test(k)) continue
+    noteValue(k, v)
+  }
+
+  const parentTables = meta.parentTables || []
+  const resolved = {}
+  const fill = () => {
+    meta.parents.forEach((col) => {
+      if (resolved[col] != null) return
+      const v = (known && known[col] != null && known[col] !== '')
+        ? known[col]
+        : valueByRelationship.get(relationshipKey(col))
+      if (v != null && v !== '') resolved[col] = v
+    })
+  }
+  const missing = () => meta.parents.some(col => resolved[col] == null)
+  fill()
+  if (!missing()) return resolved
+
+  // Climb: every ancestor we hold an id for can tell us about its own parents.
+  const queue = []
+  const seen = new Set()
+  meta.parents.forEach((col, i) => {
+    const table = parentTables[i]
+    if (table && resolved[col]) queue.push({ table, id: resolved[col] })
+  })
+  let hops = 0
+  while (queue.length && hops < maxHops && missing()) {
+    hops += 1
+    const { table, id } = queue.shift()
+    const key = `${table}:${id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const ancestorMeta = TABLE_META[table]
+    if (!ancestorMeta?.parents?.length) continue
+    try {
+      const { data: row } = await supabase
+        .from(table).select(ancestorMeta.parents.join(', ')).eq('id', id).maybeSingle()
+      if (!row) continue
+      ancestorMeta.parents.forEach((pCol, i) => {
+        const pTable = (ancestorMeta.parentTables || [])[i]
+        const val = row[pCol]
+        if (val == null || val === '') return
+        noteValue(pCol, val)
+        if (pTable) queue.push({ table: pTable, id: val })
+      })
+      fill()
+    } catch (err) {
+      console.warn('inherit parents: ancestor read failed', table, err)
+    }
+  }
+  return resolved
+}
+
 // Compose a derived record name as "<base> - <record type label>", without
 // repeating a label the base already ends with. An Assessment created from the
 // opportunity "5513 North Hopkins Street - MILWAUKEE - 5513 - WI-IRA-MF-HOMES-
@@ -1371,6 +1464,9 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
   // the field list; refreshed per-field by server search as the user types.
   const [fkLookupOpts, setFkLookupOpts] = useState({})
   const [recordTypes, setRecordTypes] = useState([])
+  // The seed plus everything resolveInheritedParents could derive from it —
+  // what actually gets written, and what the form knows never to ask for.
+  const [resolvedSeed, setResolvedSeed] = useState(() => seed || {})
   const rtColumn = useMemo(() => getRecordTypeColumn(table), [table])
 
   useEffect(() => {
@@ -1379,6 +1475,13 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
       try {
         const meta = await fetchTableMetadata(table)
         const required = new Set(meta.required_fields || [])
+        // Inherit everything the platform can already work out from the record
+        // this create was launched from — the account from the property, the
+        // property from the building, and so on — so the form only ever asks
+        // for what genuinely isn't derivable.
+        const inherited = await resolveInheritedParents(table, seed || {})
+        const effectiveSeed = { ...(seed || {}), ...inherited }
+        if (!cancelled) setResolvedSeed(effectiveSeed)
         // System/audit columns are auto-filled by applyInsertDefaults — never
         // surface them in the quick-create form even if NOT NULL.
         const SYSTEM = /(_record_number$|_owner$|_created_by$|_created_at$|_updated_by$|_updated_at$|_is_deleted$|^id$|^is_seed_data$)/
@@ -1427,13 +1530,13 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
           if (SYSTEM.test(col)) continue
           if (col === rtColumn) continue
           if (derivedCols.has(col)) continue              // trigger fills it
-          if (seed && seed[col] != null) continue  // already known from the dependency — don't ask
+          if (effectiveSeed[col] != null) continue  // already known — never ask for it
           const fkTable = parentFkTargets[col]
           if (fkTable) {
             // Keep the parent chain intact inside quick-create too: when the
             // seed already pins a property, scope building/opportunity pickers
             // to it via the same dependent-lookup RPCs the full form uses.
-            const scopedKind = seed?.property_id
+            const scopedKind = effectiveSeed?.property_id
               ? (fkTable === 'buildings' ? 'buildings_for_property'
                 : fkTable === 'opportunities' ? 'opportunities_for_property' : null)
               : null
@@ -1486,7 +1589,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         }
         for (const extra of (EXTRA_REQUIRED[table] || [])) {
           if (fieldDefs.some(f => f.name === extra.name)) continue
-          if (seed && seed[extra.name] != null) continue
+          if (effectiveSeed[extra.name] != null) continue
           fieldDefs.push({ ...extra, required: true })
         }
         // Load record types for the RT selector, and any picklist options.
@@ -1502,7 +1605,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
             fkOpts[f.name] = f.scopedKind
               ? await fetchDependentLookupOptions(
                   { name: f.name, lookup_dependency: { kind: f.scopedKind, depends_on: ['property_id'] } },
-                  seed || {})
+                  effectiveSeed)
               : await fetchLookupOptions(f.lookup_table, f.lookup_field)
           } catch { fkOpts[f.name] = [] }
         }))
@@ -1559,7 +1662,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
   const qcDupReqRef = useRef(0)
   const qcProbeSignature = useMemo(() => {
     if (!DUPLICATE_CHECK_TABLES.includes(table)) return ''
-    const probe = buildDuplicateProbe(table, { ...(seed || {}), ...draft })
+    const probe = buildDuplicateProbe(table, { ...resolvedSeed, ...draft })
     return probe ? JSON.stringify(probe) : ''
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table, draft])
@@ -1592,7 +1695,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
     setSaving(true)
     try {
       const userId = await getCurrentUserId()
-      const payload = applyInsertDefaults(table, { ...(seed || {}), ...draft }, userId)
+      const payload = applyInsertDefaults(table, { ...resolvedSeed, ...draft }, userId)
       // Normalize phone fields to the bare 10-digit form the DB constraint wants.
       normalizePhoneFieldsInPlace(payload, new Set(fields.filter(f => f.type === 'phone').map(f => f.name)))
       for (const [k, v] of Object.entries(payload)) if (v === '') payload[k] = null
@@ -5116,6 +5219,40 @@ function RelatedListWidget({
       copyFromParent('property_state', 'building_state')
       copyFromParent('property_zip', 'building_zip')
       copyFromParent('property_year_built', 'building_year_built')
+    }
+
+    // Last pass over the parent chain: anything the child still needs that the
+    // platform can work out from what we already hold — the account from the
+    // property, the property from the building — is filled in here rather than
+    // asked for. Same resolver the inline quick-create uses.
+    {
+      const inherited = await resolveInheritedParents(childTable, prefillObj)
+      for (const [col, val] of Object.entries(inherited)) {
+        if (prefillObj[col] == null || prefillObj[col] === '') prefillObj[col] = val
+      }
+    }
+
+    // A work order always lives on a project, but the record it was created from
+    // often doesn't have one — an assessment, for instance, links the property,
+    // building, and opportunity but no project. Resolve the opportunity's most
+    // recent live project so the field lands filled instead of blank (Nicholas,
+    // 2026-08-16). Mirrors what create_mf_building_assessment_work_order does
+    // server-side, and it's only a default — the picker stays editable.
+    if ((childMeta?.parents || []).includes('project_id')
+        && !prefillObj.project_id && prefillObj.opportunity_id) {
+      try {
+        const { data: projRows } = await supabase
+          .from('projects')
+          .select('id')
+          .eq('opportunity_id', prefillObj.opportunity_id)
+          .eq('project_is_deleted', false)
+          .order('project_created_at', { ascending: false })
+          .limit(1)
+        const proj = Array.isArray(projRows) ? projRows[0] : projRows
+        if (proj?.id) prefillObj.project_id = proj.id
+      } catch (err) {
+        console.warn('create prefill: project resolve failed', err)
+      }
     }
 
     // The record you created FROM is not a choice (Nicholas, 2026-08-16: "I
