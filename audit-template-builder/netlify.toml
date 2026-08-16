@@ -1,0 +1,22 @@
+# Audit Template Builder — build scoping only.
+#
+# This repo feeds TWO Netlify sites: LEAP (ees-ops, built from the repo root)
+# and this one (ees-audit-template-builder, based in this directory). Netlify's
+# default is to rebuild every site connected to a repo on every commit, without
+# looking at what changed — so a LEAP-only commit was rebuilding this site from
+# byte-identical code, and vice versa. Over the 30 days to 2026-08-16 that was
+# 33 pointless builds of this site and 23 pointless builds of LEAP, out of 58
+# commits: 56 of 58 commits triggered a build that had nothing to do with it.
+# At ~15 credits a deploy that is most of a billing period's credits.
+#
+# The ignore command below runs BEFORE the build and cancels it (at no cost)
+# when nothing in this directory changed since the last build of this site.
+# Exit 0 = cancel, anything else = build — so if CACHED_COMMIT_REF is unset
+# (first build after this lands) git errors, the command exits non-zero, and
+# the build proceeds. Failure mode is "build anyway", never "silently skip".
+#
+# Everything else about this site's build — command, publish directory, base —
+# stays exactly as configured in the Netlify UI; a netlify.toml only overrides
+# the keys it actually sets.
+[build]
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- ."
