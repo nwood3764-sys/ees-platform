@@ -351,7 +351,10 @@ const TABLE_META = {
   enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['property_id', 'opportunity_id'],                  parentTables: ['properties', 'opportunities'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
   projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id', 'building_id', 'project_account_id'],                     parentTables: ['properties', 'buildings', 'accounts'] },
-  assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id'],                     parentTables: ['properties', 'buildings'] },
+  // opportunity_id is a declared parent so a child created FROM an assessment
+  // (its work order) inherits the program opportunity, not just the property
+  // and building — the work order needs it and the assessment already knows it.
+  assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id', 'opportunity_id'],   parentTables: ['properties', 'buildings', 'opportunities'] },
   incentive_applications:    { module: 'Qualification',  label: 'Applications',         nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['opportunity_id', 'property_id', 'building_id', 'project_id'], parentTables: ['opportunities', 'properties', 'buildings', 'projects'] },
   efr_reports:               { module: 'Qualification',  label: 'EFR Reports',          nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   project_payment_requests:  { module: 'Incentives',     label: 'Payment Requests',     nameColumn: null,                     recordNumberColumn: 'ppr_record_number',               statusColumn: 'ppr_status',               parents: ['project_id', 'property_id'],                      parentTables: ['projects', 'properties'] },
@@ -4899,9 +4902,9 @@ function RelatedListWidget({
         if (v != null && v !== '' && (prefillObj[dst] == null || prefillObj[dst] === '')) prefillObj[dst] = v
       }
       try {
-        let oppId  = prefillObj.opportunity_id || prefillObj.assessment_opportunity
+        let oppId  = prefillObj.opportunity_id
           || (parentTable === 'opportunities' ? parentRecordId : null)
-        let bldId  = prefillObj.building_id || prefillObj.assessment_building_del
+        let bldId  = prefillObj.building_id
           || (parentTable === 'buildings' ? parentRecordId : null)
         let propId = prefillObj.property_id || (parentTable === 'properties' ? parentRecordId : null)
 
