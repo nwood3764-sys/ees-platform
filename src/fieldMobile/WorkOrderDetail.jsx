@@ -194,7 +194,14 @@ function ReviewChevron() {
   )
 }
 
-export default function WorkOrderDetail({ woId, navigate }) {
+// `embedded` renders the same work plan inside the main app's work order record
+// page instead of the field PWA's own screen: no mobile topbar, no back chevron,
+// and completing the plan refreshes in place rather than navigating to /field.
+// Everything else — the steps, evidence gates, photo/video capture, measurement
+// fields, N/A reasons, submit — is the identical component, so desk staff and
+// technicians run one code path (Nicholas, 2026-08-16: "they should never leave
+// the main app").
+export default function WorkOrderDetail({ woId, navigate, embedded = false, onChanged = null }) {
   const [detail, setDetail]   = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
@@ -220,8 +227,14 @@ export default function WorkOrderDetail({ woId, navigate }) {
     setTimeout(() => setToast(null), 3200)
   }
 
-  if (loading) return <MobileShell title="Work Order" onBack={() => navigate('/field')}><Empty>Loading…</Empty></MobileShell>
-  if (error)   return <MobileShell title="Work Order" onBack={() => navigate('/field')}><Empty tone="error">{error}</Empty></MobileShell>
+  // One wrapper for both surfaces: the field PWA keeps its navy topbar + back
+  // chevron; embedded gets a plain block that inherits the record page's card.
+  const Shell = ({ title, children: shellChildren }) => embedded
+    ? <div style={{ fontFamily: FONT }}>{shellChildren}</div>
+    : <MobileShell title={title} onBack={() => navigate('/field')}>{shellChildren}</MobileShell>
+
+  if (loading) return <Shell title="Work Order"><Empty>Loading…</Empty></Shell>
+  if (error)   return <Shell title="Work Order"><Empty tone="error">{error}</Empty></Shell>
   if (!detail) return null
 
   const { header, steps } = detail
@@ -301,10 +314,7 @@ export default function WorkOrderDetail({ woId, navigate }) {
   const chip = statusChip(header.work_order_status)
 
   return (
-    <MobileShell
-      title={header.work_order_record_number || 'Work Order'}
-      onBack={() => navigate('/field')}
-    >
+    <Shell title={header.work_order_record_number || 'Work Order'}>
       {toast && (
         <div style={{
           position: 'fixed', left: 12, right: 12, bottom: 'calc(env(safe-area-inset-bottom) + 12px)',
@@ -486,9 +496,12 @@ export default function WorkOrderDetail({ woId, navigate }) {
       )}
 
       {success && (
-        <SuccessOverlay message={success} onDone={() => { setSuccess(null); navigate('/field') }} />
+        <SuccessOverlay message={success} onDone={() => {
+          setSuccess(null)
+          if (embedded) { onChanged?.(); load() } else { navigate('/field') }
+        }} />
       )}
-    </MobileShell>
+    </Shell>
   )
 }
 
