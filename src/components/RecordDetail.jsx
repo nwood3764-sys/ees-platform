@@ -662,7 +662,11 @@ async function buildUnlaidOutRequiredFieldDefs(columns, tableName, recordTypeId)
     if (m.editorType === 'lookup' && m.referencesTable) {
       const labelCol = await resolveLookupLabelColumn(m.referencesTable)
       defs.push({
-        name: col, label, type: 'lookup', required: true,
+        // Name an FK column after what it points AT. humanizeFieldName strips
+        // the table prefix first, which turns buildings' own "building_id" into
+        // the meaningless "Id" — the object label is what the user recognises.
+        name: col, label: singularizeLabel(TABLE_META[m.referencesTable]?.label || label),
+        type: 'lookup', required: true,
         lookup_table: m.referencesTable, lookup_field: labelCol || 'id',
       })
       continue
@@ -708,6 +712,17 @@ const INHERITED_FROM_PARENT_COLUMNS = {
     // (application -> property -> account) via Inherited Fields.
     'ia_business_entity_name', 'ia_business_entity_phone_number', 'ia_business_entity_email',
   ],
+}
+
+// Turn a Postgres/PostgREST write error into something a user can act on.
+// supabase-js puts the useful half in `details`/`hint` — the bare `message` for
+// a constraint failure is often just "numeric field overflow", which tells the
+// user nothing about what to change.
+function describeWriteError(err) {
+  const parts = [err?.message || String(err)]
+  if (err?.details && err.details !== err.message) parts.push(err.details)
+  if (err?.hint) parts.push(err.hint)
+  return parts.filter(Boolean).join(' — ')
 }
 
 // missing from the provided values object. An empty string is treated as
@@ -1568,7 +1583,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
       toast.success(`Created ${label}`)
       onCreated({ id: created.id, label })
     } catch (err) {
-      toast.error(`Create failed — ${err.message || String(err)}`)
+      toast.error(`Create failed — ${describeWriteError(err)}`)
     } finally {
       setSaving(false)
     }
@@ -4860,15 +4875,10 @@ function RelatedListWidget({
     // system already knows so the assessor only records what they measure on
     // site (Nicholas: inherit "from the opportunity, from the building, from the
     // property"). The generic chain seeder above already resolved property_id and
-    // building_id from an opportunity parent (assessments' TABLE_META parents),
-    // but the assessment page layouts bind the Opportunity and Building fields to
-    // the legacy uuid columns assessment_opportunity / assessment_building_del —
-    // NOT the opportunity_id / building_id FKs the seeder fills — so those looked
-    // empty. Here we resolve the opportunity/building/property, then copy the
-    // building's physical attributes (square footage, unit count, attic sizing +
-    // existing insulation, utility provider) and the property's owner-level
-    // occupancy, and seed BOTH the real FK and the layout's display column so the
-    // form shows the context regardless of which record type's layout is used.
+    // building_id from an opportunity parent (assessments' TABLE_META parents);
+    // here we resolve the opportunity/building/property, then copy the building's
+    // physical attributes (square footage, unit count, attic sizing + existing
+    // insulation, utility provider) and the property's owner-level occupancy.
     // Only fill blanks; never clobber a chain-seeded value; all stay editable.
     if (childTable === 'assessments') {
       const fill = (dst, v) => {
@@ -4929,11 +4939,13 @@ function RelatedListWidget({
           if (!propId && opp.property_id) propId = opp.property_id
         }
 
-        // Seed the relationship columns — both the real FK and the legacy display
-        // column each layout binds to — so the Opportunity/Building/Property
-        // fields all show populated.
-        if (oppId)  { fill('opportunity_id', oppId);   fill('assessment_opportunity', oppId) }
-        if (bldId)  { fill('building_id', bldId);       fill('assessment_building_del', bldId) }
+        // Seed the relationship columns. Only the real FKs: migration
+        // 20260816174500 repointed every assessment layout off the legacy uuid
+        // columns (assessment_opportunity / assessment_building_del) and onto
+        // opportunity_id / building_id, so there is no second copy to keep in
+        // sync any more.
+        if (oppId)  fill('opportunity_id', oppId)
+        if (bldId)  fill('building_id', bldId)
         if (propId) fill('property_id', propId)
 
         // Building physical attributes — the assessment's primary source.
@@ -5043,6 +5055,17 @@ function RelatedListWidget({
       copyFromParent('property_state', 'building_state')
       copyFromParent('property_zip', 'building_zip')
       copyFromParent('property_year_built', 'building_year_built')
+    }
+
+    // The record you created FROM is not a choice (Nicholas, 2026-08-16: "I
+    // created this from an opportunity record, so there shouldn't be an option
+    // to change it"). Every prefilled column pointing at this parent — the
+    // related list's own FK plus any legacy display column seeded with the same
+    // id — is locked: shown on the create pop-up, read-only. Ancestors resolved
+    // further up the chain (the property, the building) stay editable.
+    if (parentRecordId) {
+      const locked = Object.keys(prefillObj).filter(k => prefillObj[k] === parentRecordId)
+      if (locked.length) prefillObj.__lockedFields = locked
     }
 
     onNavigateToRecord({ table: childTable, id: null, mode: 'create', prefill: prefillObj })
@@ -5771,7 +5794,7 @@ function AddFromPoolModal({ config, parentRecordId, onClose, onAdded }) {
       if (onAdded) await onAdded()
       onClose()
     } catch (err) {
-      toast.error(`Create failed — ${err.message || String(err)}`)
+      toast.error(`Create failed — ${describeWriteError(err)}`)
     } finally {
       setCreating(false)
     }
@@ -6354,6 +6377,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // from the table's column metadata (see buildUnlaidOutRequiredFieldDefs).
   const [createExtraFields, setCreateExtraFields] = useState([])
   const [createExtraPicklistOpts, setCreateExtraPicklistOpts] = useState({})
+  // Columns pointing at the record this one is being created FROM. Shown on the
+  // create pop-up read-only — the parent isn't a choice. Resolved display names
+  // for those parent ids live in createLockedLabels (lookups-map shape).
+  const lockedCreateFields = useMemo(
+    () => new Set(isCreate && Array.isArray(prefill?.__lockedFields) ? prefill.__lockedFields : []),
+    [isCreate, prefill],
+  )
+  const [createLockedLabels, setCreateLockedLabels] = useState(() => new Map())
   // Holds the derived-name base (e.g. a project's source opportunity name)
   // captured from the create prefill, so the name can be recomposed when the
   // user changes record type before saving. Stored in a ref so it persists
@@ -6550,6 +6581,44 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     return () => { cancelled = true }
   }, [tableName])
 
+  // Create pop-up: resolve the display name of each locked parent column, so a
+  // read-only Opportunity reads "5513 North Hopkins Street - Milwaukee - HOMES
+  // Audit" instead of the uuid sitting in the draft.
+  useEffect(() => {
+    if (!isCreate || lockedCreateFields.size === 0 || !data?.sections) {
+      setCreateLockedLabels(new Map())
+      return undefined
+    }
+    const targets = []
+    for (const sec of data.sections) {
+      for (const w of (sec.widgets || [])) {
+        if (w.widget_type !== 'field_group') continue
+        for (const f of (w.widget_config?.fields || [])) {
+          if (!lockedCreateFields.has(f.name)) continue
+          const id = prefill?.[f.name]
+          if (!id || !f.lookup_table || !f.lookup_field) continue
+          if (targets.some(t => t.id === id)) continue
+          targets.push({ id, table: f.lookup_table, column: f.lookup_field })
+        }
+      }
+    }
+    if (targets.length === 0) { setCreateLockedLabels(new Map()); return undefined }
+    let cancelled = false
+    ;(async () => {
+      const map = new Map()
+      for (const t of targets) {
+        try {
+          const { data: row } = await supabase.from(t.table)
+            .select(`id, ${t.column}`).eq('id', t.id).maybeSingle()
+          if (row) map.set(t.id, { label: row[t.column] || '(record)', table: t.table })
+        } catch { /* unresolved parents just show the raw id */ }
+      }
+      if (!cancelled) setCreateLockedLabels(map)
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreate, data?.sections, lockedCreateFields, prefill])
+
   // Create pop-up: resolve any required column the page layout doesn't carry
   // into a real editor (picklist / lookup / number / date), so the modal can
   // always ask for everything the insert needs — including on an object with no
@@ -6622,6 +6691,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           }
           delete d.__derivedNameBase
         }
+        // Transient hint naming the parent-record columns the create pop-up
+        // shows read-only — never a column, so it must not reach the insert.
+        delete d.__lockedFields
         return d
       }
 
@@ -7986,7 +8058,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           onBack()
         }
       } catch (err) {
-        toast.error(`${cloneSource ? 'Clone' : 'Create'} failed — ${err.message || String(err)}`)
+        toast.error(`${cloneSource ? 'Clone' : 'Create'} failed — ${describeWriteError(err)}`)
       } finally {
         setSaving(false)
       }
@@ -8268,6 +8340,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // for the breadcrumb (e.g. the property a building is being added to).
     const parentContext = Array.from(createCrumbLookups.values())
       .map(v => v?.label).filter(Boolean)
+    // Display names for parent ids: the breadcrumb's resolved parents plus the
+    // locked parent columns, in the { label, table } shape formatFieldValue
+    // expects, so a read-only lookup shows a name rather than a uuid.
+    const createLookupLabels = (createCrumbLookups.size || createLockedLabels.size)
+      ? new Map([...createCrumbLookups, ...createLockedLabels])
+      : lookups
 
     const modalFieldGroup = (g) => (
       <div key={g.key} style={{ marginBottom: 12 }}>
@@ -8279,10 +8357,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         )}
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
           <FieldGroupWidget
-            widget={{ widget_config: { fields: g.fields } }}
+            widget={{ widget_config: { fields: g.fields.map(f => (
+              // The record this one is being created from is context, not a
+              // choice — render it read-only.
+              lockedCreateFields.has(f.name) ? { ...f, _editable: false } : f
+            )) } }}
             record={record}
             picklists={picklists}
-            lookups={lookups}
+            lookups={createLookupLabels}
             editing
             draft={draft}
             onChange={handleFieldChange}
