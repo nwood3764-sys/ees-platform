@@ -78,6 +78,49 @@ function tzForState(state?: string | null): string {
   return STATE_TIMEZONES[state.trim().toUpperCase()] || RENDER_TIMEZONE
 }
 
+// State-specific company name (always the full "... of <State>" legal name) and
+// program phone number, surfaced to templates as {{company.name}} /
+// {{company.program_phone}}.
+const STATE_COMPANY: Record<string, string> = {
+  WI: "Energy Efficiency Services of Wisconsin",
+  NC: "Energy Efficiency Services of North Carolina",
+  MI: "Energy Efficiency Services of Michigan",
+  CO: "Energy Efficiency Services of Colorado",
+  IN: "Energy Efficiency Services of Indiana",
+}
+const STATE_PROGRAM_PHONE: Record<string, string> = {
+  NC: "(704) 990-5614",
+  WI: "(608) 888-6947",
+}
+function companyForState(state?: string | null): string {
+  if (!state) return "Energy Efficiency Services"
+  return STATE_COMPANY[state.trim().toUpperCase()] || "Energy Efficiency Services"
+}
+function programPhoneForState(state?: string | null): string {
+  if (!state) return ""
+  return STATE_PROGRAM_PHONE[state.trim().toUpperCase()] || ""
+}
+
+// Compact UTC stamp (YYYYMMDDTHHMMSSZ) for Google Calendar deep-links.
+function gcalStamp(iso: string | null): string {
+  if (!iso) return ""
+  try { return new Date(iso).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "") }
+  catch { return "" }
+}
+// Build the "Add to calendar" deep-links from the appointment. Returned as
+// {{appointment.gcal_url}} / {{appointment.outlook_url}}.
+function calendarUrls(title: string, startIso: string | null, endIso: string | null, location: string, details: string) {
+  const enc = encodeURIComponent
+  const gStart = gcalStamp(startIso), gEnd = gcalStamp(endIso)
+  const gcal = (startIso && endIso)
+    ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${enc(title)}&dates=${gStart}/${gEnd}&location=${enc(location)}&details=${enc(details)}`
+    : ""
+  const outlook = (startIso && endIso)
+    ? `https://outlook.office.com/calendar/0/deeplink/compose?path=%2Fcalendar%2Faction%2Fcompose&rru=addevent&subject=${enc(title)}&startdt=${enc(startIso)}&enddt=${enc(endIso)}&location=${enc(location)}&body=${enc(details)}`
+    : ""
+  return { gcal, outlook }
+}
+
 interface ReqBody {
   service_appointment_id: string
   trigger_event: string
@@ -283,6 +326,14 @@ async function buildAppointmentContext(
     prop?.property_state,
   ].filter(Boolean).join(", ") + (prop?.property_zip ? ` ${prop.property_zip}` : "")
 
+  // State-aware company identity + calendar deep-links.
+  const companyName  = companyForState(prop?.property_state)
+  const programPhone = programPhoneForState(prop?.property_state)
+  const eventTitle   = wt?.work_type_name || "Energy Assessment"
+  const eventLocation = [prop?.property_street, property_city_state_zip.trim()].filter(Boolean).join(", ")
+  const eventDetails  = `${eventTitle} by ${companyName}.` + (programPhone ? ` Questions: ${programPhone}` : "")
+  const cal = calendarUrls(eventTitle, sa.sa_scheduled_start_time, sa.sa_scheduled_end_time, eventLocation, eventDetails)
+
   return {
     appointment: {
       id:                sa.id,
@@ -299,6 +350,8 @@ async function buildAppointmentContext(
       // alias of the name so those tokens don't render empty.
       work_type_label:   wt?.work_type_name || "service appointment",
       manage_url:        manageUrl,
+      gcal_url:          cal.gcal,
+      outlook_url:       cal.outlook,
     },
     contact: {
       id:         c?.id,
@@ -336,8 +389,9 @@ async function buildAppointmentContext(
       customer_facing_description: wt?.work_type_customer_facing_description || "",
     },
     company: {
-      name:  "EES-WI",
-      phone: Deno.env.get("COMPANY_PHONE") || "",
+      name:  companyName,
+      program_phone: programPhone,
+      phone: programPhone || Deno.env.get("COMPANY_PHONE") || "",
       email: Deno.env.get("COMPANY_EMAIL") || "hello@EES-WI.org",
     },
   }
@@ -586,6 +640,8 @@ interface AppointmentContext {
     work_type_name: string
     work_type_label: string
     manage_url: string
+    gcal_url: string
+    outlook_url: string
   }
   contact: {
     id: string | null
@@ -621,6 +677,7 @@ interface AppointmentContext {
   }
   company: {
     name: string
+    program_phone: string
     phone: string
     email: string
   }
