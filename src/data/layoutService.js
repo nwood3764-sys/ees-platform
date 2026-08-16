@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase'
 import { loadPicklists } from './outreachService'
 import { invalidateAll } from '../lib/useCachedFetch'
+import { getEditableFieldsForTable } from './fieldMetadataService'
 export { loadPicklists }
 
 /**
@@ -504,9 +505,86 @@ export async function fetchPageLayout(objectName, recordTypeValue = null, option
 
   return {
     layout,
-    sections: applyConventionalReadOnly(objectName, sectionList),
+    sections: applyConventionalReadOnly(objectName, await applyColumnTypeFallbacks(objectName, sectionList)),
     actionOverrides,
   }
+}
+
+/**
+ * Fill in the editor type for layout fields that don't declare one.
+ *
+ * Layouts imported from the legacy system carry entries like
+ *   { name: 'assessment_opportunity', label: 'Opportunity', required: true }
+ * with no `type` at all. The renderer's fallback is a plain text box, so a uuid
+ * FK column rendered as a raw id the user could neither read nor pick — "the
+ * opportunity comes in as a computer code" (Nicholas, 2026-08-16).
+ *
+ * The column itself already knows what it is, so we ask describe_object_columns
+ * (cached per table per page load) and fill the gap: FK → picklist_values
+ * becomes a picklist, any other FK becomes a lookup pointed at the referenced
+ * table's name column, and plain columns become number / date / boolean / text.
+ *
+ * Only ever FILLS IN what's missing — a field that declares its type, or a
+ * lookup that already names its target, is left exactly as authored. Runs on
+ * the read path only, so nothing is written back to the layout.
+ */
+async function applyColumnTypeFallbacks(objectName, sectionList) {
+  const needsType = (f) => {
+    if (!f?.name || f.type === 'spacer') return false
+    if (String(f.name).includes('.')) return false        // cross-object related field
+    if (!f.type) return true
+    return f.type === 'lookup' && (!f.lookup_table || !f.lookup_field)
+  }
+  const fieldGroups = []
+  for (const sec of sectionList) {
+    for (const w of sec.widgets || []) {
+      if (w.widget_type !== 'field_group' || !Array.isArray(w.widget_config?.fields)) continue
+      if (w.widget_config.fields.some(needsType)) fieldGroups.push(w)
+    }
+  }
+  if (fieldGroups.length === 0) return sectionList
+
+  let columns
+  try { columns = await getEditableFieldsForTable(objectName) } catch { return sectionList }
+  const byName = new Map((columns || []).map(c => [c.columnName, c]))
+
+  // Label column for each lookup target we're about to wire up.
+  const targets = new Set()
+  for (const w of fieldGroups) {
+    for (const f of w.widget_config.fields) {
+      if (!needsType(f)) continue
+      const meta = byName.get(f.name)
+      const table = f.lookup_table || meta?.referencesTable
+      if (meta?.editorType === 'lookup' && table) targets.add(table)
+    }
+  }
+  const labelColumns = new Map()
+  await Promise.all(Array.from(targets).map(async (t) => {
+    try {
+      const cols = await getEditableFieldsForTable(t)
+      const hit = (cols || []).find(c => /_name$/.test(c.columnName))
+      if (hit) labelColumns.set(t, hit.columnName)
+    } catch { /* leave unresolved; the field stays as authored */ }
+  }))
+
+  for (const w of fieldGroups) {
+    const fields = w.widget_config.fields.map(f => {
+      if (!needsType(f)) return f
+      const meta = byName.get(f.name)
+      if (!meta) return f.type ? f : { ...f, type: 'text' }
+      if (meta.editorType === 'lookup') {
+        const table = f.lookup_table || meta.referencesTable
+        const labelColumn = f.lookup_field || labelColumns.get(table)
+        // Without a readable label column a lookup would render ids — leave the
+        // field as authored rather than trade one unreadable control for another.
+        if (!table || !labelColumn) return f.type ? f : { ...f, type: 'text' }
+        return { ...f, type: 'lookup', lookup_table: table, lookup_field: labelColumn }
+      }
+      return { ...f, type: meta.editorType }
+    })
+    w.widget_config = { ...w.widget_config, fields }
+  }
+  return sectionList
 }
 
 /**
