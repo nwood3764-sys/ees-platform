@@ -27,6 +27,10 @@ const AccountMergeModal                    = lazy(() => import('./AccountMergeMo
 const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
 const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
 const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstallPhotoPickerModal'))
+// The work plan runner from LEAP Pad, mounted inside the work order record page
+// so desk staff follow steps and upload evidence without leaving the main app.
+// Same component the technician PWA runs — one engine, not a desktop copy.
+const WorkPlanRunner                       = lazy(() => import('../fieldMobile/WorkOrderDetail'))
 
 import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
@@ -914,6 +918,59 @@ function buildOrderedTabs(sections, { includeActivity = true } = {}) {
     if (ra !== rb) return ra - rb
     return a.localeCompare(b)
   })
+}
+
+// ---------------------------------------------------------------------------
+// WorkPlanCard — the work plan, on the work order record page
+// ---------------------------------------------------------------------------
+// Standing rule (Nicholas, 2026-08-16): "they should never leave the main app."
+// Following a work plan — steps in order, required photos and video,
+// measurement fields, N/A with a reason, submit for verification — used to live
+// only in LEAP Pad at /field. This mounts that exact component inside the
+// record page in embedded mode, so back-office staff uploading evidence and
+// technicians in the field run ONE implementation of the evidence gates. A
+// second desktop-only runner would drift from the field one the first time a
+// rule changed.
+//
+// Photos uploaded here go through the same pipeline as field captures —
+// watermarked with the step name, EXIF and GPS preserved, filed against the
+// step — so a photo pulled off a camera card at a desk is tagged exactly like
+// one shot on site.
+function WorkPlanCard({ widget, workOrderId, onChanged }) {
+  const title = widget?.widget_config?.title || 'Work Plan'
+  const [collapsed, setCollapsed] = useState(false)
+  if (!workOrderId) return null
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+      marginBottom: 16, overflow: 'hidden',
+    }}>
+      <div
+        onClick={() => setCollapsed(c => !c)}
+        style={{
+          padding: '12px 16px', borderBottom: collapsed ? 'none' : `1px solid ${C.border}`,
+          background: C.cardSecondary, display: 'flex', alignItems: 'center', gap: 8,
+          cursor: 'pointer', userSelect: 'none',
+        }}
+      >
+        <Icon path="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+          size={15} color={C.textSecondary} />
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: C.textPrimary, flex: 1 }}>{title}</span>
+        <span style={{ fontSize: 11, color: C.textMuted }}>{collapsed ? 'Show' : 'Hide'}</span>
+      </div>
+      {!collapsed && (
+        <div style={{ padding: 12, background: C.page }}>
+          <Suspense fallback={
+            <div style={{ padding: 20, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+              Loading work plan…
+            </div>
+          }>
+            <WorkPlanRunner woId={workOrderId} embedded onChanged={onChanged} />
+          </Suspense>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -6310,7 +6367,7 @@ function Section({ section, record, picklists, lookups, editing, draft, onChange
     allSectionWidgets.every(w => hiddenWidgetTypes.has(w.widget_type))
   if (sectionWidgets.length === 0 && allSuppressed) return null
   const cardCount = allSectionWidgets.filter(w =>
-    ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'conversation_list', 'report', 'prtsn_history'].includes(w.widget_type)).length
+    ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'conversation_list', 'report', 'prtsn_history', 'work_plan'].includes(w.widget_type)).length
   // An empty field group (zero fields) renders nothing — FieldGroupWidget
   // returns null for it — yet the canvas editor auto-adds a "Fields" group to
   // every section. On a card-only section (e.g. the Buildings / Units related
@@ -9157,7 +9214,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               }
             }
             const cards = isInsertMode ? [] : (sec.widgets || []).filter(w =>
-              ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'conversation_list', 'prtsn_history', 'report'].includes(w.widget_type))
+              ['related_list', 'file_gallery', 'conversation_panel', 'conversation_messages', 'conversation_list', 'prtsn_history', 'report', 'work_plan'].includes(w.widget_type))
             return (
               <div key={sec.id}>
                 <Section section={sec} record={record} picklists={picklists} lookups={lookups}
@@ -9226,6 +9283,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   }
                   if (w.widget_type === 'file_gallery') {
                     return <FileGalleryWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId} />
+                  }
+                  if (w.widget_type === 'work_plan') {
+                    return (
+                      <WorkPlanCard
+                        key={w.id}
+                        widget={w}
+                        workOrderId={recordId}
+                        onChanged={() => setReloadTick(t => t + 1)}
+                      />
+                    )
                   }
                   if (w.widget_type === 'conversation_panel') {
                     return <ConversationPanelWidget key={w.id} widget={w} parentRecordId={recordId} />
