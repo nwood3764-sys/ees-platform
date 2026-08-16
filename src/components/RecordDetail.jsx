@@ -714,6 +714,20 @@ const INHERITED_FROM_PARENT_COLUMNS = {
   ],
 }
 
+// Compose a derived record name as "<base> - <record type label>", without
+// repeating a label the base already ends with. An Assessment created from the
+// opportunity "5513 North Hopkins Street - MILWAUKEE - 5513 - WI-IRA-MF-HOMES-
+// AUDIT" was landing as "… - WI-IRA-MF-HOMES-AUDIT - WI-IRA-MF-HOMES-AUDIT"
+// (Nicholas, 2026-08-16).
+function composeDerivedRecordName(base, label) {
+  const b = String(base || '').trim().replace(/^[\s-]+|[\s-]+$/g, '')
+  const l = String(label || '').trim()
+  if (!l) return b || null
+  const alreadyEnds = b.toLowerCase().endsWith(l.toLowerCase())
+  const composed = alreadyEnds ? b : [b, l].filter(Boolean).join(' - ')
+  return composed.replace(/^[\s-]+|[\s-]+$/g, '') || null
+}
+
 // Turn a Postgres/PostgREST write error into something a user can act on.
 // supabase-js puts the useful half in `details`/`hint` — the bare `message` for
 // a constraint failure is often just "numeric field overflow", which tells the
@@ -6673,12 +6687,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       // trg_project_name). This makes the read-only Name field show its value
       // as soon as the form opens instead of staying blank until save. The
       // base is a transient prefill hint; strip it from what we seed.
-      const composeDerivedName = (base, rtObj) => {
-        const rtLabel = rtObj ? (rtObj.label || rtObj.picklist_label || '') : ''
-        const composed = [String(base || '').trim(), String(rtLabel || '').trim()]
-          .filter(Boolean).join(' - ')
-        return composed.replace(/^[\s-]+|[\s-]+$/g, '') || null
-      }
+      const composeDerivedName = (base, rtObj) =>
+        composeDerivedRecordName(base, rtObj ? (rtObj.label || rtObj.picklist_label || '') : '')
       const seedDraft = (pf) => {
         const d = pf ? { ...seededRT, ...pf } : { ...seededRT }
         derivedNameBaseRef.current = null
@@ -7258,9 +7268,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     if (derivedNameCol && name === getRecordTypeColumn(tableName) && derivedNameBaseRef.current) {
       const opts = allPicklistOpts?.[name] || []
       const rtLabel = (opts.find(o => o.value === value)?.label) || ''
-      const composed = [String(derivedNameBaseRef.current || '').trim(), String(rtLabel || '').trim()]
-        .filter(Boolean).join(' - ').replace(/^[\s-]+|[\s-]+$/g, '')
-      next[derivedNameCol] = composed || ''
+      next[derivedNameCol] = composeDerivedRecordName(derivedNameBaseRef.current, rtLabel) || ''
     }
     return next
   })
