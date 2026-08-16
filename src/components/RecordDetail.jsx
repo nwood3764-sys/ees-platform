@@ -350,7 +350,7 @@ const TABLE_META = {
   property_programs:         { module: 'Enrollment',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['property_id', 'opportunity_id'],                  parentTables: ['properties', 'opportunities'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
-  projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id', 'building_id', 'project_account_id'],                     parentTables: ['properties', 'buildings', 'accounts'] },
+  projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id', 'building_id', 'opportunity_id', 'project_account_id'], parentTables: ['properties', 'buildings', 'opportunities', 'accounts'] },
   // opportunity_id is a declared parent so a child created FROM an assessment
   // (its work order) inherits the program opportunity, not just the property
   // and building — the work order needs it and the assessment already knows it.
@@ -1382,17 +1382,14 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         // System/audit columns are auto-filled by applyInsertDefaults — never
         // surface them in the quick-create form even if NOT NULL.
         const SYSTEM = /(_record_number$|_owner$|_created_by$|_created_at$|_updated_by$|_updated_at$|_is_deleted$|^id$|^is_seed_data$)/
-        // Columns a DB trigger populates automatically — NOT NULL but must not
-        // be shown (e.g. contacts.contact_name is derived from first + last by
-        // the trg_contact_name trigger).
-        const DERIVED = {
-          contacts: ['contact_name'],
-          opportunities: ['opportunity_name'],
-          buildings: ['building_name'],
-          units: ['unit_name'],
-          opportunity_contact_roles: ['ocr_name'],
-        }
-        const derivedCols = new Set(DERIVED[table] || [])
+        // Columns a DB trigger populates automatically, or that policy makes
+        // read-only — NOT NULL but never the user's to type (e.g.
+        // projects.project_name is composed by trg_project_name). Same maps the
+        // full create form uses, so both agree on what is never asked for.
+        const derivedCols = new Set([
+          ...(TRIGGER_DERIVED_REQUIRED[table] || []),
+          ...(DERIVED_READONLY[table] || []),
+        ])
         // Extra fields to require on quick-create beyond the DB NOT NULL set,
         // for data quality (e.g. always capture an email on a new contact).
         const EXTRA_REQUIRED = {
@@ -1442,7 +1439,10 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
               : null
             fieldDefs.push({
               name: col,
-              label: col.replace(/_id$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+              // Name a lookup after the object it points at — "Opportunity",
+              // "Account" — never after the column ("Project Account", or the
+              // stripped-to-nothing "Id" a prefixed FK produces).
+              label: singularizeLabel(TABLE_META[fkTable]?.label || fkTable),
               type: 'lookup',
               lookup_table: fkTable,
               lookup_field: TABLE_META[fkTable].nameColumn,
@@ -1468,7 +1468,8 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
           if (colMeta?.editorType === 'lookup' && colMeta.referencesTable) {
             const t = colMeta.referencesTable
             fieldDefs.push({
-              name: col, label: colLabel, type: 'lookup', required: true,
+              name: col, label: singularizeLabel(TABLE_META[t]?.label || colLabel),
+              type: 'lookup', required: true,
               lookup_table: t,
               lookup_field: TABLE_META[t]?.nameColumn || 'id',
               scopedKind: null,
@@ -1982,7 +1983,7 @@ function AvatarUpload({ value, userId, onChange }) {
 // immediately without a round-trip refetch. Inline create is enabled by the
 // field config's allow_inline_create flag; the target table/label come from
 // lookup_table / lookup_field.
-function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dependencyValues = null }) {
+function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dependencyValues = null, sourceValues = null }) {
   const [extra, setExtra] = useState([])          // options created inline this session
   const [serverOpts, setServerOpts] = useState(null) // results from server search (null = not searched)
   const [selectedOption, setSelectedOption] = useState(null) // resolved label for current value
@@ -2083,6 +2084,44 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
     return null
   }, [field, dependencyValues])
 
+  // Beyond the dependency seed: carry the whole parent chain from the record
+  // being edited into the record being quick-created. Creating a Project from a
+  // work order's Project field should not ask for the property, building,
+  // opportunity, or account — the work order already holds all four (Nicholas,
+  // 2026-08-16). Data-driven from the target's declared parents in TABLE_META,
+  // matched against the source draft by relationship suffix so a differently
+  // prefixed column for the SAME relationship still lands
+  // (work_order_account_id → project_account_id).
+  const chainSeed = useMemo(() => {
+    const targetMeta = TABLE_META[field.lookup_table]
+    if (!targetMeta || !sourceValues) return null
+    const relationshipKey = (col) => {
+      const m = String(col).match(/([a-z]+)_id$/)
+      return m ? m[0] : String(col)
+    }
+    const sourceByRelationship = new Map()
+    for (const [k, v] of Object.entries(sourceValues)) {
+      if (v == null || v === '' || k.includes('.') || k.startsWith('__')) continue
+      if (!/_id$/.test(k)) continue
+      const key = relationshipKey(k)
+      if (!sourceByRelationship.has(key)) sourceByRelationship.set(key, v)
+    }
+    const seed = {}
+    for (const col of (targetMeta.parents || [])) {
+      const v = sourceValues[col] ?? sourceByRelationship.get(relationshipKey(col))
+      if (v != null && v !== '') seed[col] = v
+    }
+    return Object.keys(seed).length ? seed : null
+  }, [field.lookup_table, sourceValues])
+
+  // Dependency seed wins where the two disagree — it is the scope the picker
+  // itself is filtered by.
+  const mergedCreateSeed = useMemo(() => {
+    if (!chainSeed) return createSeed
+    if (!createSeed) return chainSeed
+    return { ...chainSeed, ...createSeed }
+  }, [chainSeed, createSeed])
+
   return (
     <SearchableLookup
       value={value}
@@ -2094,7 +2133,7 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
       createTable={field.lookup_table}
       createLabelField={field.lookup_field}
       createObjectLabel={objectLabel}
-      createSeed={createSeed}
+      createSeed={mergedCreateSeed}
       onCreatedOption={(opt) => setExtra(prev => [...prev, opt])}
     />
   )
@@ -2273,6 +2312,7 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
               onChange={(val) => onChange(field.name, val)}
               canCreate={canCreate}
               dependencyValues={field._dependencyValues || null}
+              sourceValues={field._sourceValues || null}
             />
           )
         }
@@ -2305,6 +2345,7 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
             baseOptions={opts}
             onChange={(val) => onChange(field.name, val)}
             canCreate={canCreate}
+            sourceValues={field._sourceValues || null}
           />
         )
       }
@@ -3684,11 +3725,14 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             </span>
             {isEditable ? (
               <EditField
+                // _sourceValues hands the lookup's inline "+ New" the record
+                // being edited, so a quick-created child inherits this record's
+                // parent chain instead of asking for it again.
                 field={f.lookup_dependency?.kind
-                  ? { ...f, _dependencyValues: Object.fromEntries(
+                  ? { ...f, _sourceValues: draft, _dependencyValues: Object.fromEntries(
                       (f.lookup_dependency.depends_on || []).map(k => [k, draft[k]]).filter(([, val]) => val != null)
                     ) }
-                  : f}
+                  : (f.type === 'lookup' ? { ...f, _sourceValues: draft } : f)}
                 value={draft[f.name]} onChange={onChange}
                 picklistOpts={allPicklistOpts?.[f.name]} lookupOpts={allLookupOpts?.[f.name]}
                 recordId={recordId} />
