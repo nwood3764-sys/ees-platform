@@ -1825,6 +1825,24 @@ export async function fetchDependentLookupOptions(field, record) {
         label: r.opportunity_name || r.id.slice(0, 8),
       }))
     }
+    case 'buildings_for_opportunity': {
+      // An enrollment is tied to a building THROUGH its opportunity, so the
+      // Building picker offers the opportunity's own building plus the other
+      // buildings on its property (a multi-building property) — never a
+      // building from somewhere else.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_buildings_for_opportunity', {
+        p_opportunity_ids: dependencyValues,
+        p_include_building_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.building_name || r.id.slice(0, 8),
+      }))
+    }
     case 'projects_for_opportunity': {
       // A project always belongs to an opportunity. Anything that carries both
       // (an assessment, for instance) must only offer projects on that same
