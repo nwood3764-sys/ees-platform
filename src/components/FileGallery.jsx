@@ -161,7 +161,8 @@ export default function FileGalleryWidget({
   const [dragActive, setDragActive] = useState(false)
   const [lightboxIdx, setLightboxIdx] = useState(null) // photos only
   const [previewDoc, setPreviewDoc] = useState(null)   // documents only — modal preview
-  const [confirmDelete, setConfirmDelete] = useState(null) // {id, name}
+  // {id, name} for one item, or {ids:[...], name} for a selection (bulk delete).
+  const [confirmDelete, setConfirmDelete] = useState(null)
   const [stepFilter, setStepFilter] = useState('all')      // WO gallery: 'all' | work_step_id
   const [selectMode, setSelectMode]   = useState(false)    // photos: multi-select for download
   const [selectedIds, setSelectedIds] = useState(() => new Set())
@@ -391,7 +392,24 @@ export default function FileGalleryWidget({
   // ── Delete / reprocess ──────────────────────────────────────────────
   const performDelete = async () => {
     if (!confirmDelete) return
-    const { id, name } = confirmDelete
+    const { id, ids, name } = confirmDelete
+    // Deleting a selection: soft-delete each one, then report how many landed.
+    // Everything here is a soft delete — the rows go to the recycle bin, never
+    // out of the database (LEAP never hard-deletes).
+    if (Array.isArray(ids)) {
+      const del = target === 'photos' ? softDeletePhoto : softDeleteDocument
+      const results = await Promise.allSettled(ids.map(one => del(one)))
+      const failed = results.filter(r => r.status === 'rejected').length
+      const ok = results.length - failed
+      if (ok) toast.success(`Deleted ${ok} ${ok === 1 ? 'photo' : 'photos'}`)
+      if (failed) toast.error(`${failed} could not be deleted`)
+      setConfirmDelete(null)
+      setSelectedIds(new Set())
+      setSelectMode(false)
+      if (lightboxIdx !== null) setLightboxIdx(null)
+      await refresh()
+      return
+    }
     try {
       if (target === 'photos') await softDeletePhoto(id)
       else                     await softDeleteDocument(id)
@@ -583,6 +601,14 @@ export default function FileGalleryWidget({
                   onCancel={exitSelect}
                   onSelectAll={selectAllVisible}
                   onDownload={handleDownloadSelected}
+                  onDeleteSelected={() => {
+                    const ids = visiblePhotos.filter(p => selectedIds.has(p.id)).map(p => p.id)
+                    if (ids.length === 0) return
+                    setConfirmDelete({
+                      ids,
+                      name: `${ids.length} ${ids.length === 1 ? 'photo' : 'photos'}`,
+                    })
+                  }}
                 />
                 {showReportOnly && visiblePhotos.length === 0 ? (
                   <div style={{ padding: '18px 4px', fontSize: 12.5, color: C.textMuted }}>
@@ -640,6 +666,7 @@ export default function FileGalleryWidget({
         <ConfirmDeleteModal
           name={confirmDelete.name}
           target={target}
+          count={Array.isArray(confirmDelete.ids) ? confirmDelete.ids.length : 1}
           onConfirm={performDelete}
           onCancel={() => setConfirmDelete(null)}
         />
@@ -847,7 +874,7 @@ const FLAG_ICON = 'M6 3h12a1 1 0 011 1v17l-7-4-7 4V4a1 1 0 011-1z'
 
 // Toolbar above the grid: report-filter chip, then enter select mode →
 // Select-all / Download / Cancel.
-function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, reportCount, showReportOnly, onToggleReportFilter, onEnterSelect, onCancel, onSelectAll, onDownload }) {
+function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, reportCount, showReportOnly, onToggleReportFilter, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected }) {
   if (totalCount === 0 && !showReportOnly && !reportCount) return null
   const btn = (extra = {}) => ({
     display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -881,6 +908,25 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
             {selectedCount === totalCount ? 'All selected' : `Select all (${totalCount})`}
           </button>
           <button onClick={onCancel} style={btn()}>Cancel</button>
+          {/* Delete the selection. The per-photo delete is hover-revealed and
+              hidden while selecting, so without this there was no way to remove
+              a batch of photos you'd just uploaded (Nicholas, 2026-08-17).
+              Blue, not red, per the design system; soft delete either way. */}
+          <button
+            onClick={onDeleteSelected}
+            disabled={selectedCount === 0}
+            title="Move the selected photos to the recycle bin"
+            style={btn({
+              background: selectedCount === 0 ? C.border : '#eef5fc',
+              borderColor: selectedCount === 0 ? C.border : '#bcd9f2',
+              color: selectedCount === 0 ? C.textMuted : '#1a5a8a',
+              cursor: selectedCount === 0 ? 'default' : 'pointer',
+            })}
+          >
+            <Icon path="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              size={13} color={selectedCount === 0 ? C.textMuted : '#1a5a8a'} />
+            Delete{selectedCount ? ` (${selectedCount})` : ''}
+          </button>
           <button
             onClick={onDownload}
             disabled={selectedCount === 0 || downloading}
@@ -913,6 +959,7 @@ function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onT
         <PhotoTile
           key={p.id}
           photo={p}
+          isMobile={isMobile}
           showStepTag={showStepTag}
           selectMode={selectMode}
           selected={selectedIds?.has(p.id)}
@@ -927,7 +974,7 @@ function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onT
   )
 }
 
-function PhotoTile({ photo, showStepTag, selectMode, selected, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
+function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
   const status = photo.watermark_status
   const url = photo._thumbUrl
   const [hover, setHover] = useState(false)
@@ -1033,7 +1080,10 @@ function PhotoTile({ photo, showStepTag, selectMode, selected, onToggleSelect, o
         </button>
       )}
 
-      {/* Delete — hover-revealed, left of the flag. Hidden while selecting. */}
+      {/* Delete — left of the flag, hidden while selecting (the toolbar's
+          Delete handles a selection). On touch there is no hover, so it stays
+          visible; on desktop it fades in but never sits at zero opacity, which
+          is why it read as "there is no delete option" (Nicholas, 2026-08-17). */}
       {!selectMode && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete() }}
@@ -1044,7 +1094,7 @@ function PhotoTile({ photo, showStepTag, selectMode, selected, onToggleSelect, o
             border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer',
-            opacity: hover ? 1 : 0,
+            opacity: (isMobile || hover) ? 1 : 0.55,
             transition: 'opacity 0.15s',
           }}
           title="Delete"
@@ -1992,9 +2042,10 @@ function WordPreview({ doc }) {
 // Confirm delete
 // ---------------------------------------------------------------------------
 
-function ConfirmDeleteModal({ name, target, onConfirm, onCancel }) {
+function ConfirmDeleteModal({ name, target, count = 1, onConfirm, onCancel }) {
   const [busy, setBusy] = useState(false)
   const noun = target === 'photos' ? 'photo' : 'document'
+  const many = count > 1
   const handleConfirm = async () => {
     setBusy(true)
     try { await onConfirm() } finally { setBusy(false) }
@@ -2022,11 +2073,11 @@ function ConfirmDeleteModal({ name, target, onConfirm, onCancel }) {
           </div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, marginBottom: 4 }}>
-              Delete this {noun}?
+              Delete {many ? `these ${count} ${noun}s` : `this ${noun}`}?
             </div>
             <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
               <strong>{name}</strong> will be moved to the recycle bin. An admin can
-              restore it later if needed.
+              restore {many ? 'them' : 'it'} later if needed.
             </div>
           </div>
         </div>
@@ -2048,7 +2099,7 @@ function ConfirmDeleteModal({ name, target, onConfirm, onCancel }) {
               border: 'none', borderRadius: 5,
               padding: '7px 14px', fontSize: 13, cursor: 'pointer', fontWeight: 500,
             }}
-          >{busy ? 'Deleting…' : 'Delete'}</button>
+          >{busy ? 'Deleting…' : (many ? `Delete ${count}` : 'Delete')}</button>
         </div>
       </div>
     </div>
