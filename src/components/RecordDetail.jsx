@@ -8952,7 +8952,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
 
         {/* Desktop header card (mobile already shows this info in the sticky bar above — mobile shows a compact title + status chip instead) */}
         {!isMobile ? (
-          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, minWidth: 0 }}>
               <RecordVisualBadge
                 tableName={tableName}
@@ -8971,7 +8971,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                   )}
                   {recordNumber && <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted }}>{recordNumber}</span>}
                 </div>
-                <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px' }}>{displayName}</h1>
+                {/* Long record names must wrap, not widen the row: a work order
+                    name composed from project + unit + work type can run past
+                    100 characters, which pushed the action buttons off the card
+                    (Nicholas, 2026-08-16). overflowWrap handles the pathological
+                    case of a single unbroken token. */}
+                <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, margin: '0 0 8px', overflowWrap: 'anywhere' }}>{displayName}</h1>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   {statusLabel && <Badge s={statusLabel} />}
                   {statusLocksRecord && (
@@ -8988,7 +8993,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                 </div>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            {/* flexShrink: 0 is what keeps this cluster on the card — without it
+                the buttons shrink below their content width and spill off the
+                right edge whenever the title is long. */}
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               {editing ? (<>
                 <button onClick={handleSave} disabled={saving} style={{ background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 12.5, fontWeight: 500, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Icon path="M5 13l4 4L19 7" size={13} color="#fff" />{saving ? 'Saving…' : 'Save'}
