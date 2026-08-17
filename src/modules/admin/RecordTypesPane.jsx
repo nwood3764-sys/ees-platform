@@ -32,10 +32,18 @@ import { uploadRecordTypeIcon } from '../../data/storageService'
 // strategy (see NewRecordTypeModal for the four strategies).
 // ---------------------------------------------------------------------------
 
+// Objects whose record types declare which PROJECT record type their records
+// roll their work into. An assessment's project is created by the DB rule
+// derive_assessment_project(), which reads exactly this setting — so which
+// project record type a program's assessment produces is configured here, never
+// guessed in code. Add an object here when its records gain the same need.
+const PROJECT_RECORD_TYPE_OBJECTS = new Set(['assessments'])
+
 export default function RecordTypesPane({ objectName, objectLabel, onCountChange }) {
   const toast = useToast()
   const [rows, setRows] = useState([])
   const [layouts, setLayouts] = useState([])       // all layouts on this object — for dropdowns
+  const [projectRecordTypes, setProjectRecordTypes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
@@ -76,12 +84,19 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
     setLoading(true)
     setError(null)
     try {
-      const [types, layoutRows] = await Promise.all([
+      const [types, layoutRows, projectTypes] = await Promise.all([
         listRecordTypesForObject(objectName),
         fetchPageLayoutsFor(objectName),
+        // Options for the "Project record type" setting. Only the objects whose
+        // records roll their work into a project need it, so nothing else pays
+        // for the extra query.
+        PROJECT_RECORD_TYPE_OBJECTS.has(objectName)
+          ? listRecordTypesForObject('projects').catch(() => [])
+          : Promise.resolve([]),
       ])
       setRows(types)
       setLayouts(layoutRows)
+      setProjectRecordTypes(projectTypes.filter(t => t.isActive))
       // Report count upward so the sub-tab badge stays in sync.
       if (onCountChange) onCountChange(types.length)
     } catch (err) {
@@ -235,6 +250,7 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
               key={row.id}
               row={row}
               objectName={objectName}
+              projectRecordTypes={PROJECT_RECORD_TYPE_OBJECTS.has(objectName) ? projectRecordTypes : null}
               busy={busyRowId === row.id}
               editing={editingRowId === row.id}
               onStartEdit={() => setEditingRowId(row.id)}
@@ -273,7 +289,7 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
 // ─── Record Type Row ───────────────────────────────────────────────────
 
 function RecordTypeRow({
-  row, objectName, busy, editing,
+  row, objectName, projectRecordTypes, busy, editing,
   onStartEdit, onCancelEdit, onSaved,
   onDeactivate, onReactivate, onCreateLayout,
 }) {
@@ -285,6 +301,7 @@ function RecordTypeRow({
   const [state, setState] = useState(row.state || '')
   const [icon, setIcon] = useState(row.icon || '')
   const [color, setColor] = useState(row.color || '')
+  const [projectRecordTypeId, setProjectRecordTypeId] = useState(row.projectRecordTypeId || '')
   const [saving, setSaving] = useState(false)
 
   // Reset local state when row changes or edit is cancelled
@@ -297,8 +314,9 @@ function RecordTypeRow({
       setState(row.state || '')
       setIcon(row.icon || '')
       setColor(row.color || '')
+      setProjectRecordTypeId(row.projectRecordTypeId || '')
     }
-  }, [row.id, editing, row.label, row.value, row.description, row.sortOrder, row.state, row.icon, row.color])
+  }, [row.id, editing, row.label, row.value, row.description, row.sortOrder, row.state, row.icon, row.color, row.projectRecordTypeId])
 
   async function save() {
     if (!label.trim() || !value.trim()) {
@@ -319,6 +337,9 @@ function RecordTypeRow({
         state: state.trim().toUpperCase() || null,
         icon: icon || null,
         color: color || null,
+        // Only sent for objects that carry the setting, so editing a record type
+        // on any other object can never blank a value it never showed.
+        ...(projectRecordTypes ? { projectRecordTypeId: projectRecordTypeId || null } : {}),
       })
       toast.success('Record type updated')
       onSaved()
@@ -455,6 +476,30 @@ function RecordTypeRow({
           rows={2}
           style={{ width: '100%', boxSizing: 'border-box', padding: '6px 9px', fontSize: 12.5, color: C.textPrimary, background: C.card, border: `1px solid ${C.borderDark || C.border}`, borderRadius: 4, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }}
         />
+
+        {projectRecordTypes && (
+          <div style={{ marginTop: 12 }}>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+              Project Record Type
+            </label>
+            <select
+              value={projectRecordTypeId}
+              onChange={e => setProjectRecordTypeId(e.target.value)}
+              style={{ width: '100%', maxWidth: 420, boxSizing: 'border-box', padding: '6px 9px', fontSize: 12.5, color: C.textPrimary, background: C.card, border: `1px solid ${C.borderDark || C.border}`, borderRadius: 4, outline: 'none', fontFamily: 'inherit' }}
+            >
+              <option value="">— Not set —</option>
+              {projectRecordTypes.map(t => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 4, lineHeight: 1.5 }}>
+              The project a record of this record type rolls its work into. A work
+              order cannot exist without a project, so when a record of this type
+              has no project yet, LEAP creates one using this record type. Leave
+              unset and LEAP falls back to a generic Assessment project.
+            </div>
+          </div>
+        )}
 
         <IconColorPicker
           objectName={objectName}

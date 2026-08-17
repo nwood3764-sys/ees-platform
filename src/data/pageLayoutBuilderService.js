@@ -397,7 +397,7 @@ export async function listRecordTypesForObject(objectName) {
   // a relational embed across unrelated tables.
   const { data: types, error: tErr } = await supabase
     .from('picklist_values')
-    .select('id, picklist_value, picklist_label, picklist_description, picklist_sort_order, picklist_is_active, picklist_state, picklist_icon, picklist_color')
+    .select('id, picklist_value, picklist_label, picklist_description, picklist_sort_order, picklist_is_active, picklist_state, picklist_icon, picklist_color, picklist_project_record_type')
     .eq('picklist_object', objectName)
     .eq('picklist_field', 'record_type')
     .order('picklist_sort_order', { ascending: true })
@@ -435,6 +435,10 @@ export async function listRecordTypesForObject(objectName) {
       state: t.picklist_state || null,
       icon: t.picklist_icon || null,
       color: t.picklist_color || null,
+      // Which projects record type a record of THIS record type rolls its work
+      // into. Set on assessments record types; read by the DB rule that gives
+      // an assessment its project (derive_assessment_project).
+      projectRecordTypeId: t.picklist_project_record_type || null,
       assignedLayoutId:   assigned?.id || null,
       assignedLayoutName: assigned?.page_layout_name || null,
     }
@@ -478,6 +482,9 @@ export async function updateRecordType(id, patch) {
   if (patch.state       !== undefined) update.picklist_state       = patch.state || null
   if (patch.icon        !== undefined) update.picklist_icon        = patch.icon || null
   if (patch.color       !== undefined) update.picklist_color       = patch.color || null
+  if (patch.projectRecordTypeId !== undefined) {
+    update.picklist_project_record_type = patch.projectRecordTypeId || null
+  }
 
   const { data, error } = await supabase
     .from('picklist_values')
