@@ -352,7 +352,12 @@ const TABLE_META = {
   price_book_entries:        { module: 'Stock',            label: 'Price Book Entries',   nameColumn: 'price_book_entry_name',  recordNumberColumn: 'price_book_entry_record_number',  statusColumn: null,                       parents: ['price_book_id', 'product_id'],                    parentTables: ['price_books', 'products'] },
   opportunity_record_type_price_books: { module: 'Admin',  label: 'Record Type Price Books', nameColumn: null,                  recordNumberColumn: 'ortpb_record_number',             statusColumn: null,                       parents: ['price_book_id'],                                  parentTables: ['price_books'] },
   property_programs:         { module: 'Enrollment',       label: 'Enrollment',           nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
-  enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['property_id', 'opportunity_id'],                  parentTables: ['properties', 'opportunities'] },
+  // An enrollment is tied to a building THROUGH its opportunity, not to a
+  // property (Nicholas, 2026-08-17). Opportunity leads the parent list so a
+  // child created from an enrollment inherits the anchor first; building and
+  // property follow and are filled by the DB trigger
+  // enrollment_inherit_from_opportunity.
+  enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['opportunity_id', 'building_id', 'property_id'],   parentTables: ['opportunities', 'buildings', 'properties'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
   projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id', 'building_id', 'opportunity_id', 'project_account_id'], parentTables: ['properties', 'buildings', 'opportunities', 'accounts'] },
   // opportunity_id and project_id are declared parents so a child created FROM
@@ -577,7 +582,11 @@ const TRIGGER_DERIVED_REQUIRED = {
   opportunity_line_items: ['oli_name'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
-  enrollments: ['enrollment_name'],
+  // property_id is NOT NULL but is forced from the opportunity by
+  // trg_enrollment_inherit_from_opportunity — an enrollment is tied to a
+  // building through its opportunity, not to a property (Nicholas,
+  // 2026-08-17), so the create pop-up must never demand it.
+  enrollments: ['enrollment_name', 'property_id'],
   // ia_name is composed from the opportunity/property + record type by
   // trg_ia_autoname; ia_program_name is a defaulted legacy column. Neither is
   // part of any intake form, so the create form must never demand them.
@@ -617,7 +626,11 @@ const DERIVED_READONLY = {
   opportunity_line_items: ['oli_name', 'price_book_entry_id'],
   projects: ['project_name'],
   work_orders: ['work_order_name'],
-  enrollments: ['enrollment_name'],
+  // property_id is NOT NULL but is forced from the opportunity by
+  // trg_enrollment_inherit_from_opportunity — an enrollment is tied to a
+  // building through its opportunity, not to a property (Nicholas,
+  // 2026-08-17), so the create pop-up must never demand it.
+  enrollments: ['enrollment_name', 'property_id'],
   // ia_name is composed from the opportunity/property + record type by
   // trg_ia_autoname; ia_program_name is a defaulted legacy column. Neither is
   // part of any intake form, so the create form must never demand them.
@@ -2251,6 +2264,10 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
       return prop ? { property_id: prop } : null
     }
     if (dep.kind === 'projects_for_opportunity') {
+      const opp = dependencyValues.opportunity_id
+      return opp ? { opportunity_id: opp } : null
+    }
+    if (dep.kind === 'buildings_for_opportunity') {
       const opp = dependencyValues.opportunity_id
       return opp ? { opportunity_id: opp } : null
     }
