@@ -1825,6 +1825,23 @@ export async function fetchDependentLookupOptions(field, record) {
         label: r.opportunity_name || r.id.slice(0, 8),
       }))
     }
+    case 'projects_for_opportunity': {
+      // A project always belongs to an opportunity. Anything that carries both
+      // (an assessment, for instance) must only offer projects on that same
+      // opportunity — same parent-chain rule as opportunities_for_property.
+      if (dependencyValues.length === 0) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_projects_for_opportunity', {
+        p_opportunity_ids: dependencyValues,
+        p_include_project_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.project_name || r.id.slice(0, 8),
+      }))
+    }
     case 'products_for_opportunity': {
       // Line-item Product picker: only products with an active price book
       // entry — scoped to the opportunity's price book when it has one,

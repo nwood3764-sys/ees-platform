@@ -355,10 +355,11 @@ const TABLE_META = {
   enrollments:               { module: 'Enrollment',       label: 'Enrollments',          nameColumn: 'enrollment_name',        recordNumberColumn: 'enrollment_record_number',        statusColumn: 'enrollment_status',        parents: ['property_id', 'opportunity_id'],                  parentTables: ['properties', 'opportunities'] },
   work_orders:               { module: 'Field',          label: 'Work Orders',          nameColumn: 'work_order_name',        recordNumberColumn: 'work_order_record_number',        statusColumn: 'work_order_status',        parents: ['project_id', 'opportunity_id', 'property_id', 'building_id'],       parentTables: ['projects', 'opportunities', 'properties', 'buildings'] },
   projects:                  { module: 'Field',          label: 'Projects',             nameColumn: 'project_name',           recordNumberColumn: 'project_record_number',           statusColumn: 'project_status',           parents: ['property_id', 'building_id', 'opportunity_id', 'project_account_id'], parentTables: ['properties', 'buildings', 'opportunities', 'accounts'] },
-  // opportunity_id is a declared parent so a child created FROM an assessment
-  // (its work order) inherits the program opportunity, not just the property
-  // and building — the work order needs it and the assessment already knows it.
-  assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id', 'opportunity_id'],   parentTables: ['properties', 'buildings', 'opportunities'] },
+  // opportunity_id and project_id are declared parents so a child created FROM
+  // an assessment (its work order) inherits both, not just the property and
+  // building — work_orders.project_id is NOT NULL and the assessment knows its
+  // project (derive_assessment_project, migration 20260817163750).
+  assessments:               { module: 'Qualification',  label: 'Assessments',          nameColumn: 'assessment_name',        recordNumberColumn: 'assessment_record_number',        statusColumn: 'assessment_status',        parents: ['property_id', 'building_id', 'opportunity_id', 'project_id'], parentTables: ['properties', 'buildings', 'opportunities', 'projects'] },
   incentive_applications:    { module: 'Qualification',  label: 'Applications',         nameColumn: 'ia_name',                recordNumberColumn: 'ia_record_number',                statusColumn: 'ia_status',                parents: ['opportunity_id', 'property_id', 'building_id', 'project_id'], parentTables: ['opportunities', 'properties', 'buildings', 'projects'] },
   efr_reports:               { module: 'Qualification',  label: 'EFR Reports',          nameColumn: null,                     recordNumberColumn: null,                              statusColumn: null,                       parents: ['property_id'],                                    parentTables: ['properties'] },
   project_payment_requests:  { module: 'Incentives',     label: 'Payment Requests',     nameColumn: null,                     recordNumberColumn: 'ppr_record_number',               statusColumn: 'ppr_status',               parents: ['project_id', 'property_id'],                      parentTables: ['projects', 'properties'] },
@@ -1591,12 +1592,19 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
           const fkTable = parentFkTargets[col]
           if (fkTable) {
             // Keep the parent chain intact inside quick-create too: when the
-            // seed already pins a property, scope building/opportunity pickers
-            // to it via the same dependent-lookup RPCs the full form uses.
-            const scopedKind = effectiveSeed?.property_id
-              ? (fkTable === 'buildings' ? 'buildings_for_property'
-                : fkTable === 'opportunities' ? 'opportunities_for_property' : null)
-              : null
+            // seed already pins a property (or an opportunity), scope the
+            // building / opportunity / project pickers to it via the same
+            // dependent-lookup RPCs the full form uses.
+            const scopedKind = (fkTable === 'projects' && effectiveSeed?.opportunity_id)
+              ? 'projects_for_opportunity'
+              : effectiveSeed?.property_id
+                ? (fkTable === 'buildings' ? 'buildings_for_property'
+                  : fkTable === 'opportunities' ? 'opportunities_for_property' : null)
+                : null
+            // Each kind scopes on a different column, so carry it with the
+            // field rather than assuming property_id.
+            const scopedDependsOn = scopedKind === 'projects_for_opportunity'
+              ? 'opportunity_id' : 'property_id'
             fieldDefs.push({
               name: col,
               // Name a lookup after the object it points at — "Opportunity",
@@ -1607,6 +1615,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
               lookup_table: fkTable,
               lookup_field: TABLE_META[fkTable].nameColumn,
               scopedKind,
+              scopedDependsOn,
               required: true,
             })
             continue
@@ -1661,7 +1670,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
           try {
             fkOpts[f.name] = f.scopedKind
               ? await fetchDependentLookupOptions(
-                  { name: f.name, lookup_dependency: { kind: f.scopedKind, depends_on: ['property_id'] } },
+                  { name: f.name, lookup_dependency: { kind: f.scopedKind, depends_on: [f.scopedDependsOn || 'property_id'] } },
                   effectiveSeed)
               : await fetchLookupOptions(f.lookup_table, f.lookup_field)
           } catch { fkOpts[f.name] = [] }
@@ -2240,6 +2249,10 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
     if (dep.kind === 'opportunities_for_property') {
       const prop = dependencyValues.property_id
       return prop ? { property_id: prop } : null
+    }
+    if (dep.kind === 'projects_for_opportunity') {
+      const opp = dependencyValues.opportunity_id
+      return opp ? { opportunity_id: opp } : null
     }
     return null
   }, [field, dependencyValues])
