@@ -93,6 +93,7 @@ import {
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
 import { buildCreateModalGroups, listUnlaidOutRequiredColumns } from '../lib/createRecordFields'
+import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
 import RecordLink from './RecordLink'
 
@@ -255,6 +256,10 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
   if (fieldDef.format === 'us_state_abbrev') return usStateAbbrev(raw) || '—'
   switch (fieldDef.type) {
     case 'picklist':   return picklists.byId.get(raw) || String(raw)
+    case 'select': {
+      const opt = (fieldDef.options || []).find(o => o.value === raw)
+      return opt ? opt.label : String(raw)
+    }
     case 'phone':      return formatPhoneDisplay(raw)
     // Formula / rollup / inherited fields are computed at read; format by the
     // field's declared return type (falls back to a sensible numeric/text guess).
@@ -663,6 +668,14 @@ async function resolveLookupLabelColumn(targetTable) {
 
 async function buildUnlaidOutRequiredFieldDefs(columns, tableName, recordTypeId) {
   if (!columns.length) return { defs: [], picklistOpts: {} }
+  // Choice columns (see src/data/choiceColumns.js) are text columns with a
+  // fixed set of values — resolved first so they render as a dropdown rather
+  // than the free-text box their column type would otherwise earn.
+  const choiceOptions = new Map()
+  await Promise.all(columns.filter(col => isChoiceColumn(tableName, col)).map(async (col) => {
+    const opts = await getChoiceOptions(tableName, col)
+    if (opts && opts.length) choiceOptions.set(col, opts)
+  }))
   let meta = []
   try { meta = await getEditableFieldsForTable(tableName) } catch { meta = [] }
   const byName = new Map((meta || []).map(c => [c.columnName, c]))
@@ -671,6 +684,8 @@ async function buildUnlaidOutRequiredFieldDefs(columns, tableName, recordTypeId)
   for (const col of columns) {
     const label = humanizeFieldName(col)
     const m = byName.get(col)
+    const choices = choiceOptions.get(col)
+    if (choices) { defs.push({ name: col, label, type: 'select', options: choices, required: true }); continue }
     if (!m) { defs.push({ name: col, label, type: 'text', required: true }); continue }
     if (m.editorType === 'picklist') {
       defs.push({ name: col, label, type: 'picklist', required: true })
@@ -2345,6 +2360,20 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
   }
 
   switch (field.type) {
+    // Choice column — a text column whose value comes from a fixed list
+    // (see src/data/choiceColumns.js). Stores the literal value, not a
+    // picklist_values id, so it can't share the picklist editor.
+    case 'select': {
+      const opts = Array.isArray(field.options) ? field.options : []
+      return (
+        <select style={{ ...inputBase, cursor: 'pointer' }} value={v}
+          onChange={e => onChange(field.name, e.target.value || null)}>
+          <option value="">— Select —</option>
+          {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      )
+    }
+
     case 'text': case 'phone': case 'email':
       return <input type={field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
         style={inputBase} value={v} onChange={e => onChange(field.name, e.target.value)} />
