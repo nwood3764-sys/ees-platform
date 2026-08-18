@@ -651,19 +651,32 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
   if (loading) return <LoadingState />
   if (error)   return <ErrorState error={error} onRetry={onBack} />
 
-  const placedFieldNames = new Set(
-    sections.flatMap(s => (s.widgets || []).filter(w => w.type === 'field_group').flatMap(w => (w.config?.fields || []).map(f => f.name)))
-  )
-  const unplaced = columns.filter(c => !placedFieldNames.has(c.name))
+  // Every field already on this layout, mapped to WHERE it sits. The palette
+  // lists placed fields greyed-out rather than dropping them: a field that
+  // simply vanishes from the list reads as "this object doesn't have that
+  // field," which is how an admin ends up hunting for a Record Type field
+  // that is already sitting in the first section.
+  const placedFieldLocations = new Map()
+  for (const s of sections) {
+    if (!Array.isArray(s.widgets)) continue
+    for (const w of s.widgets) {
+      if (w.type !== 'field_group') continue
+      for (const f of (w.config?.fields || [])) {
+        if (f?.name && !placedFieldLocations.has(f.name)) {
+          placedFieldLocations.set(f.name, { section: s.label || 'Untitled Section', tab: s.tab || 'Details' })
+        }
+      }
+    }
+  }
   // Filter the palette by the search box — match on both the humanized label
   // and the raw API name so a user can find a field either way without
   // scrolling the (often long) field list.
   const fieldQuery = fieldSearch.trim().toLowerCase()
   const available = fieldQuery
-    ? unplaced.filter(c =>
+    ? columns.filter(c =>
         humanize(c.name, meta.object).toLowerCase().includes(fieldQuery) ||
         c.name.toLowerCase().includes(fieldQuery))
-    : unplaced
+    : columns
 
   const modalWidget = relatedModal?.widgetKey
     ? sections.find(s => s.key === relatedModal.sectionKey)?.widgets?.find(w => w.key === relatedModal.widgetKey)
@@ -711,17 +724,31 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
             />
           </div>
           <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 10 }}>
-            {available.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, padding: 6 }}>{fieldQuery ? 'No fields match your search.' : 'All fields placed.'}</div>
-              : available.map(c => (
-                <button key={c.name} onClick={() => activeSection && addField(activeSection, c)} disabled={!activeSection}
-                  title={activeSection ? `Add ${c.name}` : 'Select a section first'}
-                  style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '7px 9px', marginBottom: 5, fontSize: 12.5,
-                    overflow: 'hidden', overflowWrap: 'anywhere',
-                    background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
-                  {humanize(c.name, meta.object)}
-                  <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.name}</span>
-                </button>
-              ))}
+            {available.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, padding: 6 }}>{fieldQuery ? 'No fields match your search.' : 'This object has no fields.'}</div>
+              : available.map(c => {
+                const placed = placedFieldLocations.get(c.name)
+                // Already on the layout: shown, but not addable twice.
+                if (placed) return (
+                  <div key={c.name} title={`Already on this layout — ${placed.tab} tab · ${placed.section}`}
+                    style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '7px 9px', marginBottom: 5, fontSize: 12.5,
+                      overflow: 'hidden', overflowWrap: 'anywhere',
+                      background: C.card, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'default', color: C.textMuted }}>
+                    {humanize(c.name, meta.object)}
+                    <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.name}</span>
+                    <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>On this layout · {placed.section}</div>
+                  </div>
+                )
+                return (
+                  <button key={c.name} onClick={() => activeSection && addField(activeSection, c)} disabled={!activeSection}
+                    title={activeSection ? `Add ${c.name}` : 'Select a section first'}
+                    style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '7px 9px', marginBottom: 5, fontSize: 12.5,
+                      overflow: 'hidden', overflowWrap: 'anywhere',
+                      background: C.cardSecondary, border: `1px solid ${C.border}`, borderRadius: 6, cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
+                    {humanize(c.name, meta.object)}
+                    <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.name}</span>
+                  </button>
+                )
+              })}
 
             {/* Related-object drill-down — Salesforce-style cross-object
                 fields. Expand a lookup to place read-only fields from the
@@ -740,7 +767,6 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
                   const list = Array.isArray(cols)
                     ? cols.filter(c =>
                         !RELATED_HIDDEN_COLUMNS.test(c.column_name) && !c.is_primary_key &&
-                        !placedFieldNames.has(`${g.fk}.${c.column_name}`) &&
                         (!fieldQuery ||
                           c.column_name.toLowerCase().includes(fieldQuery) ||
                           humanize(c.column_name, g.table).toLowerCase().includes(fieldQuery)))
@@ -761,20 +787,33 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
                           {cols === 'loading' && <div style={{ fontSize: 11.5, color: C.textMuted, padding: 4 }}>Loading fields…</div>}
                           {Array.isArray(cols) && list.length === 0 && (
                             <div style={{ fontSize: 11.5, color: C.textMuted, padding: 4 }}>
-                              {fieldQuery ? 'No fields match your search.' : 'All fields placed.'}
+                              {fieldQuery ? 'No fields match your search.' : 'No fields on this object.'}
                             </div>
                           )}
-                          {Array.isArray(cols) && list.map(c => (
-                            <button key={c.column_name} onClick={() => addRelatedField(g, c)} disabled={!activeSection}
-                              title={activeSection ? `Add ${g.fk}.${c.column_name} (read-only)` : 'Select a section first'}
-                              style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '6px 8px', marginBottom: 4, fontSize: 12,
-                                overflow: 'hidden', overflowWrap: 'anywhere',
-                                background: C.card, border: `1px dashed ${C.border}`, borderRadius: 6,
-                                cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
-                              {humanize(c.column_name, g.table)}
-                              <span style={{ fontSize: 9.5, color: C.textMuted, marginLeft: 5, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.column_name}</span>
-                            </button>
-                          ))}
+                          {Array.isArray(cols) && list.map(c => {
+                            const placed = placedFieldLocations.get(`${g.fk}.${c.column_name}`)
+                            if (placed) return (
+                              <div key={c.column_name} title={`Already on this layout — ${placed.tab} tab · ${placed.section}`}
+                                style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '6px 8px', marginBottom: 4, fontSize: 12,
+                                  overflow: 'hidden', overflowWrap: 'anywhere',
+                                  background: C.card, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'default', color: C.textMuted }}>
+                                {humanize(c.column_name, g.table)}
+                                <span style={{ fontSize: 9.5, color: C.textMuted, marginLeft: 5, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.column_name}</span>
+                                <div style={{ fontSize: 9.5, color: C.textMuted, marginTop: 3 }}>On this layout · {placed.section}</div>
+                              </div>
+                            )
+                            return (
+                              <button key={c.column_name} onClick={() => addRelatedField(g, c)} disabled={!activeSection}
+                                title={activeSection ? `Add ${g.fk}.${c.column_name} (read-only)` : 'Select a section first'}
+                                style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '6px 8px', marginBottom: 4, fontSize: 12,
+                                  overflow: 'hidden', overflowWrap: 'anywhere',
+                                  background: C.card, border: `1px dashed ${C.border}`, borderRadius: 6,
+                                  cursor: activeSection ? 'pointer' : 'default', color: C.textPrimary }}>
+                                {humanize(c.column_name, g.table)}
+                                <span style={{ fontSize: 9.5, color: C.textMuted, marginLeft: 5, fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{c.column_name}</span>
+                              </button>
+                            )
+                          })}
                         </div>
                       )}
                     </div>
