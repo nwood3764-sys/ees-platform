@@ -21,11 +21,14 @@ const USER_COLS = [
   { field:'email',         label:'Email',     type:'text',   sortable:true, filterable:true  },
   { field:'phone',         label:'Phone',     type:'text',   sortable:true, filterable:false },
   { field:'portalRole',    label:'Portal Role', type:'select', sortable:true, filterable:true,
-    options:['Property Administrator','Property Viewer'] },
+    options:['Property Administrator','Property Viewer','Service Provider Admin','Service Provider Technician'] },
   { field:'userType',      label:'Portal',    type:'select', sortable:true, filterable:true, options:['Property Owner Portal','Partner Portal'] },
   { field:'organization',  label:'Organization', type:'text', sortable:true, filterable:true },
   { field:'lastLogin',     label:'Last Login',type:'text',   sortable:true, filterable:false },
-  { field:'status',        label:'Status',    type:'select', sortable:true, filterable:true, options:['Active','Inactive','Suspended'] },
+  // portal_users.status picklist values, verbatim — the old ['Active','Inactive',
+  // 'Suspended'] list matched no row, so the filter could never return anything.
+  { field:'status',        label:'Status',    type:'select', sortable:true, filterable:true,
+    options:['Portal User Pending','Portal User Invited','Portal User Active','Portal User Suspended','Portal User Deactivated'] },
 ]
 
 const PARTNER_COLS = [

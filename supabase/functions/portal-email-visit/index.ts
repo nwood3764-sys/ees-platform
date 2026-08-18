@@ -56,7 +56,10 @@ Deno.serve(async (req) => {
     .from("portal_users")
     .select("id, full_name, email, status")
     .eq("auth_user_id", authUid).eq("is_deleted", false).maybeSingle()
-  if (!pu || pu.status !== "Active") return json({ error: "Not an active portal user" }, 403)
+  // portal_users.status is the "Portal User ..." picklist; a bare "Active"
+  // matches no row. Same vocabulary as get_portal_calendar / the portal client.
+  const ACTIVE_PORTAL_STATUSES = ["Portal User Active", "Portal User Invited"]
+  if (!pu || !ACTIVE_PORTAL_STATUSES.includes(pu.status)) return json({ error: "Not an active portal user" }, 403)
   if (!pu.email) return json({ error: "Your portal profile has no email address on file." }, 400)
 
   // ── Grants for this portal user ──
