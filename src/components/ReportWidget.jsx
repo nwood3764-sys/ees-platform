@@ -109,10 +109,11 @@ function ReportWidgetTable({ result, maxRows }) {
   return (
     <>
       <div style={{ overflow:'auto', maxHeight: 320 }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-          {/* Background lives on the <th> cells so the sticky header stays opaque:
-              with border-collapse:collapse a background on <thead> is painted with
-              the table and the scrolled rows read through the header. */}
+        {/* `separate` borders, not collapsed: a collapsed table paints its rows
+            and row groups with the table itself, which strands a sticky header
+            behind the scrolled rows and leaves ghosted rows behind while the
+            tile scrolls. Sticky and every row rule live on the cells. */}
+        <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:12 }}>
           <thead>
             <tr>
               {columns.map((c, idx) => (
@@ -127,11 +128,11 @@ function ReportWidgetTable({ result, maxRows }) {
           </thead>
           <tbody>
             {rows.map((row, ri) => (
-              <tr key={row.id || ri} style={{ borderTop:`1px solid ${C.border}` }}>
+              <tr key={row.id || ri}>
                 {columns.map((c, ci) => {
                   const v = getRowValue(row, c, result)
                   return (
-                    <td key={ci} style={{ padding:'6px 10px', whiteSpace:'nowrap', color:C.textPrimary }}>
+                    <td key={ci} style={{ padding:'6px 10px', whiteSpace:'nowrap', color:C.textPrimary, borderTop:`1px solid ${C.border}` }}>
                       {formatWidgetCell(v)}
                     </td>
                   )
