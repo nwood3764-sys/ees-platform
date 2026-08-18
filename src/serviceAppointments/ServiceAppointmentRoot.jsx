@@ -15,6 +15,7 @@ import ManagePage    from './ManagePage'
 import SlugIndex     from './SlugIndex'
 import ServiceAppointmentHeader from './ServiceAppointmentHeader'
 import ServiceAppointmentFooter from './ServiceAppointmentFooter'
+import { SchedulerIdentityProvider } from './SchedulerIdentityContext'
 import { C } from './styles'
 
 export default function ServiceAppointmentRoot() {
@@ -51,25 +52,27 @@ export default function ServiceAppointmentRoot() {
   }
 
   return (
-    <div style={{
-      minHeight:      '100vh',
-      background:     C.page,
-      color:          C.textPrimary,
-      display:        'flex',
-      flexDirection:  'column',
-    }}>
-      <ServiceAppointmentHeader />
-      <main style={{
-        flex:        1,
-        width:       '100%',
-        maxWidth:    760,
-        margin:      '0 auto',
-        padding:     '24px 16px 48px',
-        boxSizing:   'border-box',
+    <SchedulerIdentityProvider>
+      <div style={{
+        minHeight:      '100vh',
+        background:     C.page,
+        color:          C.textPrimary,
+        display:        'flex',
+        flexDirection:  'column',
       }}>
-        {content}
-      </main>
-      <ServiceAppointmentFooter />
-    </div>
+        <ServiceAppointmentHeader />
+        <main style={{
+          flex:        1,
+          width:       '100%',
+          maxWidth:    760,
+          margin:      '0 auto',
+          padding:     '24px 16px 48px',
+          boxSizing:   'border-box',
+        }}>
+          {content}
+        </main>
+        <ServiceAppointmentFooter />
+      </div>
+    </SchedulerIdentityProvider>
   )
 }

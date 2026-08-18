@@ -15,7 +15,10 @@ import { computeAvailability, createServiceAppointment, requestDispatcherFollowu
 import {
   C, card, label, input, inputFocus, buttonPrimary, buttonSecondary,
   errorBanner, RADIUS, formatSlot, formatTimeRange,
+  companyForState, programPhoneForState, buildCalendarLinks,
+  accessAreasForSlug, isMultifamilySlug,
 } from './styles'
+import { useSchedulerIdentity } from './SchedulerIdentityContext'
 
 // ─── Google Places address autofill ─────────────────────────────────────────
 // Optional: active only when VITE_GOOGLE_MAPS_API_KEY is set at build time — a
@@ -104,6 +107,15 @@ const US_STATES = ['WI','NC','CO','MI','IN','IL','MN','IA']
 
 export default function ServiceAppointmentFlow({ slug }) {
   const meta = SLUG_META[slug]
+  const { setState: setIdentityState } = useSchedulerIdentity()
+
+  // Publish the slug's default state (e.g. NC) to the global header/footer on
+  // first render, so the company identity is correct before the customer even
+  // touches the form. It's refined to the entered state on intake submit.
+  useEffect(() => {
+    if (meta?.defaultState) setIdentityState(meta.defaultState)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Per-person invite links (and the generic public page) may prefill the
   // homeowner's details via query params:
@@ -179,6 +191,7 @@ export default function ServiceAppointmentFlow({ slug }) {
 
   async function handleIntakeSubmit(info) {
     setCustomerInfo(info)
+    setIdentityState(info.state)   // header/footer follow the entered state
     setError(null)
     setStep('loading')
     try {
@@ -279,6 +292,7 @@ export default function ServiceAppointmentFlow({ slug }) {
   if (step === 'success') {
     return (
       <SuccessStep
+        slug={slug}
         meta={meta}
         slot={selectedSlot}
         customerInfo={customerInfo}
@@ -696,66 +710,161 @@ function SummaryRow({ label: text, value, highlight }) {
 
 // ─── SuccessStep ────────────────────────────────────────────────────────────
 
-function SuccessStep({ meta, slot, customerInfo, result, timezone }) {
+function SuccessStep({ slug, meta, slot, customerInfo, result, timezone }) {
   const { date } = formatSlot(slot.start_iso, timezone)
   const range = formatTimeRange(slot.start_iso, slot.end_iso, timezone)
   const manageUrl = result.manage_url || `/sa/manage/${result.service_appointment_token}`
 
+  const state    = customerInfo.state
+  const company  = companyForState(state)
+  const phone    = programPhoneForState(state)
+  const isMF     = isMultifamilySlug(slug)
+  const cityLine = [customerInfo.city, customerInfo.state].filter(Boolean).join(', ') +
+                   (customerInfo.zip ? ` ${customerInfo.zip}` : '')
+  const fullAddr = `${customerInfo.street}, ${cityLine}`.trim()
+  const cal = buildCalendarLinks({
+    title: meta.title,
+    startIso: slot.start_iso,
+    endIso: slot.end_iso,
+    location: fullAddr,
+    details: `${meta.title} by ${company}.` + (phone ? ` Questions: ${phone}` : ''),
+  })
+  const areas = accessAreasForSlug(slug)
+
+  const secLabel = {
+    fontSize: 12, fontWeight: 700, letterSpacing: '0.06em',
+    textTransform: 'uppercase', color: C.textMuted, marginBottom: 5,
+  }
+  const bigVal = { fontSize: 16, fontWeight: 700, color: C.textPrimary }
+  const subVal = { fontSize: 15, color: C.textSecondary, marginTop: 2 }
+  const hr = { borderTop: `1px solid ${C.border}`, margin: '18px 0' }
+  const calBtn = {
+    display: 'inline-block', margin: '4px', padding: '10px 20px',
+    border: `1px solid ${C.borderDark}`, borderRadius: RADIUS,
+    color: C.textPrimary, fontSize: 14, fontWeight: 600, textDecoration: 'none',
+    background: C.card,
+  }
+
   return (
     <div>
-      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+      {/* Hero */}
+      <div style={{ textAlign: 'center', marginBottom: 20 }}>
         <div style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 64, height: 64, borderRadius: '50%',
-          background: C.emeraldBg, marginBottom: 16,
+          width: 62, height: 62, borderRadius: '50%',
+          background: C.emeraldBg, marginBottom: 14,
         }}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M5 12l5 5 9-10" stroke={C.emeraldDark} strokeWidth="2.5"
                   strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 8 }}>
-          You're scheduled.
+        <div style={{
+          color: C.emeraldMid, fontSize: 12, fontWeight: 800,
+          letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 8,
+        }}>You're all set</div>
+        <h1 style={{ fontSize: 25, fontWeight: 800, marginBottom: 8, lineHeight: 1.25 }}>
+          Your energy assessment is scheduled
         </h1>
-        <p style={{ color: C.textSecondary, fontSize: 15 }}>
-          Your appointment is confirmed for <strong style={{ color: C.textPrimary }}>{date}</strong>.
+        <p style={{ color: C.textSecondary, fontSize: 15, margin: 0 }}>
+          You're one step closer to lower energy costs and a more comfortable {isMF ? 'property' : 'home'}.
         </p>
       </div>
 
-      <div style={card}>
-        <SummaryRow label="Service" value={meta.title} />
-        <SummaryRow label="When" value={date} highlight />
-        <SummaryRow label="Time" value={range} />
-        <SummaryRow label="Auditor" value={slot.resource_first_name} />
-        <SummaryRow
-          label="Address"
-          value={`${customerInfo.street}, ${customerInfo.city}, ${customerInfo.state} ${customerInfo.zip}`}
-        />
+      {/* When / Location / Contact card — centered, matches the email */}
+      <div style={{ ...card, textAlign: 'center' }}>
+        <div style={secLabel}>When</div>
+        <div style={bigVal}>{date}</div>
+        <div style={subVal}>{range}</div>
+
+        <div style={hr} />
+
+        <div style={secLabel}>Location</div>
+        <div style={bigVal}>{customerInfo.street}</div>
+        <div style={subVal}>{cityLine}</div>
+        <div style={{ marginTop: 7 }}>
+          <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddr)}`}
+             target="_blank" rel="noreferrer"
+             style={{ color: C.emeraldMid, fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
+            Get directions &rarr;
+          </a>
+        </div>
+
+        <div style={hr} />
+
+        <div style={secLabel}>Contact</div>
+        <div style={bigVal}>{company}</div>
+        {phone && <div style={subVal}>{phone}</div>}
       </div>
 
-      <div style={{
-        ...card,
-        background:  C.cardSecondary,
-        marginTop:   12,
-        fontSize:    13,
-        color:       C.textSecondary,
-        lineHeight:  1.5,
-      }}>
-        <strong style={{ color: C.textPrimary, display: 'block', marginBottom: 6 }}>
-          What happens next
-        </strong>
-        Your auditor will arrive at the scheduled time. Please make sure they
-        can access the property and any mechanical areas (basement, attic,
-        utility closet). The assessment takes about{' '}
-        {Math.round((new Date(slot.end_iso) - new Date(slot.start_iso)) / 60000)} minutes.
-        <br /><br />
-        Bookmark this link to view or reschedule your appointment:
-        <br />
+      {/* Add to calendar */}
+      <div style={{ textAlign: 'center', marginTop: 18 }}>
+        <div style={secLabel}>Add to calendar</div>
+        <div style={{ marginTop: 8 }}>
+          <a href={cal.google}  target="_blank" rel="noreferrer" style={calBtn}>Google</a>
+          <a href={cal.outlook} target="_blank" rel="noreferrer" style={calBtn}>Outlook</a>
+          <a href={cal.icsHref} download="energy-assessment.ics" style={calBtn}>Apple</a>
+        </div>
+      </div>
+
+      {/* Access needed */}
+      <div style={{ ...card, marginTop: 18 }}>
+        <div style={{ ...secLabel, textAlign: 'center', color: C.textPrimary, fontSize: 15, letterSpacing: 0, marginBottom: 12 }}>
+          Access Needed
+        </div>
+        <p style={{ margin: '0 0 14px', color: C.textSecondary, fontSize: 14, lineHeight: 1.5, textAlign: 'center' }}>
+          {isMF
+            ? 'Please make sure the energy assessment team can reach these areas across the property:'
+            : 'Please make sure an adult (18 or older) is home, and that the team can reach these areas:'}
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+          {areas.map(a => (
+            <div key={a} style={{
+              padding: '12px 14px', background: C.cardSecondary,
+              border: `1px solid ${C.border}`, borderRadius: 9,
+              color: C.textPrimary, fontSize: 14, fontWeight: 600,
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{ color: C.emeraldMid, fontWeight: 800 }}>&#10003;</span>{a}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* What happens next */}
+      <div style={{ ...card, marginTop: 18 }}>
+        <div style={{ ...secLabel, textAlign: 'center', color: C.textPrimary, fontSize: 15, letterSpacing: 0, marginBottom: 16 }}>
+          What Happens Next
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+          {[
+            ['1', 'Assessment', 'We evaluate your ' + (isMF ? 'buildings' : 'home')],
+            ['2', 'Assessment Report', 'You get findings & savings opportunities'],
+            ['3', 'Finalize Project Scope', 'We define the upgrades & next steps'],
+          ].map(([n, t, d], i) => (
+            <div key={n} style={{ textAlign: 'center' }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: '50%', margin: '0 auto 10px',
+                background: i === 0 ? C.emeraldBg : '#f2f5fa',
+                color: i === 0 ? C.emeraldDark : C.textMuted,
+                fontWeight: 800, fontSize: 15, lineHeight: '36px',
+              }}>{n}</div>
+              <div style={{ color: C.textPrimary, fontSize: 13, fontWeight: 700 }}>{t}</div>
+              <div style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.4, marginTop: 3 }}>{d}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Manage */}
+      <div style={{ textAlign: 'center', marginTop: 20 }}>
         <a href={manageUrl} style={{
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 12, color: C.emeraldMid,
-          wordBreak: 'break-all', textDecoration: 'none',
-        }}>{manageUrl}</a>
+          display: 'inline-block', padding: '14px 40px', background: C.emerald,
+          color: C.navy, fontSize: 15, fontWeight: 700, textDecoration: 'none', borderRadius: 10,
+        }}>Manage appointment</a>
+        <div style={{ marginTop: 12, color: C.textMuted, fontSize: 13 }}>
+          We'll email you a reminder before your visit.
+        </div>
       </div>
     </div>
   )

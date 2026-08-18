@@ -148,3 +148,66 @@ const STATE_TZ = {
   IN: 'America/Indiana/Indianapolis',
 }
 export const tzForState = (state) => STATE_TZ[String(state || '').toUpperCase()] || DEFAULT_TZ
+
+// ─── State-aware company identity ────────────────────────────────────────────
+// Mirrors STATE_COMPANY / STATE_PROGRAM_PHONE in the fire-notification edge
+// function so the on-screen pages match the emails. Always the full legal
+// "… of <State>" name — never the shortened form.
+const STATE_COMPANY = {
+  WI: 'Energy Efficiency Services of Wisconsin',
+  NC: 'Energy Efficiency Services of North Carolina',
+  MI: 'Energy Efficiency Services of Michigan',
+  CO: 'Energy Efficiency Services of Colorado',
+  IN: 'Energy Efficiency Services of Indiana',
+}
+const STATE_PROGRAM_PHONE = {
+  NC: '(704) 990-5614',
+  WI: '(608) 888-6947',
+}
+export const companyForState = (state) =>
+  STATE_COMPANY[String(state || '').toUpperCase()] || 'Energy Efficiency Services'
+export const programPhoneForState = (state) =>
+  STATE_PROGRAM_PHONE[String(state || '').toUpperCase()] || ''
+
+// ─── Add-to-calendar links ───────────────────────────────────────────────────
+// Google + Outlook deep-links and a downloadable Apple/ICS blob, built entirely
+// client-side from the confirmed slot. Mirrors the calendar links baked into
+// the confirmation email so the success screen offers the same three options.
+const gcalStamp = (iso) => {
+  try { return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '') }
+  catch { return '' }
+}
+export function buildCalendarLinks({ title, startIso, endIso, location, details }) {
+  const enc = encodeURIComponent
+  const gStart = gcalStamp(startIso), gEnd = gcalStamp(endIso)
+  const google = (startIso && endIso)
+    ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${enc(title)}&dates=${gStart}/${gEnd}&location=${enc(location)}&details=${enc(details)}`
+    : ''
+  const outlook = (startIso && endIso)
+    ? `https://outlook.office.com/calendar/0/deeplink/compose?path=%2Fcalendar%2Faction%2Fcompose&rru=addevent&subject=${enc(title)}&startdt=${enc(startIso)}&enddt=${enc(endIso)}&location=${enc(location)}&body=${enc(details)}`
+    : ''
+  const ics = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//EES//Scheduler//EN',
+    'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+    `UID:${gStart}-${Math.abs((title || '').length)}@ees`,
+    `DTSTAMP:${gStart}`, `DTSTART:${gStart}`, `DTEND:${gEnd}`,
+    `SUMMARY:${(title || '').replace(/[\n,;]/g, ' ')}`,
+    `LOCATION:${(location || '').replace(/[\n,;]/g, ' ')}`,
+    `DESCRIPTION:${(details || '').replace(/[\n,;]/g, ' ')}`,
+    'END:VEVENT', 'END:VCALENDAR',
+  ].join('\r\n')
+  const icsHref = `data:text/calendar;charset=utf-8,${enc(ics)}`
+  return { google, outlook, icsHref }
+}
+
+// Access areas the field team needs to reach, shown on the success screen so it
+// matches the confirmation email. Single-family = the resident's own home;
+// multifamily = the owner's common/mechanical areas across buildings.
+const MULTIFAMILY_SLUGS = new Set([
+  'multifamily-energy-assessment',
+  'multifamily-diagnostic-assessment',
+])
+export const isMultifamilySlug = (slug) => MULTIFAMILY_SLUGS.has(String(slug || ''))
+export const accessAreasForSlug = (slug) => isMultifamilySlug(slug)
+  ? ['Common Areas', 'Mechanical Rooms', 'All Buildings', 'The Attic']
+  : ['The Attic', 'Basement or Crawlspace', 'Utility Room', 'Electrical Panel']
