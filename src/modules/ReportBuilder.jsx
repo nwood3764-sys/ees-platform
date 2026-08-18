@@ -668,6 +668,7 @@ function FieldsTab({
       <div style={card()}>
         <div style={cardHeader()}>
           Selected Fields ({report.rpt_selected_fields.length})
+          <ReportBuilderFieldStyles />
         </div>
         <div style={{ padding:12 }}>
           {report.rpt_selected_fields.length === 0 ? (
@@ -675,7 +676,8 @@ function FieldsTab({
           ) : (
             <>
               <div style={{ fontSize:11, color:C.textMuted, marginBottom:8 }}>
-                Drag to reorder columns. Set <strong>Σ</strong> to show a column total (Tabular).
+                Drag <strong>⠿</strong> to reorder columns · <strong>Σ</strong> shows a column total (Tabular)
+                · <strong>◧</strong> formats the column · <strong>Remove</strong> takes the field off the report.
               </div>
               <SortableList
                 items={report.rpt_selected_fields.map(f => ({ id: fieldKey(f), f }))}
@@ -738,8 +740,11 @@ function SelectedFieldRow({ f, setNodeRef, style, dragHandleProps, onUpdate, onR
           {numericish && <option value="max">Max</option>}
         </select>
         <button onClick={() => setOpen(o => !o)} title="Format & conditional color"
+          aria-label={`Format ${f.label}`} className="rb-field-btn"
           style={{ ...miniBtn(), color: hasFormatting ? C.emerald : C.textMuted }}>◧</button>
-        <button onClick={onRemove} style={miniBtn(true)}>×</button>
+        <button onClick={onRemove} className="rb-remove-field"
+          title={`Remove ${f.label} from this report`} aria-label={`Remove ${f.label} from this report`}
+          style={removeFieldBtn()}>Remove</button>
       </div>
 
       {open && (
@@ -2186,6 +2191,27 @@ function btnSecondary(disabled, size) {
     border: `1px solid ${C.borderDark}`, borderRadius: 6,
     cursor: disabled ? 'default' : 'pointer',
   }
+}
+
+// Remove-field control. Reads as a labelled action rather than a pale glyph:
+// the × it replaced carried no tooltip and no text, so the only way to take a
+// field off a report was to guess what the icon did.
+function removeFieldBtn() {
+  return {
+    padding: '0 9px', height: 24, fontSize: 11, fontWeight: 500,
+    background: C.card, color: C.textSecondary,
+    border: `1px solid ${C.borderDark}`, borderRadius: 4, cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  }
+}
+
+function ReportBuilderFieldStyles() {
+  return (
+    <style>{`
+      .rb-remove-field:hover { background:#e8f1fb; border-color:#7eb3e8; color:#2f6ea8; }
+      .rb-field-btn:hover    { background:#f0f3f8; }
+    `}</style>
+  )
 }
 
 function miniBtn(danger) {

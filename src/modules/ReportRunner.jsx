@@ -326,14 +326,14 @@ export function TabularLayout({ result, fill = false }) {
       ...(fill ? { flex:1 } : { maxHeight:'70vh' }),
     }}>
       <ReportViewerStyles />
-      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-        <thead style={{ background:C.cardSecondary, position:'sticky', top:0, zIndex:2 }}>
+      <table style={TABLE_STYLE}>
+        <thead>
           <tr>
             {allColumns.map((c, idx) => {
               const sk = sortKeys.find(k => k.col === idx)
               const rank = sortKeys.length > 1 && sk ? sortKeys.findIndex(k => k.col === idx) + 1 : null
               return (
-                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), background:C.cardSecondary, cursor:'pointer', userSelect:'none' }}
+                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), ...STICKY_HEAD, cursor:'pointer', userSelect:'none' }}
                     onClick={(e) => toggleSort(idx, e.shiftKey)}
                     title="Click to sort · Shift-click to add a sort level">
                   <span style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
@@ -348,9 +348,7 @@ export function TabularLayout({ result, fill = false }) {
         </thead>
         <tbody>
           {sortedRows.map((row, rowIdx) => (
-            <tr key={row.id || rowIdx} className="rpt-detail-row" style={{
-              borderTop: `1px solid ${C.border}`,
-            }}>
+            <tr key={row.id || rowIdx} className="rpt-detail-row">
               {allColumns.map((c, idx) => {
                 if (c._calc) {
                   // Build a flat row of resolved values and evaluate the
@@ -363,7 +361,7 @@ export function TabularLayout({ result, fill = false }) {
                   const v = evaluateRowExpression(c.expression, resolvedRow)
                   const condStyle = conditionalCellStyle(v, c)
                   return (
-                    <td key={`r-${rowIdx}-${idx}`} style={{ ...cellStyle(), ...(condStyle || {}) }}>
+                    <td key={`r-${rowIdx}-${idx}`} style={{ ...cellStyle(), ...ROW_TOP_BORDER, ...(condStyle || {}) }}>
                       {formatReportValue(v, { ...c, type: c.data_type })}
                     </td>
                   )
@@ -383,7 +381,7 @@ export function TabularLayout({ result, fill = false }) {
 
                 if (isEditing) {
                   return (
-                    <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
+                    <td key={`r-${rowIdx}-${idx}`} style={{ ...cellStyle(), ...ROW_TOP_BORDER }}>
                       <ReportPicklistCellEditor
                         meta={meta}
                         value={cellDraft}
@@ -403,7 +401,7 @@ export function TabularLayout({ result, fill = false }) {
                 // so new-tab / copy-link work like any record link.
                 if (idx === 0 && row.id && primaryObject) {
                   return (
-                    <td key={`r-${rowIdx}-${idx}`} style={cellStyle()}>
+                    <td key={`r-${rowIdx}-${idx}`} style={{ ...cellStyle(), ...ROW_TOP_BORDER }}>
                       <RecordLink
                         table={primaryObject}
                         id={row.id}
@@ -423,7 +421,7 @@ export function TabularLayout({ result, fill = false }) {
                 return (
                   <td
                     key={`r-${rowIdx}-${idx}`}
-                    style={{ ...cellStyle(), ...(condStyle || {}), ...(isEditablePicklist ? { cursor:'cell' } : null) }}
+                    style={{ ...cellStyle(), ...ROW_TOP_BORDER, ...(condStyle || {}), ...(isEditablePicklist ? { cursor:'cell' } : null) }}
                     title={isEditablePicklist ? 'Double-click to edit' : undefined}
                     onDoubleClick={isEditablePicklist ? () => {
                       setEditError(null)
@@ -440,9 +438,9 @@ export function TabularLayout({ result, fill = false }) {
         </tbody>
         {summaryRow && (
           <tfoot>
-            <tr style={{ background:C.cardSecondary, borderTop:`2px solid ${C.borderDark}` }}>
+            <tr style={{ background:C.cardSecondary }}>
               {allColumns.map((c, idx) => (
-                <td key={`sum-${idx}`} style={{ ...cellStyle(), fontWeight:600, color:C.textPrimary }}>
+                <td key={`sum-${idx}`} style={{ ...cellStyle(), borderTop:`2px solid ${C.borderDark}`, background:C.cardSecondary, fontWeight:600, color:C.textPrimary }}>
                   {idx === 0 && !summaryRow[idx] ? `${sortedRows.length} records` : (summaryRow[idx] || '')}
                 </td>
               ))}
@@ -647,11 +645,11 @@ export function SummaryLayout({ result, fill = false }) {
         overflow:'auto', minHeight:0,
         ...(fill ? { flex:1 } : { maxHeight:'70vh' }),
       }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-          <thead style={{ background:C.cardSecondary, position:'sticky', top:0, zIndex:2 }}>
+        <table style={TABLE_STYLE}>
+          <thead>
             <tr>
               {detailColumns.map((c, idx) => (
-                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), background:C.cardSecondary }}>{c.label}</th>
+                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), ...STICKY_HEAD }}>{c.label}</th>
               ))}
             </tr>
           </thead>
@@ -854,13 +852,13 @@ function SummaryTreeRows({ nodes, columns, renderColumns, groupings, depth, ctx,
     if (!showDetailRows) return null
     const primaryObject = ctx?.primaryObject
     return nodes.leafRows.map((row, idx) => (
-      <tr key={`leaf-${idx}`} className="rpt-detail-row" style={{ borderTop:`1px solid ${C.border}` }}>
+      <tr key={`leaf-${idx}`} className="rpt-detail-row">
         {renderColumns.map((c, ci) => {
           const val = getRowValue(row, c, ctx)
           const cond = conditionalCellStyle(val, c)
           const display = formatReportValue(val, c)
           return (
-            <td key={ci} style={{ ...cellStyle(), paddingLeft: ci === 0 ? 12 + depth * 18 : 12, ...(cond || {}) }}>
+            <td key={ci} style={{ ...cellStyle(), ...ROW_TOP_BORDER, paddingLeft: ci === 0 ? 12 + depth * 18 : 12, ...(cond || {}) }}>
               {/* First column opens the record, same as a tabular report. */}
               {ci === 0 && row.id && primaryObject ? (
                 <RecordLink
@@ -916,12 +914,15 @@ function SummaryGroupNode({ node, columns, renderColumns, groupings, depth, ctx,
       <tr
         className="rpt-group-row"
         style={{
-          background: depth === 0 ? '#e8eef7' : C.cardSecondary,
-          borderTop:`2px solid ${C.borderDark}`, cursor:'pointer',
+          background: depth === 0 ? '#e8eef7' : C.cardSecondary, cursor:'pointer',
         }}
         onClick={() => toggleGroup(pathKey)}
       >
-        <td colSpan={renderColumns.length} style={{ ...cellStyle(), padding:'9px 12px', paddingLeft: 12 + depth * 18 }}>
+        <td colSpan={renderColumns.length} style={{
+          ...cellStyle(), borderTop:`2px solid ${C.borderDark}`,
+          background: depth === 0 ? '#e8eef7' : C.cardSecondary,
+          padding:'9px 12px', paddingLeft: 12 + depth * 18,
+        }}>
           <span style={{ display:'inline-block', width:16, color:C.textMuted, fontSize:11 }}>{collapsed ? '▸' : '▾'}</span>
           <span style={{ fontSize:11, fontWeight:600, color:C.textSecondary, textTransform:'uppercase', letterSpacing:0.5, marginRight:8 }}>
             {grouping.field_label}
@@ -996,7 +997,7 @@ function prefixAggs(aggs, prefix) {
 // existing summary-formula reports keep working. Group formulas can reference
 // PARENT_/PREV_/GRAND_-prefixed aggregates for % of total, % of parent, and
 // prior-group delta.
-function summaryRowCells({ label, rows, columns, renderColumns, ctx, calcFields, aggregableColumnNames, bold, indent, parentRows, prevRows, grandRows }) {
+function summaryRowCells({ label, rows, columns, renderColumns, ctx, calcFields, aggregableColumnNames, bold, indent, rowStyle, parentRows, prevRows, grandRows }) {
   const resolved = buildResolvedRows(rows, columns, ctx)
   const aggs = computeAggregates(resolved, aggregableColumnNames)
   const scope = { ...aggs }
@@ -1020,6 +1021,7 @@ function summaryRowCells({ label, rows, columns, renderColumns, ctx, calcFields,
     return (
       <td key={i} style={{
         ...cellStyle(),
+        ...(rowStyle || {}),
         fontWeight: bold ? 700 : 600,
         color: i === 0 ? C.textSecondary : C.textPrimary,
         ...(i === 0 && indent ? { paddingLeft: indent } : null),
@@ -1032,8 +1034,9 @@ function summaryRowCells({ label, rows, columns, renderColumns, ctx, calcFields,
 
 function SummarySubtotalRow({ groupRows, columns, renderColumns, depth, ctx, summaryCalcFields, aggregableColumnNames, prevRows, parentRows, grandRows }) {
   return (
-    <tr style={{ background:'#f0f3f8', borderTop:`1px solid ${C.borderDark}` }}>
+    <tr>
       {summaryRowCells({
+        rowStyle: { background:'#f0f3f8', borderTop:`1px solid ${C.borderDark}` },
         label: 'Subtotal',
         rows: groupRows, columns, renderColumns, ctx,
         calcFields: summaryCalcFields, aggregableColumnNames, bold: false,
@@ -1047,8 +1050,9 @@ function SummarySubtotalRow({ groupRows, columns, renderColumns, depth, ctx, sum
 function SummaryTotalRow({ rows, columns, renderColumns, summaryCalcFields, aggregableColumnNames, ctx }) {
   const grandTotalCalc = (summaryCalcFields || []).filter(cf => cf.grouping_level == null)
   return (
-    <tr style={{ background: C.borderDark, borderTop:`2px solid ${C.textSecondary}` }}>
+    <tr>
       {summaryRowCells({
+        rowStyle: { background: C.borderDark, borderTop:`2px solid ${C.textSecondary}` },
         label: `Grand Total (${rows.length.toLocaleString()} records)`,
         rows, columns, renderColumns, ctx,
         calcFields: grandTotalCalc, aggregableColumnNames, bold: true,
@@ -1141,7 +1145,7 @@ export function MatrixLayout({ result, fill = false }) {
       <div style={{ padding:'6px 12px', fontSize:11, color:C.textMuted, borderBottom:`1px solid ${C.border}` }}>
         Measure: <strong style={{ color:C.textSecondary }}>{measureLabel}</strong>
       </div>
-      <table style={{ borderCollapse:'collapse', fontSize:13 }}>
+      <table style={{ ...TABLE_STYLE, width:'auto' }}>
         <thead>
           {/* Column header rows — one row per column-grouping level */}
           {Array.from({ length: headerRowCount }, (_, hLvl) => (
@@ -1167,31 +1171,31 @@ export function MatrixLayout({ result, fill = false }) {
         </thead>
         <tbody>
           {rowLeaves.map((rl, ri) => (
-            <tr key={`rl-${ri}`} style={{ borderTop:`1px solid ${C.border}` }}>
+            <tr key={`rl-${ri}`}>
               {rl.values.map((v, vi) => (
-                <td key={vi} style={{ ...cellStyle(), fontWeight:500, background:C.cardSecondary }}>
+                <td key={vi} style={{ ...cellStyle(), ...ROW_TOP_BORDER, fontWeight:500, background:C.cardSecondary }}>
                   {String(v)}
                 </td>
               ))}
               {colLeaves.map((cl, ci) => (
-                <td key={`c-${ci}`} style={{ ...cellStyle(), textAlign:'right' }}>
+                <td key={`c-${ci}`} style={{ ...cellStyle(), ...ROW_TOP_BORDER, textAlign:'right' }}>
                   {fmt(cellMap.get(`${ri}##${ci}`))}
                 </td>
               ))}
-              <td style={{ ...cellStyle(), textAlign:'right', fontWeight:600, background:'#f0f3f8', borderLeft:`2px solid ${C.borderDark}` }}>
+              <td style={{ ...cellStyle(), ...ROW_TOP_BORDER, textAlign:'right', fontWeight:600, background:'#f0f3f8', borderLeft:`2px solid ${C.borderDark}` }}>
                 {fmt(rowTotals[ri])}
               </td>
             </tr>
           ))}
           {/* Column totals + grand total */}
-          <tr style={{ borderTop:`2px solid ${C.borderDark}`, background:C.borderDark }}>
-            <td colSpan={labelColCount} style={{ ...cellStyle(), fontWeight:700, color:C.textPrimary }}>Total</td>
+          <tr style={{ background:C.borderDark }}>
+            <td colSpan={labelColCount} style={{ ...cellStyle(), ...TOTAL_TOP_BORDER, fontWeight:700, color:C.textPrimary }}>Total</td>
             {colLeaves.map((cl, ci) => (
-              <td key={`ct-${ci}`} style={{ ...cellStyle(), textAlign:'right', fontWeight:600, color:C.textPrimary }}>
+              <td key={`ct-${ci}`} style={{ ...cellStyle(), ...TOTAL_TOP_BORDER, textAlign:'right', fontWeight:600, color:C.textPrimary }}>
                 {fmt(colTotals[ci])}
               </td>
             ))}
-            <td style={{ ...cellStyle(), textAlign:'right', fontWeight:700, color:C.textPrimary, borderLeft:`2px solid ${C.textSecondary}` }}>
+            <td style={{ ...cellStyle(), ...TOTAL_TOP_BORDER, textAlign:'right', fontWeight:700, color:C.textPrimary, borderLeft:`2px solid ${C.textSecondary}` }}>
               {fmt(grandTotal)}
             </td>
           </tr>
@@ -1476,6 +1480,30 @@ function todayStr()   { return new Date().toISOString().slice(0, 10) }
 function sheetSafe(s) { return String(s).replace(/[\\/?*[\]:]/g, '_').slice(0, 31) }
 
 // ─── Style helpers ────────────────────────────────────────────────────────
+
+// Report tables deliberately do NOT use border-collapse:collapse.
+//
+// A collapsed-border table owns its rows' and row-groups' backgrounds and
+// borders: a sticky header painted with the table gets left behind as the rows
+// scroll (fixed once in #494 by moving the background onto the cells), and
+// Chrome repaints a scrolling collapsed table with sticky cells in it
+// incompletely — rows leave ghost pixels behind and read as two rows drawn on
+// top of each other (Nicholas, 2026-08-18, on the Enrolments dashboard tile).
+//
+// With `separate` + zero spacing the geometry is identical, the sticky cells
+// composite independently, and every rule that used to sit on a <tr> now sits
+// on its cells — ROW_TOP_BORDER below. Row borders on a <tr> are NOT painted
+// in this mode, so never put one back there.
+const TABLE_STYLE = {
+  width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:13,
+}
+
+// The row rule, carried by each cell.
+const ROW_TOP_BORDER   = { borderTop:`1px solid ${C.border}` }
+const TOTAL_TOP_BORDER = { borderTop:`2px solid ${C.borderDark}` }
+
+// Header cells pin themselves — sticky belongs on the cells, not on <thead>.
+const STICKY_HEAD = { position:'sticky', top:0, zIndex:2, background:C.cardSecondary }
 
 // Header cells carry their own background: these tables use
 // border-collapse:collapse, where a background set on the sticky <thead> is

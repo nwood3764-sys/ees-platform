@@ -268,12 +268,13 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
     <div
       onClick={canDrill ? () => drillWhole?.() : undefined}
       style={{ overflow:'auto', height:'100%', cursor: canDrill ? 'pointer' : 'default' }}>
-      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
-        {/* Sticky headers must carry their background on the <th> cells, not on
-            <thead>/<tr>: with border-collapse:collapse the browser paints row and
-            row-group backgrounds with the table, so a sticky rowgroup travels
-            without its fill and the scrolled rows show through it. Same reason
-            the bottom rule is an inset box-shadow instead of a border. */}
+      {/* border-collapse stays `separate`: a collapsed table owns its rows'
+          backgrounds and borders, which both strands a sticky header behind the
+          scrolling rows and makes Chrome repaint the scrolling tile incompletely
+          (rows ghost on top of each other). Sticky lives on the cells, and every
+          row rule sits on the cells too — a border on a <tr> is not painted in
+          this mode. */}
+      <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:11 }}>
         <thead>
           <tr>
             {picked.map((c, idx) => (
@@ -288,11 +289,11 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
         </thead>
         <tbody>
           {shown.map((row, ri) => (
-            <tr key={row.id || ri} style={{ borderTop:`1px solid ${C.border}` }}>
+            <tr key={row.id || ri}>
               {picked.map((c, ci) => {
                 const v = getRowValue(row, c, result)
                 return (
-                  <td key={ci} style={{ padding:'4px 8px', whiteSpace:'nowrap' }}>
+                  <td key={ci} style={{ padding:'4px 8px', whiteSpace:'nowrap', borderTop:`1px solid ${C.border}` }}>
                     {v == null ? '—' : (typeof v === 'object' ? '[obj]' : String(v))}
                   </td>
                 )
@@ -1123,7 +1124,7 @@ function MatrixWidget({ result, widget, canDrill, drillTo }) {
   const td = { padding:'5px 9px', fontSize:11.5, whiteSpace:'nowrap', textAlign:'right', fontFamily:'JetBrains Mono, monospace', borderBottom:`1px solid ${C.border}` }
   return (
     <div style={{ overflow:'auto', height:'100%' }}>
-      <table style={{ borderCollapse:'collapse', width:'100%' }}>
+      <table style={{ borderCollapse:'separate', borderSpacing:0, width:'100%' }}>
         <thead>
           <tr>
             <th style={{ ...th, textAlign:'left' }}></th>
