@@ -1510,17 +1510,43 @@ function NotApplicableModal({ stepName, busy, onCancel, onSubmit }) {
 function PhotoStrip({ photos }) {
   const [urls, setUrls] = useState({})   // photo.id -> signedUrl
   const [zoom, setZoom] = useState(null) // signedUrl being viewed full-screen
+  const signedRef = useRef(new Map())    // `${bucket}::${path}` -> signedUrl
+
+  // Key the signing effect on the photo SET's CONTENT, never on the array's
+  // identity. Callers legitimately build this array inline — the screen-flow
+  // runner passes photosOfType(field), a fresh .filter() result on every
+  // render — so keying on the reference re-signed every photo each render,
+  // and since signing sets state (which re-renders, which produces another
+  // new array) it became an endless sign -> re-render -> sign loop. In the
+  // field that loop ran as fast as the network allowed, saturating the
+  // technician's cellular uplink so real photo uploads crawled and timed out,
+  // and it re-downloaded each full-size thumbnail every cycle because the
+  // freshly signed URL changed the <img src> each time. The content key moves
+  // only when a photo is actually added, removed, or repointed.
+  const photoKey = photos.map((p) => `${p.id}:${p.bucket}:${p.path}`).join('|')
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      // Reuse a URL already signed for this object: it keeps the <img src>
+      // stable (no re-download of photos already on screen) and means adding
+      // one photo signs one photo, not the whole strip again.
       const entries = await Promise.all(
-        photos.map(async (p) => [p.id, await signedPhotoUrl(p.bucket, p.path)])
+        photos.map(async (p) => {
+          const cacheKey = `${p.bucket}::${p.path}`
+          let url = signedRef.current.get(cacheKey)
+          if (!url) {
+            url = await signedPhotoUrl(p.bucket, p.path)
+            if (url) signedRef.current.set(cacheKey, url)
+          }
+          return [p.id, url]
+        })
       )
       if (!cancelled) setUrls(Object.fromEntries(entries.filter(([, u]) => u)))
     })()
     return () => { cancelled = true }
-  }, [photos])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoKey])
 
   return (
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
