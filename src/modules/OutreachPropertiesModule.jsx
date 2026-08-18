@@ -109,6 +109,14 @@ const IMPORT_VIEWS = [
   { id:'IMV-03', name:'In Progress',     filters:[{ field:'status', label:'Status', op:'equals', value:'in_progress' }], sortField:'startedAt', sortDir:'desc' },
 ]
 
+// Header cell of the pinned property-list header. Background and the bottom
+// rule live on the cell (not the row/rowgroup) so the sticky header stays
+// opaque under border-collapse:collapse.
+const stickyHeadCell = {
+  position: 'sticky', top: 0, zIndex: 2, background: C.card, fontWeight: 600,
+  boxShadow: `inset 0 -1px 0 ${C.border}`,
+}
+
 function StatCard({ label, value }) {
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'14px 16px' }}>
@@ -398,13 +406,17 @@ function ViewportPropertyList({ rows, onOpenProperty }) {
   return (
     <div style={{ flex:1, overflowY:'auto' }}>
       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-        <thead style={{ position:'sticky', top:0, background:C.card, zIndex:1 }}>
-          <tr style={{ borderBottom:`1px solid ${C.border}`, color:C.textMuted, fontSize:10.5, textTransform:'uppercase', letterSpacing:0.5 }}>
-            <th style={{ textAlign:'left', padding:'8px 14px', fontWeight:600 }}>Property</th>
-            <th style={{ textAlign:'left', padding:'8px 8px',  fontWeight:600 }}>City</th>
-            <th style={{ textAlign:'left', padding:'8px 8px',  fontWeight:600 }}>State</th>
-            <th style={{ textAlign:'right',padding:'8px 8px',  fontWeight:600 }}>Units</th>
-            <th style={{ textAlign:'left', padding:'8px 14px', fontWeight:600 }}>Account</th>
+        {/* The pinned background belongs on the <th> cells: with
+            border-collapse:collapse a background on <thead>/<tr> is painted with
+            the table, so a sticky rowgroup travels without its fill and the
+            scrolled rows read through the header. */}
+        <thead>
+          <tr style={{ color:C.textMuted, fontSize:10.5, textTransform:'uppercase', letterSpacing:0.5 }}>
+            <th style={{ ...stickyHeadCell, textAlign:'left', padding:'8px 14px' }}>Property</th>
+            <th style={{ ...stickyHeadCell, textAlign:'left', padding:'8px 8px'  }}>City</th>
+            <th style={{ ...stickyHeadCell, textAlign:'left', padding:'8px 8px'  }}>State</th>
+            <th style={{ ...stickyHeadCell, textAlign:'right',padding:'8px 8px'  }}>Units</th>
+            <th style={{ ...stickyHeadCell, textAlign:'left', padding:'8px 14px' }}>Account</th>
           </tr>
         </thead>
         <tbody>

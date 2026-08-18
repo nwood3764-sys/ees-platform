@@ -110,13 +110,17 @@ function ReportWidgetTable({ result, maxRows }) {
     <>
       <div style={{ overflow:'auto', maxHeight: 320 }}>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-          <thead style={{ background:C.cardSecondary, position:'sticky', top:0 }}>
+          {/* Background lives on the <th> cells so the sticky header stays opaque:
+              with border-collapse:collapse a background on <thead> is painted with
+              the table and the scrolled rows read through the header. */}
+          <thead>
             <tr>
               {columns.map((c, idx) => (
                 <th key={idx} style={{
                   padding:'6px 10px', fontSize:10, fontWeight:600, color:C.textSecondary,
                   textTransform:'uppercase', letterSpacing:0.5, textAlign:'left', whiteSpace:'nowrap',
-                  borderBottom:`1px solid ${C.border}`,
+                  position:'sticky', top:0, zIndex:2, background:C.cardSecondary,
+                  boxShadow:`inset 0 -1px 0 ${C.border}`,
                 }}>{c.label}</th>
               ))}
             </tr>
