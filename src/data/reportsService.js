@@ -295,6 +295,19 @@ async function describeColumns(tableName) {
   return cols
 }
 
+// Drop a table's cached column list (and derived FK list). Called by
+// addCustomField() so the report builder and page layout editor palettes
+// see a newly added field without a page refresh.
+export function invalidateObjectColumnsCache(tableName) {
+  if (tableName) {
+    _columnsCache.delete(tableName)
+    _fkOutgoingCache.delete(tableName)
+  } else {
+    _columnsCache.clear()
+    _fkOutgoingCache.clear()
+  }
+}
+
 // Outgoing FKs from this table — i.e. columns on this table that are FKs
 // pointing at OTHER tables. describe_object_columns returns these via the
 // is_foreign_key + references_table fields, so we filter the existing

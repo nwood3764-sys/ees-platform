@@ -133,6 +133,13 @@ export function getEditableFieldsForTable(tableName) {
   return promise
 }
 
+// Drop a table's cached column metadata. Called by addCustomField() so
+// editable list views pick up a newly added field without a page refresh.
+export function invalidateEditableFieldsCache(tableName) {
+  if (tableName) _columnsCache.delete(tableName)
+  else _columnsCache.clear()
+}
+
 /**
  * Returns the active picklist options for a given (object, field) pair.
  * Used by the picklist editor to populate the dropdown.

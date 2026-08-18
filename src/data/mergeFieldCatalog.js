@@ -189,6 +189,13 @@ async function describeObject(tableName) {
   return cols
 }
 
+// Drop a table's cached columns. Called by addCustomField() so the merge
+// field picker sees a newly added field without a page refresh.
+export function invalidateMergeFieldColumnsCache(tableName) {
+  if (tableName) _columnCache.delete(tableName)
+  else _columnCache.clear()
+}
+
 /**
  * Load the field list for one merge-field object by key. Returns
  * [{ path, label }] ready to render in the picker's right pane.
