@@ -1040,7 +1040,19 @@ export default function ProjectPortalRoot() {
     try {
       const me = await fetchPortalUserSelf()
       if (!me) { setPhase('login'); return }
-      if (me.status !== 'Active') { setPhase('notportal'); setErrMsg('Your portal access is not active. Contact your project coordinator.'); return }
+      // Portal statuses are the `portal_users.status` picklist: Portal User
+      // Pending / Invited / Active / Suspended / Deactivated. This compared
+      // against a bare 'Active' that no portal user has ever carried, so every
+      // invited owner was told their access was inactive. Matches the provider
+      // portal: Invited counts as in (they get in from the invitation link,
+      // before anything flips them to Active).
+      // A service provider login is a different portal; don't half-open this one.
+      if (me.record_type === 'Provider User') {
+        setPhase('notportal'); setErrMsg('This login is a service provider account. Use the service provider portal.'); return
+      }
+      if (!['Portal User Active', 'Portal User Invited'].includes(me.status)) {
+        setPhase('notportal'); setErrMsg('Your portal access is not active. Contact your project coordinator.'); return
+      }
       setSelf(me)
       const t = await fetchProjectTracker()
       if (t.error === 'no_portal_user') { setPhase('notportal'); setErrMsg('This account is not set up as a portal user.'); return }
