@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase'
 import { loadPicklists } from './outreachService'
 import { invalidateAll } from '../lib/useCachedFetch'
 import { getEditableFieldsForTable } from './fieldMetadataService'
+import { isChoiceColumn, getChoiceOptions } from './choiceColumns'
 export { loadPicklists }
 
 /**
@@ -505,7 +506,10 @@ export async function fetchPageLayout(objectName, recordTypeValue = null, option
 
   return {
     layout,
-    sections: applyConventionalReadOnly(objectName, await applyColumnTypeFallbacks(objectName, sectionList)),
+    sections: applyConventionalReadOnly(
+      objectName,
+      await applyChoiceColumnOptions(objectName, await applyColumnTypeFallbacks(objectName, sectionList)),
+    ),
     actionOverrides,
   }
 }
@@ -528,6 +532,46 @@ export async function fetchPageLayout(objectName, recordTypeValue = null, option
  * lookup that already names its target, is left exactly as authored. Runs on
  * the read path only, so nothing is written back to the layout.
  */
+/**
+ * Turn registered choice columns into real dropdowns.
+ *
+ * A choice column stores plain text drawn from a fixed set (a report's primary
+ * object, a report's format). Layouts authored before the registry existed
+ * declare them as `type:'text'`, which renders a free-text box — so this pass
+ * OVERRIDES a declared text/textarea type, unlike applyColumnTypeFallbacks
+ * which only fills gaps. A layout that already declares its own select with
+ * options is left alone.
+ */
+async function applyChoiceColumnOptions(objectName, sectionList) {
+  const candidates = []
+  for (const sec of sectionList) {
+    for (const w of sec.widgets || []) {
+      if (w.widget_type !== 'field_group' || !Array.isArray(w.widget_config?.fields)) continue
+      if (w.widget_config.fields.some(f => f?.name && isChoiceColumn(objectName, f.name)
+        && !(f.type === 'select' && Array.isArray(f.options)))) candidates.push(w)
+    }
+  }
+  if (candidates.length === 0) return sectionList
+
+  const optionsByColumn = new Map()
+  await Promise.all(Array.from(new Set(
+    candidates.flatMap(w => w.widget_config.fields.filter(f => f?.name && isChoiceColumn(objectName, f.name)).map(f => f.name))
+  )).map(async (col) => {
+    const opts = await getChoiceOptions(objectName, col)
+    if (opts && opts.length) optionsByColumn.set(col, opts)
+  }))
+
+  for (const w of candidates) {
+    const fields = w.widget_config.fields.map(f => {
+      const opts = f?.name ? optionsByColumn.get(f.name) : null
+      if (!opts) return f
+      return { ...f, type: 'select', options: opts }
+    })
+    w.widget_config = { ...w.widget_config, fields }
+  }
+  return sectionList
+}
+
 async function applyColumnTypeFallbacks(objectName, sectionList) {
   const needsType = (f) => {
     if (!f?.name || f.type === 'spacer') return false

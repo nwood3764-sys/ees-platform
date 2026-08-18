@@ -205,10 +205,10 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
       {/* Body — render the report in its own format, scoped by any extraFilters
           from a clicked widget segment (Salesforce-style: a dashboard widget
           opens its source report, filtered to what was clicked). */}
-      <div style={{ flex:1, overflow:'auto', padding:'16px 24px' }}>
-        {result.format === 'tabular' && <TabularLayout result={result} />}
-        {result.format === 'summary' && <SummaryLayout result={result} />}
-        {result.format === 'matrix'  && <MatrixLayout  result={result} />}
+      <div style={{ flex:1, minHeight:0, overflow:'hidden', display:'flex', flexDirection:'column', padding:'16px 24px' }}>
+        {result.format === 'tabular' && <TabularLayout result={result} fill />}
+        {result.format === 'summary' && <SummaryLayout result={result} fill />}
+        {result.format === 'matrix'  && <MatrixLayout  result={result} fill />}
       </div>
     </div>
   )
@@ -216,7 +216,7 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
 
 // ─── Tabular layout ───────────────────────────────────────────────────────
 
-export function TabularLayout({ result }) {
+export function TabularLayout({ result, fill = false }) {
   const { rows, columns, calculatedFields, primaryObject } = result
   // Row-scope calculated fields appear as additional columns alongside the
   // selected fields. Summary-scope calculated fields show on the totals
@@ -320,15 +320,20 @@ export function TabularLayout({ result }) {
   const summaryRow = buildColumnSummaries(sortedRows, allColumns, resolveDisplay)
 
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'auto' }}>
+    <div style={{
+      background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
+      overflow:'auto', minHeight:0,
+      ...(fill ? { flex:1 } : { maxHeight:'70vh' }),
+    }}>
+      <ReportViewerStyles />
       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-        <thead style={{ background:C.cardSecondary, position:'sticky', top:0, zIndex:1 }}>
+        <thead style={{ background:C.cardSecondary, position:'sticky', top:0, zIndex:2 }}>
           <tr>
             {allColumns.map((c, idx) => {
               const sk = sortKeys.find(k => k.col === idx)
               const rank = sortKeys.length > 1 && sk ? sortKeys.findIndex(k => k.col === idx) + 1 : null
               return (
-                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), cursor:'pointer', userSelect:'none' }}
+                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), background:C.cardSecondary, cursor:'pointer', userSelect:'none' }}
                     onClick={(e) => toggleSort(idx, e.shiftKey)}
                     title="Click to sort · Shift-click to add a sort level">
                   <span style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
@@ -343,7 +348,7 @@ export function TabularLayout({ result }) {
         </thead>
         <tbody>
           {sortedRows.map((row, rowIdx) => (
-            <tr key={row.id || rowIdx} style={{
+            <tr key={row.id || rowIdx} className="rpt-detail-row" style={{
               borderTop: `1px solid ${C.border}`,
             }}>
               {allColumns.map((c, idx) => {
@@ -565,14 +570,13 @@ function ReportPicklistCellEditor({ meta, value, setValue, busy, onCommit, onCan
 
 // ─── Summary layout (Phase 2c.2) ──────────────────────────────────────────
 
-export function SummaryLayout({ result }) {
+export function SummaryLayout({ result, fill = false }) {
   const { rows, columns, groupings, calculatedFields } = result
-  if (groupings.length === 0) {
-    return <EmptyState message="Summary reports require at least one grouping. Edit the report to add groupings." />
-  }
-  if (rows.length === 0) {
-    return <EmptyState message="No matching rows." />
-  }
+
+  // Group collapse state lives here (not per node) so Expand/Collapse All can
+  // drive every level at once, Salesforce-style. Keys are the group's path.
+  const [collapsedKeys, setCollapsedKeys]   = useState(() => new Set())
+  const [showDetailRows, setShowDetailRows] = useState(true)
 
   // Summary-scope calculated fields show on group subtotal rows and the
   // grand total row. They use SUM_<field>/COUNT_<field>/AVG_<field>/
@@ -583,39 +587,116 @@ export function SummaryLayout({ result }) {
   // Numeric column names (from the selected fields) used to build the
   // aggregates the summary expression can reference. Columns keep their
   // raw name regardless of label, since expressions reference column names.
+  // Aggregates always span EVERY selected column, including the ones the
+  // detail rows no longer draw.
   const aggregableColumnNames = columns.map(c => c.name)
+
+  // Salesforce parity: a grouped field belongs to its group header, not to
+  // every detail row underneath it. Drop grouping fields from the detail
+  // columns — unless that would leave the table with nothing to draw.
+  const ungrouped = columns.filter(c => !groupings.some(g => isSameReportField(c, g)))
+  const detailColumns = ungrouped.length > 0 ? ungrouped : columns
 
   // Group rows iteratively by each grouping level. Output is a tree of
   // { value, level, rows, children, subtotal }
-  const tree = buildGroupTree(rows, columns, groupings, 0, result)
+  const tree = (groupings.length > 0 && rows.length > 0)
+    ? buildGroupTree(rows, columns, groupings, 0, result)
+    : null
+  const allGroupKeys = tree ? collectGroupKeys(tree) : []
+  const allCollapsed = allGroupKeys.length > 0 && allGroupKeys.every(k => collapsedKeys.has(k))
+
+  const toggleGroup = (key) => setCollapsedKeys(prev => {
+    const next = new Set(prev)
+    if (next.has(key)) next.delete(key); else next.add(key)
+    return next
+  })
+
+  if (groupings.length === 0) {
+    return <EmptyState message="Summary reports require at least one grouping. Edit the report to add groupings." />
+  }
+  if (rows.length === 0) {
+    return <EmptyState message="No matching rows." />
+  }
 
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'auto' }}>
-      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-        <thead style={{ background:C.cardSecondary, position:'sticky', top:0, zIndex:1 }}>
-          <tr>
-            {columns.map((c, idx) => (
-              <th key={`h-${idx}`} style={cellHeaderStyle()}>{c.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          <SummaryTreeRows
-            nodes={tree} columns={columns} groupings={groupings} depth={0}
-            ctx={result} summaryCalcFields={summaryCalcFields}
-            aggregableColumnNames={aggregableColumnNames}
-            parentRows={rows} grandRows={rows}
+    <div style={{ display:'flex', flexDirection:'column', minHeight:0, ...(fill ? { flex:1 } : null) }}>
+      <ReportViewerStyles />
+
+      {/* Display controls — Salesforce's Expand All / Detail Rows toggles. */}
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8, flexWrap:'wrap' }}>
+        <button
+          onClick={() => setCollapsedKeys(allCollapsed ? new Set() : new Set(allGroupKeys))}
+          style={miniBtnStyle()}
+        >{allCollapsed ? 'Expand All' : 'Collapse All'}</button>
+        <label style={{ display:'inline-flex', alignItems:'center', gap:6, fontSize:12, color:C.textSecondary, cursor:'pointer' }}>
+          <input
+            type="checkbox"
+            checked={showDetailRows}
+            onChange={e => setShowDetailRows(e.target.checked)}
+            style={{ accentColor:C.emerald, cursor:'pointer' }}
           />
-          <SummaryTotalRow
-            rows={rows} columns={columns}
-            summaryCalcFields={summaryCalcFields}
-            aggregableColumnNames={aggregableColumnNames}
-            ctx={result}
-          />
-        </tbody>
-      </table>
+          Detail rows
+        </label>
+        <span style={{ fontSize:12, color:C.textMuted }}>
+          {allGroupKeys.length.toLocaleString()} groups · {rows.length.toLocaleString()} records
+        </span>
+      </div>
+
+      <div style={{
+        background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
+        overflow:'auto', minHeight:0,
+        ...(fill ? { flex:1 } : { maxHeight:'70vh' }),
+      }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+          <thead style={{ background:C.cardSecondary, position:'sticky', top:0, zIndex:2 }}>
+            <tr>
+              {detailColumns.map((c, idx) => (
+                <th key={`h-${idx}`} style={{ ...cellHeaderStyle(), background:C.cardSecondary }}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <SummaryTreeRows
+              nodes={tree} columns={columns} renderColumns={detailColumns}
+              groupings={groupings} depth={0}
+              ctx={result} summaryCalcFields={summaryCalcFields}
+              aggregableColumnNames={aggregableColumnNames}
+              parentRows={rows} grandRows={rows}
+              pathPrefix="" collapsedKeys={collapsedKeys} toggleGroup={toggleGroup}
+              showDetailRows={showDetailRows}
+            />
+            <SummaryTotalRow
+              rows={rows} columns={columns} renderColumns={detailColumns}
+              summaryCalcFields={summaryCalcFields}
+              aggregableColumnNames={aggregableColumnNames}
+              ctx={result}
+            />
+          </tbody>
+        </table>
+      </div>
     </div>
   )
+}
+
+// A report column and a grouping point at the same field when both the column
+// name and the FK hop path match.
+function isSameReportField(col, g) {
+  const gf = groupingFieldDef(g)
+  if (!gf.name || !col?.name) return false
+  return col.name === gf.name
+    && (col.via_path || []).join('>') === (gf.via_path || []).join('>')
+}
+
+// Every group's path key, all levels deep — drives Expand/Collapse All.
+function collectGroupKeys(node, prefix = '') {
+  if (!node || !node.children) return []
+  const out = []
+  for (const child of node.children) {
+    const key = `${prefix}/${child.level}:${String(child.value)}`
+    out.push(key)
+    out.push(...collectGroupKeys(child.child, key))
+  }
+  return out
 }
 
 /**
@@ -768,16 +849,31 @@ function buildGroupTree(rows, columns, groupings, level = 0, ctx = null) {
   }
 }
 
-function SummaryTreeRows({ nodes, columns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames, parentRows, grandRows }) {
+function SummaryTreeRows({ nodes, columns, renderColumns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames, parentRows, grandRows, pathPrefix, collapsedKeys, toggleGroup, showDetailRows }) {
   if (!nodes.children) {
+    if (!showDetailRows) return null
+    const primaryObject = ctx?.primaryObject
     return nodes.leafRows.map((row, idx) => (
-      <tr key={`leaf-${idx}`} style={{ borderTop:`1px solid ${C.border}` }}>
-        {columns.map((c, ci) => {
+      <tr key={`leaf-${idx}`} className="rpt-detail-row" style={{ borderTop:`1px solid ${C.border}` }}>
+        {renderColumns.map((c, ci) => {
           const val = getRowValue(row, c, ctx)
           const cond = conditionalCellStyle(val, c)
+          const display = formatReportValue(val, c)
           return (
-            <td key={ci} style={{ ...cellStyle(), paddingLeft: 12 + depth * 16, ...(cond || {}) }}>
-              {formatReportValue(val, c)}
+            <td key={ci} style={{ ...cellStyle(), paddingLeft: ci === 0 ? 12 + depth * 18 : 12, ...(cond || {}) }}>
+              {/* First column opens the record, same as a tabular report. */}
+              {ci === 0 && row.id && primaryObject ? (
+                <RecordLink
+                  table={primaryObject}
+                  id={row.id}
+                  title="Open record"
+                  onActivate={() => {
+                    window.history.pushState(null, '', `/${primaryObject}/${row.id}`)
+                    window.dispatchEvent(new PopStateEvent('popstate'))
+                  }}
+                  style={{ color:'#1a5a8a', fontWeight:600 }}
+                >{display}</RecordLink>
+              ) : display}
             </td>
           )
         })}
@@ -787,7 +883,8 @@ function SummaryTreeRows({ nodes, columns, groupings, depth, ctx, summaryCalcFie
   return nodes.children.map((node, ni) => (
     <SummaryGroupNode
       key={`g-${depth}-${ni}`}
-      node={node} columns={columns} groupings={groupings} depth={depth}
+      node={node} columns={columns} renderColumns={renderColumns}
+      groupings={groupings} depth={depth}
       ctx={ctx} summaryCalcFields={summaryCalcFields}
       aggregableColumnNames={aggregableColumnNames}
       // Group-formula context: the previous peer group's rows (for prior-group
@@ -796,41 +893,65 @@ function SummaryTreeRows({ nodes, columns, groupings, depth, ctx, summaryCalcFie
       prevRows={ni > 0 ? nodes.children[ni - 1].rows : null}
       parentRows={parentRows}
       grandRows={grandRows}
+      pathKey={`${pathPrefix}/${node.level}:${String(node.value)}`}
+      collapsedKeys={collapsedKeys} toggleGroup={toggleGroup}
+      showDetailRows={showDetailRows}
     />
   ))
 }
 
-function SummaryGroupNode({ node, columns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames, prevRows, parentRows, grandRows }) {
+function SummaryGroupNode({ node, columns, renderColumns, groupings, depth, ctx, summaryCalcFields, aggregableColumnNames, prevRows, parentRows, grandRows, pathKey, collapsedKeys, toggleGroup, showDetailRows }) {
   const grouping = groupings[depth]
-  const showSubtotal = grouping.show_subtotal !== false
-  const [collapsed, setCollapsed] = useState(false)
+  const collapsed = collapsedKeys.has(pathKey)
+  const applicableCalc = (summaryCalcFields || []).filter(cf =>
+    cf.grouping_level == null || cf.grouping_level === depth + 1
+  )
+  // A subtotal row only earns its place when it carries an aggregate — the
+  // record count already sits on the group header, so a "subtotal" that only
+  // repeats the group name is noise.
+  const hasAggregates = renderColumns.some(c => c.summarize) || applicableCalc.length > 0
+  const showSubtotal = grouping.show_subtotal !== false && hasAggregates
   return (
     <>
-      <tr style={{ background: C.cardSecondary, borderTop:`2px solid ${C.borderDark}`, cursor:'pointer' }}
-          onClick={() => setCollapsed(c => !c)}>
-        <td colSpan={columns.length} style={{ ...cellStyle(), fontWeight:600, paddingLeft: 12 + depth * 16 }}>
-          <span style={{ display:'inline-block', width:14, color:C.textMuted }}>{collapsed ? '▸' : '▾'}</span>
-          {grouping.field_label}: {String(node.value)} <span style={{ color:C.textMuted, fontWeight:400 }}>({node.rows.length})</span>
+      <tr
+        className="rpt-group-row"
+        style={{
+          background: depth === 0 ? '#e8eef7' : C.cardSecondary,
+          borderTop:`2px solid ${C.borderDark}`, cursor:'pointer',
+        }}
+        onClick={() => toggleGroup(pathKey)}
+      >
+        <td colSpan={renderColumns.length} style={{ ...cellStyle(), padding:'9px 12px', paddingLeft: 12 + depth * 18 }}>
+          <span style={{ display:'inline-block', width:16, color:C.textMuted, fontSize:11 }}>{collapsed ? '▸' : '▾'}</span>
+          <span style={{ fontSize:11, fontWeight:600, color:C.textSecondary, textTransform:'uppercase', letterSpacing:0.5, marginRight:8 }}>
+            {grouping.field_label}
+          </span>
+          <span style={{ fontWeight:600, color:C.textPrimary }}>{String(node.value)}</span>
+          <span style={{
+            marginLeft:8, padding:'1px 8px', borderRadius:10,
+            background:C.card, border:`1px solid ${C.border}`,
+            fontSize:11, fontWeight:500, color:C.textSecondary,
+          }}>{node.rows.length.toLocaleString()}</span>
         </td>
       </tr>
       {!collapsed && (
         <SummaryTreeRows
-          nodes={node.child} columns={columns} groupings={groupings} depth={depth + 1}
+          nodes={node.child} columns={columns} renderColumns={renderColumns}
+          groupings={groupings} depth={depth + 1}
           ctx={ctx} summaryCalcFields={summaryCalcFields}
           aggregableColumnNames={aggregableColumnNames}
           parentRows={node.rows} grandRows={grandRows}
+          pathPrefix={pathKey} collapsedKeys={collapsedKeys} toggleGroup={toggleGroup}
+          showDetailRows={showDetailRows}
         />
       )}
       {showSubtotal && (
         <SummarySubtotalRow
-          groupValue={node.value} grouping={grouping} groupRows={node.rows}
-          columns={columns} depth={depth} ctx={ctx}
-          summaryCalcFields={summaryCalcFields}
+          groupRows={node.rows}
+          columns={columns} renderColumns={renderColumns} depth={depth} ctx={ctx}
+          summaryCalcFields={applicableCalc}
           aggregableColumnNames={aggregableColumnNames}
           prevRows={prevRows} parentRows={parentRows} grandRows={grandRows}
-          // Per-grouping-level calc fields: only render those with no
-          // grouping_level filter, OR those whose grouping_level matches.
-          gradeLevel={depth + 1}
         />
       )}
     </>
@@ -875,14 +996,14 @@ function prefixAggs(aggs, prefix) {
 // existing summary-formula reports keep working. Group formulas can reference
 // PARENT_/PREV_/GRAND_-prefixed aggregates for % of total, % of parent, and
 // prior-group delta.
-function summaryRowCells({ label, rows, columns, ctx, calcFields, aggregableColumnNames, bold, parentRows, prevRows, grandRows }) {
+function summaryRowCells({ label, rows, columns, renderColumns, ctx, calcFields, aggregableColumnNames, bold, indent, parentRows, prevRows, grandRows }) {
   const resolved = buildResolvedRows(rows, columns, ctx)
   const aggs = computeAggregates(resolved, aggregableColumnNames)
   const scope = { ...aggs }
   if (parentRows) Object.assign(scope, prefixAggs(computeAggregates(buildResolvedRows(parentRows, columns, ctx), aggregableColumnNames), 'PARENT_'))
   if (prevRows)   Object.assign(scope, prefixAggs(computeAggregates(buildResolvedRows(prevRows, columns, ctx), aggregableColumnNames), 'PREV_'))
   if (grandRows)  Object.assign(scope, prefixAggs(computeAggregates(buildResolvedRows(grandRows, columns, ctx), aggregableColumnNames), 'GRAND_'))
-  const cells = columns.map((c, i) => (i === 0 ? label : summarizeColumnValue(c, resolved)))
+  const cells = renderColumns.map((c, i) => (i === 0 ? label : summarizeColumnValue(c, resolved)))
   // Place calc-field values into the empty trailing cells (right to left) so
   // per-column summaries keep their own columns and formulas fill the gaps.
   const calcVals = (calcFields || []).map(cf => ({
@@ -890,43 +1011,47 @@ function summaryRowCells({ label, rows, columns, ctx, calcFields, aggregableColu
     title: `${cf.label} (${cf.expression})`,
   }))
   const emptySlots = []
-  for (let i = columns.length - 1; i >= 1; i--) if (cells[i] == null) emptySlots.push(i)
+  for (let i = renderColumns.length - 1; i >= 1; i--) if (cells[i] == null) emptySlots.push(i)
   for (let k = calcVals.length - 1, s = 0; k >= 0 && s < emptySlots.length; k--, s++) {
     cells[emptySlots[s]] = calcVals[k]
   }
   return cells.map((cell, i) => {
     const isCalc = cell && typeof cell === 'object'
     return (
-      <td key={i} style={{ ...cellStyle(), fontWeight: bold ? 700 : 500, color: i === 0 ? C.textSecondary : C.textPrimary, fontStyle: i === 0 && !bold ? 'italic' : 'normal' }}
-          title={isCalc ? cell.title : undefined}>
+      <td key={i} style={{
+        ...cellStyle(),
+        fontWeight: bold ? 700 : 600,
+        color: i === 0 ? C.textSecondary : C.textPrimary,
+        ...(i === 0 && indent ? { paddingLeft: indent } : null),
+      }} title={isCalc ? cell.title : undefined}>
         {isCalc ? cell.text : (cell || '')}
       </td>
     )
   })
 }
 
-function SummarySubtotalRow({ groupValue, grouping, groupRows, columns, depth, ctx, summaryCalcFields, aggregableColumnNames, gradeLevel, prevRows, parentRows, grandRows }) {
-  const applicableCalc = (summaryCalcFields || []).filter(cf =>
-    cf.grouping_level == null || cf.grouping_level === gradeLevel
-  )
+function SummarySubtotalRow({ groupRows, columns, renderColumns, depth, ctx, summaryCalcFields, aggregableColumnNames, prevRows, parentRows, grandRows }) {
   return (
-    <tr style={{ background: '#f0f3f8', borderTop:`1px solid ${C.borderDark}` }}>
+    <tr style={{ background:'#f0f3f8', borderTop:`1px solid ${C.borderDark}` }}>
       {summaryRowCells({
-        label: `Subtotal — ${grouping.field_label}: ${String(groupValue)} (${groupRows.length})`,
-        rows: groupRows, columns, ctx, calcFields: applicableCalc, aggregableColumnNames, bold: false,
+        label: 'Subtotal',
+        rows: groupRows, columns, renderColumns, ctx,
+        calcFields: summaryCalcFields, aggregableColumnNames, bold: false,
+        indent: 12 + depth * 18 + 16,
         prevRows, parentRows, grandRows,
       })}
     </tr>
   )
 }
 
-function SummaryTotalRow({ rows, columns, summaryCalcFields, aggregableColumnNames, ctx }) {
+function SummaryTotalRow({ rows, columns, renderColumns, summaryCalcFields, aggregableColumnNames, ctx }) {
   const grandTotalCalc = (summaryCalcFields || []).filter(cf => cf.grouping_level == null)
   return (
     <tr style={{ background: C.borderDark, borderTop:`2px solid ${C.textSecondary}` }}>
       {summaryRowCells({
-        label: `Grand Total — ${rows.length} rows`,
-        rows, columns, ctx, calcFields: grandTotalCalc, aggregableColumnNames, bold: true,
+        label: `Grand Total (${rows.length.toLocaleString()} records)`,
+        rows, columns, renderColumns, ctx,
+        calcFields: grandTotalCalc, aggregableColumnNames, bold: true,
         // At the grand total, parent and grand are itself; no previous group.
         parentRows: rows, grandRows: rows,
       })}
@@ -951,7 +1076,7 @@ function buildResolvedRows(rows, columns, ctx) {
 
 // ─── Matrix layout (row × column pivot) ──────────────────────────────────
 
-export function MatrixLayout({ result }) {
+export function MatrixLayout({ result, fill = false }) {
   const { rows, groupings, primaryObject } = result
   // Column groupings live on the report's rpt_column_groupings jsonb;
   // result includes rpt_column_groupings on result.report.rpt_column_groupings,
@@ -1008,7 +1133,11 @@ export function MatrixLayout({ result }) {
     : `${measure.type.toUpperCase()}${measure.field ? ' ' + humanizeColumnLabel(measure.field) : ''}`
 
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'auto' }}>
+    <div style={{
+      background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
+      overflow:'auto', minHeight:0,
+      ...(fill ? { flex:1 } : { maxHeight:'70vh' }),
+    }}>
       <div style={{ padding:'6px 12px', fontSize:11, color:C.textMuted, borderBottom:`1px solid ${C.border}` }}>
         Measure: <strong style={{ color:C.textSecondary }}>{measureLabel}</strong>
       </div>
@@ -1366,6 +1495,25 @@ function cellStyle() {
     padding:'8px 12px', color:C.textPrimary, verticalAlign:'top',
     whiteSpace:'nowrap',
   }
+}
+
+function miniBtnStyle() {
+  return {
+    padding:'4px 10px', fontSize:12, fontWeight:500,
+    background:C.card, color:C.textSecondary,
+    border:`1px solid ${C.borderDark}`, borderRadius:6, cursor:'pointer',
+  }
+}
+
+// Scoped stylesheet — inline styles can't express :hover, and a report table
+// without row hover reads as a static dump rather than a record list.
+function ReportViewerStyles() {
+  return (
+    <style>{`
+      .rpt-detail-row:hover > td { background: ${C.cardSecondary}; }
+      .rpt-group-row:hover > td  { filter: brightness(0.985); }
+    `}</style>
+  )
 }
 
 function btnSecondary() {
