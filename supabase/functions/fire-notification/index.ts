@@ -253,12 +253,16 @@ async function buildAppointmentContext(
   const { data: sa, error: saErr } = await supabase
     .from("service_appointments")
     .select(`
-      id, sa_record_number, work_type_id, contact_id, project_id,
+      id, sa_record_number, work_type_id, contact_id, project_id, work_order_id,
       sa_scheduled_start_time, sa_scheduled_end_time, sa_status,
       work_type:work_types!work_type_id ( id, work_type_name, work_type_customer_facing_description ),
       contact:contacts!contact_id ( id, contact_first_name, contact_last_name, contact_name, contact_phone, contact_mobile_phone, contact_email ),
       project:projects!project_id (
         id,
+        property:properties!property_id ( id, property_name, property_street, property_city, property_state, property_zip )
+      ),
+      work_order:work_orders!work_order_id (
+        id, project_id,
         property:properties!property_id ( id, property_name, property_street, property_city, property_state, property_zip )
       )
     `)
@@ -303,7 +307,15 @@ async function buildAppointmentContext(
   // Customer + auditor contact rows (auditor may be null if no SAA yet).
   const c  = (sa as Record<string, any>).contact
   const wt = (sa as Record<string, any>).work_type
-  const prop = (sa as Record<string, any>).project?.property
+  const wo = (sa as Record<string, any>).work_order
+  // The self-scheduler cascade links the SA to its property through the WORK
+  // ORDER (sa.work_order_id → work_orders.property_id); sa.project_id is left
+  // null on those rows. Older/admin-created SAs use sa.project_id directly.
+  // Resolve the property from the work order first, then fall back to project —
+  // without this, self-scheduled bookings render a blank address and the
+  // company name falls back to the short, state-less form.
+  const prop = wo?.property || (sa as Record<string, any>).project?.property
+  const resolvedProjectId = (sa as Record<string, any>).project_id || wo?.project_id || null
   const a    = (assignment as Record<string, any> | null)?.contact
 
   // Format the scheduled window in the customer's local timezone.
@@ -338,7 +350,7 @@ async function buildAppointmentContext(
     appointment: {
       id:                sa.id,
       record_number:     sa.sa_record_number,
-      project_id:        sa.project_id,
+      project_id:        resolvedProjectId,
       work_type_id:      sa.work_type_id,
       start_at:          sa.sa_scheduled_start_time,
       end_at:            sa.sa_scheduled_end_time,

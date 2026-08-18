@@ -26,10 +26,13 @@ import {
   buttonPrimary, buttonSecondary, errorBanner, label,
   formatSlot, formatTimeRange, tzForState,
 } from './styles'
+import { useSchedulerIdentity } from './SchedulerIdentityContext'
 
 export default function ManagePage({ token }) {
   const validShape = /^[a-f0-9]{32}$/.test(token || '')
   if (!validShape) return <InvalidTokenPage />
+
+  const { setState: setIdentityState } = useSchedulerIdentity()
 
   const [view, setView] = useState('loading')
   // loading | error | view | confirm_cancel | canceling | canceled
@@ -46,6 +49,7 @@ export default function ManagePage({ token }) {
       const result = await lookupAppointment(token)
       if (result.status === 'ok') {
         setAppointment(result)
+        if (result.address?.state) setIdentityState(result.address.state)
         if (result.sa_status === 'canceled') {
           setView('canceled')
         } else {

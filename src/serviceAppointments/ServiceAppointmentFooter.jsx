@@ -1,9 +1,16 @@
 // ─── ServiceAppointmentFooter.jsx ───────────────────────────────────────────────────────
-// Small footer below the scheduling flow — company contact + jurisdiction note.
+// Small footer below the scheduling flow — state-aware company + program phone.
+// No hardcoded Wisconsin address/mailbox: the company identity follows the
+// appointment's state via SchedulerIdentityContext.
 
-import { C } from './styles'
+import { C, companyForState, programPhoneForState } from './styles'
+import { useSchedulerIdentity } from './SchedulerIdentityContext'
 
 export default function ServiceAppointmentFooter() {
+  const { state } = useSchedulerIdentity()
+  const company = companyForState(state)
+  const phone   = programPhoneForState(state)
+
   return (
     <footer style={{
       borderTop:  `1px solid ${C.border}`,
@@ -21,15 +28,15 @@ export default function ServiceAppointmentFooter() {
         alignItems: 'center',
         justifyContent: 'space-between',
       }}>
-        <div>
-          Energy Efficiency Services of Wisconsin · 3218 Progress Rd, Madison, WI 53716
-        </div>
-        <div>
-          Questions? <a
-            href="mailto:assessments.wi@EES-WI.org"
-            style={{ color: C.emeraldMid, textDecoration: 'none' }}
-          >assessments.wi@EES-WI.org</a>
-        </div>
+        <div>{company}</div>
+        {phone && (
+          <div>
+            Questions? Call <a
+              href={`tel:${phone.replace(/[^\d]/g, '')}`}
+              style={{ color: C.emeraldMid, textDecoration: 'none', fontWeight: 600 }}
+            >{phone}</a>
+          </div>
+        )}
       </div>
     </footer>
   )
