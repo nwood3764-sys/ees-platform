@@ -26,6 +26,7 @@ import {
   fetchPortalUserSelf,
   fetchProjectTracker,
   fetchPortalCalendar,
+  fetchPortalPhotoUrls,
   oppPct,
   oppBucket,
   oppForProgram,
@@ -360,23 +361,65 @@ function StatusBadge({ status }) {
 }
 
 // Work-step photo thumbnails with a click-to-open lightbox.
+// Photo URLs are signed on demand. photos.file_url is a storage path inside a
+// private bucket, and a portal user has no direct storage access, so the only
+// way to render one is to ask portal-photo-urls — which re-checks the photo
+// against this user's grants and signs it server-side. Cached per photo id for
+// the life of the page, and de-duplicated so a strip that mounts twice makes
+// one request.
+const photoUrlCache = new Map()     // photoId -> { thumb, full } | null
+const photoUrlInFlight = new Map()  // photoId -> Promise
+
+async function resolvePhotoUrls(ids) {
+  const missing = ids.filter((id) => !photoUrlCache.has(id) && !photoUrlInFlight.has(id))
+  if (missing.length) {
+    const req = fetchPortalPhotoUrls(missing)
+      .then((urls) => { missing.forEach((id) => photoUrlCache.set(id, urls[id] || null)) })
+      .catch(() => { missing.forEach((id) => photoUrlCache.set(id, null)) })
+      .finally(() => { missing.forEach((id) => photoUrlInFlight.delete(id)) })
+    missing.forEach((id) => photoUrlInFlight.set(id, req))
+  }
+  await Promise.all(ids.map((id) => photoUrlInFlight.get(id)).filter(Boolean))
+  return ids.reduce((acc, id) => { acc[id] = photoUrlCache.get(id) || null; return acc }, {})
+}
+
+function usePhotoUrls(photos) {
+  const ids = useMemo(() => (photos || []).map((p) => p.id).filter(Boolean), [photos])
+  const key = ids.join(',')
+  const [urls, setUrls] = useState({})
+  useEffect(() => {
+    let alive = true
+    if (!ids.length) { setUrls({}); return undefined }
+    resolvePhotoUrls(ids).then((m) => { if (alive) setUrls(m) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return urls
+}
+
 function PhotoStrip({ photos }) {
   const [idx, setIdx] = useState(null)
+  const urls = usePhotoUrls(photos)
   if (!photos || !photos.length) return null
   const open = idx != null ? photos[idx] : null
+  const openUrl = open ? (urls[open.id]?.full || null) : null
   const lbBtn = { color: '#fff', background: 'rgba(255,255,255,.12)', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 14, cursor: 'pointer' }
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '2px 0 6px 26px' }}>
       {photos.map((p, i) => (
         <div key={p.id} onClick={() => setIdx(i)} title={p.caption}
           style={{ width: 66, height: 50, borderRadius: 6, overflow: 'hidden', cursor: 'pointer', border: `1px solid ${C.border}`, position: 'relative' }}>
-          <img src={p.thumb} alt={p.caption} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          {urls[p.id]?.thumb
+            ? <img src={urls[p.id].thumb} alt={p.caption} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            : <div style={{ width: '100%', height: '100%', background: C.page }} />}
           {p.type && <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, fontSize: 8, fontWeight: 700, color: '#fff', background: 'rgba(13,26,46,.6)', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '.3px' }}>{p.type}</span>}
         </div>
       ))}
       {open && (
         <div onClick={() => setIdx(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(7,17,31,.92)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>
-          <img src={open.url} alt={open.caption} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '86vw', maxHeight: '76vh', borderRadius: 10, objectFit: 'contain' }} />
+          {openUrl
+            ? <img src={openUrl} alt={open.caption} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '86vw', maxHeight: '76vh', borderRadius: 10, objectFit: 'contain' }} />
+            : <div onClick={(e) => e.stopPropagation()} style={{ color: '#fff', fontSize: 13, padding: 40 }}>Loading photo…</div>}
           <div style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{open.caption}{open.type ? ` · ${open.type}` : ''}</div>
           <div style={{ display: 'flex', gap: 12 }}>
             <button style={lbBtn} onClick={(e) => { e.stopPropagation(); setIdx((idx - 1 + photos.length) % photos.length) }}>‹ Prev</button>
