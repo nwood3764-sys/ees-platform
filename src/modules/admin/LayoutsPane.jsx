@@ -70,6 +70,17 @@ export default function LayoutsPane({
     return list
   }, [rows, q, sortKey, sortDir])
 
+  // Record types with no layout of their own fall back to the object's master
+  // layout (the one with no record type) — which is why a record page can look
+  // nothing like the layout an admin was just editing. Name the gap here so it
+  // is visible in Setup instead of only at the record.
+  const coverage = useMemo(() => {
+    const covered = new Set(rows.map(l => l.recordTypeId).filter(Boolean))
+    const uncovered = recordTypes.filter(rt => !covered.has(rt._id))
+    const fallback = rows.find(l => !l.recordTypeId && l.isDefault === 'Yes') || rows.find(l => !l.recordTypeId) || null
+    return { uncovered, fallback }
+  }, [rows, recordTypes])
+
   const refresh = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -156,6 +167,24 @@ export default function LayoutsPane({
           </button>
         </div>
       </div>
+
+      {rows.length > 0 && coverage.uncovered.length > 0 && (
+        <div style={{
+          background: C.cardSecondary, border: `1px solid ${C.borderDark}`, borderLeft: `3px solid ${C.sky}`,
+          borderRadius: 8, padding: '12px 14px', marginBottom: 14,
+        }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, marginBottom: 4 }}>
+            {coverage.uncovered.length} record type{coverage.uncovered.length === 1 ? '' : 's'} without a page layout
+          </div>
+          <div style={{ fontSize: 12, color: C.textSecondary, lineHeight: 1.5 }}>
+            Records of {coverage.uncovered.length === 1 ? 'this record type' : 'these record types'} display{' '}
+            {coverage.fallback
+              ? <><strong style={{ color: C.textPrimary }}>{coverage.fallback.name}</strong> (the layout with no record type)</>
+              : 'no layout at all'}
+            , not a layout of their own: {coverage.uncovered.map(rt => rt.label).join(', ')}.
+          </div>
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <div style={{
