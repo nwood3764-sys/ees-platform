@@ -269,13 +269,19 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
       onClick={canDrill ? () => drillWhole?.() : undefined}
       style={{ overflow:'auto', height:'100%', cursor: canDrill ? 'pointer' : 'default' }}>
       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
-        <thead style={{ background:C.cardSecondary, position:'sticky', top:0 }}>
+        {/* Sticky headers must carry their background on the <th> cells, not on
+            <thead>/<tr>: with border-collapse:collapse the browser paints row and
+            row-group backgrounds with the table, so a sticky rowgroup travels
+            without its fill and the scrolled rows show through it. Same reason
+            the bottom rule is an inset box-shadow instead of a border. */}
+        <thead>
           <tr>
             {picked.map((c, idx) => (
               <th key={idx} style={{
                 padding:'4px 8px', fontSize:10, fontWeight:600, color:C.textSecondary,
                 textTransform:'uppercase', textAlign:'left', whiteSpace:'nowrap',
-                borderBottom:`1px solid ${C.border}`,
+                position:'sticky', top:0, zIndex:2, background:C.cardSecondary,
+                boxShadow:`inset 0 -1px 0 ${C.border}`,
               }}>{c.label}</th>
             ))}
           </tr>
@@ -296,9 +302,11 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
         </tbody>
         {totals && (
           <tfoot>
-            <tr style={{ borderTop:`2px solid ${C.borderDark}`, background:C.cardSecondary, position:'sticky', bottom:0 }}>
+            <tr>
               {totals.map((t, i) => (
-                <td key={i} style={{ padding:'4px 8px', fontWeight:700, fontFamily:'JetBrains Mono, monospace', whiteSpace:'nowrap' }}>
+                <td key={i} style={{ padding:'4px 8px', fontWeight:700, fontFamily:'JetBrains Mono, monospace', whiteSpace:'nowrap',
+                  position:'sticky', bottom:0, zIndex:2, background:C.cardSecondary,
+                  boxShadow:`inset 0 2px 0 ${C.borderDark}` }}>
                   {i === 0 && t === null ? `Total (${shown.length})` : t === null ? '' : fmtTotal(t)}
                 </td>
               ))}
@@ -1110,12 +1118,13 @@ function MatrixWidget({ result, widget, canDrill, drillTo }) {
   const rowTotal = (g) => seriesNames.reduce((a, s) => a + (get(g, s)?.value || 0), 0)
   const colTotal = (s) => groups.reduce((a, g) => a + (get(g, s)?.value || 0), 0)
   const grand = groups.reduce((a, g) => a + rowTotal(g), 0)
-  const th = { padding:'5px 9px', fontSize:10, fontWeight:600, color:C.textSecondary, textTransform:'uppercase', whiteSpace:'nowrap', borderBottom:`1px solid ${C.border}`, textAlign:'right' }
+  const th = { padding:'5px 9px', fontSize:10, fontWeight:600, color:C.textSecondary, textTransform:'uppercase', whiteSpace:'nowrap', textAlign:'right',
+    position:'sticky', top:0, zIndex:2, background:C.cardSecondary, boxShadow:`inset 0 -1px 0 ${C.border}` }
   const td = { padding:'5px 9px', fontSize:11.5, whiteSpace:'nowrap', textAlign:'right', fontFamily:'JetBrains Mono, monospace', borderBottom:`1px solid ${C.border}` }
   return (
     <div style={{ overflow:'auto', height:'100%' }}>
       <table style={{ borderCollapse:'collapse', width:'100%' }}>
-        <thead style={{ position:'sticky', top:0, background:C.cardSecondary }}>
+        <thead>
           <tr>
             <th style={{ ...th, textAlign:'left' }}></th>
             {seriesNames.map(s => <th key={s} style={th}>{s}</th>)}

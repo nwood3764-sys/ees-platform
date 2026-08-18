@@ -1348,11 +1348,16 @@ function sheetSafe(s) { return String(s).replace(/[\\/?*[\]:]/g, '_').slice(0, 3
 
 // ─── Style helpers ────────────────────────────────────────────────────────
 
+// Header cells carry their own background: these tables use
+// border-collapse:collapse, where a background set on the sticky <thead> is
+// painted with the table and left behind, letting the scrolled rows show
+// through the pinned header. The bottom rule is an inset shadow for the same
+// reason (a collapsed border on a sticky cell scrolls away with the table).
 function cellHeaderStyle() {
   return {
     padding:'10px 12px', fontSize:11, fontWeight:600, color:C.textSecondary,
     textTransform:'uppercase', letterSpacing:0.5, textAlign:'left',
-    borderBottom:`1px solid ${C.border}`, whiteSpace:'nowrap',
+    background:C.cardSecondary, boxShadow:`inset 0 -1px 0 ${C.border}`, whiteSpace:'nowrap',
   }
 }
 
