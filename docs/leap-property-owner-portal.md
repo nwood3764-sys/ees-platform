@@ -43,6 +43,21 @@ No rows were created — every test transaction rolled back; `portal_user_proper
 
 Help article **HA-00108** rewritten ("The Property Owner Portal") — it still described a hardcoded 10-phase HOMES/HEAR bar and no calendar.
 
+### Round 2, same day — photos, and the storage hole they exposed
+
+With login working, the first real look at the portal showed **every photo as a broken image**. Two defects, one of them serious:
+
+1. **Photos could never have rendered.** `photos.file_url` holds a *storage path* (`work_steps/<id>/originals/<uuid>.jpg`), not a URL, and `work-evidence` is a private bucket. `PhotoStrip` rendered `<img src={path}>`, which the browser resolved against the site root and 404'd. `thumbnail_url` is NULL on all 499 work-step photos, so the fallback was the same path. The internal app never hit this because it resolves paths through `hydratePhotoUrls()` → `createSignedUrl`; the portal was written as though `file_url` were a public URL.
+2. **Every private bucket was readable by any authenticated user** — the policies were blanket `TO authenticated USING (bucket_id = '<bucket>')`, for all four verbs. Portal users authenticate through the same Supabase Auth instance and hold the `authenticated` role, so the moment portal login started working, any property owner or service provider could list, download, overwrite, or **delete** every object in `work-evidence`, `property-documents`, `program-applications`, `service-provider-documents`, `templates`, `signatures`, `communications-attachments` and `fleet-evidence` — including other owners' properties. Nothing exploited it: until that day no external user could sign in at all. It was latent, and Lane A is what would have made it live.
+
+Fixed by:
+
+- **Locking every private bucket to internal staff.** Each policy keeps its original bucket condition and gains `current_app_user_id() IS NOT NULL` — true for every internal staff member (they have a `public.users` row), false for every portal user (portal identities live in `portal_users`). Verified: an internal user still sees all 1,238 `work-evidence` objects; a portal-only user now sees **0** objects in **every** bucket. No portal code path is affected — neither portal client touches `supabase.storage` at all. `portal-uploads` was locked the same way deliberately; when Phase 1 builds portal upload it gets its own grant-scoped policy instead of inheriting a blanket one.
+- **A purpose-built read route: `portal-photo-urls`.** Takes photo ids, resolves the caller to a portal user, re-resolves each photo server-side through `work_step → work_order → property/building`, filters to that user's grants with the same account guard the two read RPCs apply, and returns 15-minute signed URLs minted with the service role. Prefers the watermarked variant — the copy stamped with the work step name — matching `hydratePhotoUrls`. Ids outside the caller's grants are simply absent from the response.
+- **Client**: `PhotoStrip` signs lazily per strip (≈5 photos) through a module-level cache with in-flight de-duplication, so opening one unit doesn't sign the whole portfolio. For the LSS preview that's 351 photos across 46 work orders available, signed a handful at a time.
+
+**Known-bad data noticed in passing, not fixed:** `photos.storage_path_watermarked` is the original path with the filename appended a second time (`…/<uuid>.jpg/<uuid>.jpg`). Objects do exist at those keys, so rendering works, but it is a path-composition bug in `process-photo` worth correcting before the row count grows.
+
 ---
 
 ## 3. Current-state architecture map
@@ -135,6 +150,8 @@ Make `Property Administrator` vs `Property Viewer` actually differ (upload/sign/
 - **DECIDED 2026-08-18 (Nicholas):** revisit the portal, repair-and-prove first (Lane A), then build the Actions half (Lane B).
 - **DECIDED 2026-08-18:** the owner portal gets its own record type, **Property Owner User**, paired with but never sharing anything with `Provider User`. `Portal User Invited` counts as able to sign in (they arrive from the invitation link before anything flips them to Active).
 - **DECIDED 2026-08-18:** the calendar read carries the same account guard as the tracker. Both portal reads are authenticated-only; anon revoked.
+- **DECIDED 2026-08-18:** private storage buckets are internal-staff only. External users never get direct storage access; portal media is served exclusively through purpose-built, grant-checking edge functions that mint short-lived signed URLs. Portal document upload (Phase 1) follows the same rule — its own grant-scoped policy, never a blanket one.
+- **OPEN — `process-photo` watermarked path bug.** `storage_path_watermarked` doubles the filename segment. Harmless today; fix before the photo table grows.
 - **OPEN — property-level opportunities.** The tracker requires `building_id`, so an opportunity recorded at property level is invisible to the owner. Recommendation: show it on the property page rather than silently dropping it. Needs Nicholas's call on whether property-level opportunities are legitimate at all.
 - **OPEN — `portal-email-visit` sender mailbox.** Hardcoded `assessments.wi@EES-WI.org`; the rest of the email layer routes by `obm_purpose`. Recommendation: route it like everything else, which for WI correspondence means `ira@ees-wi.org`. Not changed unilaterally — it changes which mailbox customers see.
 - **OPEN — first real invitation.** Lane A proved the read path without emailing anyone. The first live invite should go to an internal EES address before any real property owner.

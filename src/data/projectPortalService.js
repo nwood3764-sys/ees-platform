@@ -121,6 +121,22 @@ export async function fetchProjectTracker() {
   return { portalUserId: payload.portal_user_id, properties }
 }
 
+// ─── Photo URLs ──────────────────────────────────────────────────────────────
+// photos.file_url is a STORAGE PATH, not a URL, and work-evidence is a private
+// bucket that portal users have no direct access to — so the paths the tracker
+// returns cannot be rendered. The portal-photo-urls edge function re-checks
+// each photo against this user's property grants and returns short-lived
+// signed URLs for the ones they're allowed to see.
+export async function fetchPortalPhotoUrls(photoIds) {
+  const ids = Array.from(new Set((photoIds || []).filter(Boolean)))
+  if (!ids.length) return {}
+  const { data, error } = await supabase.functions.invoke('portal-photo-urls', {
+    body: { photo_ids: ids },
+  })
+  if (error) throw error
+  return (data && data.urls) || {}
+}
+
 // ─── Calendar (site visits / service appointments) ──────────────────────────
 export async function fetchPortalCalendar() {
   const { data, error } = await supabase.rpc('get_portal_calendar')
