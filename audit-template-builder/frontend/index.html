@@ -3180,6 +3180,11 @@ function invoiceModel(){
   const drift=Math.round((total-rows.reduce((a,r)=>a+r.cost,0))*100)/100;
   if(drift&&rows.length){let mx=0;rows.forEach((r,i)=>{if(r.cost>rows[mx].cost)mx=i;});
     rows[mx].cost=Math.round((rows[mx].cost+drift)*100)/100;}
+  // North Carolina proposals & invoices break every scope line into a 50/50
+  // labor/material split (NC HOMES cost-documentation requirement). Material
+  // absorbs the odd cent so labor + material == the line cost exactly. Computed
+  // on every model (cheap); only the NC documents render the two columns.
+  rows.forEach(r=>{r.labor=Math.round(r.cost*50)/100; r.material=Math.round((r.cost-r.labor)*100)/100;});
   return {units,roofSqFt,baseAtticR,iMin,savings,state,tier,homesAmt,foe,foeAmt,total,rows,
     fields:Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))};
 }
@@ -3257,7 +3262,11 @@ async function buildInvoiceWorkbook(){
     // measure rows 22–29 (5 known lines; extras cleared)
     const rowRefs=[22,23,24,25,26,27,28,29];
     m.rows.forEach((r,i)=>{const n=rowRefs[i];
-      x=xlsSet(x,'B'+n,r.name); x=xlsSet(x,'D'+n,r.desc);
+      // NC: the fixed workbook template has no Labor/Material columns, so the
+      // 50/50 split rides in the description cell (the EES PDF renders true
+      // columns). Every other state is unchanged.
+      const dsc=m.state==='NC'?r.desc+'  [Labor '+_money(r.labor)+' | Material '+_money(r.material)+']':r.desc;
+      x=xlsSet(x,'B'+n,r.name); x=xlsSet(x,'D'+n,dsc);
       x=xlsSet(x,'I'+n,r.qty!=null?r.qty:''); x=xlsSet(x,'K'+n,r.unit);
       x=xlsSetFormula(x,'L'+n,'P'+n,r.cost);
       x=xlsSet(x,'O'+n,r.frac); x=xlsSetFormula(x,'P'+n,'$P$20*O'+n,r.cost);
@@ -3409,13 +3418,23 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       t(AMT,st.y+11,r[5],{align:'right'});
       st.y+=h;});
   }else{
-    /* size QTY / UNIT / AMOUNT to their widest contents (plus padding) */
+    /* size QTY / UNIT / AMOUNT to their widest contents (plus padding). NC
+       proposals & invoices add LABOR and MATERIAL columns (50% each) ahead of
+       the line total — every other state keeps the original 4-column layout. */
+    const isNC=m.state==='NC';
     font(9); const qw=Math.max(24,...m.rows.map(r=>d.getTextWidth(_qty(r.qty))))+14;
     const uw=Math.max(24,...m.rows.map(r=>d.getTextWidth(String(r.unit||''))))+14;
     font(9.5,'bold'); const aw=Math.max(46,...m.rows.map(r=>d.getTextWidth(_money(r.cost))))+16;
-    const AX0=W-M-aw, UX0=AX0-uw, DX=UX0-qw;
+    let lw=0,mw=0;
+    if(isNC){const lwM=Math.max(...m.rows.map(r=>d.getTextWidth(_money(r.labor))));
+      const mwM=Math.max(...m.rows.map(r=>d.getTextWidth(_money(r.material))));
+      font(7.5,'bold');
+      lw=Math.max(lwM,d.getTextWidth('LABOR'))+16; mw=Math.max(mwM,d.getTextWidth('MATERIAL'))+16;}
+    const AX0=W-M-aw, MX0=AX0-mw, LX0=MX0-lw, UX0=LX0-uw, DX=UX0-qw;
     const CM=[{x0:M+22,x1:DX,lbl:'MEASURE LINE ITEM'},{x0:DX,x1:UX0,lbl:'QTY',align:'right'},
-      {x0:UX0,x1:AX0,lbl:'UNIT'},{x0:AX0,x1:W-M,lbl:'AMOUNT',align:'right'}];
+      {x0:UX0,x1:LX0,lbl:'UNIT'}];
+    if(isNC)CM.push({x0:LX0,x1:MX0,lbl:'LABOR',align:'right'},{x0:MX0,x1:AX0,lbl:'MATERIAL',align:'right'});
+    CM.push({x0:AX0,x1:W-M,lbl:'AMOUNT',align:'right'});
     gridHeader(CM);
     tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');
     const descW=DX-(M+28)-10;
@@ -3431,7 +3450,8 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       tc(C.ink); font(9,'bold'); nameLines.forEach((ln,k)=>t(M+28,st.y+12+k*11,ln));
       font(8.5); t(UX0-5,vc,_qty(r.qty),{align:'right'});
       t(UX0+6,vc,r.unit);
-      font(9,'bold'); t(AMT,vc,_money(r.cost),{align:'right'});
+      if(isNC){tc(C.ink); font(9); t(MX0-5,vc,_money(r.labor),{align:'right'}); t(AX0-5,vc,_money(r.material),{align:'right'});}
+      tc(C.ink); font(9,'bold'); t(AMT,vc,_money(r.cost),{align:'right'});
       font(8); tc([57,67,77]);
       const dy=st.y+12+nameLines.length*11+1;
       dl.forEach((ln,k)=>t(M+28,dy+k*9,ln));
