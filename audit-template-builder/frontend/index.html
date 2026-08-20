@@ -3181,10 +3181,12 @@ function invoiceModel(){
   if(drift&&rows.length){let mx=0;rows.forEach((r,i)=>{if(r.cost>rows[mx].cost)mx=i;});
     rows[mx].cost=Math.round((rows[mx].cost+drift)*100)/100;}
   // North Carolina proposals & invoices break every scope line into a 50/50
-  // labor/material split (NC HOMES cost-documentation requirement). Material
-  // absorbs the odd cent so labor + material == the line cost exactly. Computed
-  // on every model (cheap); only the NC documents render the two columns.
-  rows.forEach(r=>{r.labor=Math.round(r.cost*50)/100; r.material=Math.round((r.cost-r.labor)*100)/100;});
+  // labor/material split (NC HOMES cost-documentation requirement). When the
+  // line cost is an odd number of cents the half doesn't divide evenly, so
+  // LABOR carries the extra cent and MATERIAL takes the clean floored half —
+  // labor + material == the line total exactly. Computed on every model
+  // (cheap); only the NC documents render the two columns.
+  rows.forEach(r=>{r.material=Math.floor(r.cost*50)/100; r.labor=Math.round((r.cost-r.material)*100)/100;});
   return {units,roofSqFt,baseAtticR,iMin,savings,state,tier,homesAmt,foe,foeAmt,total,rows,
     fields:Object.fromEntries(PJ_FIELDS.map(f=>[f,pj(f)]))};
 }
@@ -3434,7 +3436,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const CM=[{x0:M+22,x1:DX,lbl:'MEASURE LINE ITEM'},{x0:DX,x1:UX0,lbl:'QTY',align:'right'},
       {x0:UX0,x1:LX0,lbl:'UNIT'}];
     if(isNC)CM.push({x0:LX0,x1:MX0,lbl:'LABOR',align:'right'},{x0:MX0,x1:AX0,lbl:'MATERIAL',align:'right'});
-    CM.push({x0:AX0,x1:W-M,lbl:'AMOUNT',align:'right'});
+    CM.push({x0:AX0,x1:W-M,lbl:isNC?'TOTAL':'AMOUNT',align:'right'});
     gridHeader(CM);
     tc([70,82,98]); font(7.5,'bold'); t(M+5,st.y-5,'#');
     const descW=DX-(M+28)-10;
