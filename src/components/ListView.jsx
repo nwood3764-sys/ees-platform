@@ -958,6 +958,9 @@ function ColumnPicker({
     let next;
     if (selectedSet.has(field)) {
       next = currentOrdered.filter(f => f !== field && !alwaysOn.includes(f));
+      // Never let the user hide the last remaining column — a zero-column table
+      // is unusable. Everything else, including the identity columns, is hideable.
+      if (next.length === 0) return;
     } else {
       // Append so the user's most-recently-added column shows at the right.
       next = [...currentOrdered.filter(f => !alwaysOn.includes(f)), field];
@@ -1028,7 +1031,10 @@ function ColumnPicker({
             </div>
             {cols.map(col => {
               const on = isVisible(col.field);
-              const locked = alwaysOn.includes(col.field) || col.locked;
+              // `col.locked` (id/name) means "hidden from the filter-field
+              // picker", NOT "unhideable as a column" — so it does not lock the
+              // column toggle here. Only `alwaysOn` (currently empty) locks.
+              const locked = alwaysOn.includes(col.field);
               return (
                 <div key={col.field}
                   onClick={() => toggle(col.field)}
@@ -1818,9 +1824,13 @@ export function ListView({
   }, [columns, columnCatalog]);
   const rowKeyFor = (field) => fieldAlias.get(field) || field;
 
-  // Columns that can never be hidden: the primary 'name' (the row's click
-  // target / label) and 'id' (record number, the leading identity column).
-  const ALWAYS_ON_COLS = ['id', 'name'];
+  // No column is mandatory. Identity columns ('id' record number, 'name') used
+  // to be force-shown on every list view, but object names here are long and
+  // concatenated, so the user needs to hide them like any other column. Rows
+  // stay openable via row double-click (desktop) / tap (mobile card), which
+  // don't depend on the name/id cell being rendered. The column picker keeps at
+  // least one column visible so the table is never blank.
+  const ALWAYS_ON_COLS = [];
   const systemViews = Array.isArray(systemViewsProp) && systemViewsProp.length > 0
     ? systemViewsProp
     : [{ id: '__default__', name: 'All', filters: [], sortField: null, sortDir: 'asc' }]
@@ -1856,27 +1866,27 @@ export function ListView({
   const [sortField, setSortField] = useState(firstView?.sortField || null);
   const [sortDir, setSortDir] = useState(firstView?.sortDir || 'asc');
   const [activeFilters, setActiveFilters] = useState([...(firstView?.filters || [])]);
-  // Column visibility for the active view. null = show all columns (default).
-  // When set, it's an array of column field names to show, in the catalog's
-  // order. The record-identity columns ('name', and the record-number 'id'
-  // shown first) are always kept so a row is never un-clickable / unlabeled.
+  // Column visibility for the active view. null = show the default column set.
+  // When set, it's an array of column field names to show, in the user's chosen
+  // order — any column, including the record-identity columns ('id'/'name'), can
+  // be hidden. The column picker keeps at least one column so the table is never
+  // blank; rows stay openable via row double-click regardless of which columns show.
   const [visibleColumns, setVisibleColumns] = useState(null);
   const [showColPicker, setShowColPicker] = useState(false);
   const [colPickerRect, setColPickerRect] = useState(null);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
-  // The columns actually rendered: full catalog when visibleColumns is null,
-  // otherwise the catalog filtered to the visible set (preserving catalog
-  // order) with always-on columns forced in. Header, rows, and the mobile
-  // card all map over effectiveColumns so a hidden column disappears
-  // everywhere consistently.
+  // The columns actually rendered: the default set when visibleColumns is null,
+  // otherwise exactly the user's chosen set in their chosen order. Header and
+  // rows map over effectiveColumns so a hidden column disappears everywhere
+  // consistently. (ALWAYS_ON_COLS is empty — no column is force-shown.)
   const effectiveColumns = useMemo(() => {
     // Default view (no explicit selection): show the default column set.
     if (!Array.isArray(visibleColumns)) return columns;
-    // Explicit selection: render in the user's chosen order. Identity columns
-    // (id, name) are always forced to the front so a row stays clickable. Each
-    // field resolves through the merged catalog so related/extra columns the
-    // user added render even though they're not in the default set.
+    // Explicit selection: render in the user's chosen order. Any always-on
+    // columns (currently none) would be forced to the front. Each field
+    // resolves through the merged catalog so related/extra columns the user
+    // added render even though they're not in the default set.
     const ordered = [];
     const seen = new Set();
     for (const f of ALWAYS_ON_COLS) {
