@@ -510,9 +510,8 @@ function parseAssetScore(t){
   // so the export can pick the right WaterHeaterEfficiencyType.
   {const _wh=t.match(/Water Heater Efficiency\s+([\d.]+)\s*(UEF|EF|Et|COP)?/i);
    d.whe=_wh?parseFloat(_wh[1]):null; d.wheUnit=(_wh&&_wh[2])?_wh[2].toUpperCase():null;}
-  // Boiler / heating plant detail (page "BUILDING CHARACTERISTICS SUMMARY / Plants").
-  d.boilerYear=num(/Year of Manufacture\s+(\d{4})/,t);          // first = heating plant
-  d.boilerEff=num(/Thermal Efficiency\s+([\d.]+)%/,t);          // "Thermal Efficiency 80.0% Et"
+  // Boiler / heating plant thermal efficiency ("Thermal Efficiency 80.0% Et").
+  d.boilerEff=num(/Thermal Efficiency\s+([\d.]+)%/,t);
   // Heating system: first REAL heating source on the block pages + its fuel.
   // (A "Through The Wall AC" system reports "Heating Source No Heating"; the
   // actual heat shows on the secondary system, e.g. "Convective Baseboard: Electric".)
@@ -523,6 +522,16 @@ function parseAssetScore(t){
     const _hf=t.slice(Math.max(0,_hi),_hi+180).match(/Fuel Type\s+([^\n]+)/);
     d.heatingFuel=_hf?_hf[1].trim():null;
   }
+  // Heating plant's OWN Year of Manufacture — scoped to the real heating-source
+  // block. The COOLING block prints before heating, so the first global
+  // "Year of Manufacture" is the AC's; sourcing the heating year from that made
+  // an electric baseboard export the AC's year (e.g. 2000 instead of 1987).
+  d.boilerYear=(function(){
+    if(d.heatingSource){const _hyi=t.indexOf('Heating Source '+d.heatingSource);
+      if(_hyi>=0){const _m=t.slice(_hyi,_hyi+300).match(/Year of Manufacture\s+(\d{4})/);
+        if(_m)return parseInt(_m[1],10);}}
+    const _g=t.match(/Year of Manufacture\s+(\d{4})/); return _g?parseInt(_g[1],10):null;
+  })();
   // A heat pump ALWAYS runs on electricity — treat any heat-pump source as
   // electric even when the report's Fuel Type line doesn't spell out "Electric".
   // Without this, a heat-pump building fell through the electric-heating
@@ -2038,11 +2047,11 @@ async function build50121XML(which){
   // Cooling: the report DOES print the equipment's own year ("Cooling Equipment
   // ... Year of Manufacture"), so use it; year built only as fallback.
   for(const tag of ['DomesticHotWaterSystem','CoolingSource']){
-    // Use the equipment's own Year of Manufacture from the report (cooling ->
-    // coolYear, water heater -> the first equipment year), year built only as
-    // the fallback — never override a real equipment year with year built.
+    // Cooling uses its own Year of Manufacture (coolYear); the water heater has
+    // no printed year, so it uses year built per the EES rule — never the
+    // heating plant's year (that was a heating->water-heater cross).
     const yr = tag==='CoolingSource' ? (as.coolYear!=null?as.coolYear:as.yearBuilt)
-                                     : (as.boilerYear!=null?as.boilerYear:as.yearBuilt);
+                                     : as.yearBuilt;
     for(const sys of _q(doc,tag)){
       const yi=sys.getElementsByTagNameNS(NS_AUC,'YearInstalled')[0];
       if(yi&&yr!=null)yi.textContent=String(yr);
@@ -2178,7 +2187,7 @@ async function build50121XML(which){
     const oc=boiler.getElementsByTagNameNS(NS_AUC,'OutputCapacity')[0];
     if(oc&&as.heatCap!=null)oc.textContent=String(Math.round(as.heatCap));
     const eff=boiler.getElementsByTagNameNS(NS_AUC,'AnnualHeatingEfficiencyValue')[0];
-    if(eff&&(as.boilerEff!=null||as.whe!=null))eff.textContent=Number(as.boilerEff!=null?as.boilerEff:as.whe).toFixed(1);
+    if(eff&&as.boilerEff!=null)eff.textContent=Number(as.boilerEff).toFixed(1);  // boiler eff only — never the water-heater's
   }
   const hp=_q(doc,'HeatingPlant')[0];
   if(hp&&as.boilerYear!=null){
