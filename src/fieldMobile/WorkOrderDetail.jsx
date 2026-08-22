@@ -29,6 +29,14 @@ import {
   fetchActiveUsers, fetchAccountContactsForWorkOrder,
 } from './fieldMobileService'
 import { uploadPhoto } from '../data/storageService'
+import {
+  imageFilesFrom,
+  imageFilesFromDrop,
+  dragCarriesFiles,
+  uploadProgressLabel,
+  uploadResultLabel,
+} from '../lib/photoDrop'
+import { photoTagLabel, isMeaningfulTag } from '../lib/photoTags'
 import { supabase } from '../lib/supabase'
 import { C, FONT, MONO, card, btnPrimary, btnSecondary, btnDisabled, statusChip } from './styles'
 
@@ -249,11 +257,15 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
   // completed in any order — the auditor walks the house non-linearly. Order was
   // never enforced server-side, so this only relaxes the client's step locking.
   const anyOrder = !!header.allow_any_order
-  // Even in any-order mode the FIRST step gates the rest: e.g. the assessment's
-  // Front Door arrival photo must be captured before the other sections unlock.
-  // Once it's done (or is a corrections re-do), everything else opens up.
-  const gateStep = orderedSteps[0]
-  const gateDone = !gateStep || isStepDone(gateStep) || isStepCorrections(gateStep)
+  // In any-order mode EVERY section is open from the start. An assessor walks a
+  // building the way the building lets them — the roof hatch is open now, the
+  // boiler room is locked until the super arrives — so ordering the sections
+  // costs real time and captures nothing extra (Nicholas, 2026-08-22: "they
+  // don't have to go in order... the user should be able to go to each
+  // section"). The first step used to gate the rest, which on a 15-section
+  // assessment meant 14 locked cards. Nothing is lost by opening them: each
+  // section still refuses to complete until its own evidence is captured, and
+  // the work order still refuses to submit until every section is done.
 
   // ── Step handlers ───────────────────────────────────────────────────────
   const handleComplete = async (step) => {
@@ -377,20 +389,18 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
       />
 
       {/* Steps */}
-      <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 13, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, margin: '4px 2px 10px' }}>
-        Work Steps · {anyOrder ? 'first section first, then any order' : 'complete in order'}
-      </div>
+      <WorkPlanProgress
+        steps={orderedSteps}
+        anyOrder={anyOrder}
+      />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {orderedSteps.map((step, i) => {
-          const isFirst = i === 0
           const locked = anyOrder
-            ? (!isFirst && !gateDone && !isStepCorrections(step))
+            ? false
             : (i > actionableIdx && actionableIdx !== -1 && !isStepCorrections(step))
           const isActionable = !isStepDone(step) && (
-            anyOrder
-              ? (isFirst || gateDone || isStepCorrections(step))
-              : (i === actionableIdx || isStepCorrections(step))
+            anyOrder || i === actionableIdx || isStepCorrections(step)
           )
           return step.is_screen_flow ? (
             <ScreenFlowCard
@@ -446,8 +456,15 @@ export default function WorkOrderDetail({ woId, navigate, embedded = false, onCh
           >
             {busy === 'submit' ? 'Submitting…'
               : allDone ? 'Submit for Verification'
-              : `Complete all steps to submit (${orderedSteps.filter(isStepDone).length}/${orderedSteps.length})`}
+              : `Complete all sections to submit (${orderedSteps.filter(isStepDone).length}/${orderedSteps.length})`}
           </button>
+        )}
+        {/* Naming what is still missing beats a disabled button: the work order
+            cannot be submitted until every section is captured, so the assessor
+            needs to know which ones and why without opening all of them. */}
+        {!allDone && !woStatus.includes('to be verified')
+          && !woStatus.includes('verified') && !woStatus.includes('complete') && (
+          <OutstandingSections steps={orderedSteps} />
         )}
       </div>
 
@@ -640,6 +657,104 @@ function UnableModal({ busy, onCancel, onSubmit }) {
   )
 }
 
+// ─── WorkPlanProgress ───────────────────────────────────────────────────────
+// How much of the work plan is captured, stated as a number and a bar.
+//
+// An assessment runs 15 to 17 sections and an assessor jumping between them
+// has no way to judge how far along they are from a list of cards (Nicholas,
+// 2026-08-22: "There needs to be a progress bar showing"). Sections marked Not
+// Applicable count as settled — they are a decision, not a gap — so the bar
+// reaches 100% exactly when the work order becomes submittable.
+function WorkPlanProgress({ steps, anyOrder }) {
+  const total = steps.length
+  const done = steps.filter(isStepDone).length
+  const na = steps.filter((st) => (st.status || '').toLowerCase() === 'not applicable').length
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+  const complete = total > 0 && done === total
+  return (
+    <div style={{ ...card, padding: 12, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{
+          fontFamily: FONT, fontWeight: 700, fontSize: 13, color: C.textMuted,
+          textTransform: 'uppercase', letterSpacing: 0.4,
+        }}>
+          Work Steps
+        </span>
+        <span style={{
+          fontFamily: MONO, fontSize: 13, fontWeight: 700,
+          color: complete ? C.emeraldMid : C.textPrimary,
+        }}>
+          {done} / {total}
+        </span>
+      </div>
+      <div style={{
+        marginTop: 8, height: 8, borderRadius: 4,
+        background: C.cardSecondary, border: `1px solid ${C.border}`, overflow: 'hidden',
+      }}
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Work plan progress"
+      >
+        <div style={{
+          width: `${pct}%`, height: '100%',
+          background: complete ? C.emerald : C.emeraldMid,
+          transition: 'width 250ms ease',
+        }} />
+      </div>
+      <div style={{ marginTop: 7, fontFamily: FONT, fontSize: 12.5, color: C.textSecondary }}>
+        {complete
+          ? 'Every section captured — ready to submit for verification.'
+          : `${total - done} section${total - done === 1 ? '' : 's'} still to capture`}
+        {na > 0 && ` · ${na} not applicable`}
+        {!complete && (anyOrder
+          ? ' · take them in any order'
+          : ' · complete in order')}
+      </div>
+    </div>
+  )
+}
+
+// ─── OutstandingSections ────────────────────────────────────────────────────
+// The sections still standing between the assessor and Submit, each with the
+// reason it is not done yet. The evidence gap is the same sentence the server
+// returns when a submit is refused, so what the screen says and what the
+// database enforces can never drift apart.
+function OutstandingSections({ steps }) {
+  const open = steps.filter((st) => !isStepDone(st))
+  if (open.length === 0) return null
+  const shown = open.slice(0, 6)
+  return (
+    <div style={{
+      ...card, padding: 12, marginTop: 10,
+      background: C.cardSecondary,
+    }}>
+      <div style={{
+        fontFamily: FONT, fontWeight: 700, fontSize: 12, color: C.textMuted,
+        textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8,
+      }}>
+        Still to capture
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {shown.map((st) => (
+          <div key={st.work_step_id} style={{ fontFamily: FONT, fontSize: 13, color: C.textPrimary }}>
+            <span style={{ fontWeight: 600 }}>{st.name}</span>
+            {st.evidence_gap && (
+              <span style={{ color: C.textSecondary }}> — {st.evidence_gap}</span>
+            )}
+          </div>
+        ))}
+      </div>
+      {open.length > shown.length && (
+        <div style={{ marginTop: 6, fontFamily: FONT, fontSize: 12.5, color: C.textMuted }}>
+          and {open.length - shown.length} more
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── StepCard ────────────────────────────────────────────────────────────────
 function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, onMarkNotApplicable, onPhotoUploaded, onPhotoError }) {
   const fileRef        = useRef(null)
@@ -647,7 +762,9 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
   const videoRef       = useRef(null)
   const folderVideoRef = useRef(null)  // library / folder picker for video
   const legRef         = useRef('general')  // synchronous — no state race with the picker
-  const [uploading, setUploading] = useState(false)
+  // {done, total} while photos upload, null when idle — see UploadProgress.
+  const [batch, setBatch] = useState(null)
+  const uploading = !!batch
 
   const done = isStepDone(step)
   const corrections = isStepCorrections(step)
@@ -682,42 +799,64 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
     if (folderRef.current) folderRef.current.click()
   }
 
-  const onFile = async (e) => {
-    const file = e.target.files && e.target.files[0]
-    e.target.value = '' // allow re-selecting the same file
-    if (!file) return
+  // Several photos at a time: the folder picker is multi-select, because at a
+  // desk the photos for a step are already in a folder together.
+  const uploadPhotos = async (files) => {
+    const list = imageFilesFrom(files)
+    if (list.length === 0) return
     const leg = legRef.current
-    setUploading(true)
-    try {
-      const row = await captureStepPhoto({ file, workStepId: step.work_step_id, photoType: leg })
-      // Screen updates immediately — the photo is saved and counts. The GPS
-      // check rides the server's EXIF processing (a few seconds) and warns
-      // AFTER the fact, so capture never feels slow.
-      onPhotoUploaded(`Photo captured (${leg}) · ${step.name}`)
-      photoGpsMissing(row).then((missing) => {
+    setBatch({ done: 0, total: list.length })
+    let uploaded = 0
+    let failed = 0
+    let lastRow = null
+    let lastError = null
+    for (const file of list) {
+      try {
+        lastRow = await captureStepPhoto({ file, workStepId: step.work_step_id, photoType: leg })
+        uploaded += 1
+      } catch (err) {
+        failed += 1
+        lastError = err
+      }
+      setBatch({ done: uploaded + failed, total: list.length })
+    }
+    setBatch(null)
+    // Screen updates immediately — the photo is saved and counts. The GPS
+    // check rides the server's EXIF processing (a few seconds) and warns
+    // AFTER the fact, so capture never feels slow.
+    if (uploaded > 0) {
+      onPhotoUploaded(list.length === 1
+        ? `Photo captured (${leg}) · ${step.name}`
+        : `${uploadResultLabel({ uploaded, failed })} · ${step.name}`)
+    }
+    if (failed > 0) onPhotoError(lastError?.message || 'Photo upload failed.')
+    if (lastRow) {
+      photoGpsMissing(lastRow).then((missing) => {
         if (missing) {
           onPhotoError('Photo saved, but it has NO location data. Turn on Location Services for your camera, then retake this photo.')
         }
       })
-    } catch (err) {
-      onPhotoError(err.message || 'Photo upload failed.')
-    } finally {
-      setUploading(false)
     }
+  }
+
+  const onFile = async (e) => {
+    const files = e.target.files
+    e.target.value = '' // allow re-selecting the same file
+    await uploadPhotos(files)
   }
 
   const onVideoFile = async (e) => {
     const file = e.target.files && e.target.files[0]
     e.target.value = '' // allow re-selecting the same file
     if (!file) return
-    setUploading(true)
+    setBatch({ done: 0, total: 1 })
     try {
       await captureStepVideo({ file, workStepId: step.work_step_id, stepName: step.name })
       onPhotoUploaded(`Video attached · ${step.name}`)
     } catch (err) {
       onPhotoError(err.message || 'Video upload failed.')
     } finally {
-      setUploading(false)
+      setBatch(null)
     }
   }
 
@@ -759,7 +898,7 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
 
       {/* Captured photos — always viewable, even after the step is completed. */}
       {Array.isArray(step.photos) && step.photos.length > 0 && (
-        <PhotoStrip photos={step.photos} />
+        <PhotoStrip photos={step.photos} pending={batch ? Math.max(0, batch.total - batch.done) : 0} />
       )}
 
       {/* Attached videos — playable inline, including on completed steps. */}
@@ -869,7 +1008,7 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
           {/* No capture attribute → opens the library / folder picker so a
               photo taken offline can be uploaded later with its own metadata. */}
           <input
-            ref={folderRef} type="file" accept="image/*"
+            ref={folderRef} type="file" accept="image/*" multiple
             onChange={onFile} style={{ display: 'none' }}
           />
           <input
@@ -922,7 +1061,9 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
             )}
           </div>
 
-          {uploading && <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>{isVideoStep ? 'Uploading video…' : 'Uploading photo…'}</div>}
+          {isVideoStep && uploading
+            ? <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>Uploading video…</div>
+            : <UploadProgress batch={batch} />}
 
           <button
             onClick={onComplete}
@@ -1401,6 +1542,77 @@ function CaptureBtn({ label, icon = 'camera', onClick, onFolder, disabled, done 
   )
 }
 
+// ─── UploadProgress ─────────────────────────────────────────────────────────
+// The in-flight state of a photo upload, stated loudly. The old version was
+// 12px muted grey under the button, which on a desktop screen read as nothing
+// at all: Nicholas picked a photo from a folder, saw no change, and concluded
+// it had failed — it had in fact uploaded (Nicholas, 2026-08-22). A photo on a
+// cellular uplink can take real seconds, so this has to be impossible to miss
+// and has to count a batch down rather than spin indefinitely.
+function UploadProgress({ batch }) {
+  if (!batch) return null
+  const { done = 0, total = 0 } = batch
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        marginTop: 10, padding: '10px 12px', borderRadius: 8,
+        background: '#e8f8f0', border: `1px solid ${C.emerald}`,
+      }}
+    >
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        fontFamily: FONT, fontSize: 13.5, fontWeight: 600, color: C.emeraldMid,
+      }}>
+        <Spinner />
+        {uploadProgressLabel(done, total)}
+      </div>
+      {total > 1 && (
+        <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: '#ffffff', overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: C.emerald, transition: 'width 200ms ease' }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Spinner() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 13, height: 13, flex: '0 0 auto', borderRadius: '50%',
+        border: `2px solid ${C.emerald}`, borderTopColor: 'transparent',
+        display: 'inline-block', animation: 'leap-spin 0.7s linear infinite',
+      }}
+    >
+      <style>{`@keyframes leap-spin { to { transform: rotate(360deg); } }`}</style>
+    </span>
+  )
+}
+
+// ─── DropHint ───────────────────────────────────────────────────────────────
+// Shown over the prompt while photos are dragged across it. Desktop only in
+// practice — there is nothing to drag on a phone — so it never competes with
+// the camera button for space in the field.
+function DropHint({ active }) {
+  if (!active) return null
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 40,
+      background: 'rgba(232,248,240,0.94)', border: `2px dashed ${C.emerald}`,
+      borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      pointerEvents: 'none', padding: 20, textAlign: 'center',
+    }}>
+      <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 17, color: C.emeraldMid }}>
+        Drop photos to attach them to this step
+      </div>
+    </div>
+  )
+}
+
 // ─── VideoStrip ──────────────────────────────────────────────────────────────
 // Renders a step's attached evidence videos (private work-evidence bucket →
 // short-lived signed URLs) as inline players. Always shown, including on
@@ -1507,7 +1719,7 @@ function NotApplicableModal({ stepName, busy, onCancel, onSubmit }) {
 // Renders thumbnails for a step's captured photos (private work-evidence
 // bucket → short-lived signed URLs). Always shown, including on completed
 // steps, so the technician can review what they captured. Tap to view full.
-function PhotoStrip({ photos }) {
+function PhotoStrip({ photos, label = null, pending = 0 }) {
   const [urls, setUrls] = useState({})   // photo.id -> signedUrl
   const [zoom, setZoom] = useState(null) // signedUrl being viewed full-screen
   const signedRef = useRef(new Map())    // `${bucket}::${path}` -> signedUrl
@@ -1569,13 +1781,17 @@ function PhotoStrip({ photos }) {
                   ? <img src={url} alt={p.photo_type || 'photo'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   : <span style={{ fontSize: 10, color: C.textMuted }}>…</span>}
               </button>
-              {p.photo_type && p.photo_type.toLowerCase() !== 'general' && (
+              {isMeaningfulTag(p.photo_type) && (
                 <span style={{
-                  position: 'absolute', bottom: 3, left: 3,
+                  position: 'absolute', bottom: 3, left: 3, right: 3,
                   background: legColor, color: '#fff', fontSize: 9, fontWeight: 700,
-                  borderRadius: 4, padding: '1px 4px', textTransform: 'capitalize',
+                  borderRadius: 4, padding: '1px 4px',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>
-                  {p.photo_type}
+                  {/* The prompt's own wording when the strip belongs to one
+                      prompt, otherwise the tag humanized — never the raw
+                      'mf_elev_front' slug the technician never typed. */}
+                  {label || photoTagLabel(p)}
                 </span>
               )}
             </div>
@@ -1590,6 +1806,23 @@ function PhotoStrip({ photos }) {
           </div>
         )
       })}
+
+      {/* One tile per photo still uploading — the drop registers on screen
+          immediately instead of after the last file lands. */}
+      {Array.from({ length: Math.max(0, pending) }).map((_, i) => (
+        <div key={`pending-${i}`} style={{ width: 72 }}>
+          <div style={{
+            width: 72, height: 72, borderRadius: 8,
+            border: `1px dashed ${C.emerald}`, background: '#e8f8f0',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Spinner />
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 10, color: C.textMuted, textAlign: 'center', marginTop: 3 }}>
+            …
+          </div>
+        </div>
+      ))}
 
       {zoom && (
         <div
@@ -1844,7 +2077,12 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   const [live, setLive] = useState(initialStep)
   const [idx, setIdx] = useState(0)
   const [busy, setBusy] = useState(false)
-  const [uploading, setUploading] = useState(false)
+  // {done, total} while photos are uploading, null when idle. A count rather
+  // than a boolean because a desktop drop is usually several files at once and
+  // the assessor needs to see it moving (Nicholas, 2026-08-22: the upload
+  // worked, but nothing on screen said so, so it read as a silent failure).
+  const [batch, setBatch] = useState(null)
+  const [dragActive, setDragActive] = useState(false)
   const [pending, setPending] = useState({}) // field_id -> current (unsaved) editor value
   const [exampleZoom, setExampleZoom] = useState(null) // illustration URL viewed full-screen
   const fileRef = useRef(null)
@@ -1896,10 +2134,25 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
 
   const clampedIdx = Math.min(idx, screens.length - 1)
   const screen = screens[clampedIdx]
-  const pct = screens.length > 1 ? Math.round((clampedIdx / (screens.length - 1)) * 100) : 100
 
   const photoCount = live.photo_count || 0
   const photoSatisfied = !photoNeeded || photoCount >= reqPhotos
+
+  // Progress by what is CAPTURED, not by where the assessor happens to be
+  // standing. Position told them nothing: skipping four optional prompts drove
+  // the bar to 80% with nothing recorded, and stepping back through a finished
+  // section drove it down again.
+  const captureScreens = screens.filter((sc) => sc.kind !== 'review')
+  const capturedCount = captureScreens.filter((sc) => {
+    if (sc.kind === 'photo') return photoSatisfied
+    if (sc.kind === 'photofield') {
+      return photosOfType(sc.field.name).length > 0 || fieldMarkedNotPresent(sc.field)
+    }
+    return String(fieldSavedString(sc.field) ?? '').trim() !== ''
+  }).length
+  const pct = captureScreens.length > 0
+    ? Math.round((capturedCount / captureScreens.length) * 100)
+    : 100
 
   const next = () => setIdx((i) => Math.min(i + 1, screens.length - 1))
   const back = () => setIdx((i) => Math.max(i - 1, 0))
@@ -1909,23 +2162,82 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
   // offline and uploaded later; same photo-type tagging as a live capture.
   const triggerPhotoFolder = (ptype) => { photoTypeRef.current = ptype || 'general'; folderRef.current?.click() }
 
-  const onFile = async (e) => {
-    const file = e.target.files && e.target.files[0]
-    e.target.value = ''
-    if (!file) return
-    setUploading(true)
-    try {
-      const row = await captureStepPhoto({ file, workStepId: live.work_step_id, photoType: photoTypeRef.current })
+  // Upload one or many photos against the current prompt. Sequential so a
+  // 30-photo drop on a cellular uplink stays predictable, and so `batch` can
+  // report real progress rather than a spinner that means nothing.
+  const uploadPhotos = async (files, { rejected = 0 } = {}) => {
+    const list = Array.isArray(files) ? files : []
+    if (list.length === 0) {
+      if (rejected > 0) onFlash(uploadResultLabel({ rejected }), 'error')
+      return
+    }
+    const photoType = photoTypeRef.current
+    setBatch({ done: 0, total: list.length })
+    let uploaded = 0
+    let failed = 0
+    let lastRow = null
+    let lastError = null
+    for (const file of list) {
+      try {
+        lastRow = await captureStepPhoto({ file, workStepId: live.work_step_id, photoType })
+        uploaded += 1
+      } catch (err) {
+        failed += 1
+        lastError = err
+      }
+      setBatch({ done: uploaded + failed, total: list.length })
+      // Refresh after each one so the thumbnail appears as it lands instead of
+      // the whole batch arriving at the end.
       await refresh()
-      onFlash(`Photo captured · ${live.name}`)
-      photoGpsMissing(row).then((missing) => {
+    }
+    setBatch(null)
+    if (uploaded > 0) {
+      onFlash(list.length === 1
+        ? `Photo captured · ${live.name}`
+        : uploadResultLabel({ uploaded, failed, rejected }))
+    }
+    if (uploaded === 0 || failed > 0 || rejected > 0) {
+      const detail = failed > 0 ? (lastError?.message || 'Photo upload failed.') : null
+      onFlash(detail || uploadResultLabel({ uploaded, failed, rejected }) || 'Photo upload failed.', 'error')
+    }
+    // The GPS check rides the server's EXIF pass (a few seconds) and warns
+    // after the fact, so capture never feels slow.
+    if (lastRow) {
+      photoGpsMissing(lastRow).then((missing) => {
         if (missing) onFlash('Photo saved, but it has NO location data. Turn on Location Services for your camera, then retake.', 'error')
       })
-    } catch (err) {
-      onFlash(err.message || 'Photo upload failed.', 'error')
-    } finally {
-      setUploading(false)
     }
+  }
+
+  const onFile = async (e) => {
+    const files = imageFilesFrom(e.target.files)
+    e.target.value = ''
+    await uploadPhotos(files)
+  }
+
+  // Desktop: drag photos straight onto the prompt. The screen body is the drop
+  // zone whenever the current screen is asking for a photo — an assessor
+  // working from a folder should never have to go through the file dialog one
+  // photo at a time.
+  const photoScreen = screen.kind === 'photo' || screen.kind === 'photofield'
+  const dropPhotoType = screen.kind === 'photofield' ? screen.field.name : 'general'
+  const onDragOver = (e) => {
+    if (!photoScreen || batch || !dragCarriesFiles(e.dataTransfer)) return
+    e.preventDefault()
+    setDragActive(true)
+  }
+  const onDragLeave = (e) => {
+    // Ignore the dragleave fired when the pointer crosses into a child.
+    if (e.currentTarget.contains(e.relatedTarget)) return
+    setDragActive(false)
+  }
+  const onDrop = async (e) => {
+    if (!photoScreen || batch) return
+    e.preventDefault()
+    setDragActive(false)
+    const { files, rejected } = imageFilesFromDrop(e.dataTransfer)
+    photoTypeRef.current = dropPhotoType
+    await uploadPhotos(files, { rejected })
   }
 
   const finish = async () => {
@@ -2029,8 +2341,16 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
         <div style={{ height: '100%', width: `${pct}%`, background: C.emerald, transition: 'width 220ms ease' }} />
       </div>
 
-      {/* Screen body */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: 18 }}>
+      {/* Screen body — also the drop zone whenever the current screen is
+          asking for a photo. */}
+      <div
+        onDragOver={onDragOver}
+        onDragEnter={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        style={{ flex: 1, overflowY: 'auto', padding: 18, position: 'relative' }}
+      >
+        <DropHint active={dragActive} />
         {screen.kind === 'photo' && (
           <div>
             <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 19, color: C.textPrimary, marginBottom: 6 }}>
@@ -2042,15 +2362,15 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
                 : `${reqPhotos} photo${reqPhotos === 1 ? '' : 's'} required.`}
             </div>
             <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
-            <input ref={folderRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
+            <input ref={folderRef} type="file" accept="image/*" multiple onChange={onFile} style={{ display: 'none' }} />
             <CaptureBtn
               label={photoCount > 0 ? 'Add / Retake Photo' : 'Take Photo'}
               onClick={() => triggerPhoto('general')}
               onFolder={() => triggerPhotoFolder('general')}
-              disabled={uploading}
+              disabled={!!batch}
               done={photoSatisfied}
             />
-            {uploading && <div style={{ fontSize: 12, color: C.textMuted, marginTop: 8 }}>Uploading photo…</div>}
+            <UploadProgress batch={batch} />
           </div>
         )}
 
@@ -2067,7 +2387,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
                 {/* Tapping the example opens the camera — same action as Take Photo. */}
                 <button
                   onClick={() => triggerPhoto(screen.field.name)}
-                  disabled={uploading}
+                  disabled={!!batch}
                   style={{
                     appearance: 'none', cursor: 'pointer', display: 'block', width: '100%',
                     background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
@@ -2099,15 +2419,15 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
               </div>
             )}
             <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
-            <input ref={folderRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
+            <input ref={folderRef} type="file" accept="image/*" multiple onChange={onFile} style={{ display: 'none' }} />
             <CaptureBtn
               label={curPhotoN > 0 ? 'Add / Retake Photo' : 'Take Photo'}
               onClick={() => triggerPhoto(screen.field.name)}
               onFolder={() => triggerPhotoFolder(screen.field.name)}
-              disabled={uploading}
+              disabled={!!batch}
               done={curPhotoN > 0}
             />
-            {uploading && <div style={{ fontSize: 12, color: C.textMuted, marginTop: 8 }}>Uploading photo…</div>}
+            <UploadProgress batch={batch} />
             {screen.field.allow_not_present && curPhotoN === 0 && (
               fieldMarkedNotPresent(screen.field)
                 ? <div style={{ marginTop: 12, fontSize: 13, fontWeight: 600, color: C.emeraldMid, textAlign: 'center' }}>
@@ -2127,7 +2447,11 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
             )}
             {photosOfType(screen.field.name).length > 0 && (
               <div style={{ marginTop: 12 }}>
-                <PhotoStrip photos={photosOfType(screen.field.name)} />
+                <PhotoStrip
+                  photos={photosOfType(screen.field.name)}
+                  label={screen.field.label || null}
+                  pending={batch ? Math.max(0, batch.total - batch.done) : 0}
+                />
               </div>
             )}
           </div>
