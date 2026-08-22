@@ -58,6 +58,24 @@ function emitServiceWorker() {
   }
 }
 
+// Emit build-manifest.json — the identity of the deployed build, fetched by
+// the running app to notice a deploy and reload itself (src/lib/appUpdate.js).
+// It has to be a real file rather than a header or index.html scrape so the
+// check is one cheap, cache-busted request that says exactly one thing.
+function emitBuildManifest() {
+  return {
+    name: 'emit-build-manifest',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'build-manifest.json',
+        source: JSON.stringify({ sha: buildSha(), id: buildId(), time: buildTime() }, null, 2),
+      })
+    },
+  }
+}
+
 // EES-WI LEAP build config
 // - React.lazy already code-splits per module (see App.jsx). This config
 //   pulls large vendor libraries out into their own long-lived chunks so
@@ -73,7 +91,7 @@ function emitServiceWorker() {
 // at module-load with "Cannot access '_' before initialization" — a TDZ
 // error inside one of the cycle members.
 export default defineConfig({
-  plugins: [react(), emitServiceWorker()],
+  plugins: [react(), emitServiceWorker(), emitBuildManifest()],
   define: {
     __BUILD_ID__: JSON.stringify(buildId()),
     __BUILD_SHA__: JSON.stringify(buildSha()),
