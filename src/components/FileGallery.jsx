@@ -4,6 +4,15 @@ import { Icon } from './UI'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
 import {
+  ALL as FILTER_ALL,
+  buildStepFilterOptions,
+  buildTagFilterOptions,
+  filterGalleryPhotos,
+  isMeaningfulTag,
+  photoTagLabel,
+  reconcileFilterValue,
+} from '../lib/photoTags'
+import {
   defaultPhotoBucket,
   uploadPhoto,
   listPhotos,
@@ -163,7 +172,8 @@ export default function FileGalleryWidget({
   const [previewDoc, setPreviewDoc] = useState(null)   // documents only — modal preview
   // {id, name} for one item, or {ids:[...], name} for a selection (bulk delete).
   const [confirmDelete, setConfirmDelete] = useState(null)
-  const [stepFilter, setStepFilter] = useState('all')      // WO gallery: 'all' | work_step_id
+  const [stepFilter, setStepFilter] = useState(FILTER_ALL) // WO gallery: 'all' | work_step_id
+  const [tagFilter, setTagFilter]   = useState(FILTER_ALL) // WO gallery: 'all' | photo_type
   const [selectMode, setSelectMode]   = useState(false)    // photos: multi-select for download
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [downloading, setDownloading] = useState(false)
@@ -210,32 +220,32 @@ export default function FileGalleryWidget({
 
   useEffect(() => { refresh() }, [refresh])
 
-  // Work-order gallery: build the step filter options (distinct steps present
-  // in the loaded photos, with counts) and the filtered view.
-  const stepOptions = useMemo(() => {
-    if (!isWorkOrderPhotoGallery) return []
-    const counts = new Map() // step_id → { name, count, position }
-    for (const p of items) {
-      const id = p._work_step_id || 'unassigned'
-      const name = p._work_step_name || 'Unassigned step'
-      const position = p._work_step_position ?? Number.MAX_SAFE_INTEGER
-      const cur = counts.get(id) || { id, name, count: 0, position }
-      cur.count += 1
-      counts.set(id, cur)
-    }
-    // Order the chips by work-step execution order (matching the photo order and
-    // the step list on the record), name as a stable tiebreaker.
-    return Array.from(counts.values()).sort((a, b) =>
-      (a.position - b.position) || a.name.localeCompare(b.name))
-  }, [items, isWorkOrderPhotoGallery])
+  // Work-order gallery: the two filter dropdowns. A photo carries a work step
+  // (where it was captured) and a tag (what it shows) — both are worth
+  // filtering by on an assessment that runs to several hundred photos.
+  const stepOptions = useMemo(
+    () => (isWorkOrderPhotoGallery ? buildStepFilterOptions(items) : []),
+    [items, isWorkOrderPhotoGallery])
+  const tagOptions = useMemo(
+    () => (isWorkOrderPhotoGallery ? buildTagFilterOptions(items) : []),
+    [items, isWorkOrderPhotoGallery])
+
+  // A filter pinned to a step or tag that no longer has photos (the last one
+  // was deleted, or another record loaded into the same card) falls back to
+  // All rather than showing an empty grid with no explanation.
+  useEffect(() => {
+    setStepFilter(v => reconcileFilterValue(v, stepOptions))
+    setTagFilter(v => reconcileFilterValue(v, tagOptions))
+  }, [stepOptions, tagOptions])
 
   const visiblePhotos = useMemo(() => {
-    let list = (!isWorkOrderPhotoGallery || stepFilter === 'all')
-      ? items
-      : items.filter(p => (p._work_step_id || 'unassigned') === stepFilter)
-    if (showReportOnly) list = list.filter(p => p.include_in_final_report)
-    return list
-  }, [items, stepFilter, isWorkOrderPhotoGallery, showReportOnly])
+    if (!isWorkOrderPhotoGallery) {
+      return showReportOnly ? items.filter(p => p.include_in_final_report) : items
+    }
+    return filterGalleryPhotos(items, {
+      stepId: stepFilter, tag: tagFilter, reportOnly: showReportOnly,
+    })
+  }, [items, stepFilter, tagFilter, isWorkOrderPhotoGallery, showReportOnly])
 
   // ── Photo selection + download ──────────────────────────────────────
   // Drop selections that scroll out of the current step filter so the count
@@ -325,7 +335,12 @@ export default function FileGalleryWidget({
               file,
               relatedObject: parentTable,
               relatedId: parentRecordId,
-              workStepId: config.work_step_id || null,
+              // A photos card sitting on a WORK STEP's own record page is
+              // capturing evidence for that step, so it stamps the FK that the
+              // work order roll-up reads. (The database enforces the same
+              // invariant — this keeps the row right before it gets there.)
+              workStepId: config.work_step_id
+                || (parentTable === 'work_steps' ? parentRecordId : null),
               photoType: config.photo_type || 'general',
               applyWatermark: config.apply_watermark !== false,
             })
@@ -581,12 +596,18 @@ export default function FileGalleryWidget({
               />
             ) : target === 'photos' ? (
               <>
-                {isWorkOrderPhotoGallery && stepOptions.length > 1 && (
-                  <StepFilterBar
-                    options={stepOptions}
+                {isWorkOrderPhotoGallery && (stepOptions.length > 1 || tagOptions.length > 1) && (
+                  <PhotoFilterBar
+                    stepOptions={stepOptions}
+                    tagOptions={tagOptions}
                     total={items.length}
-                    value={stepFilter}
-                    onChange={setStepFilter}
+                    shown={visiblePhotos.length}
+                    stepValue={stepFilter}
+                    tagValue={tagFilter}
+                    onStepChange={setStepFilter}
+                    onTagChange={setTagFilter}
+                    onClear={() => { setStepFilter(FILTER_ALL); setTagFilter(FILTER_ALL) }}
+                    isMobile={isMobile}
                   />
                 )}
                 <PhotoToolbar
@@ -610,9 +631,11 @@ export default function FileGalleryWidget({
                     })
                   }}
                 />
-                {showReportOnly && visiblePhotos.length === 0 ? (
+                {visiblePhotos.length === 0 ? (
                   <div style={{ padding: '18px 4px', fontSize: 12.5, color: C.textMuted }}>
-                    No photos marked for the final report yet. Use the flag on a photo to include it.
+                    {showReportOnly
+                      ? 'No photos marked for the final report yet. Use the flag on a photo to include it.'
+                      : 'No photos match this filter.'}
                   </div>
                 ) : (
                 <PhotoGrid
@@ -836,35 +859,104 @@ function SkeletonGrid({ mode, isMobile }) {
   )
 }
 
-function StepFilterBar({ options, total, value, onChange }) {
-  const chip = (active) => ({
-    appearance: 'none', cursor: 'pointer',
-    border: `1px solid ${active ? C.emeraldMid : C.border}`,
-    background: active ? '#e8f8f0' : C.card,
-    color: active ? '#1a7a4f' : C.textSecondary,
-    fontSize: 11.5, fontWeight: 600,
-    padding: '4px 10px', borderRadius: 14,
-    whiteSpace: 'nowrap',
-  })
+// PhotoFilterBar — the work order roll-up's filters.
+//
+// Two dropdowns rather than a chip per value: an assessment work order runs
+// 15+ steps and dozens of distinct photo tags, and a chip row that long
+// pushed the photos themselves below the fold. Each option carries its own
+// count, so the closed dropdown doubles as a summary of what the work order
+// actually holds, and Clear appears only once something is filtered.
+function FilterSelect({ label, value, onChange, options, allLabel }) {
+  const active = value !== FILTER_ALL
   return (
-    <div style={{
+    <label style={{
       display: 'flex', alignItems: 'center', gap: 6,
-      flexWrap: 'wrap', marginBottom: 12,
+      flex: '1 1 210px', minWidth: 0,
     }}>
       <span style={{
         fontSize: 11, fontWeight: 600, color: C.textMuted,
-        textTransform: 'uppercase', letterSpacing: 0.4, marginRight: 2,
+        textTransform: 'uppercase', letterSpacing: 0.4, whiteSpace: 'nowrap',
       }}>
-        Work step
+        {label}
       </span>
-      <button style={chip(value === 'all')} onClick={() => onChange('all')}>
-        All ({total})
-      </button>
-      {options.map(o => (
-        <button key={o.id} style={chip(value === o.id)} onClick={() => onChange(o.id)}>
-          {o.name} ({o.count})
-        </button>
-      ))}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          flex: 1, minWidth: 0, maxWidth: '100%',
+          height: 30, padding: '0 26px 0 9px',
+          border: `1px solid ${active ? C.emeraldMid : C.border}`,
+          background: active ? '#e8f8f0' : C.card,
+          color: active ? '#1a7a4f' : C.textSecondary,
+          borderRadius: 6, fontSize: 12.5,
+          fontWeight: active ? 600 : 500,
+          fontFamily: 'inherit', cursor: 'pointer',
+          appearance: 'none',
+          backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234a5e7a' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>")`,
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'right 8px center',
+        }}
+      >
+        <option value={FILTER_ALL}>{allLabel}</option>
+        {options.map(o => (
+          <option key={o.id} value={o.id}>
+            {(o.label || o.name)} ({o.count})
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function PhotoFilterBar({
+  stepOptions, tagOptions, total, shown,
+  stepValue, tagValue, onStepChange, onTagChange, onClear, isMobile,
+}) {
+  const filtered = stepValue !== FILTER_ALL || tagValue !== FILTER_ALL
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      flexWrap: 'wrap', marginBottom: 12,
+      padding: isMobile ? 10 : '9px 11px',
+      background: '#f7f9fc', // card secondary
+      border: `1px solid ${C.border}`, borderRadius: 8,
+    }}>
+      {stepOptions.length > 1 && (
+        <FilterSelect
+          label="Work step"
+          value={stepValue}
+          onChange={onStepChange}
+          options={stepOptions}
+          allLabel={`All work steps (${total})`}
+        />
+      )}
+      {tagOptions.length > 1 && (
+        <FilterSelect
+          label="Tag"
+          value={tagValue}
+          onChange={onTagChange}
+          options={tagOptions}
+          allLabel={`All tags (${total})`}
+        />
+      )}
+      {filtered && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+          <span style={{ fontSize: 11.5, color: C.textMuted, whiteSpace: 'nowrap' }}>
+            {shown} of {total}
+          </span>
+          <button
+            onClick={onClear}
+            style={{
+              appearance: 'none', cursor: 'pointer',
+              border: `1px solid ${C.border}`, background: C.card,
+              color: C.textSecondary, fontSize: 11.5, fontWeight: 600,
+              padding: '5px 10px', borderRadius: 6, whiteSpace: 'nowrap',
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1104,33 +1196,39 @@ function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggl
         </button>
       )}
 
-      {/* Work-step tag + capture-type badge (work-order aggregate gallery).
-          Bottom-anchored chips so the photo reads as evidence for a specific
-          step. Step name is the primary tag; before/after is secondary. */}
-      {showStepTag && (
+      {/* Tags, bottom-anchored, so a thumbnail reads as evidence for a
+          specific step and a specific subject. The work step chip appears on
+          the work order's roll-up gallery (on a step's own card the step is
+          already the context); the photo tag — the named prompt the
+          technician answered — appears wherever it says something. */}
+      {(showStepTag || isMeaningfulTag(photo.photo_type)) && (
         <div style={{
           position: 'absolute', left: 6, right: 6, bottom: 6,
           display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
           pointerEvents: 'none',
         }}>
-          <span style={{
-            maxWidth: '100%',
-            background: 'rgba(7,17,31,0.82)', color: '#fff',
-            fontSize: 10, fontWeight: 600,
-            padding: '2px 7px', borderRadius: 10,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
-            {photo._work_step_name || 'Step'}
-          </span>
-          {(photo.photo_type === 'before' || photo.photo_type === 'after') && (
+          {showStepTag && (
             <span style={{
+              maxWidth: '100%',
+              background: 'rgba(7,17,31,0.82)', color: '#fff',
+              fontSize: 10, fontWeight: 600,
+              padding: '2px 7px', borderRadius: 10,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {photo._work_step_name || 'Step'}
+            </span>
+          )}
+          {isMeaningfulTag(photo.photo_type) && (
+            <span style={{
+              maxWidth: '100%',
               background: photo.photo_type === 'before' ? '#e8f3fb' : '#e8f8f0',
               color: photo.photo_type === 'before' ? '#1a5a8a' : '#1a7a4f',
-              fontSize: 9, fontWeight: 700,
+              fontSize: 9.5, fontWeight: 700,
               padding: '2px 6px', borderRadius: 10,
-              textTransform: 'uppercase', letterSpacing: 0.4,
+              letterSpacing: 0.3,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
-              {photo.photo_type}
+              {photoTagLabel(photo)}
             </span>
           )}
         </div>
@@ -1449,6 +1547,15 @@ function Lightbox({ photos, startIndex, onClose, onIndexChange, onToggleReport }
           <div style={{ flexBasis: '100%', fontSize: 13.5 }}>
             {photo.caption}
           </div>
+        )}
+        {/* Which step this is evidence for, and what it shows — the two tags
+            the roll-up gallery filters by. Only present on the work order's
+            aggregate gallery; a step's own card already has the context. */}
+        {photo._work_step_name && (
+          <span style={{ fontWeight: 600, color: '#fff' }}>{photo._work_step_name}</span>
+        )}
+        {isMeaningfulTag(photo.photo_type) && (
+          <span style={{ color: '#8fe0bb' }}>{photoTagLabel(photo)}</span>
         )}
         {takenAt && <span>Taken {takenAt}</span>}
         {gps && <span>GPS {gps}</span>}
