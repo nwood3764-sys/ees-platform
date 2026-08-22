@@ -5208,7 +5208,8 @@ function RelatedListWidget({
           : Promise.resolve({ data: null })
         const [oppRes, buildingRes, propertyRes] = await Promise.all([
           fetchRow('opportunities', oppId,
-            'building_id, property_id, opportunity_name, opportunity_gas_account_number', 'opportunity_is_deleted'),
+            'building_id, property_id, opportunity_name, opportunity_gas_account_number, ' +
+            'opportunity_record_type', 'opportunity_is_deleted'),
           fetchRow('buildings', bldId,
             'building_sq_ft, building_square_footage, building_total_units, building_number_of_units, ' +
             'building_units_at_attic_plane, building_attic_square_footage, building_sq_ft_attic_plane, ' +
@@ -5228,6 +5229,17 @@ function RelatedListWidget({
         if (opp) {
           if (!bldId && opp.building_id) bldId = opp.building_id
           if (!propId && opp.property_id) propId = opp.property_id
+        }
+
+        // Which assessment record types this record may carry is decided by the
+        // opportunity's record type — the program. Passing it through narrows
+        // the record-type picker to that program's types, so a Wisconsin
+        // assessment type is never offered on a North Carolina opportunity.
+        // Transient hints, stripped before the insert like every other __ key;
+        // the database enforces the same rule independently.
+        if (opp?.opportunity_record_type) {
+          prefillObj.__parentObject       = 'opportunities'
+          prefillObj.__parentRecordTypeId = opp.opportunity_record_type
         }
 
         // Seed the relationship columns. Only the real FKs: migration
@@ -6854,6 +6866,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
     return null
   })()
+  // Which record types this record may carry can also be governed by its
+  // PARENT's record type — configuration held in record_type_eligibility. The
+  // create-prefill seeds these two transient __ keys when it resolves a parent
+  // whose record type constrains the child (an assessment's opportunity, say);
+  // they are stripped before the insert like every other __ key. Null means
+  // unconstrained, which is the case for most objects.
+  const prefillParentObject       = prefill?.__parentObject || null
+  const prefillParentRecordTypeId = prefill?.__parentRecordTypeId || null
   useEffect(() => {
     if (!isCreate) { setPickerEvaluated(true); return }
     let cancelled = false
@@ -6871,7 +6891,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // no state here while the picker passed state caused the picker to render
     // then immediately auto-dismiss via onPick(null) whenever a state had no
     // scoped record types — silently skipping the prompt.)
-    fetchAvailableRecordTypes(tableName, { state: prefillState })
+    fetchAvailableRecordTypes(tableName, {
+      state: prefillState,
+      parentObject: prefillParentObject,
+      parentRecordTypeId: prefillParentRecordTypeId,
+    })
       .then(rts => {
         if (cancelled) return
         if (rts.length === 0) {
@@ -6889,7 +6913,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         setPickerEvaluated(true)
       })
     return () => { cancelled = true }
-  }, [isCreate, tableName, prefillRecordTypeValue, prefillState])
+  }, [isCreate, tableName, prefillRecordTypeValue, prefillState, prefillParentObject, prefillParentRecordTypeId])
 
   // ── Load required-field set ────────────────────────────────────────────
   // Fetch the table's NOT NULL columns once per mount; render the red
@@ -7012,9 +7036,15 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           }
           delete d.__derivedNameBase
         }
-        // Transient hint naming the parent-record columns the create pop-up
-        // shows read-only — never a column, so it must not reach the insert.
-        delete d.__lockedFields
+        // Every remaining __ key is a transient prefill hint, never a column:
+        // __lockedFields (which parent columns the create pop-up shows
+        // read-only), __parentObject / __parentRecordTypeId (the parent whose
+        // record type narrows the picker). Strip them all rather than naming
+        // each one, so a new hint can never leak into an insert and fail on an
+        // unknown column.
+        for (const k of Object.keys(d)) {
+          if (k.startsWith('__')) delete d[k]
+        }
         return d
       }
 
@@ -8522,6 +8552,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         tableName={tableName}
         objectLabel={singularizeLabel(objectLabel)}
         state={prefillState}
+        parentObject={prefillParentObject}
+        parentRecordTypeId={prefillParentRecordTypeId}
         onPick={(rt) => {
           // rt can be null when the picker auto-determined no RTs exist;
           // false marks 'no picker needed' so the load effect can proceed.
