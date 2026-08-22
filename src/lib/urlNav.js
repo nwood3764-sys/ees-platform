@@ -682,10 +682,15 @@ export function useUrlNavigation() {
     setState(next)
   }, [])
 
-  const navigateToModule = useCallback((moduleId) => {
+  // Switch modules. An optional sectionId lands the user directly on that
+  // module's section (e.g. Incentives → Project Payment Requests) instead of
+  // its Home tab, so a cross-module "View All" link resolves to the list it
+  // names rather than dumping the user on a dashboard. Omitted → module home,
+  // exactly as before.
+  const navigateToModule = useCallback((moduleId, sectionId = null) => {
     pendingPrefill = null
     pendingLayoutReturn = null
-    push({ activeModule: moduleId, selectedRecord: null, section: null, subsection: null, searchQuery: null, searchType: null })
+    push({ activeModule: moduleId, selectedRecord: null, section: sectionId || null, subsection: null, searchQuery: null, searchType: null })
   }, [push])
 
   const navigateToSection = useCallback((sectionId) => {

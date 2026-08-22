@@ -410,6 +410,7 @@ function AuthedApp({ session }) {
       adminLayoutIdFromUrl,
       adminLayoutReturnFromUrl,
       onNavigateToRecord: navigateToRecordOrCreate,
+      onNavigateToModule: navigateToModule,
       onCloseRecord: closeRecord,
       onSectionChange: navigateToSection,
       onSubsectionChange: navigateToSubsection,
