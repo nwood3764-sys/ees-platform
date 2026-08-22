@@ -32,6 +32,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { createNavTrail } from './navTrail'
 
 // Map of record-detail tables to their owning module. Mirrors TABLE_META
 // in RecordDetail.jsx but only includes tables we expose as URL roots.
@@ -173,6 +174,16 @@ const TABLE_LIST_SECTION_MAP = {
   work_orders: 'workorders',
   time_sheets: 'timesheets',
   resource_absences: 'absences',
+  // Enrollment shows opportunities under "opps"; Qualification shortens
+  // incentive applications and EFR reports; Incentives names its two lists
+  // after the step, not the table. Without these, a list URL built from the
+  // table name lands on a section id the module doesn't have — an empty page.
+  opportunities: 'opps',
+  incentive_applications: 'applications',
+  efr_reports: 'efr',
+  project_payment_requests: 'requests',
+  payment_receipts: 'received',
+  portal_users: 'users',
 }
 
 /**
@@ -590,6 +601,28 @@ export function consumeLayoutReturnRecord() {
   return r
 }
 
+// ── In-page navigation trail ────────────────────────────────────────────
+//
+// Where the user has been, so leaving a record goes BACK to it. The trail
+// itself is a pure module (src/lib/navTrail.js); this file owns the History
+// API calls and keeps the two in step. See navTrail.js for why a record URL
+// can't carry this context itself.
+const navTrail = createNavTrail()
+
+// history.state is per-entry and survives a reload, so the index stamped here
+// is what lets a Back land on the right trail entry.
+function stampedState() {
+  return { leap: { i: navTrail.index } }
+}
+
+// Push a sub-URL belonging to the SAME screen as the current entry — a record's
+// ?tab=. Browser Back still steps through tabs; leaving the record steps over
+// them in one go.
+export function pushRecordSubPath(path) {
+  navTrail.pushSub(path)
+  window.history.pushState(stampedState(), '', path)
+}
+
 export function useUrlNavigation() {
   const [state, setState] = useState(() =>
     attachPendingPrefill(parsePath(window.location.pathname, window.location.search)))
@@ -599,7 +632,14 @@ export function useUrlNavigation() {
   // prefill so a create form reached via history navigation still carries
   // its parent context.
   useEffect(() => {
-    const onPop = () => setState(attachPendingPrefill(parsePath(window.location.pathname, window.location.search)))
+    const onPop = () => {
+      const path = window.location.pathname + window.location.search
+      const parsed = parsePath(window.location.pathname, window.location.search)
+      // The URL stays the source of truth for WHICH record/page this is; the
+      // trail only restores what the URL can't carry — the module and section
+      // the user was browsing in when they were last on this entry.
+      setState(attachPendingPrefill(navTrail.restore(window.history.state?.leap?.i, path, parsed)))
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
@@ -625,15 +665,19 @@ export function useUrlNavigation() {
   const push = useCallback((next) => {
     const path = buildPath(next)
     if (path !== currentFullPath()) {
-      window.history.pushState(null, '', path)
+      navTrail.push(next, path)
+      window.history.pushState(stampedState(), '', path)
+    } else {
+      navTrail.replace(next, path)
     }
     setState(next)
   }, [])
 
   const replace = useCallback((next) => {
     const path = buildPath(next)
+    navTrail.replace(next, path)
     if (path !== currentFullPath()) {
-      window.history.replaceState(null, '', path)
+      window.history.replaceState(stampedState(), '', path)
     }
     setState(next)
   }, [])
@@ -649,7 +693,12 @@ export function useUrlNavigation() {
     setState((prev) => {
       const next = { ...prev, section: sectionId, subsection: null, selectedRecord: null, searchQuery: null, searchType: null }
       const path = buildPath(next)
-      if (path !== currentFullPath()) window.history.pushState(null, '', path)
+      if (path !== currentFullPath()) {
+        navTrail.push(next, path)
+        window.history.pushState(stampedState(), '', path)
+      } else {
+        navTrail.replace(next, path)
+      }
       return next
     })
   }, [])
@@ -663,7 +712,12 @@ export function useUrlNavigation() {
     setState((prev) => {
       const next = { ...prev, subsection: subsectionId || null, selectedRecord: null, searchQuery: null, searchType: null }
       const path = buildPath(next)
-      if (path !== currentFullPath()) window.history.pushState(null, '', path)
+      if (path !== currentFullPath()) {
+        navTrail.push(next, path)
+        window.history.pushState(stampedState(), '', path)
+      } else {
+        navTrail.replace(next, path)
+      }
       return next
     })
   }, [])
@@ -699,7 +753,12 @@ export function useUrlNavigation() {
       searchType: null,
     }
     const path = buildPath(next)
-    if (path !== currentFullPath()) window.history.pushState(null, '', path)
+    if (path !== currentFullPath()) {
+      navTrail.push(next, path)
+      window.history.pushState(stampedState(), '', path)
+    } else {
+      navTrail.replace(next, path)
+    }
     setState(next)
   }, [])
 
@@ -734,7 +793,12 @@ export function useUrlNavigation() {
         subsection: keepSection ? prev.subsection : null,
         searchQuery: null, searchType: null }
       const path = buildPath(next)
-      if (path !== currentFullPath()) window.history.pushState(null, '', path)
+      if (path !== currentFullPath()) {
+        navTrail.push(next, path)
+        window.history.pushState(stampedState(), '', path)
+      } else {
+        navTrail.replace(next, path)
+      }
       return next
     })
   }, [])
@@ -752,18 +816,66 @@ export function useUrlNavigation() {
     }
     const path = buildPath(next)
     if (path !== currentFullPath()) {
-      if (useReplace) window.history.replaceState(null, '', path)
-      else            window.history.pushState(null, '', path)
+      if (useReplace) {
+        navTrail.replace(next, path)
+        window.history.replaceState(stampedState(), '', path)
+      } else {
+        navTrail.push(next, path)
+        window.history.pushState(stampedState(), '', path)
+      }
+    } else {
+      navTrail.replace(next, path)
     }
     setState(next)
   }, [])
 
+  // Leaving a record goes BACK to the screen the user came from — the property,
+  // the opportunity, the list they were browsing — not forward to a fresh list
+  // page. That's what the breadcrumb and the mobile back arrow mean, and it's
+  // what the browser's own Back does, so the two now agree instead of the app
+  // pushing yet another entry the user then has to back out of.
+  //
+  // history.back() (rather than pushing the previous path) keeps the history
+  // stack honest: the record is left behind instead of buried under a new
+  // entry. Entries belonging to the record being closed — its own ?tab= URLs —
+  // are stepped over in one go.
+  //
+  // With no in-page history to go back to (a deep link, a bookmark, a fresh
+  // tab) there is nothing behind us, so fall back to the record's own object
+  // list — never the module's Home page, which is where a null section used to
+  // dump the user.
   const closeRecord = useCallback(() => {
     pendingPrefill = null   // leaving any record clears a pending create-prefill
+    const steps = navTrail.stepsBackToPreviousScreen()
+    if (steps > 0) {
+      window.history.go(-steps)   // popstate handler re-derives state
+      return
+    }
     setState((prev) => {
-      const next = { activeModule: prev.activeModule, selectedRecord: null, section: prev.section, subsection: prev.subsection, searchQuery: null, searchType: null }
+      const table = prev.selectedRecord?.table || null
+      const listPath = table ? getTableListUrl(table) : null
+      const next = {
+        activeModule: prev.activeModule,
+        selectedRecord: null,
+        section: prev.section,
+        subsection: prev.subsection,
+        searchQuery: null,
+        searchType: null,
+      }
+      // Prefer the section we already know; otherwise derive the object's own
+      // list from the table so we land on a list, not the module home tab.
+      if (!next.section && listPath) {
+        const parsedList = parsePath(listPath)
+        next.activeModule = parsedList.activeModule || next.activeModule
+        next.section = parsedList.section
+      }
       const path = buildPath(next)
-      if (path !== currentFullPath()) window.history.pushState(null, '', path)
+      if (path !== currentFullPath()) {
+        navTrail.push(next, path)
+        window.history.pushState(stampedState(), '', path)
+      } else {
+        navTrail.replace(next, path)
+      }
       return next
     })
   }, [])
@@ -790,7 +902,8 @@ export function useUrlNavigation() {
         subsection: keepSection ? prev.subsection : null,
         searchQuery: null, searchType: null }
       const path = buildPath(next)
-      if (path !== currentFullPath()) window.history.replaceState(null, '', path)
+      navTrail.replace(next, path)
+      if (path !== currentFullPath()) window.history.replaceState(stampedState(), '', path)
       return next
     })
   }, [])

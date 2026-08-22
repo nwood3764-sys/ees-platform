@@ -37,7 +37,7 @@ import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
 import { formatUsPhoneDisplay } from '../lib/fieldLinks'
 import FieldValueLink from './FieldValueLink'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
-import { getTableListUrl, buildScopedListUrl } from '../lib/urlNav'
+import { getTableListUrl, buildScopedListUrl, pushRecordSubPath } from '../lib/urlNav'
 import { useDataRefresh } from '../lib/dataRefresh'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
@@ -7446,7 +7446,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     const qs = params.toString()
     const next = window.location.pathname + (qs ? `?${qs}` : '')
     if (next !== window.location.pathname + window.location.search) {
-      window.history.pushState(null, '', next)
+      // Pushed through urlNav so the entry is tagged as belonging to THIS
+      // record: browser Back still steps Related → Details, but leaving the
+      // record (breadcrumb / back arrow) steps over its tabs in one go
+      // instead of landing back on the same record.
+      pushRecordSubPath(next)
     }
   }, [data, isInsertMode, tableName, recordId, isCreate])
 
