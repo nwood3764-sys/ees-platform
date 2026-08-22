@@ -10,6 +10,8 @@ import {
   deactivateRecordType,
   reactivateRecordType,
   cloneFromLayout,
+  listChildRecordTypeEligibility,
+  setChildRecordTypeEligibility,
 } from '../../data/pageLayoutBuilderService'
 import { fetchPageLayoutsFor } from '../../data/adminService'
 import {
@@ -38,6 +40,16 @@ import { uploadRecordTypeIcon } from '../../data/storageService'
 // project record type a program's assessment produces is configured here, never
 // guessed in code. Add an object here when its records gain the same need.
 const PROJECT_RECORD_TYPE_OBJECTS = new Set(['assessments'])
+
+// Objects whose record types decide which record types a CHILD object may carry.
+// An opportunity record type IS the program, so it is the right place to say
+// which assessment record types belong to that program — a Wisconsin assessment
+// type is then never offered on a North Carolina opportunity. Stored in
+// record_type_eligibility and enforced in the database; this pane is the UI over
+// it. Add an entry when another parent/child pair needs the same control.
+const CHILD_RECORD_TYPE_SCOPES = {
+  opportunities: [{ childObject: 'assessments', childLabel: 'Assessment', buttonLabel: 'Assessment types' }],
+}
 
 export default function RecordTypesPane({ objectName, objectLabel, onCountChange }) {
   const toast = useToast()
@@ -251,6 +263,7 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
               row={row}
               objectName={objectName}
               projectRecordTypes={PROJECT_RECORD_TYPE_OBJECTS.has(objectName) ? projectRecordTypes : null}
+              childScopes={CHILD_RECORD_TYPE_SCOPES[objectName] || null}
               busy={busyRowId === row.id}
               editing={editingRowId === row.id}
               onStartEdit={() => setEditingRowId(row.id)}
@@ -289,10 +302,11 @@ export default function RecordTypesPane({ objectName, objectLabel, onCountChange
 // ─── Record Type Row ───────────────────────────────────────────────────
 
 function RecordTypeRow({
-  row, objectName, projectRecordTypes, busy, editing,
+  row, objectName, projectRecordTypes, childScopes, busy, editing,
   onStartEdit, onCancelEdit, onSaved,
   onDeactivate, onReactivate, onCreateLayout,
 }) {
+  const [childScope, setChildScope] = useState(null)   // the scope whose modal is open
   const toast = useToast()
   const [label, setLabel] = useState(row.label)
   const [value, setValue] = useState(row.value)
@@ -444,6 +458,17 @@ function RecordTypeRow({
                 Create layout
               </button>
             )}
+            {(childScopes || []).map(scope => (
+              <button
+                key={scope.childObject}
+                style={buttonSmSecondaryStyle}
+                onClick={() => setChildScope(scope)}
+                disabled={busy}
+                title={`Choose which ${scope.childLabel.toLowerCase()} record types are available on this ${objectName.replace(/s$/, '')} record type`}
+              >
+                {scope.buttonLabel}
+              </button>
+            ))}
             <button style={buttonSmSecondaryStyle} onClick={onStartEdit} disabled={busy}>
               Edit
             </button>
@@ -512,7 +537,185 @@ function RecordTypeRow({
         />
       </div>
     )}
+    {childScope && (
+      <ChildRecordTypesModal
+        parentObject={objectName}
+        parentRecordType={row}
+        childObject={childScope.childObject}
+        childLabel={childScope.childLabel}
+        onClose={() => setChildScope(null)}
+      />
+    )}
     </>
+  )
+}
+
+// ─── Child record types available under this record type ───────────────────
+//
+// Writes record_type_eligibility. The rule it configures is enforced in the
+// database, and the record-type picker reads the same config, so an unticked
+// type is neither offered nor accepted.
+//
+// The "none ticked means all allowed" semantics are the one genuinely
+// surprising thing here, so the modal states it plainly rather than leaving the
+// user to infer it from an all-empty checkbox list.
+
+function ChildRecordTypesModal({ parentObject, parentRecordType, childObject, childLabel, onClose }) {
+  const toast = useToast()
+  const isMobile = useIsMobile()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const [options, setOptions] = useState([])
+  const [checked, setChecked] = useState(() => new Set())
+  const [wasConstrained, setWasConstrained] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    listChildRecordTypeEligibility(parentObject, parentRecordType.id, childObject)
+      .then(({ isConstrained, options: opts }) => {
+        if (cancelled) return
+        setOptions(opts)
+        setWasConstrained(isConstrained)
+        setChecked(new Set(opts.filter(o => o.isAllowed).map(o => o.id)))
+      })
+      .catch(err => { if (!cancelled) setError(err) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [parentObject, parentRecordType.id, childObject])
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape' && !saving) onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose, saving])
+
+  const allChecked = options.length > 0 && checked.size === options.length
+  const willBeUnconstrained = checked.size === 0 || allChecked
+
+  function toggle(id) {
+    setChecked(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  async function save() {
+    setSaving(true)
+    setError(null)
+    try {
+      const { isConstrained } = await setChildRecordTypeEligibility(
+        parentObject, parentRecordType.id, childObject, [...checked],
+        { totalChildCount: options.length },
+      )
+      toast.success(isConstrained
+        ? `${parentRecordType.label}: ${checked.size} ${childLabel.toLowerCase()} record type${checked.size === 1 ? '' : 's'} available`
+        : `${parentRecordType.label}: every ${childLabel.toLowerCase()} record type available`)
+      onClose()
+    } catch (err) {
+      setError(err)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose() }}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 700,
+        display: 'flex',
+        alignItems: isMobile ? 'flex-end' : 'center',
+        justifyContent: 'center',
+        padding: isMobile ? 0 : 16,
+      }}
+    >
+      <div
+        role="dialog" aria-modal="true" aria-label={`${childLabel} record types`}
+        style={{
+          background: C.card,
+          borderRadius: isMobile ? '12px 12px 0 0' : 10,
+          padding: isMobile ? '22px 20px calc(20px + env(safe-area-inset-bottom))' : 26,
+          width: isMobile ? '100%' : 560,
+          maxWidth: '100%',
+          maxHeight: isMobile ? '92vh' : '90vh',
+          overflowY: 'auto',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+        }}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>
+            {childLabel} record types
+          </div>
+          <div style={{ fontSize: 12, color: C.textMuted }}>
+            available on <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{parentRecordType.value}</span>
+          </div>
+        </div>
+
+        <div style={{
+          fontSize: 12, color: C.textSecondary, lineHeight: 1.55,
+          background: '#f7f9fc',
+          border: `1px solid ${C.border}`, borderRadius: 6,
+          padding: '9px 11px', marginBottom: 14,
+        }}>
+          Ticked types can be chosen on a record with this record type; the rest are
+          neither offered nor accepted. Tick <strong>none</strong> (or <strong>all</strong>) to leave it
+          open — every {childLabel.toLowerCase()} record type stays available, including any added later.
+        </div>
+
+        {loading && <div style={{ fontSize: 13, color: C.textMuted, padding: '10px 0' }}>Loading…</div>}
+
+        {error && (
+          <div style={{ fontSize: 12.5, color: C.textPrimary, background: '#eaf2fb', border: `1px solid ${C.sky}`, borderRadius: 6, padding: '9px 11px', marginBottom: 12 }}>
+            {error.message || String(error)}
+          </div>
+        )}
+
+        {!loading && options.length === 0 && (
+          <div style={{ fontSize: 13, color: C.textMuted, padding: '10px 0' }}>
+            No active {childLabel.toLowerCase()} record types exist yet.
+          </div>
+        )}
+
+        {!loading && options.map(o => (
+          <label
+            key={o.id}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 9,
+              padding: '8px 2px', borderBottom: `1px solid ${C.border}`,
+              cursor: saving ? 'default' : 'pointer', fontSize: 13, color: C.textPrimary,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={checked.has(o.id)}
+              onChange={() => toggle(o.id)}
+              disabled={saving}
+            />
+            <span style={{ flex: 1 }}>{o.label}</span>
+            {o.state && (
+              <span style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{o.state}</span>
+            )}
+          </label>
+        ))}
+
+        {!loading && (
+          <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 10, lineHeight: 1.5 }}>
+            {willBeUnconstrained
+              ? `Open — every ${childLabel.toLowerCase()} record type is available here.`
+              : `${checked.size} of ${options.length} available here.`}
+            {wasConstrained && willBeUnconstrained && ' Saving will clear the current selection.'}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 20 }}>
+          <button style={buttonSmSecondaryStyle} onClick={onClose} disabled={saving}>Cancel</button>
+          <button style={buttonSmPrimaryStyle} onClick={save} disabled={saving || loading}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
