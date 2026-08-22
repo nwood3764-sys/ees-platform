@@ -11,7 +11,7 @@
     "runtime-smoke": "node scripts/runtime-smoke.mjs",
     "build:safe": "npm run preflight && npm run check:tdz && npm run fixtures && npm run build && npm run runtime-smoke",
     "check:tdz": "node scripts/check-hook-deps-tdz.mjs",
-    "fixtures": "node scripts/combustion-notification-fixture.mjs && node scripts/create-modal-fields-fixture.mjs && node scripts/field-links-fixture.mjs && node scripts/nav-trail-fixture.mjs && node scripts/paperwork-math-fixture.mjs"
+    "fixtures": "node scripts/run-fixtures.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
