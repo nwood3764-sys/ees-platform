@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
 import { compressPhotoForUpload } from '../lib/photoCompression'
+import { WORK_ORDER_STEP_KEY, UNASSIGNED_STEP_KEY } from '../lib/photoTags'
 
 // ---------------------------------------------------------------------------
 // storageService.js — uploads, downloads, deletes, and signed URLs for the
@@ -211,6 +212,15 @@ export async function uploadRecordTypeIcon({ file, recordTypeId }) {
 // Photos
 // ───────────────────────────────────────────────────────────────────────────
 
+// Sorts any step with no execution order to the very end of the roll-up.
+const STEP_POSITION_LAST = Number.MAX_SAFE_INTEGER
+// Photos on the work order itself belong after every step but ahead of any
+// step the roll-up could not resolve.
+const STEP_POSITION_WORK_ORDER = Number.MAX_SAFE_INTEGER - 1
+// photo_type values that describe no particular subject, so there is no work
+// step template field to read a label from.
+const GENERIC_PHOTO_TYPES = new Set(['general', 'before', 'after'])
+
 /**
  * Upload a photo file and create the matching row in `photos`.
  *
@@ -369,21 +379,36 @@ export async function listPhotos(relatedObject, relatedId, { workStepId = null }
 }
 
 /**
- * Aggregate every live photo across ALL of a work order's steps.
+ * Aggregate every live photo that belongs to a work order — the roll-up the
+ * work order's Photos card shows.
  *
- * Photos are anchored at the work-step grain (related_object='work_steps',
- * related_id=<step id>, work_step_id set). A work order's photo gallery wants
- * the union across its steps, each tagged with the step it belongs to so the
- * UI can label and filter by work step. listPhotos() can't express this — it
- * matches a single (related_object, related_id) pair — so this walks
- * work_steps → photos for the given work order.
+ * A work order's photos live at two grains and BOTH belong on the roll-up:
+ *
+ *   step grain   related_object='work_steps', related_id=<step id>, and the
+ *                real FK work_step_id — the evidence a technician captured
+ *                against a numbered step of the work plan
+ *   order grain  related_object='work_orders', related_id=<work order id> —
+ *                a photo attached to the job itself and to no one step (the
+ *                Unable to Complete evidence photo, or a file dropped onto
+ *                this very card)
+ *
+ * Reading the FK alone missed both the order-grain photos and any step photo
+ * whose FK was never populated, which is why an assessment with 73 photos on
+ * its steps showed an empty card. The FK is now guaranteed by
+ * trg_photos_sync_work_step_anchor, but this still reads the polymorphic
+ * anchor too: the roll-up is correct regardless of which writer produced the
+ * row.
  *
  * Each returned row is a photos row plus:
- *   _work_step_id    — the owning step's id (filter key)
- *   _work_step_name  — the owning step's human-readable name (tag/label)
+ *   _work_step_id     the owning step's id, or 'work_order' (the filter key)
+ *   _work_step_name   the owning step's name, or 'Work Order' (the tag)
+ *   _work_step_position  the step's execution order (drives the ordering)
+ *   _photo_tag_label  the photo_type's human label, resolved from the work
+ *                     step template that asked for it
  *
- * Ordered by step name then capture time so the gallery groups naturally.
- * Returns raw rows; caller hydrates signed URLs via hydratePhotoUrls.
+ * Ordered by work step, then capture time within a step, with the
+ * order-grain photos last. Returns raw rows; the caller hydrates signed URLs
+ * via hydratePhotoUrls.
  */
 export async function listWorkOrderPhotos(workOrderId) {
   if (!workOrderId) return []
@@ -394,41 +419,95 @@ export async function listWorkOrderPhotos(workOrderId) {
     .select('id, work_step_name, work_step_execution_order, work_step_plan_execution_order')
     .eq('work_order_id', workOrderId)
   if (stepErr) throw new Error(`work order steps load failed: ${stepErr.message}`)
-  if (!steps || steps.length === 0) return []
 
-  const stepNameById = new Map(steps.map(s => [s.id, s.work_step_name]))
+  const stepIds = (steps || []).map(s => s.id)
+  const stepNameById = new Map((steps || []).map(s => [s.id, s.work_step_name]))
   // Position map: the step's execution order in the work plan (what the work
   // step list on the record shows as 1, 2, 3…). Fall back to the plan execution
   // order, then to a large number so any unordered step sinks to the end.
-  const stepPosById = new Map(steps.map(s => [
+  const stepPosById = new Map((steps || []).map(s => [
     s.id,
-    s.work_step_execution_order ?? s.work_step_plan_execution_order ?? Number.MAX_SAFE_INTEGER,
+    s.work_step_execution_order ?? s.work_step_plan_execution_order ?? STEP_POSITION_LAST,
   ]))
-  const stepIds = steps.map(s => s.id)
 
-  // 2. All live photos linked to any of those steps.
-  const { data: photos, error: photoErr } = await supabase
-    .from('photos')
-    .select('*')
-    .in('work_step_id', stepIds)
-    .eq('is_deleted', false)
-    .order('taken_at', { ascending: true })
-  if (photoErr) throw new Error(`work order photos load failed: ${photoErr.message}`)
+  // 2. Photos, at both grains, in one round trip. The step queries are split
+  //    (FK, then polymorphic anchor) rather than OR-ed so neither depends on
+  //    the other's index, and rows caught by both are de-duplicated below.
+  const photoSelect = () => supabase.from('photos').select('*').eq('is_deleted', false)
+  const queries = [
+    photoSelect().eq('related_object', 'work_orders').eq('related_id', workOrderId),
+  ]
+  if (stepIds.length > 0) {
+    queries.push(photoSelect().in('work_step_id', stepIds))
+    queries.push(photoSelect().eq('related_object', 'work_steps').in('related_id', stepIds))
+  }
+  const results = await Promise.all(queries)
+  const failed = results.find(r => r.error)
+  if (failed) throw new Error(`work order photos load failed: ${failed.error.message}`)
 
-  // 3. Tag each photo with its step id/name/position; sort by the step's
-  // execution order (so photos read in work-step order — Opening, then each
-  // step, then Closing), then by capture time within a step.
-  return (photos || [])
-    .map(p => ({
-      ...p,
-      _work_step_id: p.work_step_id,
-      _work_step_name: stepNameById.get(p.work_step_id) || 'Unassigned step',
-      _work_step_position: stepPosById.get(p.work_step_id) ?? Number.MAX_SAFE_INTEGER,
-    }))
+  const byId = new Map()
+  for (const r of results) for (const p of r.data || []) byId.set(p.id, p)
+  const photos = Array.from(byId.values())
+  if (photos.length === 0) return []
+
+  // 3. Resolve each photo's tag label from the work step template field that
+  //    asked for it, so the gallery shows "Refrigerator Nameplate" instead of
+  //    'kitchen_refrigerator_nameplate_photo'.
+  const tagLabels = await resolvePhotoTagLabels(photos.map(p => p.photo_type))
+
+  // 4. Tag each photo with its step (or the work order) and sort: by the
+  //    step's execution order, then capture time within the step.
+  return photos
+    .map(p => {
+      const stepId = p.work_step_id
+        || (p.related_object === 'work_steps' ? p.related_id : null)
+      const onAStep = stepId && stepNameById.has(stepId)
+      return {
+        ...p,
+        _work_step_id: onAStep ? stepId : (stepId ? UNASSIGNED_STEP_KEY : WORK_ORDER_STEP_KEY),
+        _work_step_name: onAStep ? stepNameById.get(stepId)
+          : (stepId ? 'Unassigned step' : 'Work Order'),
+        _work_step_position: onAStep
+          ? (stepPosById.get(stepId) ?? STEP_POSITION_LAST)
+          : (stepId ? STEP_POSITION_LAST : STEP_POSITION_WORK_ORDER),
+        _photo_tag_label: tagLabels.get(String(p.photo_type || '').trim()) || null,
+      }
+    })
     .sort((a, b) => {
       if (a._work_step_position !== b._work_step_position) return a._work_step_position - b._work_step_position
+      if (a._work_step_name !== b._work_step_name) return a._work_step_name.localeCompare(b._work_step_name)
       return (a.taken_at || '').localeCompare(b.taken_at || '')
     })
+}
+
+/**
+ * photo_type → human label, read from the work step template field that
+ * defined the prompt. Only named tags are looked up; the generic legs
+ * ('general' / 'before' / 'after') are labelled by the caller.
+ *
+ * A miss is not an error — an ad hoc tag simply falls back to a humanized
+ * form of its own name.
+ */
+async function resolvePhotoTagLabels(types) {
+  const wanted = Array.from(new Set(
+    (types || [])
+      .map(t => String(t || '').trim())
+      .filter(t => t && !GENERIC_PHOTO_TYPES.has(t))
+  ))
+  if (wanted.length === 0) return new Map()
+  const { data, error } = await supabase
+    .from('work_step_template_fields')
+    .select('wstf_field_name, wstf_field_label')
+    .in('wstf_field_name', wanted)
+    .eq('wstf_is_deleted', false)
+  if (error) return new Map() // labels are a nicety; never sink the gallery
+  const map = new Map()
+  for (const row of data || []) {
+    if (row.wstf_field_label && !map.has(row.wstf_field_name)) {
+      map.set(row.wstf_field_name, row.wstf_field_label)
+    }
+  }
+  return map
 }
 
 /**
