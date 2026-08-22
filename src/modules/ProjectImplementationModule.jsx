@@ -231,7 +231,12 @@ export default function ProjectImplementationModule({ selectedRecord: navSelecte
             recordId={selectedRecord.id}
             mode={selectedRecord.mode}
             onBack={() => { setSelectedRecord(null); if (onCloseRecord) onCloseRecord() }}
-            onNavigateToRecord={onReplaceRecord}
+            // Opening a record FROM a record is a navigation, not a correction of
+            // the current one: it has to push a history entry, or the browser's
+            // Back skips the whole chain (project → work order → …) and lands
+            // wherever the URL last actually changed — a module list, or Home.
+            // onReplaceRecord stays for the create → view swap after a save.
+            onNavigateToRecord={onNavigateToRecord}
             onRecordCreated={() => { setSelectedRecord(null); loadAll(); if (onCloseRecord) onCloseRecord() }}
           />
         ) : (<>

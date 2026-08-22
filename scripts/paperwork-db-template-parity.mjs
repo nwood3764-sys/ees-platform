@@ -1,7 +1,7 @@
 // Render from the ACTUAL seeded database section lists and prove they match
 // the shipped documents. The JSON below is copied verbatim from prod.
 import crypto from 'node:crypto'
-import { buildPaperworkModel, buildEesPdf, buildSubmittalPdf } from '/home/user/ees-platform/src/data/paperworkModel.js'
+import { buildPaperworkModel, buildEesPdf, buildSubmittalPdf } from '../src/data/paperworkModel.js'
 import { readFileSync } from 'node:fs'
 
 const dbTemplates = JSON.parse(readFileSync(new URL('./paperwork-db-templates.fixture.json', import.meta.url), 'utf8'))
