@@ -2280,6 +2280,12 @@ function LookupEditControl({ field, value, baseOptions, onChange, canCreate, dep
       const opp = dependencyValues.opportunity_id
       return opp ? { opportunity_id: opp } : null
     }
+    if (dep.kind === 'units_for_building') {
+      // A unit is created INTO a building — never straight onto a property,
+      // which is why this seeds nothing without one.
+      const bld = dependencyValues.building_id
+      return bld ? { building_id: bld } : null
+    }
     return null
   }, [field, dependencyValues])
 
