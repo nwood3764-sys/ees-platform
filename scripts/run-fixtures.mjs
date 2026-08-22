@@ -19,10 +19,27 @@ if (suites.length === 0) {
   process.exit(1)
 }
 
+// Name the environment and the suite list up front: this runs inside the
+// Netlify build, whose log is the only place a CI-only failure is visible.
+console.log(`run-fixtures: node ${process.version} · ${suites.length} suites · ${suites.join(', ')}`)
+
 let failed = 0
 for (const suite of suites) {
   const result = spawnSync(process.execPath, [join(here, suite)], { stdio: 'inherit' })
-  if (result.status !== 0) failed += 1
+  if (result.error) {
+    failed += 1
+    console.error(`run-fixtures: ${suite} could not be started — ${result.error.message}`)
+    continue
+  }
+  if (result.signal) {
+    failed += 1
+    console.error(`run-fixtures: ${suite} was killed by ${result.signal}`)
+    continue
+  }
+  if (result.status !== 0) {
+    failed += 1
+    console.error(`run-fixtures: ${suite} exited ${result.status}`)
+  }
 }
 
 console.log(failed === 0
