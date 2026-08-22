@@ -77,6 +77,12 @@ export default class ErrorBoundary extends Component {
     // Auto-reset when a tracked key changes. Used by App.jsx to clear
     // the error when the user navigates to a different module/record.
     if (!this.state.error) return
+    // ...except for a stale bundle. The only cure there is the reload the
+    // stale-version screen is counting down to, and resetting UNMOUNTS that
+    // screen — cancelling the reload. The user then bounces between modules,
+    // seeing the screen flash on each switch and never getting the new build.
+    // Hold the state until the reload happens.
+    if (this.isStaleChunkError()) return
     const prev = prevProps.resetKeys || []
     const next = this.props.resetKeys || []
     if (prev.length !== next.length) {

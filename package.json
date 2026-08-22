@@ -10,7 +10,8 @@
     "preflight": "node scripts/preflight.mjs",
     "runtime-smoke": "node scripts/runtime-smoke.mjs",
     "build:safe": "npm run preflight && npm run check:tdz && npm run build && npm run runtime-smoke",
-    "check:tdz": "node scripts/check-hook-deps-tdz.mjs"
+    "check:tdz": "node scripts/check-hook-deps-tdz.mjs",
+    "fixtures": "node scripts/run-fixtures.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

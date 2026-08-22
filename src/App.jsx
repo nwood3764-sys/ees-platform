@@ -180,7 +180,13 @@ function AuthedApp({ session }) {
     let cancelled = false
     fetchAccessibleModules()
       .then(list => { if (!cancelled) setAccessibleModules(list) })
-      .catch(() => { if (!cancelled) setAccessibleModules([]) })
+      // A FAILED lookup is not "this user may see nothing". Treating it as an
+      // empty set made the guard below read every module as forbidden and
+      // bounce the user to Home — including straight back to Home after they
+      // pressed the browser's Back button. Leave access unknown instead: the
+      // guard stands down, the nav renders unfiltered, and every module still
+      // enforces its own access server-side through RLS.
+      .catch(() => { if (!cancelled) setAccessibleModules(null) })
     return () => { cancelled = true }
   }, [])
 

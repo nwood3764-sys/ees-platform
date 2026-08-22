@@ -158,9 +158,18 @@ function maybeRecoverFromStaleChunk(err) {
     sessionStorage.setItem(STALE_CHUNK_BOUNDARY_KEY, String(now))
   } catch { /* sessionStorage unavailable — fall through to reload anyway */ }
   // Log a benign breadcrumb (info severity) so we can see how often this fires,
-  // then reload to pick up the new build.
-  try { logClientError(err, null, { severity: 'info', module: 'stale-chunk-reload' }) } catch { /* noop */ }
-  window.location.reload()
+  // then reload to pick up the new build. The reload aborts any request still
+  // in flight, so give the insert a brief moment to land — without it the
+  // breadcrumb never arrived and these reloads were invisible in client_errors
+  // (which is exactly what made a recurring stale-bundle loop hard to see).
+  try {
+    Promise.race([
+      logClientError(err, null, { severity: 'info', module: 'stale-chunk-reload' }),
+      new Promise(resolve => setTimeout(resolve, 700)),
+    ]).catch(() => undefined).then(() => window.location.reload())
+  } catch {
+    window.location.reload()
+  }
   return true
 }
 
