@@ -7,6 +7,7 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
 import NavLink from '../components/NavLink'
+import RecordLink from '../components/RecordLink'
 import HelpIcon from '../components/help/HelpIcon'
 import WorkOrderReviewQueue from '../components/WorkOrderReviewQueue'
 import WorkOrderReviewScreen from '../components/WorkOrderReviewScreen'
@@ -311,12 +312,32 @@ function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, on
   )
 }
 
-function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrews = [] }) {
+// Exported so the dashboard can be mounted in a scratch Vite page and driven
+// with a real browser — the only way to prove a click actually opens what it
+// names (reading the JSX is what let these dead clicks ship in the first
+// place). Nothing else imports it.
+export function FieldHome({ setSec, onOpenRecord, onNavigateToModule, projects, workOrders, paymentRequests, scheduleCrews = [] }) {
   const R = useRecharts()
   const toVerify    = workOrders.filter(w => w.status === 'To Be Verified')
   const corrections = workOrders.filter(w => w.status === 'Corrections Needed')
   const toSchedProj = projects.filter(p => p.status === 'Project To Be Scheduled')
   const inProgress  = workOrders.filter(w => w.status === 'In Progress')
+  const agedPaymentRequests = paymentRequests.filter(r => r.daysOpen > 14).slice(0, 5)
+
+  // Every row on this dashboard names a real record, so every row opens it.
+  // The rows carry the record's uuid as `_id` (the visible `id` is the record
+  // NUMBER, e.g. WO-00083 — not addressable), which is what the record URL
+  // needs. onOpenRecord routes through the module's setSelectedRecord, so the
+  // open is URL-driven (shareable /<table>/<uuid>) exactly like a list-view
+  // row. Without an id there is nothing to open, so the click is a no-op
+  // rather than a navigation to a broken URL.
+  const openRecordRow = (table, row) => {
+    if (!row?._id || !onOpenRecord) return
+    onOpenRecord({ table, id: row._id, mode: 'view', name: row.name })
+  }
+  const openProject        = (p)  => openRecordRow('projects', p)
+  const openWorkOrder      = (w)  => openRecordRow('work_orders', w)
+  const openPaymentRequest = (pr) => openRecordRow('project_payment_requests', pr)
 
   // Header identity — pulled once from the current Supabase auth session and
   // joined to the app-level users/roles tables. Null while loading and also
@@ -369,18 +390,18 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
           {[
-            { label:'Work Orders to Verify',  value:toVerify.length,    color:C.amber,  action:() => setSec('workorders') },
-            { label:'Corrections Needed',      value:corrections.length, color:C.danger, urgent:corrections.length>0, action:() => setSec('workorders') },
-            { label:'Projects to Schedule',    value:toSchedProj.length, color:C.sky,    action:() => setSec('projects')   },
-            { label:'Work Orders In Progress', value:inProgress.length,  color:C.emerald,action:() => setSec('workorders') },
+            { label:'Work Orders to Verify',  value:toVerify.length,    color:C.amber,  section:'workorders' },
+            { label:'Corrections Needed',      value:corrections.length, color:C.danger, urgent:corrections.length>0, section:'workorders' },
+            { label:'Projects to Schedule',    value:toSchedProj.length, color:C.sky,    section:'projects'   },
+            { label:'Work Orders In Progress', value:inProgress.length,  color:C.emerald,section:'workorders' },
           ].map(s => (
-            <div key={s.label} onClick={s.action}
-              style={{ background:C.card, border:`2px solid ${s.urgent?C.danger:C.border}`, borderTop:`3px solid ${s.color}`, borderRadius:8, padding:'14px 16px', cursor:'pointer' }}
+            <NavLink key={s.label} to={{ activeModule:'field', section:s.section }} onActivate={() => setSec(s.section)}
+              style={{ display:'block', background:C.card, border:`2px solid ${s.urgent?C.danger:C.border}`, borderTop:`3px solid ${s.color}`, borderRadius:8, padding:'14px 16px', cursor:'pointer' }}
               onMouseEnter={e => e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)'}
               onMouseLeave={e => e.currentTarget.style.boxShadow='none'}>
               <div style={{ fontSize:11, color:C.textMuted, fontWeight:500, textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:8 }}>{s.label}</div>
               <div style={{ fontSize:26, fontWeight:700, color:s.urgent?C.danger:s.color, fontFamily:'JetBrains Mono, monospace' }}>{s.value}</div>
-            </div>
+            </NavLink>
           ))}
         </div>
 
@@ -400,7 +421,7 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
                 ))}
               </div>
             </div>
-            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('workorders')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Work Orders →</span></div>
+            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'field', section:'workorders' }} onActivate={() => setSec('workorders')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Work Orders →</NavLink></div>
           </div>
 
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
@@ -421,7 +442,7 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
                 ))}
               </div>
             ))}
-            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('schedule')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>Open Schedule →</span></div>
+            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'field', section:'schedule' }} onActivate={() => setSec('schedule')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>Open Schedule →</NavLink></div>
           </div>
 
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
@@ -430,15 +451,24 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
               <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>{['Project','WOs','Action'].map(h => <th key={h} style={{ padding:'8px 12px', textAlign:'left', color:C.textMuted, fontWeight:500, fontSize:11 }}>{h}</th>)}</tr></thead>
               <tbody>
                 {toSchedProj.slice(0,4).map(p => (
-                  <TableRow key={p.id}>
-                    <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}`, color:C.textPrimary, fontWeight:500, maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</td>
+                  <TableRow key={p.id} onClick={() => openProject(p)}>
+                    <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}`, color:C.textPrimary, fontWeight:500, maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      <RecordLink table="projects" id={p._id} onActivate={() => openProject(p)} title={p.name}
+                        style={{ color:C.textPrimary, display:'block', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</RecordLink>
+                    </td>
                     <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{p.workOrders}</td>
-                    <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}` }}><button style={{ background:'#e8f1fb', color:'#1e466b', border:`1px solid #bcd9f2`, borderRadius:4, padding:'2px 7px', fontSize:10, fontWeight:600, cursor:'pointer' }}>Schedule</button></td>
+                    <td style={{ padding:'9px 12px', borderBottom:`1px solid ${C.border}` }}>
+                      <button onClick={e => { e.stopPropagation(); openProject(p) }}
+                        style={{ background:'#e8f1fb', color:'#1e466b', border:`1px solid #bcd9f2`, borderRadius:4, padding:'2px 7px', fontSize:10, fontWeight:600, cursor:'pointer' }}>Schedule</button>
+                    </td>
                   </TableRow>
                 ))}
+                {toSchedProj.length===0 && (
+                  <tr><td colSpan={3} style={{ padding:'16px 12px', textAlign:'center', color:C.textMuted, fontSize:12 }}>Nothing waiting to be scheduled.</td></tr>
+                )}
               </tbody>
             </table>
-            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('projects')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View All Projects →</span></div>
+            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'field', section:'projects' }} onActivate={() => setSec('projects')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View All Projects →</NavLink></div>
           </div>
         </div>
       </div>
@@ -456,27 +486,30 @@ function FieldHome({ setSec, projects, workOrders, paymentRequests, scheduleCrew
             </div>
             {sec2.items.length===0 ? <div style={{ padding:'16px 14px', textAlign:'center', color:C.textMuted, fontSize:12 }}>All clear.</div>
             : sec2.items.slice(0,4).map((w,i) => (
-              <div key={w.id} style={{ padding:'10px 14px', borderBottom:i<Math.min(sec2.items.length,4)-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
+              <RecordLink key={w.id} table="work_orders" id={w._id} onActivate={() => openWorkOrder(w)}
+                style={{ display:'block', padding:'10px 14px', borderBottom:i<Math.min(sec2.items.length,4)-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
                 onMouseEnter={e => e.currentTarget.style.background='#f7f9fc'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                 <div style={{ color:sec2.color, fontSize:12, fontWeight:500, marginBottom:2 }}>{w.id}</div>
                 <div style={{ color:C.textMuted, fontSize:11 }}>{w.property} · {w.teamLead||'Unassigned'}</div>
-              </div>
+              </RecordLink>
             ))}
-            <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={() => setSec('workorders')} style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</span></div>
+            <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'field', section:'workorders' }} onActivate={() => setSec('workorders')} style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</NavLink></div>
           </div>
         ))}
 
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
           <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><span style={{ fontWeight:600, fontSize:13, color:C.textPrimary }}>Project Payment Requests</span></div>
-          {paymentRequests.filter(r=>r.daysOpen>14).slice(0,5).map((pr,i) => (
-            <div key={pr.id} style={{ padding:'9px 14px', borderBottom:i<4?`1px solid ${C.border}`:'none', cursor:'pointer' }}
+          {agedPaymentRequests.length===0 && <div style={{ padding:'16px 14px', textAlign:'center', color:C.textMuted, fontSize:12 }}>Nothing open past 14 days.</div>}
+          {agedPaymentRequests.map((pr,i) => (
+            <RecordLink key={pr.id} table="project_payment_requests" id={pr._id} onActivate={() => openPaymentRequest(pr)}
+              style={{ display:'block', padding:'9px 14px', borderBottom:i<agedPaymentRequests.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background='#f7f9fc'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
               <div style={{ color:pr.daysOpen>30?C.danger:'#1a5a8a', fontSize:11, fontWeight:600, marginBottom:2 }}>${Number(pr.amount).toLocaleString()} · {pr.daysOpen}d open</div>
               <div style={{ color:C.textMuted, fontSize:10 }}>{pr.property}</div>
               <div style={{ marginTop:3 }}><Badge s={pr.status} /></div>
-            </div>
+            </RecordLink>
           ))}
-          <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><span style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</span></div>
+          <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'incentives', section:'requests' }} onActivate={() => onNavigateToModule && onNavigateToModule('incentives', 'requests')} style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</NavLink></div>
         </div>
       </div>
     </div>
@@ -698,7 +731,7 @@ function ServiceAppointmentsInbox({ onOpenRecord }) {
   )
 }
 
-export default function FieldModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+export default function FieldModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onNavigateToModule, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
   const SECTIONS = useModuleSections('field', CODE_SECTIONS)
   // Navigation is URL-driven when App passes nav props (the default in the
   // shipping app). The local-state fallback path remains so this module can
@@ -895,7 +928,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
             objectTable={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
             moduleId="field" />
         )}
-        {sec==='home'                 && <FieldHome setSec={setSec} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
+        {sec==='home'                 && <FieldHome setSec={setSec} onOpenRecord={setSelectedRecord} onNavigateToModule={onNavigateToModule} projects={projects} workOrders={workOrders} paymentRequests={paymentRequests} scheduleCrews={todayCrews} />}
         {sec==='service_appointments' && <ServiceAppointmentsInbox onOpenRecord={openRecord} />}
         {sec==='reviews' && (reviewWorkOrder
           ? <WorkOrderReviewScreen
