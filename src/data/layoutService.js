@@ -2053,6 +2053,50 @@ export async function fetchDependentLookupOptions(field, record) {
         label: r.unit_name || r.id.slice(0, 8),
       }))
     }
+    case 'units_for_building': {
+      // A unit belongs to a building, and a building to a property. Offering
+      // every unit in the platform put Madison units on a Rocky Mount work
+      // order (Nicholas, 2026-08-22). Mixed dependency, so read the draft by
+      // name: with a building chosen only its units are offered; with only a
+      // property, its units across every building; with neither, nothing.
+      const buildingId = record?.building_id ?? null
+      const propertyId = record?.property_id ?? null
+      if (!buildingId && !propertyId) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_units_for_building', {
+        p_building_ids: buildingId ? [buildingId] : [],
+        p_property_ids: propertyId ? [propertyId] : null,
+        p_include_unit_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.unit_name || r.id.slice(0, 8),
+      }))
+    }
+    case 'contacts_for_property_chain': {
+      // The people connected to THIS job: the program's site contact, the
+      // property's and buildings' contacts, the opportunity's contact roles,
+      // and everyone at the owning account and its parents. Scopes a work
+      // order's Contact without narrowing it to a single account, which is
+      // wrong for a property whose site contact works for the manager.
+      const propertyId = record?.property_id ?? null
+      const opportunityId = record?.opportunity_id ?? null
+      if (!propertyId && !opportunityId) {
+        return []
+      }
+      const { data, error } = await supabase.rpc('list_contacts_for_property_chain', {
+        p_property_ids: propertyId ? [propertyId] : null,
+        p_opportunity_ids: opportunityId ? [opportunityId] : null,
+        p_include_contact_id: currentValue,
+      })
+      if (error) throw error
+      return (data || []).map(r => ({
+        value: r.id,
+        label: r.contact_name || r.id.slice(0, 8),
+      }))
+    }
     case 'opportunities_for_contact_account': {
       // Contact-first Opportunity Contact Roles: once a contact is chosen (or
       // prefilled from the contact you came from), scope the Opportunity picker
