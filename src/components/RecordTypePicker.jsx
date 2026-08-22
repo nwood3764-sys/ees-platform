@@ -14,7 +14,11 @@ import { C } from '../data/constants'
 import { Icon } from './UI'
 import { fetchAvailableRecordTypes } from '../data/layoutService'
 
-export default function RecordTypePicker({ tableName, objectLabel, state = null, onPick, onCancel }) {
+export default function RecordTypePicker({
+  tableName, objectLabel, state = null,
+  parentObject = null, parentRecordTypeId = null,
+  onPick, onCancel,
+}) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [recordTypes, setRecordTypes] = useState([])
@@ -24,7 +28,7 @@ export default function RecordTypePicker({ tableName, objectLabel, state = null,
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchAvailableRecordTypes(tableName, { state })
+    fetchAvailableRecordTypes(tableName, { state, parentObject, parentRecordTypeId })
       .then(rts => {
         if (cancelled) return
         setRecordTypes(rts)
@@ -48,7 +52,7 @@ export default function RecordTypePicker({ tableName, objectLabel, state = null,
     // infinite fetch loop. We only want to refetch when the tableName
     // actually changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableName, state])
+  }, [tableName, state, parentObject, parentRecordTypeId])
 
   // Cancel on Escape
   useEffect(() => {

@@ -227,7 +227,10 @@ export function getRecordTypeColumn(tableName) {
  * [{ id, value, label }]. Empty array means the object has no record-type
  * differentiation and the Create flow should skip the record-type picker.
  */
-export async function fetchAvailableRecordTypes(objectName, { state = null } = {}) {
+export async function fetchAvailableRecordTypes(
+  objectName,
+  { state = null, parentObject = null, parentRecordTypeId = null } = {},
+) {
   const runQuery = async (applyState) => {
     let query = supabase
       .from('picklist_values')
@@ -260,10 +263,55 @@ export async function fetchAvailableRecordTypes(objectName, { state = null } = {
   // active set so the user is still required to choose. This keeps the
   // "advancing must prompt for record type" guarantee even for states whose
   // scoped types have not been configured yet.
-  if (state && scoped.length === 0) {
-    return runQuery(false)
+  const base = (state && scoped.length === 0) ? await runQuery(false) : scoped
+  return applyParentEligibility(base, objectName, parentObject, parentRecordTypeId)
+}
+
+/**
+ * Narrow a record-type list to the ones the PARENT record type allows.
+ *
+ * Which child record types are available under a given parent is configuration,
+ * held in record_type_eligibility and resolved by the
+ * eligible_record_types_for_parent RPC: a (parent_object, parent_record_type,
+ * child_object) triple with no active edges is unconstrained, so unconfigured
+ * parents return everything and this is a no-op for them.
+ *
+ * Filtering here is what stops the wrong type ever being OFFERED — a Wisconsin
+ * assessment type on a North Carolina opportunity, say. The database enforces
+ * the same rule independently (enforce_assessment_record_type_eligibility), so
+ * this is the courteous half of the guarantee, not the guarantee itself. That is
+ * why a failed lookup falls back to the unfiltered list rather than blocking:
+ * the save is still safe, and the user is never stuck staring at an empty
+ * picker because a config read hiccupped.
+ */
+async function applyParentEligibility(recordTypes, objectName, parentObject, parentRecordTypeId) {
+  if (!parentObject || !parentRecordTypeId || !UUID_RE.test(String(parentRecordTypeId))) {
+    return recordTypes
   }
-  return scoped
+  try {
+    const { data, error } = await supabase.rpc('eligible_record_types_for_parent', {
+      p_parent_object:      parentObject,
+      p_parent_record_type: parentRecordTypeId,
+      p_child_object:       objectName,
+    })
+    if (error) throw error
+    const allowed = new Set((data || []).map(r => r.id))
+    if (allowed.size === 0) return recordTypes
+    const narrowed = recordTypes.filter(rt => allowed.has(rt.id))
+    // An empty intersection means the state filter and the eligibility config
+    // disagree. Eligibility is the explicit, hand-configured rule, so it wins —
+    // returning [] here would silently skip the record-type prompt entirely.
+    if (narrowed.length > 0) return narrowed
+    return (data || []).map(r => ({
+      id:    r.id,
+      value: r.picklist_value,
+      label: r.picklist_label || r.picklist_value,
+      state: r.picklist_state || null,
+    }))
+  } catch (err) {
+    console.warn('eligible_record_types_for_parent failed; showing all record types', err)
+    return recordTypes
+  }
 }
 
 /**
