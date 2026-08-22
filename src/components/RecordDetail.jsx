@@ -35,6 +35,7 @@ const WorkPlanRunner                       = lazy(() => import('../fieldMobile/W
 import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
 import { formatUsPhoneDisplay } from '../lib/fieldLinks'
+import { holdAppReload } from '../lib/appUpdate'
 import FieldValueLink from './FieldValueLink'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl, buildScopedListUrl, pushRecordSubPath } from '../lib/urlNav'
@@ -6588,6 +6589,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [error, setError] = useState(null)
   const [editing, setEditing] = useState(isCreate)
   const [draft, setDraft] = useState({})
+
+  // Typing in a record is unsaved work — hold off the auto-update reload until
+  // the user saves or cancels. The app updating itself must never cost anyone
+  // a half-filled form.
+  useEffect(() => {
+    if (!editing) return
+    return holdAppReload()
+  }, [editing])
   const [saving, setSaving] = useState(false)
   const [allPicklistOpts, setAllPicklistOpts] = useState({})
   const [allLookupOpts, setAllLookupOpts] = useState({})

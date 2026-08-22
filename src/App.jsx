@@ -21,6 +21,7 @@ import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
 import { useIsMobile } from './lib/useMediaQuery'
 import { useUrlNavigation, getTableForSection } from './lib/urlNav'
+import { startAutoUpdate, holdAppReload } from './lib/appUpdate'
 
 // ─── Lazy-loaded modules ─────────────────────────────────────────────────────
 // Each module becomes its own webpack/rollup chunk. Only the active module's
@@ -190,6 +191,13 @@ function AuthedApp({ session }) {
     return () => { cancelled = true }
   }, [])
 
+  // Pick up a new deploy without the user ever being asked to refresh. Skipped
+  // in dev, where the module graph is served live and there is no manifest.
+  useEffect(() => {
+    if (import.meta.env.DEV) return
+    return startAutoUpdate({ runningSha: typeof __BUILD_SHA__ === 'string' ? __BUILD_SHA__ : null })
+  }, [])
+
   // The sidebar list filtered to what this user may access.
   // ── View As (troubleshooting) ──────────────────────────────────────────────
   // A permitted user (Admin / Project Coordinator) can simulate another role's
@@ -281,6 +289,12 @@ function AuthedApp({ session }) {
   // behind the modal stays live — cancel and you're exactly where you were.
   const [createRequest, setCreateRequest] = useState(null)
   const createSeqRef = useRef(0)
+  // A half-filled create form is unsaved work: hold off any auto-reload until
+  // it's saved or cancelled.
+  useEffect(() => {
+    if (!createRequest) return
+    return holdAppReload()
+  }, [createRequest])
   const openCreateRecord = (rec) => {
     createSeqRef.current += 1
     setCreateRequest({
