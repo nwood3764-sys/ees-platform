@@ -902,3 +902,127 @@ export async function clearActionOverride({ layoutId, actionKey, reason = 'clear
     .eq('pla_is_deleted',     false)
   if (error) throw error
 }
+
+// ─── Child record-type eligibility ─────────────────────────────────────
+//
+// Which record types a CHILD object may carry under a given PARENT record type
+// is configuration, held in record_type_eligibility and enforced in the database
+// by a per-object trigger (assessments under opportunities, work orders under
+// projects). The record-type picker reads the same config through the
+// eligible_record_types_for_parent RPC, so a type that isn't allowed is never
+// offered in the first place.
+//
+// Semantics, mirroring picklist_value_record_type_assignments: a
+// (parent_object, parent_record_type, child_object) triple with NO active edges
+// is UNCONSTRAINED — every active child record type is available. Selecting any
+// constrains it to exactly that set; clearing the whole selection returns it to
+// unconstrained rather than forbidding everything. The pane says so out loud,
+// because "none selected" meaning "all allowed" is otherwise a trap.
+
+/**
+ * Every active child record type, flagged with whether this parent allows it.
+ *
+ * @returns {Promise<{isConstrained: boolean, options: Array<{id, value, label, state, isAllowed}>}>}
+ */
+export async function listChildRecordTypeEligibility(parentObject, parentRecordTypeId, childObject) {
+  const [{ data: children, error: childErr }, { data: edges, error: edgeErr }] = await Promise.all([
+    supabase
+      .from('picklist_values')
+      .select('id, picklist_value, picklist_label, picklist_state')
+      .eq('picklist_object', childObject)
+      .eq('picklist_field', 'record_type')
+      .eq('picklist_is_active', true)
+      .order('picklist_label', { ascending: true }),
+    supabase
+      .from('record_type_eligibility')
+      .select('rte_child_record_type_id')
+      .eq('rte_parent_object', parentObject)
+      .eq('rte_parent_record_type_id', parentRecordTypeId)
+      .eq('rte_child_object', childObject)
+      .eq('rte_is_active', true)
+      .eq('rte_is_deleted', false),
+  ])
+  if (childErr) throw childErr
+  if (edgeErr) throw edgeErr
+
+  const allowed = new Set((edges || []).map(e => e.rte_child_record_type_id))
+  return {
+    isConstrained: allowed.size > 0,
+    options: (children || []).map(r => ({
+      id:        r.id,
+      value:     r.picklist_value,
+      label:     r.picklist_label || r.picklist_value,
+      state:     r.picklist_state || null,
+      // Unconstrained parents allow everything, so every box reads as ticked.
+      isAllowed: allowed.size === 0 ? true : allowed.has(r.id),
+    })),
+  }
+}
+
+/**
+ * Replace this parent's selection with exactly `allowedChildIds`.
+ *
+ * Existing edges are soft-deleted / restored rather than deleted and re-created,
+ * so the audit trail shows what a program used to allow. Passing every child id
+ * (or an empty array) clears the selection entirely, returning the parent to
+ * unconstrained — the two are equivalent by the semantics above, and storing an
+ * "everything" selection would silently freeze out any record type added later.
+ */
+export async function setChildRecordTypeEligibility(
+  parentObject, parentRecordTypeId, childObject, allowedChildIds, { totalChildCount = null } = {},
+) {
+  const userId = await getCurrentUserId()
+  const wanted = new Set(allowedChildIds || [])
+  const selectsEverything = totalChildCount != null && wanted.size >= totalChildCount
+  const target = (wanted.size === 0 || selectsEverything) ? new Set() : wanted
+
+  const { data: existing, error: readErr } = await supabase
+    .from('record_type_eligibility')
+    .select('id, rte_child_record_type_id, rte_is_deleted, rte_is_active')
+    .eq('rte_parent_object', parentObject)
+    .eq('rte_parent_record_type_id', parentRecordTypeId)
+    .eq('rte_child_object', childObject)
+  if (readErr) throw readErr
+
+  const byChild = new Map((existing || []).map(r => [r.rte_child_record_type_id, r]))
+  const now = new Date().toISOString()
+
+  // Restore or create every edge that should be live.
+  for (const childId of target) {
+    const row = byChild.get(childId)
+    if (row) {
+      if (row.rte_is_deleted || !row.rte_is_active) {
+        const { error } = await supabase
+          .from('record_type_eligibility')
+          .update({ rte_is_deleted: false, rte_is_active: true, rte_updated_by: userId, rte_updated_at: now })
+          .eq('id', row.id)
+        if (error) throw error
+      }
+    } else {
+      const { error } = await supabase
+        .from('record_type_eligibility')
+        .insert({
+          rte_record_number: '',
+          rte_parent_object: parentObject,
+          rte_parent_record_type_id: parentRecordTypeId,
+          rte_child_object: childObject,
+          rte_child_record_type_id: childId,
+          rte_created_by: userId,
+          rte_updated_by: userId,
+        })
+      if (error) throw error
+    }
+  }
+
+  // Retire the ones that should not be.
+  const toRetire = (existing || []).filter(r => !r.rte_is_deleted && !target.has(r.rte_child_record_type_id))
+  for (const row of toRetire) {
+    const { error } = await supabase
+      .from('record_type_eligibility')
+      .update({ rte_is_deleted: true, rte_updated_by: userId, rte_updated_at: now })
+      .eq('id', row.id)
+    if (error) throw error
+  }
+
+  return { isConstrained: target.size > 0, allowedCount: target.size }
+}
