@@ -34,8 +34,11 @@ const WorkPlanRunner                       = lazy(() => import('../fieldMobile/W
 
 import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
+import { formatUsPhoneDisplay } from '../lib/fieldLinks'
+import { holdAppReload } from '../lib/appUpdate'
+import FieldValueLink from './FieldValueLink'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
-import { getTableListUrl, buildScopedListUrl } from '../lib/urlNav'
+import { getTableListUrl, buildScopedListUrl, pushRecordSubPath } from '../lib/urlNav'
 import { useDataRefresh } from '../lib/dataRefresh'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
@@ -169,23 +172,9 @@ function formatByReturnType(raw, returnType) {
     case 'datetime': return raw ? new Date(raw).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
     case 'boolean':  return raw ? 'Yes' : 'No'
     case 'number':   return Number(raw).toLocaleString()
+    case 'phone':    return formatUsPhoneDisplay(raw)
     default:         return typeof raw === 'number' ? raw.toLocaleString() : String(raw)
   }
-}
-
-// Format a US phone number for display: 5152978363 -> (515) 297-8363,
-// 15152978363 -> (515) 297-8363. Anything that isn't a clean 10/11-digit US
-// number (extensions, international, already-formatted oddities) is returned
-// untouched so we never mangle a value we don't recognize.
-function formatPhoneDisplay(raw) {
-  const digits = String(raw).replace(/\D/g, '')
-  if (digits.length === 10) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
-  }
-  if (digits.length === 11 && digits[0] === '1') {
-    return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`
-  }
-  return String(raw)
 }
 
 // Normalize a US phone value to the bare 10-digit form the DB check constraint
@@ -260,7 +249,7 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
       const opt = (fieldDef.options || []).find(o => o.value === raw)
       return opt ? opt.label : String(raw)
     }
-    case 'phone':      return formatPhoneDisplay(raw)
+    case 'phone':      return formatUsPhoneDisplay(raw)
     // Formula / rollup / inherited fields are computed at read; format by the
     // field's declared return type (falls back to a sensible numeric/text guess).
     case 'formula':
@@ -298,6 +287,8 @@ function formatFieldValue(raw, fieldDef, picklists, lookups) {
       const labelByValue = new Map((fieldDef.options || []).map(o => [o.value, o.label]))
       return raw.map(v => labelByValue.get(v) || v).join(', ')
     }
+    case 'url':
+    case 'email':      return String(raw)
     case 'json':       return typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)
     default:           return String(raw)
   }
@@ -1887,7 +1878,10 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                   })}
                 </div>
               ) : (
-                <input type={f.type === 'email' ? 'email' : 'text'} style={{ ...inputBase }} value={draft[f.name] || ''}
+                <input
+                  type={f.type === 'email' ? 'email' : f.type === 'phone' ? 'tel' : f.type === 'url' ? 'url' : 'text'}
+                  inputMode={f.type === 'phone' ? 'tel' : f.type === 'email' ? 'email' : f.type === 'url' ? 'url' : undefined}
+                  style={{ ...inputBase }} value={draft[f.name] || ''}
                   onChange={e => setVal(f.name, e.target.value)} />
               )}
             </div>
@@ -2374,8 +2368,13 @@ function EditField({ field, value, onChange, picklistOpts, lookupOpts, recordId,
       )
     }
 
-    case 'text': case 'phone': case 'email':
-      return <input type={field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'}
+    // Typed inputs so mobile keyboards match the field (email/@ keyboard, phone
+    // keypad, url keyboard) and the browser offers the right autofill.
+    case 'text': case 'phone': case 'email': case 'url':
+      return <input
+        type={field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : field.type === 'url' ? 'url' : 'text'}
+        inputMode={field.type === 'phone' ? 'tel' : field.type === 'email' ? 'email' : field.type === 'url' ? 'url' : undefined}
+        placeholder={field.type === 'url' ? 'https://' : undefined}
         style={inputBase} value={v} onChange={e => onChange(field.name, e.target.value)} />
 
     case 'number': case 'currency': case 'percent': {
@@ -3806,7 +3805,9 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
                 {typeof f.label === 'string' && f.label.includes(' · ') ? f.label.split(' · ').pop() : f.label}
               </span>
               <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>
-                {rel.column_type === 'picklist' && relRaw ? <Badge s={relDisplay} /> : relDisplay}
+                {rel.column_type === 'picklist' && relRaw
+                  ? <Badge s={relDisplay} />
+                  : <FieldValueLink type={rel.column_type} raw={relRaw} display={relDisplay} label={f.label} />}
               </span>
             </div>
           )
@@ -3836,7 +3837,9 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
                   {chip}
                 </span>
               </span>
-              <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>{cDisplay}</span>
+              <span style={{ fontSize: 13, color: C.textPrimary, wordBreak: 'break-word' }}>
+                <FieldValueLink type={f.return_type} raw={cRaw} display={cDisplay} label={f.label} />
+              </span>
             </div>
           )
         }
@@ -3982,7 +3985,9 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
                 fontFamily: f.type === 'number' || f.type === 'currency' || f.type === 'percent' ? 'JetBrains Mono, monospace' : 'inherit',
                 wordBreak: 'break-word',
               }}>
-                {f.type === 'picklist' && raw ? <Badge s={display} /> : display}
+                {f.type === 'picklist' && raw
+                  ? <Badge s={display} />
+                  : <FieldValueLink type={f.type} raw={raw} display={display} label={f.label} />}
               </span>
             )}
           </div>
@@ -4329,14 +4334,19 @@ function renderRelatedCell(col, val, picklists, { isFirstCol, canNavigate, child
   }
   if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
   if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
-  const content = col.type === 'picklist' && shown
-    ? <Badge s={shown} />
-    : (shown != null && shown !== '' ? shown : '—')
+  if (col.type === 'phone' && shown) shown = formatUsPhoneDisplay(shown)
   // The first column is the record's name — render it as a REAL anchor so the
   // browser's "Open link in new tab", middle-click, and Ctrl/Cmd-click work on
   // a related-list row exactly like a Salesforce list. Plain click still does
   // fast in-app navigation (and the whole <tr> stays clickable for convenience).
   const asLink = isFirstCol && canNavigate && childTable && rowId && col.type !== 'picklist'
+  const plain = shown != null && shown !== '' ? shown : '—'
+  // A phone/email/website in a related list is as actionable as it is on the
+  // record page — click the number in a Contacts list and it dials. Skipped on
+  // the name cell, which is already the anchor to the record (no nested <a>).
+  const content = col.type === 'picklist' && shown
+    ? <Badge s={shown} />
+    : (asLink ? plain : <FieldValueLink type={col.type} raw={val} display={plain} label={col.label} />)
   return (
     <td key={col.name} style={{
       padding: '10px 14px',
@@ -4407,15 +4417,17 @@ function renderRelatedValue(col, val, picklists) {
   }
   if (col.type === 'number' && shown != null) shown = Number(shown).toLocaleString()
   if (col.type === 'boolean') shown = shown === true ? 'Yes' : shown === false ? 'No' : shown
+  if (col.type === 'phone' && shown) shown = formatUsPhoneDisplay(shown)
   if (col.type === 'picklist' && shown) return <Badge s={shown} />
   if (shown == null || shown === '') return <span style={{ color: C.textMuted }}>—</span>
   return (
-    <span style={{
-      fontFamily: col.type === 'number' ? 'JetBrains Mono, monospace' : 'inherit',
-      color: C.textSecondary,
-    }}>
-      {shown}
-    </span>
+    <FieldValueLink
+      type={col.type} raw={val} display={shown} label={col.label}
+      style={{
+        fontFamily: col.type === 'number' ? 'JetBrains Mono, monospace' : 'inherit',
+        color: C.textSecondary,
+      }}
+    />
   )
 }
 
@@ -6577,6 +6589,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [error, setError] = useState(null)
   const [editing, setEditing] = useState(isCreate)
   const [draft, setDraft] = useState({})
+
+  // Typing in a record is unsaved work — hold off the auto-update reload until
+  // the user saves or cancels. The app updating itself must never cost anyone
+  // a half-filled form.
+  useEffect(() => {
+    if (!editing) return
+    return holdAppReload()
+  }, [editing])
   const [saving, setSaving] = useState(false)
   const [allPicklistOpts, setAllPicklistOpts] = useState({})
   const [allLookupOpts, setAllLookupOpts] = useState({})
@@ -7465,7 +7485,11 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     const qs = params.toString()
     const next = window.location.pathname + (qs ? `?${qs}` : '')
     if (next !== window.location.pathname + window.location.search) {
-      window.history.pushState(null, '', next)
+      // Pushed through urlNav so the entry is tagged as belonging to THIS
+      // record: browser Back still steps Related → Details, but leaving the
+      // record (breadcrumb / back arrow) steps over its tabs in one go
+      // instead of landing back on the same record.
+      pushRecordSubPath(next)
     }
   }, [data, isInsertMode, tableName, recordId, isCreate])
 

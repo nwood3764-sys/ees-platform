@@ -77,6 +77,12 @@ export default class ErrorBoundary extends Component {
     // Auto-reset when a tracked key changes. Used by App.jsx to clear
     // the error when the user navigates to a different module/record.
     if (!this.state.error) return
+    // ...except for a stale bundle. The only cure there is the reload the
+    // stale-version screen is counting down to, and resetting UNMOUNTS that
+    // screen — cancelling the reload. The user then bounces between modules,
+    // seeing the screen flash on each switch and never getting the new build.
+    // Hold the state until the reload happens.
+    if (this.isStaleChunkError()) return
     const prev = prevProps.resetKeys || []
     const next = this.props.resetKeys || []
     if (prev.length !== next.length) {
@@ -338,7 +344,11 @@ export default class ErrorBoundary extends Component {
 
 const STALE_RELOAD_GUARD_KEY = 'leap.staleReload.attemptedAt'
 const STALE_RELOAD_COOLDOWN_MS = 60 * 1000   // 1 minute
-const STALE_RELOAD_COUNTDOWN_SEC = 3
+// No countdown. A deploy landing mid-session is the app's problem to solve,
+// not a message to read: reload on the next tick and let the user carry on.
+// The screen below is only what's briefly behind that reload, and what stays
+// on screen in the one case we won't auto-reload (a second failure inside the
+// cooldown, which means reloading isn't fixing it and a person should decide).
 
 function StaleVersionScreen() {
   // Has this tab already tried an auto-reload in the last minute? If so,
@@ -351,24 +361,14 @@ function StaleVersionScreen() {
       return false
     }
   })
-  const [seconds, setSeconds] = useReactState(STALE_RELOAD_COUNTDOWN_SEC)
 
   useEffect(() => {
     if (autoReloadBlocked) return
     try { sessionStorage.setItem(STALE_RELOAD_GUARD_KEY, String(Date.now())) } catch {}
-    const id = setInterval(() => {
-      setSeconds(s => {
-        if (s <= 1) {
-          clearInterval(id)
-          // Use replace, not assign, so the broken navigation doesn't
-          // create a new history entry the user could navigate Back to.
-          window.location.reload()
-          return 0
-        }
-        return s - 1
-      })
-    }, 1000)
-    return () => clearInterval(id)
+    // Reload on the next tick so this render commits (and the breadcrumb the
+    // boundary logs has a chance to leave) without the user reading anything.
+    const id = setTimeout(() => window.location.reload(), 400)
+    return () => clearTimeout(id)
   }, [autoReloadBlocked])
 
   return (
@@ -411,7 +411,7 @@ function StaleVersionScreen() {
 
         {!autoReloadBlocked ? (
           <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 14 }}>
-            Reloading in <strong style={{ color: C.textPrimary }}>{seconds}</strong> second{seconds === 1 ? '' : 's'}…
+            Updating…
           </div>
         ) : (
           <div style={{ fontSize: 12, color: '#1e466b', marginBottom: 14 }}>

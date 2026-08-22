@@ -1,7 +1,7 @@
 // Prove the section-driven renderer reproduces the shipped documents exactly.
 import crypto from 'node:crypto'
 import { buildPaperworkModel, buildEesPdf, buildSealedPdf, DEFAULT_DOCUMENT_SECTIONS }
-  from '/home/user/ees-platform/src/data/paperworkModel.js'
+  from '../src/data/paperworkModel.js'
 
 const fields = {
   ownerName: 'Hampton Housing Partners LLC', ownerAddress: '100 Main St',

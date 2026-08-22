@@ -21,6 +21,7 @@ import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
 import { useIsMobile } from './lib/useMediaQuery'
 import { useUrlNavigation, getTableForSection } from './lib/urlNav'
+import { startAutoUpdate, holdAppReload } from './lib/appUpdate'
 
 // ─── Lazy-loaded modules ─────────────────────────────────────────────────────
 // Each module becomes its own webpack/rollup chunk. Only the active module's
@@ -180,8 +181,21 @@ function AuthedApp({ session }) {
     let cancelled = false
     fetchAccessibleModules()
       .then(list => { if (!cancelled) setAccessibleModules(list) })
-      .catch(() => { if (!cancelled) setAccessibleModules([]) })
+      // A FAILED lookup is not "this user may see nothing". Treating it as an
+      // empty set made the guard below read every module as forbidden and
+      // bounce the user to Home — including straight back to Home after they
+      // pressed the browser's Back button. Leave access unknown instead: the
+      // guard stands down, the nav renders unfiltered, and every module still
+      // enforces its own access server-side through RLS.
+      .catch(() => { if (!cancelled) setAccessibleModules(null) })
     return () => { cancelled = true }
+  }, [])
+
+  // Pick up a new deploy without the user ever being asked to refresh. Skipped
+  // in dev, where the module graph is served live and there is no manifest.
+  useEffect(() => {
+    if (import.meta.env.DEV) return
+    return startAutoUpdate({ runningSha: typeof __BUILD_SHA__ === 'string' ? __BUILD_SHA__ : null })
   }, [])
 
   // The sidebar list filtered to what this user may access.
@@ -275,6 +289,12 @@ function AuthedApp({ session }) {
   // behind the modal stays live — cancel and you're exactly where you were.
   const [createRequest, setCreateRequest] = useState(null)
   const createSeqRef = useRef(0)
+  // A half-filled create form is unsaved work: hold off any auto-reload until
+  // it's saved or cancelled.
+  useEffect(() => {
+    if (!createRequest) return
+    return holdAppReload()
+  }, [createRequest])
   const openCreateRecord = (rec) => {
     createSeqRef.current += 1
     setCreateRequest({

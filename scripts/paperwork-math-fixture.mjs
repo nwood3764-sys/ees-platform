@@ -4,7 +4,7 @@
 // attic) is Nicholas's canonical review case: HOMES $80,000 + FOE $7,150 =
 // $87,150 gross, line-item costs summing back to the gross exactly so
 // TOTAL DUE is $0.00; the Energy Audit Invoice is $2,000 on one page.
-import { buildPaperworkModel, buildEesPdf, formatMoney } from '/home/user/ees-platform/src/data/paperworkModel.js'
+import { buildPaperworkModel, buildEesPdf, formatMoney } from '../src/data/paperworkModel.js'
 
 let pass = 0, fail = 0
 const eq = (label, got, want) => {
