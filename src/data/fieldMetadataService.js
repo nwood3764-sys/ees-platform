@@ -1,4 +1,5 @@
 import { supabase, fetchAllPaged } from '../lib/supabase'
+import { isSystemAuditColumn } from '../lib/systemAuditFields'
 
 // =====================================================================
 // fieldMetadataService
@@ -36,17 +37,18 @@ const _picklistOptionsCache = new Map() // `${object}.${field}` → Promise<Opti
 const SYSTEM_COLUMN_PATTERNS = [
   /^id$/,
   /_record_number$/,
-  /_created_at$/,    /_created_by$/,
-  /_updated_at$/,    /_updated_by$/,
   /_deleted_at$/,    /_deleted_by$/,
   /_is_deleted$/,    /_deletion_reason$/,
 ]
 const SYSTEM_COLUMN_LITERALS = new Set([
-  'created_at','created_by','updated_at','updated_by',
   'deleted_at','deleted_by','is_deleted','deletion_reason',
 ])
 
 function isSystemManaged(columnName) {
+  // The four audit columns come from the shared rule so every spelling is
+  // covered — prefixed, bare, and the `_id` suffix (tasks.created_by_id).
+  // They are written by trg_record_audit_fields, never by a user.
+  if (isSystemAuditColumn(columnName)) return true
   if (SYSTEM_COLUMN_LITERALS.has(columnName)) return true
   return SYSTEM_COLUMN_PATTERNS.some(p => p.test(columnName))
 }

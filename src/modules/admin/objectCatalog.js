@@ -149,6 +149,7 @@ export const OBJECT_CATALOG = [
   { table: 'field_history',                 label: 'Field History Entry',         pluralLabel: 'Field History',                module: 'Data',                  description: 'Per-field change tracking.' },
   { table: 'activities',                    label: 'Activity',                    pluralLabel: 'Activities',                   module: 'Data',                  description: 'Call, email, meeting, or status change activity.' },
   { table: 'notifications',                 label: 'Notification',                pluralLabel: 'Notifications',                module: 'Data',                  description: 'User-facing notification.' },
+  { table: 'record_audit_column_overrides', label: 'Record Audit Column Override', pluralLabel: 'Record Audit Column Overrides', module: 'Data',                 description: 'Which columns hold an object\'s created / last-modified stamps when they are not named by convention. Only objects that need an exception have a row; everything else resolves automatically.' },
 ]
 
 // Module order for sidebar / list grouping

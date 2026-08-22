@@ -27,6 +27,8 @@ const HIDDEN_SUFFIXES = [
 const HIDDEN_EXACT    = new Set([
   'is_deleted', 'deleted_at', 'deleted_by', 'deletion_reason',
   'created_at', 'updated_at', 'created_by', 'updated_by',
+  // tasks predates the standard spelling and carries created_by_id.
+  'created_by_id', 'updated_by_id',
   // Legacy/unused account column — the account's name is `account_name`
   // (surfaced as "Name"); `account_organization_name` is a leftover that only
   // confuses the column picker, so keep it out of the catalog entirely.

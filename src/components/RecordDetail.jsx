@@ -64,6 +64,7 @@ import { getSectionConfigSchema, buildDefaultConfig } from '../data/sectionConfi
 import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
 import { MERGE_FIELD_OBJECTS, loadFieldsForObject } from '../data/mergeFieldCatalog'
 import { resolveLookupLabel, getEditableFieldsForTable } from '../data/fieldMetadataService'
+import { isSystemAuditField, isSystemAuditColumn, fieldRenderKey } from '../lib/systemAuditFields'
 import {
   uploadDocumentTemplateAsset,
   signedDocumentTemplateAssetUrl,
@@ -3751,10 +3752,14 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
   // display purposes on saved records but shouldn't be shown as inputs on
   // the create form. Hide them when the record doesn't exist yet.
   const isCreate = !record?.id
+  // Audit columns come from the shared rule (it also covers the bare
+  // `created_at` / `created_by_id` spellings the older tables use, which the
+  // previous inline regex missed — those rendered as blank inputs on the
+  // create form). Record number and owner keep their own suffix test.
   const isSystemField = (name) =>
-    /(_record_number|_created_by|_updated_by|_created_at|_updated_at|_owner)$/.test(name || '')
+    isSystemAuditColumn(name) || /(_record_number|_owner)$/.test(name || '')
 
-  const renderField = (f) => {
+  const renderField = (f, fieldIndex = 0) => {
         // Hide system-set fields on the create form — they're auto-populated
         // at insert time by applyInsertDefaults and rendering them as inputs
         // just confuses the user (and produced an incorrect 'Required fields
@@ -3766,7 +3771,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // paired field in the other column lines up, mirroring the source form.
         if (f.type === 'spacer') {
           return (
-            <div key={f.spacer_id || `sp-${f.column || 1}-${f.label || ''}`} aria-hidden="true"
+            <div key={fieldRenderKey(f, fieldIndex)} aria-hidden="true"
               style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', visibility: 'hidden' }}>&nbsp;</span>
               <span style={{ fontSize: 13, visibility: 'hidden' }}>&nbsp;</span>
@@ -3797,7 +3802,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             }, picklists, lookups)
           }
           return (
-            <div key={f.name} style={{
+            <div key={fieldRenderKey(f, fieldIndex)} style={{
               padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
@@ -3831,7 +3836,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
             : f.type === 'rollup' ? 'Read-only — rolled up from related records.'
             : 'Read-only — inherited from a parent record. Edit it on the base record.'
           return (
-            <div key={f.name} style={{
+            <div key={fieldRenderKey(f, fieldIndex)} style={{
               padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
@@ -3882,7 +3887,12 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         // trg_project_name, etc). Read-only in edit mode so users aren't
         // presented an input whose value silently won't stick.
         const isDerivedField = isDerivedReadonlyField(tableName, f.name)
+        // Created By / Last Modified By are lookups onto users, so without this
+        // they rendered as editable dropdowns — offering a change that
+        // trg_record_audit_fields reverts on save. The layout declares which
+        // fields those are (`system_audit`), so no column-name guessing.
         const isEditable = editing
+          && !isSystemAuditField(f)
           && (f.type !== 'datetime')
           && (f.type !== 'polymorphic_lookup')
           && (f.type !== 'lookup' || lookupIsEditable)
@@ -3920,7 +3930,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
           const livePath = record[f.name] || null
           const fieldDisabled = fieldDisabledReasons?.[f.name] || null
           return (
-            <div key={f.name} style={{
+            <div key={fieldRenderKey(f, fieldIndex)} style={{
               padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
@@ -3939,7 +3949,7 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
         }
 
         return (
-          <div key={f.name} style={{
+          <div key={fieldRenderKey(f, fieldIndex)} style={{
             padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
             display: 'flex', flexDirection: 'column', gap: 4,
             background: isEditable ? '#fafffe' : 'transparent',
@@ -4014,12 +4024,12 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridAutoFlow: 'row', alignItems: 'start' }}>
         {fields.map((f, i) => {
-          const el = renderField(f)
+          const el = renderField(f, i)
           if (el == null) return null
           const cellStyle = f.full_width
             ? { gridColumn: '1 / -1' }
             : { gridColumnStart: f.column === 2 ? 2 : 1 }
-          return <div key={f.name || f.spacer_id || `rm-${i}`} style={cellStyle}>{el}</div>
+          return <div key={fieldRenderKey(f, i)} style={cellStyle}>{el}</div>
         })}
       </div>
     )
@@ -4035,14 +4045,14 @@ function FieldGroupWidget({ widget, record, picklists, lookups, editing, draft, 
     return (
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${nCols}, minmax(0, 1fr))`, alignItems: 'start' }}>
         {Array.from({ length: nCols }, (_, i) => i + 1).map(c => (
-          <div key={c}>{fields.filter(f => (f.column || 1) === c).map(renderField)}</div>
+          <div key={c}>{fields.filter(f => (f.column || 1) === c).map((f, i) => renderField(f, i))}</div>
         ))}
       </div>
     )
   }
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0' }}>
-      {fields.map(renderField)}
+      {fields.map((f, i) => renderField(f, i))}
     </div>
   )
 }

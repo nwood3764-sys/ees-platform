@@ -21,6 +21,10 @@
 // Pure functions, no imports: the caller supplies its own exclusion sets, which
 // keeps this testable in node (scripts/create-modal-fields-fixture.mjs).
 
+// Explicit .js extension: scripts/create-modal-fields-fixture.mjs loads this
+// module in plain Node, which does not resolve extensionless specifiers.
+import { isSystemAuditColumn } from './systemAuditFields.js'
+
 export const CREATE_MODAL_HIDDEN_TYPES = new Set([
   'spacer', 'related_field', 'formula', 'rollup', 'inherited',
 ])
@@ -28,7 +32,16 @@ export const CREATE_MODAL_HIDDEN_TYPES = new Set([
 // Columns applyInsertDefaults owns. Same expression the create form's
 // required-field validator uses, kept here so both agree on what "system" means.
 export const CREATE_MODAL_SYSTEM_COLUMN =
-  /(^id$|_record_number$|_owner$|_created_by$|_created_at$|_updated_by$|_updated_at$|_is_deleted$|^is_seed_data$|_is_seed_data$)/
+  /(^id$|_record_number$|_owner$|_is_deleted$|^is_seed_data$|_is_seed_data$)/
+
+/**
+ * Never ask for a column on a create form when the platform fills it in. The
+ * four audit columns come from the shared rule (which also covers the bare
+ * `created_at` / `created_by_id` spellings that the older tables use and that
+ * the suffix-only pattern above missed).
+ */
+const isCreateModalSystemColumn = (name) =>
+  CREATE_MODAL_SYSTEM_COLUMN.test(name || '') || isSystemAuditColumn(name)
 
 /**
  * Group the page layout's fields down to what the create pop-up should ask for.
@@ -56,7 +69,7 @@ export function buildCreateModalGroups(sections, { requiredFields, showAll = fal
         if (!f?.name || covered.has(f.name)) continue
         covered.add(f.name)
         if (CREATE_MODAL_HIDDEN_TYPES.has(f.type)) continue
-        if (CREATE_MODAL_SYSTEM_COLUMN.test(f.name)) continue
+        if (isCreateModalSystemColumn(f.name)) continue
         if (skip.has(f.name)) continue
         if (f._editable === false) continue
         const isRequired = f.required === true || required.has(f.name)
@@ -91,7 +104,7 @@ export function listUnlaidOutRequiredColumns(requiredFields, covered, { neverAsk
   const out = []
   for (const col of (requiredFields || [])) {
     if (seen.has(col)) continue
-    if (CREATE_MODAL_SYSTEM_COLUMN.test(col)) continue
+    if (isCreateModalSystemColumn(col)) continue
     if (skip.has(col)) continue
     if (recordTypeColumn && col === recordTypeColumn) continue   // the record-type picker owns this
     out.push(col)
