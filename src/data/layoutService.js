@@ -1152,7 +1152,10 @@ export async function loadRecordDetailData(tableName, recordId) {
   // from live field_metadata so a type change (→ Formula, Currency, …) takes
   // effect on existing layouts without re-saving them. One small indexed query,
   // skipped entirely when the object defines no custom field types.
-  await computeFieldValues(tableName, recordId, record, layoutData.sections)
+  await Promise.all([
+    computeFieldValues(tableName, recordId, record, layoutData.sections),
+    overlayRelatedFieldDisplayTypes(layoutData.sections),
+  ])
 
   return {
     record,
@@ -1170,6 +1173,49 @@ const OVERLAY_DISPLAY_TYPES = new Set([
   'text', 'textarea', 'number', 'integer', 'currency', 'percent',
   'date', 'datetime', 'boolean', 'email', 'phone', 'url',
 ])
+
+// Cross-object (related) fields carry the parent column's type in
+// widget_config.related.column_type, frozen at the moment the field was placed
+// on the layout. A phone / email / website column is plain `text` in Postgres,
+// so those fields froze as text and rendered as dead strings even after the
+// parent object's field_metadata gave the column its real logical type.
+//
+// This re-reads that logical type at load, for every related field on the
+// layout, so a Website pulled from the Property renders as a link on the
+// Enrollment exactly as it does on the Property. Only text-shaped columns are
+// upgraded (picklist/lookup/date/number related fields keep their placement
+// type, which carries wiring the metadata doesn't).
+const RELATED_UPGRADABLE_FROM = new Set([null, undefined, '', 'text', 'textarea'])
+
+export async function overlayRelatedFieldDisplayTypes(sections) {
+  if (!Array.isArray(sections) || sections.length === 0) return
+  const fieldsByTable = new Map()   // parent table → related field defs
+  for (const sec of sections) {
+    for (const w of (sec.widgets || [])) {
+      if (w.widget_type !== 'field_group' || !w.widget_config?.fields) continue
+      for (const f of w.widget_config.fields) {
+        if (f.type !== 'related_field' || !f.related?.table || !f.related?.column) continue
+        if (!RELATED_UPGRADABLE_FROM.has(f.related.column_type)) continue
+        if (!fieldsByTable.has(f.related.table)) fieldsByTable.set(f.related.table, [])
+        fieldsByTable.get(f.related.table).push(f)
+      }
+    }
+  }
+  if (fieldsByTable.size === 0) return
+  // describe_object_columns already carries each column's field_metadata
+  // display type, and getEditableFieldsForTable caches it per page session —
+  // so this costs nothing on a layout whose parents were already described.
+  await Promise.all([...fieldsByTable.entries()].map(async ([table, fields]) => {
+    try {
+      const cols = await getEditableFieldsForTable(table)
+      const byCol = new Map((cols || []).map(c => [c.columnName, c.displayType]))
+      for (const f of fields) {
+        const dt = byCol.get(f.related.column)
+        if (dt && OVERLAY_DISPLAY_TYPES.has(dt)) f.related.column_type = dt
+      }
+    } catch { /* best-effort — the field still renders, just as plain text */ }
+  }))
+}
 
 // Resolve formula + rollup field values for a record and merge them in place,
 // and overlay each field's logical type from field_metadata onto the layout so

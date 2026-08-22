@@ -93,6 +93,16 @@ function columnType(c) {
     : 'text'
 }
 
+// A phone / email / website column is plain `text` in Postgres — its logical
+// type lives in field_metadata and rides along on describe_object_columns as
+// display_type. Carry it onto the column descriptor as `linkType` so list cells
+// render the value as a real dial/mail/open link. Kept separate from `type`,
+// which drives the FILTER (a website still filters as text).
+function linkTypeOf(c) {
+  const dt = c?.display_type
+  return dt === 'email' || dt === 'phone' || dt === 'url' ? dt : undefined
+}
+
 // Build a ListView column descriptor for one own-object schema column.
 // FK columns (picklist/user) resolve to a *__label field; others map straight.
 // `valueSource` tells the filter sidebar where the value typeahead's options
@@ -124,6 +134,8 @@ function ownColumnDescriptor(c, group, ownerTable) {
   // free text when no definition exists.
   const type = columnType(c)
   const base = { field: c.column_name, label: titleize(c.column_name), type, group, columnName: c.column_name }
+  const linkType = linkTypeOf(c)
+  if (linkType) base.linkType = linkType
   if (type === 'text') base.valueSource = { kind: 'picklist', object: ownerTable, field: c.column_name, maybe: true }
   return base
 }
@@ -316,6 +328,7 @@ export async function buildObjectColumnCatalog(table) {
           ? 'Record Owner'
           : titleize(stripParentPrefix(pc.column_name, parentTable)),
         type,
+        linkType: linkTypeOf(pc),
         group: groupLabel,
         valueSource,
         related: {

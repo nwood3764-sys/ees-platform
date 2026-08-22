@@ -7,6 +7,8 @@ import { usePullToRefresh } from '../lib/usePullToRefresh';
 import { blockNegativeKeys, composeKeyDown, clampNonNegative } from '../lib/numberInput';
 import { Badge, Icon, TableRow, ProgramTag } from './UI';
 import HelpIcon from './help/HelpIcon';
+import FieldValueLink from './FieldValueLink';
+import { formatUsPhoneDisplay } from '../lib/fieldLinks';
 import {
   getEditableFieldsForTable,
   getPicklistOptions,
@@ -2377,7 +2379,16 @@ export function ListView({
         : (v == null || v === '' ? '—' : String(v));
       return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 500, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{display}</td>;
     }
-    if (col.field === 'email') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: '#1a5a8a', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</td>;
+    if (col.field === 'email') return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: '#1a5a8a', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><FieldValueLink type="email" raw={v} display={v || '—'} label={col.label} /></td>;
+    // A phone / email / website column (col.linkType, from the object's field
+    // metadata) is as actionable in a list as it is on the record page: click
+    // the number to dial, the address to compose, the site to open it.
+    if (col.linkType) {
+      const shownLink = col.linkType === 'phone' && v ? formatUsPhoneDisplay(v) : v;
+      return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: v ? C.textSecondary : C.textMuted, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <FieldValueLink type={col.linkType} raw={v} display={shownLink || '—'} label={col.label} />
+      </td>;
+    }
     return <td key={col.field} style={{ padding: '11px 12px', borderBottom: `1px solid ${C.border}`, color: v ? C.textSecondary : C.textMuted, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v || '—'}</td>;
   };
 
