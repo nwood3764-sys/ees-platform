@@ -9,10 +9,12 @@
 // entirely and the create form opens directly.
 // =============================================================================
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { C } from '../data/constants'
 import { Icon } from './UI'
 import { fetchAvailableRecordTypes } from '../data/layoutService'
+import { scopedToState, statesInRecordTypes, needsStateChoice as recordOwesState }
+  from '../lib/programStateScope'
 
 export default function RecordTypePicker({
   tableName, objectLabel, state = null,
@@ -23,17 +25,36 @@ export default function RecordTypePicker({
   const [error, setError] = useState(null)
   const [recordTypes, setRecordTypes] = useState([])
   const [chosenId, setChosenId] = useState(null)
+  // The state the user picked here, when the record itself could not tell us
+  // one. Never overrides a state the record already has.
+  const [chosenState, setChosenState] = useState('')
+
+  // Every state this object actually has programs configured for, read off the
+  // record types themselves — never a hardcoded list of the states EES works in.
+  const stateOptions = useMemo(() => statesInRecordTypes(recordTypes), [recordTypes])
+  // The record could not tell us its state and this object's record types span
+  // more than one, so the user has to say which — otherwise the picker would
+  // offer every program in the platform, which is exactly the bug this closes
+  // (Nicholas, 2026-08-23). A record that DOES know its state never sees this.
+  const needsStateChoice = recordOwesState(state, recordTypes)
+  const visibleRecordTypes = needsStateChoice
+    ? scopedToState(recordTypes, chosenState || null)
+    : recordTypes
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
+    setChosenState('')
     fetchAvailableRecordTypes(tableName, { state, parentObject, parentRecordTypeId })
       .then(rts => {
         if (cancelled) return
         setRecordTypes(rts)
         // Auto-pick if there's only one — keeps the flow seamless when an
-        // object has a single record type configured.
+        // object has a single record type configured. Never while a state is
+        // still owed: "only one nationwide type" is not the same as "only one
+        // choice", and auto-picking it would skip the prompt entirely.
+        if (recordOwesState(state, rts)) return
         if (rts.length === 1) {
           onPick(rts[0])
           return
@@ -62,8 +83,9 @@ export default function RecordTypePicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Hide entirely when the effect already auto-picked (one or zero RTs)
-  if (!loading && recordTypes.length <= 1 && !error) return null
+  // Hide entirely when the effect already auto-picked (one or zero RTs). A
+  // pending state choice is never an auto-pick, however few types are showing.
+  if (!loading && !needsStateChoice && recordTypes.length <= 1 && !error) return null
 
   return (
     <div
@@ -94,8 +116,51 @@ export default function RecordTypePicker({
             New {objectLabel || tableName}
           </div>
           <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4 }}>
-            Choose a record type to continue.
+            {needsStateChoice
+              ? 'Choose the state this record is in, then its record type.'
+              : 'Choose a record type to continue.'}
           </div>
+          {/* The record already knows where it is — say so, so the shorter list
+              reads as deliberate rather than as missing programs. */}
+          {!needsStateChoice && state && stateOptions.length > 0 && (
+            <div style={{
+              marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '4px 10px', borderRadius: 999,
+              background: '#e8f8f2', border: '1px solid #b7e6ce',
+              fontSize: 11.5, fontWeight: 600, color: '#1f6b4b',
+            }}>
+              <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{state}</span>
+              <span style={{ fontWeight: 500 }}>— record types that run in this state</span>
+            </div>
+          )}
+          {needsStateChoice && (
+            <div style={{ marginTop: 12 }}>
+              <label
+                htmlFor="record-type-picker-state"
+                style={{
+                  display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
+                  textTransform: 'uppercase', color: C.textMuted, marginBottom: 5,
+                }}
+              >
+                State
+              </label>
+              <select
+                id="record-type-picker-state"
+                value={chosenState}
+                onChange={e => { setChosenState(e.target.value); setChosenId(null) }}
+                style={{
+                  width: '100%', padding: '8px 10px', fontSize: 13,
+                  border: `1px solid ${C.border}`, borderRadius: 5,
+                  background: C.card, color: C.textPrimary, fontFamily: 'inherit',
+                }}
+              >
+                <option value="">Select a state…</option>
+                {stateOptions.map(code => (
+                  <option key={code} value={code}>{code}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Body */}
@@ -113,9 +178,19 @@ export default function RecordTypePicker({
               {error}
             </div>
           )}
-          {!loading && !error && recordTypes.length > 1 && (
+          {!loading && !error && needsStateChoice && !chosenState && (
+            <div style={{
+              padding: 14, background: '#f7f9fc',
+              border: `1px solid ${C.border}`, borderRadius: 6,
+              color: C.textSecondary, fontSize: 12.5, marginBottom: 10,
+            }}>
+              Select a state above to see the record types that run there.
+              {visibleRecordTypes.length > 0 && ' The types below run in every state.'}
+            </div>
+          )}
+          {!loading && !error && visibleRecordTypes.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {recordTypes.map(rt => {
+              {visibleRecordTypes.map(rt => {
                 const selected = chosenId === rt.id
                 return (
                   <button
@@ -174,7 +249,7 @@ export default function RecordTypePicker({
           </button>
           <button
             onClick={() => {
-              const rt = recordTypes.find(r => r.id === chosenId)
+              const rt = visibleRecordTypes.find(r => r.id === chosenId)
               if (rt) onPick(rt)
             }}
             disabled={!chosenId}
