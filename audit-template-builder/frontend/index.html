@@ -2524,6 +2524,31 @@ async function build50121XML(which){
     for(const e of [..._q(doc,tag)])
       if(!(e.textContent||'').trim()) e.parentNode.removeChild(e);
 
+  // Final guard: prune DANGLING IDrefs. The HVAC collapse, heating-plant
+  // pruning, and auditor-contact strip above each remove a target element but
+  // can leave a reference to it behind — e.g. the removed auditor contact is
+  // also pointed at by CertifiedAuditTeamMemberContactID (not just
+  // AuditorContactID), a removed HVACSystem by LinkedSystemID, a removed
+  // HeatingPlant by SourceHeatingPlantID. A reference whose target no longer
+  // exists fails DOE's import and the "all ID references resolve" pre-export
+  // check. Every IDref-bearing element here is optional (minOccurs=0), so
+  // dropping the orphaned reference is schema-safe. Loop until stable in case
+  // removing a ref orphans another.
+  {
+    let removed=true;
+    while(removed){
+      removed=false;
+      const ids=new Set();
+      for(const el of doc.getElementsByTagName('*')){
+        const id=el.getAttribute&&el.getAttribute('ID'); if(id)ids.add(id);
+      }
+      for(const el of [...doc.getElementsByTagName('*')]){
+        const rf=el.getAttribute&&el.getAttribute('IDref');
+        if(rf&&!ids.has(rf)&&el.parentNode){ el.parentNode.removeChild(el); removed=true; }
+      }
+    }
+  }
+
   let s=new XMLSerializer().serializeToString(doc);
   // The template already carries an XML declaration (and the serializer re-emits
   // it); only add one if it's somehow missing, so we never produce a duplicate.
