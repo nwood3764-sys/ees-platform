@@ -7,6 +7,8 @@ import { fetchUsers } from '../../data/adminService'
 import { supabase } from '../../lib/supabase'
 import InviteUserModal from './InviteUserModal'
 import TechnicianSetupWizard from './TechnicianSetupWizard'
+import UserStateAccessModal from './UserStateAccessModal'
+import { fetchStateScopesByUser, describeStateAccess } from '../../data/stateScopeService'
 
 /**
  * UsersPane — Administration > Users.
@@ -47,11 +49,18 @@ export default function UsersPane({ onOpenRecord }) {
   // null when no reset is in progress.
   const [resetModal, setResetModal] = useState(null)
 
+  // Geographic (state) record access, keyed by user id. Fetched alongside the
+  // users rather than per row, and separately from fetchUsers so the shape
+  // every other caller of that function relies on is unchanged. A user absent
+  // from this map has no grants, which means unrestricted.
+  const [stateScopes, setStateScopes] = useState({})
+  const [accessModal, setAccessModal] = useState(null)
+
   const reload = useCallback(() => {
     setLoading(true)
     setError(null)
-    return fetchUsers()
-      .then(setData)
+    return Promise.all([fetchUsers(), fetchStateScopesByUser()])
+      .then(([users, scopes]) => { setData(users); setStateScopes(scopes) })
       .catch(setError)
       .finally(() => setLoading(false))
   }, [])
@@ -127,6 +136,27 @@ export default function UsersPane({ onOpenRecord }) {
   // We render a full <td> here; ListView expects renderCell to return
   // either a complete cell or a falsy value.
   const renderCell = (col, row) => {
+    if (col.field === 'recordAccess') {
+      const scopes = stateScopes[row._id] || []
+      const scoped = scopes.length > 0
+      return (
+        <td key="recordAccess" style={cellStyle}>
+          <span style={authLinkedWrap}>
+            <span style={scoped ? badgeScoped : badgeAllStates}>
+              {describeStateAccess(scopes)}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setAccessModal(row) }}
+              style={resetBtnStyle}
+              title="Choose which states' records this user may see, create and edit."
+            >
+              Manage
+            </button>
+          </span>
+        </td>
+      )
+    }
     if (col.field !== 'authStatus') return null
     return (
       <td key="authStatus" style={cellStyle}>
@@ -208,7 +238,11 @@ export default function UsersPane({ onOpenRecord }) {
           // Inject a virtual `authStatus` field on each row so ListView's
           // filter/sort code can reference it — the renderCell for that
           // column produces the actual button/badge.
-          data={data.map(u => ({ ...u, authStatus: u.hasAuthLink ? 'Active' : 'Pending' }))}
+          data={data.map(u => ({
+            ...u,
+            authStatus: u.hasAuthLink ? 'Active' : 'Pending',
+            recordAccess: describeStateAccess(stateScopes[u._id]),
+          }))}
           columns={USER_COLS}
           renderCell={renderCell}
           systemViews={systemViews}
@@ -235,6 +269,14 @@ export default function UsersPane({ onOpenRecord }) {
           existingUser={modal.existingUser}
           onClose={() => setModal(null)}
           onInvited={() => { reload() }}
+        />
+      )}
+
+      {accessModal && (
+        <UserStateAccessModal
+          user={accessModal}
+          onClose={() => setAccessModal(null)}
+          onChanged={() => { reload() }}
         />
       )}
 
@@ -497,6 +539,10 @@ const USER_COLS = [
   { field: 'email',      label: 'Email',     type: 'text',   sortable: true,  filterable: true  },
   { field: 'phone',      label: 'Phone',     type: 'text',   sortable: false, filterable: false },
   { field: 'authStatus', label: 'Sign-In',   type: 'select', sortable: true,  filterable: true,  options: ['Active', 'Pending'] },
+  // Geographic record access. The value filtered and sorted on is the state
+  // list ("All states" when unrestricted); the cell itself renders the badge
+  // and the Manage action.
+  { field: 'recordAccess', label: 'Record Access', type: 'text', sortable: true, filterable: true },
   { field: 'status',     label: 'Status',    type: 'select', sortable: true,  filterable: true,  options: ['Active', 'Inactive'] },
 ]
 
@@ -518,6 +564,32 @@ const badgeOk = {
   background: '#dff5e9',
   borderRadius: 999,
   border: '1px solid #b7e3cb',
+}
+
+// A restricted user is the notable case, so it gets the emerald treatment;
+// "All states" is the platform default and stays neutral rather than reading
+// as an alarm on every existing row.
+const badgeScoped = {
+  display: 'inline-block',
+  padding: '2px 9px',
+  fontSize: 11,
+  fontWeight: 600,
+  fontFamily: 'JetBrains Mono, monospace',
+  color: '#1a6e44',
+  background: '#dff5e9',
+  borderRadius: 999,
+  border: '1px solid #b7e3cb',
+}
+
+const badgeAllStates = {
+  display: 'inline-block',
+  padding: '2px 9px',
+  fontSize: 11,
+  fontWeight: 500,
+  color: C.textMuted,
+  background: '#f7f9fc',
+  borderRadius: 999,
+  border: `1px solid ${C.border}`,
 }
 
 const inviteBtnStyle = {
