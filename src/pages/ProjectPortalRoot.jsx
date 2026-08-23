@@ -28,6 +28,7 @@ import {
   fetchPortalCalendar,
   fetchPortalPhotoUrls,
   startPortalViewAs,
+  fetchViewAsOrganizations,
   oppPct,
   oppBucket,
   oppForProgram,
@@ -1074,6 +1075,32 @@ function LoginGate({ onSignedIn }) {
 }
 
 // ─── Root ────────────────────────────────────────────────────────────────────
+// Switch organizations without leaving the portal. Looking at portals should
+// not mean bouncing back to a record page for every organization — you came
+// here to look at portals, so the list of organizations lives here too.
+function OrganizationSwitcher({ currentAccountId }) {
+  const [orgs, setOrgs] = useState([])
+  useEffect(() => {
+    let alive = true
+    fetchViewAsOrganizations().then((r) => { if (alive) setOrgs(r) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  if (!orgs.length) return null
+  return (
+    <select
+      value={currentAccountId || ''}
+      onChange={(e) => { if (e.target.value) window.location.search = `?account=${e.target.value}` }}
+      title="View this portal as another organization"
+      style={{ background: 'rgba(255,255,255,.12)', color: '#fff', border: '1px solid rgba(255,255,255,.25)',
+               borderRadius: 6, padding: '4px 8px', fontSize: 12, maxWidth: 260, cursor: 'pointer' }}>
+      {!currentAccountId && <option value="">Switch organization…</option>}
+      {orgs.map((o) => (
+        <option key={o.id} value={o.id} style={{ color: '#0d1a2e' }}>{o.name}</option>
+      ))}
+    </select>
+  )
+}
+
 export default function ProjectPortalRoot() {
   const [phase, setPhase] = useState('loading')   // loading | login | ready | error | notportal
   const [self, setSelf] = useState(null)
@@ -1114,7 +1141,15 @@ export default function ProjectPortalRoot() {
               : 'That portal could not be opened for preview.')
           return
         }
-        const ctx = { ...requestedViewAs, label: started.label || 'Portal preview', mode: started.mode }
+        // bannerAccountId is display-only, for the organization switcher. It is
+        // deliberately NOT `accountId`: viewAsParams() maps accountId to
+        // p_preview_account_id, and sending both targets is rejected outright.
+        const ctx = {
+          ...requestedViewAs,
+          label: started.label || 'Portal preview',
+          mode: started.mode,
+          bannerAccountId: requestedViewAs.accountId || started.account_id || null,
+        }
         setViewAs(ctx)
         setPortalPhotoViewAs(ctx)
         setSelf(null)
@@ -1216,6 +1251,7 @@ export default function ProjectPortalRoot() {
               ? <>Showing the Property Owner Portal as a full-portfolio owner at <strong>{viewAs.label}</strong> would see it. No portal user is required for this view.</>
               : <>Viewing the portal as <strong>{viewAs.label}</strong> — their grants, exactly what they see.</>}
           </span>
+          <OrganizationSwitcher currentAccountId={viewAs.bannerAccountId || null} />
           <a href="/" style={{ color: C.emerald, textDecoration: 'underline', whiteSpace: 'nowrap' }}>Exit preview</a>
         </div>
       )}

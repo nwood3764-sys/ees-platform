@@ -67,6 +67,14 @@ function viewAsParams(viewAs) {
   }
 }
 
+// The organizations an admin can switch between from inside the portal. Same
+// RPC the Portal module's list uses, so the two never disagree.
+export async function fetchViewAsOrganizations() {
+  const { data, error } = await supabase.rpc('list_property_owner_portals', { p_only_with_content: true })
+  if (error) throw error
+  return (data || []).map((r) => ({ id: r.account_id, name: r.account_name }))
+}
+
 export async function startPortalViewAs({ portalUserId = null, accountId = null } = {}) {
   const { data, error } = await supabase.rpc('portal_view_as_start', {
     p_portal_user_id: portalUserId,

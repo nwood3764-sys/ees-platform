@@ -11,6 +11,36 @@ import { supabase } from '../lib/supabase'
 // derived from the linked account's record_type.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Property Owner Portals — the browsable list of organizations whose portal an
+// admin can open. Opening a portal shouldn't require hunting down an account
+// record and finding an Actions menu: the Portal module is where you go to look
+// at portals, so the organizations live here.
+//
+// `onlyWithContent` defaults to true — an organization with no buildings or
+// opportunities renders an empty portal, which is not what anyone is checking
+// for. Pass false to see every property-owning account.
+// ---------------------------------------------------------------------------
+export async function fetchPropertyOwnerPortals(onlyWithContent = true) {
+  const { data, error } = await supabase.rpc('list_property_owner_portals', {
+    p_only_with_content: onlyWithContent,
+  })
+  if (error) throw error
+  return (data || []).map(r => ({
+    id:              r.account_record_number || r.account_id.slice(0, 8).toUpperCase(),
+    _id:             r.account_id,
+    name:            r.account_name,
+    recordType:      r.account_record_type || '—',
+    properties:      r.properties,
+    buildings:       r.buildings,
+    opportunities:   r.opportunities,
+    workOrders:      r.work_orders,
+    visits:          r.scheduled_visits,
+    portalUsers:     r.portal_users,
+    activeUsers:     r.active_portal_users,
+  }))
+}
+
 export async function fetchPortalUsers() {
   const { data, error } = await supabase
     .from('portal_users')
