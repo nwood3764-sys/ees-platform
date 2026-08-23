@@ -12,8 +12,7 @@
 
 import {
   scopedToState, statesInRecordTypes, needsStateChoice,
-  programStateFromSeed, normalizeStateCode,
-} from '../src/lib/programStateScope.js'
+  programStateFromSeed, normalizeStateCode, stateHasNoPrograms } from '../src/lib/programStateScope.js'
 
 let failures = 0
 let checks = 0
@@ -90,6 +89,37 @@ check('a seed with no state column resolves to unknown',
 check('a non-object seed resolves to unknown', programStateFromSeed(null), null)
 check('a stage column is not a state column',
   programStateFromSeed({ opportunity_stage: 'NC HOMES Phase 1' }), null)
+
+// ── A state with no programs at all ─────────────────────────────────────────
+//
+// The rule that stops the picker widening across states. 4,037 live properties
+// are in Texas, 2,150 in Georgia, 1,742 in Minnesota — states EES runs no
+// program in — and until 2026-08-23 every one of them was offered the full
+// Wisconsin set the moment the state filter came back empty.
+// Incentive applications, unlike opportunities, have NO nationwide record type:
+// an application is always some program's application. That is what makes a
+// state with no program genuinely empty.
+const APPLICATION_TYPES = [
+  rt('WI-FOE', 'WI'), rt('WI-IRA-MF-HOMES', 'WI'), rt('WI-IRA-SF-HOMES', 'WI'),
+  rt('NC-IRA-MF-HOMES', 'NC'), rt('NC-IRA-SF-HOMES', 'NC'),
+  rt('MI-IRA-MF-HOMES', 'MI'), rt('ELECTRIFY-DENVER', 'CO'),
+]
+check('a state with no programs has none — not another state\'s',
+  stateHasNoPrograms(APPLICATION_TYPES, 'TX'), true)
+check('a state that has programs is not empty',
+  stateHasNoPrograms(APPLICATION_TYPES, 'NC'), false)
+check('a nationwide type runs everywhere, so no state is ever empty',
+  stateHasNoPrograms(OPPORTUNITY_TYPES, 'TX'), false)
+check('an object whose types carry no state at all is not this rule\'s business',
+  stateHasNoPrograms([rt('Standard', null), rt('Other', null)], 'TX'), false)
+check('an unknown state never claims emptiness — it prompts instead',
+  stateHasNoPrograms(APPLICATION_TYPES, null), false)
+check('a blank state never claims emptiness',
+  stateHasNoPrograms(APPLICATION_TYPES, '  '), false)
+check('an object with no record types at all is not this rule\'s business',
+  stateHasNoPrograms([], 'TX'), false)
+check('the state code is normalized before matching',
+  stateHasNoPrograms(APPLICATION_TYPES, ' nc '), false)
 
 // ── Normalization ───────────────────────────────────────────────────────────
 check('codes are upper-cased and trimmed', normalizeStateCode(' nc '), 'NC')

@@ -48,7 +48,13 @@ const PROJECT_RECORD_TYPE_OBJECTS = new Set(['assessments'])
 // record_type_eligibility and enforced in the database; this pane is the UI over
 // it. Add an entry when another parent/child pair needs the same control.
 const CHILD_RECORD_TYPE_SCOPES = {
-  opportunities: [{ childObject: 'assessments', childLabel: 'Assessment', buttonLabel: 'Assessment types' }],
+  opportunities: [
+    { childObject: 'assessments', childLabel: 'Assessment', buttonLabel: 'Assessment types' },
+    // Every program runs its own incentive application, so the opportunity
+    // record type decides which application forms belong to it (Nicholas,
+    // 2026-08-23). Seeded one-per-program in 20260823202021; editable here.
+    { childObject: 'incentive_applications', childLabel: 'Incentive application', buttonLabel: 'Application forms' },
+  ],
 }
 
 export default function RecordTypesPane({ objectName, objectLabel, onCountChange }) {
