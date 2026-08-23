@@ -86,29 +86,66 @@ def repair(model):
         n += 1
     s["water_heaters_fixed"] = n
 
-    # 3b. Cycle the packaged-heat-pump fans instead of running them 24/7.
-    # DOE Asset Score models set each UnitarySystem's supply-fan operating mode
-    # to "Always_On" (continuous), so the constant-volume fan runs around the
-    # clock and fan energy can exceed heating + cooling — a badly distorted load
-    # shape. A packaged heat pump cycles its fan with the compressor, so point
-    # the fan operating mode at a constant-0 schedule (0 = cycle with the coil).
-    cyc = openstudio.model.ScheduleConstant(model)
-    cyc.setName("Fan Cycling (repair)"); cyc.setValue(0.0)
+    # 3b. Fan operating mode. DOE Asset Score models set each UnitarySystem's
+    # supply-fan operating mode to "Always_On" (continuous), so the fan runs 24/7
+    # and its energy can swamp the real heating/cooling load shape. Let cyclable
+    # fans cycle with the coil — but the EnergyPlus-VALID way, which differs by
+    # component:
+    #   * AirLoopHVAC:UnitarySystem — CLEAR the operating-mode schedule. A blank
+    #     schedule means "cycle with the coil". Assigning a constant-0 schedule
+    #     instead makes E+ fatal at RUN time (verified on real files):
+    #       "UnitarySys::processInputSpec ... Supply Air Fan Operating Mode
+    #        Schedule ... contains values that are <= 0 and/or > 1"
+    #       "Fatal: getUnitarySystemInputData: previous errors cause termination"
+    #     — it passes forward-translation but dies in the simulation. (0 is a
+    #     rejected VALUE here, not the way to request cycling.)
+    #   * PTAC/PTHP zone units REQUIRE an operating-mode schedule; for those a
+    #     0-value schedule = cycle with the coil (a different E+ input path that
+    #     accepts 0).
+    # Only a Fan:OnOff can cycle; a Fan:ConstantVolume must stay continuous, so
+    # leave it alone (townhome furnace + split-AC systems use Fan:ConstantVolume).
+    def _fan_can_cycle(fan):
+        # Accept either an HVACComponent or an optional<HVACComponent>; only a
+        # Fan:OnOff may run in a cycling operating mode.
+        if hasattr(fan, "is_initialized"):
+            if not fan.is_initialized():
+                return False
+            fan = fan.get()
+        return fan.to_FanOnOff().is_initialized()
+
     nf = 0
+    cv = 0
     for u in model.getAirLoopHVACUnitarySystems():
-        try:
-            u.setSupplyAirFanOperatingModeSchedule(cyc); nf += 1
-        except Exception:
-            pass
-    # Water-to-air / PTAC-style zone heat pumps use the same convention.
-    for u in model.getZoneHVACPackagedTerminalHeatPumps():
-        try:
-            u.setSupplyAirFanOperatingModeSchedule(cyc); nf += 1
-        except Exception:
-            pass
-    if nf == 0:
-        cyc.remove()
+        if _fan_can_cycle(u.supplyFan()):
+            try:
+                u.resetSupplyAirFanOperatingModeSchedule(); nf += 1   # blank = cycle
+            except Exception:
+                pass
+        else:
+            cv += 1
+    # PTAC/PTHP zone heat pumps: 0-value schedule = cycle (schedule is required).
+    pthps = model.getZoneHVACPackagedTerminalHeatPumps()
+    if pthps:
+        cyc = openstudio.model.ScheduleConstant(model)
+        cyc.setName("Fan Cycling (repair)"); cyc.setValue(0.0)
+        ftl = openstudio.model.ScheduleTypeLimits(model)   # proper 0/1 mode limits
+        ftl.setName("Fan Operating Mode (repair)")
+        ftl.setLowerLimitValue(0.0); ftl.setUpperLimitValue(1.0)
+        ftl.setNumericType("Discrete"); ftl.setUnitType("Availability")
+        cyc.setScheduleTypeLimits(ftl)
+        used = 0
+        for u in pthps:
+            if _fan_can_cycle(u.supplyAirFan()):
+                try:
+                    u.setSupplyAirFanOperatingModeSchedule(cyc); nf += 1; used += 1
+                except Exception:
+                    pass
+            else:
+                cv += 1
+        if used == 0:
+            cyc.remove(); ftl.remove()
     s["fans_set_to_cycling"] = nf
+    s["constant_volume_fans_left_continuous"] = cv
 
     # 4. HTML output + AllSummary + monthly meters
     ots = model.getOutputControlTableStyle()
