@@ -60,6 +60,30 @@ Fixed by:
 
 ---
 
+### Round 3, 2026-08-23 — View As, for internal admins
+
+Nicholas: *"All the system admins from our side should be able to log in as a user to see what they use… what if I don't have a user on a portal? The admin has to verify and check before we invite a user. I'm never going to invite a user without us first checking to make sure the content is displaying correctly."*
+
+Salesforce **Login As** parity, built as **two deliberately separate modes** because one cannot stand in for the other:
+
+| Mode | Entry point | Scope | Answers |
+|---|---|---|---|
+| **View as portal user** | Actions → *View Portal as This User* on a `portal_users` record | That user's own grants + their account guard | "What does this person actually see?" |
+| **Preview an account** | Actions → *View Owner Portal* on an `accounts` record | Every property on the account | "What would an owner here see — before anyone is invited?" |
+
+The second is the one that unblocks the workflow: only two portal users exist platform-wide, so a user-only feature would have been useless for checking almost every account.
+
+Mechanics:
+
+- Both read RPCs gained `p_view_as_portal_user_id` / `p_preview_account_id`, defaulted NULL, so the portal's own calls are unchanged. Exactly one may be supplied (`supply_exactly_one_target` otherwise).
+- **Admin only, enforced in the database** — `app_is_admin()` inside every RPC and inside `portal-photo-urls`. The URL is a request, not a grant: a non-admin who pastes the address gets `not_authorized`. Verified live against a Project Site Lead — refused on all four entry points.
+- **Logged.** `portal_view_as_sessions` (PVA-) records who viewed as whom, when. Written only by `portal_view_as_start()`; admin-readable, never client-written.
+- **Unmistakable.** A dark banner names the target and the mode on every screen, including screenshots, with an Exit preview link. The sidebar identity shows the target, not the admin.
+- **Read-only by construction.** The portal has no writes today; when Phase 1 adds them they must refuse while a view-as context is set.
+- `portal-photo-urls` v2 takes the same two parameters so photos render in preview exactly as they do for the customer.
+
+This **replaced a stopgap**: pointing an internal auth identity at a `portal_users` row. That only ever worked for one account at a time, and `fetchPortalUserSelf()`'s `maybeSingle()` would have errored outright the moment a second such row existed. The stopgap row and its 23 grants were soft-deleted when the real feature landed.
+
 ## 3. Current-state architecture map
 
 ### Client
