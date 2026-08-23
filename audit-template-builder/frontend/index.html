@@ -137,10 +137,12 @@
     <label>Dwelling units
       <input id="occUnits" type="number" min="1" placeholder="required" style="width:88px;margin-left:4px"></label>
     <label>Bedrooms per unit
-      <input id="occBeds" type="number" min="0" placeholder="required" style="width:88px;margin-left:4px"></label>
+      <input id="occBeds" type="number" min="0" placeholder="uniform" style="width:80px;margin-left:4px"></label>
+    <label title="For buildings whose units have different bedroom counts, enter the whole-building total (sum of every unit's bedrooms). Overrides bedrooms-per-unit.">or Total bedrooms
+      <input id="occBedsTotal" type="number" min="0" placeholder="mixed units" style="width:96px;margin-left:4px"></label>
     <span class="copyhint" id="occCalc"></span>
   </div>
-  <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and bedrooms per unit to enable exports.</div>
+  <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and either bedrooms per unit (uniform) or total bedrooms (mixed unit types) to enable exports.</div>
 
   <div class="tabs">
     <button class="tabBtn active" data-tab="Model">Energy Modeling</button>
@@ -905,12 +907,22 @@ function scaleToAssetScore(os, as, which){
   os._asElecTarget=elecTarget; os._asGasTarget=gasTarget;
 }
 function annual(os){const e=os.elec.reduce((a,b)=>a+b,0),g=os.gas.reduce((a,b)=>a+b,0);return{e,g,kbtu:e*KWH_KBTU+g*THERM_KBTU};}
-function occValid(){
-  const u=document.getElementById('occUnits'), b=document.getElementById('occBeds');
-  if(!u||!b) return false;
-  const uv=parseInt(u.value,10), bv=parseInt(b.value,10);
-  return u.value.trim()!=='' && b.value.trim()!=='' && Number.isFinite(uv) && uv>=1 && Number.isFinite(bv) && bv>=0;
+// Building occupancy the tool EXPORTS. Bedrooms only drive this one total, so
+// mixed unit types are captured by a single building-wide "Total bedrooms"
+// number: occupants = (sum of every unit's bedrooms) + units — which equals the
+// uniform "units × (bedrooms+1)" when all units match. Total bedrooms, when
+// entered, wins; otherwise fall back to the uniform bedrooms-per-unit field.
+function occupantCount(){
+  const units=parseInt((document.getElementById('occUnits')||{}).value,10);
+  if(!Number.isFinite(units)||units<1) return null;
+  const totEl=document.getElementById('occBedsTotal');
+  const tot=totEl?parseInt(totEl.value,10):NaN;
+  if(Number.isFinite(tot)&&tot>=0) return tot+units;                  // mixed unit types
+  const beds=parseInt((document.getElementById('occBeds')||{}).value,10);
+  if(Number.isFinite(beds)&&beds>=0) return units*Math.max(1,beds+1); // uniform units
+  return null;
 }
+function occValid(){ return occupantCount()!=null; }
 function refresh(){
   // Utility rates track the building's location — never default to Wisconsin.
   setRatesForState(buildingState());
@@ -1005,9 +1017,12 @@ function refresh(){
   // fields above (EES rule), NOT the Asset Score's assumed count. Falls back to
   // the Asset Score value until units & bedrooms are entered.
   const _ou=parseInt((document.getElementById('occUnits')||{}).value,10);
+  const _obt=parseInt((document.getElementById('occBedsTotal')||{}).value,10);
   const _ob=parseInt((document.getElementById('occBeds')||{}).value,10);
-  const _occ=(Number.isFinite(_ou)&&_ou>0&&Number.isFinite(_ob)&&_ob>=0)?_ou*Math.max(1,_ob+1):null;
-  const _occDisp=_occ!=null?(_occ+' &nbsp;<span style="color:var(--mut)">('+_ou+' units × '+Math.max(1,_ob+1)+'/unit)</span>')
+  const _occ=occupantCount();
+  const _occBasis=(Number.isFinite(_obt)&&_obt>=0)?(_ou+' units + '+_obt+' bedrooms')
+    :(Number.isFinite(_ob)&&_ob>=0?(_ou+' units × '+Math.max(1,_ob+1)+'/unit'):'');
+  const _occDisp=_occ!=null?(_occ+' &nbsp;<span style="color:var(--mut)">('+_occBasis+')</span>')
     :(asB.occupants!=null?(asB.occupants+' &nbsp;<span style="color:var(--mut)">(Asset Score — enter units &amp; bedrooms above to set)</span>'):'—');
   const rows=[['Address',`${asB.street}, ${asB.cityStateZip}`],['Gross floor area',`${fmt(asB.gfa)} ft²`],
     ['Year built',asB.yearBuilt],['Climate zone',asB.climateZone],['Occupants',_occDisp],
@@ -2461,13 +2476,12 @@ async function build50121XML(which){
     }
   }
 
-  // Occupancy: units x (bedrooms + 1)  [2 in the master + 1 per extra bedroom].
-  // No default — the user must enter these (exports are gated on them). Only
-  // inject when a valid entry is present, so nothing silently defaults.
+  // Occupancy: (total bedrooms + units), or the uniform units × (bedrooms+1) —
+  // see occupantCount(). No default; exports are gated on a valid entry, and we
+  // only inject when one is present so nothing silently defaults.
   const units=parseInt((document.getElementById('occUnits')||{}).value,10);
-  const beds =parseInt((document.getElementById('occBeds')||{}).value,10);
-  const occ_ok = Number.isFinite(units) && units>=1 && Number.isFinite(beds) && beds>=0;
-  const occupants = occ_ok ? units*Math.max(1, beds+1) : null;
+  const occupants = occupantCount();
+  const occ_ok = occupants!=null;
   if(occupants!=null) _setFirst(doc,'OccupantQuantity', occupants);
   const su=occ_ok?_q(doc,'SpatialUnit')[0]:null;
   if(su){
@@ -2558,7 +2572,9 @@ async function build50121XML(which){
 
 async function downloadXML(which){
   const fs=document.getElementById('finalStatus');
-  if(!autoCheckGate()){fs.className='status err';fs.textContent='Export canceled — fix the failing pre-export checks first.';return;}
+  // Energy-modeling 50121 XML: owner is NOT required (you complete the contact
+  // in DOE after import) — only the paperwork exports require the owner.
+  if(!autoCheckGate({requireOwner:false})){fs.className='status err';fs.textContent='Export canceled — fix the failing pre-export checks first.';return;}
   fs.className='status'; fs.textContent='Building 50121 file…';
   try{
     const as = which==='improved' ? (data.asImp||data.asBase) : data.asBase;
@@ -2573,17 +2589,17 @@ async function downloadXML(which){
     fs.textContent=tag+' 50121 file downloaded. Import under Building → Import buildings → Import BuildingSync XML.';
   }catch(err){fs.className='status err';fs.textContent='Build error: '+err.message;}
 }
-// Live occupancy readout (units x (bedrooms+1)).
+// Live occupancy readout — bedrooms per unit (uniform) OR total bedrooms (mixed).
 (function(){
   const u=document.getElementById('occUnits'), bd=document.getElementById('occBeds'),
-        out=document.getElementById('occCalc');
+        bt=document.getElementById('occBedsTotal'), out=document.getElementById('occCalc');
   function upd(){
-    if(occValid()){const units=parseInt(u.value,10),beds=parseInt(bd.value,10);
-      out.textContent='→ '+(units*Math.max(1,beds+1))+' occupants';}
-    else out.textContent='';
+    const occ=occupantCount();
+    out.textContent = occ!=null ? ('→ '+occ+' occupants') : '';
     refresh();   // re-evaluate export gating on every occupancy edit
   }
-  if(u&&bd){u.addEventListener('input',upd);bd.addEventListener('input',upd);upd();}
+  [u,bd,bt].forEach(el=>{ if(el) el.addEventListener('input',upd); });
+  upd();
 })();
 
 /* ---------- Automatic pre-export checks ---------- */
@@ -2597,13 +2613,18 @@ function _sysVal(sysArr,suffix){ // find a value by key suffix across a system d
   return null;
 }
 function evaluateAutoChecks(dg){
-  const out=[]; const ck=(name,ok,detail)=>out.push({name,ok:!!ok,detail:detail||''});
+  // soft:true = advisory (needed for paperwork, not the DOE XML import) — shown
+  // but never counted as a blocking failure and never gates the XML export.
+  const out=[]; const ck=(name,ok,detail,soft)=>out.push({name,ok:!!ok,detail:detail||'',soft:!!soft});
   const asB=data.asBase, asI=data.asImp;
   const gfa=(asI&&asI.gfa)||(asB&&asB.gfa);
   const udf=(f,n)=>{const u=(f.userDefinedFields||[]).find(x=>x.name===n);return u?u.value:null;};
   {const ow=_resolvedOwner('baseline')||_resolvedOwner('improved');
-   ck('Owner information present (required for export)', !!ow,
-     ow ? ('owner: '+(ow.company||ow.name)) : 'MISSING — add the building’s Audit Template XML (Owner contact) or fill the Property Owner field');}
+   // Owner is required for the PAPERWORK (proposal/invoice), not the DOE 50121
+   // XML import — you complete the contact in DOE — so this is advisory (soft),
+   // it never blocks the energy-modeling XML export.
+   ck('Owner information present (required for paperwork; not for the DOE XML import)', !!ow,
+     ow ? ('owner: '+(ow.company||ow.name)) : 'not set — required before the proposal/invoice; the 50121 XML can still be imported to DOE without it', true);}
   // --- System fidelity: the generated XML must reflect the Asset Score's actual
   //     systems, never the template's hard-coded ones (the gas-boiler leak). ---
   {const asb=data.asBase, dgB=dg.baseline;
@@ -2757,13 +2778,22 @@ function paintAutoChecks(){
   const el=document.getElementById('autoChecksBody'); if(!el)return;
   if(_autoChk.running&&!_autoChk.results){el.innerHTML='<span class="hint">Generating both files and checking…</span>';return;}
   const res=_autoChk.results; if(!res)return;
-  const fails=res.filter(c=>!c.ok);
+  const hard=res.filter(c=>!c.soft);                 // blocking checks (DOE XML import)
+  const fails=hard.filter(c=>!c.ok);                 // blocking failures
+  const softFails=res.filter(c=>!c.ok&&c.soft);      // advisories (paperwork)
+  let html;
   if(!fails.length){
-    el.innerHTML='<div style="color:#2aab72;font-weight:700">✓ All '+res.length+' automatic checks passed — the generated files match the reports, DOE\'s accepted values, and the EES rules.</div>';
+    html='<div style="color:#2aab72;font-weight:700">✓ All '+hard.length+' automatic checks passed — the generated files match the reports, DOE\'s accepted values, and the EES rules.</div>';
   }else{
-    el.innerHTML='<div style="color:#2a4a6a;font-weight:700">⚠ '+fails.length+' of '+res.length+' checks FAILING — fix before importing to DOE:</div>'
+    html='<div style="color:#2a4a6a;font-weight:700">⚠ '+fails.length+' of '+hard.length+' checks FAILING — fix before importing to DOE:</div>'
       +fails.map(f=>`<div style="padding:4px 0;border-top:1px solid var(--line)"><strong>${f.name}</strong>${f.detail?` — <span style="color:#4a5e7a">${f.detail}</span>`:''}</div>`).join('');
   }
+  // Advisories don't block the energy-modeling XML export (e.g. owner, which is
+  // only needed for the paperwork) — shown muted, separate from the hard count.
+  if(softFails.length){
+    html+=softFails.map(f=>`<div style="padding:4px 0;border-top:1px solid var(--line);color:#8fa0b8"><strong>${f.name}</strong>${f.detail?` — <span>${f.detail}</span>`:''} <em>— advisory, does not block the XML export</em></div>`).join('');
+  }
+  el.innerHTML=html;
 }
 async function runAutoChecks(){
   if(!Object.values(data).every(Boolean)||!occValid()){_autoChk.results=null;return;}
@@ -2777,9 +2807,12 @@ async function runAutoChecks(){
 }
 const scheduleAutoChecks=(()=>{let t;return()=>{clearTimeout(t);t=setTimeout(runAutoChecks,700);};})();
 // Export gate: failing checks demand an explicit override.
-function autoCheckGate(){
-  if(!ownerExportOk()) return false;   // owner is a hard requirement, no override
-  const fails=(_autoChk.results||[]).filter(c=>!c.ok);
+function autoCheckGate(opts){
+  // Owner is required for PAPERWORK exports (proposal/invoice/workbook/packet),
+  // not for the energy-modeling 50121 XML — that caller passes requireOwner:false.
+  const requireOwner = !(opts && opts.requireOwner===false);
+  if(requireOwner && !ownerExportOk()) return false;
+  const fails=(_autoChk.results||[]).filter(c=>!c.ok && !c.soft);  // soft = advisory, never gates
   // System mismatches: a loud, deliberate override rather than a dead stop, so
   // testing isn't blocked. The exact mismatch still fires every time — a
   // wrong-systems file must never be SUBMITTED to DOE, but you can push a test
@@ -2974,8 +3007,10 @@ function buildMappedForReview(){
   const asB=data.asBase, asI=data.asImp;
   const _u=parseInt((document.getElementById('occUnits')||{}).value,10);
   const _b=parseInt((document.getElementById('occBeds')||{}).value,10);
+  const _bt=parseInt((document.getElementById('occBedsTotal')||{}).value,10);
   const units=Number.isFinite(_u)&&_u>=1?_u:null;   // null = not entered yet (no default)
   const beds =Number.isFinite(_b)&&_b>=0?_b:null;
+  const totalBeds=Number.isFinite(_bt)&&_bt>=0?_bt:null;
   let osPct=null;
   try{const b=annual(data.osBase),i=annual(data.osImp);osPct=+((b.kbtu-i.kbtu)/b.kbtu*100).toFixed(1);}catch(e){}
   const pick=a=>a?{name:a.name,address:(a.street||'')+', '+(a.cityStateZip||''),grossFloorArea:a.gfa,
@@ -2986,7 +3021,7 @@ function buildMappedForReview(){
     boilerYear:a.boilerYear,coolingCOP:a.coolCop,coolingTons:a.coolTons,waterHeaterEt:a.whe,
     useMultifamilyArea:a.useMultifamilyArea,useCommonArea:a.useCommonArea,measures:a.measures}:null;
   return {baseline:pick(asB), improved:pick(asI),
-    occupancy:{dwellingUnits:units,bedroomsPerUnit:beds,computedOccupants:(units!=null&&beds!=null)?units*Math.max(1,beds+1):null},
+    occupancy:{dwellingUnits:units,bedroomsPerUnit:beds,totalBedrooms:totalBeds,computedOccupants:occupantCount()},
     openStudioSavingsPct:osPct, meteringYearStart:startDateFor(asB)};
 }
 (function(){
