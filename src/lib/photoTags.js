@@ -118,34 +118,85 @@ export function buildTagFilterOptions(items, labels) {
   })
 }
 
+/** The step a photo filters under. */
+export function stepKeyOf(photo) {
+  return photo?._work_step_id || UNASSIGNED_STEP_KEY
+}
+
+/** The tag a photo filters under. An untyped photo filters as 'general'. */
+export function tagKeyOf(photo) {
+  return String(photo?.photo_type ?? '').trim() || 'general'
+}
+
 /**
- * Apply the gallery's filters. All three are independent and combine with AND,
- * matching what the two dropdowns and the report flag show on screen.
+ * Normalize a filter selection to a Set of chosen ids. Both dropdowns are
+ * multi-select — a reviewer wants "Roof / Ceiling AND Windows & Doors", not
+ * one at a time (Nicholas, 2026-08-22) — and an EMPTY selection means "all",
+ * so clearing the last checkbox widens rather than blanking the grid.
+ */
+export function selectionSet(selection) {
+  if (selection == null || selection === ALL) return null
+  const list = Array.isArray(selection) ? selection
+    : (selection instanceof Set) ? Array.from(selection)
+    : [selection]
+  const cleaned = list.filter(v => v != null && v !== '' && v !== ALL)
+  return cleaned.length > 0 ? new Set(cleaned) : null
+}
+
+/**
+ * Apply the gallery's filters. The three are independent and combine with AND;
+ * within a single dropdown the chosen values are an OR.
  *
  * @param {Array}  items
  * @param {Object} opts
- * @param {string} [opts.stepId='all']  work step id, WORK_ORDER_STEP_KEY, or 'all'
- * @param {string} [opts.tag='all']     photo_type, or 'all'
- * @param {boolean}[opts.reportOnly]    only photos flagged for the final report
+ * @param {string[]|Set|string} [opts.steps]  chosen work step ids ('all'/empty = every step)
+ * @param {string[]|Set|string} [opts.tags]   chosen photo_types ('all'/empty = every tag)
+ * @param {boolean}             [opts.reportOnly]  only photos flagged for the final report
  */
-export function filterGalleryPhotos(items, { stepId = ALL, tag = ALL, reportOnly = false } = {}) {
+export function filterGalleryPhotos(items, { steps = ALL, tags = ALL, reportOnly = false } = {}) {
   let list = items || []
-  if (stepId !== ALL) {
-    list = list.filter(p => (p._work_step_id || UNASSIGNED_STEP_KEY) === stepId)
-  }
-  if (tag !== ALL) {
-    list = list.filter(p => (String(p.photo_type ?? '').trim() || 'general') === tag)
-  }
+  const stepSet = selectionSet(steps)
+  const tagSet = selectionSet(tags)
+  if (stepSet) list = list.filter(p => stepSet.has(stepKeyOf(p)))
+  if (tagSet) list = list.filter(p => tagSet.has(tagKeyOf(p)))
   if (reportOnly) list = list.filter(p => p.include_in_final_report)
   return list
 }
 
 /**
- * Drop a filter selection that no longer matches anything — e.g. the step
- * filter is pinned to a step whose only photo was just deleted. Returns the
- * value to keep.
+ * Drop selections that no longer match anything — a step whose last photo was
+ * just deleted, or a tag left over from another record loaded into the same
+ * card. Returns the selection to keep; an empty result means "all", which is
+ * the honest answer rather than a grid filtered to nothing.
  */
-export function reconcileFilterValue(value, options) {
-  if (value === ALL) return ALL
-  return (options || []).some(o => o.id === value) ? value : ALL
+export function reconcileSelection(selection, options) {
+  const set = selectionSet(selection)
+  if (!set) return []
+  const live = new Set((options || []).map(o => o.id))
+  return Array.from(set).filter(id => live.has(id))
+}
+
+/** Add or remove one id from a multi-select selection. */
+export function toggleSelection(selection, id) {
+  const set = selectionSet(selection)
+  const next = new Set(set || [])
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  return Array.from(next)
+}
+
+/**
+ * The closed dropdown's label. Naming the one or two things chosen beats
+ * "2 selected" — the reviewer can see what they are filtered to without
+ * opening the list.
+ */
+export function selectionLabel(selection, options, allLabel) {
+  const set = selectionSet(selection)
+  if (!set) return allLabel
+  const chosen = (options || []).filter(o => set.has(o.id))
+  if (chosen.length === 0) return allLabel
+  const name = (o) => o.label || o.name || o.id
+  if (chosen.length === 1) return name(chosen[0])
+  if (chosen.length === 2) return `${name(chosen[0])}, ${name(chosen[1])}`
+  return `${name(chosen[0])} +${chosen.length - 1} more`
 }
