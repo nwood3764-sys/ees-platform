@@ -8957,6 +8957,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     incomeQualificationComplete,
     recordTypeLabel,
     recordIsLocked:       recordLockedForUser,
+    isSystemAdmin,
   }
 
   const topbarActionHandlers = {
@@ -8966,6 +8967,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: handleRunIncomeQualification,
     [ACTION_KEYS.VERIFY_FIELDS]:          handleVerifyFields,
     [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
+    // Open the portal in a new tab so the admin keeps the record they came
+    // from. The URL is only a request — the portal RPCs re-check app_is_admin().
+    [ACTION_KEYS.VIEW_OWNER_PORTAL]:
+      () => window.open(`/project-portal?account=${recordId}`, '_blank', 'noopener'),
+    [ACTION_KEYS.VIEW_AS_PORTAL_USER]:
+      () => window.open(`/project-portal?as=${recordId}`, '_blank', 'noopener'),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
     [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_SUBMITTAL]:
       () => setSubmittalStage(SUBMITTAL_STAGES.PROJECT_RESERVATION),

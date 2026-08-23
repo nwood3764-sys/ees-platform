@@ -68,6 +68,8 @@ export const ACTION_KEYS = Object.freeze({
   VOID_ENVELOPE:           'void_envelope',
   PREVIEW_PDF:             'preview_pdf',
   PREVIEW_DOCUMENT:        'preview_document',
+  VIEW_OWNER_PORTAL:       'view_owner_portal',
+  VIEW_AS_PORTAL_USER:     'view_as_portal_user',
   PREVIEW_EMAIL:           'preview_email',
   CLONE_TEMPLATE:          'clone_template',
   EDIT_SUBMITTAL_TEMPLATE: 'edit_submittal_template',
@@ -182,6 +184,44 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultTier:         'primary',
     defaultSortOrder:    20,
     isAvailable: ({ tableName, editing }) => !editing && tableName === 'projects',
+  },
+  // ── Portal View As (Salesforce "Login As" parity) ───────────────────────
+  // Two deliberately separate actions, because they answer two different
+  // questions and one cannot stand in for the other:
+  //
+  //   view_owner_portal   (accounts)     — what a full-portfolio owner at this
+  //                                        account WOULD see. Works with no
+  //                                        portal user in existence, which is
+  //                                        the point: nobody is invited until
+  //                                        an admin has confirmed the content
+  //                                        displays correctly.
+  //   view_as_portal_user (portal_users) — what this specific person sees right
+  //                                        now, through their own grants.
+  //
+  // Both are Admin-only in the UI and, independently, enforced server-side by
+  // app_is_admin() inside the portal RPCs; every session is logged to
+  // portal_view_as_sessions.
+  view_owner_portal: {
+    key:                 ACTION_KEYS.VIEW_OWNER_PORTAL,
+    label:               'View Owner Portal',
+    icon:                'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z M12 9a3 3 0 100 6 3 3 0 000-6z',
+    color:               ACTION_COLORS.SKY,
+    applicableObjects:   ['accounts'],
+    defaultTier:         'menu',
+    defaultSortOrder:    40,
+    isAvailable: ({ tableName, editing, isSystemAdmin }) =>
+      !editing && tableName === 'accounts' && !!isSystemAdmin,
+  },
+  view_as_portal_user: {
+    key:                 ACTION_KEYS.VIEW_AS_PORTAL_USER,
+    label:               'View Portal as This User',
+    icon:                'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z M12 9a3 3 0 100 6 3 3 0 000-6z',
+    color:               ACTION_COLORS.SKY,
+    applicableObjects:   ['portal_users'],
+    defaultTier:         'menu',
+    defaultSortOrder:    41,
+    isAvailable: ({ tableName, editing, isSystemAdmin }) =>
+      !editing && tableName === 'portal_users' && !!isSystemAdmin,
   },
   // ── Program submittals ──────────────────────────────────────────────────
   // Each program runs its own incentive application with three stages that
