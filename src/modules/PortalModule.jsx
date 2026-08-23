@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useModuleSections } from '../lib/useModuleSections'
 import { useRecharts } from '../lib/RechartsLazy'
 import { C, CHART_COLORS } from '../data/constants'
@@ -7,10 +7,12 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
 import NavLink from '../components/NavLink'
-import { fetchPortalUsers, fetchPartnerOrganizations } from '../data/portalService'
+import { fetchPortalUsers, fetchPartnerOrganizations, fetchPropertyOwnerPortals } from '../data/portalService'
+import { getCurrentUserProfile } from '../data/layoutService'
 
 const CODE_SECTIONS = [
   { id: 'home',     label: 'Home' },
+  { id: 'portals',  label: 'Property Owner Portals' },
   { id: 'users',    label: 'Portal Users' },
   { id: 'partners', label: 'Partner Organizations' },
 ]
@@ -196,6 +198,146 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 }
 
 // ---------------------------------------------------------------------------
+// Property Owner Portals — pick an organization, open their portal.
+//
+// This is the entry point for "go look at a portal." The per-record Actions
+// menus (View Owner Portal on an account, View Portal as This User on a portal
+// user) still exist for when you are already on that record, but nobody should
+// have to find a record first just to look at a portal.
+// ---------------------------------------------------------------------------
+
+function PortalReadiness({ row }) {
+  const cfg = row.opportunities === 0
+    ? { label: 'No content yet', color: C.textMuted, bg: C.page }
+    : row.activeUsers > 0
+      ? { label: 'Owner invited', color: C.emeraldMid, bg: '#e8f8f2' }
+      : { label: 'Ready to review', color: '#1a5a8a', bg: '#e8f3fb' }
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, fontWeight:600,
+                   color:cfg.color, background:cfg.bg, padding:'3px 8px', borderRadius:11 }}>
+      {cfg.label}
+    </span>
+  )
+}
+
+function PropertyOwnerPortals({ isSystemAdmin, onOpenAccount }) {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [onlyWithContent, setOnlyWithContent] = useState(true)
+  const [q, setQ] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true); setError(null)
+    fetchPropertyOwnerPortals(onlyWithContent)
+      .then(r => { if (!cancelled) setRows(r) })
+      .catch(e => { if (!cancelled) setError(e) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [onlyWithContent])
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    if (!needle) return rows
+    return rows.filter(r => (r.name || '').toLowerCase().includes(needle)
+                         || (r.id || '').toLowerCase().includes(needle))
+  }, [rows, q])
+
+  const th = { textAlign:'left', fontSize:11, fontWeight:600, color:C.textMuted, textTransform:'uppercase',
+               letterSpacing:'.04em', padding:'8px 12px', borderBottom:`1px solid ${C.border}`, whiteSpace:'nowrap' }
+  const td = { fontSize:12.5, color:C.textSecondary, padding:'10px 12px', borderBottom:`1px solid ${C.border}` }
+  const num = { ...td, fontFamily:'JetBrains Mono, monospace', textAlign:'right' }
+
+  if (loading) return <LoadingState message="Loading portals…" />
+  if (error)   return <ErrorState error={error} />
+
+  return (
+    <div style={{ flex:1, overflow:'auto', padding:'20px 24px' }}>
+      <div style={{ marginBottom:14 }}>
+        <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Property Owner Portals</h1>
+        <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>
+          Open any organization&rsquo;s portal and see it exactly as they would. Check the content before anyone is invited.
+        </div>
+      </div>
+
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:12, flexWrap:'wrap' }}>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search organizations…"
+          style={{ flex:'1 1 240px', maxWidth:360, padding:'7px 11px', fontSize:12.5, border:`1px solid ${C.border}`,
+                   borderRadius:6, background:C.card, color:C.textPrimary, outline:'none' }} />
+        <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:12.5, color:C.textSecondary, cursor:'pointer' }}>
+          <input type="checkbox" checked={onlyWithContent} onChange={e => setOnlyWithContent(e.target.checked)} />
+          Only organizations with portal content
+        </label>
+        <span style={{ fontSize:12, color:C.textMuted, marginLeft:'auto' }}>
+          {filtered.length} organization{filtered.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {!isSystemAdmin && (
+        <div style={{ background:'#e8f3fb', border:`1px solid ${C.border}`, borderRadius:6, padding:'10px 12px',
+                      fontSize:12.5, color:'#1a5a8a', marginBottom:12 }}>
+          Opening a portal as an organization is limited to system administrators.
+        </div>
+      )}
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'auto' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse' }}>
+          <thead>
+            <tr>
+              <th style={th}>Organization</th>
+              <th style={th}>Record Type</th>
+              <th style={{ ...th, textAlign:'right' }}>Properties</th>
+              <th style={{ ...th, textAlign:'right' }}>Buildings</th>
+              <th style={{ ...th, textAlign:'right' }}>Programs</th>
+              <th style={{ ...th, textAlign:'right' }}>Work Orders</th>
+              <th style={{ ...th, textAlign:'right' }}>Visits</th>
+              <th style={{ ...th, textAlign:'right' }}>Portal Users</th>
+              <th style={th}>Status</th>
+              <th style={th}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td style={{ ...td, color:C.textMuted }} colSpan={10}>
+                {onlyWithContent
+                  ? 'No organizations have portal content yet. Untick the filter to see every property-owning account.'
+                  : 'No organizations found.'}
+              </td></tr>
+            )}
+            {filtered.map(r => (
+              <tr key={r._id}>
+                <td style={{ ...td, color:C.textPrimary, fontWeight:600 }}>
+                  <span onClick={() => onOpenAccount(r)} style={{ cursor:'pointer', color:C.emeraldMid }}>{r.name}</span>
+                  <div style={{ fontSize:11, color:C.textMuted, fontFamily:'JetBrains Mono, monospace', fontWeight:400 }}>{r.id}</div>
+                </td>
+                <td style={td}>{r.recordType}</td>
+                <td style={num}>{r.properties}</td>
+                <td style={num}>{r.buildings}</td>
+                <td style={num}>{r.opportunities}</td>
+                <td style={num}>{r.workOrders}</td>
+                <td style={num}>{r.visits}</td>
+                <td style={num}>{r.portalUsers}</td>
+                <td style={td}><PortalReadiness row={r} /></td>
+                <td style={{ ...td, textAlign:'right' }}>
+                  {isSystemAdmin && (
+                    <a href={`/project-portal?account=${r._id}`} target="_blank" rel="noopener noreferrer"
+                       style={{ display:'inline-block', background:C.emerald, color:'#07111f', fontWeight:600, fontSize:12,
+                                padding:'6px 12px', borderRadius:6, textDecoration:'none', whiteSpace:'nowrap' }}>
+                      Open Portal
+                    </a>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export
 // ---------------------------------------------------------------------------
 
@@ -258,6 +400,15 @@ export default function PortalModule({ selectedRecord: navSelectedRecord, sectio
 
   const counts = { users: users.length, partners: partners.length }
 
+  // Opening a portal as someone else is Admin-only (enforced again in the DB);
+  // the list itself is visible to any internal user.
+  const [isSystemAdmin, setIsSystemAdmin] = useState(false)
+  useEffect(() => {
+    let alive = true
+    getCurrentUserProfile().then(p => { if (alive) setIsSystemAdmin(p?.roleName === 'Admin') }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div data-module-topbar="1" style={{ height: 54, background:C.card, borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', flexShrink:0 }}>
@@ -289,6 +440,8 @@ export default function PortalModule({ selectedRecord: navSelectedRecord, sectio
             moduleId="portal" />
         )}
         {sec==='home'     && <PortalHome setSec={setSec} users={users} partners={partners} />}
+        {sec==='portals'  && <PropertyOwnerPortals isSystemAdmin={isSystemAdmin}
+          onOpenAccount={(r) => setSelectedRecord({ table:'accounts', id:r._id, name:r.name })} />}
         </>)}
       </div>
     </div>
