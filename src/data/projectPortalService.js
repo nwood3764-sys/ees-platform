@@ -46,9 +46,39 @@ export function programLabel(opp) {
   return (opp && opp.program) || 'Program'
 }
 
+// ─── View As (internal admins) ───────────────────────────────────────────────
+// Salesforce "Login As" parity. An internal ADMIN can open the portal as
+// someone else, in one of two modes — never both at once:
+//
+//   { portalUserId } — exactly what that portal user sees: their own grants,
+//                      their account guard.
+//   { accountId }    — what a full-portfolio owner at that account WOULD see.
+//                      Works when the account has no portal user at all, which
+//                      is the point: nobody gets invited until an admin has
+//                      confirmed the content displays correctly.
+//
+// Everything is enforced server-side (app_is_admin() inside each RPC); these
+// params are a request, not a grant. Every session is logged to
+// portal_view_as_sessions by portal_view_as_start().
+function viewAsParams(viewAs) {
+  return {
+    p_view_as_portal_user_id: viewAs?.portalUserId || null,
+    p_preview_account_id:     viewAs?.accountId || null,
+  }
+}
+
+export async function startPortalViewAs({ portalUserId = null, accountId = null } = {}) {
+  const { data, error } = await supabase.rpc('portal_view_as_start', {
+    p_portal_user_id: portalUserId,
+    p_account_id:     accountId,
+  })
+  if (error) throw error
+  return data || {}
+}
+
 // ─── Project tracker tree ────────────────────────────────────────────────────
-export async function fetchProjectTracker() {
-  const { data, error } = await supabase.rpc('get_portal_project_tracker')
+export async function fetchProjectTracker(viewAs = null) {
+  const { data, error } = await supabase.rpc('get_portal_project_tracker', viewAsParams(viewAs))
   if (error) throw error
 
   const payload = data || {}
@@ -127,19 +157,23 @@ export async function fetchProjectTracker() {
 // returns cannot be rendered. The portal-photo-urls edge function re-checks
 // each photo against this user's property grants and returns short-lived
 // signed URLs for the ones they're allowed to see.
-export async function fetchPortalPhotoUrls(photoIds) {
+export async function fetchPortalPhotoUrls(photoIds, viewAs = null) {
   const ids = Array.from(new Set((photoIds || []).filter(Boolean)))
   if (!ids.length) return {}
   const { data, error } = await supabase.functions.invoke('portal-photo-urls', {
-    body: { photo_ids: ids },
+    body: {
+      photo_ids: ids,
+      view_as_portal_user_id: viewAs?.portalUserId || null,
+      preview_account_id:     viewAs?.accountId || null,
+    },
   })
   if (error) throw error
   return (data && data.urls) || {}
 }
 
 // ─── Calendar (site visits / service appointments) ──────────────────────────
-export async function fetchPortalCalendar() {
-  const { data, error } = await supabase.rpc('get_portal_calendar')
+export async function fetchPortalCalendar(viewAs = null) {
+  const { data, error } = await supabase.rpc('get_portal_calendar', viewAsParams(viewAs))
   if (error) throw error
   const payload = data || {}
   if (payload.error) return { error: payload.error, appointments: [] }

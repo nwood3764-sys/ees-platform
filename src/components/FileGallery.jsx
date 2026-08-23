@@ -4,13 +4,14 @@ import { Icon } from './UI'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
 import {
-  ALL as FILTER_ALL,
   buildStepFilterOptions,
   buildTagFilterOptions,
   filterGalleryPhotos,
   isMeaningfulTag,
   photoTagLabel,
-  reconcileFilterValue,
+  reconcileSelection,
+  selectionLabel,
+  toggleSelection,
 } from '../lib/photoTags'
 import {
   defaultPhotoBucket,
@@ -172,8 +173,11 @@ export default function FileGalleryWidget({
   const [previewDoc, setPreviewDoc] = useState(null)   // documents only — modal preview
   // {id, name} for one item, or {ids:[...], name} for a selection (bulk delete).
   const [confirmDelete, setConfirmDelete] = useState(null)
-  const [stepFilter, setStepFilter] = useState(FILTER_ALL) // WO gallery: 'all' | work_step_id
-  const [tagFilter, setTagFilter]   = useState(FILTER_ALL) // WO gallery: 'all' | photo_type
+  // Multi-select: arrays of chosen ids, empty meaning every one. A reviewer
+  // pulls "Roof / Ceiling AND Windows & Doors" out together, not one at a time
+  // (Nicholas, 2026-08-22).
+  const [stepFilter, setStepFilter] = useState([])  // WO gallery: work step ids
+  const [tagFilter, setTagFilter]   = useState([])  // WO gallery: photo_types
   const [selectMode, setSelectMode]   = useState(false)    // photos: multi-select for download
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [downloading, setDownloading] = useState(false)
@@ -234,8 +238,14 @@ export default function FileGalleryWidget({
   // was deleted, or another record loaded into the same card) falls back to
   // All rather than showing an empty grid with no explanation.
   useEffect(() => {
-    setStepFilter(v => reconcileFilterValue(v, stepOptions))
-    setTagFilter(v => reconcileFilterValue(v, tagOptions))
+    setStepFilter(v => {
+      const next = reconcileSelection(v, stepOptions)
+      return next.length === v.length ? v : next
+    })
+    setTagFilter(v => {
+      const next = reconcileSelection(v, tagOptions)
+      return next.length === v.length ? v : next
+    })
   }, [stepOptions, tagOptions])
 
   const visiblePhotos = useMemo(() => {
@@ -243,7 +253,7 @@ export default function FileGalleryWidget({
       return showReportOnly ? items.filter(p => p.include_in_final_report) : items
     }
     return filterGalleryPhotos(items, {
-      stepId: stepFilter, tag: tagFilter, reportOnly: showReportOnly,
+      steps: stepFilter, tags: tagFilter, reportOnly: showReportOnly,
     })
   }, [items, stepFilter, tagFilter, isWorkOrderPhotoGallery, showReportOnly])
 
@@ -297,6 +307,42 @@ export default function FileGalleryWidget({
       toast.error(e.message || 'Could not update report flag')
     }
   }
+  // Flag or unflag every selected photo. Sequential so one failure doesn't
+  // leave the rest in an unknown state, and optimistic per row so the grid
+  // keeps up with a 40-photo selection.
+  const [reportBusy, setReportBusy] = useState(false)
+  const selectedPhotos = useMemo(
+    () => visiblePhotos.filter(p => selectedIds.has(p.id)),
+    [visiblePhotos, selectedIds])
+  const selectedAllInReport = selectedPhotos.length > 0
+    && selectedPhotos.every(p => p.include_in_final_report)
+  const handleReportSelected = async () => {
+    if (selectedPhotos.length === 0) return
+    const next = !selectedAllInReport
+    setReportBusy(true)
+    let changed = 0
+    let failed = 0
+    for (const photo of selectedPhotos) {
+      if (!!photo.include_in_final_report === next) continue
+      setLocalReportFlag(photo.id, next)
+      try {
+        await setPhotoReportInclusion(photo.id, next)
+        changed += 1
+      } catch (e) {
+        setLocalReportFlag(photo.id, !next)
+        failed += 1
+      }
+    }
+    setReportBusy(false)
+    if (changed > 0) {
+      toast.success(next
+        ? `${changed} photo${changed === 1 ? '' : 's'} added to the final report`
+        : `${changed} photo${changed === 1 ? '' : 's'} removed from the final report`)
+    }
+    if (failed > 0) toast.error(`${failed} could not be updated`)
+    if (changed > 0 || failed > 0) exitSelect()
+  }
+
   const reportCount = useMemo(
     () => (target === 'photos' ? items.filter(p => p.include_in_final_report).length : 0),
     [items, target]
@@ -606,7 +652,7 @@ export default function FileGalleryWidget({
                     tagValue={tagFilter}
                     onStepChange={setStepFilter}
                     onTagChange={setTagFilter}
-                    onClear={() => { setStepFilter(FILTER_ALL); setTagFilter(FILTER_ALL) }}
+                    onClear={() => { setStepFilter([]); setTagFilter([]) }}
                     isMobile={isMobile}
                   />
                 )}
@@ -622,6 +668,9 @@ export default function FileGalleryWidget({
                   onCancel={exitSelect}
                   onSelectAll={selectAllVisible}
                   onDownload={handleDownloadSelected}
+                  onReportSelected={handleReportSelected}
+                  selectedAllInReport={selectedAllInReport}
+                  reportBusy={reportBusy}
                   onDeleteSelected={() => {
                     const ids = visiblePhotos.filter(p => selectedIds.has(p.id)).map(p => p.id)
                     if (ids.length === 0) return
@@ -866,12 +915,32 @@ function SkeletonGrid({ mode, isMobile }) {
 // pushed the photos themselves below the fold. Each option carries its own
 // count, so the closed dropdown doubles as a summary of what the work order
 // actually holds, and Clear appears only once something is filtered.
-function FilterSelect({ label, value, onChange, options, allLabel }) {
-  const active = value !== FILTER_ALL
+function FilterSelect({ label, value, onChange, options, allLabel, isMobile }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+  const chosen = Array.isArray(value) ? value : []
+  const active = chosen.length > 0
+
+  // Close on an outside click or Escape. A popover that traps the page is
+  // worse than the native select it replaced.
+  useEffect(() => {
+    if (!open) return
+    const onDocDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDocDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
   return (
-    <label style={{
+    <div ref={wrapRef} style={{
       display: 'flex', alignItems: 'center', gap: 6,
-      flex: '1 1 210px', minWidth: 0,
+      flex: '1 1 210px', minWidth: 0, position: 'relative',
     }}>
       <span style={{
         fontSize: 11, fontWeight: 600, color: C.textMuted,
@@ -879,32 +948,85 @@ function FilterSelect({ label, value, onChange, options, allLabel }) {
       }}>
         {label}
       </span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         style={{
-          flex: 1, minWidth: 0, maxWidth: '100%',
-          height: 30, padding: '0 26px 0 9px',
-          border: `1px solid ${active ? C.emeraldMid : C.border}`,
+          flex: 1, minWidth: 0, height: 30,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+          padding: '0 9px', cursor: 'pointer', textAlign: 'left',
+          border: `1px solid ${active || open ? C.emeraldMid : C.border}`,
           background: active ? '#e8f8f0' : C.card,
           color: active ? '#1a7a4f' : C.textSecondary,
           borderRadius: 6, fontSize: 12.5,
-          fontWeight: active ? 600 : 500,
-          fontFamily: 'inherit', cursor: 'pointer',
-          appearance: 'none',
-          backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234a5e7a' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>")`,
-          backgroundRepeat: 'no-repeat',
-          backgroundPosition: 'right 8px center',
+          fontWeight: active ? 600 : 500, fontFamily: 'inherit',
         }}
       >
-        <option value={FILTER_ALL}>{allLabel}</option>
-        {options.map(o => (
-          <option key={o.id} value={o.id}>
-            {(o.label || o.name)} ({o.count})
-          </option>
-        ))}
-      </select>
-    </label>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {selectionLabel(chosen, options, allLabel)}
+        </span>
+        <Icon path="M6 9l6 6 6-6" size={12} color={active ? '#1a7a4f' : C.textSecondary} />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          aria-multiselectable="true"
+          style={{
+            position: 'absolute', top: 34, left: 0, right: 0, zIndex: 60,
+            background: C.card, border: `1px solid ${C.borderDark}`, borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(13,26,46,0.16)',
+            maxHeight: isMobile ? '52vh' : 320, overflowY: 'auto', padding: 4,
+          }}
+        >
+          {/* Clearing every checkbox already means "all", so this is the same
+              action — named, rather than left for the user to work out. */}
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            style={{
+              appearance: 'none', width: '100%', textAlign: 'left', cursor: 'pointer',
+              border: 'none', background: chosen.length === 0 ? '#e8f8f0' : 'transparent',
+              color: chosen.length === 0 ? '#1a7a4f' : C.textSecondary,
+              fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
+              padding: '7px 9px', borderRadius: 6,
+            }}
+          >
+            {allLabel}
+          </button>
+          <div style={{ height: 1, background: C.border, margin: '4px 2px' }} />
+          {options.map(o => {
+            const isOn = chosen.includes(o.id)
+            return (
+              <label
+                key={o.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '7px 9px', borderRadius: 6, cursor: 'pointer',
+                  background: isOn ? '#e8f8f0' : 'transparent',
+                  fontSize: 12.5, color: C.textPrimary,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isOn}
+                  onChange={() => onChange(toggleSelection(chosen, o.id))}
+                  style={{ width: 15, height: 15, accentColor: C.emeraldMid, flex: '0 0 auto', cursor: 'pointer' }}
+                />
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {o.label || o.name}
+                </span>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: C.textMuted }}>
+                  {o.count}
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -912,7 +1034,7 @@ function PhotoFilterBar({
   stepOptions, tagOptions, total, shown,
   stepValue, tagValue, onStepChange, onTagChange, onClear, isMobile,
 }) {
-  const filtered = stepValue !== FILTER_ALL || tagValue !== FILTER_ALL
+  const filtered = (stepValue?.length || 0) > 0 || (tagValue?.length || 0) > 0
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10,
@@ -928,6 +1050,7 @@ function PhotoFilterBar({
           onChange={onStepChange}
           options={stepOptions}
           allLabel={`All work steps (${total})`}
+          isMobile={isMobile}
         />
       )}
       {tagOptions.length > 1 && (
@@ -937,6 +1060,7 @@ function PhotoFilterBar({
           onChange={onTagChange}
           options={tagOptions}
           allLabel={`All tags (${total})`}
+          isMobile={isMobile}
         />
       )}
       {filtered && (
@@ -960,13 +1084,11 @@ function PhotoFilterBar({
     </div>
   )
 }
-
-// Bookmark/flag icon path — reused on the toolbar chip, tiles, and lightbox.
 const FLAG_ICON = 'M6 3h12a1 1 0 011 1v17l-7-4-7 4V4a1 1 0 011-1z'
 
 // Toolbar above the grid: report-filter chip, then enter select mode →
 // Select-all / Download / Cancel.
-function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, reportCount, showReportOnly, onToggleReportFilter, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected }) {
+function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, reportCount, showReportOnly, onToggleReportFilter, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected, onReportSelected, selectedAllInReport, reportBusy }) {
   if (totalCount === 0 && !showReportOnly && !reportCount) return null
   const btn = (extra = {}) => ({
     display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -1000,6 +1122,30 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
             {selectedCount === totalCount ? 'All selected' : `Select all (${totalCount})`}
           </button>
           <button onClick={onCancel} style={btn()}>Cancel</button>
+          {/* Flag the whole selection for the final report in one press. With
+              multi-select filters this is the point of selecting at all: filter
+              to Roof / Ceiling + Windows & Doors, Select all, and mark them.
+              Toggles to Remove once everything selected is already in. */}
+          <button
+            onClick={onReportSelected}
+            disabled={selectedCount === 0 || reportBusy}
+            title={selectedAllInReport
+              ? 'Remove the selected photos from the final report'
+              : 'Add the selected photos to the final report'}
+            style={btn({
+              background: (selectedCount === 0 || reportBusy) ? C.border : '#e8f8f2',
+              borderColor: (selectedCount === 0 || reportBusy) ? C.border : C.emerald,
+              color: (selectedCount === 0 || reportBusy) ? C.textMuted : C.emeraldMid,
+              cursor: (selectedCount === 0 || reportBusy) ? 'default' : 'pointer',
+            })}
+          >
+            <Icon path={FLAG_ICON} size={12}
+              color={(selectedCount === 0 || reportBusy) ? C.textMuted : C.emeraldMid} />
+            {reportBusy ? 'Saving…'
+              : selectedAllInReport
+                ? `Remove from report${selectedCount ? ` (${selectedCount})` : ''}`
+                : `Add to report${selectedCount ? ` (${selectedCount})` : ''}`}
+          </button>
           {/* Delete the selection. The per-photo delete is hover-revealed and
               hidden while selecting, so without this there was no way to remove
               a batch of photos you'd just uploaded (Nicholas, 2026-08-17).

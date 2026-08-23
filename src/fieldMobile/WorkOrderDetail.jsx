@@ -28,7 +28,7 @@ import {
   markWorkStepNotApplicable, saveWorkStepFieldValue, signedPhotoUrl,
   fetchActiveUsers, fetchAccountContactsForWorkOrder,
 } from './fieldMobileService'
-import { uploadPhoto } from '../data/storageService'
+import { uploadPhoto, setPhotoReportInclusion } from '../data/storageService'
 import {
   imageFilesFrom,
   imageFilesFromDrop,
@@ -898,7 +898,11 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
 
       {/* Captured photos — always viewable, even after the step is completed. */}
       {Array.isArray(step.photos) && step.photos.length > 0 && (
-        <PhotoStrip photos={step.photos} pending={batch ? Math.max(0, batch.total - batch.done) : 0} />
+        <PhotoStrip
+          photos={step.photos}
+          pending={batch ? Math.max(0, batch.total - batch.done) : 0}
+          onFlash={(msg, tone) => (tone === 'error' ? onPhotoError(msg) : onPhotoUploaded(msg))}
+        />
       )}
 
       {/* Attached videos — playable inline, including on completed steps. */}
@@ -1719,10 +1723,49 @@ function NotApplicableModal({ stepName, busy, onCancel, onSubmit }) {
 // Renders thumbnails for a step's captured photos (private work-evidence
 // bucket → short-lived signed URLs). Always shown, including on completed
 // steps, so the technician can review what they captured. Tap to view full.
-function PhotoStrip({ photos, label = null, pending = 0 }) {
+// The same bookmark mark the desktop gallery uses for report inclusion, so
+// one action reads identically on both surfaces. Filled when the photo is in.
+function ReportFlagIcon({ filled }) {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24"
+      fill={filled ? 'currentColor' : 'none'} stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 3h12a1 1 0 011 1v17l-7-4-7 4V4a1 1 0 011-1z" />
+    </svg>
+  )
+}
+
+function PhotoStrip({ photos, label = null, pending = 0, onFlash = null }) {
   const [urls, setUrls] = useState({})   // photo.id -> signedUrl
   const [zoom, setZoom] = useState(null) // signedUrl being viewed full-screen
   const signedRef = useRef(new Map())    // `${bucket}::${path}` -> signedUrl
+  // Report-inclusion overrides, keyed by photo id. The strip's photos come
+  // from the work order detail payload, which only reloads on a refresh, so a
+  // flag toggled here shows immediately instead of after the next fetch.
+  const [reportFlags, setReportFlags] = useState({})
+  const [flagBusy, setFlagBusy] = useState(null)
+
+  // The technician standing in the attic knows better than anyone which shot
+  // proves the work. Until now only the desktop gallery could mark a photo for
+  // the final report, so that judgement was made later by someone who wasn't
+  // there (Nicholas, 2026-08-22).
+  const inReport = (p) => (
+    reportFlags[p.id] !== undefined ? reportFlags[p.id] : !!p.include_in_final_report
+  )
+  const toggleReport = async (p) => {
+    const next = !inReport(p)
+    setReportFlags((m) => ({ ...m, [p.id]: next }))
+    setFlagBusy(p.id)
+    try {
+      await setPhotoReportInclusion(p.id, next)
+      if (onFlash) onFlash(next ? 'Added to the final report' : 'Removed from the final report')
+    } catch (err) {
+      setReportFlags((m) => ({ ...m, [p.id]: !next }))
+      if (onFlash) onFlash(err.message || 'Could not update the report flag.', 'error')
+    } finally {
+      setFlagBusy(null)
+    }
+  }
 
   // Key the signing effect on the photo SET's CONTENT, never on the array's
   // identity. Callers legitimately build this array inline — the screen-flow
@@ -1780,6 +1823,25 @@ function PhotoStrip({ photos, label = null, pending = 0 }) {
                 {url
                   ? <img src={url} alt={p.photo_type || 'photo'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   : <span style={{ fontSize: 10, color: C.textMuted }}>…</span>}
+              </button>
+              <button
+                onClick={() => toggleReport(p)}
+                disabled={flagBusy === p.id}
+                aria-label={inReport(p) ? 'Remove from the final report' : 'Add to the final report'}
+                title={inReport(p) ? 'In the final report — tap to remove' : 'Add to the final report'}
+                style={{
+                  position: 'absolute', top: 3, right: 3,
+                  width: 22, height: 22, borderRadius: '50%', padding: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: inReport(p) ? C.emerald : 'rgba(13,26,46,0.62)',
+                  border: inReport(p) ? 'none' : '1px solid rgba(255,255,255,0.4)',
+                  cursor: flagBusy === p.id ? 'default' : 'pointer',
+                  opacity: flagBusy === p.id ? 0.6 : 1,
+                }}
+              >
+                <span style={{ color: '#fff', display: 'flex' }}>
+                  <ReportFlagIcon filled={inReport(p)} />
+                </span>
               </button>
               {isMeaningfulTag(p.photo_type) && (
                 <span style={{
@@ -2451,6 +2513,7 @@ function ScreenFlowRunner({ step: initialStep, woId, onClose, onCompleted, onFla
                   photos={photosOfType(screen.field.name)}
                   label={screen.field.label || null}
                   pending={batch ? Math.max(0, batch.total - batch.done) : 0}
+                  onFlash={onFlash}
                 />
               </div>
             )}

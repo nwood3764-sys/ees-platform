@@ -37,7 +37,14 @@ const MAX_PHOTO_IDS = 250
 
 const ACTIVE_PORTAL_STATUSES = ["Portal User Active", "Portal User Invited"]
 
-interface ReqBody { photo_ids: string[] }
+interface ReqBody {
+  photo_ids: string[]
+  // Internal-admin View As, mirroring get_portal_project_tracker's parameters.
+  // Exactly one may be set, and only an Admin may set either — verified here
+  // against public.users/roles, never trusted from the request.
+  view_as_portal_user_id?: string | null
+  preview_account_id?: string | null
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
@@ -61,22 +68,65 @@ Deno.serve(async (req) => {
   const authUid = userData?.user?.id
   if (!authUid) return json({ error: "Not authenticated" }, 401)
 
-  const { data: pu } = await admin
-    .from("portal_users")
-    .select("id, status, portal_user_account_id")
-    .eq("auth_user_id", authUid).eq("is_deleted", false).maybeSingle()
-  if (!pu || !ACTIVE_PORTAL_STATUSES.includes(pu.status)) {
-    return json({ error: "Not an active portal user" }, 403)
+  const viewAsPortalUserId = body?.view_as_portal_user_id || null
+  const previewAccountId   = body?.preview_account_id || null
+  const wantsViewAs = !!(viewAsPortalUserId || previewAccountId)
+
+  let portalUserId: string | null = null
+  let accountId: string | null = null
+  let previewWholeAccount = false
+
+  if (wantsViewAs) {
+    if (viewAsPortalUserId && previewAccountId) {
+      return json({ error: "Supply exactly one view-as target" }, 400)
+    }
+    // Admin check, against the caller's internal identity.
+    const { data: staff } = await admin
+      .from("users")
+      .select("id, user_is_active, roles ( role_name )")
+      .eq("auth_user_id", authUid).maybeSingle()
+    const roleName = (staff as any)?.roles?.role_name
+    if (!staff || staff.user_is_active !== true || roleName !== "Admin") {
+      return json({ error: "Viewing a portal as someone else is limited to system administrators" }, 403)
+    }
+    if (viewAsPortalUserId) {
+      const { data: target } = await admin
+        .from("portal_users")
+        .select("id, portal_user_account_id")
+        .eq("id", viewAsPortalUserId).eq("is_deleted", false).maybeSingle()
+      if (!target) return json({ error: "Portal user not found" }, 404)
+      portalUserId = target.id
+      accountId    = target.portal_user_account_id
+    } else {
+      previewWholeAccount = true
+      accountId = previewAccountId
+    }
+  } else {
+    const { data: pu } = await admin
+      .from("portal_users")
+      .select("id, status, portal_user_account_id")
+      .eq("auth_user_id", authUid).eq("is_deleted", false).maybeSingle()
+    if (!pu || !ACTIVE_PORTAL_STATUSES.includes(pu.status)) {
+      return json({ error: "Not an active portal user" }, 403)
+    }
+    portalUserId = pu.id
+    accountId    = pu.portal_user_account_id
   }
 
-  // ── Grants ──
-  const { data: grants } = await admin
-    .from("portal_user_property_grants")
-    .select("pug_property_id, pug_building_id")
-    .eq("pug_portal_user_id", pu.id).eq("pug_is_deleted", false)
-  const propIds = new Set((grants || []).map((g: any) => g.pug_property_id).filter(Boolean))
-  const bldgIds = new Set((grants || []).map((g: any) => g.pug_building_id).filter(Boolean))
-  if (!propIds.size && !bldgIds.size) return json({ urls: {} }, 200)
+  // ── Grants (skipped entirely when previewing a whole account) ──
+  const propIds = new Set<string>()
+  const bldgIds = new Set<string>()
+  if (!previewWholeAccount) {
+    const { data: grants } = await admin
+      .from("portal_user_property_grants")
+      .select("pug_property_id, pug_building_id")
+      .eq("pug_portal_user_id", portalUserId).eq("pug_is_deleted", false)
+    for (const g of (grants || []) as any[]) {
+      if (g.pug_property_id) propIds.add(g.pug_property_id)
+      if (g.pug_building_id) bldgIds.add(g.pug_building_id)
+    }
+    if (!propIds.size && !bldgIds.size) return json({ urls: {} }, 200)
+  }
 
   // ── Re-resolve the requested photos through their work order ──
   const { data: rows, error: qErr } = await admin
@@ -91,11 +141,15 @@ Deno.serve(async (req) => {
   const allowed = (rows || []).filter((r: any) => {
     const wo = r.work_steps?.work_orders
     if (!wo) return false
+    const acct = wo.properties?.property_account_id
+    if (previewWholeAccount) {
+      // Account preview: everything on that account, matching the tracker.
+      return !!acct && acct === accountId
+    }
     if (!(propIds.has(wo.property_id) || bldgIds.has(wo.building_id))) return false
     // Same account guard the portal's read RPCs apply: a grant to a property
     // that belongs to another account resolves to nothing.
-    const acct = wo.properties?.property_account_id
-    return !pu.portal_user_account_id || !acct || acct === pu.portal_user_account_id
+    return !accountId || !acct || acct === accountId
   })
   if (!allowed.length) return json({ urls: {} }, 200)
 

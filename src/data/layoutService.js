@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { programStateFromSeed } from '../lib/programStateScope'
 import { loadPicklists } from './outreachService'
 import { invalidateAll } from '../lib/useCachedFetch'
 import { getEditableFieldsForTable } from './fieldMetadataService'
@@ -220,6 +221,58 @@ export function getRecordTypeColumn(tableName) {
     return 'record_type'
   }
   return `${prefix}_record_type`
+}
+
+/**
+ * The program state that scopes a new record's record-type choice.
+ *
+ * Every program in LEAP runs in exactly one state and its opportunity record
+ * type carries that state (picklist_state); a nationwide type carries null.
+ * Filtering the picker therefore needs one thing — the state the new record is
+ * in — and getting that wrong is what let a North Carolina building offer the
+ * Wisconsin and Michigan programs (Nicholas, 2026-08-23).
+ *
+ * The state belongs to the PROPERTY, so that is what this reads. It deliberately
+ * does NOT trust a state column on the record the create was launched from:
+ * building_state is null on a third of live buildings (a building only inherits
+ * the address when its property carried one), and a null there silently widened
+ * the picker to every program in the platform. opportunities.property_id is NOT
+ * NULL and the database derives opportunity_state from the property
+ * (sync_opportunity_state_from_property), so the property is the same authority
+ * on both sides.
+ *
+ * Order: the seeded property, then the seeded building's property, then the
+ * building's own state, then any *_state value the seed carries (which covers
+ * objects that have no property at all). Null means "unknown" — the caller
+ * should ask rather than assume, which is what the record-type picker's state
+ * selector is for.
+ */
+export async function fetchProgramStateForCreate(seed) {
+  if (!seed || typeof seed !== 'object') return null
+  const readPropertyState = async (propertyId) => {
+    if (!propertyId || !UUID_RE.test(String(propertyId))) return null
+    const { data, error } = await supabase
+      .from('properties').select('property_state').eq('id', propertyId).maybeSingle()
+    if (error) throw error
+    return data?.property_state || null
+  }
+  try {
+    const fromProperty = await readPropertyState(seed.property_id)
+    if (fromProperty) return fromProperty
+    if (seed.building_id && UUID_RE.test(String(seed.building_id))) {
+      const { data: bld, error } = await supabase
+        .from('buildings').select('building_state, property_id').eq('id', seed.building_id).maybeSingle()
+      if (error) throw error
+      const fromBuildingProperty = await readPropertyState(bld?.property_id)
+      if (fromBuildingProperty) return fromBuildingProperty
+      if (bld?.building_state) return bld.building_state
+    }
+  } catch (err) {
+    // A read that fails leaves the state unknown, which widens the picker and
+    // prompts the user — never narrows it to a guess.
+    console.warn('fetchProgramStateForCreate: state lookup failed', err)
+  }
+  return programStateFromSeed(seed)
 }
 
 /**

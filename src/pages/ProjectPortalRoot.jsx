@@ -27,6 +27,7 @@ import {
   fetchProjectTracker,
   fetchPortalCalendar,
   fetchPortalPhotoUrls,
+  startPortalViewAs,
   oppPct,
   oppBucket,
   oppForProgram,
@@ -370,10 +371,16 @@ function StatusBadge({ status }) {
 const photoUrlCache = new Map()     // photoId -> { thumb, full } | null
 const photoUrlInFlight = new Map()  // photoId -> Promise
 
+// The page renders exactly one portal context — either the signed-in portal
+// user's own, or one an admin is viewing as — so the signing calls read it from
+// here rather than threading it through every strip.
+let currentViewAs = null
+export function setPortalPhotoViewAs(v) { currentViewAs = v }
+
 async function resolvePhotoUrls(ids) {
   const missing = ids.filter((id) => !photoUrlCache.has(id) && !photoUrlInFlight.has(id))
   if (missing.length) {
-    const req = fetchPortalPhotoUrls(missing)
+    const req = fetchPortalPhotoUrls(missing, currentViewAs)
       .then((urls) => { missing.forEach((id) => photoUrlCache.set(id, urls[id] || null)) })
       .catch(() => { missing.forEach((id) => photoUrlCache.set(id, null)) })
       .finally(() => { missing.forEach((id) => photoUrlInFlight.delete(id)) })
@@ -1077,10 +1084,51 @@ export default function ProjectPortalRoot() {
   const [errMsg, setErrMsg] = useState(null)
   const [view, setView] = useState('tree')        // tree | calendar
   const [appointments, setAppointments] = useState([])
+  const [viewAs, setViewAs] = useState(null)      // { portalUserId | accountId, label, mode }
+
+  // ?as=<portal user id> — see exactly what that portal user sees.
+  // ?account=<account id> — see what a full-portfolio owner there would see,
+  // which works before any portal user exists. Both are admin-only and are
+  // enforced server-side; the URL is a request, not a grant.
+  const requestedViewAs = useMemo(() => {
+    const q = new URLSearchParams(window.location.search)
+    const portalUserId = q.get('as')
+    const accountId = q.get('account')
+    if (portalUserId) return { portalUserId }
+    if (accountId) return { accountId }
+    return null
+  }, [])
 
   const load = useCallback(async () => {
     setPhase('loading')
     try {
+      // ── Internal admin viewing someone else's portal ──
+      if (requestedViewAs) {
+        const started = await startPortalViewAs(requestedViewAs)
+        if (started?.error) {
+          setPhase('notportal')
+          setErrMsg(started.error === 'not_authorized'
+            ? 'Viewing a portal as someone else is limited to system administrators.'
+            : started.error === 'not_authenticated'
+              ? 'Sign in to LEAP first, then open this portal preview again.'
+              : 'That portal could not be opened for preview.')
+          return
+        }
+        const ctx = { ...requestedViewAs, label: started.label || 'Portal preview', mode: started.mode }
+        setViewAs(ctx)
+        setPortalPhotoViewAs(ctx)
+        setSelf(null)
+        const t = await fetchProjectTracker(ctx)
+        const props = t.properties || []
+        setTree(props)
+        const first = props[0]
+        setSel({ pid: first ? first.id : null, bid: null, uid: null, projId: null })
+        setOpen({ prop: first ? first.id : null, bldg: null, proj: null })
+        try { const cal = await fetchPortalCalendar(ctx); setAppointments(cal.appointments || []) } catch { setAppointments([]) }
+        setPhase('ready')
+        return
+      }
+
       const me = await fetchPortalUserSelf()
       if (!me) { setPhase('login'); return }
       // Portal statuses are the `portal_users.status` picklist: Portal User
@@ -1110,7 +1158,7 @@ export default function ProjectPortalRoot() {
       setErrMsg(e?.message || 'Failed to load the portal.')
       setPhase('error')
     }
-  }, [])
+  }, [requestedViewAs])
 
   useEffect(() => {
     if (!hasSupabaseConfig) { setPhase('error'); setErrMsg('Portal is not configured.'); return }
@@ -1149,10 +1197,31 @@ export default function ProjectPortalRoot() {
   if (project) crumb.push({ label: project.recordType || project.name, onClick: null })
   if (unit) crumb.push({ label: `Unit ${unit.unitNumber}`, onClick: null })
 
+  // Viewing as someone else must never be mistakable for a real customer
+  // session — not on screen, and not in a screenshot.
+  const viewAsUser = viewAs
+    ? { full_name: viewAs.label,
+        portalRoleLabel: viewAs.mode === 'account_preview' ? 'Account preview' : 'Viewing as portal user' }
+    : self
+
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', background: C.page }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', background: C.page }}>
+      {viewAs && (
+        <div style={{ flexShrink: 0, background: '#0d1a2e', color: '#fff', padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 12, fontSize: 12.5 }}>
+          <span style={{ background: C.sky, color: '#0d1a2e', fontWeight: 700, fontSize: 10, letterSpacing: '.4px', textTransform: 'uppercase', padding: '3px 7px', borderRadius: 4 }}>
+            Internal preview
+          </span>
+          <span style={{ flex: 1 }}>
+            {viewAs.mode === 'account_preview'
+              ? <>Showing the Property Owner Portal as a full-portfolio owner at <strong>{viewAs.label}</strong> would see it. No portal user is required for this view.</>
+              : <>Viewing the portal as <strong>{viewAs.label}</strong> — their grants, exactly what they see.</>}
+          </span>
+          <a href="/" style={{ color: C.emerald, textDecoration: 'underline', whiteSpace: 'nowrap' }}>Exit preview</a>
+        </div>
+      )}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
       <TreeSidebar tree={tree} sel={sel} open={open} setOpen={setOpen} onSelect={onSelect}
-        query={query} setQuery={setQuery} user={self} onSignOut={signOut} view={view} setView={setView} />
+        query={query} setQuery={setQuery} user={viewAsUser} onSignOut={viewAs ? () => { window.location.href = '/' } : signOut} view={view} setView={setView} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
         <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, height: 54, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
           {view === 'calendar'
@@ -1176,6 +1245,7 @@ export default function ProjectPortalRoot() {
             {property && !building && <PropertyPage property={property} programs={programs} colorOf={colorOf} onOpenBuilding={(b) => onSelect({ pid: property.id, bid: b.id })} />}
           </>}
         </div>
+      </div>
       </div>
     </div>
   )

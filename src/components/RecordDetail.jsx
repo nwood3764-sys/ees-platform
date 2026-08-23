@@ -94,6 +94,7 @@ import {
   getRecordTypeValue,
   getRecordTypeColumn,
   fetchAvailableRecordTypes,
+  fetchProgramStateForCreate,
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
 import { buildCreateModalGroups, listUnlaidOutRequiredColumns } from '../lib/createRecordFields'
@@ -1681,7 +1682,11 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         // Load record types for the RT selector, and any picklist options.
         let rts = []
         if (rtColumn) {
-          rts = await fetchAvailableRecordTypes(table).catch(() => [])
+          // Same state scoping as the full create pop-up: a quick-created
+          // opportunity on a North Carolina property offers North Carolina
+          // programs, never Wisconsin's.
+          const programState = await fetchProgramStateForCreate(effectiveSeed).catch(() => null)
+          rts = await fetchAvailableRecordTypes(table, { state: programState }).catch(() => [])
         }
         // First option page for each required-FK lookup field. Scoped fields
         // load their full (small) scoped set; unscoped load the first page.
@@ -5388,6 +5393,23 @@ function RelatedListWidget({
       }
     }
 
+    // Which state's programs this record may carry is decided by the PROPERTY,
+    // resolved here rather than read off whatever record the create was
+    // launched from — a building's own state column is blank on a third of live
+    // buildings, and a blank one silently widened the record-type picker to
+    // every program in the platform (Nicholas, 2026-08-23: "North Carolina
+    // properties only get North Carolina opportunities"). Resolved last, once
+    // the chain above has filled in the property. Transient __ key, stripped
+    // before the insert like every other; opportunity_state is also written
+    // through so the form shows what the database will derive anyway.
+    {
+      const programState = await fetchProgramStateForCreate(prefillObj)
+      if (programState) {
+        prefillObj.__programState = programState
+        if (childTable === 'opportunities') prefillObj.opportunity_state = programState
+      }
+    }
+
     // A work order always lives on a project, but the record it was created from
     // often doesn't have one — an assessment, for instance, links the property,
     // building, and opportunity but no project. Resolve the opportunity's most
@@ -6885,6 +6907,9 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // which shows all active types.
   const prefillState = (() => {
     if (!prefill) return null
+    // Resolved from the property by the create-prefill — the authority, and the
+    // only value that is right when the record was created from a building.
+    if (prefill.__programState) return prefill.__programState
     if (prefill.state) return prefill.state
     for (const key of Object.keys(prefill)) {
       if (key.endsWith('_state') && prefill[key]) return prefill[key]
@@ -8932,6 +8957,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     incomeQualificationComplete,
     recordTypeLabel,
     recordIsLocked:       recordLockedForUser,
+    isSystemAdmin,
   }
 
   const topbarActionHandlers = {
@@ -8941,6 +8967,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.RUN_INCOME_QUALIFICATION]: handleRunIncomeQualification,
     [ACTION_KEYS.VERIFY_FIELDS]:          handleVerifyFields,
     [ACTION_KEYS.DELETE]:                 () => setShowDeleteConfirm(true),
+    // Open the portal in a new tab so the admin keeps the record they came
+    // from. The URL is only a request — the portal RPCs re-check app_is_admin().
+    [ACTION_KEYS.VIEW_OWNER_PORTAL]:
+      () => window.open(`/project-portal?account=${recordId}`, '_blank', 'noopener'),
+    [ACTION_KEYS.VIEW_AS_PORTAL_USER]:
+      () => window.open(`/project-portal?as=${recordId}`, '_blank', 'noopener'),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
     [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_SUBMITTAL]:
       () => setSubmittalStage(SUBMITTAL_STAGES.PROJECT_RESERVATION),

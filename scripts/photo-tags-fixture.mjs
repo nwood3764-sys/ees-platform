@@ -19,7 +19,10 @@ import {
   buildStepFilterOptions,
   buildTagFilterOptions,
   filterGalleryPhotos,
-  reconcileFilterValue,
+  reconcileSelection,
+  selectionSet,
+  selectionLabel,
+  toggleSelection,
 } from '../src/lib/photoTags.js'
 
 let failures = 0
@@ -110,21 +113,64 @@ check('every photo is reachable from some tag option',
 // ── Filtering ──────────────────────────────────────────────────────────────
 check('unfiltered returns everything',
   filterGalleryPhotos(items, {}).map(p => p.id), items.map(p => p.id))
-check('filter by step',
-  filterGalleryPhotos(items, { stepId: 's1' }).map(p => p.id), ['p1', 'p2', 'p3'])
+check('filter by one step',
+  filterGalleryPhotos(items, { steps: ['s1'] }).map(p => p.id), ['p1', 'p2', 'p3'])
 check('filter by the work order itself',
-  filterGalleryPhotos(items, { stepId: WORK_ORDER_STEP_KEY }).map(p => p.id), ['p6'])
-check('filter by tag across steps',
-  filterGalleryPhotos(items, { tag: 'general' }).map(p => p.id), ['p3', 'p5', 'p6'])
+  filterGalleryPhotos(items, { steps: [WORK_ORDER_STEP_KEY] }).map(p => p.id), ['p6'])
+check('filter by one tag across steps',
+  filterGalleryPhotos(items, { tags: ['general'] }).map(p => p.id), ['p3', 'p5', 'p6'])
 check('step and tag combine with AND',
-  filterGalleryPhotos(items, { stepId: 's1', tag: 'general' }).map(p => p.id), ['p3'])
+  filterGalleryPhotos(items, { steps: ['s1'], tags: ['general'] }).map(p => p.id), ['p3'])
 check('report flag combines too',
   filterGalleryPhotos(items, { reportOnly: true }).map(p => p.id), ['p1', 'p4'])
 check('report flag with a step',
-  filterGalleryPhotos(items, { stepId: 's1', reportOnly: true }).map(p => p.id), ['p1'])
+  filterGalleryPhotos(items, { steps: ['s1'], reportOnly: true }).map(p => p.id), ['p1'])
 check('a combination with no matches returns empty',
-  filterGalleryPhotos(items, { stepId: 's2', tag: 'before' }), [])
+  filterGalleryPhotos(items, { steps: ['s2'], tags: ['before'] }), [])
 check('filtering never mutates the input', items.length, 7)
+
+// ── Multi-select: several steps, several tags ──────────────────────────────
+// Within one dropdown the choices are an OR; between the two they are an AND.
+check('two steps at once',
+  filterGalleryPhotos(items, { steps: ['s1', 's3'] }).map(p => p.id), ['p1', 'p2', 'p3', 'p4'])
+check('three steps at once',
+  filterGalleryPhotos(items, { steps: ['s1', 's2', 's3'] }).map(p => p.id),
+  ['p1', 'p2', 'p3', 'p4', 'p5'])
+check('two tags at once',
+  filterGalleryPhotos(items, { tags: ['exterior_face_north', 'before'] }).map(p => p.id),
+  ['p1', 'p7'])
+check('several steps AND several tags',
+  filterGalleryPhotos(items, { steps: ['s1', 's3'], tags: ['general', 'exterior_face_north'] })
+    .map(p => p.id), ['p1', 'p3'])
+check('a Set works as well as an array',
+  filterGalleryPhotos(items, { steps: new Set(['s1', 's3']) }).map(p => p.id),
+  ['p1', 'p2', 'p3', 'p4'])
+// Clearing the last checkbox must WIDEN to everything, never blank the grid.
+check('an empty selection means all',
+  filterGalleryPhotos(items, { steps: [] }).map(p => p.id), items.map(p => p.id))
+check('an empty tag selection means all',
+  filterGalleryPhotos(items, { steps: [], tags: [] }).map(p => p.id), items.map(p => p.id))
+check("the literal 'all' still means all",
+  filterGalleryPhotos(items, { steps: ALL }).map(p => p.id), items.map(p => p.id))
+check('a single string still works',
+  filterGalleryPhotos(items, { steps: 's1' }).map(p => p.id), ['p1', 'p2', 'p3'])
+
+check('selectionSet of nothing is null', selectionSet([]), null)
+check('selectionSet of all is null', selectionSet(ALL), null)
+check('selectionSet drops blanks', Array.from(selectionSet(['s1', '', null, 's2'])), ['s1', 's2'])
+
+check('toggle adds', toggleSelection([], 's1'), ['s1'])
+check('toggle adds a second', toggleSelection(['s1'], 's2'), ['s1', 's2'])
+check('toggle removes', toggleSelection(['s1', 's2'], 's1'), ['s2'])
+check('toggling the last one back to empty', toggleSelection(['s1'], 's1'), [])
+
+check('closed label with nothing chosen', selectionLabel([], stepOpts, 'All work steps (7)'),
+  'All work steps (7)')
+check('closed label names one', selectionLabel(['s1'], stepOpts, 'all'), 'Building Photos')
+check('closed label names two', selectionLabel(['s1', 's2'], stepOpts, 'all'),
+  'Building Photos, Roof / Ceiling')
+check('closed label counts beyond two', selectionLabel(['s1', 's2', 's3'], stepOpts, 'all'),
+  'Building Photos +2 more')
 
 // A photo with no photo_type at all filters as 'general' rather than
 // disappearing from both the dropdown and the grid.
@@ -132,13 +178,15 @@ const untyped = [{ id: 'u1', _work_step_id: 's1', _work_step_name: 'Building Pho
 check('untyped photo lands under general',
   buildTagFilterOptions(untyped).map(o => o.id), ['general'])
 check('untyped photo is reachable by the general filter',
-  filterGalleryPhotos(untyped, { tag: 'general' }).map(p => p.id), ['u1'])
+  filterGalleryPhotos(untyped, { tags: ['general'] }).map(p => p.id), ['u1'])
 
 // ── Stale selections ───────────────────────────────────────────────────────
-check('a live selection is kept', reconcileFilterValue('s1', stepOpts), 's1')
-check('a deleted step falls back to all', reconcileFilterValue('s9', stepOpts), ALL)
-check('all stays all', reconcileFilterValue(ALL, stepOpts), ALL)
-check('no options at all falls back to all', reconcileFilterValue('s1', []), ALL)
+check('live selections are kept', reconcileSelection(['s1', 's2'], stepOpts), ['s1', 's2'])
+check('a deleted step is dropped', reconcileSelection(['s1', 's9'], stepOpts), ['s1'])
+// Every choice gone means "all", never a grid filtered to nothing.
+check('all choices gone falls back to all', reconcileSelection(['s9'], stepOpts), [])
+check('all stays all', reconcileSelection(ALL, stepOpts), [])
+check('no options at all falls back to all', reconcileSelection(['s1'], []), [])
 
 if (failures > 0) {
   console.error(`\nphoto-tags fixture: ${failures} of ${checks} checks FAILED`)
