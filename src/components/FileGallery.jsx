@@ -26,7 +26,12 @@ import {
   listDocuments,
   hydrateDocumentUrls,
   softDeleteDocument,
+  freshDocumentUrls,
+  freshPhotoUrls,
+  freshPhotoUrlsBatch,
+  freshDocumentUrlsBatch,
 } from '../data/storageService'
+import { isSignedUrlUsable } from '../lib/signedUrlExpiry'
 
 // ---------------------------------------------------------------------------
 // FileGallery — Salesforce-style related-list card for photos and documents.
@@ -108,9 +113,12 @@ function photoFileName(p) {
 }
 
 async function downloadSinglePhoto(p) {
-  const u = p._thumbUrl || p._originalUrl
+  // Re-sign first: the URL on the row was minted when the gallery loaded and
+  // may have aged out of its TTL while the user worked on the record.
+  const fresh = await freshPhotoUrls(p)
+  const u = fresh._thumbUrl || fresh._originalUrl
   if (!u) throw new Error('image not available')
-  triggerBlobDownload(await fetchAsBlob(u), photoFileName(p))
+  triggerBlobDownload(await fetchAsBlob(u), photoFileName(fresh))
 }
 
 // Zip N watermarked evidence files in-browser (jszip lazy-loaded so it stays
@@ -121,7 +129,9 @@ async function downloadPhotosZip(photos, zipName) {
   const zip = new JSZip()
   const used = new Set()
   let added = 0, skipped = 0
-  for (const p of photos) {
+  // One batched re-sign for the whole selection, not one per file.
+  const rows = await freshPhotoUrlsBatch(photos)
+  for (const p of rows) {
     const u = p._thumbUrl || p._originalUrl
     if (!u) { skipped++; continue }
     let blob
@@ -166,6 +176,10 @@ export default function FileGalleryWidget({
   const [collapsed, setCollapsed] = useState(false)
   const [loading, setLoading]     = useState(true)
   const [items, setItems]         = useState([])     // photos or documents (hydrated with _url / _thumbUrl)
+  // Mirrors `items` for the foreground re-sign below, which reads the current
+  // rows from an event handler rather than a render.
+  const itemsRef = useRef(items)
+  itemsRef.current = items
   const [error, setError]         = useState(null)
   const [uploading, setUploading] = useState(0)      // count of in-flight uploads
   const [dragActive, setDragActive] = useState(false)
@@ -223,6 +237,34 @@ export default function FileGalleryWidget({
   }, [parentTable, parentRecordId, target, config.work_step_id, isWorkOrderPhotoGallery])
 
   useEffect(() => { refresh() }, [refresh])
+
+  // A record page is left open for hours, so the URLs signed at load go stale
+  // in place — a thumbnail that lazy-loads afterwards would 400. Re-sign the
+  // card's rows when the tab returns to the foreground, which is when a long
+  // absence ends. The batch helpers return the same array when every URL is
+  // still good, so this is a no-op in the common case.
+  useEffect(() => {
+    let cancelled = false
+    async function resignIfStale() {
+      if (document.visibilityState === 'hidden') return
+      const current = itemsRef.current
+      if (!current || current.length === 0) return
+      const next = target === 'photos'
+        ? await freshPhotoUrlsBatch(current)
+        : await freshDocumentUrlsBatch(current)
+      // Identity change means something was actually re-signed; and only
+      // apply it if the card has not loaded a different set meanwhile.
+      if (!cancelled && next !== current && itemsRef.current === current) setItems(next)
+    }
+    const onForeground = () => { resignIfStale().catch(() => {}) }
+    window.addEventListener('focus', onForeground)
+    document.addEventListener('visibilitychange', onForeground)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', onForeground)
+      document.removeEventListener('visibilitychange', onForeground)
+    }
+  }, [target])
 
   // Work-order gallery: the two filter dropdowns. A photo carries a work step
   // (where it was captured) and a tag (what it shows) — both are worth
@@ -1533,7 +1575,22 @@ function Lightbox({ photos, startIndex, onClose, onIndexChange, onToggleReport }
     touchStartX.current = null
   }
 
-  const photo = photos[idx]
+  const basePhoto = photos[idx]
+  // Same expiry problem as the document preview — the lightbox can be opened
+  // long after the grid signed its URLs, and a spent URL renders as a broken
+  // image. Re-sign the photo actually on screen.
+  const [freshened, setFreshened] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    if (!basePhoto?.storage_bucket) return
+    if (isSignedUrlUsable(basePhoto._thumbUrl || basePhoto._originalUrl)) return
+    freshPhotoUrls(basePhoto)
+      .then(next => { if (!cancelled) setFreshened(next) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [basePhoto])
+
+  const photo = (freshened && freshened.id === basePhoto?.id) ? freshened : basePhoto
   if (!photo) return null
   // Show the watermarked (tagged) variant in the lightbox so the step /
   // location / date / GPS stamp is visible — that's the evidence view. Fall
@@ -1758,8 +1815,31 @@ function getPreviewKind(doc) {
   return 'fallback'
 }
 
-export function DocumentPreviewModal({ doc, onClose }) {
+export function DocumentPreviewModal({ doc: docProp, onClose }) {
   const isMobile = useIsMobile()
+
+  // The signed URL on the row was minted when the gallery loaded, and a record
+  // page stays open for hours. Opening a preview after the TTL lapsed put
+  // Storage's InvalidJWT error JSON inside the iframe instead of the file, so
+  // re-sign at the moment the preview opens rather than trusting the row.
+  const [doc, setDoc] = useState(docProp)
+  const [signing, setSigning] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setDoc(docProp)
+    const hasFile = !!(docProp?.storage_bucket && docProp?.storage_path)
+    if (!hasFile) return
+    if (isSignedUrlUsable(docProp._previewUrl) && isSignedUrlUsable(docProp._url)) return
+    setSigning(true)
+    freshDocumentUrls(docProp)
+      .then(next => { if (!cancelled) setDoc(next) })
+      // A signing failure falls through to the body's own "unavailable"
+      // message — there is nothing better to show here.
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setSigning(false) })
+    return () => { cancelled = true }
+  }, [docProp])
+
   const kind = getPreviewKind(doc)
   const url = doc._url
 
@@ -1882,7 +1962,11 @@ export function DocumentPreviewModal({ doc, onClose }) {
           overflow: 'auto',
           position: 'relative',
         }}>
-          {!url ? (
+          {signing ? (
+            <div style={{ color: C.textMuted, fontSize: 13, padding: 32 }}>
+              Preparing preview…
+            </div>
+          ) : !url ? (
             <div style={{ color: C.textMuted, fontSize: 13, padding: 32 }}>
               Preview unavailable — could not generate a signed URL.
             </div>
