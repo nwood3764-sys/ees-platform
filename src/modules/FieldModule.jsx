@@ -152,7 +152,7 @@ const isSameDay = (a, b) =>
   a.getMonth()    === b.getMonth() &&
   a.getDate()     === b.getDate()
 
-function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, onOpenWorkOrder }) {
+function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, onOpenWorkOrder, onOpenRecord }) {
   const [selJob, setSelJob] = useState(null)
   const hrs = Array.from({ length: TOTAL+1 }, (_, i) => DAY_START+i)
 
@@ -189,7 +189,11 @@ function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, on
           <button onClick={() => goToDate(new Date())} disabled={showingToday}
             style={{ background: showingToday ? '#e8f8f2' : C.card, border:`1px solid ${showingToday ? '#b8e8d0' : C.border}`, borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:600, color: showingToday ? '#1a7a4e' : C.textSecondary, cursor: showingToday ? 'default' : 'pointer' }}>Today</button>
         </div>
-        <button style={{ background:C.emerald, color:'#fff', border:'none', borderRadius:6, padding:'7px 14px', fontSize:12.5, fontWeight:500, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
+        {/* Scheduling a work order IS creating a service appointment — that is
+            the record that carries the crew, the date and the time window. It
+            opens as the platform's required-fields pop-up like every other New. */}
+        <button onClick={() => onOpenRecord && onOpenRecord({ table:'service_appointments', mode:'create' })}
+          style={{ background:C.emerald, color:'#fff', border:'none', borderRadius:6, padding:'7px 14px', fontSize:12.5, fontWeight:500, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
           <Icon path="M12 5v14M5 12h14" size={12} color="#fff"/>Schedule Work Order
         </button>
       </div>
@@ -303,8 +307,13 @@ function ScheduleView({ crews, loading, error, selectedDate, setSelectedDate, on
               onClick={() => selJob.workOrderId && onOpenWorkOrder && onOpenWorkOrder(selJob.workOrderId, selJob.name)}
               disabled={!selJob.workOrderId}
               style={{ background:C.emerald, color:'#fff', border:'none', borderRadius:6, padding:'6px 14px', fontSize:12.5, fontWeight:500, cursor: selJob.workOrderId ? 'pointer' : 'not-allowed', opacity: selJob.workOrderId ? 1 : 0.5 }}>Open Work Order</button>
-            <button style={{ background:C.page, color:C.textSecondary, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 14px', fontSize:12.5, cursor:'pointer' }}>Reassign</button>
-            <button style={{ background:C.page, color:C.textSecondary, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 14px', fontSize:12.5, cursor:'pointer' }}>Reschedule</button>
+            {/* Who works the job and when it happens are both fields on the
+                service appointment (selJob.id is its uuid), so both buttons
+                open that record rather than pretending to be their own flow. */}
+            <button onClick={() => selJob.id && onOpenRecord && onOpenRecord({ table:'service_appointments', id:selJob.id, mode:'view', name:selJob.name })}
+              style={{ background:C.page, color:C.textSecondary, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 14px', fontSize:12.5, cursor:'pointer' }}>Reassign</button>
+            <button onClick={() => selJob.id && onOpenRecord && onOpenRecord({ table:'service_appointments', id:selJob.id, mode:'view', name:selJob.name })}
+              style={{ background:C.page, color:C.textSecondary, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 14px', fontSize:12.5, cursor:'pointer' }}>Reschedule</button>
           </div>
         </div>
       )}
@@ -909,9 +918,10 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
           <NavLink to={{ activeModule: 'field', section: sec }} onActivate={() => selectedRecord && closeRecord()} style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }}>{SECTIONS.find(s=>s.id===sec)?.label}</NavLink>
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name}</span></>}
         </div>
-        <button style={{ display:'flex', alignItems:'center', gap:6, background:C.page, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12.5, color:C.textSecondary, cursor:'pointer', fontWeight:500 }}>
+        <NavLink to={{ activeModule: 'reports' }} onActivate={() => onNavigateToModule && onNavigateToModule('reports')}
+          style={{ display:'flex', alignItems:'center', gap:6, background:C.page, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12.5, color:C.textSecondary, cursor:'pointer', fontWeight:500 }}>
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
-        </button>
+        </NavLink>
       </div>
       <SectionTabs sections={SECTIONS} moduleId="field" active={sec} onChange={s => { setSec(s); closeRecord(); setReviewWorkOrder(null); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
@@ -943,6 +953,7 @@ export default function FieldModule({ selectedRecord: navSelectedRecord, section
           selectedDate={scheduleDate}
           setSelectedDate={setScheduleDate}
           onOpenWorkOrder={(id, name) => setSelectedRecord({ table: 'work_orders', id, name })}
+          onOpenRecord={setSelectedRecord}
         />}
         </>)}
       </div>

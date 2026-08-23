@@ -235,7 +235,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 // Default export
 // ---------------------------------------------------------------------------
 
-export default function StockModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+export default function StockModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onNavigateToModule, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
   const SECTIONS = useModuleSections('stock', CODE_SECTIONS)
   // Navigation is URL-driven when App passes nav props (the default in the
   // shipping app). The local-state fallback path remains so this module can
@@ -315,9 +315,10 @@ export default function StockModule({ selectedRecord: navSelectedRecord, section
           <NavLink to={{ activeModule: 'stock', section: sec }} onActivate={() => selectedRecord && closeRecord()} style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }}>{SECTIONS.find(s=>s.id===sec)?.label}</NavLink>
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name}</span></>}
         </div>
-        <button style={{ display:'flex', alignItems:'center', gap:6, background:C.page, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12.5, color:C.textSecondary, cursor:'pointer', fontWeight:500 }}>
+        <NavLink to={{ activeModule: 'reports' }} onActivate={() => onNavigateToModule && onNavigateToModule('reports')}
+          style={{ display:'flex', alignItems:'center', gap:6, background:C.page, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12.5, color:C.textSecondary, cursor:'pointer', fontWeight:500 }}>
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
-        </button>
+        </NavLink>
       </div>
       <SectionTabs sections={SECTIONS} moduleId="stock" active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>

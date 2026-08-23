@@ -7,6 +7,7 @@ import SetupHome from './SetupHome'
 import ObjectManager from './ObjectManager'
 import ObjectDetail from './ObjectDetail'
 import { OBJECT_CATALOG } from './objectCatalog'
+import NavLink from '../../components/NavLink'
 
 // ---------------------------------------------------------------------------
 // AdminModule — Salesforce-style Setup shell.
@@ -18,7 +19,7 @@ import { OBJECT_CATALOG } from './objectCatalog'
 // Both tabs can open individual record detail pages (contacts, templates, etc.)
 // ---------------------------------------------------------------------------
 
-export default function AdminModule({ selectedRecord: navSelectedRecord, sectionFromUrl, subsectionFromUrl, adminTabFromUrl, adminLayoutIdFromUrl, adminLayoutReturnFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onSubsectionChange, onReplaceRecord, onOpenSetup } = {}) {
+export default function AdminModule({ selectedRecord: navSelectedRecord, sectionFromUrl, subsectionFromUrl, adminTabFromUrl, adminLayoutIdFromUrl, adminLayoutReturnFromUrl, onNavigateToRecord, onNavigateToModule, onCloseRecord, onSectionChange, onSubsectionChange, onReplaceRecord, onOpenSetup } = {}) {
   // Admin uses 'setup' / 'objects' rather than the section-name pattern of
   // the other modules, so we map the URL section to the local tab. Only
   // 'objects' is exposed via URL today; everything else stays on 'setup'.
@@ -180,14 +181,14 @@ export default function AdminModule({ selectedRecord: navSelectedRecord, section
             )
           })}
         </div>
-        <button style={{
+        <NavLink to={{ activeModule: 'reports' }} onActivate={() => onNavigateToModule && onNavigateToModule('reports')}
+          style={{
           display: 'flex', alignItems: 'center', gap: 6,
           background: C.page, border: `1px solid ${C.border}`, borderRadius: 6,
           padding: '6px 12px', fontSize: 12.5, color: C.textSecondary, cursor: 'pointer', fontWeight: 500,
         }}>
-          <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>
-          Reports
-        </button>
+          <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
+        </NavLink>
       </div>
 
       {/* ─── Primary tab bar — Setup Home / Object Manager ──────────── */}

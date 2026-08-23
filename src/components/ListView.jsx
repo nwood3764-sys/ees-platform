@@ -3087,9 +3087,12 @@ export function ListView({
               </div>
             )}
 
+            {/* Open Record is the only action here on purpose. There is no
+                separate "Edit" screen in LEAP — record pages edit in place —
+                so the Edit button that used to sit below this one had nowhere
+                to go and was wired to nothing. */}
             <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button onClick={() => onOpenRecord && onOpenRecord(selectedRow)} style={{ width: '100%', background: C.emerald, color: '#fff', border: 'none', borderRadius: 6, padding: 9, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>Open Record</button>
-              <button style={{ width: '100%', background: C.page, color: C.textSecondary, border: `1px solid ${C.border}`, borderRadius: 6, padding: 9, fontSize: 13, cursor: 'pointer' }}>Edit</button>
             </div>
           </div>
         )}

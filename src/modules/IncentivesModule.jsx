@@ -7,6 +7,7 @@ import { ListView } from '../components/ListView'
 import RecordDetail from '../components/RecordDetail'
 import ObjectListSection from '../components/ObjectListSection'
 import NavLink from '../components/NavLink'
+import RecordLink from '../components/RecordLink'
 import { fetchPaymentRequests, fetchPaymentReceipts } from '../data/incentivesService'
 
 const CODE_SECTIONS = [
@@ -60,7 +61,18 @@ function pmtCell(col, r) {
   return undefined
 }
 
-function IncentivesHome({ setSec, requests, receipts }) {
+function IncentivesHome({ setSec, onOpenRecord, onNavigateToModule, requests, receipts }) {
+  // Every row on this dashboard names a real record, so every row opens it.
+  // The rows carry the record's uuid as `_id`; the visible `id` is the record
+  // NUMBER (PPR-00007), which is not addressable. A row with no `_id` is a
+  // no-op rather than a link to a broken URL.
+  const openRecordRow = (table, row) => {
+    if (!row?._id || !onOpenRecord) return
+    onOpenRecord({ table, id: row._id, mode: 'view', name: row.name })
+  }
+  const openRequest = (r) => openRecordRow('project_payment_requests', r)
+  const openReceipt = (r) => openRecordRow('payment_receipts', r)
+
   const R = useRecharts()
   const toPrepare    = requests.filter(r => r.status==='Payment Request To Be Prepared'||r.status==='Payment Request To Be Verified')
   const toSubmit     = requests.filter(r => r.status==='Payment Request To Be Submitted')
@@ -117,18 +129,18 @@ function IncentivesHome({ setSec, requests, receipts }) {
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
           {[
-            { label:'Requests to Prepare',  value:toPrepare.length,   color:C.amber,  action:() => setSec('requests') },
-            { label:'Ready to Submit',       value:toSubmit.length,    color:C.sky,    action:() => setSec('requests') },
-            { label:'Awaiting Review',       value:awaitReview.length, color:C.purple, action:() => setSec('requests') },
-            { label:'Payment Pending',       value:pmtPending.length,  color:C.emerald,action:() => setSec('requests') },
+            { label:'Requests to Prepare',  value:toPrepare.length,   color:C.amber,  section:'requests' },
+            { label:'Ready to Submit',       value:toSubmit.length,    color:C.sky,    section:'requests' },
+            { label:'Awaiting Review',       value:awaitReview.length, color:C.purple, section:'requests' },
+            { label:'Payment Pending',       value:pmtPending.length,  color:C.emerald,section:'requests' },
           ].map(s => (
-            <div key={s.label} onClick={s.action}
-              style={{ background:C.card, border:`2px solid ${C.border}`, borderTop:`3px solid ${s.color}`, borderRadius:8, padding:'14px 16px', cursor:'pointer' }}
+            <NavLink key={s.label} to={{ activeModule:'incentives', section:s.section }} onActivate={() => setSec(s.section)}
+              style={{ display:'block', background:C.card, border:`2px solid ${C.border}`, borderTop:`3px solid ${s.color}`, borderRadius:8, padding:'14px 16px', cursor:'pointer' }}
               onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)'}
               onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
               <div style={{ fontSize:11, color:C.textMuted, fontWeight:500, textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:8 }}>{s.label}</div>
               <div style={{ fontSize:26, fontWeight:700, color:s.color, fontFamily:'JetBrains Mono, monospace' }}>{s.value}</div>
-            </div>
+            </NavLink>
           ))}
         </div>
 
@@ -176,7 +188,7 @@ function IncentivesHome({ setSec, requests, receipts }) {
                 </R.BarChart>
               </R.ResponsiveContainer>
             </div>
-            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Report →</span></div>
+            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'reports' }} onActivate={() => onNavigateToModule && onNavigateToModule('reports')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Report →</NavLink></div>
           </div>
 
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
@@ -191,7 +203,7 @@ function IncentivesHome({ setSec, requests, receipts }) {
                 </R.LineChart>
               </R.ResponsiveContainer>
             </div>
-            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={()=>setSec('received')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Receipts →</span></div>
+            <div style={{ padding:'8px 14px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'incentives', section:'received' }} onActivate={()=>setSec('received')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View Receipts →</NavLink></div>
           </div>
         </div>
 
@@ -205,9 +217,13 @@ function IncentivesHome({ setSec, requests, receipts }) {
             <thead><tr style={{ borderBottom:`1px solid ${C.border}` }}>{['Record #','Request','Property','Status','Amount','Days Open','Payment Body'].map(h=><th key={h} style={{ padding:'9px 12px', textAlign:'left', color:C.textMuted, fontWeight:500, fontSize:11, textTransform:'uppercase', letterSpacing:'0.04em' }}>{h}</th>)}</tr></thead>
             <tbody>
               {[...requests].sort((a,b)=>b.daysOpen-a.daysOpen).map(r=>(
-                <TableRow key={r.id}>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textMuted, fontFamily:'JetBrains Mono, monospace', fontSize:10 }}>{r.id}</td>
-                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textPrimary, fontWeight:500, maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</td>
+                <TableRow key={r.id} onClick={() => openRequest(r)}>
+                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textMuted, fontFamily:'JetBrains Mono, monospace', fontSize:10 }}>
+                    <RecordLink table="project_payment_requests" id={r._id} onActivate={() => openRequest(r)} style={{ color:C.textMuted }}>{r.id}</RecordLink>
+                  </td>
+                  <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textPrimary, fontWeight:500, maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    <RecordLink table="project_payment_requests" id={r._id} onActivate={() => openRequest(r)} title={r.name} style={{ color:C.textPrimary, display:'block', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</RecordLink>
+                  </td>
                   <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textSecondary }}>{r.property}</td>
                   <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}` }}><Badge s={r.status}/></td>
                   <td style={{ padding:'10px 12px', borderBottom:`1px solid ${C.border}`, color:C.textPrimary, fontWeight:500, fontFamily:'JetBrains Mono, monospace', fontSize:12 }}>{fmt(r.amount)}</td>
@@ -217,7 +233,7 @@ function IncentivesHome({ setSec, requests, receipts }) {
               ))}
             </tbody>
           </table>
-          <div style={{ padding:'9px 16px', borderTop:`1px solid ${C.border}` }}><span onClick={()=>setSec('requests')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View All Project Payment Requests →</span></div>
+          <div style={{ padding:'9px 16px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'incentives', section:'requests' }} onActivate={()=>setSec('requests')} style={{ color:'#1a5a8a', fontSize:11, cursor:'pointer', fontWeight:500 }}>View All Project Payment Requests →</NavLink></div>
         </div>
       </div>
 
@@ -230,26 +246,28 @@ function IncentivesHome({ setSec, requests, receipts }) {
           </div>
           {overdue.length===0?<div style={{ padding:'16px', textAlign:'center', color:C.textMuted, fontSize:12 }}>All clear.</div>
           :overdue.map((r,i)=>(
-            <div key={r.id} style={{ padding:'10px 14px', borderBottom:i<overdue.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
+            <RecordLink key={r.id} table="project_payment_requests" id={r._id} onActivate={() => openRequest(r)}
+              style={{ display:'block', padding:'10px 14px', borderBottom:i<overdue.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
               onMouseEnter={e=>e.currentTarget.style.background='#eef5fc'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
               <div style={{ color:C.danger, fontSize:12, fontWeight:500, marginBottom:2 }}>{r.id} — {fmt(r.amount)}</div>
               <div style={{ color:C.textMuted, fontSize:11 }}>{r.property} · {r.daysOpen}d open</div>
-            </div>
+            </RecordLink>
           ))}
-          <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={()=>setSec('requests')} style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</span></div>
+          <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'incentives', section:'requests' }} onActivate={()=>setSec('requests')} style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</NavLink></div>
         </div>
 
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
           <div style={{ padding:'12px 14px', borderBottom:`1px solid ${C.border}` }}><span style={{ fontWeight:600, fontSize:13, color:C.textPrimary }}>Recent Receipts</span></div>
           {receipts.map((r,i)=>(
-            <div key={r.id} style={{ padding:'10px 14px', borderBottom:i<receipts.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
+            <RecordLink key={r.id} table="payment_receipts" id={r._id} onActivate={() => openReceipt(r)}
+              style={{ display:'block', padding:'10px 14px', borderBottom:i<receipts.length-1?`1px solid ${C.border}`:'none', cursor:'pointer' }}
               onMouseEnter={e=>e.currentTarget.style.background='#f7f9fc'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
               <div style={{ color:'#1a7a4e', fontSize:12, fontWeight:600, marginBottom:2 }}>{fmt(r.amount)}</div>
               <div style={{ color:C.textSecondary, fontSize:11, marginBottom:1 }}>{r.property}</div>
               <div style={{ color:C.textMuted, fontSize:10 }}>{r.receivedDate} · {r.paymentBody}</div>
-            </div>
+            </RecordLink>
           ))}
-          <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><span onClick={()=>setSec('received')} style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</span></div>
+          <div style={{ padding:'9px 14px', borderTop:`1px solid ${C.border}` }}><NavLink to={{ activeModule:'incentives', section:'received' }} onActivate={()=>setSec('received')} style={{ color:'#1a5a8a', fontSize:12, cursor:'pointer', fontWeight:500 }}>View All</NavLink></div>
         </div>
       </div>
     </div>
@@ -262,7 +280,7 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
   return <ListView data={data} {...rest} />
 }
 
-export default function IncentivesModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
+export default function IncentivesModule({ selectedRecord: navSelectedRecord, sectionFromUrl, onNavigateToRecord, onNavigateToModule, onCloseRecord, onSectionChange, onReplaceRecord, onOpenSetup } = {}) {
   const SECTIONS = useModuleSections('incentives', CODE_SECTIONS)
   // Navigation is URL-driven when App passes nav props (the default in the
   // shipping app). The local-state fallback path remains so this module can
@@ -333,9 +351,10 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
           <NavLink to={{ activeModule: 'incentives', section: sec }} onActivate={() => selectedRecord && closeRecord()} style={{ color: selectedRecord ? C.textMuted : C.textPrimary, fontWeight: selectedRecord ? 400 : 500, cursor: selectedRecord ? 'pointer' : 'default' }}>{SECTIONS.find(s=>s.id===sec)?.label}</NavLink>
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name}</span></>}
         </div>
-        <button style={{ display:'flex', alignItems:'center', gap:6, background:C.page, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12.5, color:C.textSecondary, cursor:'pointer', fontWeight:500 }}>
+        <NavLink to={{ activeModule: 'reports' }} onActivate={() => onNavigateToModule && onNavigateToModule('reports')}
+          style={{ display:'flex', alignItems:'center', gap:6, background:C.page, border:`1px solid ${C.border}`, borderRadius:6, padding:'6px 12px', fontSize:12.5, color:C.textSecondary, cursor:'pointer', fontWeight:500 }}>
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
-        </button>
+        </NavLink>
       </div>
       <SectionTabs sections={SECTIONS} moduleId="incentives" active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
@@ -352,7 +371,7 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
             objectTable={SEC_TABLE[sec] || SECTIONS.find(s=>s.id===sec).objectTable}
             moduleId="incentives" />
         )}
-        {sec==='home'     && <IncentivesHome setSec={setSec} requests={requests} receipts={receipts} />}
+        {sec==='home'     && <IncentivesHome setSec={setSec} onOpenRecord={setSelectedRecord} onNavigateToModule={onNavigateToModule} requests={requests} receipts={receipts} />}
         </>)}
       </div>
     </div>
