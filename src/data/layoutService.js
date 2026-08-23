@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
-import { programStateFromSeed } from '../lib/programStateScope'
+import { normalizeStateCode, programStateFromSeed, statesInRecordTypes, stateHasNoPrograms }
+  from '../lib/programStateScope'
 import { loadPicklists } from './outreachService'
 import { invalidateAll } from '../lib/useCachedFetch'
 import { getEditableFieldsForTable } from './fieldMetadataService'
@@ -310,14 +311,81 @@ export async function fetchAvailableRecordTypes(
   }
 
   const scoped = await runQuery(true)
-  // Fallback: a state was supplied but no record type is scoped to it (and no
-  // nationwide type exists). Rather than return empty — which makes the picker
-  // auto-dismiss and silently skip the record-type prompt — surface the full
-  // active set so the user is still required to choose. This keeps the
-  // "advancing must prompt for record type" guarantee even for states whose
-  // scoped types have not been configured yet.
-  const base = (state && scoped.length === 0) ? await runQuery(false) : scoped
-  return applyParentEligibility(base, objectName, parentObject, parentRecordTypeId)
+  if (!state || scoped.length > 0) {
+    return applyParentEligibility(scoped, objectName, parentObject, parentRecordTypeId)
+  }
+
+  // A state was supplied and nothing is scoped to it. What that MEANS depends on
+  // whether the object is state-scoped at all, so read the unfiltered set and
+  // ask (stateHasNoPrograms).
+  //
+  //   • The object's record types carry states and none is this one — the honest
+  //     answer is that no record type runs here. Returning the full set instead,
+  //     which is what this did until 2026-08-23, offered every Wisconsin
+  //     incentive application form on a Texas property. The marker tells the
+  //     caller to say so rather than skip the prompt (an empty list alone reads
+  //     as "this object has no record types" and advances without one).
+  //   • The object simply isn't state-scoped — no type carries a state — so the
+  //     empty result is about something else and the full set is right.
+  const all = await runQuery(false)
+  if (stateHasNoPrograms(all, state)) {
+    const none = []
+    none._noneInState = normalizeStateCode(state)
+    none._statesConfigured = statesInRecordTypes(all)
+    return none
+  }
+  return applyParentEligibility(all, objectName, parentObject, parentRecordTypeId)
+}
+
+/**
+ * The parent record type that constrains what record types a new child may
+ * carry, resolved from the create seed — or null when nothing constrains it.
+ *
+ * Which parent/child pairs are governed is configuration, not code:
+ * record_type_eligibility holds the edges, so this reads that table to learn
+ * which object is the constraining parent for this child (opportunities, for
+ * assessments and incentive applications today) and then follows the seed's FK
+ * to that parent to read its record type. A pair configured later — in the
+ * Setup pane, with no deploy — starts working here on its own.
+ *
+ * Returns { parentObject, parentRecordTypeId } for fetchAvailableRecordTypes.
+ * Any failure resolves to null, which leaves the picker unconstrained: the
+ * database enforces the same rule on save, so a missed narrowing is a worse
+ * prompt, never a bad record.
+ */
+export async function fetchConstrainingParentForCreate(childTable, seed) {
+  if (!childTable || !seed || typeof seed !== 'object') return null
+  try {
+    const { data: edges, error } = await supabase
+      .from('record_type_eligibility')
+      .select('rte_parent_object')
+      .eq('rte_child_object', childTable)
+      .eq('rte_is_active', true)
+      .eq('rte_is_deleted', false)
+    if (error) throw error
+
+    for (const parentObject of new Set((edges || []).map(e => e.rte_parent_object))) {
+      // The FK to that parent, by LEAP's own column convention: the parent
+      // object's short prefix plus _id (opportunities -> opportunity_id).
+      const prefix = TABLE_COLUMN_PREFIX[parentObject]
+      if (!prefix) continue
+      const fkColumn = `${prefix}_id`
+      const parentId = seed[fkColumn]
+      if (!parentId || !UUID_RE.test(String(parentId))) continue
+
+      const rtColumn = getRecordTypeColumn(parentObject)
+      const { data: row, error: rowErr } = await supabase
+        .from(parentObject).select(rtColumn).eq('id', parentId).maybeSingle()
+      if (rowErr) throw rowErr
+      const parentRecordTypeId = row?.[rtColumn]
+      if (parentRecordTypeId && UUID_RE.test(String(parentRecordTypeId))) {
+        return { parentObject, parentRecordTypeId }
+      }
+    }
+  } catch (err) {
+    console.warn('fetchConstrainingParentForCreate: lookup failed', err)
+  }
+  return null
 }
 
 /**

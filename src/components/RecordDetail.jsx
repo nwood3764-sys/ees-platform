@@ -94,6 +94,7 @@ import {
   getRecordTypeValue,
   getRecordTypeColumn,
   fetchAvailableRecordTypes,
+  fetchConstrainingParentForCreate,
   fetchProgramStateForCreate,
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
@@ -1543,6 +1544,9 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
   // the field list; refreshed per-field by server search as the user types.
   const [fkLookupOpts, setFkLookupOpts] = useState({})
   const [recordTypes, setRecordTypes] = useState([])
+  // The state whose programs are missing, when the record-type list came back
+  // empty because none runs where this record is (see fetchAvailableRecordTypes).
+  const [recordTypesNoneInState, setRecordTypesNoneInState] = useState(null)
   // The seed plus everything resolveInheritedParents could derive from it —
   // what actually gets written, and what the form knows never to ask for.
   const [resolvedSeed, setResolvedSeed] = useState(() => seed || {})
@@ -1686,7 +1690,14 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
           // opportunity on a North Carolina property offers North Carolina
           // programs, never Wisconsin's.
           const programState = await fetchProgramStateForCreate(effectiveSeed).catch(() => null)
-          rts = await fetchAvailableRecordTypes(table, { state: programState }).catch(() => [])
+          // ...and the same parent-program scoping: an incentive application
+          // quick-created from an opportunity offers that program's forms only.
+          const parent = await fetchConstrainingParentForCreate(table, effectiveSeed).catch(() => null)
+          rts = await fetchAvailableRecordTypes(table, {
+            state: programState,
+            parentObject: parent?.parentObject || null,
+            parentRecordTypeId: parent?.parentRecordTypeId || null,
+          }).catch(() => [])
         }
         // First option page for each required-FK lookup field. Scoped fields
         // load their full (small) scoped set; unscoped load the first page.
@@ -1711,6 +1722,7 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
         if (cancelled) return
         setFields(fieldDefs)
         setRecordTypes(rts)
+        setRecordTypesNoneInState(rts._noneInState || null)
         setFkLookupOpts(fkOpts)
         setPicklistOpts(pickOpts)
         setLoading(false)
@@ -1830,12 +1842,22 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                   {draft[f.name] || '— set on save —'}
                 </div>
               ) : f.name === rtColumn ? (
-                <SearchableLookup
-                  value={draft[f.name] || ''}
-                  options={recordTypes.map(rt => ({ value: rt.id, label: rt.label || rt.picklist_label }))}
-                  onChange={(val) => setVal(f.name, val || null)}
-                  placeholder="— Select —"
-                />
+                <>
+                  <SearchableLookup
+                    value={draft[f.name] || ''}
+                    options={recordTypes.map(rt => ({ value: rt.id, label: rt.label || rt.picklist_label }))}
+                    onChange={(val) => setVal(f.name, val || null)}
+                    placeholder="— Select —"
+                  />
+                  {recordTypesNoneInState && (
+                    <div style={{ marginTop: 6, fontSize: 11.5, color: C.textSecondary, lineHeight: 1.5 }}>
+                      No record type runs in{' '}
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{recordTypesNoneInState}</span>
+                      {' '}— every one belongs to a program in another state. Set up
+                      the {recordTypesNoneInState} record types in Setup first.
+                    </div>
+                  )}
+                </>
               ) : f.type === 'lookup' ? (
                 <SearchableLookup
                   value={draft[f.name] || ''}
@@ -5253,17 +5275,6 @@ function RelatedListWidget({
           if (!propId && opp.property_id) propId = opp.property_id
         }
 
-        // Which assessment record types this record may carry is decided by the
-        // opportunity's record type — the program. Passing it through narrows
-        // the record-type picker to that program's types, so a Wisconsin
-        // assessment type is never offered on a North Carolina opportunity.
-        // Transient hints, stripped before the insert like every other __ key;
-        // the database enforces the same rule independently.
-        if (opp?.opportunity_record_type) {
-          prefillObj.__parentObject       = 'opportunities'
-          prefillObj.__parentRecordTypeId = opp.opportunity_record_type
-        }
-
         // Seed the relationship columns. Only the real FKs: migration
         // 20260816174500 repointed every assessment layout off the legacy uuid
         // columns (assessment_opportunity / assessment_building_del) and onto
@@ -5407,6 +5418,24 @@ function RelatedListWidget({
       if (programState) {
         prefillObj.__programState = programState
         if (childTable === 'opportunities') prefillObj.opportunity_state = programState
+      }
+    }
+
+    // And which of that state's record types this record may carry can be
+    // narrowed further by its PARENT's record type. An opportunity record type
+    // IS the program, so it decides which assessment record types and which
+    // incentive application forms belong to it — a WI-IRA-SF-HEAR application
+    // has no business on a WI-IRA-MF-HOMES opportunity (Nicholas, 2026-08-23:
+    // "not any incentive record type should be able to be created for any
+    // opportunity record type"). Which pairs are governed is read from
+    // record_type_eligibility, so configuring a new one in Setup needs no code.
+    // Transient __ keys, stripped before the insert; the database enforces the
+    // same rule independently.
+    {
+      const constrainingParent = await fetchConstrainingParentForCreate(childTable, prefillObj)
+      if (constrainingParent) {
+        prefillObj.__parentObject       = constrainingParent.parentObject
+        prefillObj.__parentRecordTypeId = constrainingParent.parentRecordTypeId
       }
     }
 
@@ -6948,7 +6977,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     })
       .then(rts => {
         if (cancelled) return
-        if (rts.length === 0) {
+        if (rts._noneInState) {
+          // No record type runs in this record's state. Leave the decision
+          // unresolved so the picker renders and says so — skipping it here
+          // would create the record with whatever record type the database
+          // falls back to, which is the failure this whole rule exists to stop.
+        } else if (rts.length === 0) {
           setPickedRecordType(false)
         } else if (rts.length === 1) {
           setPickedRecordType(rts[0])

@@ -24,6 +24,14 @@ export default function RecordTypePicker({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [recordTypes, setRecordTypes] = useState([])
+  // Set when this object's record types are state-scoped and none runs in the
+  // record's state — e.g. an incentive application on a Texas property, where
+  // EES runs no program. The picker says so instead of offering another
+  // state's forms or waving the create through with no record type.
+  const [noneInState, setNoneInState] = useState(null)
+  // The states this object DOES have record types for — carried separately
+  // because the returned list is empty in that case, so stateOptions is too.
+  const [statesConfigured, setStatesConfigured] = useState([])
   const [chosenId, setChosenId] = useState(null)
   // The state the user picked here, when the record itself could not tell us
   // one. Never overrides a state the record already has.
@@ -46,10 +54,17 @@ export default function RecordTypePicker({
     setLoading(true)
     setError(null)
     setChosenState('')
+    setNoneInState(null)
+    setStatesConfigured([])
     fetchAvailableRecordTypes(tableName, { state, parentObject, parentRecordTypeId })
       .then(rts => {
         if (cancelled) return
         setRecordTypes(rts)
+        if (rts._noneInState) {
+          setNoneInState(rts._noneInState)
+          setStatesConfigured(rts._statesConfigured || [])
+          return
+        }
         // Auto-pick if there's only one — keeps the flow seamless when an
         // object has a single record type configured. Never while a state is
         // still owed: "only one nationwide type" is not the same as "only one
@@ -85,7 +100,7 @@ export default function RecordTypePicker({
 
   // Hide entirely when the effect already auto-picked (one or zero RTs). A
   // pending state choice is never an auto-pick, however few types are showing.
-  if (!loading && !needsStateChoice && recordTypes.length <= 1 && !error) return null
+  if (!loading && !needsStateChoice && !noneInState && recordTypes.length <= 1 && !error) return null
 
   return (
     <div
@@ -116,13 +131,15 @@ export default function RecordTypePicker({
             New {objectLabel || tableName}
           </div>
           <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4 }}>
-            {needsStateChoice
-              ? 'Choose the state this record is in, then its record type.'
-              : 'Choose a record type to continue.'}
+            {noneInState
+              ? `Nothing is configured for ${noneInState}.`
+              : needsStateChoice
+                ? 'Choose the state this record is in, then its record type.'
+                : 'Choose a record type to continue.'}
           </div>
           {/* The record already knows where it is — say so, so the shorter list
               reads as deliberate rather than as missing programs. */}
-          {!needsStateChoice && state && stateOptions.length > 0 && (
+          {!needsStateChoice && !noneInState && state && stateOptions.length > 0 && (
             <div style={{
               marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6,
               padding: '4px 10px', borderRadius: 999,
@@ -176,6 +193,22 @@ export default function RecordTypePicker({
               borderRadius: 6, color: '#1e466b', fontSize: 12.5,
             }}>
               {error}
+            </div>
+          )}
+          {!loading && !error && noneInState && (
+            <div style={{
+              padding: 14, background: '#f7f9fc',
+              border: `1px solid ${C.border}`, borderRadius: 6,
+              color: C.textSecondary, fontSize: 12.5, lineHeight: 1.6,
+            }}>
+              No {(objectLabel || tableName).toLowerCase()} record type runs in{' '}
+              <strong style={{ fontFamily: 'JetBrains Mono, monospace' }}>{noneInState}</strong>.
+              Every one of them belongs to a program in another state, and a record
+              here cannot carry one.
+              {statesConfigured.length > 0 && (
+                <> Configured today: <strong>{statesConfigured.join(', ')}</strong>.</>
+              )}
+              {' '}Set up the {noneInState} record types in Setup → Object Manager first.
             </div>
           )}
           {!loading && !error && needsStateChoice && !chosenState && (
@@ -247,6 +280,7 @@ export default function RecordTypePicker({
           >
             Cancel
           </button>
+          {!noneInState && (
           <button
             onClick={() => {
               const rt = visibleRecordTypes.find(r => r.id === chosenId)
@@ -265,6 +299,7 @@ export default function RecordTypePicker({
             Next
             <Icon path="M5 12h14 M12 5l7 7-7 7" size={13} color="currentColor" />
           </button>
+          )}
         </div>
       </div>
     </div>

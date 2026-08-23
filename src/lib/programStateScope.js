@@ -63,3 +63,30 @@ export function normalizeStateCode(value) {
   const trimmed = value.trim().toUpperCase()
   return trimmed || null
 }
+
+/**
+ * True when this object's record types are state-scoped and NONE of them run in
+ * the given state — so the honest answer is "no record type is available here",
+ * never another state's programs.
+ *
+ * This is the rule behind the one remaining way a wrong-state program could
+ * still be offered. fetchAvailableRecordTypes used to fall back to the FULL
+ * active set whenever the state filter came back empty, so a Texas property —
+ * and 4,037 of them are live — was shown every Wisconsin incentive application
+ * form. The fallback existed to stop the picker auto-dismissing and silently
+ * skipping the record-type prompt, which is a real problem; widening across
+ * states is the wrong cure for it. The picker now says so instead.
+ *
+ * An object with any nationwide type (picklist_state null) can never reach this:
+ * a nationwide type passes every state filter, so the scoped list is non-empty.
+ */
+export function stateHasNoPrograms(recordTypes, stateCode) {
+  const wanted = normalizeStateCode(stateCode)
+  if (!wanted) return false
+  const list = recordTypes || []
+  if (list.length === 0) return false
+  // Not a state-scoped object at all — no state carried by any type — so an
+  // empty scoped list means something else, and this rule has no opinion.
+  if (statesInRecordTypes(list).length === 0) return false
+  return scopedToState(list, wanted).length === 0
+}
