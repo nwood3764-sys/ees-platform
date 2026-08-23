@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
 import { compressPhotoForUpload } from '../lib/photoCompression'
 import { WORK_ORDER_STEP_KEY, UNASSIGNED_STEP_KEY } from '../lib/photoTags'
+import { areSignedUrlsUsable } from '../lib/signedUrlExpiry'
 
 // ---------------------------------------------------------------------------
 // storageService.js — uploads, downloads, deletes, and signed URLs for the
@@ -770,6 +771,71 @@ export async function hydrateDocumentUrls(documents) {
       : [null, null]
     return { ...d, _url: url, _previewUrl: previewUrl }
   }))
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Point-of-use re-signing
+//
+// hydrate*Urls above mints URLs when a gallery LOADS. The click that uses one
+// can come much later — a record page stays open for hours — and a signed URL
+// older than its TTL resolves to a Storage `InvalidJWT` error instead of the
+// file. An <iframe> renders that error JSON in place of the PDF; an <img>
+// shows a broken image.
+//
+// So every action that actually opens or downloads a file re-signs first.
+// These helpers are cheap no-ops when the URLs on the row are still good —
+// they return the SAME object so React re-renders nothing — and issue fresh
+// signatures only when `isSignedUrlUsable` says the existing ones are spent.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Return `doc` with `_url` / `_previewUrl` guaranteed usable right now.
+ * Returns the input object untouched when the existing URLs are still valid,
+ * or when the row carries no file to sign.
+ */
+export async function freshDocumentUrls(doc) {
+  if (!doc) return doc
+  if (!doc.storage_bucket || !doc.storage_path) return doc
+  if (areSignedUrlsUsable([doc._url, doc._previewUrl])) return doc
+  const [hydrated] = await hydrateDocumentUrls([doc])
+  return hydrated || doc
+}
+
+/**
+ * Return `photo` with `_thumbUrl` / `_originalUrl` guaranteed usable right
+ * now, on the same terms as freshDocumentUrls.
+ */
+export async function freshPhotoUrls(photo) {
+  if (!photo) return photo
+  if (!photo.storage_bucket) return photo
+  if (areSignedUrlsUsable([photo._thumbUrl, photo._originalUrl])) return photo
+  const [hydrated] = await hydratePhotoUrls([photo])
+  return hydrated || photo
+}
+
+/**
+ * Batch form for a whole gallery or a multi-select download. Re-signs in one
+ * round trip per bucket when ANY row has gone stale, and returns the input
+ * array unchanged when none has — a bulk download of 60 photos must not fire
+ * 60 separate signing calls.
+ */
+export async function freshPhotoUrlsBatch(photos) {
+  if (!photos || photos.length === 0) return photos || []
+  const signable = photos.filter(p => p?.storage_bucket)
+  if (signable.length === 0) return photos
+  const allFresh = signable.every(p => areSignedUrlsUsable([p._thumbUrl, p._originalUrl]))
+  if (allFresh) return photos
+  return hydratePhotoUrls(photos)
+}
+
+/** Batch form of freshDocumentUrls, on the same all-or-nothing terms. */
+export async function freshDocumentUrlsBatch(documents) {
+  if (!documents || documents.length === 0) return documents || []
+  const signable = documents.filter(d => d?.storage_bucket && d?.storage_path)
+  if (signable.length === 0) return documents
+  const allFresh = signable.every(d => areSignedUrlsUsable([d._url, d._previewUrl]))
+  if (allFresh) return documents
+  return hydrateDocumentUrls(documents)
 }
 
 // ─── Document Template Assets (docx) ───────────────────────────────────
