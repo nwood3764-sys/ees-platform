@@ -3,6 +3,35 @@
 // completes. Idempotent: safe to re-invoke (e.g. after work_step_id is set
 // to re-render the watermark with the new photo tag).
 //
+// v25 — HEIC/HEIF support:
+//   - HEIC originals are decodable, via libheif (WASM), decoded straight to the
+//     final watermark size because a full-res intermediate does not fit in an
+//     edge worker. iPhones shoot HEIC by
+//     default ("High Efficiency") and imagescript cannot read it, so every such
+//     upload failed with "Unsupported image type", produced NO watermarked
+//     variant, and left the gallery pointing an <img> at the .heic original —
+//     which no desktop browser can paint. The file downloaded and opened fine,
+//     which is exactly why it read as "broken images".
+//   - EXIF comes out of the HEIF container directly (`extractHeifExifTiff`).
+//     exifr ships a HEIC parser but its sniff rejects these files outright
+//     ("Unknown file format", verified in prod), so GPS and capture time were
+//     being lost on every HEIC. Extraction now also retries across exifr's
+//     parse modes and reports WHY it came back empty instead of silently
+//     collapsing to {}.
+//   - HEIF is NOT re-rotated from the EXIF orientation tag: libheif has already
+//     applied the container's `irot`, and Apple writes the rotation in both
+//     places, so honouring EXIF too would lay every portrait photo on its side.
+//   - Watermark path fix: the folder regex looked for "/original/" but every
+//     path this platform writes is "/originals/", so the replace never matched
+//     and the variant landed at ".../originals/<uuid>.jpg/<uuid>.jpg" — the
+//     filename doubled as a folder. New renders write ".../watermarked/<uuid>.jpg".
+//     Rows already carrying the doubled key are untouched and still resolve.
+//   - PIXELS may come from photos.storage_path_rendition: a JPEG decoded on the
+//     device at upload time. The libheif path above works, but only for light
+//     captures — a 12 MP frame exceeds this worker's CPU budget whenever the
+//     scene is detailed, so it succeeds or fails by subject matter. The device
+//     has no such ceiling. EXIF is still read from the ORIGINAL either way.
+//
 // v9:
 //   - Orientation fix: exifr returns EXIF Orientation as a human-readable
 //     STRING by default (e.g. "Rotate 90 CW"), not the numeric code. The old
@@ -37,10 +66,382 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { Image } from "https://deno.land/x/imagescript@1.2.17/mod.ts"
 import exifr from "npm:exifr@7.1.3"
 import piexif from "npm:piexifjs@1.0.6"
+import libheifBundle from "npm:libheif-js@1.18.2/wasm-bundle.js"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!
+
+// ── HEIC / HEIF decoding ────────────────────────────────────────────────────
+// imagescript reads JPEG/PNG/GIF only. Apple's default capture format is HEIC,
+// so a phone-library or desktop upload of untouched iPhone photos arrives in a
+// container imagescript rejects outright. libheif-js is the reference WASM
+// build of libheif; the "wasm-bundle" entry point embeds the binary, so there
+// is no runtime fetch of a second asset from inside the worker.
+//
+// Imported statically rather than lazily: the module is bundled into the
+// function either way, the emscripten factory costs ~50 ms once per cold
+// start, and a static specifier is the only form the deploy bundler is
+// guaranteed to resolve. The "/wasm-bundle.js" subpath needs its extension —
+// libheif-js publishes no exports map, so bare "/wasm-bundle" does not resolve.
+const heifModule: any = (libheifBundle as any)?.default ?? libheifBundle
+
+// ISO base media file format sniff: bytes 4..8 are "ftyp", 8..12 the major
+// brand. Covers HEIC (Apple), HEIF and AVIF. Sniffing the BYTES rather than
+// trusting the extension or mime_type matters here — the browser reports an
+// empty File.type for .heic on several desktop platforms, so mime_type is
+// NULL on every row this defect produced.
+function isHeifBytes(bytes: Uint8Array): boolean {
+  if (bytes.length < 16) return false
+  const tag = (a: number, b: number) => String.fromCharCode(...bytes.subarray(a, b))
+  if (tag(4, 8) !== "ftyp") return false
+  return ["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs",
+          "mif1", "msf1", "avif", "avis"].includes(tag(8, 12))
+}
+
+// One decoder for the worker's lifetime. libheif-js frees a decode context only
+// at the START of the next decode() call, so a worker that decodes and then goes
+// idle would hold the whole parsed file in WASM memory; decodeHeifScaled frees
+// it explicitly instead, and nulling `decoder` keeps the wrapper's own guard
+// from double-freeing on the next call.
+const heifDecoder: any = new heifModule.HeifDecoder()
+
+// Decode a HEIC/HEIF straight into an imagescript Image AT THE FINAL SIZE,
+// reading the camera's native YCbCr planes rather than asking libheif for RGB.
+//
+// Both halves of that are forced by the worker's 256 MB memory ceiling, and
+// both were established by watching real uploads fail:
+//   - Decode-then-resize (what the JPEG path does) needs a full-res RGBA bitmap
+//     on the JS side. Removing it fixed the 1 MP-class photos.
+//   - Asking libheif for interleaved RGBA still costs 4 bytes/pixel INSIDE the
+//     WASM heap — 98 MB for a 24 MP iPhone frame, on top of the YCbCr planes it
+//     decodes into first. Every photo over ~2 MB on disk still died with
+//     "Memory limit exceeded". The native 4:2:0 planes are 1.5 bytes/pixel, so
+//     the same frame costs ~37 MB and nothing is converted twice.
+//
+// libheif hands the planes back as typed-array VIEWS onto its own heap, so the
+// downscale reads straight out of WASM memory and the only JS allocation is the
+// finished, already-shrunk bitmap.
+//
+// Averaging happens in YCbCr and converts once per destination pixel. The
+// conversion is affine, so that is exactly equal to converting every source
+// pixel and averaging the RGB — at a quarter of the arithmetic. A box average
+// rather than point sampling because a 4032 -> 2400 reduction aliases visibly
+// and these are evidence photos.
+
+// YCbCr -> RGB coefficients [Kr, Kgb, Kgr, Kb] by nclx matrix_coefficients.
+const YCBCR_MATRICES: Record<number, [number, number, number, number]> = {
+  1: [1.5748, 0.1873, 0.4681, 1.8556],    // BT.709
+  5: [1.402, 0.344136, 0.714136, 1.772],  // BT.470BG (== BT.601)
+  6: [1.402, 0.344136, 0.714136, 1.772],  // SMPTE 170M (== BT.601)
+  9: [1.4746, 0.16455, 0.57135, 1.8814],  // BT.2020 non-constant luminance
+}
+
+// The colour matrix and range are declared in the container's `colr` box
+// (meta -> iprp -> ipco -> colr, colour_type "nclx"), so read them rather than
+// assume: an iPhone writes BT.709 on some captures and BT.601 on others, and
+// picking the wrong one shifts the colour of an evidence photo. When the box is
+// absent, matrix 6 / full range is libheif's own default, and using it here was
+// verified to reproduce libheif's RGB output to a mean error of 0.6/255.
+function readHeifNclx(bytes: Uint8Array): { matrix: number; fullRange: boolean } | null {
+  try {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    const str = (o: number, n: number) => String.fromCharCode(...bytes.subarray(o, o + n))
+    const head = (off: number) => {
+      if (off + 8 > bytes.length) return null
+      let size = dv.getUint32(off)
+      const type = str(off + 4, 4)
+      let h = 8
+      if (size === 1) { size = Number(dv.getBigUint64(off + 8)); h = 16 }
+      else if (size === 0) size = bytes.length - off
+      if (size < h) return null
+      return { type, start: off + h, end: off + size }
+    }
+    const find = (from: number, to: number, type: string) => {
+      let o = from
+      while (o < to) {
+        const x = head(o)
+        if (!x) return null
+        if (x.type === type) return x
+        o = x.end
+      }
+      return null
+    }
+    let meta = null
+    for (let o = 0; o < bytes.length;) {
+      const x = head(o)
+      if (!x) break
+      if (x.type === "meta") { meta = x; break }
+      o = x.end
+    }
+    if (!meta) return null
+    const iprp = find(meta.start + 4, meta.end, "iprp")
+    if (!iprp) return null
+    const ipco = find(iprp.start, iprp.end, "ipco")
+    if (!ipco) return null
+    const colr = find(ipco.start, ipco.end, "colr")
+    if (!colr || str(colr.start, 4) !== "nclx") return null
+    const p = colr.start + 4 // colour_primaries, transfer, matrix, then flags
+    return { matrix: dv.getUint16(p + 4), fullRange: (bytes[p + 6] & 0x80) !== 0 }
+  } catch (_) {
+    return null
+  }
+}
+
+async function decodeHeifScaled(bytes: Uint8Array, maxEdge: number): Promise<Image> {
+  const frames = heifDecoder.decode(bytes)
+  if (!frames || frames.length === 0) throw new Error("HEIC contains no decodable image")
+  const frame = frames[0]
+  let decoded: any = null
+  try {
+    const raw = heifModule.heif_js_decode_image2(
+      frame.handle,
+      heifModule.heif_colorspace.heif_colorspace_YCbCr,
+      heifModule.heif_chroma.heif_chroma_420,
+    )
+    if (!raw || raw.code) throw new Error("HEIC pixel decode failed")
+    decoded = raw
+
+    let chY: any = null, chCb: any = null, chCr: any = null
+    for (const c of raw.channels || []) {
+      if (c.id == heifModule.heif_channel.heif_channel_Y) chY = c
+      else if (c.id == heifModule.heif_channel.heif_channel_Cb) chCb = c
+      else if (c.id == heifModule.heif_channel.heif_channel_Cr) chCr = c
+    }
+    if (!chY || !chY.data) throw new Error("HEIC decode returned no luma channel")
+
+    const sw = chY.width, sh = chY.height
+    if (!sw || !sh) throw new Error("HEIC image has no dimensions")
+    const yData = chY.data as Uint8Array, yStride = chY.stride
+    // A monochrome HEIC carries no chroma planes; 128/128 is neutral grey.
+    const cbData = (chCb?.data ?? null) as Uint8Array | null
+    const crData = (chCr?.data ?? null) as Uint8Array | null
+    const cStride = chCb?.stride ?? 0
+    const cW = chCb?.width ?? 0, cH = chCb?.height ?? 0
+
+    const nclx = readHeifNclx(bytes)
+    const [kr, kgb, kgr, kb] = YCBCR_MATRICES[nclx?.matrix ?? 6] || YCBCR_MATRICES[6]
+    const fullRange = nclx ? nclx.fullRange : true
+    const yScale = fullRange ? 1 : 255 / 219
+    const yOffset = fullRange ? 0 : 16
+    const cScale = fullRange ? 1 : 255 / 224
+
+    const scale = Math.min(1, maxEdge / Math.max(sw, sh))
+    const dw = Math.max(1, Math.round(sw * scale))
+    const dh = Math.max(1, Math.round(sh * scale))
+    const img = new Image(dw, dh)
+    const dst = img.bitmap
+    const clamp = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0)
+
+    for (let y = 0; y < dh; y++) {
+      const y0 = Math.floor(y * sh / dh)
+      const y1 = Math.max(y0 + 1, Math.floor((y + 1) * sh / dh))
+      for (let x = 0; x < dw; x++) {
+        const x0 = Math.floor(x * sw / dw)
+        const x1 = Math.max(x0 + 1, Math.floor((x + 1) * sw / dw))
+        let sumY = 0, sumCb = 0, sumCr = 0, n = 0
+        for (let sy = y0; sy < y1; sy++) {
+          const yRow = sy * yStride
+          const cRow = cbData ? Math.min(cH - 1, sy >> 1) * cStride : 0
+          for (let sx = x0; sx < x1; sx++) {
+            sumY += yData[yRow + sx]
+            if (cbData && crData) {
+              const ci = cRow + Math.min(cW - 1, sx >> 1)
+              sumCb += cbData[ci]
+              sumCr += crData[ci]
+            } else {
+              sumCb += 128; sumCr += 128
+            }
+            n++
+          }
+        }
+        const yv = (sumY / n - yOffset) * yScale
+        const cbv = (sumCb / n - 128) * cScale
+        const crv = (sumCr / n - 128) * cScale
+        const di = (y * dw + x) * 4
+        dst[di]     = clamp(yv + kr * crv)
+        dst[di + 1] = clamp(yv - kgb * cbv - kgr * crv)
+        dst[di + 2] = clamp(yv + kb * cbv)
+        dst[di + 3] = 255
+      }
+    }
+    return img
+  } finally {
+    // Release in reverse order of acquisition, and BEFORE the caller starts
+    // encoding, so the JPEG encoder is not competing with live decode planes.
+    try { if (decoded?.image) heifModule.heif_image_release(decoded.image) } catch (_) { /* noop */ }
+    // A HEIC routinely carries more than one top-level image (primary plus a
+    // thumbnail or depth map) and each holds its own handle.
+    for (const f of frames) { try { f.free?.() } catch (_) { /* noop */ } }
+    try {
+      if (heifDecoder.decoder) {
+        heifModule.heif_context_free(heifDecoder.decoder)
+        heifDecoder.decoder = null
+      }
+    } catch (_) { /* noop */ }
+  }
+}
+
+// Pull the EXIF payload out of a HEIF container.
+//
+// exifr owns a HEIC parser but it never fires on the files this platform
+// actually receives — it answers "Unknown file format" (verified in prod on a
+// real iPhone upload), because its sniff insists the ftyp COMPATIBLE-brand
+// list contains "heic". So walk the ISO base media boxes directly:
+//
+//   meta -> iinf : find the item whose type is "Exif"        -> item_ID
+//   meta -> iloc : find that item_ID's extent                -> offset+length
+//   payload      : uint32 "bytes before the TIFF header", then the TIFF block
+//
+// The bare TIFF block IS something exifr parses happily, so the tag decoding,
+// GPS conversion and orientation labelling all stay exifr's job — this only
+// finds the bytes. Verified against synthetic containers covering iloc v0/v1/v2,
+// infe v2/v3, present/absent base offsets and 4- and 8-byte offset/length
+// fields, then end-to-end against the real uploads.
+function extractHeifExifTiff(bytes: Uint8Array): Uint8Array | null {
+  try {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    const str = (o: number, n: number) => String.fromCharCode(...bytes.subarray(o, o + n))
+    const uint = (o: number, n: number) => { let v = 0; for (let i = 0; i < n; i++) v = v * 256 + bytes[o + i]; return v }
+
+    function boxHead(off: number) {
+      if (off + 8 > bytes.length) return null
+      let size = dv.getUint32(off)
+      const type = str(off + 4, 4)
+      let head = 8
+      if (size === 1) { size = Number(dv.getBigUint64(off + 8)); head = 16 }
+      else if (size === 0) size = bytes.length - off
+      if (size < head) return null
+      return { off, size, type, start: off + head, end: off + size }
+    }
+    function findBox(from: number, to: number, type: string) {
+      let o = from
+      while (o < to) {
+        const b = boxHead(o)
+        if (!b) return null
+        if (b.type === type) return b
+        o = b.end
+      }
+      return null
+    }
+
+    let meta = null
+    for (let o = 0; o < bytes.length;) {
+      const b = boxHead(o)
+      if (!b) break
+      if (b.type === "meta") { meta = b; break }
+      o = b.end
+    }
+    if (!meta) return null
+    const metaStart = meta.start + 4 // meta is a FullBox
+
+    const iinf = findBox(metaStart, meta.end, "iinf")
+    const iloc = findBox(metaStart, meta.end, "iloc")
+    if (!iinf || !iloc) return null
+
+    // iinf: the item declaring item_type "Exif".
+    let exifItemId: number | null = null
+    {
+      const version = bytes[iinf.start]
+      let o = iinf.start + 4
+      const count = version === 0 ? dv.getUint16(o) : dv.getUint32(o)
+      o += version === 0 ? 2 : 4
+      for (let i = 0; i < count; i++) {
+        const infe = boxHead(o)
+        if (!infe) break
+        const v = bytes[infe.start]
+        if (v >= 2) {
+          const idSize = v === 2 ? 2 : 4
+          const p = infe.start + 4
+          if (str(p + idSize + 2, 4) === "Exif") { exifItemId = uint(p, idSize); break }
+        }
+        o = infe.end
+      }
+    }
+    if (exifItemId === null) return null
+
+    // iloc: that item's first extent. Field widths are packed into two nibble
+    // pairs, and the item_ID / construction-method fields change width by box
+    // version — hence the arithmetic rather than fixed offsets.
+    let offset = 0, length = 0
+    {
+      const version = bytes[iloc.start]
+      let o = iloc.start + 4
+      const offsetSize = bytes[o] >> 4, lengthSize = bytes[o] & 15; o++
+      const baseOffsetSize = bytes[o] >> 4
+      const indexSize = (version === 1 || version === 2) ? (bytes[o] & 15) : 0; o++
+      const idSize = version === 2 ? 4 : 2
+      const ctorSize = (version === 1 || version === 2) ? 2 : 0
+      const count = version === 2 ? dv.getUint32(o) : dv.getUint16(o)
+      o += version === 2 ? 4 : 2
+      for (let i = 0; i < count; i++) {
+        const id = uint(o, idSize)
+        o += idSize + ctorSize + 2 // + data_reference_index
+        const baseOffset = baseOffsetSize ? uint(o, baseOffsetSize) : 0
+        o += baseOffsetSize
+        const extentCount = dv.getUint16(o); o += 2
+        if (id === exifItemId && extentCount > 0) {
+          offset = baseOffset + uint(o + indexSize, offsetSize)
+          length = uint(o + indexSize + offsetSize, lengthSize)
+          break
+        }
+        o += extentCount * (indexSize + offsetSize + lengthSize)
+      }
+    }
+    if (!length || offset + 4 > bytes.length) return null
+
+    const tiffStart = offset + 4 + dv.getUint32(offset)
+    const tiffEnd = Math.min(bytes.length, offset + length)
+    if (tiffStart >= tiffEnd) return null
+    return bytes.subarray(tiffStart, tiffEnd)
+  } catch (_) {
+    return null
+  }
+}
+
+// ── EXIF extraction ─────────────────────────────────────────────────────────
+// The old single `exifr.parse(..., {gps, ifd0, exif})` call was wrapped in a
+// bare catch that turned ANY failure into {}, so a format exifr needed coaxing
+// on lost its GPS and capture time with no trace of why. Try the segment-scoped
+// parse, then exifr's parse-everything mode, then GPS alone; keep the first
+// result that actually carries data and report the last error otherwise.
+async function extractExif(bytes: Uint8Array): Promise<{ exif: Record<string, any>; error: string | null }> {
+  const attempts: Array<() => Promise<any>> = [
+    // HEIF first: exifr's own sniff rejects these files, so hand it the TIFF
+    // block lifted straight out of the container.
+    async () => {
+      const tiff = isHeifBytes(bytes) ? extractHeifExifTiff(bytes) : null
+      return tiff ? await exifr.parse(tiff, { gps: true, ifd0: true, exif: true }) : null
+    },
+    () => exifr.parse(bytes, { gps: true, ifd0: true, exif: true }),
+    () => exifr.parse(bytes, true),
+    () => exifr.gps(bytes).then((g: any) => (g && g.latitude != null ? { latitude: g.latitude, longitude: g.longitude } : null)),
+  ]
+  let lastError: string | null = null
+  for (const attempt of attempts) {
+    try {
+      const out = await attempt()
+      if (out && Object.keys(out).length > 0) return { exif: sanitizeExif(out), error: null }
+    } catch (e) {
+      lastError = (e as Error).message || String(e)
+    }
+  }
+  return { exif: {}, error: lastError }
+}
+
+// exif_raw is a jsonb column, and the parse-everything mode can return raw
+// MakerNote / UserComment byte arrays that are megabytes wide and of no use to
+// anyone. Drop long binary blobs; keep every scalar and short value verbatim.
+function sanitizeExif(raw: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (v == null) continue
+    if (ArrayBuffer.isView(v) || (Array.isArray(v) && v.length > 64)) continue
+    if (typeof v === "string" && v.length > 2000) continue
+    out[k] = v
+  }
+  return out
+}
 
 const FONT_BUCKET = "templates"
 const FONT_PATH = "fonts/watermark-font.ttf"
@@ -183,6 +584,61 @@ function embedOriginalExif(originalBytes: Uint8Array, watermarkedJpeg: Uint8Arra
   }
 }
 
+// A HEIC original carries its EXIF in an ISOBMFF box, not a JPEG APP1 segment,
+// so `embedOriginalExif` (which reads the JPEG header) finds nothing to copy
+// and the watermarked evidence file would ship with no capture time and no
+// GPS — the two things the incentive programs actually check. Rebuild a
+// minimal EXIF block from the values exifr already read OFF THAT SAME FILE.
+// Nothing is invented: if the original had no date and no GPS, this returns
+// null and the variant stays metadata-free rather than carrying a guess.
+function piexifDateString(d: Date): string {
+  const p2 = (n: number) => String(n).padStart(2, "0")
+  return `${d.getUTCFullYear()}:${p2(d.getUTCMonth() + 1)}:${p2(d.getUTCDate())} ` +
+         `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`
+}
+function buildExifFromParsed(
+  vals: { takenAt: Date | null; lat: number | null; lng: number | null; alt: number | null; make: string | null; model: string | null },
+  outW: number,
+  outH: number,
+): string | null {
+  try {
+    const hasDate = vals.takenAt instanceof Date && !isNaN(vals.takenAt.getTime())
+    const hasGps = vals.lat !== null && vals.lng !== null
+    if (!hasDate && !hasGps) return null
+
+    const zeroth: Record<number, unknown> = {}
+    const exifIfd: Record<number, unknown> = {}
+    const gpsIfd: Record<number, unknown> = {}
+
+    zeroth[piexif.ImageIFD.Orientation] = 1
+    if (vals.make) zeroth[piexif.ImageIFD.Make] = vals.make
+    if (vals.model) zeroth[piexif.ImageIFD.Model] = vals.model
+    exifIfd[piexif.ExifIFD.PixelXDimension] = outW
+    exifIfd[piexif.ExifIFD.PixelYDimension] = outH
+
+    if (hasDate) {
+      const ds = piexifDateString(vals.takenAt as Date)
+      zeroth[piexif.ImageIFD.DateTime] = ds
+      exifIfd[piexif.ExifIFD.DateTimeOriginal] = ds
+      exifIfd[piexif.ExifIFD.DateTimeDigitized] = ds
+    }
+    if (hasGps) {
+      const lat = vals.lat as number, lng = vals.lng as number
+      gpsIfd[piexif.GPSIFD.GPSLatitudeRef] = lat >= 0 ? "N" : "S"
+      gpsIfd[piexif.GPSIFD.GPSLatitude] = piexif.GPSHelper.degToDmsRational(Math.abs(lat))
+      gpsIfd[piexif.GPSIFD.GPSLongitudeRef] = lng >= 0 ? "E" : "W"
+      gpsIfd[piexif.GPSIFD.GPSLongitude] = piexif.GPSHelper.degToDmsRational(Math.abs(lng))
+      if (vals.alt !== null) {
+        gpsIfd[piexif.GPSIFD.GPSAltitudeRef] = vals.alt >= 0 ? 0 : 1
+        gpsIfd[piexif.GPSIFD.GPSAltitude] = [Math.round(Math.abs(vals.alt) * 100), 100]
+      }
+    }
+    return piexif.dump({ "0th": zeroth, "Exif": exifIfd, "GPS": gpsIfd, "1st": {}, thumbnail: null })
+  } catch (_) {
+    return null
+  }
+}
+
 // Leaf of a hierarchical LEAP name: "1837 Alden Rd - Janesville - 1837 - 11"
 // -> "11". Building/unit names carry the full path; we want the trailing token.
 function leafName(name: string | null | undefined): string | null {
@@ -218,18 +674,36 @@ Deno.serve(async (req: Request) => {
       if (!authRow?.secret || presentedSecret !== authRow.secret) {
         return json({ error: "invalid internal secret" }, 401)
       }
-      const ids = Array.isArray(body.photo_ids) ? body.photo_ids : (body.photo_id ? [body.photo_id] : [])
-      if (ids.length === 0) return json({ error: "photo_ids required" }, 400)
+      const requested = Array.isArray(body.photo_ids) ? body.photo_ids : (body.photo_id ? [body.photo_id] : [])
+      if (requested.length === 0) return json({ error: "photo_ids required" }, 400)
+      // Batch size is bounded by worker MEMORY, not by time. Even decoded at the
+      // final size a HEIC costs ~50 MB of WASM heap that is never handed back,
+      // so several in one request risk the runtime's memory ceiling.
+      //
+      // A dead worker is worse than a slow one: processPhoto has already flipped
+      // its row to "processing", and NOTHING retries a row in that state, so the
+      // photo is stranded silently — which is the failure mode that hid this
+      // whole defect in the first place. So: at most four photos, and a HEIC
+      // ends the batch there and then. The caller loops on `not_attempted`.
+      const MAX_PER_INVOCATION = 4
+      const queue = requested.slice(0, MAX_PER_INVOCATION)
+      const notAttempted = requested.slice(MAX_PER_INVOCATION)
       const results = []
-      for (const id of ids) {
+      for (let i = 0; i < queue.length; i++) {
+        const id = queue[i]
+        let wasHeif = false
         try {
           const r = await processPhoto(admin, id)
+          // Only a DIRECT HEIC decode is expensive enough to end the batch;
+          // a rendition-backed photo is an ordinary JPEG render.
+          wasHeif = r.source_format === "heif" && r.pixel_source === "original"
           results.push({ photo_id: id, ...r })
         } catch (e) {
           results.push({ photo_id: id, watermark_status: "failed", error: (e as Error).message })
         }
+        if (wasHeif) { notAttempted.unshift(...queue.slice(i + 1)); break }
       }
-      return json({ ok: true, count: results.length, results })
+      return json({ ok: true, count: results.length, not_attempted: notAttempted, results })
     }
 
     // ── Caller-JWT path (single photo) ─────────────────────────────────────
@@ -266,7 +740,7 @@ Deno.serve(async (req: Request) => {
 async function processPhoto(admin: ReturnType<typeof createClient>, photoId: string) {
   const { data: photo, error: photoErr } = await admin
     .from("photos")
-    .select("id, storage_bucket, storage_path_original, storage_path_watermarked, apply_watermark, photo_type, work_step_id, related_object, related_id")
+    .select("id, storage_bucket, storage_path_original, storage_path_rendition, storage_path_watermarked, apply_watermark, photo_type, work_step_id, related_object, related_id")
     .eq("id", photoId)
     .maybeSingle()
   if (photoErr) throw new Error(photoErr.message)
@@ -286,13 +760,30 @@ async function processPhoto(admin: ReturnType<typeof createClient>, photoId: str
   }
   const buffer = new Uint8Array(await blob.arrayBuffer())
 
-  // Parse EXIF — full dump. Errors here are non-fatal; we just record empty.
-  let exif: Record<string, any> = {}
-  try {
-    exif = (await exifr.parse(buffer, { gps: true, ifd0: true, exif: true })) || {}
-  } catch (_) {
-    exif = {}
+  // Pixels may come from somewhere other than the original. A HEIC capture is
+  // decoded on the device at upload and stored as a JPEG rendition beside it
+  // (photos.storage_path_rendition), because HEVC decode of a 12 MP frame only
+  // fits this worker's CPU budget when the scene happens to be simple. When a
+  // rendition exists it is what gets watermarked; EXIF is still read from the
+  // ORIGINAL below, so GPS and capture time remain the camera's own bytes.
+  let pixelBytes = buffer
+  if (photo.storage_path_rendition) {
+    const { data: renBlob, error: renErr } = await admin.storage
+      .from(photo.storage_bucket)
+      .download(photo.storage_path_rendition)
+    if (renErr || !renBlob) {
+      console.warn(`process-photo ${photoId}: rendition unreadable, falling back to the original — ${renErr?.message || "no data"}`)
+    } else {
+      pixelBytes = new Uint8Array(await renBlob.arrayBuffer())
+    }
   }
+
+  // Parse EXIF — full dump. Errors here are non-fatal; we record empty and
+  // keep the reason so an unreadable camera format is diagnosable instead of
+  // silently arriving with no GPS.
+  const sourceIsHeif = isHeifBytes(buffer)
+  const { exif, error: exifError } = await extractExif(buffer)
+  if (exifError) console.warn(`process-photo ${photoId}: EXIF unreadable — ${exifError}`)
 
   const takenAt: Date | null = (exif.DateTimeOriginal as Date) || (exif.CreateDate as Date) || (exif.ModifyDate as Date) || null
   const lat = typeof exif.latitude === "number" ? exif.latitude : null
@@ -360,24 +851,40 @@ async function processPhoto(admin: ReturnType<typeof createClient>, photoId: str
 
   if (photo.apply_watermark) {
     try {
-      let img = await Image.decode(buffer)
-
       // Cap the long edge FIRST so the per-pixel orientation remap below is
-      // bounded work, then re-orient. Original is preserved full-res.
+      // bounded work. The original is preserved full-res in storage either way.
+      // HEIF applies the cap DURING decode (see decodeHeifScaled) because a
+      // full-size intermediate does not fit in the worker.
       const MAX_EDGE = 2400
-      const longEdge = Math.max(img.width, img.height)
-      if (longEdge > MAX_EDGE) {
-        const scale = MAX_EDGE / longEdge
-        img.resize(Math.round(img.width * scale), Math.round(img.height * scale))
+      const pixelsAreHeif = isHeifBytes(pixelBytes)
+      let img = pixelsAreHeif
+        ? await decodeHeifScaled(pixelBytes, MAX_EDGE)
+        : await Image.decode(pixelBytes)
+      if (!pixelsAreHeif) {
+        const longEdge = Math.max(img.width, img.height)
+        if (longEdge > MAX_EDGE) {
+          const scale = MAX_EDGE / longEdge
+          img.resize(Math.round(img.width * scale), Math.round(img.height * scale))
+        }
       }
 
       // Apply EXIF orientation so the watermarked variant displays upright (its
       // EXIF tag is stripped by re-encoding). 6="Rotate 90 CW", 8="Rotate 270
       // CW" (=90 CCW), 3=180. Uses the explicit remap (imagescript rotate(90)
       // is unreliable here).
-      if (orient === 3) img = rotate180(img)
-      else if (orient === 6) img = rotate90(img, true)
-      else if (orient === 8) img = rotate90(img, false)
+      //
+      // NOT for HEIF: in that container the display transform is the `irot`
+      // property, which libheif has already applied by the time decode returns,
+      // and Apple writes the same rotation into EXIF as well. Rotating again on
+      // the EXIF tag would turn every portrait photo sideways.
+      // Guarded on the ORIGINAL's container, not the pixel source: a rendition
+      // is drawn through a canvas that has already applied the HEIF display
+      // transform, so it is upright for the same reason the direct decode is.
+      if (!sourceIsHeif) {
+        if (orient === 3) img = rotate180(img)
+        else if (orient === 6) img = rotate90(img, true)
+        else if (orient === 8) img = rotate90(img, false)
+      }
 
       const fontBuf = await getFont(admin)
       const fontSize = Math.max(22, Math.round(img.width * 0.028))
@@ -423,13 +930,28 @@ async function processPhoto(admin: ReturnType<typeof createClient>, photoId: str
       // the downloadable evidence file has BOTH the visible tag and accurate
       // metadata. Falls back to the plain watermarked bytes if the original has
       // no readable EXIF.
-      const { bytes: out, ok: exifOk } = embedOriginalExif(buffer, encoded, img.width, img.height)
+      let { bytes: out, ok: exifOk } = embedOriginalExif(buffer, encoded, img.width, img.height)
+      if (!exifOk) {
+        // Non-JPEG original (HEIC/HEIF): nothing to copy verbatim, so rebuild
+        // the block from what exifr read off that same original.
+        const synthesized = buildExifFromParsed({ takenAt, lat, lng, alt, make, model }, img.width, img.height)
+        if (synthesized) {
+          try {
+            out = binaryStringToU8(piexif.insert(synthesized, u8ToBinaryString(encoded)))
+            exifOk = true
+          } catch (_) { /* keep the plain watermarked bytes */ }
+        }
+      }
       wmExifOk = exifOk
 
       const origPath = photo.storage_path_original
       const baseName = origPath.split("/").pop() || "photo"
       const baseNoExt = baseName.replace(/\.[^.]+$/, "")
-      const folder = origPath.replace(/\/original\/[^/]+$/, "/watermarked")
+      // Every path this platform writes is ".../originals/<uuid>.<ext>". The
+      // old pattern looked for the singular "/original/", never matched, and
+      // left `folder` as the FULL original path — which is how the shipped
+      // keys ended up as ".../originals/<uuid>.jpg/<uuid>.jpg".
+      const folder = origPath.replace(/\/originals?\/[^/]+$/, "/watermarked")
       watermarkPath = `${folder}/${baseNoExt}.jpg`
 
       const { error: upErr } = await admin.storage
@@ -470,6 +992,10 @@ async function processPhoto(admin: ReturnType<typeof createClient>, photoId: str
     orientation: orient,
     location_line: locLine,
     watermark_exif_embedded: wmExifOk,
+    exif_error: exifError,
+    source_format: sourceIsHeif ? "heif" : "other",
+    pixel_source: pixelBytes === buffer ? "original" : "rendition",
+    watermark_path: watermarkPath,
     taken_at: takenAt instanceof Date ? takenAt.toISOString() : null,
   }
 }

@@ -1,6 +1,13 @@
 import { supabase } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
 import { compressPhotoForUpload } from '../lib/photoCompression'
+import {
+  heifRenditionForFile,
+  decodeHeifToJpegBlob,
+  renditionPathFor,
+  isHeifBytes,
+  displayPathForPhoto,
+} from '../lib/heifRendition'
 import { WORK_ORDER_STEP_KEY, UNASSIGNED_STEP_KEY } from '../lib/photoTags'
 import { areSignedUrlsUsable } from '../lib/signedUrlExpiry'
 
@@ -14,6 +21,8 @@ import { areSignedUrlsUsable } from '../lib/signedUrlExpiry'
 //     storage_bucket           text      always "work-evidence"
 //     storage_path_original    text      "work_orders/<uuid>/originals/<photoId>.<ext>"
 //     storage_path_watermarked text      written by the process-photo edge fn
+//     storage_path_rendition   text      device-decoded JPEG standing in for an
+//                                        original the server cannot decode (HEIC)
 //     apply_watermark          bool      whether the edge fn should watermark
 //     watermark_status         text      'pending' | 'done' | 'error' | null
 //     latitude / longitude / altitude / camera_* / orientation / mime_type /
@@ -266,6 +275,18 @@ export async function uploadPhoto({
   const photoId = newId()
   const path = photoOriginalPath(relatedObject, relatedId, photoId, file.name)
 
+  // A HEIC capture (the iPhone default) is decoded HERE, on the device, and
+  // uploaded alongside the untouched original. Nothing server-side can decode
+  // it dependably: process-photo can, via libheif, but a 12 MP frame only fits
+  // the edge worker's CPU budget when the scene is simple, so half a job's
+  // photos would render and half would not. See src/lib/heifRendition.js.
+  //
+  // Returns null for every non-HEIF file and for any decode that fails, and a
+  // missing rendition never blocks the upload — the row still lands and the
+  // server still tries.
+  const renditionBlob = await heifRenditionForFile(file)
+  const renditionPath = renditionBlob ? renditionPathFor(path) : null
+
   // 1. Upload the original to Storage. upsert=false because we generated a
   //    fresh uuid for the path; a collision would be a logic bug we want to
   //    surface, not silently overwrite.
@@ -277,6 +298,21 @@ export async function uploadPhoto({
     })
   if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`)
 
+  // 1b. Upload the rendition beside it. Best-effort: a failure here costs the
+  //     photo its preview, not its existence, so it must not throw.
+  let renditionStored = null
+  if (renditionBlob && renditionPath) {
+    const { error: renErr } = await supabase.storage
+      .from(bucket)
+      .upload(renditionPath, renditionBlob, { contentType: 'image/jpeg', upsert: true })
+    if (renErr) {
+      // eslint-disable-next-line no-console
+      console.warn('rendition upload failed (non-fatal):', renErr.message)
+    } else {
+      renditionStored = renditionPath
+    }
+  }
+
   // 2. Insert the photos row. photo_number is auto-filled by trigger when
   //    null. mime_type and file_size_bytes are populated client-side because
   //    the edge function may not run (e.g. apply_watermark=false in some
@@ -287,6 +323,7 @@ export async function uploadPhoto({
     file_url: path,
     storage_bucket: bucket,
     storage_path_original: path,
+    storage_path_rendition: renditionStored,
     apply_watermark: !!applyWatermark,
     watermark_status: applyWatermark ? 'pending' : null,
     file_size_bytes: file.size || null,
@@ -344,20 +381,108 @@ export async function uploadPhoto({
 
 /**
  * Re-run the process-photo edge function for an existing row. Used when the
- * first attempt errored — typically transient failures (cold start timeout,
- * EXIF parse on an unusual file). Resets watermark_status to 'pending' so the
- * UI shows the spinner state again.
+ * first attempt errored — transient failures (cold start timeout, EXIF parse on
+ * an unusual file) and, since 2026-08-24, HEIC originals that predate the
+ * device-side rendition.
+ *
+ * A HEIC row uploaded before renditions existed has no pixels the server can
+ * dependably read, so re-invoking alone would fail exactly as it did the first
+ * time. Instead the original is pulled back down, decoded HERE (the same
+ * decoder the upload path uses — the device has the CPU headroom the edge
+ * worker does not), and stored as the row's rendition before the function runs.
+ * That repairs the photo in place: no re-upload, no lost capture, and the
+ * archival HEIC is never touched.
+ *
+ * Resets watermark_status to 'pending' so the UI shows the working state.
  */
 export async function reprocessPhoto(photoId) {
   if (!photoId) throw new Error('reprocessPhoto: photoId is required')
+
+  const { data: photo, error: readErr } = await supabase
+    .from('photos')
+    .select('id, storage_bucket, storage_path_original, storage_path_rendition')
+    .eq('id', photoId)
+    .maybeSingle()
+  if (readErr) throw new Error(`photos read failed: ${readErr.message}`)
+
   const { error: updErr } = await supabase
     .from('photos')
     .update({ watermark_status: 'pending', watermark_error: null })
     .eq('id', photoId)
   if (updErr) throw new Error(`photos update failed: ${updErr.message}`)
+
+  if (photo && !photo.storage_path_rendition) {
+    const stored = await buildRenditionForStoredPhoto(photo)
+    if (stored) {
+      const { error: renErr } = await supabase
+        .from('photos')
+        .update({ storage_path_rendition: stored })
+        .eq('id', photoId)
+      if (renErr) throw new Error(`photos rendition update failed: ${renErr.message}`)
+    }
+  }
+
   const { error: invErr } = await supabase.functions
     .invoke('process-photo', { body: { photo_id: photoId } })
   if (invErr) throw new Error(`process-photo invocation failed: ${invErr.message}`)
+}
+
+/**
+ * Download an already-stored original, and if it turns out to be HEIF, decode
+ * it on the device and store the JPEG rendition beside it. Returns the stored
+ * rendition path, or null when the original needs no rendition (a JPEG) or
+ * could not be decoded.
+ *
+ * Deliberately silent on failure: this runs inside repair flows where the
+ * caller's job is to make progress on whatever it can, not to abort a batch.
+ */
+async function buildRenditionForStoredPhoto(photo) {
+  const bucket = photo?.storage_bucket
+  const original = photo?.storage_path_original
+  if (!bucket || !original) return null
+  const target = renditionPathFor(original)
+  if (!target) return null
+  try {
+    const { data: blob, error } = await supabase.storage.from(bucket).download(original)
+    if (error || !blob) return null
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    if (!isHeifBytes(bytes)) return null // JPEG/PNG: the server reads it directly
+    const rendition = await decodeHeifToJpegBlob(bytes)
+    if (!rendition) return null
+    const { error: upErr } = await supabase.storage
+      .from(bucket)
+      .upload(target, rendition, { contentType: 'image/jpeg', upsert: true })
+    if (upErr) return null
+    return target
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Repair every photo on a record that has no usable rendered image — the bulk
+ * form of reprocessPhoto, for a card full of HEIC captures uploaded before
+ * device-side renditions existed.
+ *
+ * Sequential on purpose. Each HEIC decode is a multi-megapixel job on the
+ * viewer's machine, and running a card's worth in parallel would lock the tab
+ * up; one at a time keeps the page responsive and lets `onProgress` report
+ * honestly. Returns { repaired, failed }.
+ */
+export async function repairUnrenderedPhotos(photos, { onProgress } = {}) {
+  const todo = (photos || []).filter(p => p && !p.storage_path_watermarked)
+  let repaired = 0
+  let failed = 0
+  for (let i = 0; i < todo.length; i++) {
+    try {
+      await reprocessPhoto(todo[i].id)
+      repaired++
+    } catch {
+      failed++
+    }
+    if (onProgress) onProgress({ done: i + 1, total: todo.length, repaired, failed })
+  }
+  return { repaired, failed }
 }
 
 /**
@@ -700,8 +825,9 @@ export async function signedUrls(bucket, paths, ttl = DEFAULT_SIGNED_URL_TTL_SEC
 
 /**
  * Resolve the URLs needed to render a list of photos. Returns the input
- * array with each row gaining `_thumbUrl` (watermarked if present, else
- * original) and `_originalUrl` (always the original).
+ * array with each row gaining `_thumbUrl` (the best displayable variant, per
+ * displayPathForPhoto) and `_originalUrl` (always the original, whatever its
+ * format — downloads and archival links want the real capture).
  *
  * Shaped this way so the gallery component never has to know which bucket
  * a photo lives in or which variant exists — it just renders what's there.
@@ -714,7 +840,7 @@ export async function hydratePhotoUrls(photos) {
   const byBucket = new Map()
   for (const p of photos) {
     if (!p.storage_bucket) continue
-    const wantedPath = p.storage_path_watermarked || p.storage_path_original
+    const wantedPath = displayPathForPhoto(p)
     const orig = p.storage_path_original
     if (!byBucket.has(p.storage_bucket)) byBucket.set(p.storage_bucket, new Set())
     if (wantedPath) byBucket.get(p.storage_bucket).add(wantedPath)
@@ -730,7 +856,7 @@ export async function hydratePhotoUrls(photos) {
   }))
 
   return photos.map(p => {
-    const thumbPath = p.storage_path_watermarked || p.storage_path_original
+    const thumbPath = displayPathForPhoto(p)
     return {
       ...p,
       _thumbUrl:    p.storage_bucket && thumbPath

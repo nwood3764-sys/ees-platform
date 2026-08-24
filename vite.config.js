@@ -108,6 +108,13 @@ export default defineConfig({
           if (!id.includes('node_modules')) return
           // mammoth (DOCX preview) → its own chunk, loaded only when a Word
           // document is previewed via the dynamic import in FileGallery.
+          // libheif (HEIC/HEIF decode) → own leaf chunk. iPhones capture HEIC
+          // by default and nothing else in the platform can read it, so the
+          // upload path decodes it on the device; the module is ~1.3 MB of
+          // emscripten output with the WASM binary embedded, and it is imported
+          // dynamically so a session that never touches a HEIC never pays for
+          // it. A pure leaf — it imports nothing of ours, so no cycle.
+          if (id.includes('libheif-js')) return 'vendor-libheif'
           if (id.includes('mammoth')) return 'vendor-mammoth'
           // exceljs (writes the Bulk Property Import template WITH native Excel
           // dropdowns) → own leaf chunk, lazy-loaded only when Download Template

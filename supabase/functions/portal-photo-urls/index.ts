@@ -16,7 +16,10 @@
 // simply absent from the response. The service role key never leaves here.
 //
 // Returns the watermarked variant when process-photo has produced one (that is
-// the copy stamped with the work step name), falling back to the original.
+// the copy stamped with the work step name), then the device-decoded rendition,
+// then the original — but ONLY when a browser can paint the original. An iPhone
+// capture is a HEIC and no browser can, so falling through to it unconditionally
+// served the owner a broken tile for a photo that was perfectly intact.
 // ============================================================================
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
@@ -131,7 +134,7 @@ Deno.serve(async (req) => {
   // ── Re-resolve the requested photos through their work order ──
   const { data: rows, error: qErr } = await admin
     .from("photos")
-    .select(`id, storage_bucket, storage_path_original, storage_path_watermarked,
+    .select(`id, storage_bucket, storage_path_original, storage_path_rendition, storage_path_watermarked,
              work_steps!inner ( work_orders!inner ( property_id, building_id,
                properties ( property_account_id, property_include_in_owner_portal,
                             accounts ( account_include_in_owner_portal ) ),
@@ -170,6 +173,7 @@ Deno.serve(async (req) => {
     if (!r.storage_bucket) continue
     const paths = byBucket.get(r.storage_bucket) || new Set<string>()
     if (r.storage_path_watermarked) paths.add(r.storage_path_watermarked)
+    if (r.storage_path_rendition)   paths.add(r.storage_path_rendition)
     if (r.storage_path_original)    paths.add(r.storage_path_original)
     byBucket.set(r.storage_bucket, paths)
   }
@@ -183,12 +187,28 @@ Deno.serve(async (req) => {
     })
   }))
 
+  // Hand back only what a browser can actually paint. An iPhone capture is a
+  // HEIC, and falling through to the original meant the portal served a .heic
+  // to an <img> — a broken tile for the property owner, with the file itself
+  // perfectly intact. The rendition (a JPEG decoded on the device at upload)
+  // covers the window before the watermarked variant exists; beyond that, no
+  // URL at all is better than one that cannot render.
+  const renderable = (path: string | null | undefined) => {
+    if (!path) return false
+    const ext = String(path).toLowerCase().split("?")[0].split(".").pop() || ""
+    return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"].includes(ext)
+  }
+
   const urls: Record<string, { thumb: string | null; full: string | null }> = {}
   for (const r of allowed as any[]) {
     const b = r.storage_bucket
-    const stamped  = r.storage_path_watermarked ? urlMap.get(`${b}::${r.storage_path_watermarked}`) || null : null
-    const original = r.storage_path_original    ? urlMap.get(`${b}::${r.storage_path_original}`)    || null : null
-    urls[r.id] = { thumb: stamped || original, full: stamped || original }
+    const stamped   = r.storage_path_watermarked ? urlMap.get(`${b}::${r.storage_path_watermarked}`) || null : null
+    const rendition = r.storage_path_rendition   ? urlMap.get(`${b}::${r.storage_path_rendition}`)   || null : null
+    const original  = renderable(r.storage_path_original)
+      ? urlMap.get(`${b}::${r.storage_path_original}`) || null
+      : null
+    const best = stamped || rendition || original
+    urls[r.id] = { thumb: best, full: best }
   }
 
   return json({ urls, expires_in: SIGNED_URL_TTL_SECONDS }, 200)
