@@ -25,7 +25,7 @@
 // with the renderers — a section type that has no renderer can never be added.
 // ---------------------------------------------------------------------------
 
-import { DOCUMENT_KIND_ENGINE, SECTION_TYPES_BY_ENGINE } from './paperworkModel'
+import { DOCUMENT_KIND_ENGINE, SECTION_TYPES_BY_ENGINE } from './paperworkModel.js'
 
 // Sealed, Inc.'s fixed contractor block, as a default the editor can override.
 const SEALED_PRIMARY_LINES = ['Sealed, Inc.', '200 E Verona Ave', 'Verona, WI 53593', '(949) 832-6798']
@@ -120,6 +120,96 @@ export const SUBMITTAL_SECTION_SCHEMAS = {
   sealed_signature_block: [
     { key: 'signer_label', label: 'Signer Label', type: 'text', default: 'Customer Signature' },
   ],
+
+  // --- Energy Assessment Report -------------------------------------------
+  // The audit's own deliverable. Its sections are the assessment's own walk of
+  // the building, so the template is where the report's ORDER and HEADINGS are
+  // set — which is what lets it be laid out to mirror the Asset Score report
+  // and read side by side with it.
+  assessment_cover: [
+    { key: 'title', label: 'Report Title', type: 'text',
+      placeholder: 'Leave blank to use the report’s own title' },
+    { key: 'subtitle', label: 'Subtitle', type: 'text',
+      placeholder: 'e.g. Whole-Building Energy Audit — ASHRAE Level II Equivalent' },
+    { key: 'eyebrow', label: 'Company Line', type: 'text',
+      placeholder: 'Leave blank to use the Submittal Document Wording' },
+    { key: 'subject_heading', label: 'Left Column Heading', type: 'text', default: 'Building Assessed' },
+    { key: 'provenance_heading', label: 'Right Column Heading', type: 'text', default: 'Report Details' },
+    { key: 'prepared_for_heading', label: 'Prepared-For Heading', type: 'text', default: 'Prepared For' },
+  ],
+  assessment_narrative: [
+    { key: 'heading', label: 'Heading', type: 'text', default: 'Scope & Methodology' },
+    { key: 'body', label: 'Body', type: 'textarea',
+      description: 'Free prose. Blank lines start a new paragraph.' },
+    { key: 'items', label: 'Bullet Points', type: 'string_list', default: [] },
+  ],
+  assessment_building_summary: [
+    { key: 'heading', label: 'Heading', type: 'text', default: 'Building Summary' },
+    { key: '__info__', type: 'info',
+      description: 'Read from the building and property RECORDS (year built, unit count, square footage, system types…). Columns with no value are left out.' },
+  ],
+  assessment_field_data: [
+    { key: 'step', label: 'Work Step Section', type: 'text',
+      description: 'The name of the work plan section to print, exactly as it appears on the work order (e.g. “Heating Systems”). Every question the section asks is printed, with its answer or an em dash.' },
+    { key: 'heading', label: 'Heading', type: 'text',
+      placeholder: 'Leave blank to use the work step’s own name',
+      description: 'Rename the heading here to match the corresponding section of the Asset Score report.' },
+    { key: 'body', label: 'Intro Text', type: 'textarea' },
+    { key: 'photos', label: 'Photos', type: 'select', default: 'step',
+      options: [
+        { value: 'step', label: 'Print this section’s photos here' },
+        { value: 'none', label: 'Leave photos to the Photo Documentation section' },
+      ],
+      description: 'Only photos marked “Include in final report” on the work order are ever printed.' },
+    { key: 'photo_heading', label: 'Photo Sub-heading', type: 'text', default: 'Photo Documentation' },
+    { key: 'photo_columns', label: 'Photos per Row', type: 'select', default: 2,
+      options: [{ value: 1, label: '1' }, { value: 2, label: '2' }, { value: 3, label: '3' }] },
+  ],
+  assessment_photo_documentation: [
+    { key: 'heading', label: 'Heading', type: 'text', default: 'Photo Documentation' },
+    { key: 'body', label: 'Intro Text', type: 'textarea' },
+    { key: 'columns', label: 'Photos per Row', type: 'select', default: 2,
+      options: [{ value: 1, label: '1' }, { value: 2, label: '2' }, { value: 3, label: '3' }] },
+    { key: 'group_by_step', label: 'Group by Work Step', type: 'select', default: true,
+      options: [{ value: true, label: 'Yes — band each step' }, { value: false, label: 'No — one continuous grid' }] },
+    { key: 'exclude_printed', label: 'Skip Already-Printed Photos', type: 'select', default: true,
+      options: [
+        { value: true, label: 'Yes — only photos no section above showed' },
+        { value: false, label: 'No — print every flagged photo again' },
+      ] },
+    { key: 'steps', label: 'Limit to Work Steps', type: 'string_list', default: [],
+      description: 'Leave empty for every step. Otherwise list the work step names whose photos this block prints.' },
+  ],
+  assessment_recommendations: [
+    { key: 'heading', label: 'Heading', type: 'text', default: 'Findings & Recommended Measures' },
+    { key: 'body', label: 'Body', type: 'textarea' },
+    { key: 'items', label: 'Measures', type: 'string_list', default: [],
+      description: 'Savings, cost and payback are modelled downstream (Snugg Pro / Asset Score) — this section states the measures, it does not compute them.' },
+  ],
+  assessment_deliverables: [
+    { key: 'heading', label: 'Heading', type: 'text', default: 'Deliverables' },
+    { key: 'body', label: 'Intro Text', type: 'textarea' },
+    { key: 'items', label: 'Deliverable Items', type: 'string_list',
+      default: [
+        'Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
+        'HPXML v4 / BuildingSync file from Asset Score',
+        'Customer Report / Building Assessment Tool Report',
+      ] },
+  ],
+  assessment_signature: [
+    { key: 'heading', label: 'Heading', type: 'text', default: 'Acknowledgment' },
+    { key: 'acknowledgment', label: 'Acknowledgment Text', type: 'textarea' },
+    { key: 'signer_label', label: 'Signer Label', type: 'text',
+      default: 'Property Owner / Authorized Representative' },
+  ],
+  assessment_footer: [
+    { key: 'company_line', label: 'Company Line', type: 'text',
+      placeholder: 'Leave blank to use the Submittal Document Wording' },
+    { key: 'contact_line', label: 'Contact Line', type: 'text',
+      placeholder: 'Leave blank to use the Submittal Document Wording' },
+    { key: '__info__', type: 'info',
+      description: 'Stamped on every page with the work order number and “Page N of M”. Place it last.' },
+  ],
 }
 
 // Human labels for section types, used in rows and the Add-Section palette.
@@ -142,6 +232,15 @@ export const SUBMITTAL_SECTION_LABELS = {
   sealed_rebate_section: 'Rebate Section',
   sealed_totals_list: 'Totals List',
   sealed_signature_block: 'Signature',
+  assessment_cover: 'Report Cover',
+  assessment_narrative: 'Narrative',
+  assessment_building_summary: 'Building Summary',
+  assessment_field_data: 'Captured Section',
+  assessment_photo_documentation: 'Photo Documentation',
+  assessment_recommendations: 'Findings & Measures',
+  assessment_deliverables: 'Deliverables',
+  assessment_signature: 'Acknowledgment & Signature',
+  assessment_footer: 'Page Footer',
 }
 
 /** Return the schema array for a section type, or null (→ JSON fallback). */
@@ -161,7 +260,7 @@ export function buildDefaultSectionConfig(sectionType) {
   return out
 }
 
-/** The rendering engine ('ees' | 'sealed') for a template kind. */
+/** The rendering engine ('ees' | 'sealed' | 'combustion_safety' | 'energy_assessment') for a template kind. */
 export function engineForKind(sdtKind) {
   return DOCUMENT_KIND_ENGINE[sdtKind] || 'ees'
 }

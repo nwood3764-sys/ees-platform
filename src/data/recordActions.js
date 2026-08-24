@@ -46,6 +46,11 @@
 // Action keys — exported as a const map for use in handler maps and the
 // LayoutEditor Actions section.
 // ---------------------------------------------------------------------------
+// Which work order record types have an energy assessment report, and which
+// report each one gets, is declared once in the pure registry — never as a
+// string comparison here.
+import { hasAssessmentReport } from '../lib/assessmentReport'
+
 export const ACTION_KEYS = Object.freeze({
   EDIT:                    'edit',
   CLONE:                   'clone',
@@ -58,6 +63,7 @@ export const ACTION_KEYS = Object.freeze({
   GENERATE_PROJECT_RESERVATION_SUBMITTAL:   'generate_project_reservation_submittal',
   GENERATE_FINAL_PAYMENT_REQUEST_SUBMITTAL: 'generate_final_payment_request_submittal',
   GENERATE_QUALITY_INSTALL_TOOL:            'generate_quality_install_tool',
+  GENERATE_ENERGY_ASSESSMENT_REPORT:        'generate_energy_assessment_report',
   GENERATE_PREAPPROVAL_APPLICATION:         'generate_preapproval_application',
   SCHEDULE_WORK_ORDERS:    'schedule_work_orders',
   RESCHEDULE_WORK_ORDERS:  'reschedule_work_orders',
@@ -352,6 +358,25 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultSortOrder:    20,
     isAvailable: ({ tableName, editing, statusLabel }) =>
       !editing && tableName === 'work_orders' && statusLabel === 'To Be Scheduled',
+  },
+  // The assessment's OWN deliverable — the write-up of what the assessor found
+  // on the building, generated from the work order that captured it. It is not
+  // a program submittal: Project Reservation and Final Project Payment Request
+  // are filings to a program administering body and live on the PROJECT.
+  //
+  // Gated on the work order's record type VALUE, because which report this is
+  // follows what was assessed (a whole multifamily building vs a single-family
+  // home), and each shape has its own document key and its own template.
+  generate_energy_assessment_report: {
+    key:                 ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT,
+    label:               'Generate Energy Assessment Report',
+    icon:                'M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z M14 3v6h6 M8 13h8 M8 17h5',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['work_orders'],
+    defaultTier:         'menu',
+    defaultSortOrder:    24,
+    isAvailable: ({ tableName, editing, recordTypeValue }) =>
+      !editing && tableName === 'work_orders' && hasAssessmentReport(recordTypeValue),
   },
   issue_to_provider: {
     key:                 ACTION_KEYS.ISSUE_TO_PROVIDER,

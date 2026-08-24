@@ -17,6 +17,8 @@
 //   - HOMES Project Invoice           (EES vector PDF)
 //   - Sealed Proposal / Sealed Invoice (Sealed, Inc. primary-contractor style)
 //   - Paperwork Workbook (.xlsx)      (template fill — styles preserved)
+//   - Energy Assessment Report        (the AUDIT's own deliverable — not a
+//                                      program submittal; see the engine below)
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
@@ -579,6 +581,43 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
     { type: 'sealed_totals_list' },
     { type: 'sealed_signature_block' },
   ],
+  // Energy Assessment Report — the audit's own deliverable, its own engine.
+  // One assessment_field_data section per captured work-step section, in the
+  // order the auditor walks the building, so the report reads as the walk.
+  energyAssessmentReport: [
+    { type: 'assessment_cover' },
+    { type: 'assessment_narrative', config: {
+      heading: 'Scope & Methodology',
+      body: 'Energy Efficiency Services performed a whole-building energy assessment of the property identified above. The assessment documents the building’s geometry and use, envelope assemblies, central and common-area mechanical systems, service hot water, common-area lighting, and available utility and occupancy data. Findings are recorded in the field at the time of the visit and are supported by the photographic documentation included in this report.' } },
+    { type: 'assessment_building_summary', config: { heading: 'Building Summary' } },
+    { type: 'assessment_field_data', config: { step: 'Building Photos',                    heading: 'Building Photographs', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Building Geometry & Use',            heading: 'Building Geometry & Use', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Roof / Ceiling',                     heading: 'Envelope — Roof / Ceiling', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Walls',                              heading: 'Envelope — Walls', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Foundation / Floor',                 heading: 'Envelope — Foundation / Floor', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Windows & Doors',                    heading: 'Envelope — Windows & Doors', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Heating Systems',                    heading: 'Heating Systems', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Cooling Systems',                    heading: 'Cooling Systems', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Distribution & Ventilation',         heading: 'Distribution & Ventilation', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Service Hot Water',                  heading: 'Service Hot Water', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Common-Area Lighting',               heading: 'Common-Area Lighting', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Building Diagnostics',               heading: 'Building Diagnostics', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Utility & Energy Data',              heading: 'Utility & Energy Data', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Occupancy & Operating Schedules',    heading: 'Occupancy & Operating Schedules', photos: 'step' } },
+    { type: 'assessment_photo_documentation', config: {
+      heading: 'Additional Photo Documentation', columns: 2, group_by_step: true, exclude_printed: true,
+      empty_label: 'All photos marked “Include in final report” are shown with their sections above.' } },
+    { type: 'assessment_recommendations', config: { heading: 'Findings & Recommended Measures' } },
+    { type: 'assessment_deliverables', config: {
+      heading: 'Deliverables',
+      items: [
+        'Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
+        'HPXML v4 / BuildingSync file from Asset Score',
+        'Customer Report / Building Assessment Tool Report',
+      ] } },
+    { type: 'assessment_signature' },
+    { type: 'assessment_footer' },
+  ],
   // Combustion Safety Notification (Large Multifamily 5+ Units) — its own engine.
   combustionSafety: [
     { type: 'combustion_intro' },
@@ -624,6 +663,8 @@ export async function buildSubmittalPdfWithSignatureTabs(m, kind, sections) {
     throw new Error('Signature capture is not implemented for Sealed documents')
   if (engine === 'combustion_safety')
     return buildCombustionPdf(m, kind, sections, { collectTabs: true })
+  if (engine === 'energy_assessment')
+    return buildAssessmentReportPdf(m, kind, sections, { collectTabs: true })
   return buildEesPdf(m, kind, sections, { collectTabs: true })
 }
 
@@ -1047,6 +1088,420 @@ export async function buildCombustionPdf(m, kind, sections, opts = {}) {
   return x.d.output('blob')
 }
 
+// ===========================================================================
+// ENERGY ASSESSMENT REPORT — its own engine.
+//
+// This is NOT a submittal to a program administering body at an incentive
+// application stage (that is paperworkSubmittals.js: Project Reservation and
+// Final Project Payment Request). An energy assessment report is the
+// DELIVERABLE OF THE AUDIT ITSELF — the write-up of what the auditor found on
+// the building, produced from the assessment work order that captured it.
+// It has its own kind ('energy_assessment_report'), its own document keys
+// (one per assessment work order record type), its own section types, and its
+// own templates. Nothing here is shared with the invoice/proposal engines.
+//
+// The model is assembled by assessmentReportService.loadAssessmentReportModel:
+//
+//   m = {
+//     title, subtitle,
+//     program:   { label, name },
+//     property:  { name, addressLines[], cityStateZip },
+//     building:  { name, label },
+//     workOrder: { number, name, status },
+//     preparedFor: { name, lines[] },
+//     auditor:   { name, role },
+//     assessedOn, generatedOn,
+//     summaryRows: [[label, value], …],       // building facts from the record
+//     steps: [{ key, name, notApplicable, notApplicableReason,
+//               fields: [{ label, value, unit }], photoCount }],
+//     photos: [{ group, label, caption, takenAt, gps, dataUrl, w, h }],
+//     textBlocks,
+//   }
+//
+// Photos arrive as ALREADY-ENCODED JPEG data URLs. Decoding, HEIC rendition
+// resolution and downscaling all happen in the service (they need the DOM and
+// the network); this module stays pure and node-testable like the rest of the
+// file.
+// ===========================================================================
+
+/** Shared drawing context for the energy assessment report. */
+async function buildAssessmentContext(m, kind, opts = {}) {
+  const P = await pdfCanvas(48)
+  const { d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc } = P
+  const INK = C.ink, MUT = C.mut, NAVY = C.navy
+  const RULE = [208, 216, 232]
+  const EMERALD = [42, 171, 114]
+  const text = (key) => resolveTextBlock(m.textBlocks, key)
+  const pv = v => (v != null && String(v).trim() !== '') ? String(v) : '—'
+
+  // Numbered section band: emerald tick, navy uppercase heading, hairline.
+  const band = (txt, gap = 16) => {
+    need(34); st.y += gap
+    fill(EMERALD); d.rect(M, st.y + 1, 3, 12, 'F')
+    tc(NAVY); font(10.5, 'bold'); t(M + 10, st.y + 11, String(txt).toUpperCase())
+    st.y += 16; stroke(RULE); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 8
+  }
+  const subHead = (txt) => { need(16); tc([60, 76, 94]); font(9, 'bold'); t(M, st.y + 9, txt); st.y += 13 }
+  const para = (txt, sz = 9) => {
+    if (txt == null || String(txt).trim() === '') return
+    tc(INK); font(sz)
+    for (const block of String(txt).split('\n')) {
+      if (!block.trim()) { st.y += sz * 0.6; continue }
+      const ls = wrap(block, CW)
+      for (const ln of ls) { need(sz + 4); t(M, st.y + sz, ln); st.y += sz + 3.5 }
+    }
+    st.y += 4
+  }
+  const bullets = (items, sz = 9) => {
+    tc(INK); font(sz)
+    for (const item of (items || [])) {
+      const ls = wrap(String(item), CW - 14)
+      ls.forEach((ln, i) => {
+        need(sz + 4)
+        if (i === 0) { fill([122, 135, 152]); d.circle(M + 3, st.y + sz - 3, 1.6, 'F') }
+        tc(INK); font(sz); t(M + 14, st.y + sz, ln); st.y += sz + 3.5
+      })
+      st.y += 2
+    }
+    st.y += 3
+  }
+
+  // Two-column label/value table. Rows that carry no value still print with an
+  // em dash: a blank line in an audit report means "asked and not answered",
+  // which the reviewer must be able to see.
+  const kvTable = (rows, opts2 = {}) => {
+    const list = (rows || []).filter(Boolean)
+    if (!list.length) { subHead(opts2.emptyLabel || 'Not captured on this assessment.'); return }
+    const labW = opts2.labelWidth || Math.round(CW * 0.44)
+    const valX = M + labW + 10
+    const valW = W - M - valX
+    let zebra = 0
+    for (const [label, value] of list) {
+      tc(INK); font(8.5)
+      const vls = wrap(pv(value), valW)
+      const lls = wrap(String(label ?? ''), labW)
+      const h = Math.max(lls.length, vls.length) * 11 + 6
+      need(h)
+      if (zebra % 2 === 1) { fill([247, 249, 252]); d.rect(M, st.y, CW, h, 'F') }
+      tc([70, 82, 98]); font(8.5, 'bold')
+      lls.forEach((ln, i) => t(M + 4, st.y + 11 + i * 11, ln))
+      tc(INK); font(8.5)
+      vls.forEach((ln, i) => t(valX, st.y + 11 + i * 11, ln))
+      st.y += h; zebra++
+    }
+    stroke(RULE); d.setLineWidth(.5); d.line(M, st.y, W - M, st.y); st.y += 2
+  }
+
+  // One photo cell: bordered box, image centred inside it, caption beneath.
+  const PH_GAP = 16
+  const photoCell = (photo, col, cellW, boxH) => {
+    const x = M + col * (cellW + PH_GAP)
+    stroke(RULE); d.setLineWidth(.6); d.rect(x, st.y, cellW, boxH)
+    if (photo.dataUrl && photo.w && photo.h) {
+      const scale = Math.min(cellW / photo.w, boxH / photo.h)
+      const dw = Math.max(1, photo.w * scale), dh = Math.max(1, photo.h * scale)
+      try {
+        d.addImage(photo.dataUrl, 'JPEG', x + (cellW - dw) / 2, st.y + (boxH - dh) / 2, dw, dh)
+      } catch { /* leave the empty box — a missing image never sinks the report */ }
+    } else {
+      tc(MUT); font(8); t(x + cellW / 2, st.y + boxH / 2, 'Image unavailable', { align: 'center' })
+    }
+    tc(NAVY); font(8, 'bold')
+    const label = wrap(photo.label || 'Photo', cellW).slice(0, 1)
+    t(x, st.y + boxH + 10, label[0] || '')
+    tc(MUT); font(7.5)
+    const cap = wrap(photo.caption || '', cellW).slice(0, 2)
+    cap.forEach((ln, i) => t(x, st.y + boxH + 20 + i * 9, ln))
+  }
+
+  const x = {
+    m, kind, d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc,
+    INK, MUT, NAVY, RULE, EMERALD, text, pv,
+    band, subHead, para, bullets, kvTable, photoCell, PH_GAP,
+    // Every photo drawn so far, so a trailing Photo Documentation section can
+    // print only what the system sections did not already show.
+    printedPhotoIds: new Set(),
+    collectTabs: !!opts.collectTabs, signatureTabs: [],
+  }
+
+  /**
+   * Draw a grid of photos, optionally banded by the step that captured them.
+   * Shared by the system sections (photos printed beside the data they
+   * document) and the standalone Photo Documentation section.
+   */
+  x.photoGrid = (photos, cfg = {}) => {
+    const list = (photos || []).filter(Boolean)
+    if (!list.length) return 0
+    const cols = Math.max(1, Math.min(3, Number(cfg.columns) || 2))
+    const cellW = (CW - PH_GAP * (cols - 1)) / cols
+    const boxH = Math.round(cellW * (Number(cfg.aspect) || 0.72))
+    const rowH = boxH + 34
+
+    const groups = []
+    for (const p of list) {
+      const key = cfg.group_by_step ? (p.group || '') : ''
+      let g = groups.find(gg => gg.key === key)
+      if (!g) { g = { key, photos: [] }; groups.push(g) }
+      g.photos.push(p)
+    }
+    for (const g of groups) {
+      if (g.key) {
+        need(26 + rowH)
+        fill([240, 243, 248]); d.rect(M, st.y, CW, 20, 'F')
+        fill(EMERALD); d.rect(M, st.y, 3, 20, 'F')
+        tc(NAVY); font(9, 'bold'); t(M + 10, st.y + 14, g.key)
+        tc(MUT); font(7.5)
+        t(W - M - 4, st.y + 14, g.photos.length === 1 ? '1 photo' : `${g.photos.length} photos`, { align: 'right' })
+        st.y += 26
+      }
+      for (let i = 0; i < g.photos.length; i += cols) {
+        need(rowH)
+        g.photos.slice(i, i + cols).forEach((p, c) => photoCell(p, c, cellW, boxH))
+        st.y += rowH
+      }
+      st.y += 4
+    }
+    for (const p of list) if (p.id != null) x.printedPhotoIds.add(p.id)
+    return list.length
+  }
+
+  return x
+}
+
+/** The report photos captured on one named work step. */
+function assessmentStepPhotos(m, stepName) {
+  if (!stepName) return []
+  const want = String(stepName).trim().toLowerCase()
+  return (m.photos || []).filter(p => String(p.group || '').trim().toLowerCase() === want)
+}
+
+/** Find one captured work step in the model by its template name. */
+function assessmentStep(m, name) {
+  if (!name) return null
+  const want = String(name).trim().toLowerCase()
+  return (m.steps || []).find(s =>
+    String(s.name || '').trim().toLowerCase() === want ||
+    String(s.key || '').trim().toLowerCase() === want) || null
+}
+
+export const ASSESSMENT_SECTION_RENDERERS = {
+  /* Cover block: report title, program, the building it is about, and who
+     prepared it for whom. Always the first page. */
+  assessment_cover(x, cfg = {}) {
+    const { m, W, M, CW, C, st, font, t, tc, wrap, d, fill, stroke, RULE, NAVY, MUT, INK, EMERALD, text, pv } = x
+    fill([13, 26, 46]); d.rect(0, 0, W, 4, 'F')
+    tc(MUT); font(8.5, 'bold')
+    t(M, st.y + 10, (cfg.eyebrow || text('assessment.header.company_name') || 'ENERGY EFFICIENCY SERVICES of WISCONSIN').toUpperCase())
+    st.y += 26
+    tc(NAVY); font(19, 'bold')
+    for (const ln of wrap(cfg.title || m.title || 'Building Energy Assessment Report', CW)) {
+      t(M, st.y + 18, ln); st.y += 23
+    }
+    if (cfg.subtitle || m.subtitle) {
+      tc([74, 94, 122]); font(11)
+      for (const ln of wrap(cfg.subtitle || m.subtitle, CW)) { t(M, st.y + 11, ln); st.y += 15 }
+    }
+    st.y += 6
+    fill(EMERALD); d.rect(M, st.y, 54, 3, 'F'); st.y += 16
+
+    // Two facing columns: the subject building, and the report's provenance.
+    const colW = (CW - 24) / 2
+    const leftX = M, rightX = M + colW + 24
+    const yStart = st.y
+    const stack = (px, heading, lines) => {
+      let yy = yStart
+      tc(MUT); font(7.5, 'bold'); t(px, yy + 8, heading.toUpperCase()); yy += 14
+      tc(INK); font(9)
+      for (const ln of (lines || []).filter(Boolean)) {
+        for (const w of wrap(String(ln), colW)) { t(px, yy + 9, w); yy += 12 }
+      }
+      return yy
+    }
+    const p = m.property || {}, b = m.building || {}
+    const yL = stack(leftX, cfg.subject_heading || 'Building Assessed', [
+      b.label || b.name, p.name, ...(p.addressLines || []), p.cityStateZip,
+    ])
+    const yR = stack(rightX, cfg.provenance_heading || 'Report Details', [
+      m.program?.label ? `Program: ${m.program.label}` : null,
+      m.workOrder?.number ? `Work Order: ${m.workOrder.number}` : null,
+      m.assessedOn ? `Assessment Date: ${m.assessedOn}` : null,
+      m.auditor?.name ? `Assessed By: ${m.auditor.name}` : null,
+      m.generatedOn ? `Report Generated: ${m.generatedOn}` : null,
+    ])
+    st.y = Math.max(yL, yR) + 8
+    if ((m.preparedFor?.lines || []).length || m.preparedFor?.name) {
+      tc(MUT); font(7.5, 'bold'); t(M, st.y + 8, (cfg.prepared_for_heading || 'Prepared For').toUpperCase()); st.y += 14
+      tc(INK); font(9)
+      for (const ln of [m.preparedFor.name, ...(m.preparedFor.lines || [])].filter(Boolean)) {
+        for (const w of wrap(String(ln), CW)) { t(M, st.y + 9, w); st.y += 12 }
+      }
+    }
+    st.y += 6; stroke(RULE); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 2
+  },
+
+  /* Scope & methodology narrative. Wording is template config, so it is
+     edited in LEAP without a deploy. */
+  assessment_narrative(x, cfg = {}) {
+    const { band, para, bullets } = x
+    band(cfg.heading || 'Scope & Methodology')
+    para(cfg.body)
+    if ((cfg.items || []).length) bullets(cfg.items)
+  },
+
+  /* Building facts pulled off the property/building records (not the field
+     capture) — the reviewer's orientation table. */
+  assessment_building_summary(x, cfg = {}) {
+    const { m, band, kvTable } = x
+    band(cfg.heading || 'Building Summary')
+    kvTable(m.summaryRows, { emptyLabel: 'No building record data available.' })
+  },
+
+  /* ONE captured work-step section, rendered as a label/value table.
+     config.step names the work step template ('Roof / Ceiling'). This is the
+     section type that makes every capture section printable: the template
+     carries one of these per section, so they reorder, rename and drop
+     without code. */
+  assessment_field_data(x, cfg = {}) {
+    const { m, band, kvTable, subHead, para, MUT, tc, font, t, M, st } = x
+    const step = assessmentStep(m, cfg.step)
+    band(cfg.heading || cfg.step || 'Field Data')
+    if (cfg.body) para(cfg.body)
+    if (!step) {
+      subHead(cfg.missing_label || `Not captured on this assessment — no “${cfg.step}” section on this work order.`)
+      return
+    }
+    if (step.notApplicable) {
+      subHead('Marked Not Applicable' + (step.notApplicableReason ? ` — ${step.notApplicableReason}` : ''))
+      return
+    }
+    const rows = (step.fields || []).map(f => [
+      f.label,
+      f.value != null && String(f.value).trim() !== ''
+        ? String(f.value) + (f.unit ? ` ${f.unit}` : '')
+        : null,
+    ])
+    kvTable(rows, { emptyLabel: 'No values recorded for this section.' })
+
+    // Photos captured on THIS step, printed with the data they document, so
+    // the report can be read side by side with the Asset Score section of the
+    // same name. config.photos: 'step' to include, 'none' (default) to leave
+    // them to the standalone Photo Documentation section.
+    if (cfg.photos === 'step') {
+      const stepPhotos = assessmentStepPhotos(m, step.name)
+      if (stepPhotos.length) {
+        x.subHead(cfg.photo_heading || 'Photo Documentation')
+        x.photoGrid(stepPhotos, { columns: cfg.photo_columns || 2, aspect: cfg.photo_aspect, group_by_step: false })
+      } else if (cfg.photo_empty_label) {
+        x.subHead(cfg.photo_empty_label)
+      }
+    }
+  },
+
+  /* Photo documentation — the photos an internal reviewer flagged with
+     "Include in final report" on the work order's Photos card. Grouped by the
+     work step that captured them, two to a row. */
+  assessment_photo_documentation(x, cfg = {}) {
+    const { m, band, subHead, para, photoGrid, printedPhotoIds } = x
+    band(cfg.heading || 'Photo Documentation')
+    if (cfg.body) para(cfg.body)
+    let photos = m.photos || []
+    // Only the named steps, when the template scopes this block to some.
+    if (Array.isArray(cfg.steps) && cfg.steps.length) {
+      const want = new Set(cfg.steps.map(v => String(v).trim().toLowerCase()))
+      photos = photos.filter(p => want.has(String(p.group || '').trim().toLowerCase()))
+    }
+    // Skip anything a system section already printed, so a template that puts
+    // photos beside their data can still carry a catch-all block at the end.
+    if (cfg.exclude_printed) photos = photos.filter(p => !printedPhotoIds.has(p.id))
+    if (!photos.length) {
+      subHead(cfg.empty_label || 'No photos have been marked “Include in final report” on this work order.')
+      return
+    }
+    photoGrid(photos, {
+      columns: cfg.columns, aspect: cfg.aspect,
+      group_by_step: cfg.group_by_step !== false,
+    })
+  },
+
+  /* Findings / recommended energy efficiency measures. Deliberately narrative
+     + list, authored in the template or per report: the savings analysis is
+     modelled downstream (Snugg Pro / Asset Score), not computed here. */
+  assessment_recommendations(x, cfg = {}) {
+    const { m, band, para, bullets, subHead } = x
+    band(cfg.heading || 'Findings & Recommended Measures')
+    para(cfg.body)
+    const items = (m.recommendations && m.recommendations.length) ? m.recommendations : (cfg.items || [])
+    if (items.length) bullets(items)
+    else if (!cfg.body) subHead(cfg.empty_label || 'No measures recorded.')
+  },
+
+  /* Deliverables this report accompanies. */
+  assessment_deliverables(x, cfg = {}) {
+    const { band, bullets, para } = x
+    band(cfg.heading || 'Deliverables')
+    if (cfg.body) para(cfg.body)
+    bullets(cfg.items || [])
+  },
+
+  /* Acknowledgment + signature rules, with optional e-signature tab capture
+     (same contract as the other engines). */
+  assessment_signature(x, cfg = {}) {
+    const { W, H, M, C, st, font, t, tc, need, stroke, d, band, para, MUT } = x
+    band(cfg.heading || 'Acknowledgment')
+    para(cfg.acknowledgment || 'This report presents the conditions observed at the building on the date of the assessment. It is a record of the assessor’s field observations and the data collected; it does not constitute a warranty or guarantee of the condition or performance of any building component or system.')
+    need(52); st.y += 26; stroke([68, 88, 110]); d.setLineWidth(1)
+    d.line(M, st.y, M + 300, st.y); d.line(W - M - 150, st.y, W - M, st.y)
+    tc(MUT); font(8.5)
+    t(M, st.y + 10, cfg.signer_label || 'Property Owner / Authorized Representative')
+    t(W - M - 150, st.y + 10, 'Date')
+    if (x.collectTabs) {
+      const page = d.getNumberOfPages(), boxH = 26
+      x.signatureTabs.push(
+        { recipient_order: 1, tab_type: 'sig',  page, x: M,          y: H - st.y, width: 300, height: boxH },
+        { recipient_order: 1, tab_type: 'date', page, x: W - M - 150, y: H - st.y, width: 150, height: boxH },
+      )
+    }
+    st.y += 16
+  },
+
+  /* Page footer, stamped on every page with "Page N of M". */
+  assessment_footer(x, cfg = {}) {
+    const { m, W, H, M, d, font, t, tc, stroke, C, text } = x
+    const total = d.getNumberOfPages()
+    const l1 = cfg.company_line || text('assessment.footer.company_line') || text('footer.company_line')
+    const l2 = cfg.contact_line || text('assessment.footer.contact_line') || text('footer.contact_line')
+    const ref = [m.workOrder?.number, m.building?.label || m.building?.name].filter(Boolean).join('  ·  ')
+    for (let pg = 1; pg <= total; pg++) {
+      d.setPage(pg)
+      const fy = H - 40
+      stroke(C.line); d.setLineWidth(.5); d.line(M, fy, W - M, fy)
+      tc(C.mut); font(7.5)
+      if (l1) t(M, fy + 12, String(l1))
+      if (l2) t(M, fy + 21, String(l2))
+      if (ref) t(W / 2, fy + 12, ref, { align: 'center' })
+      t(W - M, fy + 12, `Page ${pg} of ${total}`, { align: 'right' })
+    }
+  },
+}
+
+/**
+ * Render an energy assessment report. `sections` overrides the built-in list
+ * (that is how a stored template drives the output). Returns a Blob, or
+ * { blob, tabs } when opts.collectTabs is set.
+ */
+export async function buildAssessmentReportPdf(m, kind, sections, opts = {}) {
+  const x = await buildAssessmentContext(m, kind, opts)
+  const list = sections && sections.length ? sections : DEFAULT_DOCUMENT_SECTIONS.energyAssessmentReport
+  if (!list) throw new Error(`Unknown assessment document kind: ${kind}`)
+  for (const s of list) {
+    const render = ASSESSMENT_SECTION_RENDERERS[s.type]
+    if (!render) throw new Error(`Unknown assessment section type: ${s.type}`)
+    render(x, s.config || {})
+  }
+  if (opts.collectTabs) return { blob: x.d.output('blob'), tabs: x.signatureTabs }
+  return x.d.output('blob')
+}
+
 // ---------------------------------------------------------------------------
 // Kind → rendering engine, and a single dispatch used by the modal, the
 // template editor, and the live preview. EES kinds render through
@@ -1058,6 +1513,7 @@ export const DOCUMENT_KIND_ENGINE = Object.freeze({
   audit: 'ees', proposal: 'ees', invoice: 'ees',
   sealed_proposal: 'sealed', sealed_invoice: 'sealed',
   combustion_safety_notification: 'combustion_safety',
+  energy_assessment_report: 'energy_assessment',
 })
 
 /** Section-type catalogue per engine — the source of truth for the editor palette. */
@@ -1065,6 +1521,7 @@ export const SECTION_TYPES_BY_ENGINE = Object.freeze({
   ees: Object.keys(SECTION_RENDERERS),
   sealed: Object.keys(SEALED_SECTION_RENDERERS),
   combustion_safety: Object.keys(COMBUSTION_SECTION_RENDERERS),
+  energy_assessment: Object.keys(ASSESSMENT_SECTION_RENDERERS),
 })
 
 /** Render any submittal document by kind, dispatching to the right engine. */
@@ -1072,6 +1529,7 @@ export async function buildSubmittalPdf(m, kind, sections) {
   const engine = DOCUMENT_KIND_ENGINE[kind]
   if (engine === 'sealed') return buildSealedPdf(m, kind, sections)
   if (engine === 'combustion_safety') return buildCombustionPdf(m, kind, sections)
+  if (engine === 'energy_assessment') return buildAssessmentReportPdf(m, kind, sections)
   return buildEesPdf(m, kind, sections)
 }
 
