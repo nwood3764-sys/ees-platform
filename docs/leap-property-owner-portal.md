@@ -84,6 +84,27 @@ Mechanics:
 
 This **replaced a stopgap**: pointing an internal auth identity at a `portal_users` row. That only ever worked for one account at a time, and `fetchPortalUserSelf()`'s `maybeSingle()` would have errored outright the moment a second such row existed. The stopgap row and its 23 grants were soft-deleted when the real feature landed.
 
+### Round 4, 2026-08-24 — Include in Property Owner Portal
+
+Nicholas: *"on the account record, the property record, and the building record, there must be a radio button that says 'Include in property owner portal'. I need some real tactile controls on what's viewable, what's not."*
+
+Visibility is now **two independent axes**, and both must say yes:
+
+| Axis | Where it is set | Question it answers |
+|---|---|---|
+| **Publication** | `Include in Property Owner Portal` on the account, property and building | Is this record published to the portal at all? |
+| **Grant** | `portal_user_property_grants`, via Add to Portal on a contact | Which portal user may see it? |
+
+Publication cascades top-down: **account** is the master switch (off publishes nothing from that organisation), **property** publishes itself and everything beneath, **building** publishes itself and its units, opportunities, projects, work orders, photos and visits — with the property still listing as an empty container when only the building is excluded.
+
+Defaults are deliberately asymmetric: `accounts` **false** (publishing an organisation is an affirmative act, made once), `properties` and `buildings` **true** (inside a published organisation everything is published unless deliberately excluded). Backfill set the 34 accounts that already had portal content to true so the reviewed previews kept working; every other account, and every new one, starts unpublished.
+
+**One definition of visibility.** `portal_visible_property_ids()` / `portal_visible_building_ids()` apply publication *and* the grant/account guard in one place. The tracker, the calendar and `portal-photo-urls` v3 all resolve their scope through them, instead of each carrying its own copy of the CTEs — which is precisely how three copies drift apart. EXECUTE is revoked from `anon` and `authenticated`: they are internals of the portal RPCs, not an API (and so they add zero advisor lints).
+
+**Verified in rolled-back transactions** against Lutheran Social Services (baseline 23 properties / 3 buildings / 56 visits): account unpublished → 0 and 0; one property unpublished → 22 properties, that property gone, visits 56 → 5; its building unpublished only → 23 properties with that one showing 0 buildings, visits 56 → 5.
+
+**The control is on the page.** A purpose-named *Property Owner Portal* section carrying the single checkbox was placed on all 19 account / property / building record layouts (8 + 6 + 5), above System Information. The Portal module list shows publication state per organisation — a *Not published* badge, and published/total counts for properties and buildings — and the portal itself, in admin preview, explains an empty result by naming the flag rather than showing a blank tree.
+
 ## 3. Current-state architecture map
 
 ### Client

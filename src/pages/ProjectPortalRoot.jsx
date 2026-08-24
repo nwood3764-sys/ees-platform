@@ -1274,7 +1274,18 @@ export default function ProjectPortalRoot() {
             else if (a.propertyId && a.buildingId) { setView('tree'); onSelect({ pid: a.propertyId, bid: a.buildingId }) }
           }} />}
           {view === 'tree' && <>
-            {!property && <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>}
+            {!property && (viewAs
+              ? <Centered>
+                  <div style={{ maxWidth: 460 }}>
+                    <strong>Nothing is published for {viewAs.label}.</strong>
+                    <div style={{ marginTop: 8 }}>
+                      An organization appears here only when <em>Include in Property Owner Portal</em> is ticked on the
+                      account, and on the properties and buildings you want shown. Tick the account first — its
+                      properties and buildings are included by default.
+                    </div>
+                  </div>
+                </Centered>
+              : <Centered>You don't have any properties assigned yet. Contact your project coordinator.</Centered>)}
             {property && building && unit && <UnitPage property={property} building={building} unit={unit} colorOf={colorOf} />}
             {property && building && !unit && project && <ProjectPage property={property} building={building} project={project} opportunity={projectOpp} color={colorOf(projectOpp?.program)} />}
             {property && building && !unit && !project && <BuildingPage property={property} building={building} colorOf={colorOf} onOpenProject={(pr) => onSelect({ pid: property.id, bid: building.id, projId: pr.id })} />}
