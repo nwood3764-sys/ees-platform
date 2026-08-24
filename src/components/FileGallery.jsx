@@ -32,6 +32,12 @@ import {
   freshDocumentUrlsBatch,
 } from '../data/storageService'
 import { isSignedUrlUsable } from '../lib/signedUrlExpiry'
+import {
+  documentFileName,
+  documentsZipName,
+  pruneSelectedIds,
+  uniqueEntryName,
+} from '../lib/documentDownloads'
 
 // ---------------------------------------------------------------------------
 // FileGallery — Salesforce-style related-list card for photos and documents.
@@ -136,19 +142,50 @@ async function downloadPhotosZip(photos, zipName) {
     if (!u) { skipped++; continue }
     let blob
     try { blob = await fetchAsBlob(u) } catch { skipped++; continue }
-    let name = photoFileName(p)
-    if (used.has(name)) {
-      const dot = name.lastIndexOf('.')
-      const b = name.slice(0, dot), e = name.slice(dot)
-      let i = 2
-      while (used.has(`${b} (${i})${e}`)) i++
-      name = `${b} (${i})${e}`
-    }
+    const name = uniqueEntryName(photoFileName(p), used)
     used.add(name)
     zip.file(name, blob)
     added++
   }
   if (added === 0) throw new Error('no original files could be fetched')
+  const out = await zip.generateAsync({ type: 'blob' })
+  triggerBlobDownload(out, zipName)
+  return { added, skipped }
+}
+
+// Documents download as themselves — the stored file, under the name it was
+// uploaded with. There is no watermarked variant and nothing is re-encoded, so
+// an Asset Score PDF or an .osm model comes back byte-identical to what the
+// program will be sent.
+async function downloadSingleDocument(d) {
+  // Same re-sign-first rule as photos: the URL on the row was minted when the
+  // card loaded and a record page stays open for hours.
+  const fresh = await freshDocumentUrls(d)
+  const u = fresh._url || fresh._previewUrl
+  if (!u) throw new Error('file not available')
+  triggerBlobDownload(await fetchAsBlob(u), documentFileName(fresh))
+}
+
+// Zip a selection of documents in-browser (jszip lazy-loaded, same as the
+// photo path, so it stays off the main bundle). One batched re-sign for the
+// whole selection rather than one call per file.
+async function downloadDocumentsZip(documents, zipName) {
+  const JSZip = (await import('jszip')).default
+  const zip = new JSZip()
+  const used = new Set()
+  let added = 0, skipped = 0
+  const rows = await freshDocumentUrlsBatch(documents)
+  for (const d of rows) {
+    const u = d._url || d._previewUrl
+    if (!u) { skipped++; continue }
+    let blob
+    try { blob = await fetchAsBlob(u) } catch { skipped++; continue }
+    const name = uniqueEntryName(documentFileName(d), used)
+    used.add(name)
+    zip.file(name, blob)
+    added++
+  }
+  if (added === 0) throw new Error('no files could be fetched')
   const out = await zip.generateAsync({ type: 'blob' })
   triggerBlobDownload(out, zipName)
   return { added, skipped }
@@ -192,7 +229,9 @@ export default function FileGalleryWidget({
   // (Nicholas, 2026-08-22).
   const [stepFilter, setStepFilter] = useState([])  // WO gallery: work step ids
   const [tagFilter, setTagFilter]   = useState([])  // WO gallery: photo_types
-  const [selectMode, setSelectMode]   = useState(false)    // photos: multi-select for download
+  // Multi-select for the bulk actions, in BOTH modes. Documents got it on
+  // 2026-08-24 — nine Asset Score files had to be pulled one at a time.
+  const [selectMode, setSelectMode]   = useState(false)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [downloading, setDownloading] = useState(false)
   const [showReportOnly, setShowReportOnly] = useState(false) // filter to report-flagged photos
@@ -299,17 +338,21 @@ export default function FileGalleryWidget({
     })
   }, [items, stepFilter, tagFilter, isWorkOrderPhotoGallery, showReportOnly])
 
-  // ── Photo selection + download ──────────────────────────────────────
-  // Drop selections that scroll out of the current step filter so the count
-  // always matches what's on screen.
+  // The rows a bulk action can actually reach: the filtered grid in photo
+  // mode, the whole list in document mode (documents carry no filters).
+  const visibleItems = target === 'photos' ? visiblePhotos : items
+
+  // ── Selection + download ────────────────────────────────────────────
+  // Drop selections that scroll out of the current filter, or that were just
+  // deleted, so the count always matches what's on screen.
   useEffect(() => {
     if (!selectMode) return
-    const visibleIds = new Set(visiblePhotos.map(p => p.id))
+    const visibleIds = visibleItems.map(it => it.id)
     setSelectedIds(prev => {
-      const next = new Set([...prev].filter(id => visibleIds.has(id)))
-      return next.size === prev.size ? prev : next
+      const next = pruneSelectedIds([...prev], visibleIds)
+      return next.length === prev.size ? prev : new Set(next)
     })
-  }, [visiblePhotos, selectMode])
+  }, [visibleItems, selectMode])
 
   const toggleSelect = (id) => setSelectedIds(prev => {
     const n = new Set(prev)
@@ -317,21 +360,41 @@ export default function FileGalleryWidget({
     return n
   })
   const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()) }
-  const selectAllVisible = () => setSelectedIds(new Set(visiblePhotos.map(p => p.id)))
+  const selectAllVisible = () => setSelectedIds(new Set(visibleItems.map(it => it.id)))
 
+  // One file downloads as itself; several are zipped. Both modes take the same
+  // route so a selection of one never produces a zip holding a single file.
   const handleDownloadSelected = async () => {
-    const chosen = visiblePhotos.filter(p => selectedIds.has(p.id))
+    const chosen = visibleItems.filter(it => selectedIds.has(it.id))
     if (chosen.length === 0) return
+    const noun = target === 'photos' ? 'photo' : 'document'
     setDownloading(true)
     try {
-      if (chosen.length === 1) await downloadSinglePhoto(chosen[0])
-      else await downloadPhotosZip(chosen, 'work-order-photos.zip')
-      toast.success(`Downloaded ${chosen.length} photo${chosen.length > 1 ? 's' : ''}`)
+      if (target === 'photos') {
+        if (chosen.length === 1) await downloadSinglePhoto(chosen[0])
+        else await downloadPhotosZip(chosen, 'work-order-photos.zip')
+      } else {
+        if (chosen.length === 1) await downloadSingleDocument(chosen[0])
+        else await downloadDocumentsZip(chosen, documentsZipName(title))
+      }
+      toast.success(`Downloaded ${chosen.length} ${noun}${chosen.length > 1 ? 's' : ''}`)
       exitSelect()
     } catch (e) {
       toast.error(`Download failed: ${e.message || e}`)
     } finally {
       setDownloading(false)
+    }
+  }
+
+  // Single-row download, from the row's own button and from the preview modal.
+  // Kept separate from the selection path so downloading one file never
+  // requires entering select mode first.
+  const handleDownloadDocument = async (d) => {
+    try {
+      await downloadSingleDocument(d)
+      toast.success(`Downloaded ${d.name || 'document'}`)
+    } catch (e) {
+      toast.error(`Download failed: ${e.message || e}`)
     }
   }
 
@@ -501,15 +564,17 @@ export default function FileGalleryWidget({
     // out of the database (LEAP never hard-deletes).
     if (Array.isArray(ids)) {
       const del = target === 'photos' ? softDeletePhoto : softDeleteDocument
+      const noun = target === 'photos' ? 'photo' : 'document'
       const results = await Promise.allSettled(ids.map(one => del(one)))
       const failed = results.filter(r => r.status === 'rejected').length
       const ok = results.length - failed
-      if (ok) toast.success(`Deleted ${ok} ${ok === 1 ? 'photo' : 'photos'}`)
+      if (ok) toast.success(`Deleted ${ok} ${ok === 1 ? noun : `${noun}s`}`)
       if (failed) toast.error(`${failed} could not be deleted`)
       setConfirmDelete(null)
       setSelectedIds(new Set())
       setSelectMode(false)
       if (lightboxIdx !== null) setLightboxIdx(null)
+      if (previewDoc && ids.includes(previewDoc.id)) setPreviewDoc(null)
       await refresh()
       return
     }
@@ -744,12 +809,38 @@ export default function FileGalleryWidget({
                 )}
               </>
             ) : (
-              <DocumentList
-                documents={items}
-                isMobile={isMobile}
-                onPreview={(d) => setPreviewDoc(d)}
-                onDelete={(d) => setConfirmDelete({ id: d.id, name: d.name || 'document' })}
-              />
+              <>
+                <DocumentToolbar
+                  selectMode={selectMode}
+                  selectedCount={selectedIds.size}
+                  totalCount={visibleItems.length}
+                  downloading={downloading}
+                  onEnterSelect={() => setSelectMode(true)}
+                  onCancel={exitSelect}
+                  onSelectAll={selectAllVisible}
+                  onDownload={handleDownloadSelected}
+                  onDeleteSelected={() => {
+                    const chosen = visibleItems.filter(d => selectedIds.has(d.id))
+                    if (chosen.length === 0) return
+                    setConfirmDelete({
+                      ids: chosen.map(d => d.id),
+                      name: chosen.length === 1
+                        ? (chosen[0].name || 'document')
+                        : `${chosen.length} documents`,
+                    })
+                  }}
+                />
+                <DocumentList
+                  documents={items}
+                  isMobile={isMobile}
+                  selectMode={selectMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                  onPreview={(d) => setPreviewDoc(d)}
+                  onDownload={handleDownloadDocument}
+                  onDelete={(d) => setConfirmDelete({ id: d.id, name: d.name || 'document' })}
+                />
+              </>
             )}
           </div>
         )}
@@ -771,6 +862,7 @@ export default function FileGalleryWidget({
       {target === 'documents' && previewDoc && (
         <DocumentPreviewModal
           doc={previewDoc}
+          onDownload={() => handleDownloadDocument(previewDoc)}
           onClose={() => setPreviewDoc(null)}
         />
       )}
@@ -1439,7 +1531,78 @@ function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggl
   )
 }
 
-function DocumentList({ documents, isMobile, onPreview, onDelete }) {
+// Toolbar above the document list: enter select mode → Select all / Cancel /
+// Delete / Download. Purpose-built for documents rather than shared with
+// PhotoToolbar, which carries the final-report flag actions that mean nothing
+// to a document (Nicholas, 2026-08-24).
+function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected }) {
+  if (totalCount === 0) return null
+  const btn = (extra = {}) => ({
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '5px 10px', fontSize: 12, fontWeight: 600,
+    borderRadius: 6, cursor: 'pointer', border: `1px solid ${C.border}`,
+    background: C.card, color: C.textSecondary, ...extra,
+  })
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+      gap: 8, marginBottom: 10, flexWrap: 'wrap',
+    }}>
+      {!selectMode ? (
+        <button onClick={onEnterSelect} style={btn()}>
+          <Icon path="M9 11l3 3L22 4 M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" size={13} color={C.textSecondary} />
+          Select
+        </button>
+      ) : (
+        <>
+          <span style={{ fontSize: 12, color: C.textMuted, marginRight: 'auto' }}>
+            {selectedCount} selected
+          </span>
+          <button onClick={onSelectAll} style={btn()}>
+            {selectedCount === totalCount ? 'All selected' : `Select all (${totalCount})`}
+          </button>
+          <button onClick={onCancel} style={btn()}>Cancel</button>
+          {/* Blue, not red, per the design system; soft delete either way. */}
+          <button
+            onClick={onDeleteSelected}
+            disabled={selectedCount === 0}
+            title="Move the selected documents to the recycle bin"
+            style={btn({
+              background: selectedCount === 0 ? C.border : '#eef5fc',
+              borderColor: selectedCount === 0 ? C.border : '#bcd9f2',
+              color: selectedCount === 0 ? C.textMuted : '#1a5a8a',
+              cursor: selectedCount === 0 ? 'default' : 'pointer',
+            })}
+          >
+            <Icon path="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              size={13} color={selectedCount === 0 ? C.textMuted : '#1a5a8a'} />
+            Delete{selectedCount ? ` (${selectedCount})` : ''}
+          </button>
+          {/* One file comes down as itself; several arrive as a single zip. */}
+          <button
+            onClick={onDownload}
+            disabled={selectedCount === 0 || downloading}
+            title={selectedCount > 1
+              ? 'Download the selected documents as one zip'
+              : 'Download the selected document'}
+            style={btn({
+              background: (selectedCount === 0 || downloading) ? C.border : C.emerald,
+              color: (selectedCount === 0 || downloading) ? C.textMuted : '#fff',
+              border: 'none',
+              cursor: (selectedCount === 0 || downloading) ? 'default' : 'pointer',
+            })}
+          >
+            <Icon path="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+              size={13} color={(selectedCount === 0 || downloading) ? C.textMuted : '#fff'} />
+            {downloading ? 'Preparing…' : `Download${selectedCount ? ` (${selectedCount})` : ''}`}
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSelect, onPreview, onDownload, onDelete }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {documents.map((d) => (
@@ -1447,7 +1610,11 @@ function DocumentList({ documents, isMobile, onPreview, onDelete }) {
           key={d.id}
           doc={d}
           isMobile={isMobile}
+          selectMode={selectMode}
+          selected={selectedIds?.has(d.id) || false}
+          onToggleSelect={() => onToggleSelect(d.id)}
           onPreview={() => onPreview(d)}
+          onDownload={() => onDownload(d)}
           onDelete={() => onDelete(d)}
         />
       ))}
@@ -1455,7 +1622,7 @@ function DocumentList({ documents, isMobile, onPreview, onDelete }) {
   )
 }
 
-function DocumentRow({ doc, isMobile, onPreview, onDelete }) {
+function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPreview, onDownload, onDelete }) {
   const [hover, setHover] = useState(false)
   const ext = (doc.name || '').split('.').pop()?.toLowerCase() || ''
   const iconPath = ext === 'pdf'
@@ -1469,9 +1636,13 @@ function DocumentRow({ doc, isMobile, onPreview, onDelete }) {
         { month: 'short', day: 'numeric', year: 'numeric' })
     : null
 
+  // While selecting, the whole row is the checkbox — clicking a row to open a
+  // preview mid-selection is how you lose a selection you were building.
   const open = () => {
+    if (selectMode) { onToggleSelect(); return }
     if (doc._url) onPreview()
   }
+  const clickable = selectMode || !!doc._url
 
   return (
     <div
@@ -1482,11 +1653,25 @@ function DocumentRow({ doc, isMobile, onPreview, onDelete }) {
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '8px 10px',
         borderRadius: 6,
-        cursor: doc._url ? 'pointer' : 'default',
-        background: hover ? '#f5f8fc' : 'transparent',
+        cursor: clickable ? 'pointer' : 'default',
+        background: selected ? '#eaf7f1' : hover ? '#f5f8fc' : 'transparent',
+        boxShadow: selected ? `inset 0 0 0 1px ${C.emerald}` : 'none',
+        // The whole row is a toggle while selecting, so a click must not also
+        // drag-select the filename text under the cursor.
+        userSelect: selectMode ? 'none' : 'auto',
         transition: 'background 0.1s',
       }}
     >
+      {selectMode && (
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Select ${doc.name || 'document'}`}
+          style={{ width: 15, height: 15, accentColor: C.emerald, flexShrink: 0, cursor: 'pointer' }}
+        />
+      )}
       <div style={{
         width: 32, height: 32, borderRadius: 5,
         background: '#e8f3fb',
@@ -1512,24 +1697,47 @@ function DocumentRow({ doc, isMobile, onPreview, onDelete }) {
           {dateStr && !isMobile && <span>· {dateStr}</span>}
         </div>
       </div>
-      <button
-        onClick={(e) => { e.stopPropagation(); onDelete() }}
-        style={{
-          background: 'transparent',
-          border: 'none',
-          width: 28, height: 28, borderRadius: 4,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer',
-          opacity: hover || isMobile ? 1 : 0,
-          transition: 'opacity 0.15s',
-        }}
-        title="Delete"
-      >
-        <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"
-          size={13} color={C.textMuted} />
-      </button>
+      {/* Row actions are hidden while selecting — the toolbar owns the actions
+          then, and a stray per-row delete mid-selection is a surprise. */}
+      {!selectMode && (
+        <>
+          {doc._url && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDownload() }}
+              style={rowActionStyle(hover || isMobile)}
+              title="Download"
+            >
+              <Icon path="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                size={13} color={C.textMuted} />
+            </button>
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete() }}
+            style={rowActionStyle(hover || isMobile)}
+            title="Delete"
+          >
+            <Icon path="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"
+              size={13} color={C.textMuted} />
+          </button>
+        </>
+      )}
     </div>
   )
+}
+
+// Hover-revealed row action button. Always visible on mobile, where there is
+// no hover to reveal it with.
+function rowActionStyle(visible) {
+  return {
+    background: 'transparent',
+    border: 'none',
+    width: 28, height: 28, borderRadius: 4,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer',
+    flexShrink: 0,
+    opacity: visible ? 1 : 0,
+    transition: 'opacity 0.15s',
+  }
 }
 
 function formatBytes(n) {
@@ -1815,7 +2023,7 @@ function getPreviewKind(doc) {
   return 'fallback'
 }
 
-export function DocumentPreviewModal({ doc: docProp, onClose }) {
+export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
   const isMobile = useIsMobile()
 
   // The signed URL on the row was minted when the gallery loaded, and a record
@@ -1935,6 +2143,25 @@ export function DocumentPreviewModal({ doc: docProp, onClose }) {
                 size={11} color={C.textSecondary} />
               Open in new tab
             </a>
+          )}
+          {/* Saving the file was previously only reachable by opening it in a
+              new tab and downloading from the browser's own viewer. */}
+          {url && onDownload && (
+            <button
+              onClick={onDownload}
+              style={{
+                background: C.emerald, color: '#fff',
+                border: 'none', borderRadius: 5,
+                padding: '6px 12px', fontSize: 12.5, cursor: 'pointer',
+                fontWeight: 600,
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                flexShrink: 0,
+              }}
+            >
+              <Icon path="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                size={12} color="#fff" />
+              Download
+            </button>
           )}
           <button
             onClick={onClose}
