@@ -8,8 +8,10 @@
 //   photo tag   what the photo IS (`photo_type`) — for LEAP Pad captures this
 //               is the named photo prompt from the work step template
 //               ('kitchen_overall_photo'), whose human label lives on
-//               work_step_template_fields.wstf_field_label; for ad hoc
-//               uploads it is 'general', 'before', or 'after'
+//               work_step_template_fields.wstf_field_label; for a photo
+//               uploaded straight onto a work order it is a value chosen by
+//               hand from the `photos` / `photo_type` picklist ('Damage or
+//               Deficiency'), or 'general' when nobody has tagged it yet
 //
 // Both drive a filter dropdown on the work order's Photos card, so a
 // reviewer can pull "every Kitchen Overall Photo on this assessment" out of
@@ -116,6 +118,70 @@ export function buildTagFilterOptions(items, labels) {
     const bm = isMeaningfulTag(b.id) ? 0 : 1
     return (am - bm) || a.label.localeCompare(b.label)
   })
+}
+
+// The tag that means "nobody has said what this is". Written at upload, and
+// what the tag picker clears back to.
+export const UNTAGGED = 'general'
+
+/**
+ * Is a photo's tag part of a work step's evidence checklist?
+ *
+ * This is the reason the tag picker warns rather than just saving. A work step
+ * template asks for named shots ('kitchen_overall_photo'), and the DB counts
+ * them by photo_type to decide whether the step can be completed — including
+ * the legacy 'before'/'after' legs, which are matched case-insensitively (hence
+ * the picklist storing 'Before' and 'After' with those exact spellings, so a
+ * hand-applied tag satisfies the same gate).
+ *
+ * Re-tagging such a photo is allowed — a mis-tagged shot has to be correctable
+ * — but it can satisfy or un-satisfy a step, so the person doing it is told.
+ */
+export function tagIsStepEvidence(photo) {
+  if (!photo?.work_step_id && !photo?._work_step_id) return false
+  const raw = String(photo?.photo_type ?? '').trim().toLowerCase()
+  if (!raw || raw === UNTAGGED) return false
+  return true
+}
+
+/**
+ * Of a selection about to be re-tagged, which photos carry step evidence?
+ * Returns the affected photos so the caller can name the steps rather than
+ * warn in the abstract.
+ */
+export function stepEvidenceInSelection(photos) {
+  return (photos || []).filter(tagIsStepEvidence)
+}
+
+/**
+ * The tag options a person may CHOOSE, given the picklist and the photos being
+ * tagged. Two rules, both about not silently destroying evidence:
+ *
+ *   - The picklist values are always offered, in the admin's order.
+ *   - Tags already on the selection that the picklist does not contain (a work
+ *     step template's named prompts) are offered too, so re-tagging a batch
+ *     back to a step's own prompt stays possible without an admin adding every
+ *     template field name to the picklist.
+ *
+ * `UNTAGGED` is never in the list — clearing is a separate action, so it can
+ * read as "Remove tag" rather than sit among the real choices.
+ */
+export function buildTagChoices(picklistOptions, photos, labels) {
+  const out = []
+  const seen = new Set()
+  for (const o of picklistOptions || []) {
+    const value = String(o?.value ?? '').trim()
+    if (!value || seen.has(value.toLowerCase())) continue
+    seen.add(value.toLowerCase())
+    out.push({ value, label: o.label || value, source: 'picklist' })
+  }
+  for (const p of photos || []) {
+    const value = String(p?.photo_type ?? '').trim()
+    if (!value || value === UNTAGGED || seen.has(value.toLowerCase())) continue
+    seen.add(value.toLowerCase())
+    out.push({ value, label: photoTagLabel(p, labels), source: 'in-use' })
+  }
+  return out
 }
 
 /** The step a photo filters under. */
