@@ -4,8 +4,11 @@ import { Icon } from './UI'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
 import {
+  UNTAGGED,
   buildStepFilterOptions,
+  buildTagChoices,
   buildTagFilterOptions,
+  stepEvidenceInSelection,
   filterGalleryPhotos,
   isMeaningfulTag,
   photoTagLabel,
@@ -23,6 +26,8 @@ import {
   setPhotoReportInclusion,
   reprocessPhoto,
   repairUnrenderedPhotos,
+  fetchPhotoTagOptions,
+  setPhotoTag,
   uploadDocument,
   listDocuments,
   hydrateDocumentUrls,
@@ -427,6 +432,9 @@ export default function FileGalleryWidget({
   // keeps up with a 40-photo selection.
   const [reportBusy, setReportBusy] = useState(false)
   const [repairBusy, setRepairBusy] = useState(null) // {done,total} while repairing
+  const [tagPicker, setTagPicker] = useState(null)   // {photos} while choosing a tag
+  const [tagVocabulary, setTagVocabulary] = useState([]) // picklist: photos / photo_type
+  const [tagBusy, setTagBusy] = useState(null)       // {done,total} while applying
   const selectedPhotos = useMemo(
     () => visiblePhotos.filter(p => selectedIds.has(p.id)),
     [visiblePhotos, selectedIds])
@@ -476,6 +484,18 @@ export default function FileGalleryWidget({
     const t = setTimeout(refresh, 4000)
     return () => clearTimeout(t)
   }, [items, target, refresh])
+
+  // The tag vocabulary is admin-managed, so it is read from the picklist rather
+  // than compiled in. Loaded once per card; an empty list is a real answer (an
+  // admin has retired every tag) and the picker says so.
+  useEffect(() => {
+    if (target !== 'photos') return
+    let cancelled = false
+    fetchPhotoTagOptions()
+      .then(opts => { if (!cancelled) setTagVocabulary(opts) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [target])
 
   // Photos with no displayable image — a HEIC capture whose rendition and
   // watermark were never produced. These are the tiles that used to render as
@@ -629,6 +649,33 @@ export default function FileGalleryWidget({
       toast.info('Re-processing — will refresh shortly')
     } catch (e) {
       toast.error(e.message || 'Re-processing failed')
+      await refresh()
+    }
+  }
+
+  const handleApplyTag = async (tag) => {
+    const photos = tagPicker?.photos || []
+    if (photos.length === 0) return
+    const ids = photos.map(p => p.id)
+    setTagBusy({ done: 0, total: ids.length })
+    try {
+      const { failed } = await setPhotoTag(ids, tag, {
+        onProgress: ({ done, total }) => setTagBusy({ done, total }),
+      })
+      const label = tag
+        ? `Tagged ${ids.length} photo${ids.length === 1 ? '' : 's'}`
+        : `Tag removed from ${ids.length} photo${ids.length === 1 ? '' : 's'}`
+      toast.success(label)
+      // The tag is printed onto the watermark, so the image is being re-rendered
+      // behind this. Say so rather than leaving the old stamp on screen looking
+      // like the save did not take.
+      if (failed > 0) toast.error(`${failed} could not be re-stamped — use Render on those tiles`)
+      setTagPicker(null)
+      exitSelect()
+    } catch (e) {
+      toast.error(e.message || 'Tagging failed')
+    } finally {
+      setTagBusy(null)
       await refresh()
     }
   }
@@ -822,6 +869,10 @@ export default function FileGalleryWidget({
                   onReportSelected={handleReportSelected}
                   selectedAllInReport={selectedAllInReport}
                   reportBusy={reportBusy}
+                  onTagSelected={() => {
+                    const chosen = visiblePhotos.filter(p => selectedIds.has(p.id))
+                    if (chosen.length > 0) setTagPicker({ photos: chosen })
+                  }}
                   onDeleteSelected={() => {
                     const ids = visiblePhotos.filter(p => selectedIds.has(p.id)).map(p => p.id)
                     if (ids.length === 0) return
@@ -945,6 +996,17 @@ export default function FileGalleryWidget({
           doc={previewDoc}
           onDownload={() => handleDownloadDocument(previewDoc)}
           onClose={() => setPreviewDoc(null)}
+        />
+      )}
+
+      {/* Tag picker */}
+      {tagPicker && (
+        <PhotoTagPickerModal
+          photos={tagPicker.photos}
+          vocabulary={tagVocabulary}
+          busy={tagBusy}
+          onApply={handleApplyTag}
+          onCancel={() => { if (!tagBusy) setTagPicker(null) }}
         />
       )}
 
@@ -1303,7 +1365,7 @@ const FLAG_ICON = 'M6 3h12a1 1 0 011 1v17l-7-4-7 4V4a1 1 0 011-1z'
 
 // Toolbar above the grid: report-filter chip, then enter select mode →
 // Select-all / Download / Cancel.
-function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, reportCount, showReportOnly, onToggleReportFilter, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected, onReportSelected, selectedAllInReport, reportBusy }) {
+function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, reportCount, showReportOnly, onToggleReportFilter, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected, onReportSelected, selectedAllInReport, reportBusy, onTagSelected }) {
   if (totalCount === 0 && !showReportOnly && !reportCount) return null
   const btn = (extra = {}) => ({
     display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -1337,6 +1399,24 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
             {selectedCount === totalCount ? 'All selected' : `Select all (${totalCount})`}
           </button>
           <button onClick={onCancel} style={btn()}>Cancel</button>
+          {/* Tag the selection. A photo uploaded onto the work order rather
+              than captured against a work step arrives untagged, and until
+              this existed there was no way to say what it showed — sixty
+              photos of a job all reading "Work Order" (Nicholas, 2026-08-24).
+              Bulk because that is how they arrive: a whole visit at once. */}
+          <button
+            onClick={onTagSelected}
+            disabled={selectedCount === 0}
+            title="Set what these photos show"
+            style={btn({
+              color: selectedCount === 0 ? C.textMuted : C.textSecondary,
+              cursor: selectedCount === 0 ? 'default' : 'pointer',
+            })}
+          >
+            <Icon path="M20.6 13.4L12 4.8V2H4v8h2.8l8.6 8.6a2 2 0 002.8 0l2.4-2.4a2 2 0 000-2.8z M7 7h.01"
+              size={12} color={selectedCount === 0 ? C.textMuted : C.textSecondary} />
+            Tag{selectedCount ? ` (${selectedCount})` : ''}
+          </button>
           {/* Flag the whole selection for the final report in one press. With
               multi-select filters this is the point of selecting at all: filter
               to Roof / Ceiling + Windows & Doors, Select all, and mark them.
@@ -2714,6 +2794,145 @@ function WordPreview({ doc }) {
 // ---------------------------------------------------------------------------
 // Confirm delete
 // ---------------------------------------------------------------------------
+
+// ── Tag picker ──────────────────────────────────────────────────────────────
+// Says what a photo SHOWS. A capture made against a work step is already
+// tagged with that step's named prompt; a photo uploaded straight onto the work
+// order arrives untagged, and this is where it gets one.
+//
+// Two things this deliberately does that a plain dropdown would not:
+//
+//   - It warns when the selection contains step evidence. The work step
+//     evidence gates count photos by tag, so re-tagging one of those can
+//     satisfy or un-satisfy a step. Correcting a mis-tagged shot has to stay
+//     possible, so the warning names what is affected instead of blocking.
+//   - It says the watermark is being redrawn. The tag is printed onto the face
+//     of the evidence copy, so tagging is not a metadata-only edit.
+function PhotoTagPickerModal({ photos, vocabulary, busy, onApply, onCancel }) {
+  const count = photos.length
+  const choices = useMemo(() => buildTagChoices(vocabulary, photos), [vocabulary, photos])
+  const stepEvidence = useMemo(() => stepEvidenceInSelection(photos), [photos])
+  // Every photo already carrying the same tag → show it as the current value.
+  const currentTag = useMemo(() => {
+    const tags = new Set(photos.map(p => String(p.photo_type || '').trim() || UNTAGGED))
+    return tags.size === 1 ? Array.from(tags)[0] : null
+  }, [photos])
+  const anyTagged = photos.some(p => isMeaningfulTag(p.photo_type))
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9200,
+        background: 'rgba(7,17,31,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      }}
+    >
+      <div style={{
+        background: C.card, borderRadius: 8, border: `1px solid ${C.border}`,
+        boxShadow: '0 12px 40px rgba(7,17,31,0.28)',
+        width: 'min(440px, 100%)', maxHeight: '86vh',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{ padding: '14px 16px 10px', borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700, color: C.textPrimary }}>
+            Tag {count} photo{count === 1 ? '' : 's'}
+          </div>
+          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>
+            What do these photos show? The tag is stamped onto the watermarked
+            copy, so each photo is re-rendered after it is set.
+          </div>
+        </div>
+
+        {stepEvidence.length > 0 && (
+          <div style={{
+            margin: '10px 16px 0', padding: '8px 11px',
+            background: '#eef4fb', border: `1px solid ${C.sky}`, borderRadius: 6,
+            fontSize: 12, color: C.textSecondary, lineHeight: 1.45,
+          }}>
+            {stepEvidence.length} of these {stepEvidence.length === 1 ? 'is' : 'are'} work
+            step evidence. A step's checklist counts photos by tag, so re-tagging
+            {stepEvidence.length === 1 ? ' it' : ' them'} may change whether that
+            step reads as complete.
+          </div>
+        )}
+
+        <div style={{ overflowY: 'auto', padding: '8px 8px 4px', flex: 1 }}>
+          {choices.length === 0 ? (
+            <div style={{ padding: 16, fontSize: 12.5, color: C.textMuted }}>
+              No photo tags are configured. An administrator adds them at
+              Setup → Picklists, on <strong>photos / photo_type</strong>.
+            </div>
+          ) : choices.map(c => {
+            const isCurrent = currentTag && currentTag.toLowerCase() === c.value.toLowerCase()
+            return (
+              <button
+                key={c.value}
+                onClick={() => onApply(c.value)}
+                disabled={!!busy}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '9px 12px', marginBottom: 2,
+                  border: `1px solid ${isCurrent ? C.emerald : 'transparent'}`,
+                  background: isCurrent ? '#e8f8f2' : 'transparent',
+                  borderRadius: 6, cursor: busy ? 'default' : 'pointer',
+                  fontSize: 13, color: C.textPrimary, fontWeight: isCurrent ? 600 : 500,
+                }}
+              >
+                {c.label}
+                {c.source === 'in-use' && (
+                  <span style={{ fontSize: 10.5, color: C.textMuted, marginLeft: 8 }}>
+                    already in use
+                  </span>
+                )}
+                {isCurrent && (
+                  <span style={{ fontSize: 10.5, color: C.emeraldMid, marginLeft: 8 }}>
+                    current
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        <div style={{
+          display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center',
+          padding: '10px 16px', borderTop: `1px solid ${C.border}`,
+        }}>
+          <button
+            onClick={() => onApply(null)}
+            disabled={!!busy || !anyTagged}
+            title={anyTagged ? 'Clear the tag from these photos' : 'These photos have no tag'}
+            style={{
+              padding: '6px 11px', borderRadius: 6,
+              border: `1px solid ${C.border}`, background: C.card,
+              color: (busy || !anyTagged) ? C.textMuted : C.textSecondary,
+              fontSize: 12, fontWeight: 600,
+              cursor: (busy || !anyTagged) ? 'default' : 'pointer',
+            }}
+          >Remove tag</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {busy && (
+              <span style={{ fontSize: 12, color: C.textMuted }}>
+                Re-stamping {busy.done}/{busy.total}…
+              </span>
+            )}
+            <button
+              onClick={onCancel}
+              disabled={!!busy}
+              style={{
+                padding: '6px 13px', borderRadius: 6,
+                border: `1px solid ${C.border}`, background: C.card,
+                color: C.textSecondary, fontSize: 12, fontWeight: 600,
+                cursor: busy ? 'default' : 'pointer',
+              }}
+            >Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function ConfirmDeleteModal({ name, target, count = 1, onConfirm, onCancel }) {
   const [busy, setBusy] = useState(false)

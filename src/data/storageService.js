@@ -8,7 +8,7 @@ import {
   isHeifBytes,
   displayPathForPhoto,
 } from '../lib/heifRendition'
-import { WORK_ORDER_STEP_KEY, UNASSIGNED_STEP_KEY } from '../lib/photoTags'
+import { WORK_ORDER_STEP_KEY, UNASSIGNED_STEP_KEY, UNTAGGED as UNTAGGED_PHOTO_TYPE } from '../lib/photoTags'
 import { areSignedUrlsUsable } from '../lib/signedUrlExpiry'
 
 // ---------------------------------------------------------------------------
@@ -607,12 +607,20 @@ export async function listWorkOrderPhotos(workOrderId) {
 }
 
 /**
- * photo_type → human label, read from the work step template field that
- * defined the prompt. Only named tags are looked up; the generic legs
- * ('general' / 'before' / 'after') are labelled by the caller.
+ * photo_type → human label. A tag reaches a photo by one of two routes and
+ * both are resolved here:
  *
- * A miss is not an error — an ad hoc tag simply falls back to a humanized
- * form of its own name.
+ *   work step template   the named prompt a technician shot against
+ *                        ('kitchen_overall_photo' → "Kitchen Overall Photo")
+ *   photo tag picklist   a tag applied by hand from the Photos card
+ *                        ('Damage or Deficiency' → itself)
+ *
+ * The template wins where both answer, because that is the wording the
+ * technician saw in the field and the wording a program reviewer reads back.
+ *
+ * Only named tags are looked up; the generic legs ('general' / 'before' /
+ * 'after') are labelled by the caller. A miss is not an error — an ad hoc tag
+ * simply falls back to a humanized form of its own name.
  */
 async function resolvePhotoTagLabels(types) {
   const wanted = Array.from(new Set(
@@ -621,19 +629,95 @@ async function resolvePhotoTagLabels(types) {
       .filter(t => t && !GENERIC_PHOTO_TYPES.has(t))
   ))
   if (wanted.length === 0) return new Map()
-  const { data, error } = await supabase
-    .from('work_step_template_fields')
-    .select('wstf_field_name, wstf_field_label')
-    .in('wstf_field_name', wanted)
-    .eq('wstf_is_deleted', false)
-  if (error) return new Map() // labels are a nicety; never sink the gallery
+
+  const [templateRes, picklistRes] = await Promise.all([
+    supabase
+      .from('work_step_template_fields')
+      .select('wstf_field_name, wstf_field_label')
+      .in('wstf_field_name', wanted)
+      .eq('wstf_is_deleted', false),
+    supabase
+      .from('picklist_values')
+      .select('picklist_value, picklist_label')
+      .eq('picklist_object', 'photos')
+      .eq('picklist_field', 'photo_type')
+      .in('picklist_value', wanted),
+  ])
+
   const map = new Map()
-  for (const row of data || []) {
-    if (row.wstf_field_label && !map.has(row.wstf_field_name)) {
-      map.set(row.wstf_field_name, row.wstf_field_label)
-    }
+  // Picklist first, template second, so the template's wording overwrites.
+  for (const row of picklistRes.error ? [] : (picklistRes.data || [])) {
+    if (row.picklist_label) map.set(row.picklist_value, row.picklist_label)
   }
-  return map
+  for (const row of templateRes.error ? [] : (templateRes.data || [])) {
+    if (row.wstf_field_label) map.set(row.wstf_field_name, row.wstf_field_label)
+  }
+  return map // labels are a nicety; a failed lookup never sinks the gallery
+}
+
+/**
+ * The tags a person may apply by hand, from the `photos` / `photo_type`
+ * picklist. Admin-managed at Setup → Picklists — nothing here is compiled in,
+ * so adding a tag the crew needs is a configuration change, not a deploy.
+ *
+ * Returns [] rather than throwing: an unreachable picklist should leave the
+ * picker empty and honest, not break the Photos card.
+ */
+export async function fetchPhotoTagOptions() {
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('picklist_value, picklist_label, picklist_description, picklist_sort_order')
+    .eq('picklist_object', 'photos')
+    .eq('picklist_field', 'photo_type')
+    .eq('picklist_is_active', true)
+    .order('picklist_sort_order', { ascending: true })
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn('photo tag options unavailable:', error.message)
+    return []
+  }
+  return (data || []).map(r => ({
+    value: r.picklist_value,
+    label: r.picklist_label || r.picklist_value,
+    description: r.picklist_description || null,
+  }))
+}
+
+/**
+ * Apply a tag to photos — or clear it, by passing null.
+ *
+ * Re-watermarking is part of the operation, not an afterthought. process-photo
+ * prints the tag onto the face of the evidence copy, so a photo whose row says
+ * "Damage or Deficiency" while its image still says "general" is a record that
+ * disagrees with the file a program reviewer receives. The row is updated
+ * first, then each photo is re-rendered.
+ *
+ * Sequential, because each re-render is an edge-function invocation and a
+ * sixty-photo batch fired at once is a thundering herd of cold starts. Returns
+ * { tagged, failed }; a failed re-render leaves the row tagged and the photo
+ * re-renderable from its own tile, which is better than rolling the tag back.
+ */
+export async function setPhotoTag(photoIds, tag, { onProgress } = {}) {
+  const ids = (photoIds || []).filter(Boolean)
+  if (ids.length === 0) return { tagged: 0, failed: 0 }
+  const value = tag == null || tag === '' ? UNTAGGED_PHOTO_TYPE : String(tag)
+
+  const { error } = await supabase
+    .from('photos')
+    .update({ photo_type: value })
+    .in('id', ids)
+  if (error) throw new Error(`photo tag update failed: ${error.message}`)
+
+  let tagged = 0
+  let failed = 0
+  for (let i = 0; i < ids.length; i++) {
+    const { error: invErr } = await supabase.functions
+      .invoke('process-photo', { body: { photo_id: ids[i] } })
+    if (invErr) failed++
+    else tagged++
+    if (onProgress) onProgress({ done: i + 1, total: ids.length, tagged, failed })
+  }
+  return { tagged, failed }
 }
 
 /**

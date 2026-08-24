@@ -23,6 +23,10 @@ import {
   selectionSet,
   selectionLabel,
   toggleSelection,
+  UNTAGGED,
+  tagIsStepEvidence,
+  stepEvidenceInSelection,
+  buildTagChoices,
 } from '../src/lib/photoTags.js'
 
 let failures = 0
@@ -187,6 +191,66 @@ check('a deleted step is dropped', reconcileSelection(['s1', 's9'], stepOpts), [
 check('all choices gone falls back to all', reconcileSelection(['s9'], stepOpts), [])
 check('all stays all', reconcileSelection(ALL, stepOpts), [])
 check('no options at all falls back to all', reconcileSelection(['s1'], []), [])
+
+// ── Tagging a photo by hand (Nicholas, 2026-08-24) ─────────────────────────
+// A photo uploaded onto the work order rather than captured against a step
+// arrives 'general' and had no way to say what it showed. The tag it gets now
+// comes from the photos/photo_type picklist, and these pin the two rules that
+// keep that from destroying evidence.
+
+const PICKLIST = [
+  { value: 'Before', label: 'Before' },
+  { value: 'Damage or Deficiency', label: 'Damage or Deficiency' },
+]
+
+check('the picklist is offered in the admin\'s order',
+  buildTagChoices(PICKLIST, []).map(c => c.value),
+  ['Before', 'Damage or Deficiency'])
+
+// A step's own prompts are not in the picklist, so without this a batch that
+// included one could never be put back to it.
+const stepShot = [{ id: 'p1', _work_step_id: 's1', photo_type: 'kitchen_overall_photo' }]
+check('a tag already in use is offered alongside the picklist',
+  buildTagChoices(PICKLIST, stepShot).map(c => c.value),
+  ['Before', 'Damage or Deficiency', 'kitchen_overall_photo'])
+check('an in-use tag is marked as such, not passed off as a configured one',
+  buildTagChoices(PICKLIST, stepShot).find(c => c.value === 'kitchen_overall_photo').source,
+  'in-use')
+check('the untagged value is never offered as a choice',
+  buildTagChoices(PICKLIST, [{ id: 'p2', photo_type: UNTAGGED }]).map(c => c.value),
+  ['Before', 'Damage or Deficiency'])
+check('a tag matching the picklist case-insensitively is not offered twice',
+  buildTagChoices(PICKLIST, [{ id: 'p3', _work_step_id: 's1', photo_type: 'before' }]).map(c => c.value),
+  ['Before', 'Damage or Deficiency'])
+
+// The warning: the DB counts step photos by tag to decide whether a step can
+// be completed, so re-tagging one is not a cosmetic edit.
+check('a step capture with a named tag is step evidence',
+  tagIsStepEvidence({ _work_step_id: 's1', photo_type: 'kitchen_overall_photo' }), true)
+check("a step capture tagged 'before' is step evidence — the legacy gate leg",
+  tagIsStepEvidence({ _work_step_id: 's1', photo_type: 'before' }), true)
+check('an untagged step capture is not evidence of anything yet',
+  tagIsStepEvidence({ _work_step_id: 's1', photo_type: UNTAGGED }), false)
+check('a work-order photo is never step evidence, tagged or not',
+  tagIsStepEvidence({ photo_type: 'Damage or Deficiency' }), false)
+check('the work_step_id FK counts as well as the resolved step',
+  tagIsStepEvidence({ work_step_id: 's1', photo_type: 'Before' }), true)
+check('a mixed selection reports only the photos that carry step evidence',
+  stepEvidenceInSelection([
+    { id: 'a', _work_step_id: 's1', photo_type: 'kitchen_overall_photo' },
+    { id: 'b', photo_type: 'general' },
+    { id: 'c', photo_type: 'Damage or Deficiency' },
+  ]).map(p => p.id), ['a'])
+
+// A hand-applied tag has to behave like any other in the gallery: chip on the
+// tile, its own entry in the filter dropdown.
+check('a hand-applied tag is meaningful enough to print on the tile',
+  isMeaningfulTag('Damage or Deficiency'), true)
+check('a hand-applied tag becomes its own filter option',
+  buildTagFilterOptions([
+    { id: 'x', photo_type: 'Damage or Deficiency' },
+    { id: 'y', photo_type: 'general' },
+  ]).map(o => o.id), ['Damage or Deficiency', 'general'])
 
 if (failures > 0) {
   console.error(`\nphoto-tags fixture: ${failures} of ${checks} checks FAILED`)
