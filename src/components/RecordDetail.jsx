@@ -27,6 +27,7 @@ const AccountMergeModal                    = lazy(() => import('./AccountMergeMo
 const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
 const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
 const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstallPhotoPickerModal'))
+const EnergyAssessmentReportModal          = lazy(() => import('./EnergyAssessmentReportModal'))
 // The work plan runner from LEAP Pad, mounted inside the work order record page
 // so desk staff follow steps and upload evidence without leaving the main app.
 // Same component the technician PWA runs — one engine, not a desktop copy.
@@ -6866,6 +6867,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [submittalStage, setSubmittalStage] = useState(null)
   const [showSubmittalEditor, setShowSubmittalEditor] = useState(false)
   const [showQiToolModal, setShowQiToolModal] = useState(false)
+  const [showAssessmentReportModal, setShowAssessmentReportModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   // Set when the loaded account was merged away by the Merge Accounts tool
   // (soft-deleted loser). Null = live record, or still resolving the survivor.
@@ -8799,6 +8801,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const recordTypeId = recordTypeColumn ? record[recordTypeColumn] : null
   const recordTypeMeta = recordTypeId ? (picklists.metaById?.get(recordTypeId) || null) : null
   const recordTypeLabel = recordTypeMeta?.label || (recordTypeId ? picklists.byId.get(recordTypeId) : null) || null
+  // The record type's stored VALUE ('MULTIFAMILY-ENERGY-ASSESSMENT'), as
+  // distinct from its display label ('Multifamily Energy Assessment'). Action
+  // guards that key off configuration must use the value — a label is prose
+  // and an admin may rename it.
+  const recordTypeValue = recordTypeMeta?.value
+    || (recordTypeId ? picklists.valueById?.get(recordTypeId) : null) || null
 
   // Income Qualification is a record-type-scoped, run-once enrollment step.
   // The record type carries the flag (the six IRA programs, not the HOMES
@@ -9049,6 +9057,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     recordTypeRequiresIncomeQualification,
     incomeQualificationComplete,
     recordTypeLabel,
+    recordTypeValue,
     recordIsLocked:       recordLockedForUser,
     isSystemAdmin,
   }
@@ -9073,6 +9082,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       () => setSubmittalStage(SUBMITTAL_STAGES.FINAL_PROJECT_PAYMENT_REQUEST),
     [ACTION_KEYS.EDIT_SUBMITTAL_TEMPLATE]: () => setShowSubmittalEditor(true),
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
+    [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
@@ -9920,6 +9930,17 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             incentiveApplicationId={recordId}
             incentiveApplication={record}
             onClose={() => setShowQiToolModal(false)}
+          />
+        )}
+
+        {/* Energy Assessment Report — the audit's own deliverable, generated from
+            the assessment work order that captured it (work orders only). */}
+        {showAssessmentReportModal && tableName === 'work_orders' && (
+          <EnergyAssessmentReportModal
+            workOrderId={recordId}
+            workOrder={record}
+            onClose={() => setShowAssessmentReportModal(false)}
+            onSaved={() => { setReloadTick(t => t + 1) }}
           />
         )}
 
