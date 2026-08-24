@@ -14,6 +14,7 @@ import assert from 'node:assert/strict'
 import {
   ASSESSMENT_REPORTS, ASSESSMENT_REPORT_KIND, assessmentReportFor, hasAssessmentReport,
   fieldDisplayValue, buildStepEntry, isNotApplicable, reportPhotos, photoCaption, reportPhotoLabel,
+  isRecordId, collectRecordIds, applyLookupLabels, companyNameForState, stateFullName,
   buildingSummaryRows, addressLines, cityStateZip, reportFileName,
 } from '../src/lib/assessmentReport.js'
 import {
@@ -65,8 +66,13 @@ const naStep = buildStepEntry(
   { id: 's2', work_step_name: 'Building Diagnostics', work_step_not_applicable_reason: 'No combustion equipment' }, [], new Map())
 ok(naStep.notApplicable, 'a recorded reason marks the step Not Applicable')
 eq(naStep.notApplicableReason, 'No combustion equipment', 'the reason is carried into the report')
-ok(isNotApplicable({ _status_label: 'Not Applicable' }), 'the N/A status label also counts')
+// Status is never a trigger anywhere in this report: a section's presence and
+// its contents follow what was CAPTURED, not what state anybody left the step
+// in. An assessment does not become unprintable because a step still says New.
+ok(!isNotApplicable({ _status_label: 'Not Applicable' }),
+  'work step STATUS never marks a section Not Applicable — only a recorded reason does')
 ok(!isNotApplicable({ _status_label: 'Completed' }), 'a completed step is not N/A')
+ok(!isNotApplicable({ work_step_not_applicable_reason: '   ' }), 'a blank reason is not a reason')
 
 // ── 4. Photo selection — the include_in_final_report flag's first consumer ──
 const photos = [
@@ -98,14 +104,25 @@ eq(reportPhotoLabel({ photo_type: 'general', photo_number: 'PHO-01855' }), 'PHO-
 eq(reportPhotoLabel(null), 'Photo', 'a missing photo still gets a label rather than "undefined"')
 
 // ── 5. Building summary ─────────────────────────────────────────────────────
-const rows = buildingSummaryRows(
-  { building_name: '1615 E Raleigh Rd', building_year_built: 1974, building_total_units: 24, building_roof_type: null },
-  { property_name: '100 Saint Francis Court', property_total_units: 24 })
+// This is a BUILDING energy audit report: the summary carries building facts
+// only. A property-level count under a building heading reads as a claim about
+// that building.
+const rows = buildingSummaryRows({
+  building_name: '1615 E Raleigh Rd', building_year_built: 1974,
+  building_total_units: 24, building_roof_type: null,
+})
 const labels = rows.map(r => r[0])
 ok(labels.includes('Year Built'), 'a populated column appears')
-ok(!labels.includes('Roof Type'), 'an empty column is dropped — context, not a wall of em dashes')
-eq(rows.find(r => r[0] === 'Property')[1], '100 Saint Francis Court', 'property name comes off the property record')
-eq(buildingSummaryRows(null, null).length, 0, 'no records means no summary rows, not a crash')
+ok(!labels.includes('Roof Type'), 'an empty column is dropped')
+ok(!labels.some(l => /Property/i.test(l)), 'no property-level row appears in a building report')
+eq(rows.find(r => r[0] === 'Dwelling Units')[1], '24', 'the building\u2019s own unit count is shown')
+// The same fact lives under different columns depending on how the building
+// was created; the first populated one wins and the label never repeats.
+const alt = buildingSummaryRows({ building_number_of_units: 6, building_stories_of_building: '2.0' })
+eq(alt.find(r => r[0] === 'Dwelling Units')[1], '6', 'the alternate unit-count column is read too')
+eq(alt.filter(r => r[0] === 'Dwelling Units').length, 1, 'a label is never printed twice')
+eq(alt.find(r => r[0] === 'Stories')[1], '2.0', 'the alternate stories column is read too')
+eq(buildingSummaryRows(null).length, 0, 'no building record means no summary rows, not a crash')
 eq(addressLines({ property_street: '100 Saint Francis Ct' }, 'property'), ['100 Saint Francis Ct'],
   'properties spell it property_street')
 eq(addressLines({ building_address: '1615 E Raleigh Rd' }, 'building'), ['1615 E Raleigh Rd'],
@@ -113,10 +130,53 @@ eq(addressLines({ building_address: '1615 E Raleigh Rd' }, 'building'), ['1615 E
 eq(cityStateZip({ property_city: 'Rocky Mount', property_state: 'NC', property_zip: '27801' }, 'property'),
   'Rocky Mount, NC 27801', 'city/state/zip composes')
 eq(cityStateZip({}, 'property'), null, 'an unknown address composes to null, not ", "')
-eq(reportFileName(ASSESSMENT_REPORTS['MULTIFAMILY-ENERGY-ASSESSMENT'], 'WO-00208', '1615 E Raleigh Rd'),
-  'Multifamily Energy Assessment Report - WO-00208 - 1615 E Raleigh Rd.pdf', 'filename composes')
-ok(!reportFileName({ fileStem: 'A/B:C' }, 'WO-1', null).includes('/'),
+// The file is named for the BUILDING it is about — that is how these are filed
+// and looked for.
+eq(reportFileName(ASSESSMENT_REPORTS['MULTIFAMILY-ENERGY-ASSESSMENT'],
+    '100 Saint Francis Court - Rocky Mount - 100 - 110', '100 - 110'),
+  '100 Saint Francis Court - Rocky Mount - 100 - 110 - Multifamily Energy Assessment Report.pdf',
+  'the filename leads with the building name')
+eq(reportFileName(ASSESSMENT_REPORTS['MULTIFAMILY-ENERGY-ASSESSMENT'], null, '100 - 110'),
+  '100 - 110 - Multifamily Energy Assessment Report.pdf',
+  'with no full building name the short label is used')
+ok(!reportFileName({ fileStem: 'A/B:C' }, 'Bldg', null).includes('/'),
   'characters a filesystem rejects are stripped from the filename')
+
+// ── The company is named for the state the building is in ───────────────────
+eq(companyNameForState('NC'), 'Energy Efficiency Services of North Carolina',
+  'an NC building is assessed by the North Carolina entity')
+eq(companyNameForState('WI'), 'Energy Efficiency Services of Wisconsin', 'and a WI building by the Wisconsin one')
+eq(companyNameForState('North Carolina'), 'Energy Efficiency Services of North Carolina',
+  'a full state name is accepted as well as the abbreviation')
+eq(companyNameForState(null), 'Energy Efficiency Services',
+  'an unknown state falls back to the unqualified name — never to another state\u2019s')
+eq(companyNameForState('ZZ'), 'Energy Efficiency Services', 'and so does a state nobody recognises')
+eq(stateFullName('mi'), 'Michigan', 'state lookup is case-insensitive')
+
+// ── A record id is never printed ────────────────────────────────────────────
+ok(isRecordId('09888d66-7719-49a8-b19b-ca885d26fd94'), 'a uuid is a record id')
+ok(!isRecordId('Apartment'), 'a word is not a record id')
+ok(!isRecordId(1974), 'a number is not a record id')
+const withIds = {
+  summaryRows: [['Building Type', '09888d66-7719-49a8-b19b-ca885d26fd94'],
+                ['Roof Type', 'ade76988-46b5-4955-afa1-f569e77843cb'],
+                ['Year Built', '1974']],
+  steps: [{ key: 'k', name: 'Walls', fields: [{ label: 'Wall Type', value: 'a58ea0ea-742c-4cc2-976f-dc46fe31537e' }] }],
+}
+eq(collectRecordIds(withIds).length, 3, 'every record id in the printable values is collected')
+const resolved = applyLookupLabels(withIds, new Map([
+  ['09888d66-7719-49a8-b19b-ca885d26fd94', 'Apartment'],
+  ['a58ea0ea-742c-4cc2-976f-dc46fe31537e', 'FAF - Forced Air Furnace'],
+]))
+eq(resolved.summaryRows.map(r => r[0]), ['Building Type', 'Year Built'],
+  'a summary row whose id cannot be named is DROPPED, never printed as a uuid')
+eq(resolved.summaryRows[0][1], 'Apartment', 'a resolvable id becomes its label')
+eq(resolved.steps[0].fields[0].value, 'FAF - Forced Air Furnace', 'a captured field resolves too')
+const unresolvable = applyLookupLabels(
+  { summaryRows: [], steps: [{ key: 'k', name: 'Walls', fields: [{ label: 'Wall Type', value: '11111111-2222-3333-4444-555555555555' }] }] },
+  new Map())
+eq(unresolvable.steps[0].fields[0].value, null,
+  'an unnameable captured value reads as unanswered rather than as gibberish')
 
 // ── 6. The engine is registered and separate from the submittal engines ─────
 eq(DOCUMENT_KIND_ENGINE[ASSESSMENT_REPORT_KIND], 'energy_assessment', 'the kind routes to its own engine')
@@ -136,13 +196,16 @@ for (const s of defaults) {
 }
 // One assessment_field_data per captured section, each naming a real step.
 const stepSections = defaults.filter(s => s.type === 'assessment_field_data')
-eq(stepSections.length, 14, 'one section per captured work step')
+eq(stepSections.length, 13, 'one section per captured system, and none for anything else')
+ok(!defaults.some(x => ['assessment_narrative','assessment_deliverables','assessment_recommendations','assessment_signature'].includes(x.type)),
+  'the report carries no narrative, deliverables, findings or signature block — only the building and its photographs')
 ok(stepSections.every(s => s.config.photos === 'step'),
   'each system section prints its own photos, so the report reads beside the Asset Score sections')
 
 const model = {
   title: 'Multifamily Building Energy Assessment Report',
-  subtitle: 'Whole-Building Energy Audit — ASHRAE Level II Equivalent',
+  subtitle: null,
+  company: { name: 'Energy Efficiency Services of North Carolina' },
   program: { label: 'NC-IRA-MF-HOMES' },
   property: { name: '100 Saint Francis Court', addressLines: ['100 Saint Francis Ct'], cityStateZip: 'Rocky Mount, NC 27801' },
   building: { name: '1615 E Raleigh Rd', label: '1615 E Raleigh Rd' },
@@ -180,9 +243,89 @@ const missing = await buildAssessmentReportPdf(model, ASSESSMENT_REPORT_KIND, [
 ])
 ok(missing.size > 1000, 'a section naming an uncaptured step renders a "not captured" note, not an error')
 
+// ── Sections and line items ─────────────────────────────────────────────────
+// Nicholas, 2026-08-24: "get rid of the fucking sections if there are no
+// pictures" and "If there's not a photo, get rid of the line item and get rid
+// of the section if there are no line items in the section."
+const base = { ...model, steps: [], photos: [], summaryRows: [] }
+const oneSection = cfgExtra => [{ type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step', ...cfgExtra } }]
+
+const noPhotos = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: 'DX Cooling' }] }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+const withPhoto = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: 'DX Cooling' }] }],
+  photos: [{ id: 'c1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+ok(withPhoto.size > noPhotos.size, 'a section with no photographs is not in the report')
+
+// Blank answers are never printed as line items — only answered fields are.
+const someBlank = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [
+    { label: 'Cooling System Type', value: 'DX Cooling' },
+    { label: 'Efficiency (SEER)', value: null },
+    { label: 'Condition', value: null }] }],
+  photos: [{ id: 'c1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+const allAnswered = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [
+    { label: 'Cooling System Type', value: 'DX Cooling' },
+    { label: 'Efficiency (SEER)', value: '13' },
+    { label: 'Condition', value: 'Average' }] }],
+  photos: [{ id: 'c1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+ok(allAnswered.size > someBlank.size,
+  'unanswered fields are dropped as line items rather than printed as em dashes')
+
+// A photo-only section prints its photographs and no table at all.
+const photosOnly = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: null }] }],
+  photos: [{ id: 'c1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+ok(photosOnly.size > 1000, 'a section with photographs and no answers still prints, carrying just the photographs')
+
+// require_photos:false keeps a written-record section that has data but no photos.
+const keptWithoutPhotos = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: 'DX Cooling' }] }],
+}, ASSESSMENT_REPORT_KIND, oneSection({ require_photos: false }))
+ok(keptWithoutPhotos.size > noPhotos.size, 'require_photos:false keeps a section that has data but no photographs')
+
+// An empty Building Summary and an empty Findings list are dropped too.
+const emptyChrome = await buildAssessmentReportPdf(base, ASSESSMENT_REPORT_KIND,
+  [{ type: 'assessment_building_summary' }, { type: 'assessment_recommendations' }])
+const filledChrome = await buildAssessmentReportPdf(
+  { ...base, summaryRows: [['Year Built', '1972']], recommendations: ['Air seal envelope'] },
+  ASSESSMENT_REPORT_KIND,
+  [{ type: 'assessment_building_summary' }, { type: 'assessment_recommendations' }])
+ok(filledChrome.size > emptyChrome.size,
+  'an empty Building Summary and an empty Findings list are dropped, not printed as headings over nothing')
+
+// A photo carrying a link renders larger than one without: the link, the
+// underline and the link-coloured label are all real marks on the page.
+const linked = await buildAssessmentReportPdf({
+  ...model,
+  photos: [{ id: 'L1', group: 'Building Geometry & Use', label: 'North Elevation',
+             caption: 'Aug 24, 2026', linkUrl: 'https://example.test/photo.jpg' }],
+}, ASSESSMENT_REPORT_KIND, [{ type: 'assessment_photo_documentation' }])
+const unlinked = await buildAssessmentReportPdf({
+  ...model,
+  photos: [{ id: 'L1', group: 'Building Geometry & Use', label: 'North Elevation', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, [{ type: 'assessment_photo_documentation' }])
+ok(linked.size > unlinked.size, 'a photo with a download link renders as a link; one without still renders')
+
+// The company name comes off the model, so an NC report never says Wisconsin.
+const ncCover = await buildAssessmentReportPdf(model, ASSESSMENT_REPORT_KIND, [{ type: 'assessment_cover' }])
+ok(ncCover.size > 1000, 'the cover renders with the state-specific company name')
+
 // A report with no flagged photos at all still renders.
-const noPhotos = await buildAssessmentReportPdf({ ...model, photos: [] }, ASSESSMENT_REPORT_KIND, null)
-ok(noPhotos.size > 3000, 'a report with no flagged photos still renders')
+const nothingTagged = await buildAssessmentReportPdf({ ...model, photos: [] }, ASSESSMENT_REPORT_KIND, null)
+ok(nothingTagged.size > 1000, 'a report with no tagged photos still renders — the cover and the building summary')
 
 // An unknown section type is a loud failure, not a silently missing section.
 await assert.rejects(

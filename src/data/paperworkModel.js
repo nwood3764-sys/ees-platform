@@ -581,58 +581,44 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
     { type: 'sealed_totals_list' },
     { type: 'sealed_signature_block' },
   ],
-  // Energy Assessment Report — the audit's own deliverable, its own engine.
+  // Energy Assessment Report.
   //
-  // The section ORDER and HEADINGS mirror the DOE **Audit Template** report
-  // (PNNL, ANSI/ASHRAE/ACCA Standard 211-2018) so the two can be read side by
-  // side: its six parts — Overview · Contact Information and Audit Details ·
-  // Facility Description · Utility Data and Benchmarking · Energy Savings
-  // Opportunities · Attachments — appear here in the same sequence, with the
-  // same sub-section names (Roofs, Walls, Windows, Foundation Types, Lighting,
-  // HVAC Systems, Service Hot Water Systems…), each fed by the LEAP work step
-  // that captured it and carrying that step's photos.
+  // This report carries the TAGGED PHOTOGRAPHS of an assessment, grouped under
+  // the system each one documents, in the order and under the headings of the
+  // DOE Audit Template report — so the two are read side by side and the
+  // systems photos line up with the same systems in both.
   //
-  // Note the ordering: Audit Template puts Windows before Foundation Types and
-  // Lighting before HVAC. That is why this list is not simply the work plan's
-  // own walk order. "Building 360 Video" has no Audit Template counterpart and
-  // cannot render in a PDF, so it is deliberately absent.
+  // That is the whole document. It identifies the building and it shows the
+  // photographs. It carries no narrative, no deliverables list, no findings
+  // section and no signature block: an assessment report is a record of what
+  // was seen, and anything else on the page is an assertion nobody made.
+  //
+  // A section appears only when it has photographs, and prints only the
+  // questions that were actually answered — a heading over nothing, or a
+  // column of em dashes, is filler.
+  //
+  // Note the order: Audit Template puts Windows before Foundation Types and
+  // Lighting before HVAC, which is why this is not the work plan's walk order.
   energyAssessmentReport: [
-    { type: 'assessment_cover', config: {
-      subtitle: 'ANSI/ASHRAE/ACCA Standard 211 Level 2 — Field Data Record' } },
-    { type: 'assessment_narrative', config: {
-      heading: 'Overview',
-      body: 'Energy Efficiency Services performed a whole-building energy assessment of the building identified above. This report is the field record of that assessment: the observed condition of the building\u2019s envelope, its central and common-area mechanical systems, its service hot water and lighting, and the utility and occupancy data collected for it, together with the photographs taken on site.\n\nIts sections follow the DOE Audit Template report (ANSI/ASHRAE/ACCA Standard 211) so the two documents can be read side by side, section for section. Contact information and audit details \u2014 who performed the assessment, for whom, and on what date \u2014 appear on the cover of this report.' } },
-    { type: 'assessment_building_summary', config: {
-      heading: 'Facility Description — Building Summary' } },
-    { type: 'assessment_field_data', config: { step: 'Building Geometry & Use',         heading: 'Facility Description — Building Characteristics and Use Types', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Roof / Ceiling',                  heading: 'Facility Description — Roofs', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Walls',                           heading: 'Facility Description — Walls', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Windows & Doors',                 heading: 'Facility Description — Windows', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Foundation / Floor',              heading: 'Facility Description — Foundation Types', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Common-Area Lighting',            heading: 'Facility Description — Lighting', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Heating Systems',                 heading: 'Facility Description — HVAC Systems: Heating', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Cooling Systems',                 heading: 'Facility Description — HVAC Systems: Cooling', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Distribution & Ventilation',      heading: 'Facility Description — Distribution Equipment and Zone Controls', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Service Hot Water',               heading: 'Facility Description — Service Hot Water Systems', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Building Diagnostics',            heading: 'Facility Description — Enclosure Tightness and Diagnostics', photos: 'step' } },
+    { type: 'assessment_cover' },
+    { type: 'assessment_building_summary', config: { heading: 'Building Summary' } },
+    { type: 'assessment_field_data', config: { step: 'Building Geometry & Use',         heading: 'Building Characteristics and Use Types', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Roof / Ceiling',                  heading: 'Roofs', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Walls',                           heading: 'Walls', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Windows & Doors',                 heading: 'Windows', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Foundation / Floor',              heading: 'Foundation Types', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Common-Area Lighting',            heading: 'Lighting', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Heating Systems',                 heading: 'HVAC Systems: Heating', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Cooling Systems',                 heading: 'HVAC Systems: Cooling', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Distribution & Ventilation',      heading: 'Distribution Equipment and Zone Controls', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Service Hot Water',               heading: 'Service Hot Water Systems', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Building Diagnostics',            heading: 'Enclosure Tightness and Diagnostics', photos: 'step' } },
     { type: 'assessment_field_data', config: { step: 'Utility & Energy Data',           heading: 'Utility Data and Benchmarking', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Occupancy & Operating Schedules', heading: 'Utility Data and Benchmarking — Occupancy and Operating Schedules', photos: 'step' } },
-    { type: 'assessment_recommendations', config: {
-      heading: 'Energy Savings Opportunities',
-      body: 'The measures below are the opportunities identified during this assessment. Their modelled energy savings, cost, incentives and payback are produced by the energy model and are reported in the Audit Template report\u2019s Energy Savings Opportunities section; they are not computed here.' } },
-    { type: 'assessment_field_data', config: { step: 'Building Photos',                 heading: 'Attachments — Building Photographs', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Occupancy & Operating Schedules', heading: 'Occupancy and Operating Schedules', photos: 'step' } },
+    // Catches any tagged photograph none of the sections above showed, so no
+    // tagged photo is ever silently dropped. Prints nothing when there is none.
     { type: 'assessment_photo_documentation', config: {
-      heading: 'Attachments — Additional Photo Documentation', columns: 2, group_by_step: true, exclude_printed: true,
-      empty_label: 'All photos marked “Include in final report” are shown with their sections above.' } },
-    { type: 'assessment_deliverables', config: {
-      heading: 'Deliverables',
-      items: [
-        'Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
-        'DOE Audit Template report',
-        'HPXML v4 / BuildingSync file from Asset Score',
-        'Customer Report / Building Assessment Tool Report',
-      ] } },
-    { type: 'assessment_signature' },
+      heading: 'Additional Photographs', columns: 2, group_by_step: true, exclude_printed: true } },
     { type: 'assessment_footer' },
   ],
   // Combustion Safety Notification (Large Multifamily 5+ Units) — its own engine.
@@ -1213,6 +1199,7 @@ async function buildAssessmentContext(m, kind, opts = {}) {
   const PH_GAP = 16
   const photoCell = (photo, col, cellW, boxH) => {
     const x = M + col * (cellW + PH_GAP)
+    const linked = !!photo.linkUrl
     stroke(RULE); d.setLineWidth(.6); d.rect(x, st.y, cellW, boxH)
     if (photo.dataUrl && photo.w && photo.h) {
       const scale = Math.min(cellW / photo.w, boxH / photo.h)
@@ -1223,9 +1210,18 @@ async function buildAssessmentContext(m, kind, opts = {}) {
     } else {
       tc(MUT); font(8); t(x + cellW / 2, st.y + boxH / 2, 'Image unavailable', { align: 'center' })
     }
-    tc(NAVY); font(8, 'bold')
+    // The whole cell links to the ORIGINAL capture, so a reader of the PDF can
+    // open or save the full-resolution photo with its EXIF intact. It is a
+    // read-only object link — it exposes the photo, never the record.
+    tc(linked ? [42, 110, 178] : NAVY); font(8, 'bold')
     const label = wrap(photo.label || 'Photo', cellW).slice(0, 1)
     t(x, st.y + boxH + 10, label[0] || '')
+    if (linked) {
+      const labelW = Math.min(cellW, d.getTextWidth(label[0] || ''))
+      stroke([42, 110, 178]); d.setLineWidth(.5)
+      d.line(x, st.y + boxH + 12, x + labelW, st.y + boxH + 12)
+      d.link(x, st.y, cellW, boxH + 14, { url: photo.linkUrl })
+    }
     tc(MUT); font(7.5)
     const cap = wrap(photo.caption || '', cellW).slice(0, 2)
     cap.forEach((ln, i) => t(x, st.y + boxH + 20 + i * 9, ln))
@@ -1308,7 +1304,9 @@ export const ASSESSMENT_SECTION_RENDERERS = {
     const { m, W, M, CW, C, st, font, t, tc, wrap, d, fill, stroke, RULE, NAVY, MUT, INK, EMERALD, text, pv } = x
     fill([13, 26, 46]); d.rect(0, 0, W, 4, 'F')
     tc(MUT); font(8.5, 'bold')
-    t(M, st.y + 10, (cfg.eyebrow || text('assessment.header.company_name') || 'ENERGY EFFICIENCY SERVICES of WISCONSIN').toUpperCase())
+    // The company is named for the state the BUILDING is in; a template may
+    // still override it outright.
+    t(M, st.y + 10, String(cfg.eyebrow || m.company?.name || text('assessment.header.company_name') || 'Energy Efficiency Services').toUpperCase())
     st.y += 26
     tc(NAVY); font(19, 'bold')
     for (const ln of wrap(cfg.title || m.title || 'Building Energy Assessment Report', CW)) {
@@ -1369,6 +1367,7 @@ export const ASSESSMENT_SECTION_RENDERERS = {
      capture) — the reviewer's orientation table. */
   assessment_building_summary(x, cfg = {}) {
     const { m, band, kvTable } = x
+    if (!(m.summaryRows || []).length && cfg.omit_when_empty !== false) return
     band(cfg.heading || 'Building Summary')
     kvTable(m.summaryRows, { emptyLabel: 'No building record data available.' })
   },
@@ -1379,38 +1378,53 @@ export const ASSESSMENT_SECTION_RENDERERS = {
      carries one of these per section, so they reorder, rename and drop
      without code. */
   assessment_field_data(x, cfg = {}) {
-    const { m, band, kvTable, subHead, para, MUT, tc, font, t, M, st } = x
+    const { m, band, kvTable, subHead, para } = x
     const step = assessmentStep(m, cfg.step)
+    const withPhotos = cfg.photos === 'step'
+    const stepPhotos = (withPhotos && step) ? assessmentStepPhotos(m, step.name) : []
+    const answered = step ? (step.fields || []).filter(f => f.value != null && String(f.value).trim() !== '') : []
+
+    // A section with no photographs is not in the report (Nicholas,
+    // 2026-08-24: "get rid of the fucking sections if there are no pictures").
+    // The photographs are the evidence this report exists to carry; a heading
+    // with none behind it is a heading over nothing.
+    //
+    // require_photos: false on a section keeps it whenever it has captured
+    // data, for a program that wants the written record with or without
+    // photographs.
+    const requirePhotos = cfg.require_photos !== false
+    if (!step) return
+    if (requirePhotos && !stepPhotos.length) return
+    if (!requirePhotos && !answered.length && !stepPhotos.length && !step.notApplicable) return
+
     band(cfg.heading || cfg.step || 'Field Data')
     if (cfg.body) para(cfg.body)
-    if (!step) {
-      subHead(cfg.missing_label || `Not captured on this assessment — no “${cfg.step}” section on this work order.`)
-      return
-    }
+    // Not Applicable is a NOTE, never a gate: the section still prints whatever
+    // was captured. Status must never suppress evidence (Nicholas, 2026-08-24:
+    // "if you're looking at the status of the work order or work steps, that
+    // shouldn't be a trigger") — a photo that was taken is a fact regardless of
+    // what state anybody left the step in.
     if (step.notApplicable) {
       subHead('Marked Not Applicable' + (step.notApplicableReason ? ` — ${step.notApplicableReason}` : ''))
-      return
     }
-    const rows = (step.fields || []).map(f => [
-      f.label,
-      f.value != null && String(f.value).trim() !== ''
-        ? String(f.value) + (f.unit ? ` ${f.unit}` : '')
-        : null,
+
+    // Only ANSWERED fields are printed. A row of em dashes is not information,
+    // it is filler (Nicholas, 2026-08-24: "you're just putting blanks in
+    // sections, so it makes it look like crap. If there's not a photo, get rid
+    // of the line item"). A section with no answered field simply carries its
+    // photographs.
+    const rows = answered.map(f => [
+      f.label, String(f.value) + (f.unit ? ` ${f.unit}` : ''),
     ])
-    kvTable(rows, { emptyLabel: 'No values recorded for this section.' })
+    if (rows.length) kvTable(rows)
 
     // Photos captured on THIS step, printed with the data they document, so
-    // the report can be read side by side with the Asset Score section of the
-    // same name. config.photos: 'step' to include, 'none' (default) to leave
-    // them to the standalone Photo Documentation section.
-    if (cfg.photos === 'step') {
-      const stepPhotos = assessmentStepPhotos(m, step.name)
-      if (stepPhotos.length) {
-        x.subHead(cfg.photo_heading || 'Photo Documentation')
-        x.photoGrid(stepPhotos, { columns: cfg.photo_columns || 2, aspect: cfg.photo_aspect, group_by_step: false })
-      } else if (cfg.photo_empty_label) {
-        x.subHead(cfg.photo_empty_label)
-      }
+    // the report reads beside the Audit Template section of the same name.
+    // config.photos: 'step' to include, 'none' to leave them to the standalone
+    // Photo Documentation section.
+    if (stepPhotos.length) {
+      if (rows.length) x.subHead(cfg.photo_heading || 'Photo Documentation')
+      x.photoGrid(stepPhotos, { columns: cfg.photo_columns || 2, aspect: cfg.photo_aspect, group_by_step: false })
     }
   },
 
@@ -1419,8 +1433,6 @@ export const ASSESSMENT_SECTION_RENDERERS = {
      work step that captured them, two to a row. */
   assessment_photo_documentation(x, cfg = {}) {
     const { m, band, subHead, para, photoGrid, printedPhotoIds } = x
-    band(cfg.heading || 'Photo Documentation')
-    if (cfg.body) para(cfg.body)
     let photos = m.photos || []
     // Only the named steps, when the template scopes this block to some.
     if (Array.isArray(cfg.steps) && cfg.steps.length) {
@@ -1431,9 +1443,14 @@ export const ASSESSMENT_SECTION_RENDERERS = {
     // photos beside their data can still carry a catch-all block at the end.
     if (cfg.exclude_printed) photos = photos.filter(p => !printedPhotoIds.has(p.id))
     if (!photos.length) {
-      subHead(cfg.empty_label || 'No photos have been marked “Include in final report” on this work order.')
+      if (cfg.omit_when_empty === false) {
+        band(cfg.heading || 'Photo Documentation')
+        subHead(cfg.empty_label || 'No photos have been marked “Include in final report” on this work order.')
+      }
       return
     }
+    band(cfg.heading || 'Photo Documentation')
+    if (cfg.body) para(cfg.body)
     photoGrid(photos, {
       columns: cfg.columns, aspect: cfg.aspect,
       group_by_step: cfg.group_by_step !== false,
@@ -1445,11 +1462,12 @@ export const ASSESSMENT_SECTION_RENDERERS = {
      modelled downstream (Snugg Pro / Asset Score), not computed here. */
   assessment_recommendations(x, cfg = {}) {
     const { m, band, para, bullets, subHead } = x
+    const items = (m.recommendations && m.recommendations.length) ? m.recommendations : (cfg.items || [])
+    if (!items.length && cfg.omit_when_empty !== false) return
     band(cfg.heading || 'Findings & Recommended Measures')
     para(cfg.body)
-    const items = (m.recommendations && m.recommendations.length) ? m.recommendations : (cfg.items || [])
     if (items.length) bullets(items)
-    else if (!cfg.body) subHead(cfg.empty_label || 'No measures recorded.')
+    else subHead(cfg.empty_label || 'No measures recorded.')
   },
 
   /* Deliverables this report accompanies. */
@@ -1485,7 +1503,8 @@ export const ASSESSMENT_SECTION_RENDERERS = {
   assessment_footer(x, cfg = {}) {
     const { m, W, H, M, d, font, t, tc, stroke, C, text } = x
     const total = d.getNumberOfPages()
-    const l1 = cfg.company_line || text('assessment.footer.company_line') || text('footer.company_line')
+    const l1 = cfg.company_line || m.company?.footerLine
+      || text('assessment.footer.company_line') || text('footer.company_line')
     const l2 = cfg.contact_line || text('assessment.footer.contact_line') || text('footer.contact_line')
     const ref = [m.workOrder?.number, m.building?.label || m.building?.name].filter(Boolean).join('  ·  ')
     for (let pg = 1; pg <= total; pg++) {

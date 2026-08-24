@@ -35,7 +35,7 @@ export const ASSESSMENT_REPORTS = Object.freeze({
     documentKey: 'multifamily_energy_assessment_report',
     label:       'Multifamily Building Energy Assessment Report',
     title:       'Multifamily Building Energy Assessment Report',
-    subtitle:    'Whole-Building Energy Audit — ASHRAE Level II Equivalent',
+    subtitle:    null,
     fileStem:    'Multifamily Energy Assessment Report',
     built:       true,
   },
@@ -44,7 +44,7 @@ export const ASSESSMENT_REPORTS = Object.freeze({
     documentKey: 'single_family_energy_assessment_report',
     label:       'Single-Family Energy Assessment Report',
     title:       'Single-Family Energy Assessment Report',
-    subtitle:    'Home Energy Assessment',
+    subtitle:    null,
     fileStem:    'Single-Family Energy Assessment Report',
     built:       false,
   },
@@ -53,7 +53,7 @@ export const ASSESSMENT_REPORTS = Object.freeze({
     documentKey: 'hes_assessment_report',
     label:       'Home Energy Score Assessment Report',
     title:       'Home Energy Score Assessment Report',
-    subtitle:    'Home Energy Assessment',
+    subtitle:    null,
     fileStem:    'Home Energy Score Assessment Report',
     built:       false,
   },
@@ -121,12 +121,22 @@ export function buildStepEntry(step, templateFields, valuesByFieldId) {
   }
 }
 
-/** A step marked Not Applicable — status label or a recorded reason. */
+/**
+ * A step the assessor explicitly marked Not Applicable, recognised by the
+ * RECORDED REASON — the deliberate act — and never by work step status.
+ *
+ * Nothing in this report reads the status of a work order or a work step
+ * (Nicholas, 2026-08-24: "if you're looking at the status of the work order or
+ * work steps, that shouldn't be a trigger"). A report is a record of what was
+ * captured; a photo that was taken is a fact whatever state somebody left the
+ * step in, and an assessment does not become unprintable because a step still
+ * says New. Even here the flag only adds a note — it never suppresses a
+ * section's fields or its photos.
+ */
 export function isNotApplicable(step) {
   if (!step) return false
-  if (step.work_step_not_applicable_reason) return true
-  const label = String(step._status_label || '').trim().toLowerCase()
-  return label === 'not applicable'
+  const reason = step.work_step_not_applicable_reason
+  return reason != null && String(reason).trim() !== ''
 }
 
 /**
@@ -178,40 +188,148 @@ export function photoCaption(photo, { formatDate } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// The company that performed the assessment is named for the state the
+// BUILDING is in — an assessment on a North Carolina property is performed by
+// Energy Efficiency Services of North Carolina, and a report that says
+// Wisconsin on a Rocky Mount building is simply wrong on its face.
+// ---------------------------------------------------------------------------
+export const COMPANY_BASE_NAME = 'Energy Efficiency Services'
+
+const STATE_NAMES = Object.freeze({
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia',
+  FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois',
+  IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana',
+  ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan',
+  MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana',
+  NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota',
+  OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania',
+  RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee',
+  TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington',
+  WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+})
+
+/** "NC" → "North Carolina". Accepts a full name unchanged. Null when unknown. */
+export function stateFullName(state) {
+  const raw = String(state ?? '').trim()
+  if (!raw) return null
+  const abbr = STATE_NAMES[raw.toUpperCase()]
+  if (abbr) return abbr
+  const known = Object.values(STATE_NAMES).find(n => n.toLowerCase() === raw.toLowerCase())
+  return known || null
+}
+
+/**
+ * "Energy Efficiency Services of North Carolina" for a building in NC.
+ * An unknown state falls back to the unqualified name — never to another
+ * state's, which would put a false entity on a legal-looking document.
+ */
+export function companyNameForState(state) {
+  const full = stateFullName(state)
+  return full ? `${COMPANY_BASE_NAME} of ${full}` : COMPANY_BASE_NAME
+}
+
+// ---------------------------------------------------------------------------
+// Record ids must never reach the page.
+//
+// Many `building_*` columns are picklist FKs holding a uuid, not text — the
+// platform rule that `{object}_record_type` is a uuid FK into picklist_values
+// applies to a good deal more than record type. Printing the stored value
+// verbatim puts "09888d66-7719-49a8-b19b-ca885d26fd94" where "Apartment"
+// belongs. A report is read by a property owner and a program reviewer: an
+// identifier is never an acceptable thing to show them.
+// ---------------------------------------------------------------------------
+const RECORD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** True when a value is a record id rather than something a person can read. */
+export function isRecordId(value) {
+  return typeof value === 'string' && RECORD_ID_RE.test(value.trim())
+}
+
+/** Every record id sitting in the model's printable values, de-duplicated. */
+export function collectRecordIds(model) {
+  const ids = new Set()
+  for (const [, value] of (model?.summaryRows || [])) if (isRecordId(value)) ids.add(value.trim())
+  for (const step of (model?.steps || [])) {
+    for (const f of (step.fields || [])) if (isRecordId(f.value)) ids.add(String(f.value).trim())
+  }
+  return Array.from(ids)
+}
+
+/**
+ * Replace record ids with their human labels.
+ *
+ * Anything still unresolved is REMOVED, never printed: a summary row whose
+ * value cannot be named is dropped (the summary is context, and a row nobody
+ * can read is worse than no row), and a captured field falls back to an em
+ * dash — the question was asked and its answer is unreadable, which is much
+ * closer to "not answered" than to a valid value.
+ */
+export function applyLookupLabels(model, labelById) {
+  const label = id => (labelById?.get?.(String(id).trim()) || null)
+  return {
+    ...model,
+    summaryRows: (model?.summaryRows || [])
+      .map(([k, v]) => (isRecordId(v) ? [k, label(v)] : [k, v]))
+      .filter(([, v]) => v != null && String(v).trim() !== ''),
+    steps: (model?.steps || []).map(step => ({
+      ...step,
+      fields: (step.fields || []).map(f =>
+        isRecordId(f.value) ? { ...f, value: label(f.value) } : f),
+    })),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Building summary rows — the orientation table, read off the building and
 // property RECORDS (not the field capture, which gets its own sections).
 // Rows whose column is empty are dropped: this table is context, and a wall of
 // em dashes ahead of the real findings helps nobody.
 // ---------------------------------------------------------------------------
 const SUMMARY_SPEC = [
-  ['Property',                'property_name',                     'property'],
-  ['Building',                'building_name',                     'building'],
-  ['Building Address',        'building_address',                  'building'],
-  ['Year Built',              'building_year_built',               'building'],
-  ['Stories',                 'building_stories',                  'building'],
-  ['Total Units in Building', 'building_total_units',              'building'],
-  ['Building Square Footage', 'building_square_footage',           'building'],
-  ['Building Type',           'building_type',                     'building'],
-  ['Construction Type',       'building_construction_type',        'building'],
-  ['Foundation Type',         'building_foundation_type',          'building'],
-  ['Roof Type',               'building_roof_type',                'building'],
-  ['Window Type',             'building_window_type',              'building'],
-  ['Heating System Type',     'building_heating_system_type',      'building'],
-  ['Heating Fuel',            'building_heating_fuel_type',        'building'],
-  ['Cooling System Type',     'building_cooling_system_type',      'building'],
-  ['Water Heating Type',      'building_water_heating_system_type', 'building'],
-  ['Ventilation Type',        'building_ventilation_type',         'building'],
-  ['Total Units on Property', 'property_total_units',              'property'],
-  ['Total Buildings on Property', 'property_total_buildings',      'property'],
+  ['Building',                'building_name'],
+  ['Building Address',        'building_address'],
+  ['Year Built',              'building_year_built'],
+  ['Stories',                 'building_stories'],
+  ['Stories',                 'building_stories_of_building'],
+  ['Dwelling Units',          'building_total_units'],
+  ['Dwelling Units',          'building_number_of_units'],
+  ['Gross Floor Area',        'building_square_footage'],
+  ['Gross Floor Area',        'building_area'],
+  ['Building Type',           'building_type'],
+  ['Construction Type',       'building_construction_type'],
+  ['Foundation Type',         'building_foundation_type'],
+  ['Roof Type',               'building_roof_type'],
+  ['Window Type',             'building_window_type'],
+  ['Heating System Type',     'building_heating_system_type'],
+  ['Heating Fuel',            'building_heating_fuel_type'],
+  ['Cooling System Type',     'building_cooling_system_type'],
+  ['Water Heating Type',      'building_water_heating_system_type'],
+  ['Ventilation Type',        'building_ventilation_type'],
 ]
 
-/** [[label, value], …] for the Building Summary section. */
-export function buildingSummaryRows(building, property) {
-  const src = { building: building || {}, property: property || {} }
+/**
+ * [[label, value], …] for the Building Summary.
+ *
+ * BUILDING columns only. This is a building energy audit report — how many
+ * units or buildings the wider property holds says nothing about the building
+ * that was walked, and a property-level count printed under a building heading
+ * reads as a statement about that building.
+ *
+ * Some facts are stored under more than one column depending on how the
+ * building was created, so a label may appear twice in the spec; the first
+ * populated one wins and the label is never printed twice.
+ */
+export function buildingSummaryRows(building) {
+  const src = building || {}
   const out = []
-  for (const [label, column, from] of SUMMARY_SPEC) {
-    const v = src[from][column]
+  const seen = new Set()
+  for (const [label, column] of SUMMARY_SPEC) {
+    if (seen.has(label)) continue
+    const v = src[column]
     if (v == null || String(v).trim() === '') continue
+    seen.add(label)
     out.push([label, typeof v === 'number' ? v.toLocaleString('en-US') : String(v)])
   }
   return out
@@ -230,9 +348,17 @@ export function cityStateZip(rec, prefix) {
   return [left, zip].filter(v => v != null && String(v).trim() !== '').join(' ').trim() || null
 }
 
-/** Filename for a generated report, free of characters a filesystem rejects. */
-export function reportFileName(def, workOrderNumber, buildingLabel) {
-  const parts = [def?.fileStem || 'Energy Assessment Report', workOrderNumber, buildingLabel]
+/**
+ * Filename for a generated report: the BUILDING it is about, then which report
+ * it is. Named for the building because that is how these are filed and looked
+ * for — a folder of "Multifamily Energy Assessment Report - WO-00206.pdf" tells
+ * nobody which building they are holding.
+ *
+ * Characters a filesystem rejects are stripped.
+ */
+export function reportFileName(def, buildingName, fallbackLabel) {
+  const building = [buildingName, fallbackLabel].find(v => v != null && String(v).trim() !== '')
+  const parts = [building, def?.fileStem || 'Energy Assessment Report']
     .filter(v => v != null && String(v).trim() !== '')
     .map(v => String(v).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim())
   return `${parts.join(' - ')}.pdf`

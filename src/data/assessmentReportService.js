@@ -19,15 +19,20 @@
 // ---------------------------------------------------------------------------
 
 import { supabase } from '../lib/supabase'
-import { listWorkOrderPhotos, hydratePhotoUrls, uploadDocument } from './storageService'
+import { listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrls } from './storageService'
 import { loadSubmittalDocumentTemplate, loadSubmittalTextBlocks } from './paperworkService'
 import { buildAssessmentReportPdf } from './paperworkModel'
 import { encodeImageForPdf } from '../lib/pdfImages'
 import {
   ASSESSMENT_REPORT_KIND, assessmentReportFor, buildStepEntry, reportPhotos,
   photoCaption, reportPhotoLabel, buildingSummaryRows, addressLines, cityStateZip,
-  reportFileName,
+  reportFileName, collectRecordIds, applyLookupLabels, companyNameForState,
 } from '../lib/assessmentReport'
+
+// How long the in-PDF photo links stay good. A report is filed with a program
+// and read months later, so a one-hour link would be dead on arrival; a year
+// matches the life of the submittal it accompanies.
+const PHOTO_LINK_TTL_SECONDS = 60 * 60 * 24 * 365
 
 function fmtDate(iso) {
   if (!iso) return null
@@ -157,7 +162,7 @@ export async function loadAssessmentReportContext(workOrderId) {
   }
   const stepStatusLabel = new Map((statusRes.data || []).map(r => [r.id, r.picklist_label]))
 
-  const modelSteps = orderedSteps.map(s => buildStepEntry(
+  const modelStepsRaw = orderedSteps.map(s => buildStepEntry(
     { ...s, _status_label: stepStatusLabel.get(s.work_step_status) || null },
     fieldsByTemplate.get(s.work_step_template_id) || [],
     valuesByStep.get(s.id) || new Map(),
@@ -166,6 +171,20 @@ export async function loadAssessmentReportContext(workOrderId) {
   // ── The flagged photos ──────────────────────────────────────────────────
   const allPhotos = await listWorkOrderPhotos(workOrderId)
   const flagged = reportPhotos(allPhotos)
+
+  // Photos count as content, so each step carries how many it contributes.
+  // The dialog reads this: a section with five photos and no typed answers
+  // must not look identical to one with nothing in it.
+  const flaggedByStep = new Map()
+  for (const p of flagged) {
+    const key = String(p._work_step_name || '').trim().toLowerCase()
+    flaggedByStep.set(key, (flaggedByStep.get(key) || 0) + 1)
+  }
+  const modelSteps = modelStepsRaw.map(s => {
+    const photoCount = flaggedByStep.get(String(s.name || '').trim().toLowerCase()) || 0
+    const answered = (s.fields || []).filter(f => f.value != null && String(f.value).trim() !== '').length
+    return { ...s, photoCount, answeredCount: answered, willPrint: answered > 0 || photoCount > 0 || s.notApplicable }
+  })
 
   // ── The template that drives the section list ───────────────────────────
   const [template, textBlocks] = await Promise.all([
@@ -192,16 +211,32 @@ export async function loadAssessmentReportContext(workOrderId) {
     || firstCapture
     || wo.work_order_scheduled_start_date
 
-  const model = {
+  // The building's state decides which EES entity performed the assessment.
+  const reportState = building?.building_state || property?.property_state || null
+
+  const draftModel = {
     title:    def.title,
-    subtitle: def.subtitle,
+    subtitle: def.subtitle || null,
+    company:  {
+      name: companyNameForState(reportState),
+      // The Monona street address belongs to the Wisconsin entity — printing
+      // it under another state's name would put a false address on the report.
+      footerLine: String(reportState || '').toUpperCase() === 'WI'
+        ? null                                  // the seeded WI footer line is correct
+        : companyNameForState(reportState),
+    },
     program:  programRt ? { label: programRt.picklist_label || programRt.picklist_value, name: programRt.picklist_value } : null,
     property: property ? {
       name: property.property_name,
       addressLines: addressLines(property, 'property'),
       cityStateZip: cityStateZip(property, 'property'),
     } : {},
-    building: building ? { name: building.building_name, label: buildingLabel } : {},
+    building: building
+      ? { name: building.building_name, label: buildingLabel,
+          // The file is named for the building, so it wants the full
+          // identifying name rather than the short street label.
+          fileName: building.building_name || buildingLabel }
+      : {},
     workOrder: { number: wo.work_order_record_number, name: wo.work_order_name, status: statusLabel },
     preparedFor: account ? {
       name: account.account_name,
@@ -211,7 +246,7 @@ export async function loadAssessmentReportContext(workOrderId) {
     auditor: owner ? { name: [owner.user_first_name, owner.user_last_name].filter(Boolean).join(' ').trim() || null } : null,
     assessedOn:  fmtDate(assessedOn),
     generatedOn: fmtDate(new Date().toISOString()),
-    summaryRows: buildingSummaryRows(building, property),
+    summaryRows: buildingSummaryRows(building),
     steps: modelSteps,
     photos: flagged.map(p => ({
       id: p.id,
@@ -224,9 +259,26 @@ export async function loadAssessmentReportContext(workOrderId) {
     textBlocks,
   }
 
+  // Resolve every record id in the printable values to its label. Many
+  // building_* columns are picklist FKs holding a uuid, so without this the
+  // report shows "09888d66-…" where "Apartment" belongs.
+  const recordIds = collectRecordIds(draftModel)
+  let labelById = new Map()
+  if (recordIds.length) {
+    const { data: pvRows } = await supabase.from('picklist_values')
+      .select('id, picklist_value, picklist_label').in('id', recordIds)
+    labelById = new Map((pvRows || []).map(r => [r.id, r.picklist_label || r.picklist_value]))
+  }
+  const model = applyLookupLabels(draftModel, labelById)
+
   return {
     def, model, template,
-    counts: { photosFlagged: flagged.length, photosTotal: allPhotos.length, steps: modelSteps.length },
+    counts: {
+      photosFlagged: flagged.length,
+      photosTotal:   allPhotos.length,
+      steps:         modelSteps.length,
+      sectionsWithContent: model.steps.filter(s => s.willPrint).length,
+    },
   }
 }
 
@@ -238,13 +290,31 @@ export async function loadAssessmentReportContext(workOrderId) {
 export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
   const list = model.photos || []
   if (!list.length) return model
-  const hydrated = await hydratePhotoUrls(list.map(p => p._row))
+  const rows = list.map(p => p._row).filter(Boolean)
+  const hydrated = await hydratePhotoUrls(rows)
   const urlById = new Map(hydrated.map(h => [h.id, h._thumbUrl || h._originalUrl || null]))
+
+  // A separate, long-lived link to the ORIGINAL capture, so the PDF's reader
+  // can open or save the full-resolution photo with its EXIF intact. Signed
+  // object URLs are read-only: they expose that one photo and nothing else —
+  // no record, no edit, no delete.
+  const linkById = new Map()
+  const byBucket = new Map()
+  for (const r of rows) {
+    if (!r.storage_bucket || !r.storage_path_original) continue
+    if (!byBucket.has(r.storage_bucket)) byBucket.set(r.storage_bucket, [])
+    byBucket.get(r.storage_bucket).push(r)
+  }
+  await Promise.all(Array.from(byBucket.entries()).map(async ([bucket, group]) => {
+    const urls = await signedUrls(bucket, group.map(r => r.storage_path_original), PHOTO_LINK_TTL_SECONDS)
+    group.forEach((r, i) => { if (urls[i]) linkById.set(r.id, urls[i]) })
+  }))
   let done = 0
   for (const p of list) {
     try {
       const img = await encodeImageForPdf(urlById.get(p.id))
       if (img) { p.dataUrl = img.dataUrl; p.w = img.w; p.h = img.h }
+      p.linkUrl = linkById.get(p.id) || null
     } catch { /* an unreadable photo prints as an empty box, never a failed report */ }
     done++
     if (onProgress) onProgress(done, list.length)
@@ -261,7 +331,7 @@ export async function generateAssessmentReport(workOrderId, { onProgress } = {})
     ctx.model, ASSESSMENT_REPORT_KIND, ctx.template?.sections || null)
   return {
     blob,
-    fileName: reportFileName(ctx.def, ctx.model.workOrder?.number, ctx.model.building?.label),
+    fileName: reportFileName(ctx.def, ctx.model.building?.fileName, ctx.model.building?.label),
     def: ctx.def,
     counts: ctx.counts,
     templateName: ctx.template?.name || null,
