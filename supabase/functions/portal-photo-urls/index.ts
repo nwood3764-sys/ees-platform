@@ -133,7 +133,9 @@ Deno.serve(async (req) => {
     .from("photos")
     .select(`id, storage_bucket, storage_path_original, storage_path_watermarked,
              work_steps!inner ( work_orders!inner ( property_id, building_id,
-               properties ( property_account_id ) ) )`)
+               properties ( property_account_id, property_include_in_owner_portal,
+                            accounts ( account_include_in_owner_portal ) ),
+               buildings ( building_include_in_owner_portal ) ) )`)
     .in("id", ids)
     .eq("is_deleted", false)
   if (qErr) return json({ error: qErr.message }, 500)
@@ -142,6 +144,15 @@ Deno.serve(async (req) => {
     const wo = r.work_steps?.work_orders
     if (!wo) return false
     const acct = wo.properties?.property_account_id
+
+    // Publication flags, top-down — the same rule the tracker and calendar
+    // apply through portal_visible_property_ids / _building_ids. A photo hangs
+    // off a work order, so it is published only when the account, the property
+    // and (when there is one) the building are all published.
+    if (wo.properties?.accounts?.account_include_in_owner_portal !== true) return false
+    if (wo.properties?.property_include_in_owner_portal !== true) return false
+    if (wo.building_id && wo.buildings?.building_include_in_owner_portal !== true) return false
+
     if (previewWholeAccount) {
       // Account preview: everything on that account, matching the tracker.
       return !!acct && acct === accountId

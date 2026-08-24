@@ -207,11 +207,15 @@ function LiveListView({ loading, error, data, onRetry, ...rest }) {
 // ---------------------------------------------------------------------------
 
 function PortalReadiness({ row }) {
-  const cfg = row.opportunities === 0
-    ? { label: 'No content yet', color: C.textMuted, bg: C.page }
-    : row.activeUsers > 0
-      ? { label: 'Owner invited', color: C.emeraldMid, bg: '#e8f8f2' }
-      : { label: 'Ready to review', color: '#1a5a8a', bg: '#e8f3fb' }
+  // Publication comes first: an organization that is not included shows nothing
+  // in the portal no matter how much content or how many grants it has.
+  const cfg = !row.included
+    ? { label: 'Not published', color: C.textMuted, bg: C.page }
+    : row.opportunities === 0
+      ? { label: 'No content yet', color: C.textMuted, bg: C.page }
+      : row.activeUsers > 0
+        ? { label: 'Owner invited', color: C.emeraldMid, bg: '#e8f8f2' }
+        : { label: 'Ready to review', color: '#1a5a8a', bg: '#e8f3fb' }
   return (
     <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, fontWeight:600,
                    color:cfg.color, background:cfg.bg, padding:'3px 8px', borderRadius:11 }}>
@@ -258,6 +262,8 @@ function PropertyOwnerPortals({ isSystemAdmin, onOpenAccount }) {
         <h1 style={{ fontSize:20, fontWeight:700, color:C.textPrimary, margin:0 }}>Property Owner Portals</h1>
         <div style={{ fontSize:12, color:C.textMuted, marginTop:3 }}>
           Open any organization&rsquo;s portal and see it exactly as they would. Check the content before anyone is invited.
+          {' '}An organization appears to its owners only when <strong>Include in Property Owner Portal</strong> is ticked on the
+          account, and each property and building carries the same control.
         </div>
       </div>
 
@@ -312,8 +318,12 @@ function PropertyOwnerPortals({ isSystemAdmin, onOpenAccount }) {
                   <div style={{ fontSize:11, color:C.textMuted, fontFamily:'JetBrains Mono, monospace', fontWeight:400 }}>{r.id}</div>
                 </td>
                 <td style={td}>{r.recordType}</td>
-                <td style={num}>{r.properties}</td>
-                <td style={num}>{r.buildings}</td>
+                <td style={num} title="Published / total">
+                  {r.propertiesIncluded}<span style={{ color:C.textMuted }}>/{r.properties}</span>
+                </td>
+                <td style={num} title="Published / total">
+                  {r.buildingsIncluded}<span style={{ color:C.textMuted }}>/{r.buildings}</span>
+                </td>
                 <td style={num}>{r.opportunities}</td>
                 <td style={num}>{r.workOrders}</td>
                 <td style={num}>{r.visits}</td>
