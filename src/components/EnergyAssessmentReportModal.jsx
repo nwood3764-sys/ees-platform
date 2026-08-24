@@ -124,14 +124,17 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
           {ctx && (
             <>
               <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.55, marginBottom: 14 }}>
-                The report is built from what this assessment captured — every section of the work
-                plan, with the questions the assessor was asked and the answers recorded — plus the
-                photos marked <strong>Include in final report</strong> on this work order’s Photos
-                card. Photos print with the section that captured them.
+                The report prints the sections of this assessment that have something in them —
+                answers recorded, or photos marked <strong>Include in final report</strong> on this
+                work order’s Photos card. Photos print with the section that captured them. A
+                section with nothing captured is left out; work order and work step status are never
+                consulted.
               </div>
 
               <div style={statGrid}>
-                <Stat label="Sections captured" value={ctx.counts.steps} />
+                <Stat label="Sections in report"
+                  value={`${ctx.counts.sectionsWithContent} of ${ctx.counts.steps}`}
+                  tone={ctx.counts.sectionsWithContent === 0 ? 'warn' : 'ok'} />
                 <Stat label="Photos in report" value={`${ctx.counts.photosFlagged} of ${ctx.counts.photosTotal}`}
                   tone={noPhotos ? 'warn' : 'ok'} />
                 <Stat label="Template" value={ctx.templateName || ctx.template?.name || 'Built-in default'} />
@@ -148,20 +151,32 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
                 </div>
               )}
 
-              {/* What the report will contain, section by section. */}
+              {/* What the report will contain, section by section — counting
+                  PHOTOS as content, so a section carrying five photos and no
+                  typed answers never reads as empty. */}
               <div style={{ marginTop: 4 }}>
                 <div style={sectionLabel}>Sections</div>
                 <div style={sectionList}>
-                  {ctx.model.steps.map(s => (
-                    <div key={s.key} style={sectionRow}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
-                      <span style={{ color: C.textMuted, fontSize: 11, whiteSpace: 'nowrap', marginLeft: 10 }}>
-                        {s.notApplicable
-                          ? 'Not applicable'
-                          : `${s.fields.filter(f => f.value != null).length} of ${s.fields.length} answered`}
-                      </span>
-                    </div>
-                  ))}
+                  {ctx.model.steps.map(s => {
+                    const bits = []
+                    if (s.photoCount) bits.push(s.photoCount === 1 ? '1 photo' : `${s.photoCount} photos`)
+                    if (s.fields.length) bits.push(`${s.answeredCount} of ${s.fields.length} answered`)
+                    if (s.notApplicable) bits.push('not applicable')
+                    return (
+                      <div key={s.key} style={{ ...sectionRow, opacity: s.willPrint ? 1 : 0.5 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                          <span style={{
+                            width: 6, height: 6, borderRadius: 3, flexShrink: 0,
+                            background: s.willPrint ? C.emerald : C.borderDark,
+                          }} />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                        </span>
+                        <span style={{ color: C.textMuted, fontSize: 11, whiteSpace: 'nowrap', marginLeft: 10 }}>
+                          {s.willPrint ? bits.join('  ·  ') : 'nothing captured — left out'}
+                        </span>
+                      </div>
+                    )
+                  })}
                   {ctx.model.steps.length === 0 && (
                     <div style={{ ...sectionRow, color: C.textMuted }}>This work order has no captured sections.</div>
                   )}

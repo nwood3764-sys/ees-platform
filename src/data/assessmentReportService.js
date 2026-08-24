@@ -157,7 +157,7 @@ export async function loadAssessmentReportContext(workOrderId) {
   }
   const stepStatusLabel = new Map((statusRes.data || []).map(r => [r.id, r.picklist_label]))
 
-  const modelSteps = orderedSteps.map(s => buildStepEntry(
+  const modelStepsRaw = orderedSteps.map(s => buildStepEntry(
     { ...s, _status_label: stepStatusLabel.get(s.work_step_status) || null },
     fieldsByTemplate.get(s.work_step_template_id) || [],
     valuesByStep.get(s.id) || new Map(),
@@ -166,6 +166,20 @@ export async function loadAssessmentReportContext(workOrderId) {
   // ── The flagged photos ──────────────────────────────────────────────────
   const allPhotos = await listWorkOrderPhotos(workOrderId)
   const flagged = reportPhotos(allPhotos)
+
+  // Photos count as content, so each step carries how many it contributes.
+  // The dialog reads this: a section with five photos and no typed answers
+  // must not look identical to one with nothing in it.
+  const flaggedByStep = new Map()
+  for (const p of flagged) {
+    const key = String(p._work_step_name || '').trim().toLowerCase()
+    flaggedByStep.set(key, (flaggedByStep.get(key) || 0) + 1)
+  }
+  const modelSteps = modelStepsRaw.map(s => {
+    const photoCount = flaggedByStep.get(String(s.name || '').trim().toLowerCase()) || 0
+    const answered = (s.fields || []).filter(f => f.value != null && String(f.value).trim() !== '').length
+    return { ...s, photoCount, answeredCount: answered, willPrint: answered > 0 || photoCount > 0 || s.notApplicable }
+  })
 
   // ── The template that drives the section list ───────────────────────────
   const [template, textBlocks] = await Promise.all([
@@ -226,7 +240,12 @@ export async function loadAssessmentReportContext(workOrderId) {
 
   return {
     def, model, template,
-    counts: { photosFlagged: flagged.length, photosTotal: allPhotos.length, steps: modelSteps.length },
+    counts: {
+      photosFlagged: flagged.length,
+      photosTotal:   allPhotos.length,
+      steps:         modelSteps.length,
+      sectionsWithContent: modelSteps.filter(s => s.willPrint).length,
+    },
   }
 }
 

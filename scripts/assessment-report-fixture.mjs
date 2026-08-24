@@ -65,8 +65,13 @@ const naStep = buildStepEntry(
   { id: 's2', work_step_name: 'Building Diagnostics', work_step_not_applicable_reason: 'No combustion equipment' }, [], new Map())
 ok(naStep.notApplicable, 'a recorded reason marks the step Not Applicable')
 eq(naStep.notApplicableReason, 'No combustion equipment', 'the reason is carried into the report')
-ok(isNotApplicable({ _status_label: 'Not Applicable' }), 'the N/A status label also counts')
+// Status is never a trigger anywhere in this report: a section's presence and
+// its contents follow what was CAPTURED, not what state anybody left the step
+// in. An assessment does not become unprintable because a step still says New.
+ok(!isNotApplicable({ _status_label: 'Not Applicable' }),
+  'work step STATUS never marks a section Not Applicable — only a recorded reason does')
 ok(!isNotApplicable({ _status_label: 'Completed' }), 'a completed step is not N/A')
+ok(!isNotApplicable({ work_step_not_applicable_reason: '   ' }), 'a blank reason is not a reason')
 
 // ── 4. Photo selection — the include_in_final_report flag's first consumer ──
 const photos = [
@@ -179,6 +184,76 @@ const missing = await buildAssessmentReportPdf(model, ASSESSMENT_REPORT_KIND, [
   { type: 'assessment_footer' },
 ])
 ok(missing.size > 1000, 'a section naming an uncaptured step renders a "not captured" note, not an error')
+
+// ── A section with nothing to show is not printed ───────────────────────────
+// Nicholas, 2026-08-24: "You should only include tags or sections that
+// actually have photos." A section that WAS assessed still prints in full,
+// em dashes included, so a half-answered section never hides what it skipped.
+const emptyOnly = {
+  ...model,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: null }] }],
+  photos: [],
+  summaryRows: [],
+}
+const omitted = await buildAssessmentReportPdf(emptyOnly, ASSESSMENT_REPORT_KIND, [
+  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
+])
+const kept = await buildAssessmentReportPdf({
+  ...emptyOnly,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [
+    { label: 'Cooling System Type', value: 'DX Cooling' }, { label: 'Efficiency (SEER)', value: null }] }],
+}, ASSESSMENT_REPORT_KIND, [
+  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
+])
+ok(kept.size > omitted.size,
+  'a section with one answered field prints (and still shows the unanswered one); an entirely empty section does not')
+
+// One photo and no answers is still worth printing — the photo is the content.
+const photoOnly = await buildAssessmentReportPdf({
+  ...emptyOnly,
+  photos: [{ id: 'q1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, [
+  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
+])
+ok(photoOnly.size > omitted.size, 'a section with a photo but no answers still prints')
+
+// A Not Applicable section prints: "we looked, it does not apply" is content.
+const naOnly = await buildAssessmentReportPdf({
+  ...emptyOnly,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [], notApplicable: true, notApplicableReason: 'No cooling equipment' }],
+}, ASSESSMENT_REPORT_KIND, [
+  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
+])
+ok(naOnly.size > omitted.size, 'a Not Applicable section still prints, with its reason')
+
+// omit_when_empty:false forces an empty section to appear anyway.
+const forced = await buildAssessmentReportPdf(emptyOnly, ASSESSMENT_REPORT_KIND, [
+  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step', omit_when_empty: false } },
+])
+ok(forced.size > omitted.size, 'omit_when_empty:false keeps a section that would otherwise be dropped')
+
+// An empty building summary and an empty findings list are dropped too.
+const emptyChrome = await buildAssessmentReportPdf(emptyOnly, ASSESSMENT_REPORT_KIND, [
+  { type: 'assessment_building_summary' }, { type: 'assessment_recommendations' },
+])
+const filledChrome = await buildAssessmentReportPdf(
+  { ...emptyOnly, summaryRows: [['Year Built', '1972']], recommendations: ['Air seal envelope'] },
+  ASSESSMENT_REPORT_KIND,
+  [{ type: 'assessment_building_summary' }, { type: 'assessment_recommendations' }])
+ok(filledChrome.size > emptyChrome.size,
+  'an empty Building Summary and an empty Findings list are dropped, not printed as headings over nothing')
+
+// A Not Applicable step must still print the photos taken on it — the note is
+// added, never substituted for the evidence.
+const naWithPhotos = await buildAssessmentReportPdf({
+  ...emptyOnly,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [], notApplicable: true, notApplicableReason: 'No cooling equipment' }],
+  photos: [{ id: 'q9', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, [
+  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
+])
+ok(naWithPhotos.size > naOnly.size,
+  'Not Applicable adds a note but never suppresses the photos captured on the step')
 
 // A report with no flagged photos at all still renders.
 const noPhotos = await buildAssessmentReportPdf({ ...model, photos: [] }, ASSESSMENT_REPORT_KIND, null)

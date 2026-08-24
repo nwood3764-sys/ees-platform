@@ -1369,6 +1369,7 @@ export const ASSESSMENT_SECTION_RENDERERS = {
      capture) — the reviewer's orientation table. */
   assessment_building_summary(x, cfg = {}) {
     const { m, band, kvTable } = x
+    if (!(m.summaryRows || []).length && cfg.omit_when_empty !== false) return
     band(cfg.heading || 'Building Summary')
     kvTable(m.summaryRows, { emptyLabel: 'No building record data available.' })
   },
@@ -1379,38 +1380,62 @@ export const ASSESSMENT_SECTION_RENDERERS = {
      carries one of these per section, so they reorder, rename and drop
      without code. */
   assessment_field_data(x, cfg = {}) {
-    const { m, band, kvTable, subHead, para, MUT, tc, font, t, M, st } = x
+    const { m, band, kvTable, subHead, para } = x
     const step = assessmentStep(m, cfg.step)
+    const withPhotos = cfg.photos === 'step'
+    const stepPhotos = (withPhotos && step) ? assessmentStepPhotos(m, step.name) : []
+    const answered = step ? (step.fields || []).filter(f => f.value != null && String(f.value).trim() !== '') : []
+
+    // A section with nothing to show is not printed at all (Nicholas,
+    // 2026-08-24: "You should only include tags or sections that actually have
+    // photos"). "Nothing to show" means no answered field AND no photo — a
+    // section that was assessed still prints in full, em dashes included, so a
+    // half-answered section never hides the questions it skipped.
+    //
+    // Set omit_when_empty: false on a section that must always appear (a
+    // program that requires the empty form to be filed, say).
+    const omitWhenEmpty = cfg.omit_when_empty !== false
+    const nothingToShow = !step || (!answered.length && !stepPhotos.length && !step.notApplicable)
+    if (omitWhenEmpty && nothingToShow) return
+
     band(cfg.heading || cfg.step || 'Field Data')
     if (cfg.body) para(cfg.body)
     if (!step) {
       subHead(cfg.missing_label || `Not captured on this assessment — no “${cfg.step}” section on this work order.`)
       return
     }
+    // Not Applicable is a NOTE, never a gate: the section still prints whatever
+    // was captured. Status must never suppress evidence (Nicholas, 2026-08-24:
+    // "if you're looking at the status of the work order or work steps, that
+    // shouldn't be a trigger") — a photo that was taken is a fact regardless of
+    // what state anybody left the step in.
     if (step.notApplicable) {
       subHead('Marked Not Applicable' + (step.notApplicableReason ? ` — ${step.notApplicableReason}` : ''))
-      return
     }
-    const rows = (step.fields || []).map(f => [
-      f.label,
-      f.value != null && String(f.value).trim() !== ''
-        ? String(f.value) + (f.unit ? ` ${f.unit}` : '')
-        : null,
-    ])
-    kvTable(rows, { emptyLabel: 'No values recorded for this section.' })
+
+    // A step that asks no questions (a photo-only section such as Building
+    // Photos) is all photographs — printing "no values recorded" under it, and
+    // then a second heading above its own photos, says nothing twice.
+    const asksQuestions = (step.fields || []).length > 0
+    if (asksQuestions) {
+      const rows = step.fields.map(f => [
+        f.label,
+        f.value != null && String(f.value).trim() !== ''
+          ? String(f.value) + (f.unit ? ` ${f.unit}` : '')
+          : null,
+      ])
+      kvTable(rows, { emptyLabel: 'No values recorded for this section.' })
+    }
 
     // Photos captured on THIS step, printed with the data they document, so
-    // the report can be read side by side with the Asset Score section of the
-    // same name. config.photos: 'step' to include, 'none' (default) to leave
-    // them to the standalone Photo Documentation section.
-    if (cfg.photos === 'step') {
-      const stepPhotos = assessmentStepPhotos(m, step.name)
-      if (stepPhotos.length) {
-        x.subHead(cfg.photo_heading || 'Photo Documentation')
-        x.photoGrid(stepPhotos, { columns: cfg.photo_columns || 2, aspect: cfg.photo_aspect, group_by_step: false })
-      } else if (cfg.photo_empty_label) {
-        x.subHead(cfg.photo_empty_label)
-      }
+    // the report reads beside the Audit Template section of the same name.
+    // config.photos: 'step' to include, 'none' to leave them to the standalone
+    // Photo Documentation section.
+    if (stepPhotos.length) {
+      if (asksQuestions) x.subHead(cfg.photo_heading || 'Photo Documentation')
+      x.photoGrid(stepPhotos, { columns: cfg.photo_columns || 2, aspect: cfg.photo_aspect, group_by_step: false })
+    } else if (withPhotos && cfg.photo_empty_label) {
+      x.subHead(cfg.photo_empty_label)
     }
   },
 
@@ -1419,8 +1444,6 @@ export const ASSESSMENT_SECTION_RENDERERS = {
      work step that captured them, two to a row. */
   assessment_photo_documentation(x, cfg = {}) {
     const { m, band, subHead, para, photoGrid, printedPhotoIds } = x
-    band(cfg.heading || 'Photo Documentation')
-    if (cfg.body) para(cfg.body)
     let photos = m.photos || []
     // Only the named steps, when the template scopes this block to some.
     if (Array.isArray(cfg.steps) && cfg.steps.length) {
@@ -1431,9 +1454,14 @@ export const ASSESSMENT_SECTION_RENDERERS = {
     // photos beside their data can still carry a catch-all block at the end.
     if (cfg.exclude_printed) photos = photos.filter(p => !printedPhotoIds.has(p.id))
     if (!photos.length) {
-      subHead(cfg.empty_label || 'No photos have been marked “Include in final report” on this work order.')
+      if (cfg.omit_when_empty === false) {
+        band(cfg.heading || 'Photo Documentation')
+        subHead(cfg.empty_label || 'No photos have been marked “Include in final report” on this work order.')
+      }
       return
     }
+    band(cfg.heading || 'Photo Documentation')
+    if (cfg.body) para(cfg.body)
     photoGrid(photos, {
       columns: cfg.columns, aspect: cfg.aspect,
       group_by_step: cfg.group_by_step !== false,
@@ -1445,11 +1473,12 @@ export const ASSESSMENT_SECTION_RENDERERS = {
      modelled downstream (Snugg Pro / Asset Score), not computed here. */
   assessment_recommendations(x, cfg = {}) {
     const { m, band, para, bullets, subHead } = x
+    const items = (m.recommendations && m.recommendations.length) ? m.recommendations : (cfg.items || [])
+    if (!items.length && cfg.omit_when_empty !== false) return
     band(cfg.heading || 'Findings & Recommended Measures')
     para(cfg.body)
-    const items = (m.recommendations && m.recommendations.length) ? m.recommendations : (cfg.items || [])
     if (items.length) bullets(items)
-    else if (!cfg.body) subHead(cfg.empty_label || 'No measures recorded.')
+    else subHead(cfg.empty_label || 'No measures recorded.')
   },
 
   /* Deliverables this report accompanies. */

@@ -121,12 +121,22 @@ export function buildStepEntry(step, templateFields, valuesByFieldId) {
   }
 }
 
-/** A step marked Not Applicable — status label or a recorded reason. */
+/**
+ * A step the assessor explicitly marked Not Applicable, recognised by the
+ * RECORDED REASON — the deliberate act — and never by work step status.
+ *
+ * Nothing in this report reads the status of a work order or a work step
+ * (Nicholas, 2026-08-24: "if you're looking at the status of the work order or
+ * work steps, that shouldn't be a trigger"). A report is a record of what was
+ * captured; a photo that was taken is a fact whatever state somebody left the
+ * step in, and an assessment does not become unprintable because a step still
+ * says New. Even here the flag only adds a note — it never suppresses a
+ * section's fields or its photos.
+ */
 export function isNotApplicable(step) {
   if (!step) return false
-  if (step.work_step_not_applicable_reason) return true
-  const label = String(step._status_label || '').trim().toLowerCase()
-  return label === 'not applicable'
+  const reason = step.work_step_not_applicable_reason
+  return reason != null && String(reason).trim() !== ''
 }
 
 /**
