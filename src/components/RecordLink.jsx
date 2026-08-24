@@ -37,8 +37,10 @@ function isModifiedClick(e) {
 export default function RecordLink({ table, id, onActivate, children, style, className, title, onMouseEnter, onMouseLeave }) {
   const href = recordHref(table, id)
 
-  // No real URL for this table (or no id) → keep the prior plain-span behavior
-  // so non-addressable rows are unchanged.
+  // No id (an unsaved draft, a row whose reference didn't resolve) → keep the
+  // plain-span behavior. Every object table is addressable, so a record with an
+  // id always gets a real anchor: open-in-new-tab and copy-link work on any
+  // object, and the URL they produce resolves back to the record.
   if (!href || !isUrlAddressableTable(table)) {
     return (
       <span

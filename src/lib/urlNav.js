@@ -16,13 +16,13 @@
  *                                    results). type= is optional and filters
  *                                    to a single object_type.
  *
- * The module is implied by the table on record URLs — TABLE_MODULE_MAP
- * tells the App which module to activate when a user opens a deep link.
+ * The module is implied by the table on record URLs — the object registry
+ * in objectNav.js tells the App which module to activate on a deep link.
  * In-app record navigation (global search, related lists, lookups) does
  * NOT switch modules: the user stays in whatever module they're in and the
  * record renders there, Salesforce-style. Surfaces that can't host a
  * record (Home, Dispatch, Providers, Search, Help) send the user back to
- * the last workspace module they were in; TABLE_MODULE_MAP is only the
+ * the last workspace module they were in; the registry is only the
  * fallback for cold loads and fresh sessions. See resolveRecordModule.
  *
  * Two routes are reserved and bypass this controller (handled in main.jsx
@@ -33,102 +33,16 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createNavTrail } from './navTrail'
+import { objectModuleFor } from './objectNav.js'
+// The pure URL grammar. Re-exported below so every existing import of
+// parsePath / buildPath / getTableListUrl / getTableForSection /
+// buildScopedListUrl / isUrlAddressableTable from this module keeps working.
+import { parsePath, buildPath } from './urlGrammar.js'
 
-// Map of record-detail tables to their owning module. Mirrors TABLE_META
-// in RecordDetail.jsx but only includes tables we expose as URL roots.
-// Tables not in this map fall through to /m/<module> when opened.
-//
-// NB: this is the SOURCE OF TRUTH for "which module owns which table" in
-// the URL layer. RecordDetail.TABLE_META has the same info but is keyed
-// for display purposes — keep them aligned when adding new objects.
-// True when a table can be addressed as a record URL root (`/<table>/<id>`).
-// Only these resolve back to a record on reload/share (see parsePath), so the
-// URL-routing path in ObjectListSection gates on this to avoid producing a
-// deep link that would break when opened fresh.
-export function isUrlAddressableTable(table) {
-  return !!TABLE_MODULE_MAP[table]
-}
-
-const TABLE_MODULE_MAP = {
-  // Enrollment
-  accounts: 'enrollment',
-  contacts: 'enrollment',
-  account_contact_relations: 'enrollment',
-  properties: 'enrollment',
-  buildings: 'enrollment',
-  units: 'enrollment',
-  opportunities: 'enrollment',
-  property_programs: 'enrollment',
-  enrollments: 'enrollment',
-  // Field
-  projects: 'field',
-  work_orders: 'field',
-  service_appointments: 'field',
-  service_appointment_assignments: 'field',
-  resource_absences: 'field',
-  envelopes: 'field',
-  envelope_recipients: 'field',
-  envelope_tabs: 'field',
-  envelope_events: 'field',
-  // Qualification
-  assessments: 'qualification',
-  incentive_applications: 'qualification',
-  efr_reports: 'qualification',
-  // Incentives
-  project_payment_requests: 'incentives',
-  payment_receipts: 'incentives',
-  // Stock
-  products: 'stock',
-  product_items: 'stock',
-  materials_requests: 'stock',
-  equipment: 'stock',
-  // Fleet
-  vehicles: 'fleet',
-  vehicle_activities: 'fleet',
-  equipment_containers: 'fleet',
-  // Field — people-related (Field module exposes Technicians/Credentials/Time Sheets)
-  contact_skills: 'field',
-  time_sheets: 'field',
-  // Field — dispatcher follow-up queue (captured leads from public scheduling
-  // pages when auto-scheduling hit a dead-end — out_of_territory etc.)
-  dispatcher_followup_requests: 'field',
-  // Tasks (global to-do queue)
-  tasks: 'tasks',
-  // Admin
-  programs: 'admin',
-  work_types: 'admin',
-  work_type_skill_requirements: 'admin',
-  email_templates: 'admin',
-  document_templates: 'admin',
-  document_template_snapshots: 'admin',
-  automation_rules: 'admin',
-  validation_rules: 'admin',
-  roles: 'admin',
-  picklist_values: 'admin',
-  page_layouts: 'admin',
-  skills: 'admin',
-  users: 'admin',
-  project_report_templates: 'admin',
-  project_report_template_sections: 'admin',
-  project_report_template_record_type_assignments: 'admin',
-  project_report_template_snapshots: 'admin',
-  // Portal
-  portal_users: 'portal',
-  // Reports & Dashboards
-  reports: 'reports',
-  report_folders: 'reports',
-  report_filters: 'reports',
-  report_groupings: 'reports',
-  report_calculated_fields: 'reports',
-  scheduled_reports: 'reports',
-  scheduled_report_runs: 'reports',
-  dashboards: 'reports',
-  dashboard_folders: 'reports',
-  dashboard_widgets: 'reports',
-  dashboard_filters: 'reports',
-  dashboard_folder_user_shares: 'reports',
-  dashboard_folder_role_shares: 'reports',
-}
+export {
+  parsePath, buildPath, isUrlAddressableTable, getTableListUrl,
+  getTableForSection, buildScopedListUrl,
+} from './urlGrammar.js'
 
 // Modules that render a record detail surface from the selectedRecord nav
 // prop (they pass it straight into the generic RecordDetail). Opening a
@@ -137,8 +51,13 @@ const TABLE_MODULE_MAP = {
 // navigation chrome, records are global. Modules NOT listed (home, dispatch,
 // providers have no record-detail surface; search and help are synthetic
 // pages) can't display a record, so record-opens from them go to the last
-// hosting module the user was in, then fall back to TABLE_MODULE_MAP — the
-// same resolution a cold deep link uses in parsePath.
+// hosting module the user was in, then fall back to the object registry —
+// the same resolution a cold deep link uses in parsePath.
+/** True when a module renders a record-detail surface. */
+export function isRecordHostingModule(moduleId) {
+  return RECORD_HOSTING_MODULES.has(moduleId)
+}
+
 const RECORD_HOSTING_MODULES = new Set([
   'tasks', 'enrollment', 'outreach', 'qualification', 'field', 'planning',
   'implementation', 'incentives', 'stock', 'fleet', 'reports', 'admin',
@@ -151,7 +70,7 @@ const RECORD_HOSTING_MODULES = new Set([
 // (Home, the /search results page, Dispatch, Providers) return the user to
 // the workspace they were last working in rather than the record's owning
 // module. Module-scoped rather than URL state: a cold-loaded deep link has
-// no workspace history and falls back to TABLE_MODULE_MAP.
+// no workspace history and falls back to the object registry.
 let lastHostingModule = null
 
 // Which module should be active after opening a record. Stay in the current
@@ -162,362 +81,7 @@ let lastHostingModule = null
 function resolveRecordModule(table, currentModule) {
   if (RECORD_HOSTING_MODULES.has(currentModule)) return currentModule
   if (RECORD_HOSTING_MODULES.has(lastHostingModule)) return lastHostingModule
-  return TABLE_MODULE_MAP[table] || currentModule
-}
-
-// Some module sections drop or change the table name — e.g. the Field
-// module exposes work_orders under section id "workorders" (no underscore),
-// time_sheets under "timesheets", and resource_absences under "absences".
-// When wiring a related-list "View All" link to a list view we look up the
-// section here first, then fall back to the table name.
-const TABLE_LIST_SECTION_MAP = {
-  work_orders: 'workorders',
-  time_sheets: 'timesheets',
-  resource_absences: 'absences',
-  // Enrollment shows opportunities under "opps"; Qualification shortens
-  // incentive applications and EFR reports; Incentives names its two lists
-  // after the step, not the table. Without these, a list URL built from the
-  // table name lands on a section id the module doesn't have — an empty page.
-  opportunities: 'opps',
-  incentive_applications: 'applications',
-  efr_reports: 'efr',
-  project_payment_requests: 'requests',
-  payment_receipts: 'received',
-  portal_users: 'users',
-}
-
-/**
- * Compute the URL of a table's list view, if one is reachable.
- * Returns null when the table isn't mapped to a module.
- */
-export function getTableListUrl(table) {
-  if (!table) return null
-  const moduleId = TABLE_MODULE_MAP[table]
-  if (!moduleId) return null
-  const section = TABLE_LIST_SECTION_MAP[table] || table
-  return `/m/${moduleId}/${section}`
-}
-
-/**
- * Build the URL for a related-list "View All" — the target object's list view
- * SCOPED to a single parent record, Salesforce-style (the related-list page
- * shows only the records related to this parent, not the whole object).
- *
- * scope: { table, fk, via, parentId, label }
- *   • table    — target object table (e.g. 'units')
- *   • fk       — the target's FK to the first intermediate (via-path) or the
- *                direct parent FK (e.g. 'building_id' or 'property_id')
- *   • via      — via-chain array for multi-hop related lists (null for direct)
- *   • parentId — the parent record UUID the list is scoped to
- *   • label    — display name of the parent (for the scope banner)
- *
- * The scope rides in a single `rel` query param (compact JSON) so the scoped
- * list is shareable/bookmarkable and survives a reload — parsePath decodes it
- * back into `listScope`. Returns null (caller falls back to the unscoped list
- * URL) when the table isn't addressable or there's nothing to scope on.
- */
-export function buildScopedListUrl(scope) {
-  if (!scope || !scope.table || !scope.parentId || !scope.fk) return null
-  const base = getTableListUrl(scope.table)
-  if (!base) return null
-  const token = scopeToToken(scope)
-  if (!token) return null
-  return `${base}?rel=${token}`
-}
-
-// The scope rides in the URL as a single compact base64url token rather than
-// raw JSON, so the address bar shows `?rel=eyJ0Ijoi…` instead of a wall of
-// percent-escaped braces and quotes.
-function scopeToToken(scope) {
-  if (!scope || !scope.table || !scope.parentId || !scope.fk) return null
-  const via = Array.isArray(scope.via)
-    ? scope.via.filter(v => v && v.table && v.fk).map(v => ({ table: v.table, fk: v.fk }))
-    : (scope.via && scope.via.table && scope.via.fk ? [{ table: scope.via.table, fk: scope.via.fk }] : [])
-  const payload = {
-    t: scope.table,
-    fk: scope.fk,
-    via: via.length ? via : null,
-    pid: scope.parentId,
-    lbl: scope.label || null,
-  }
-  try {
-    return b64urlEncode(JSON.stringify(payload))
-  } catch {
-    return null
-  }
-}
-
-// Decode the `rel` query param (see buildScopedListUrl) back into a listScope
-// object, or null when absent/malformed.
-function decodeListScope(search) {
-  const params = new URLSearchParams(search || '')
-  const raw = params.get('rel')
-  if (!raw) return null
-  try {
-    const p = JSON.parse(b64urlDecode(raw))
-    if (!p || !p.t || !p.pid || !p.fk) return null
-    return {
-      table: p.t,
-      fk: p.fk,
-      via: Array.isArray(p.via) && p.via.length ? p.via.filter(v => v && v.table && v.fk) : null,
-      parentId: p.pid,
-      label: p.lbl || null,
-    }
-  } catch {
-    return null
-  }
-}
-
-// Re-encode a listScope onto a URLSearchParams as the `rel` param (inverse of
-// decodeListScope). No-op when scope is falsy. URLSearchParams won't touch a
-// base64url token (its alphabet is URL-safe), so the address bar stays clean.
-function encodeListScope(params, scope) {
-  const token = scopeToToken(scope)
-  if (token) params.set('rel', token)
-}
-
-// ── Page-layout editor return target (URL-encoded) ───────────────────────
-//
-// When the Setup gear opens the page-layout editor FROM a record, the record
-// to return to on Close/Save rides in the URL as a compact `ret` token — the
-// same base64url scheme as the listScope `rel` token. Unlike the in-memory
-// stash (setLayoutReturnRecord below), a URL param survives a page reload and
-// an editor re-mount, so the "return to the record" behavior holds up even
-// after the admin refreshes the layout editor. Carries only table/id/module —
-// the id is a plain record UUID, exactly what a normal record URL already
-// exposes, so no new PII lands in the address bar.
-function encodeLayoutReturn(ret) {
-  if (!ret || !ret.table || !ret.id) return null
-  try {
-    return b64urlEncode(JSON.stringify({ t: ret.table, id: ret.id, m: ret.module || null }))
-  } catch {
-    return null
-  }
-}
-function decodeLayoutReturn(search) {
-  const params = new URLSearchParams(search || '')
-  const raw = params.get('ret')
-  if (!raw) return null
-  try {
-    const p = JSON.parse(b64urlDecode(raw))
-    if (!p || !p.t || !p.id) return null
-    return { table: p.t, id: p.id, module: p.m || null }
-  } catch {
-    return null
-  }
-}
-
-// Unicode-safe base64url (RFC 4648 §5) — the JSON scope may carry a parent
-// label with non-ASCII characters, so round-trip through UTF-8 bytes.
-function b64urlEncode(str) {
-  const b64 = btoa(unescape(encodeURIComponent(str)))
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-function b64urlDecode(token) {
-  let b64 = token.replace(/-/g, '+').replace(/_/g, '/')
-  while (b64.length % 4) b64 += '='
-  return decodeURIComponent(escape(atob(b64)))
-}
-
-// Reverse of TABLE_LIST_SECTION_MAP — section id back to its table name for
-// the handful of sections whose id differs from the table.
-const SECTION_TABLE_MAP = Object.fromEntries(
-  Object.entries(TABLE_LIST_SECTION_MAP).map(([table, section]) => [section, table])
-)
-
-/**
- * Resolve the underlying table for a module's current list section. Used by
- * the topbar Setup gear so that, on a list page (no record open), it can still
- * deep-link to that object's setup instead of the generic Setup home.
- *
- * Sections whose id equals the table name resolve directly; the few that
- * differ (workorders→work_orders, etc.) come from SECTION_TABLE_MAP. The
- * candidate is validated against TABLE_MODULE_MAP for the active module, so a
- * non-object section (e.g. a module "home" or dashboard tab) returns null and
- * the gear falls back to generic Setup.
- */
-export function getTableForSection(moduleId, section) {
-  if (!section) return null
-  const candidate = SECTION_TABLE_MAP[section] || section
-  // Modules are Salesforce-style apps over one shared database — the same
-  // object's list can appear in many modules — so resolve the section to its
-  // table whenever the candidate is a real object, regardless of which module
-  // is active. (Previously this required TABLE_MODULE_MAP[candidate]===moduleId,
-  // which broke the Setup gear on every module the object wasn't "assigned" to,
-  // e.g. Project Planning / Implementation, leaving only generic Setup.)
-  if (Object.prototype.hasOwnProperty.call(TABLE_MODULE_MAP, candidate)) return candidate
-  return null
-}
-
-// Regex matching a UUID v4 — the only ID format we accept in record URLs.
-// Record-number formats (PROJ-00001, ENV-00002, ...) are NOT accepted here
-// because the RecordDetail loader takes a UUID. If we want record-number
-// URLs in the future, we'd need an id-resolution step before mounting
-// RecordDetail.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-// Module IDs that App.jsx knows how to render. 'search' is a synthetic
-// module — not a navigable item in the sidebar; activated only when the
-// user lands on /search?q=... (typically from the search modal's "View
-// all results" footer button or a shared link).
-const KNOWN_MODULES = new Set([
-  'home', 'tasks', 'outreach', 'enrollment', 'qualification', 'field', 'planning', 'implementation', 'dispatch', 'incentives',
-  'stock', 'fleet', 'reports', 'admin', 'portal', 'providers', 'search', 'help',
-])
-
-/**
- * Parse a pathname (and optional search string) into navigation state.
- * Returns null for selectedRecord when the URL doesn't address a record.
- *
- * Examples:
- *   '/'                          → { activeModule: 'home', selectedRecord: null }
- *   '/m/field'                   → { activeModule: 'field', selectedRecord: null }
- *   '/m/field/projects'          → { activeModule: 'field', selectedRecord: null, section: 'projects' }
- *   '/projects/<uuid>'           → { activeModule: 'field', selectedRecord: { table: 'projects', id: <uuid>, mode: 'view' } }
- *   '/work_orders/new'           → { activeModule: 'field', selectedRecord: { table: 'work_orders', id: null, mode: 'create' } }
- *   '/search?q=willow'           → { activeModule: 'search', searchQuery: 'willow' }
- *   '/search?q=willow&type=project' → { activeModule: 'search', searchQuery: 'willow', searchType: 'project' }
- *   '/garbage/foo'               → { activeModule: 'home', selectedRecord: null }   ← unknown table, no record-detail attempt
- */
-export function parsePath(pathname, search = '') {
-  const clean = (pathname || '/').replace(/\/+$/, '') || '/'
-  const parts = clean.split('/').filter(Boolean)
-
-  // Default empty navigation state — every return path overlays its own
-  // fields on top of this so consumers always get the same shape.
-  const base = {
-    activeModule: 'home',
-    selectedRecord: null,
-    section: null,
-    subsection: null,
-    adminTab: null,
-    adminLayoutId: null,
-    adminLayoutReturn: null,
-    searchQuery: null,
-    searchType: null,
-    helpSlug: null,
-    listScope: null,
-  }
-
-  // /
-  if (parts.length === 0) return base
-
-  // /help                  → help center, no slug → show first article
-  // /help/<slug>           → help center, deep-link to specific article
-  // Bypasses the module switch so the help center is reachable from
-  // anywhere — including external portal subdomains in the future.
-  if (parts[0] === 'help') {
-    return {
-      ...base,
-      activeModule: 'help',
-      helpSlug: parts[1] || null,
-    }
-  }
-
-  // /search?q=<term>&type=<object_type>
-  // Reads the search string for q/type. type is optional. An empty/missing
-  // q still routes to the search page — the page itself handles the empty
-  // state by showing the search input and a hint.
-  if (parts[0] === 'search') {
-    const params = new URLSearchParams(search || '')
-    return {
-      ...base,
-      activeModule: 'search',
-      searchQuery: params.get('q') || '',
-      searchType: params.get('type') || null,
-    }
-  }
-
-  // /m/<module>[/<section>[/<subsection>]]
-  // Examples:
-  //   /m/field/projects              → { section: 'projects' }
-  //   /m/admin/objects/properties    → { section: 'objects', subsection: 'properties' }
-  // Subsection is consumed by modules that need a finer routing tier — today
-  // only Admin's Object Manager (which needs the specific table the user is
-  // viewing) so that browser-back lands on the manager list rather than home.
-  if (parts[0] === 'm') {
-    // Legacy slug aliases so old bookmarks resolve. /m/prospecting and the
-    // retired /m/outreach_properties both now map to the Outreach app at
-    // /m/outreach. (The Enrollment app, formerly at the 'outreach' id, now
-    // lives at /m/enrollment; bare /m/outreach now correctly resolves to the
-    // Outreach app.)
-    let mod = parts[1]
-    if (mod === 'prospecting' || mod === 'outreach_properties') mod = 'outreach'
-    if (KNOWN_MODULES.has(mod) && mod !== 'search' && mod !== 'help') {
-      // ?tab=<id> carries an admin-module sub-tab hint (used by ObjectDetail's
-      // initialSubTab). ?layout=<uuid> carries a layout-id hint so the
-      // Page Layouts sub-tab can open the specific layout's editor directly.
-      const params = new URLSearchParams(search || '')
-      return {
-        ...base,
-        activeModule: mod,
-        section: parts[2] || null,
-        subsection: parts[3] || null,
-        adminTab: params.get('tab') || null,
-        adminLayoutId: params.get('layout') || null,
-        // The record (if any) the page-layout editor should return to on
-        // Close/Save — encoded in the URL so it survives a reload or a
-        // re-mount, unlike the in-memory stash below. See decodeLayoutReturn.
-        adminLayoutReturn: decodeLayoutReturn(search),
-        // A related-list "View All" scopes the section's list to one parent.
-        listScope: decodeListScope(search),
-      }
-    }
-    return base
-  }
-
-  // /<table>/<id>  or  /<table>/new
-  if (parts.length === 2) {
-    const [table, id] = parts
-    const mod = TABLE_MODULE_MAP[table]
-    if (!mod) return base
-    if (id === 'new') {
-      return { ...base, activeModule: mod, selectedRecord: { table, id: null, mode: 'create' } }
-    }
-    if (UUID_RE.test(id)) {
-      return { ...base, activeModule: mod, selectedRecord: { table, id, mode: 'view' } }
-    }
-    // Unknown id format — drop to module home rather than 404.
-    return { ...base, activeModule: mod }
-  }
-
-  // Anything else — fall through to home.
-  return base
-}
-
-/**
- * Build a pathname (+ optional search string) for the given navigation
- * state. Inverse of parsePath. Returns the full path including any query
- * string the search route needs.
- */
-export function buildPath({ activeModule, selectedRecord, section, subsection, adminTab, adminLayoutId, adminLayoutReturn, searchQuery, searchType, helpSlug, listScope }) {
-  if (selectedRecord?.table) {
-    if (selectedRecord.mode === 'create') return `/${selectedRecord.table}/new`
-    if (selectedRecord.id) return `/${selectedRecord.table}/${selectedRecord.id}`
-  }
-  if (activeModule === 'help') {
-    return helpSlug ? `/help/${helpSlug}` : '/help'
-  }
-  if (activeModule === 'search') {
-    const params = new URLSearchParams()
-    if (searchQuery) params.set('q', searchQuery)
-    if (searchType) params.set('type', searchType)
-    const qs = params.toString()
-    return qs ? `/search?${qs}` : '/search'
-  }
-  let base
-  if (section && subsection) base = `/m/${activeModule}/${section}/${subsection}`
-  else if (section)          base = `/m/${activeModule}/${section}`
-  else if (activeModule && activeModule !== 'home') base = `/m/${activeModule}`
-  else return '/'
-  const params = new URLSearchParams()
-  if (adminTab) params.set('tab', adminTab)
-  if (adminLayoutId) params.set('layout', adminLayoutId)
-  const retToken = encodeLayoutReturn(adminLayoutReturn)
-  if (retToken) params.set('ret', retToken)
-  encodeListScope(params, listScope)
-  const qs = params.toString()
-  return qs ? `${base}?${qs}` : base
+  return objectModuleFor(table)
 }
 
 /**
