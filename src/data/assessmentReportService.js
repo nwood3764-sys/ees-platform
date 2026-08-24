@@ -25,7 +25,8 @@ import { buildAssessmentReportPdf } from './paperworkModel'
 import { encodeImageForPdf } from '../lib/pdfImages'
 import {
   ASSESSMENT_REPORT_KIND, assessmentReportFor, buildStepEntry, reportPhotos,
-  photoCaption, buildingSummaryRows, addressLines, cityStateZip, reportFileName,
+  photoCaption, reportPhotoLabel, buildingSummaryRows, addressLines, cityStateZip,
+  reportFileName,
 } from '../lib/assessmentReport'
 
 function fmtDate(iso) {
@@ -54,8 +55,8 @@ export async function loadAssessmentReportContext(workOrderId) {
     .select(`
       id, work_order_record_number, work_order_name, work_order_record_type,
       work_order_status, work_order_owner, property_id, building_id,
-      opportunity_id, project_id, work_order_scheduled_date,
-      work_order_actual_start, work_order_actual_end, work_order_completed_date`)
+      opportunity_id, project_id,
+      work_order_start_datetime, work_order_end_datetime, work_order_scheduled_start_date`)
     .eq('id', workOrderId)
     .maybeSingle()
   if (woErr) throw new Error(woErr.message)
@@ -172,11 +173,24 @@ export async function loadAssessmentReportContext(workOrderId) {
     loadSubmittalTextBlocks(opportunity?.opportunity_record_type || null),
   ])
 
+  // EES names a building by its street number, and the derived building_name
+  // repeats the whole property name — on a report cover the short identity is
+  // the readable one.
   const buildingLabel = building
-    ? (building.building_name || building.building_number_or_name || 'Building')
+    ? (building.building_number_or_name || building.building_name || 'Building')
     : null
 
-  const assessedOn = wo.work_order_completed_date || wo.work_order_actual_start || wo.work_order_scheduled_date
+  // When the building was actually assessed. The work order's own datetimes
+  // are only filled once it is started/finished, so fall back to the first
+  // photo captured on it — a photo's taken_at IS the visit — and only then to
+  // the scheduled date, which is a plan rather than a fact.
+  const firstCapture = flagged.length
+    ? flagged.map(p => p.taken_at || p.created_at).filter(Boolean).sort()[0]
+    : (allPhotos.map(p => p.taken_at || p.created_at).filter(Boolean).sort()[0] || null)
+  const assessedOn = wo.work_order_end_datetime
+    || wo.work_order_start_datetime
+    || firstCapture
+    || wo.work_order_scheduled_start_date
 
   const model = {
     title:    def.title,
@@ -202,7 +216,7 @@ export async function loadAssessmentReportContext(workOrderId) {
     photos: flagged.map(p => ({
       id: p.id,
       group: p._work_step_name || 'Work Order',
-      label: p._photo_tag_label || p.caption || p.photo_number || 'Photo',
+      label: reportPhotoLabel(p),
       caption: photoCaption(p, { formatDate: fmtDateTime }),
       _row: p,
     })),

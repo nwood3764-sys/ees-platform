@@ -71,6 +71,8 @@ export function hasAssessmentReport(recordTypeValue) {
   return !!(def && def.built)
 }
 
+import { photoTagLabel, isMeaningfulTag } from './photoTags.js'
+
 // ---------------------------------------------------------------------------
 // Shaping the captured field data.
 // ---------------------------------------------------------------------------
@@ -144,6 +146,24 @@ export function reportPhotos(photos) {
       if (pa !== pb) return pa - pb
       return String(a.taken_at || a.created_at || '').localeCompare(String(b.taken_at || b.created_at || ''))
     })
+}
+
+/**
+ * The bold line under a report photo — what it SHOWS.
+ *
+ * Uses the platform's own tag rule (photoTags.photoTagLabel), so a photo
+ * captured against a work step prompt reads with the wording the technician
+ * saw and the program reviewer expects. A tag that describes nothing beyond
+ * "a photo" ('general', 'photo', blank) is not a description, so the caption
+ * is preferred over it, and the photo number is the last resort — never a
+ * label that says nothing.
+ */
+export function reportPhotoLabel(photo, labels) {
+  if (!photo) return 'Photo'
+  if (isMeaningfulTag(photo.photo_type)) return photoTagLabel(photo, labels)
+  const caption = photo.caption
+  if (caption != null && String(caption).trim() !== '') return String(caption).trim()
+  return photo.photo_number || 'Photo'
 }
 
 /** Caption line under a report photo: when it was taken, and where. */
