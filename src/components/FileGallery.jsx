@@ -22,6 +22,7 @@ import {
   softDeletePhoto,
   setPhotoReportInclusion,
   reprocessPhoto,
+  repairUnrenderedPhotos,
   uploadDocument,
   listDocuments,
   hydrateDocumentUrls,
@@ -109,13 +110,22 @@ async function fetchAsBlob(url) {
   return r.blob()
 }
 
-// Safe, human-readable filename from the photo's number + work-step tag. The
-// watermarked evidence file is always a JPEG.
+// Safe, human-readable filename from the photo's number + work-step tag.
+//
+// The extension follows the bytes actually being downloaded, which is not
+// always JPEG: the watermarked evidence file is, but a photo with no rendered
+// variant downloads its ORIGINAL, and for an iPhone capture that is a .heic.
+// Naming those .jpg produced a file that opens on a Mac and confuses everything
+// else — a mislabelled evidence file is worse than an honestly named one.
 function photoFileName(p) {
   const parts = [p.photo_number, p._work_step_name].filter(Boolean)
   const base = (parts.join(' - ') || p.id || 'photo')
     .replace(/[^\w \-().]/g, '').trim().slice(0, 90) || 'photo'
-  return `${base}.jpg`
+  const source = p._thumbUrl
+    ? (p.storage_path_watermarked || p.storage_path_rendition)
+    : p.storage_path_original
+  const ext = String(source || '').toLowerCase().split('?')[0].split('.').pop()
+  return `${base}.${/^[a-z0-9]{2,5}$/.test(ext) ? ext : 'jpg'}`
 }
 
 async function downloadSinglePhoto(p) {
@@ -416,6 +426,7 @@ export default function FileGalleryWidget({
   // leave the rest in an unknown state, and optimistic per row so the grid
   // keeps up with a 40-photo selection.
   const [reportBusy, setReportBusy] = useState(false)
+  const [repairBusy, setRepairBusy] = useState(null) // {done,total} while repairing
   const selectedPhotos = useMemo(
     () => visiblePhotos.filter(p => selectedIds.has(p.id)),
     [visiblePhotos, selectedIds])
@@ -453,16 +464,26 @@ export default function FileGalleryWidget({
     [items, target]
   )
 
-  // Photos with a 'pending' watermark won't have their watermarked URL on
-  // first load. Poll lightly while any are pending so the UI catches up
-  // when the edge function finishes. Stops as soon as no rows are pending.
+  // Photos still being processed won't have their watermarked URL on first
+  // load. Poll lightly while any are in flight so the UI catches up when the
+  // edge function finishes. 'processing' counts as in flight too: process-photo
+  // flips a row to that the moment it picks it up, and a row that never came
+  // back from it is exactly the case a viewer is most likely to be watching.
   useEffect(() => {
     if (target !== 'photos') return
-    const hasPending = items.some(p => p.watermark_status === 'pending')
-    if (!hasPending) return
+    const inFlight = items.some(p => p.watermark_status === 'pending' || p.watermark_status === 'processing')
+    if (!inFlight) return
     const t = setTimeout(refresh, 4000)
     return () => clearTimeout(t)
   }, [items, target, refresh])
+
+  // Photos with no displayable image — a HEIC capture whose rendition and
+  // watermark were never produced. These are the tiles that used to render as
+  // broken images; the card offers to repair them in place.
+  const unrenderedPhotos = useMemo(
+    () => (target === 'photos' ? items.filter(p => !p._thumbUrl && p.storage_path_original) : []),
+    [items, target]
+  )
 
   // ── Upload handlers ─────────────────────────────────────────────────
   const handleFiles = useCallback(async (fileList) => {
@@ -597,16 +618,39 @@ export default function FileGalleryWidget({
   }
 
   const handleReprocess = async (photoId) => {
+    // Optimistically flip status first: repairing a HEIC decodes a 12 MP frame
+    // in this tab, which takes a beat, and a tile that looks inert while that
+    // happens invites a second click.
+    setItems(prev => prev.map(p => p.id === photoId
+      ? { ...p, watermark_status: 'pending', watermark_error: null }
+      : p))
     try {
       await reprocessPhoto(photoId)
       toast.info('Re-processing — will refresh shortly')
-      // Optimistically flip status so the badge updates without waiting
-      // for the next refresh tick.
-      setItems(prev => prev.map(p => p.id === photoId
-        ? { ...p, watermark_status: 'pending', watermark_error: null }
-        : p))
     } catch (e) {
       toast.error(e.message || 'Re-processing failed')
+      await refresh()
+    }
+  }
+
+  const handleRepairAll = async () => {
+    const todo = unrenderedPhotos
+    if (todo.length === 0) return
+    setRepairBusy({ done: 0, total: todo.length })
+    setItems(prev => prev.map(p => (todo.some(t => t.id === p.id)
+      ? { ...p, watermark_status: 'pending', watermark_error: null }
+      : p)))
+    try {
+      const { repaired, failed } = await repairUnrenderedPhotos(todo, {
+        onProgress: ({ done, total }) => setRepairBusy({ done, total }),
+      })
+      if (repaired > 0) toast.success(`${repaired} photo${repaired === 1 ? '' : 's'} repaired`)
+      if (failed > 0) toast.error(`${failed} could not be repaired`)
+    } catch (e) {
+      toast.error(e.message || 'Repair failed')
+    } finally {
+      setRepairBusy(null)
+      await refresh()
     }
   }
 
@@ -787,6 +831,43 @@ export default function FileGalleryWidget({
                     })
                   }}
                 />
+                {/* Photos with no displayable image. Before 2026-08-24 these
+                    rendered as broken tiles with nothing to explain them; now
+                    the card says what is wrong and fixes it in place. The
+                    decode runs in this tab, which is precisely why the server
+                    could not do it. */}
+                {unrenderedPhotos.length > 0 && !selectMode && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                    margin: '0 0 10px', padding: '9px 12px',
+                    background: '#eef4fb', border: `1px solid ${C.sky}`,
+                    borderRadius: 6, fontSize: 12.5, color: C.textSecondary,
+                  }}>
+                    <Icon path="M12 9v4 M12 17h.01 M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"
+                      size={14} color="#2a5a8a" />
+                    <span style={{ flex: 1, minWidth: 200 }}>
+                      {unrenderedPhotos.length} photo{unrenderedPhotos.length === 1 ? ' has' : 's have'} no preview yet
+                      {' '}— the capture is safe, it just has not been rendered.
+                    </span>
+                    <button
+                      onClick={handleRepairAll}
+                      disabled={!!repairBusy}
+                      style={{
+                        padding: '5px 11px', borderRadius: 5,
+                        border: `1px solid ${C.emeraldMid}`,
+                        background: repairBusy ? '#f7f9fc' : C.emerald,
+                        color: repairBusy ? C.textMuted : '#fff',
+                        fontSize: 12, fontWeight: 600,
+                        cursor: repairBusy ? 'default' : 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {repairBusy
+                        ? `Repairing ${repairBusy.done}/${repairBusy.total}…`
+                        : `Repair ${unrenderedPhotos.length === 1 ? 'photo' : 'photos'}`}
+                    </button>
+                  </div>
+                )}
                 {visiblePhotos.length === 0 ? (
                   <div style={{ padding: '18px 4px', fontSize: 12.5, color: C.textMuted }}>
                     {showReportOnly
@@ -1349,6 +1430,13 @@ function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onT
 function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
   const status = photo.watermark_status
   const url = photo._thumbUrl
+  // process-photo writes 'pending' | 'processing' | 'done' | 'skipped' |
+  // 'failed'. The retry affordance used to test for 'error', a value the
+  // function has never written, so a failed photo offered nothing at all —
+  // which is how 66 unprocessed captures sat on a work order looking simply
+  // broken.
+  const working = status === 'pending' || status === 'processing'
+  const failedWithImage = status === 'failed' && !!url
   const [hover, setHover] = useState(false)
   return (
     <div
@@ -1392,17 +1480,38 @@ function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggl
           }}
         />
       ) : (
+        // No displayable image. The photo itself is fine — its bytes are in
+        // storage and Download still returns the real capture — it just has no
+        // rendered variant yet. Say that, rather than letting the browser draw
+        // its broken-image glyph over a photo that was never lost.
         <div style={{
           width: '100%', height: '100%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: C.textMuted, fontSize: 11,
+          display: 'flex', flexDirection: 'column', gap: 6,
+          alignItems: 'center', justifyContent: 'center',
+          color: 'rgba(255,255,255,0.72)', fontSize: 11,
+          textAlign: 'center', padding: 10,
         }}>
-          {status === 'pending' ? 'Processing…' : 'Unavailable'}
+          <Icon path="M3 7h2l2-3h10l2 3h2v12H3V7z M12 11a4 4 0 100 8 4 4 0 000-8z"
+            size={20} color="rgba(255,255,255,0.5)" />
+          {working
+            ? 'Rendering…'
+            : <>
+                <span>No preview yet</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onReprocess() }}
+                  style={{
+                    padding: '3px 9px', borderRadius: 4,
+                    border: '1px solid rgba(255,255,255,0.45)',
+                    background: 'rgba(255,255,255,0.12)', color: '#fff',
+                    fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >Render</button>
+              </>}
         </div>
       )}
 
       {/* Watermark status badge — only visible when not 'done' */}
-      {status === 'pending' && (
+      {working && (
         <div style={{
           position: 'absolute', top: 6, left: 6,
           background: 'rgba(13,26,46,0.78)', color: '#fff',
@@ -1411,7 +1520,7 @@ function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggl
           textTransform: 'uppercase', letterSpacing: 0.4,
         }}>Processing</div>
       )}
-      {status === 'error' && (
+      {failedWithImage && (
         <button
           onClick={(e) => { e.stopPropagation(); onReprocess() }}
           title={photo.watermark_error || 'Retry processing'}
