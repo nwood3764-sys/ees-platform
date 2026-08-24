@@ -104,14 +104,25 @@ eq(reportPhotoLabel({ photo_type: 'general', photo_number: 'PHO-01855' }), 'PHO-
 eq(reportPhotoLabel(null), 'Photo', 'a missing photo still gets a label rather than "undefined"')
 
 // ── 5. Building summary ─────────────────────────────────────────────────────
-const rows = buildingSummaryRows(
-  { building_name: '1615 E Raleigh Rd', building_year_built: 1974, building_total_units: 24, building_roof_type: null },
-  { property_name: '100 Saint Francis Court', property_total_units: 24 })
+// This is a BUILDING energy audit report: the summary carries building facts
+// only. A property-level count under a building heading reads as a claim about
+// that building.
+const rows = buildingSummaryRows({
+  building_name: '1615 E Raleigh Rd', building_year_built: 1974,
+  building_total_units: 24, building_roof_type: null,
+})
 const labels = rows.map(r => r[0])
 ok(labels.includes('Year Built'), 'a populated column appears')
-ok(!labels.includes('Roof Type'), 'an empty column is dropped — context, not a wall of em dashes')
-eq(rows.find(r => r[0] === 'Property')[1], '100 Saint Francis Court', 'property name comes off the property record')
-eq(buildingSummaryRows(null, null).length, 0, 'no records means no summary rows, not a crash')
+ok(!labels.includes('Roof Type'), 'an empty column is dropped')
+ok(!labels.some(l => /Property/i.test(l)), 'no property-level row appears in a building report')
+eq(rows.find(r => r[0] === 'Dwelling Units')[1], '24', 'the building\u2019s own unit count is shown')
+// The same fact lives under different columns depending on how the building
+// was created; the first populated one wins and the label never repeats.
+const alt = buildingSummaryRows({ building_number_of_units: 6, building_stories_of_building: '2.0' })
+eq(alt.find(r => r[0] === 'Dwelling Units')[1], '6', 'the alternate unit-count column is read too')
+eq(alt.filter(r => r[0] === 'Dwelling Units').length, 1, 'a label is never printed twice')
+eq(alt.find(r => r[0] === 'Stories')[1], '2.0', 'the alternate stories column is read too')
+eq(buildingSummaryRows(null).length, 0, 'no building record means no summary rows, not a crash')
 eq(addressLines({ property_street: '100 Saint Francis Ct' }, 'property'), ['100 Saint Francis Ct'],
   'properties spell it property_street')
 eq(addressLines({ building_address: '1615 E Raleigh Rd' }, 'building'), ['1615 E Raleigh Rd'],
@@ -185,7 +196,9 @@ for (const s of defaults) {
 }
 // One assessment_field_data per captured section, each naming a real step.
 const stepSections = defaults.filter(s => s.type === 'assessment_field_data')
-eq(stepSections.length, 14, 'one section per captured work step')
+eq(stepSections.length, 13, 'one section per captured system, and none for anything else')
+ok(!defaults.some(x => ['assessment_narrative','assessment_deliverables','assessment_recommendations','assessment_signature'].includes(x.type)),
+  'the report carries no narrative, deliverables, findings or signature block — only the building and its photographs')
 ok(stepSections.every(s => s.config.photos === 'step'),
   'each system section prints its own photos, so the report reads beside the Asset Score sections')
 
@@ -230,75 +243,68 @@ const missing = await buildAssessmentReportPdf(model, ASSESSMENT_REPORT_KIND, [
 ])
 ok(missing.size > 1000, 'a section naming an uncaptured step renders a "not captured" note, not an error')
 
-// ── A section with nothing to show is not printed ───────────────────────────
-// Nicholas, 2026-08-24: "You should only include tags or sections that
-// actually have photos." A section that WAS assessed still prints in full,
-// em dashes included, so a half-answered section never hides what it skipped.
-const emptyOnly = {
-  ...model,
-  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: null }] }],
-  photos: [],
-  summaryRows: [],
-}
-const omitted = await buildAssessmentReportPdf(emptyOnly, ASSESSMENT_REPORT_KIND, [
-  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
-])
-const kept = await buildAssessmentReportPdf({
-  ...emptyOnly,
+// ── Sections and line items ─────────────────────────────────────────────────
+// Nicholas, 2026-08-24: "get rid of the fucking sections if there are no
+// pictures" and "If there's not a photo, get rid of the line item and get rid
+// of the section if there are no line items in the section."
+const base = { ...model, steps: [], photos: [], summaryRows: [] }
+const oneSection = cfgExtra => [{ type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step', ...cfgExtra } }]
+
+const noPhotos = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: 'DX Cooling' }] }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+const withPhoto = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: 'DX Cooling' }] }],
+  photos: [{ id: 'c1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+ok(withPhoto.size > noPhotos.size, 'a section with no photographs is not in the report')
+
+// Blank answers are never printed as line items — only answered fields are.
+const someBlank = await buildAssessmentReportPdf({
+  ...base,
   steps: [{ key: 'e1', name: 'Cooling Systems', fields: [
-    { label: 'Cooling System Type', value: 'DX Cooling' }, { label: 'Efficiency (SEER)', value: null }] }],
-}, ASSESSMENT_REPORT_KIND, [
-  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
-])
-ok(kept.size > omitted.size,
-  'a section with one answered field prints (and still shows the unanswered one); an entirely empty section does not')
+    { label: 'Cooling System Type', value: 'DX Cooling' },
+    { label: 'Efficiency (SEER)', value: null },
+    { label: 'Condition', value: null }] }],
+  photos: [{ id: 'c1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+const allAnswered = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [
+    { label: 'Cooling System Type', value: 'DX Cooling' },
+    { label: 'Efficiency (SEER)', value: '13' },
+    { label: 'Condition', value: 'Average' }] }],
+  photos: [{ id: 'c1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+ok(allAnswered.size > someBlank.size,
+  'unanswered fields are dropped as line items rather than printed as em dashes')
 
-// One photo and no answers is still worth printing — the photo is the content.
-const photoOnly = await buildAssessmentReportPdf({
-  ...emptyOnly,
-  photos: [{ id: 'q1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
-}, ASSESSMENT_REPORT_KIND, [
-  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
-])
-ok(photoOnly.size > omitted.size, 'a section with a photo but no answers still prints')
+// A photo-only section prints its photographs and no table at all.
+const photosOnly = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: null }] }],
+  photos: [{ id: 'c1', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, oneSection())
+ok(photosOnly.size > 1000, 'a section with photographs and no answers still prints, carrying just the photographs')
 
-// A Not Applicable section prints: "we looked, it does not apply" is content.
-const naOnly = await buildAssessmentReportPdf({
-  ...emptyOnly,
-  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [], notApplicable: true, notApplicableReason: 'No cooling equipment' }],
-}, ASSESSMENT_REPORT_KIND, [
-  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
-])
-ok(naOnly.size > omitted.size, 'a Not Applicable section still prints, with its reason')
+// require_photos:false keeps a written-record section that has data but no photos.
+const keptWithoutPhotos = await buildAssessmentReportPdf({
+  ...base,
+  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [{ label: 'Cooling System Type', value: 'DX Cooling' }] }],
+}, ASSESSMENT_REPORT_KIND, oneSection({ require_photos: false }))
+ok(keptWithoutPhotos.size > noPhotos.size, 'require_photos:false keeps a section that has data but no photographs')
 
-// omit_when_empty:false forces an empty section to appear anyway.
-const forced = await buildAssessmentReportPdf(emptyOnly, ASSESSMENT_REPORT_KIND, [
-  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step', omit_when_empty: false } },
-])
-ok(forced.size > omitted.size, 'omit_when_empty:false keeps a section that would otherwise be dropped')
-
-// An empty building summary and an empty findings list are dropped too.
-const emptyChrome = await buildAssessmentReportPdf(emptyOnly, ASSESSMENT_REPORT_KIND, [
-  { type: 'assessment_building_summary' }, { type: 'assessment_recommendations' },
-])
+// An empty Building Summary and an empty Findings list are dropped too.
+const emptyChrome = await buildAssessmentReportPdf(base, ASSESSMENT_REPORT_KIND,
+  [{ type: 'assessment_building_summary' }, { type: 'assessment_recommendations' }])
 const filledChrome = await buildAssessmentReportPdf(
-  { ...emptyOnly, summaryRows: [['Year Built', '1972']], recommendations: ['Air seal envelope'] },
+  { ...base, summaryRows: [['Year Built', '1972']], recommendations: ['Air seal envelope'] },
   ASSESSMENT_REPORT_KIND,
   [{ type: 'assessment_building_summary' }, { type: 'assessment_recommendations' }])
 ok(filledChrome.size > emptyChrome.size,
   'an empty Building Summary and an empty Findings list are dropped, not printed as headings over nothing')
-
-// A Not Applicable step must still print the photos taken on it — the note is
-// added, never substituted for the evidence.
-const naWithPhotos = await buildAssessmentReportPdf({
-  ...emptyOnly,
-  steps: [{ key: 'e1', name: 'Cooling Systems', fields: [], notApplicable: true, notApplicableReason: 'No cooling equipment' }],
-  photos: [{ id: 'q9', group: 'Cooling Systems', label: 'Condenser', caption: 'Aug 24, 2026' }],
-}, ASSESSMENT_REPORT_KIND, [
-  { type: 'assessment_field_data', config: { step: 'Cooling Systems', heading: 'Cooling', photos: 'step' } },
-])
-ok(naWithPhotos.size > naOnly.size,
-  'Not Applicable adds a note but never suppresses the photos captured on the step')
 
 // A photo carrying a link renders larger than one without: the link, the
 // underline and the link-coloured label are all real marks on the page.
@@ -318,8 +324,8 @@ const ncCover = await buildAssessmentReportPdf(model, ASSESSMENT_REPORT_KIND, [{
 ok(ncCover.size > 1000, 'the cover renders with the state-specific company name')
 
 // A report with no flagged photos at all still renders.
-const noPhotos = await buildAssessmentReportPdf({ ...model, photos: [] }, ASSESSMENT_REPORT_KIND, null)
-ok(noPhotos.size > 3000, 'a report with no flagged photos still renders')
+const nothingTagged = await buildAssessmentReportPdf({ ...model, photos: [] }, ASSESSMENT_REPORT_KIND, null)
+ok(nothingTagged.size > 1000, 'a report with no tagged photos still renders — the cover and the building summary')
 
 // An unknown section type is a loud failure, not a silently missing section.
 await assert.rejects(

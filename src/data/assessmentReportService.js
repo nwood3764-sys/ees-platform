@@ -246,7 +246,7 @@ export async function loadAssessmentReportContext(workOrderId) {
     auditor: owner ? { name: [owner.user_first_name, owner.user_last_name].filter(Boolean).join(' ').trim() || null } : null,
     assessedOn:  fmtDate(assessedOn),
     generatedOn: fmtDate(new Date().toISOString()),
-    summaryRows: buildingSummaryRows(building, property),
+    summaryRows: buildingSummaryRows(building),
     steps: modelSteps,
     photos: flagged.map(p => ({
       id: p.id,

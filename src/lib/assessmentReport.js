@@ -288,34 +288,48 @@ export function applyLookupLabels(model, labelById) {
 // em dashes ahead of the real findings helps nobody.
 // ---------------------------------------------------------------------------
 const SUMMARY_SPEC = [
-  ['Property',                'property_name',                     'property'],
-  ['Building',                'building_name',                     'building'],
-  ['Building Address',        'building_address',                  'building'],
-  ['Year Built',              'building_year_built',               'building'],
-  ['Stories',                 'building_stories',                  'building'],
-  ['Total Units in Building', 'building_total_units',              'building'],
-  ['Building Square Footage', 'building_square_footage',           'building'],
-  ['Building Type',           'building_type',                     'building'],
-  ['Construction Type',       'building_construction_type',        'building'],
-  ['Foundation Type',         'building_foundation_type',          'building'],
-  ['Roof Type',               'building_roof_type',                'building'],
-  ['Window Type',             'building_window_type',              'building'],
-  ['Heating System Type',     'building_heating_system_type',      'building'],
-  ['Heating Fuel',            'building_heating_fuel_type',        'building'],
-  ['Cooling System Type',     'building_cooling_system_type',      'building'],
-  ['Water Heating Type',      'building_water_heating_system_type', 'building'],
-  ['Ventilation Type',        'building_ventilation_type',         'building'],
-  ['Total Units on Property', 'property_total_units',              'property'],
-  ['Total Buildings on Property', 'property_total_buildings',      'property'],
+  ['Building',                'building_name'],
+  ['Building Address',        'building_address'],
+  ['Year Built',              'building_year_built'],
+  ['Stories',                 'building_stories'],
+  ['Stories',                 'building_stories_of_building'],
+  ['Dwelling Units',          'building_total_units'],
+  ['Dwelling Units',          'building_number_of_units'],
+  ['Gross Floor Area',        'building_square_footage'],
+  ['Gross Floor Area',        'building_area'],
+  ['Building Type',           'building_type'],
+  ['Construction Type',       'building_construction_type'],
+  ['Foundation Type',         'building_foundation_type'],
+  ['Roof Type',               'building_roof_type'],
+  ['Window Type',             'building_window_type'],
+  ['Heating System Type',     'building_heating_system_type'],
+  ['Heating Fuel',            'building_heating_fuel_type'],
+  ['Cooling System Type',     'building_cooling_system_type'],
+  ['Water Heating Type',      'building_water_heating_system_type'],
+  ['Ventilation Type',        'building_ventilation_type'],
 ]
 
-/** [[label, value], …] for the Building Summary section. */
-export function buildingSummaryRows(building, property) {
-  const src = { building: building || {}, property: property || {} }
+/**
+ * [[label, value], …] for the Building Summary.
+ *
+ * BUILDING columns only. This is a building energy audit report — how many
+ * units or buildings the wider property holds says nothing about the building
+ * that was walked, and a property-level count printed under a building heading
+ * reads as a statement about that building.
+ *
+ * Some facts are stored under more than one column depending on how the
+ * building was created, so a label may appear twice in the spec; the first
+ * populated one wins and the label is never printed twice.
+ */
+export function buildingSummaryRows(building) {
+  const src = building || {}
   const out = []
-  for (const [label, column, from] of SUMMARY_SPEC) {
-    const v = src[from][column]
+  const seen = new Set()
+  for (const [label, column] of SUMMARY_SPEC) {
+    if (seen.has(label)) continue
+    const v = src[column]
     if (v == null || String(v).trim() === '') continue
+    seen.add(label)
     out.push([label, typeof v === 'number' ? v.toLocaleString('en-US') : String(v)])
   }
   return out
