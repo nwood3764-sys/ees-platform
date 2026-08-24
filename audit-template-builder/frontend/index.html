@@ -144,6 +144,16 @@
   </div>
   <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and either bedrooms per unit (uniform) or total bedrooms (mixed unit types) to enable exports.</div>
 
+  <div id="rateRow" style="margin-top:2px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+    <strong>Utility rates</strong>
+    <label title="All-in $ per kWh. Pre-filled with the building state's average; edit for the specific municipality/region.">Electric $/kWh
+      <input id="rateElec" type="number" min="0" step="0.001" style="width:92px;margin-left:4px"></label>
+    <label title="All-in $ per therm. Pre-filled with the building state's average; edit for the specific municipality/region.">Gas $/therm
+      <input id="rateGas" type="number" min="0" step="0.01" style="width:92px;margin-left:4px"></label>
+    <span class="copyhint" id="rateHint"></span>
+  </div>
+  <div style="margin:2px 0 12px;font-size:12px;color:var(--mut)">Pre-filled with the building state's residential average (EIA). Edit either field for a specific municipality or region — your value flows into the page, the 50121 XML energy costs, and the paperwork.</div>
+
   <div class="tabs">
     <button class="tabBtn active" data-tab="Model">Energy Modeling</button>
     <button class="tabBtn" data-tab="Paper">Project Paperwork</button>
@@ -360,10 +370,20 @@ let RATE_GAS =STATE_UTILITY_RATES.US.gas;   // $ per therm (all-in)
 let RATE_STATE='US';                        // 2-letter state the live rates belong to
 // Point RATE_ELEC/RATE_GAS at the building's state. Called from refresh() and
 // invoiceModel() so every $ figure (page + XML + paperwork) tracks the location.
+let RATE_CUSTOM=false;   // true when the entered rate differs from the state average
 function setRatesForState(st){
   const key=STATE_UTILITY_RATES[(st||'').toUpperCase()]?(st||'').toUpperCase():'US';
   const r=STATE_UTILITY_RATES[key];
-  RATE_ELEC=r.elec; RATE_GAS=r.gas; RATE_STATE=key;
+  RATE_STATE=key;
+  // The rate INPUTS are the source of truth (pre-filled with the state average,
+  // editable per municipality/region). A valid entered value wins; otherwise the
+  // state average is used. This flows into every $ figure — page, 50121 XML
+  // energy costs, and the paperwork.
+  const ev=parseFloat((document.getElementById('rateElec')||{}).value);
+  const gv=parseFloat((document.getElementById('rateGas')||{}).value);
+  RATE_ELEC=(Number.isFinite(ev)&&ev>0)?ev:r.elec;
+  RATE_GAS =(Number.isFinite(gv)&&gv>0)?gv:r.gas;
+  RATE_CUSTOM=(Number.isFinite(ev)&&ev>0&&ev!==r.elec)||(Number.isFinite(gv)&&gv>0&&gv!==r.gas);
   return key;
 }
 // Fixed meter/customer charges, $ per meter per month. Currently $0.00: the
@@ -1130,10 +1150,14 @@ function refresh(){
     +`<tr><td>Electric meter charge</td><td>$${METER_CHARGE_ELEC.toFixed(2)} / month</td></tr>`
     +`<tr><td>Cost per therm</td><td>$${RATE_GAS.toFixed(2)}</td></tr>`
     +`<tr><td>Gas meter charge</td><td>$${METER_CHARGE_GAS.toFixed(2)} / month</td></tr>`
-    +'</table><p class="hint">'+(RATE_STATE==='US'?'National average (building state unknown)':stateFullName(RATE_STATE))
-    +' residential averages (EIA, 2026), selected from the building location. The all-in $/kWh and $/therm '
-    +'rates already spread utility fixed/meter charges across usage, so the separate meter charges are '
-    +'$0.00 until real tariffs are itemized. These are read-only for now — they can be made editable later.</p></div>';
+    +'</table><p class="hint">'
+    +(RATE_CUSTOM
+       ? 'Custom rates entered for this project (municipality/region-specific).'
+       : ((RATE_STATE==='US'?'National average (building state unknown)':stateFullName(RATE_STATE))
+          +' residential averages (EIA, 2026), from the building location.'))
+    +' The all-in $/kWh and $/therm rates already spread utility fixed/meter charges across usage, so the '
+    +'separate meter charges are $0.00 until real tariffs are itemized. Edit the rates in the Utility rates '
+    +'row above for a specific municipality or region.</p></div>';
 
   h+='<div class="sect"><h3>Monthly energy &amp; cost (whole building)</h3>';
   h+=monthTable('Baseline',data.osBase);
@@ -1220,7 +1244,7 @@ function refresh(){
     'EUI and headline savings come from the Asset Score Report (the document of record). '+
     'The monthly metered energy uses the OpenStudio month-to-month shape, scaled so each fuel\'s annual total equals the Asset Score energy (per-fuel EUI × floor area) — so the EUI matches the Asset Score PDF. '+
     'Floor area uses the page-1 value ('+fmt(asB.gfa)+' ft²), not the block-driven figure on later pages. '+
-    'Annual energy cost uses '+(RATE_STATE==='US'?'national average':stateFullName(RATE_STATE)+' residential average')+' rates (from the building location): $'+RATE_ELEC.toFixed(3)+'/kWh and $'+RATE_GAS.toFixed(2)+'/therm (EIA, 2026).';
+    'Annual energy cost uses '+(RATE_CUSTOM?'custom rates entered for this project':((RATE_STATE==='US'?'national average':stateFullName(RATE_STATE)+' residential average')+' rates (from the building location)'))+': $'+RATE_ELEC.toFixed(3)+'/kWh and $'+RATE_GAS.toFixed(2)+'/therm'+(RATE_CUSTOM?'.':' (EIA, 2026).');
 
   // sanity flags
   const flags=[];
@@ -1609,6 +1633,7 @@ async function build50121XML(which){
 
   const asB=data.asBase, asI=data.asImp;
   const as = which==='improved' ? (asI||asB) : asB;
+  setRatesForState(buildingState());   // honor any per-project rate override in the XML costs
 
   // Whole-building savings % (the 50121 qualification driver) + headline EUIs.
   const b=annual(data.osBase), i=annual(data.osImp);
@@ -3109,7 +3134,7 @@ function buildMappedForReview(){
      the rounding so Gross Total = Total Rebates exactly → TOTAL DUE $0.                    */
 const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone','pjPropName',
   'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd',
-  'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower'];
+  'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower','rateElec','rateGas'];
 function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
@@ -3145,10 +3170,19 @@ function pjLoadAndPrefill(){
     const e=document.getElementById(id); if(!e)continue;
     if(v!=null&&(e.value===''||e.dataset.auto==='1')){e.value=v; e.dataset.auto='1';}
   }
+  // Utility rates: pre-fill with the building state's residential average when
+  // empty (no saved override), so the field always shows the rate in use and the
+  // user can edit it for their municipality/region. A saved value (loaded above)
+  // is left untouched.
+  {const rr=STATE_UTILITY_RATES[buildingState()]||STATE_UTILITY_RATES.US;
+   set('rateElec',String(rr.elec)); set('rateGas',String(rr.gas));}
 }
 (function(){for(const f of PJ_FIELDS){const e=document.getElementById(f);
   if(e)e.addEventListener('input',()=>{pjSave();
     if(/^pjQty/.test(f)){delete e.dataset.auto;
+      if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();}
+    if(/^rate(Elec|Gas)$/.test(f)){   // rate edit → re-render every $ figure + re-check
+      if(typeof refresh==='function')refresh();
       if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();}});}})();
 
 // The Measure Description Bank (from the workbook), with R-value substitution slots.
