@@ -582,36 +582,53 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
     { type: 'sealed_signature_block' },
   ],
   // Energy Assessment Report — the audit's own deliverable, its own engine.
-  // One assessment_field_data section per captured work-step section, in the
-  // order the auditor walks the building, so the report reads as the walk.
+  //
+  // The section ORDER and HEADINGS mirror the DOE **Audit Template** report
+  // (PNNL, ANSI/ASHRAE/ACCA Standard 211-2018) so the two can be read side by
+  // side: its six parts — Overview · Contact Information and Audit Details ·
+  // Facility Description · Utility Data and Benchmarking · Energy Savings
+  // Opportunities · Attachments — appear here in the same sequence, with the
+  // same sub-section names (Roofs, Walls, Windows, Foundation Types, Lighting,
+  // HVAC Systems, Service Hot Water Systems…), each fed by the LEAP work step
+  // that captured it and carrying that step's photos.
+  //
+  // Note the ordering: Audit Template puts Windows before Foundation Types and
+  // Lighting before HVAC. That is why this list is not simply the work plan's
+  // own walk order. "Building 360 Video" has no Audit Template counterpart and
+  // cannot render in a PDF, so it is deliberately absent.
   energyAssessmentReport: [
-    { type: 'assessment_cover' },
+    { type: 'assessment_cover', config: {
+      subtitle: 'ANSI/ASHRAE/ACCA Standard 211 Level 2 — Field Data Record' } },
     { type: 'assessment_narrative', config: {
-      heading: 'Scope & Methodology',
-      body: 'Energy Efficiency Services performed a whole-building energy assessment of the property identified above. The assessment documents the building’s geometry and use, envelope assemblies, central and common-area mechanical systems, service hot water, common-area lighting, and available utility and occupancy data. Findings are recorded in the field at the time of the visit and are supported by the photographic documentation included in this report.' } },
-    { type: 'assessment_building_summary', config: { heading: 'Building Summary' } },
-    { type: 'assessment_field_data', config: { step: 'Building Photos',                    heading: 'Building Photographs', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Building Geometry & Use',            heading: 'Building Geometry & Use', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Roof / Ceiling',                     heading: 'Envelope — Roof / Ceiling', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Walls',                              heading: 'Envelope — Walls', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Foundation / Floor',                 heading: 'Envelope — Foundation / Floor', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Windows & Doors',                    heading: 'Envelope — Windows & Doors', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Heating Systems',                    heading: 'Heating Systems', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Cooling Systems',                    heading: 'Cooling Systems', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Distribution & Ventilation',         heading: 'Distribution & Ventilation', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Service Hot Water',                  heading: 'Service Hot Water', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Common-Area Lighting',               heading: 'Common-Area Lighting', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Building Diagnostics',               heading: 'Building Diagnostics', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Utility & Energy Data',              heading: 'Utility & Energy Data', photos: 'step' } },
-    { type: 'assessment_field_data', config: { step: 'Occupancy & Operating Schedules',    heading: 'Occupancy & Operating Schedules', photos: 'step' } },
+      heading: 'Overview',
+      body: 'Energy Efficiency Services performed a whole-building energy assessment of the building identified above. This report is the field record of that assessment: the observed condition of the building\u2019s envelope, its central and common-area mechanical systems, its service hot water and lighting, and the utility and occupancy data collected for it, together with the photographs taken on site.\n\nIts sections follow the DOE Audit Template report (ANSI/ASHRAE/ACCA Standard 211) so the two documents can be read side by side, section for section. Contact information and audit details \u2014 who performed the assessment, for whom, and on what date \u2014 appear on the cover of this report.' } },
+    { type: 'assessment_building_summary', config: {
+      heading: 'Facility Description — Building Summary' } },
+    { type: 'assessment_field_data', config: { step: 'Building Geometry & Use',         heading: 'Facility Description — Building Characteristics and Use Types', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Roof / Ceiling',                  heading: 'Facility Description — Roofs', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Walls',                           heading: 'Facility Description — Walls', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Windows & Doors',                 heading: 'Facility Description — Windows', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Foundation / Floor',              heading: 'Facility Description — Foundation Types', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Common-Area Lighting',            heading: 'Facility Description — Lighting', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Heating Systems',                 heading: 'Facility Description — HVAC Systems: Heating', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Cooling Systems',                 heading: 'Facility Description — HVAC Systems: Cooling', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Distribution & Ventilation',      heading: 'Facility Description — Distribution Equipment and Zone Controls', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Service Hot Water',               heading: 'Facility Description — Service Hot Water Systems', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Building Diagnostics',            heading: 'Facility Description — Enclosure Tightness and Diagnostics', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Utility & Energy Data',           heading: 'Utility Data and Benchmarking', photos: 'step' } },
+    { type: 'assessment_field_data', config: { step: 'Occupancy & Operating Schedules', heading: 'Utility Data and Benchmarking — Occupancy and Operating Schedules', photos: 'step' } },
+    { type: 'assessment_recommendations', config: {
+      heading: 'Energy Savings Opportunities',
+      body: 'The measures below are the opportunities identified during this assessment. Their modelled energy savings, cost, incentives and payback are produced by the energy model and are reported in the Audit Template report\u2019s Energy Savings Opportunities section; they are not computed here.' } },
+    { type: 'assessment_field_data', config: { step: 'Building Photos',                 heading: 'Attachments — Building Photographs', photos: 'step' } },
     { type: 'assessment_photo_documentation', config: {
-      heading: 'Additional Photo Documentation', columns: 2, group_by_step: true, exclude_printed: true,
+      heading: 'Attachments — Additional Photo Documentation', columns: 2, group_by_step: true, exclude_printed: true,
       empty_label: 'All photos marked “Include in final report” are shown with their sections above.' } },
-    { type: 'assessment_recommendations', config: { heading: 'Findings & Recommended Measures' } },
     { type: 'assessment_deliverables', config: {
       heading: 'Deliverables',
       items: [
         'Whole-Building Energy Audit Report (ASHRAE Level II equivalent)',
+        'DOE Audit Template report',
         'HPXML v4 / BuildingSync file from Asset Score',
         'Customer Report / Building Assessment Tool Report',
       ] } },

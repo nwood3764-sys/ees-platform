@@ -13,7 +13,7 @@ import assert from 'node:assert/strict'
 
 import {
   ASSESSMENT_REPORTS, ASSESSMENT_REPORT_KIND, assessmentReportFor, hasAssessmentReport,
-  fieldDisplayValue, buildStepEntry, isNotApplicable, reportPhotos, photoCaption,
+  fieldDisplayValue, buildStepEntry, isNotApplicable, reportPhotos, photoCaption, reportPhotoLabel,
   buildingSummaryRows, addressLines, cityStateZip, reportFileName,
 } from '../src/lib/assessmentReport.js'
 import {
@@ -83,6 +83,19 @@ eq(reportPhotos(null).length, 0, 'a null photo list is not an error')
 ok(photoCaption({ taken_at: '2026-08-24T10:00:00Z', latitude: 35.9382, longitude: -77.7905 },
   { formatDate: () => 'Aug 24, 2026' }).includes('35.93820'), 'GPS rides in the caption')
 eq(photoCaption({}, {}), '', 'a photo with neither time nor GPS gets an empty caption, not "undefined"')
+
+// The photo's LABEL follows the platform's own tag rule, so a step-captured
+// photo reads with the wording the technician saw.
+eq(reportPhotoLabel({ photo_type: 'kitchen_overall_photo' }), 'Kitchen Overall Photo',
+  'a real tag is humanized into the label')
+eq(reportPhotoLabel({ photo_type: 'boiler', _photo_tag_label: 'Boiler Nameplate' }), 'Boiler Nameplate',
+  'a work step template label always wins')
+eq(reportPhotoLabel({ photo_type: 'general', caption: 'North elevation', photo_number: 'PHO-01855' }),
+  'North elevation',
+  '"general" describes nothing, so the caption is preferred over it')
+eq(reportPhotoLabel({ photo_type: 'general', photo_number: 'PHO-01855' }), 'PHO-01855',
+  'with no meaningful tag and no caption the photo number is the last resort — never an empty label')
+eq(reportPhotoLabel(null), 'Photo', 'a missing photo still gets a label rather than "undefined"')
 
 // ── 5. Building summary ─────────────────────────────────────────────────────
 const rows = buildingSummaryRows(
