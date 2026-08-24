@@ -39,6 +39,7 @@ import { holdAppReload } from '../lib/appUpdate'
 import FieldValueLink from './FieldValueLink'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl, buildScopedListUrl, pushRecordSubPath } from '../lib/urlNav'
+import { objectNavFor, humanizeObjectLabel } from '../lib/objectNav'
 import { useDataRefresh } from '../lib/dataRefresh'
 import ActivityTimeline from './ActivityTimeline'
 import FileGalleryWidget from './FileGallery'
@@ -457,17 +458,60 @@ function getRecordNumber(tableName, record) {
   return ''
 }
 
-function Breadcrumbs({ tableName, record, lookups, onBack, onNavigateToRecord }) {
-  const meta = TABLE_META[tableName] || { module: '—', label: tableName, parents: [], parentTables: [] }
+// The parent chain for an object that carries no explicit `parents` list in
+// TABLE_META: its own lookup fields, in page-layout order.
+//
+// TABLE_META covers 74 of the 103 objects with a record page, so for the rest
+// the breadcrumb rendered no hierarchy at all — a work step showed nothing
+// above it even though its Work Order was sitting right there on the layout.
+// Deriving from the layout means a new object gets a real breadcrumb the day
+// its page is built, with no registry entry to remember.
+//
+// Excluded: fields the layout declares as system audit (Created By / Last
+// Modified By) and lookups onto users — an owner is not a parent in the
+// hierarchy, and putting one in the breadcrumb reads as one.
+function deriveParentFksFromSections(sections) {
+  const out = []
+  for (const sec of sections || []) {
+    for (const w of sec.widgets || []) {
+      if (w.widget_type !== 'field_group' || !w.widget_config?.fields) continue
+      for (const f of w.widget_config.fields) {
+        if (f.type !== 'lookup' || !f.name) continue
+        if (isSystemAuditField(f)) continue
+        if (f.lookup_table === 'users') continue
+        if (!out.includes(f.name)) out.push(f.name)
+      }
+    }
+  }
+  return out
+}
+
+function Breadcrumbs({ tableName, record, lookups, derivedParents, onBack, onNavigateToRecord }) {
+  // Every object gets an app name and a readable object name, whether or not
+  // it was ever added to TABLE_META. Before this, an unlisted object rendered
+  // its module as "—" and its own name as the raw table ("— / work_steps").
+  const nav = objectNavFor(tableName)
+  const declared = TABLE_META[tableName] || null
+  const meta = {
+    module: declared?.module || nav.moduleLabel,
+    label: declared?.label || nav.label,
+    parents: declared?.parents || [],
+    parentTables: declared?.parentTables || [],
+  }
 
   // Parent crumbs — innermost first. Each crumb carries the FK target so the
   // user can click through to the parent record. `parentTables` aligns
   // positionally with `parents`; if it's missing or short (legacy entries),
   // the crumb still renders as plain text.
+  //
+  // With no declared parents, fall back to the chain derived from the page
+  // layout, capped so a wide layout can't push a dozen crumbs into the bar.
+  const usingDerived = meta.parents.length === 0 && (derivedParents?.length || 0) > 0
+  const parentFks = usingDerived ? derivedParents.slice(0, 3) : meta.parents
   const parentCrumbs = []
-  for (let i = 0; i < meta.parents.length; i += 1) {
-    const fk = meta.parents[i]
-    const parentTable = (meta.parentTables || [])[i] || null
+  for (let i = 0; i < parentFks.length; i += 1) {
+    const fk = parentFks[i]
+    const parentTable = usingDerived ? null : ((meta.parentTables || [])[i] || null)
     const val = record[fk]
     if (val && lookups.has(val)) {
       const entry = lookups.get(val)
@@ -480,15 +524,25 @@ function Breadcrumbs({ tableName, record, lookups, onBack, onNavigateToRecord })
     }
   }
 
+  // The object crumb links to the object's list view. Objects reached only
+  // through a parent (work steps, line items, photos) have no list anywhere,
+  // and linking them used to drop the user on the module's Home page — the
+  // "breadcrumb takes me home" complaint. They render as plain text instead.
+  const hasList = !!nav.listUrl
+
   const sep = <span style={{ color: C.textMuted, margin: '0 6px', fontSize: 10 }}>/</span>
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, marginBottom: 14 }}>
       <span style={{ fontSize: 12, color: C.textMuted }}>{meta.module}</span>
       {sep}
-      <button onClick={onBack} style={{ fontSize: 12, color: '#1a5a8a', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
-        {meta.label}
-      </button>
+      {hasList ? (
+        <button onClick={onBack} style={{ fontSize: 12, color: '#1a5a8a', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+          {meta.label}
+        </button>
+      ) : (
+        <span style={{ fontSize: 12, color: C.textSecondary }}>{meta.label}</span>
+      )}
       {parentCrumbs.map((c, i) => (
         <span key={i} style={{ display: 'flex', alignItems: 'center' }}>
           {sep}
@@ -8630,7 +8684,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
 
   // Show the record-type picker before loading the layout. Gates create mode.
   if (isCreate && pickerEvaluated && pickedRecordType === null) {
-    const objectLabel = TABLE_META[tableName]?.label || tableName
+    const objectLabel = TABLE_META[tableName]?.label || humanizeObjectLabel(tableName)
     return (
       <RecordTypePicker
         tableName={tableName}
@@ -8708,13 +8762,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // it uses the loaded record and its lookups.
   const crumbRecord = isCreate ? { ...record, ...(prefill || {}) } : record
   const crumbLookups = isCreate ? createCrumbLookups : lookups
+  // Parent chain for objects TABLE_META doesn't declare one for — read off the
+  // page layout so every object shows its hierarchy, not just the listed ones.
+  const derivedParentFks = TABLE_META[tableName]?.parents?.length
+    ? null
+    : deriveParentFksFromSections(sections)
 
   // Build the ordered tab list from the loaded sections. Details first,
   // Related second (if any section has related_list widgets), Activity third
   // (not on new records — nothing to show yet), alphabetical after.
   const orderedTabs = buildOrderedTabs(sections, { includeActivity: !isInsertMode })
 
-  const objectLabel = TABLE_META[tableName]?.label || tableName
+  const objectLabel = TABLE_META[tableName]?.label || humanizeObjectLabel(tableName)
   // Header values driven from TABLE_META so adding a new object only requires
   // one row of metadata. Previously these were 9-fallback `||` chains that
   // grew with every new table — the envelope page rendered "Record" + a
@@ -8936,7 +8995,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       padding: isMobile ? '12px' : '20px 24px',
       paddingBottom: isMobile ? 'calc(12px + env(safe-area-inset-bottom))' : '20px',
     }}>
-      {!isMobile && <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
+      {!isMobile && <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} derivedParents={derivedParentFks} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
       {isMobile && (
         <button
           onClick={onBack}
@@ -9145,7 +9204,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         paddingBottom: isMobile && editing ? 'calc(80px + env(safe-area-inset-bottom))' : isMobile ? 'calc(24px + env(safe-area-inset-bottom))' : undefined,
       }}>
         {/* Desktop breadcrumbs (hidden on mobile — the sticky header handles back navigation) */}
-        {!isMobile && <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
+        {!isMobile && <Breadcrumbs tableName={tableName} record={crumbRecord} lookups={crumbLookups} derivedParents={derivedParentFks} onBack={onBack} onNavigateToRecord={onNavigateToRecord} />}
 
         {/* Desktop header card (mobile already shows this info in the sticky bar above — mobile shows a compact title + status chip instead) */}
         {!isMobile ? (

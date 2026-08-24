@@ -20,7 +20,7 @@ import { fetchAccessibleModules, moduleAllowed, fetchCanUseViewAs, fetchAllRoles
 import { supabase } from './lib/supabase'
 import { useInputFocusScroll } from './lib/useInputFocusScroll'
 import { useIsMobile } from './lib/useMediaQuery'
-import { useUrlNavigation, getTableForSection } from './lib/urlNav'
+import { useUrlNavigation, getTableForSection, isRecordHostingModule } from './lib/urlNav'
 import { startAutoUpdate, holdAppReload } from './lib/appUpdate'
 
 // ─── Lazy-loaded modules ─────────────────────────────────────────────────────
@@ -149,7 +149,8 @@ function AuthedApp({ session }) {
   // URL-driven navigation. Replaces what used to be a local activeModule
   // useState — now `activeModule` and `selectedRecord` come from the URL,
   // which means every record has a stable shareable address. See
-  // src/lib/urlNav.js for the URL scheme and the table-to-module map.
+  // src/lib/urlNav.js for the URL scheme and src/lib/objectNav.js for the
+  // object registry that maps every object to its app, label and list view.
   const {
     activeModule,
     selectedRecord,
@@ -239,6 +240,15 @@ function AuthedApp({ session }) {
     if (activeModule && activeModule !== 'search' && activeModule !== 'help'
         && !moduleAllowed(effectiveAccess, activeModule)) {
       const fallback = navModules[0]?.id || 'home'
+      // Moving the user to an app they can open must not throw away the record
+      // they asked for. Which app hosts an object is chrome; whether they may
+      // read the record is RLS, and that is enforced when it loads. Dropping
+      // the record here turned a shared link into a Home screen for anyone
+      // whose role didn't include the object's default app.
+      if (selectedRecord?.table && selectedRecord.id && isRecordHostingModule(fallback)) {
+        navigateToRecord({ ...selectedRecord, module: fallback })
+        return
+      }
       navigateToModule(fallback)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
