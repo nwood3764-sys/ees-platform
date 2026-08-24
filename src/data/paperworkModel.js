@@ -597,8 +597,7 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
   // own walk order. "Building 360 Video" has no Audit Template counterpart and
   // cannot render in a PDF, so it is deliberately absent.
   energyAssessmentReport: [
-    { type: 'assessment_cover', config: {
-      subtitle: 'ANSI/ASHRAE/ACCA Standard 211 Level 2 — Field Data Record' } },
+    { type: 'assessment_cover' },
     { type: 'assessment_narrative', config: {
       heading: 'Overview',
       body: 'Energy Efficiency Services performed a whole-building energy assessment of the building identified above. This report is the field record of that assessment: the observed condition of the building\u2019s envelope, its central and common-area mechanical systems, its service hot water and lighting, and the utility and occupancy data collected for it, together with the photographs taken on site.\n\nIts sections follow the DOE Audit Template report (ANSI/ASHRAE/ACCA Standard 211) so the two documents can be read side by side, section for section. Contact information and audit details \u2014 who performed the assessment, for whom, and on what date \u2014 appear on the cover of this report.' } },
@@ -1213,6 +1212,7 @@ async function buildAssessmentContext(m, kind, opts = {}) {
   const PH_GAP = 16
   const photoCell = (photo, col, cellW, boxH) => {
     const x = M + col * (cellW + PH_GAP)
+    const linked = !!photo.linkUrl
     stroke(RULE); d.setLineWidth(.6); d.rect(x, st.y, cellW, boxH)
     if (photo.dataUrl && photo.w && photo.h) {
       const scale = Math.min(cellW / photo.w, boxH / photo.h)
@@ -1223,9 +1223,18 @@ async function buildAssessmentContext(m, kind, opts = {}) {
     } else {
       tc(MUT); font(8); t(x + cellW / 2, st.y + boxH / 2, 'Image unavailable', { align: 'center' })
     }
-    tc(NAVY); font(8, 'bold')
+    // The whole cell links to the ORIGINAL capture, so a reader of the PDF can
+    // open or save the full-resolution photo with its EXIF intact. It is a
+    // read-only object link — it exposes the photo, never the record.
+    tc(linked ? [42, 110, 178] : NAVY); font(8, 'bold')
     const label = wrap(photo.label || 'Photo', cellW).slice(0, 1)
     t(x, st.y + boxH + 10, label[0] || '')
+    if (linked) {
+      const labelW = Math.min(cellW, d.getTextWidth(label[0] || ''))
+      stroke([42, 110, 178]); d.setLineWidth(.5)
+      d.line(x, st.y + boxH + 12, x + labelW, st.y + boxH + 12)
+      d.link(x, st.y, cellW, boxH + 14, { url: photo.linkUrl })
+    }
     tc(MUT); font(7.5)
     const cap = wrap(photo.caption || '', cellW).slice(0, 2)
     cap.forEach((ln, i) => t(x, st.y + boxH + 20 + i * 9, ln))
@@ -1308,7 +1317,9 @@ export const ASSESSMENT_SECTION_RENDERERS = {
     const { m, W, M, CW, C, st, font, t, tc, wrap, d, fill, stroke, RULE, NAVY, MUT, INK, EMERALD, text, pv } = x
     fill([13, 26, 46]); d.rect(0, 0, W, 4, 'F')
     tc(MUT); font(8.5, 'bold')
-    t(M, st.y + 10, (cfg.eyebrow || text('assessment.header.company_name') || 'ENERGY EFFICIENCY SERVICES of WISCONSIN').toUpperCase())
+    // The company is named for the state the BUILDING is in; a template may
+    // still override it outright.
+    t(M, st.y + 10, String(cfg.eyebrow || m.company?.name || text('assessment.header.company_name') || 'Energy Efficiency Services').toUpperCase())
     st.y += 26
     tc(NAVY); font(19, 'bold')
     for (const ln of wrap(cfg.title || m.title || 'Building Energy Assessment Report', CW)) {
@@ -1514,7 +1525,8 @@ export const ASSESSMENT_SECTION_RENDERERS = {
   assessment_footer(x, cfg = {}) {
     const { m, W, H, M, d, font, t, tc, stroke, C, text } = x
     const total = d.getNumberOfPages()
-    const l1 = cfg.company_line || text('assessment.footer.company_line') || text('footer.company_line')
+    const l1 = cfg.company_line || m.company?.footerLine
+      || text('assessment.footer.company_line') || text('footer.company_line')
     const l2 = cfg.contact_line || text('assessment.footer.contact_line') || text('footer.contact_line')
     const ref = [m.workOrder?.number, m.building?.label || m.building?.name].filter(Boolean).join('  ·  ')
     for (let pg = 1; pg <= total; pg++) {

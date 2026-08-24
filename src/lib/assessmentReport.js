@@ -35,7 +35,7 @@ export const ASSESSMENT_REPORTS = Object.freeze({
     documentKey: 'multifamily_energy_assessment_report',
     label:       'Multifamily Building Energy Assessment Report',
     title:       'Multifamily Building Energy Assessment Report',
-    subtitle:    'Whole-Building Energy Audit — ASHRAE Level II Equivalent',
+    subtitle:    null,
     fileStem:    'Multifamily Energy Assessment Report',
     built:       true,
   },
@@ -44,7 +44,7 @@ export const ASSESSMENT_REPORTS = Object.freeze({
     documentKey: 'single_family_energy_assessment_report',
     label:       'Single-Family Energy Assessment Report',
     title:       'Single-Family Energy Assessment Report',
-    subtitle:    'Home Energy Assessment',
+    subtitle:    null,
     fileStem:    'Single-Family Energy Assessment Report',
     built:       false,
   },
@@ -53,7 +53,7 @@ export const ASSESSMENT_REPORTS = Object.freeze({
     documentKey: 'hes_assessment_report',
     label:       'Home Energy Score Assessment Report',
     title:       'Home Energy Score Assessment Report',
-    subtitle:    'Home Energy Assessment',
+    subtitle:    null,
     fileStem:    'Home Energy Score Assessment Report',
     built:       false,
   },
@@ -188,6 +188,100 @@ export function photoCaption(photo, { formatDate } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// The company that performed the assessment is named for the state the
+// BUILDING is in — an assessment on a North Carolina property is performed by
+// Energy Efficiency Services of North Carolina, and a report that says
+// Wisconsin on a Rocky Mount building is simply wrong on its face.
+// ---------------------------------------------------------------------------
+export const COMPANY_BASE_NAME = 'Energy Efficiency Services'
+
+const STATE_NAMES = Object.freeze({
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia',
+  FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois',
+  IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana',
+  ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan',
+  MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana',
+  NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota',
+  OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania',
+  RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee',
+  TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington',
+  WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+})
+
+/** "NC" → "North Carolina". Accepts a full name unchanged. Null when unknown. */
+export function stateFullName(state) {
+  const raw = String(state ?? '').trim()
+  if (!raw) return null
+  const abbr = STATE_NAMES[raw.toUpperCase()]
+  if (abbr) return abbr
+  const known = Object.values(STATE_NAMES).find(n => n.toLowerCase() === raw.toLowerCase())
+  return known || null
+}
+
+/**
+ * "Energy Efficiency Services of North Carolina" for a building in NC.
+ * An unknown state falls back to the unqualified name — never to another
+ * state's, which would put a false entity on a legal-looking document.
+ */
+export function companyNameForState(state) {
+  const full = stateFullName(state)
+  return full ? `${COMPANY_BASE_NAME} of ${full}` : COMPANY_BASE_NAME
+}
+
+// ---------------------------------------------------------------------------
+// Record ids must never reach the page.
+//
+// Many `building_*` columns are picklist FKs holding a uuid, not text — the
+// platform rule that `{object}_record_type` is a uuid FK into picklist_values
+// applies to a good deal more than record type. Printing the stored value
+// verbatim puts "09888d66-7719-49a8-b19b-ca885d26fd94" where "Apartment"
+// belongs. A report is read by a property owner and a program reviewer: an
+// identifier is never an acceptable thing to show them.
+// ---------------------------------------------------------------------------
+const RECORD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** True when a value is a record id rather than something a person can read. */
+export function isRecordId(value) {
+  return typeof value === 'string' && RECORD_ID_RE.test(value.trim())
+}
+
+/** Every record id sitting in the model's printable values, de-duplicated. */
+export function collectRecordIds(model) {
+  const ids = new Set()
+  for (const [, value] of (model?.summaryRows || [])) if (isRecordId(value)) ids.add(value.trim())
+  for (const step of (model?.steps || [])) {
+    for (const f of (step.fields || [])) if (isRecordId(f.value)) ids.add(String(f.value).trim())
+  }
+  return Array.from(ids)
+}
+
+/**
+ * Replace record ids with their human labels.
+ *
+ * Anything still unresolved is REMOVED, never printed: a summary row whose
+ * value cannot be named is dropped (the summary is context, and a row nobody
+ * can read is worse than no row), and a captured field falls back to an em
+ * dash — the question was asked and its answer is unreadable, which is much
+ * closer to "not answered" than to a valid value.
+ */
+export function applyLookupLabels(model, labelById) {
+  const label = id => (labelById?.get?.(String(id).trim()) || null)
+  return {
+    ...model,
+    summaryRows: (model?.summaryRows || [])
+      .map(([k, v]) => (isRecordId(v) ? [k, label(v)] : [k, v]))
+      .filter(([, v]) => v != null && String(v).trim() !== ''),
+    steps: (model?.steps || []).map(step => ({
+      ...step,
+      fields: (step.fields || []).map(f =>
+        isRecordId(f.value) ? { ...f, value: label(f.value) } : f),
+    })),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Building summary rows — the orientation table, read off the building and
 // property RECORDS (not the field capture, which gets its own sections).
 // Rows whose column is empty are dropped: this table is context, and a wall of
@@ -240,9 +334,17 @@ export function cityStateZip(rec, prefix) {
   return [left, zip].filter(v => v != null && String(v).trim() !== '').join(' ').trim() || null
 }
 
-/** Filename for a generated report, free of characters a filesystem rejects. */
-export function reportFileName(def, workOrderNumber, buildingLabel) {
-  const parts = [def?.fileStem || 'Energy Assessment Report', workOrderNumber, buildingLabel]
+/**
+ * Filename for a generated report: the BUILDING it is about, then which report
+ * it is. Named for the building because that is how these are filed and looked
+ * for — a folder of "Multifamily Energy Assessment Report - WO-00206.pdf" tells
+ * nobody which building they are holding.
+ *
+ * Characters a filesystem rejects are stripped.
+ */
+export function reportFileName(def, buildingName, fallbackLabel) {
+  const building = [buildingName, fallbackLabel].find(v => v != null && String(v).trim() !== '')
+  const parts = [building, def?.fileStem || 'Energy Assessment Report']
     .filter(v => v != null && String(v).trim() !== '')
     .map(v => String(v).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim())
   return `${parts.join(' - ')}.pdf`

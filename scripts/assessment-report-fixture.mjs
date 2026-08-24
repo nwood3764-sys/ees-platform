@@ -14,6 +14,7 @@ import assert from 'node:assert/strict'
 import {
   ASSESSMENT_REPORTS, ASSESSMENT_REPORT_KIND, assessmentReportFor, hasAssessmentReport,
   fieldDisplayValue, buildStepEntry, isNotApplicable, reportPhotos, photoCaption, reportPhotoLabel,
+  isRecordId, collectRecordIds, applyLookupLabels, companyNameForState, stateFullName,
   buildingSummaryRows, addressLines, cityStateZip, reportFileName,
 } from '../src/lib/assessmentReport.js'
 import {
@@ -118,10 +119,53 @@ eq(addressLines({ building_address: '1615 E Raleigh Rd' }, 'building'), ['1615 E
 eq(cityStateZip({ property_city: 'Rocky Mount', property_state: 'NC', property_zip: '27801' }, 'property'),
   'Rocky Mount, NC 27801', 'city/state/zip composes')
 eq(cityStateZip({}, 'property'), null, 'an unknown address composes to null, not ", "')
-eq(reportFileName(ASSESSMENT_REPORTS['MULTIFAMILY-ENERGY-ASSESSMENT'], 'WO-00208', '1615 E Raleigh Rd'),
-  'Multifamily Energy Assessment Report - WO-00208 - 1615 E Raleigh Rd.pdf', 'filename composes')
-ok(!reportFileName({ fileStem: 'A/B:C' }, 'WO-1', null).includes('/'),
+// The file is named for the BUILDING it is about — that is how these are filed
+// and looked for.
+eq(reportFileName(ASSESSMENT_REPORTS['MULTIFAMILY-ENERGY-ASSESSMENT'],
+    '100 Saint Francis Court - Rocky Mount - 100 - 110', '100 - 110'),
+  '100 Saint Francis Court - Rocky Mount - 100 - 110 - Multifamily Energy Assessment Report.pdf',
+  'the filename leads with the building name')
+eq(reportFileName(ASSESSMENT_REPORTS['MULTIFAMILY-ENERGY-ASSESSMENT'], null, '100 - 110'),
+  '100 - 110 - Multifamily Energy Assessment Report.pdf',
+  'with no full building name the short label is used')
+ok(!reportFileName({ fileStem: 'A/B:C' }, 'Bldg', null).includes('/'),
   'characters a filesystem rejects are stripped from the filename')
+
+// ── The company is named for the state the building is in ───────────────────
+eq(companyNameForState('NC'), 'Energy Efficiency Services of North Carolina',
+  'an NC building is assessed by the North Carolina entity')
+eq(companyNameForState('WI'), 'Energy Efficiency Services of Wisconsin', 'and a WI building by the Wisconsin one')
+eq(companyNameForState('North Carolina'), 'Energy Efficiency Services of North Carolina',
+  'a full state name is accepted as well as the abbreviation')
+eq(companyNameForState(null), 'Energy Efficiency Services',
+  'an unknown state falls back to the unqualified name — never to another state\u2019s')
+eq(companyNameForState('ZZ'), 'Energy Efficiency Services', 'and so does a state nobody recognises')
+eq(stateFullName('mi'), 'Michigan', 'state lookup is case-insensitive')
+
+// ── A record id is never printed ────────────────────────────────────────────
+ok(isRecordId('09888d66-7719-49a8-b19b-ca885d26fd94'), 'a uuid is a record id')
+ok(!isRecordId('Apartment'), 'a word is not a record id')
+ok(!isRecordId(1974), 'a number is not a record id')
+const withIds = {
+  summaryRows: [['Building Type', '09888d66-7719-49a8-b19b-ca885d26fd94'],
+                ['Roof Type', 'ade76988-46b5-4955-afa1-f569e77843cb'],
+                ['Year Built', '1974']],
+  steps: [{ key: 'k', name: 'Walls', fields: [{ label: 'Wall Type', value: 'a58ea0ea-742c-4cc2-976f-dc46fe31537e' }] }],
+}
+eq(collectRecordIds(withIds).length, 3, 'every record id in the printable values is collected')
+const resolved = applyLookupLabels(withIds, new Map([
+  ['09888d66-7719-49a8-b19b-ca885d26fd94', 'Apartment'],
+  ['a58ea0ea-742c-4cc2-976f-dc46fe31537e', 'FAF - Forced Air Furnace'],
+]))
+eq(resolved.summaryRows.map(r => r[0]), ['Building Type', 'Year Built'],
+  'a summary row whose id cannot be named is DROPPED, never printed as a uuid')
+eq(resolved.summaryRows[0][1], 'Apartment', 'a resolvable id becomes its label')
+eq(resolved.steps[0].fields[0].value, 'FAF - Forced Air Furnace', 'a captured field resolves too')
+const unresolvable = applyLookupLabels(
+  { summaryRows: [], steps: [{ key: 'k', name: 'Walls', fields: [{ label: 'Wall Type', value: '11111111-2222-3333-4444-555555555555' }] }] },
+  new Map())
+eq(unresolvable.steps[0].fields[0].value, null,
+  'an unnameable captured value reads as unanswered rather than as gibberish')
 
 // ── 6. The engine is registered and separate from the submittal engines ─────
 eq(DOCUMENT_KIND_ENGINE[ASSESSMENT_REPORT_KIND], 'energy_assessment', 'the kind routes to its own engine')
@@ -147,7 +191,8 @@ ok(stepSections.every(s => s.config.photos === 'step'),
 
 const model = {
   title: 'Multifamily Building Energy Assessment Report',
-  subtitle: 'Whole-Building Energy Audit — ASHRAE Level II Equivalent',
+  subtitle: null,
+  company: { name: 'Energy Efficiency Services of North Carolina' },
   program: { label: 'NC-IRA-MF-HOMES' },
   property: { name: '100 Saint Francis Court', addressLines: ['100 Saint Francis Ct'], cityStateZip: 'Rocky Mount, NC 27801' },
   building: { name: '1615 E Raleigh Rd', label: '1615 E Raleigh Rd' },
@@ -254,6 +299,23 @@ const naWithPhotos = await buildAssessmentReportPdf({
 ])
 ok(naWithPhotos.size > naOnly.size,
   'Not Applicable adds a note but never suppresses the photos captured on the step')
+
+// A photo carrying a link renders larger than one without: the link, the
+// underline and the link-coloured label are all real marks on the page.
+const linked = await buildAssessmentReportPdf({
+  ...model,
+  photos: [{ id: 'L1', group: 'Building Geometry & Use', label: 'North Elevation',
+             caption: 'Aug 24, 2026', linkUrl: 'https://example.test/photo.jpg' }],
+}, ASSESSMENT_REPORT_KIND, [{ type: 'assessment_photo_documentation' }])
+const unlinked = await buildAssessmentReportPdf({
+  ...model,
+  photos: [{ id: 'L1', group: 'Building Geometry & Use', label: 'North Elevation', caption: 'Aug 24, 2026' }],
+}, ASSESSMENT_REPORT_KIND, [{ type: 'assessment_photo_documentation' }])
+ok(linked.size > unlinked.size, 'a photo with a download link renders as a link; one without still renders')
+
+// The company name comes off the model, so an NC report never says Wisconsin.
+const ncCover = await buildAssessmentReportPdf(model, ASSESSMENT_REPORT_KIND, [{ type: 'assessment_cover' }])
+ok(ncCover.size > 1000, 'the cover renders with the state-specific company name')
 
 // A report with no flagged photos at all still renders.
 const noPhotos = await buildAssessmentReportPdf({ ...model, photos: [] }, ASSESSMENT_REPORT_KIND, null)
