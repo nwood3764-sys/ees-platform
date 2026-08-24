@@ -38,14 +38,8 @@ import {
   freshDocumentUrlsBatch,
 } from '../data/storageService'
 import { isSignedUrlUsable } from '../lib/signedUrlExpiry'
-import {
-  selectRepairTargets,
-  unrepairableIds,
-  markAttempted,
-  markFailed,
-  allowRetry,
-  withRepairLock,
-} from '../lib/photoRepairQueue'
+import { unrepairableIds, allowRetry } from '../lib/photoRepairQueue'
+import { usePhotoRepair } from '../lib/usePhotoRepair'
 import {
   documentFileName,
   documentsZipName,
@@ -439,7 +433,6 @@ export default function FileGalleryWidget({
   // leave the rest in an unknown state, and optimistic per row so the grid
   // keeps up with a 40-photo selection.
   const [reportBusy, setReportBusy] = useState(false)
-  const [repairBusy, setRepairBusy] = useState(null) // {done,total} while repairing
   const [tagPicker, setTagPicker] = useState(null)   // {photos} while choosing a tag
   const [tagVocabulary, setTagVocabulary] = useState([]) // picklist: photos / photo_type
   const [tagBusy, setTagBusy] = useState(null)       // {done,total} while applying
@@ -696,62 +689,30 @@ export default function FileGalleryWidget({
   }
 
   // Render unrendered photos automatically, as soon as the card sees them.
+  // No button, on purpose: a photo with no preview is the app's problem, not a
+  // chore for the person looking at it. The decode has to run in a browser —
+  // which is why the edge function cannot do it — but this card IS a browser,
+  // already open on these photos.
   //
-  // There is no button, on purpose. A photo with no preview is the app's
-  // problem, not something to hand back to the person looking at it — the same
-  // standing rule as never asking for a hard refresh. The decode has to happen
-  // in a browser (which is exactly why the edge function could not do it), but
-  // "needs a browser" is not "needs a human": this card IS a browser, already
-  // open on these photos.
-  //
-  // The bookkeeping that makes it safe lives in photoRepairQueue: one attempt
-  // per photo per page session (the pass ends in a refresh, which would
-  // otherwise re-trigger it forever on a file that cannot be decoded), and one
-  // pass at a time process-wide (a work order shows photos at two grains, in
-  // two cards, over the same files).
-  useEffect(() => {
-    if (target !== 'photos') return
-    const todo = selectRepairTargets(items)
-    if (todo.length === 0) return
-
-    const controller = new AbortController()
-    const ids = todo.map(p => p.id)
-    markAttempted(ids)
-
-    ;(async () => {
-      const ran = await withRepairLock(async () => {
-        setRepairBusy({ done: 0, total: todo.length })
-        setItems(prev => prev.map(p => (ids.includes(p.id)
-          ? { ...p, watermark_status: 'pending', watermark_error: null }
-          : p)))
-        return repairUnrenderedPhotos(todo, {
-          signal: controller.signal,
-          onProgress: ({ done, total }) => {
-            if (!controller.signal.aborted) setRepairBusy({ done, total })
-          },
-        })
-      })
-      if (controller.signal.aborted) return
-      // A skipped pass (another card holds the lock) leaves these photos marked
-      // attempted, which is right: that card is rendering the same files, and
-      // its refresh brings them back here.
-      if (ran?.failedIds?.length) markFailed(ran.failedIds)
-      setRepairBusy(null)
-      if (ran) await refresh()
-    })().catch(() => { if (!controller.signal.aborted) setRepairBusy(null) })
-
-    return () => controller.abort()
-    // `items` identity changes on every refresh; selectRepairTargets filtering
-    // on the attempted set is what stops that from looping.
-  }, [items, target, refresh])
+  // The scheduling lives in usePhotoRepair, because getting it wrong is not
+  // visible in a screenshot: the first version listed `items` as a dependency
+  // and also wrote to `items`, so each pass cancelled itself on its first tick
+  // and froze the progress line at 0.
+  const { progress: repairBusy, renderingIds } = usePhotoRepair({
+    photos: items,
+    enabled: target === 'photos',
+    runRepair: repairUnrenderedPhotos,
+    onRepaired: refresh,
+    recordKey: `${parentTable}:${parentRecordId}:${config?.work_step_id || ''}`,
+  })
 
   // A person explicitly asking for another go is not the loop the attempt
   // registry guards against, so retrying clears those photos' records and lets
-  // the effect above pick them up again.
-  const handleRetryUnrepairable = () => {
+  // the hook pick them up again.
+  const handleRetryUnrepairable = useCallback(() => {
     allowRetry(stuckPhotoIds)
     setItems(prev => [...prev])
-  }
+  }, [stuckPhotoIds])
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
@@ -984,6 +945,7 @@ export default function FileGalleryWidget({
                 ) : (
                 <PhotoGrid
                   photos={visiblePhotos}
+                  renderingIds={renderingIds}
                   isMobile={isMobile}
                   showStepTag={isWorkOrderPhotoGallery}
                   selectMode={selectMode}
@@ -1537,7 +1499,7 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
   )
 }
 
-function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
+function PhotoGrid({ photos, renderingIds, isMobile, showStepTag, selectMode, selectedIds, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
   return (
     <div style={{
       display: 'grid',
@@ -1555,6 +1517,7 @@ function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onT
           onToggleSelect={() => onToggleSelect(p.id)}
           onToggleReport={() => onToggleReport(p)}
           onOpen={() => onOpen(idx)}
+          rendering={!!renderingIds?.has(p.id)}
           onReprocess={() => onReprocess(p.id)}
           onDelete={() => onDelete(p)}
         />
@@ -1563,7 +1526,7 @@ function PhotoGrid({ photos, isMobile, showStepTag, selectMode, selectedIds, onT
   )
 }
 
-function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
+function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, selected, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
   const status = photo.watermark_status
   const url = photo._thumbUrl
   // process-photo writes 'pending' | 'processing' | 'done' | 'skipped' |
@@ -1571,7 +1534,9 @@ function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggl
   // function has never written, so a failed photo offered nothing at all —
   // which is how 66 unprocessed captures sat on a work order looking simply
   // broken.
-  const working = status === 'pending' || status === 'processing'
+  // `rendering` comes from the live repair pass, NOT from a mutated row: the
+  // pass writing into `items` is exactly what made it cancel itself.
+  const working = rendering || status === 'pending' || status === 'processing'
   const failedWithImage = status === 'failed' && !!url
   const [hover, setHover] = useState(false)
   return (
