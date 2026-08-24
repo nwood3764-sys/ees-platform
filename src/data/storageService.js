@@ -469,20 +469,25 @@ async function buildRenditionForStoredPhoto(photo) {
  * up; one at a time keeps the page responsive and lets `onProgress` report
  * honestly. Returns { repaired, failed }.
  */
-export async function repairUnrenderedPhotos(photos, { onProgress } = {}) {
+export async function repairUnrenderedPhotos(photos, { onProgress, signal } = {}) {
   const todo = (photos || []).filter(p => p && !p.storage_path_watermarked)
+  const failedIds = []
   let repaired = 0
-  let failed = 0
   for (let i = 0; i < todo.length; i++) {
+    // The card that started this pass can be unmounted mid-run (the user moves
+    // to another record). Stop rather than keep decoding for a dead component.
+    if (signal?.aborted) break
     try {
       await reprocessPhoto(todo[i].id)
       repaired++
     } catch {
-      failed++
+      failedIds.push(todo[i].id)
     }
-    if (onProgress) onProgress({ done: i + 1, total: todo.length, repaired, failed })
+    if (onProgress) {
+      onProgress({ done: i + 1, total: todo.length, repaired, failed: failedIds.length })
+    }
   }
-  return { repaired, failed }
+  return { repaired, failed: failedIds.length, failedIds }
 }
 
 /**

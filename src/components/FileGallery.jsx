@@ -39,6 +39,14 @@ import {
 } from '../data/storageService'
 import { isSignedUrlUsable } from '../lib/signedUrlExpiry'
 import {
+  selectRepairTargets,
+  unrepairableIds,
+  markAttempted,
+  markFailed,
+  allowRetry,
+  withRepairLock,
+} from '../lib/photoRepairQueue'
+import {
   documentFileName,
   documentsZipName,
   pruneSelectedIds,
@@ -504,6 +512,13 @@ export default function FileGalleryWidget({
     () => (target === 'photos' ? items.filter(p => !p._thumbUrl && p.storage_path_original) : []),
     [items, target]
   )
+  // The ones this session already tried and could not render. Only these are
+  // ever surfaced as something a person might act on; everything else is
+  // either already rendered or being rendered right now.
+  const stuckPhotoIds = useMemo(
+    () => (target === 'photos' ? unrepairableIds(items) : []),
+    [items, target]
+  )
 
   // ── Upload handlers ─────────────────────────────────────────────────
   const handleFiles = useCallback(async (fileList) => {
@@ -680,25 +695,62 @@ export default function FileGalleryWidget({
     }
   }
 
-  const handleRepairAll = async () => {
-    const todo = unrenderedPhotos
+  // Render unrendered photos automatically, as soon as the card sees them.
+  //
+  // There is no button, on purpose. A photo with no preview is the app's
+  // problem, not something to hand back to the person looking at it — the same
+  // standing rule as never asking for a hard refresh. The decode has to happen
+  // in a browser (which is exactly why the edge function could not do it), but
+  // "needs a browser" is not "needs a human": this card IS a browser, already
+  // open on these photos.
+  //
+  // The bookkeeping that makes it safe lives in photoRepairQueue: one attempt
+  // per photo per page session (the pass ends in a refresh, which would
+  // otherwise re-trigger it forever on a file that cannot be decoded), and one
+  // pass at a time process-wide (a work order shows photos at two grains, in
+  // two cards, over the same files).
+  useEffect(() => {
+    if (target !== 'photos') return
+    const todo = selectRepairTargets(items)
     if (todo.length === 0) return
-    setRepairBusy({ done: 0, total: todo.length })
-    setItems(prev => prev.map(p => (todo.some(t => t.id === p.id)
-      ? { ...p, watermark_status: 'pending', watermark_error: null }
-      : p)))
-    try {
-      const { repaired, failed } = await repairUnrenderedPhotos(todo, {
-        onProgress: ({ done, total }) => setRepairBusy({ done, total }),
+
+    const controller = new AbortController()
+    const ids = todo.map(p => p.id)
+    markAttempted(ids)
+
+    ;(async () => {
+      const ran = await withRepairLock(async () => {
+        setRepairBusy({ done: 0, total: todo.length })
+        setItems(prev => prev.map(p => (ids.includes(p.id)
+          ? { ...p, watermark_status: 'pending', watermark_error: null }
+          : p)))
+        return repairUnrenderedPhotos(todo, {
+          signal: controller.signal,
+          onProgress: ({ done, total }) => {
+            if (!controller.signal.aborted) setRepairBusy({ done, total })
+          },
+        })
       })
-      if (repaired > 0) toast.success(`${repaired} photo${repaired === 1 ? '' : 's'} repaired`)
-      if (failed > 0) toast.error(`${failed} could not be repaired`)
-    } catch (e) {
-      toast.error(e.message || 'Repair failed')
-    } finally {
+      if (controller.signal.aborted) return
+      // A skipped pass (another card holds the lock) leaves these photos marked
+      // attempted, which is right: that card is rendering the same files, and
+      // its refresh brings them back here.
+      if (ran?.failedIds?.length) markFailed(ran.failedIds)
       setRepairBusy(null)
-      await refresh()
-    }
+      if (ran) await refresh()
+    })().catch(() => { if (!controller.signal.aborted) setRepairBusy(null) })
+
+    return () => controller.abort()
+    // `items` identity changes on every refresh; selectRepairTargets filtering
+    // on the attempted set is what stops that from looping.
+  }, [items, target, refresh])
+
+  // A person explicitly asking for another go is not the loop the attempt
+  // registry guards against, so retrying clears those photos' records and lets
+  // the effect above pick them up again.
+  const handleRetryUnrepairable = () => {
+    allowRetry(stuckPhotoIds)
+    setItems(prev => [...prev])
   }
 
   // ── Render ──────────────────────────────────────────────────────────
@@ -887,7 +939,7 @@ export default function FileGalleryWidget({
                     the card says what is wrong and fixes it in place. The
                     decode runs in this tab, which is precisely why the server
                     could not do it. */}
-                {unrenderedPhotos.length > 0 && !selectMode && (
+                {(repairBusy || stuckPhotoIds.length > 0) && !selectMode && (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
                     margin: '0 0 10px', padding: '9px 12px',
@@ -896,27 +948,31 @@ export default function FileGalleryWidget({
                   }}>
                     <Icon path="M12 9v4 M12 17h.01 M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"
                       size={14} color="#2a5a8a" />
-                    <span style={{ flex: 1, minWidth: 200 }}>
-                      {unrenderedPhotos.length} photo{unrenderedPhotos.length === 1 ? ' has' : 's have'} no preview yet
-                      {' '}— the capture is safe, it just has not been rendered.
-                    </span>
-                    <button
-                      onClick={handleRepairAll}
-                      disabled={!!repairBusy}
-                      style={{
-                        padding: '5px 11px', borderRadius: 5,
-                        border: `1px solid ${C.emeraldMid}`,
-                        background: repairBusy ? '#f7f9fc' : C.emerald,
-                        color: repairBusy ? C.textMuted : '#fff',
-                        fontSize: 12, fontWeight: 600,
-                        cursor: repairBusy ? 'default' : 'pointer',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {repairBusy
-                        ? `Repairing ${repairBusy.done}/${repairBusy.total}…`
-                        : `Repair ${unrenderedPhotos.length === 1 ? 'photo' : 'photos'}`}
-                    </button>
+                    {repairBusy ? (
+                      <span style={{ flex: 1, minWidth: 200 }}>
+                        Rendering {repairBusy.done} of {repairBusy.total} photo{repairBusy.total === 1 ? '' : 's'}
+                        {' '}— they will appear as each one finishes.
+                      </span>
+                    ) : (
+                      <>
+                        <span style={{ flex: 1, minWidth: 200 }}>
+                          {stuckPhotoIds.length} photo{stuckPhotoIds.length === 1 ? '' : 's'}
+                          {' '}could not be rendered. The capture{stuckPhotoIds.length === 1 ? ' is' : 's are'} safe
+                          {' '}— download{stuckPhotoIds.length === 1 ? 's' : ''} still work
+                          {stuckPhotoIds.length === 1 ? 's' : ''}.
+                        </span>
+                        <button
+                          onClick={handleRetryUnrepairable}
+                          style={{
+                            padding: '5px 11px', borderRadius: 5,
+                            border: `1px solid ${C.emeraldMid}`,
+                            background: C.emerald, color: '#fff',
+                            fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >Try again</button>
+                      </>
+                    )}
                   </div>
                 )}
                 {visiblePhotos.length === 0 ? (
@@ -1573,10 +1629,15 @@ function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggl
         }}>
           <Icon path="M3 7h2l2-3h10l2 3h2v12H3V7z M12 11a4 4 0 100 8 4 4 0 000-8z"
             size={20} color="rgba(255,255,255,0.5)" />
+          {/* The card renders these by itself on load, so a tile only reaches
+              the second state after that pass already tried and failed. Say
+              so — "No preview yet" alongside a Render button read as a chore
+              waiting on the user, which is the app's job, not theirs
+              (Nicholas, 2026-08-24). */}
           {working
             ? 'Rendering…'
             : <>
-                <span>No preview yet</span>
+                <span>Could not render</span>
                 <button
                   onClick={(e) => { e.stopPropagation(); onReprocess() }}
                   style={{
@@ -1585,7 +1646,7 @@ function PhotoTile({ photo, isMobile, showStepTag, selectMode, selected, onToggl
                     background: 'rgba(255,255,255,0.12)', color: '#fff',
                     fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
                   }}
-                >Render</button>
+                >Try again</button>
               </>}
         </div>
       )}
