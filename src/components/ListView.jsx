@@ -942,7 +942,7 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
 // defaultFields:  the field list of the default-visible set (for Reset)
 // visibleColumns: current explicit selection (array) or null (= default set)
 function ColumnPicker({
-  catalog, groups, visibleColumns, defaultFields, onChange, onClose, triggerRect,
+  catalog, groups, visibleColumns, defaultFields, fieldsWithNoData, onChange, onClose, triggerRect,
 }) {
   const ref = useRef();
   const [search, setSearch] = useState('');
@@ -982,7 +982,8 @@ function ColumnPicker({
     const byGroup = new Map();
     for (const g of (groups || [])) byGroup.set(g, []);
     for (const c of (catalog || [])) {
-      if (q && !c.label.toLowerCase().includes(q) && !(c.group || '').toLowerCase().includes(q)) continue;
+      const haystack = `${c.label || ''} ${c.shortLabel || ''} ${c.group || ''}`.toLowerCase();
+      if (q && !haystack.includes(q)) continue;
       const g = c.group || 'Other';
       if (!byGroup.has(g)) byGroup.set(g, []);
       byGroup.get(g).push(c);
@@ -1054,7 +1055,15 @@ function ColumnPicker({
                     {on && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={3}><polyline points="20 6 9 17 4 12" /></svg>}
                   </span>
                   <span style={{ fontSize: 13, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {col.label}
+                    {/* Grouped under its object, so the bare field reads best
+                        here; the column HEADER carries the qualified label. */}
+                    {col.shortLabel || col.label}
+                    {fieldsWithNoData?.has(col.field) && (
+                      <span style={{ marginLeft: 6, fontSize: 10.5, color: C.textMuted, fontStyle: 'italic' }}
+                        title="Every record in this list is blank for this field.">
+                        no data
+                      </span>
+                    )}
                     {locked && <span style={{ color: C.textMuted, fontSize: 11 }}> {isLastColumn(col.field) ? '(last column)' : '(always shown)'}</span>}
                   </span>
                 </div>
@@ -1332,7 +1341,7 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onSave
 // { id, field, label, type, op, value }. On Apply it serializes to the
 // activeFilters shape the list engine consumes (array-valued equals for
 // multi-select; scalar value otherwise), and pushes via onApply.
-function FilterSidebar({ catalog, groups, activeFilters, filterLogic, onApply, onClose }) {
+function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWithNoData, onApply, onClose }) {
   const ref = useRef();
 
   // Resolve a catalog column by field.
@@ -1476,7 +1485,8 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, onApply, o
     const byGroup = new Map();
     for (const g of (groups || [])) byGroup.set(g, []);
     for (const c of (catalog || [])) {
-      if (q && !c.label.toLowerCase().includes(q) && !(c.group || '').toLowerCase().includes(q)) continue;
+      const haystack = `${c.label || ''} ${c.shortLabel || ''} ${c.group || ''}`.toLowerCase();
+      if (q && !haystack.includes(q)) continue;
       const g = c.group || 'Other';
       if (!byGroup.has(g)) byGroup.set(g, []);
       byGroup.get(g).push(c);
@@ -1553,7 +1563,16 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, onApply, o
                         style={{ fontSize: 12.5, color: C.textPrimary, padding: '6px 8px', borderRadius: 5, cursor: 'pointer' }}
                         onMouseEnter={e => e.currentTarget.style.background = C.page}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                        {c.label}
+                        {/* The group heading above already names the object, so
+                            the row shows the bare field; everywhere else (header,
+                            chip, filter row) uses the qualified label. */}
+                        {c.shortLabel || c.label}
+                        {fieldsWithNoData?.has(c.field) && (
+                          <span style={{ marginLeft: 6, fontSize: 10.5, color: C.textMuted, fontStyle: 'italic' }}
+                            title="Every record in this list is blank for this field, so a filter on it cannot match anything.">
+                            no data
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2493,6 +2512,74 @@ export function ListView({
     return out;
   }, [activeFilters, columnCatalog, columns, fieldAlias]);
 
+  // Fields that are blank on every record in this list. LEAP carries a number of
+  // columns the original import never populated — buildings.building_property_
+  // management_company is varchar and empty on all 96 buildings — and the field
+  // picker offered them with names that looked exactly right. Picking one
+  // silently empties the list (Nicholas, 2026-08-25). Say so BEFORE it is
+  // chosen, not after.
+  //
+  // Only a field the rows actually carry can be judged: a related field nobody
+  // has selected yet isn't fetched, and calling it empty would be a guess.
+  const fieldsWithNoData = useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return new Set();
+    const sample = data.slice(0, 500);
+    const out = new Set();
+    const candidates = new Set();
+    for (const c of (columnCatalog || [])) candidates.add(c.field);
+    for (const field of candidates) {
+      const key = fieldAlias.get(field) || field;
+      let carried = false;
+      let populated = false;
+      for (const r of sample) {
+        if (!Object.prototype.hasOwnProperty.call(r, key)) continue;
+        carried = true;
+        const v = r[key];
+        if (v !== null && v !== undefined && String(v).trim() !== '' && String(v) !== '—') {
+          populated = true;
+          break;
+        }
+      }
+      if (carried && !populated) out.add(field);
+    }
+    return out;
+  }, [data, columnCatalog, fieldAlias]);
+
+  // Why is this list empty? When filters knock every record out, the useful
+  // answer is WHICH filter did it — and whether the field it reads carries any
+  // data at all. A filter on a column that is blank on every record (LEAP has a
+  // number of them, left unpopulated by the original import) can never match,
+  // and looks identical to "there are no such records" (Nicholas, 2026-08-25:
+  // "it just flashed, showed all the properties correctly, and then it just
+  // deleted. What the hell is going on?").
+  //
+  // Each numbered filter is scored on its own, against the same values the list
+  // matched on. Only computed when the list is actually empty.
+  const filterDiagnostics = useMemo(() => {
+    if (filtered.length > 0 || data.length === 0 || activeFilters.length === 0) return null;
+    const entries = numberFilters(activeFilters);
+    if (entries.length === 0) return null;
+    return entries.map((entry, i) => {
+      const key = rowKeyFor(entry.field);
+      let matches = 0;
+      let populated = 0;
+      let resolved = false;
+      for (const r of data) {
+        if (Object.prototype.hasOwnProperty.call(r, key)) resolved = true;
+        const raw = r[key];
+        if (raw !== null && raw !== undefined && String(raw).trim() !== '') populated += 1;
+        if (matchFilter(raw, entry)) matches += 1;
+      }
+      return { number: i + 1, label: entry.label, matches, populated, resolved, total: data.length };
+    });
+  }, [filtered, data, activeFilters, fieldAlias]);
+
+  // The filters that, on their own, match nothing — the ones worth naming.
+  const deadFilters = useMemo(
+    () => (filterDiagnostics || []).filter(d => d.matches === 0),
+    [filterDiagnostics],
+  );
+
   // Render-time row cap. Filtering + sorting still run across the full
   // dataset above, but only the first `renderLimit` rows actually mount.
   // 200 is a comfortable scroll buffer for screens. The toolbar shows
@@ -2891,7 +2978,7 @@ export function ListView({
             Columns
             {Array.isArray(visibleColumns) && <span style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{effectiveColumns.length}</span>}
           </button>
-          {showColPicker && <ColumnPicker catalog={columnCatalog} groups={columnGroups} visibleColumns={visibleColumns} defaultFields={columns.map(c => c.field)} onChange={(next) => { setVisibleColumns(next); setIsDirty(true); }} onClose={() => setShowColPicker(false)} triggerRect={colPickerRect} />}
+          {showColPicker && <ColumnPicker catalog={columnCatalog} groups={columnGroups} visibleColumns={visibleColumns} defaultFields={columns.map(c => c.field)} fieldsWithNoData={fieldsWithNoData} onChange={(next) => { setVisibleColumns(next); setIsDirty(true); }} onClose={() => setShowColPicker(false)} triggerRect={colPickerRect} />}
         </div>
 
         {persistEnabled && <HelpIcon anchors={[{ type: 'concept', concept: 'list-views' }, { type: 'concept', concept: 'column-visibility' }]} title="List views & columns" />}
@@ -3094,9 +3181,35 @@ export function ListView({
                       : data.length === 0
                       ? <>No {pluralizeLabel(newLabel ? newLabel.toLowerCase() : '')} yet. <span onClick={onNew} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Create one</span></>
                       : <>
-                          No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span>
+                          <div>
+                            No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span>
+                          </div>
+                          {deadFilters.length > 0 && (
+                            <div style={{ margin: '12px auto 0', fontSize: 12.5, color: C.textSecondary, lineHeight: 1.6, textAlign: 'left', maxWidth: 620 }}>
+                              {deadFilters.map(d => (
+                                <div key={d.number} style={{ marginBottom: 4 }}>
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                    minWidth: 18, height: 18, padding: '0 4px', marginRight: 7, borderRadius: 4,
+                                    background: C.skyBlue || '#7eb3e8', color: '#fff', fontSize: 10.5, fontWeight: 700,
+                                    fontFamily: 'JetBrains Mono, monospace',
+                                  }}>{d.number}</span>
+                                  <span style={{ color: C.textPrimary, fontWeight: 600 }}>{d.label}</span>
+                                  {' '}matches no records
+                                  {d.resolved && d.populated === 0
+                                    ? <> — that field is <strong>empty on all {d.total} records</strong> in this list, so it can never match.</>
+                                    : <> on its own ({d.populated} of {d.total} records have a value).</>}
+                                </div>
+                              ))}
+                              {filterDiagnostics && filterDiagnostics.length > deadFilters.length && (
+                                <div style={{ marginTop: 6, color: C.textMuted }}>
+                                  Other filters on their own: {filterDiagnostics.filter(d => d.matches > 0).map(d => `${d.label} ${d.matches}`).join(', ')}.
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {unmatchableFilters.length > 0 && (
-                            <div style={{ marginTop: 10, fontSize: 12.5, color: C.textSecondary, lineHeight: 1.5 }}>
+                            <div style={{ margin: '10px auto 0', fontSize: 12.5, color: C.textSecondary, lineHeight: 1.5, textAlign: 'left', maxWidth: 620 }}>
                               {unmatchableFilters.length === 1 ? 'This filter refers' : 'These filters refer'} to a field this list no longer offers, so {unmatchableFilters.length === 1 ? 'it' : 'they'} cannot match any record:{' '}
                               <span style={{ color: C.textPrimary, fontWeight: 600 }}>
                                 {unmatchableFilters.map(f => f.label || f.field).join(', ')}
@@ -3265,6 +3378,7 @@ export function ListView({
           groups={columnGroups}
           activeFilters={activeFilters}
           filterLogic={filterLogic}
+          fieldsWithNoData={fieldsWithNoData}
           onApply={(nf, nextLogic) => {
             userInteractedRef.current = true;
             setActiveFilters(nf);

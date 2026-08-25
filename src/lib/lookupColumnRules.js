@@ -136,3 +136,42 @@ export function parentLookupColumnOf(field) {
     ? field.slice(0, -LOOKUP_NAME_SUFFIX.length)
     : field
 }
+
+// ---------------------------------------------------------------------------
+// Field labels name the OBJECT, never just the part of it.
+//
+// "Name" is not a field name. An opportunities list showing its own name and
+// the account's name rendered two columns both headed NAME, and a filter chip
+// read "State: WI" without saying whose state (Nicholas, 2026-08-25: "you just
+// can't have name as a field. That's not a unique situation"). LEAP's naming
+// rule is explicit names always — no abbreviations, no ambiguous terms.
+//
+// So every column carries two labels:
+//   label       — fully qualified, used in the column HEADER, the filter chip
+//                 and the filter row: "Opportunity Name", "Account Name",
+//                 "Property State", "Property Management Company".
+//   shortLabel  — the bare field, used only inside the field PICKER, where the
+//                 relationship group heading above it already supplies the
+//                 context and "Property › Property State" would stutter.
+// ---------------------------------------------------------------------------
+
+// The relationship half of a group label: "Managing Account (Account)" is the
+// Managing Account relationship, and qualifying a field with the parenthetical
+// object name too reads as a sentence rather than a label.
+function relationshipName(groupLabel) {
+  return String(groupLabel || '').replace(/\s*\([^)]*\)\s*$/, '').trim()
+}
+
+// Qualify a field label with the relationship it is reached through, without
+// stuttering when the field already says it.
+export function qualifiedFieldLabel(groupLabel, shortLabel) {
+  const rel = relationshipName(groupLabel)
+  const short = String(shortLabel || '').trim()
+  if (!rel) return short
+  if (!short) return rel
+  const relLower = rel.toLowerCase()
+  const shortLower = short.toLowerCase()
+  if (shortLower === relLower) return short
+  if (shortLower.startsWith(`${relLower} `)) return short
+  return `${rel} ${short}`
+}
