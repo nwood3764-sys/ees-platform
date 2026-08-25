@@ -134,3 +134,96 @@ Field-level financial tiers are still unbuilt platform-wide, so the read RPC ret
 **Likely files:** `src/main.jsx` (route), `src/pages/ProgramPortalRoot.jsx` (new), `src/data/programPortalService.js` (new), `src/modules/PortalModule.jsx` (a Program Manager Portals section), `supabase/functions/program-portal-file/index.ts` (new).
 
 **Tables:** `accounts` · `contacts` · `portal_users` · `portal_record_grants` (new) · `portal_download_log` (new) · `assessments` · `projects` · `work_orders` · `work_steps` · `photos` · `documents` · `properties` · `buildings` · `portal_view_as_sessions`
+
+---
+
+## 11. Setting it up, and testing it (2026-08-25)
+
+The portal is built and live. Nothing is shared yet, and Everblue has no portal
+user — both of those are deliberate: which assessments are exposed, and when, is
+a business decision made record by record.
+
+**The three OPEN items in §9 were closed during the build:** Everblue is a
+**Program Implementer** (`ACC-07622`, the record type's first account);
+"reports" means the generated **Energy Assessment Report** stored as a
+`documents` row on the assessment work order (`document_type =
+'energy_assessment_report'`); and download permission is **per organisation AND
+per user** — both flags must be on, per Nicholas, 2026-08-25.
+
+### Set it up
+
+1. **Portal → Portal Users → New.** The record-type picker offers three types;
+   choose **Program Manager User**. Fill Full Name, Email, Portal Role (Program
+   Manager or Program Reviewer) and Account = **Everblue**. Status defaults to
+   *Portal User Active*, which is what View As needs — no invitation, no
+   password, and the person cannot sign in, because the record carries no auth
+   link.
+2. **On that record, Actions → Manage Shared Records.** Every assessment and
+   every project is listed, nothing is ticked. Tick the ones to expose. Revoking
+   soft-deletes the grant, so it stays auditable that access once existed.
+3. **Actions → View Portal as This User** opens `/program-portal` as them, with
+   the dark preview banner naming who you are viewing as. Admin-only, enforced
+   in the database, and every preview is written to `portal_view_as_sessions`.
+4. **Downloads, only if you want to test them:** tick *Allow Portal Download* on
+   the **Everblue account** and on the **portal user**. Both off = the buttons
+   say downloading is not enabled. Every download writes `portal_download_log`.
+
+### What the data can actually show today
+
+Of 19 live assessments, 7 have an assessment work order and 5 have photographs:
+
+| Assessment | Property | Steps | Photos | Report |
+|---|---|---|---|---|
+| ASMT-00032 | 5513 North Hopkins Street - Milwaukee | 15 | 89 | 1 |
+| ASMT-00025 | 922 Tessie Street - Rocky Mount | 15 | 72 | — |
+| ASMT-00030 | 100 Saint Francis Court - Rocky Mount | 15 | 66 | — |
+| ASMT-00023 | 5513 North Hopkins Street - Milwaukee | 15 | 40 | — |
+| ASMT-00028 | 100 Saint Francis Court - Rocky Mount | 15 | 27 | — |
+| ASMT-00029 / ASMT-00031 | Rocky Mount | 15 | 0 | — |
+
+ASMT-00032 is the only assessment carrying a generated Energy Assessment Report,
+so it is the only one whose Reports card has anything in it. The other twelve
+assessments have no assessment work order at all — shared, they show as a
+property and building with nothing beneath.
+
+The whole path was rehearsed in a rolled-back transaction against production:
+a Program Manager User created for Everblue exactly as the pop-up creates one,
+granted ASMT-00032, returned Everblue → 1 property → 1 building → 1 assessment →
+1 work order → 15 steps → 89 photos → 1 report, `can_download: false`. Nothing
+was written.
+
+### Three defects fixed to make step 1 possible
+
+Creating a portal user through the UI did not work, and none of it was visible
+until someone tried:
+
+- **The create form seeded a uuid into a text column.** `portal_users.record_type`
+  is TEXT holding the picklist VALUE, not the platform's usual uuid FK, and the
+  create form seeded the picked type's id. The record saved cleanly and then
+  failed every gate that reads it — the three portal read RPCs,
+  `program-portal-file`, and the Manage Shared Records action all compare
+  `record_type` to `'Program Manager User'`. Fixed at the level of the rule, not
+  the table: `src/lib/recordTypeSeed.js` seeds what the COLUMN can hold, read
+  from the column's own data type (`scripts/record-type-seed-fixture.mjs`, 16
+  checks).
+- **Portal Role rendered as a text box.** It is declared `text` on the Standard
+  Portal Users Layout but is a uuid FK to `picklist_values` and NOT NULL — so
+  the one field the create pop-up insists on was asking, in effect, for a uuid.
+  Declared as the picklist it is.
+- **Account and Email were optional.** A portal user with no account cannot be
+  scoped at all (the organisation, the download flag and the owner portal's
+  account guard all hang off it) and one with no email can never be invited.
+  Both required on the layout.
+
+`status` was deliberately left alone: its column is text and holds the picklist
+LABEL (`Portal User Active`) while the picklist row's value is snake_case, so
+typing it as a picklist would store an id where every gate compares a label. It
+has a working default and the create form never asks for it — worth its own
+decision, not a silent change.
+
+### Still not built
+
+The **invitation path**. `portal_invite_create` is property-grant shaped and
+writes a Property Owner User; a program manager needs a sibling that creates the
+auth identity against a record-grant user. Until it exists, testing goes through
+admin View As, which is exactly what View As was built for.
