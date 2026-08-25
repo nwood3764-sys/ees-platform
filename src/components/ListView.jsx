@@ -1510,7 +1510,7 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, onApply, o
           )}
 
           {rows.map((row, rowIndex) => (
-            <div key={row.id} style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 10, background: C.cardSecondary || C.page }}>
+            <div key={row.id} style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 10, background: C.cardSecondary }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   {/* The number the filter logic refers to. Always shown, so an
@@ -1594,7 +1594,7 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, onApply, o
                   spellCheck={false}
                   style={{
                     width: '100%', marginTop: 8, boxSizing: 'border-box',
-                    background: C.card, border: `1px solid ${logicCheck.ok ? C.border : C.skyBlue || '#7eb3e8'}`,
+                    background: C.card, border: `1px solid ${logicCheck.ok ? C.border : C.sky}`,
                     borderRadius: 5, padding: '7px 9px', fontSize: 12.5, color: C.textPrimary,
                     fontFamily: 'JetBrains Mono, monospace', outline: 'none',
                   }} />
@@ -1609,7 +1609,7 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, onApply, o
                     </span>
                   ))}
                 </div>
-                <div style={{ fontSize: 11.5, marginTop: 6, color: logicCheck.ok ? C.textMuted : (C.skyBlue || '#7eb3e8'), lineHeight: 1.4 }}>
+                <div style={{ fontSize: 11.5, marginTop: 6, color: logicCheck.ok ? C.textMuted : C.sky, lineHeight: 1.4 }}>
                   {logicCheck.ok
                     ? 'Refer to filters by number, with AND, OR, NOT and parentheses.'
                     : logicCheck.error}
@@ -2971,7 +2971,7 @@ export function ListView({
           </button>
           <button onClick={() => setConfirmDelete({ ids: [...selected] })} disabled={bulkBusy}
             style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 600,
-                     background: C.card, border: `1px solid ${C.skyBlue || '#7eb3e8'}`, borderRadius: 6,
+                     background: C.card, border: `1px solid ${C.sky}`, borderRadius: 6,
                      color: '#1a5a8a', cursor: bulkBusy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon path="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" size={13} color="#1a5a8a" />
             Delete

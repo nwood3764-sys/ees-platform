@@ -1075,10 +1075,10 @@ function FiltersTab({
                 style={{
                   ...inputStyle(),
                   fontFamily:'JetBrains Mono, monospace',
-                  borderColor: logicCheck.ok ? C.border : C.skyBlue,
+                  borderColor: logicCheck.ok ? C.border : C.sky,
                 }}
               />
-              <div style={{ fontSize:11, marginTop:6, color: logicCheck.ok ? C.textMuted : C.skyBlue }}>
+              <div style={{ fontSize:11, marginTop:6, color: logicCheck.ok ? C.textMuted : C.sky }}>
                 {logicCheck.ok
                   ? `Reference each filter by its number. Operators: AND, OR, NOT, and parentheses.`
                   : logicCheck.error}

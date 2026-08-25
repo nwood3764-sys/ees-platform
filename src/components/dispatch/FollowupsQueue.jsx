@@ -520,7 +520,7 @@ const subToolbar = {
   display: 'flex', alignItems: 'center', gap: 12,
   padding: '10px 16px',
   borderBottom: `1px solid ${C.border}`,
-  background: C.surface,
+  background: C.card,
   flexWrap: 'wrap',
 }
 

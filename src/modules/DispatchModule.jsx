@@ -420,7 +420,7 @@ export default function DispatchModule({ onNavigateToRecord }) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.page }}>
       {/* ── Toolbar ───────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px',
-                    background: C.surface, borderBottom: `1px solid ${C.border}` }}>
+                    background: C.card, borderBottom: `1px solid ${C.border}` }}>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ fontSize: 18, fontWeight: 600, color: C.textPrimary }}>Dispatch Console</div>
           <div style={{ fontSize: 12, color: C.textSecondary }}>
@@ -461,7 +461,7 @@ export default function DispatchModule({ onNavigateToRecord }) {
                   padding: '5px 14px',
                   fontSize: 13, fontWeight: active ? 600 : 500,
                   color: active ? C.textPrimary : C.textSecondary,
-                  background: active ? C.surface : 'transparent',
+                  background: active ? C.card : 'transparent',
                   border: 'none', borderRadius: 5, cursor: 'pointer',
                   boxShadow: active ? '0 1px 2px rgba(13,26,46,0.08)' : 'none',
                 }}
@@ -613,7 +613,7 @@ function BoardGrid({
     <div style={{ minWidth: 200 + days.length * 220 }}>
       {/* Header row */}
       <div style={{ display: 'grid', gridTemplateColumns: dayColumnTemplate, position: 'sticky', top: 0, zIndex: 2,
-                    background: C.surface, borderBottom: `1px solid ${C.border}` }}>
+                    background: C.card, borderBottom: `1px solid ${C.border}` }}>
         <div style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: 0.4, borderRight: `1px solid ${C.border}` }}>
           Team Lead
         </div>
@@ -622,7 +622,7 @@ function BoardGrid({
           return (
             <div key={toYMD(d)} style={{
               padding: '10px 12px', borderRight: `1px solid ${C.border}`,
-              background: isToday ? '#eff6ff' : C.surface,
+              background: isToday ? '#eff6ff' : C.card,
             }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: isToday ? '#1e40af' : C.textPrimary }}>
                 {fmtDayHeader(d)}
@@ -646,7 +646,7 @@ function BoardGrid({
           {/* Lane label */}
           <div style={{
             padding: '12px 14px', borderRight: `1px solid ${C.border}`,
-            background: lane.isUnassigned ? '#f9fafb' : C.surface,
+            background: lane.isUnassigned ? '#f9fafb' : C.card,
             position: 'sticky', left: 0, zIndex: 1,
           }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: lane.isUnassigned ? C.textSecondary : C.textPrimary }}>
@@ -881,10 +881,10 @@ function SABlock({ sa, cellHeight, onClick, onDragStart, onDragEnd }) {
 const btnSecondary = {
   display: 'inline-flex', alignItems: 'center', gap: 6,
   padding: '6px 10px', fontSize: 12.5, fontWeight: 500,
-  background: C.surface, color: C.textPrimary,
+  background: C.card, color: C.textPrimary,
   border: `1px solid ${C.border}`, borderRadius: 5, cursor: 'pointer',
 }
 const dateInput = {
   padding: '5px 8px', fontSize: 12.5, color: C.textPrimary,
-  background: C.surface, border: `1px solid ${C.border}`, borderRadius: 5,
+  background: C.card, border: `1px solid ${C.border}`, borderRadius: 5,
 }

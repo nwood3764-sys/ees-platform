@@ -278,13 +278,13 @@ export function laneInScope({
 // ─── Styles ─────────────────────────────────────────────────────────────
 const rail = {
   width: 240, flexShrink: 0,
-  borderRight: `1px solid ${C.border}`, background: C.surface,
+  borderRight: `1px solid ${C.border}`, background: C.card,
   display: 'flex', flexDirection: 'column',
   maxHeight: '100%',
 }
 const collapsedRail = {
   width: 36, flexShrink: 0,
-  borderRight: `1px solid ${C.border}`, background: C.surface,
+  borderRight: `1px solid ${C.border}`, background: C.card,
   display: 'flex', flexDirection: 'column', alignItems: 'center',
   paddingTop: 8,
 }
@@ -310,18 +310,18 @@ const clearBtn = {
 }
 const searchInput = {
   width: '100%', padding: '6px 8px 6px 26px', fontSize: 12.5,
-  color: C.textPrimary, background: C.surface,
+  color: C.textPrimary, background: C.card,
   border: `1px solid ${C.border}`, borderRadius: 5,
 }
 const pickerToggle = {
   width: '100%', padding: '6px 8px', fontSize: 12.5,
-  background: C.surface, border: `1px solid ${C.border}`, borderRadius: 5,
+  background: C.card, border: `1px solid ${C.border}`, borderRadius: 5,
   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
   cursor: 'pointer', textAlign: 'left',
 }
 const pickerPanel = {
   marginTop: 4, padding: '4px 0', border: `1px solid ${C.border}`, borderRadius: 5,
-  background: C.surface, boxShadow: '0 4px 10px -4px rgba(15,23,42,0.10)',
+  background: C.card, boxShadow: '0 4px 10px -4px rgba(15,23,42,0.10)',
   maxHeight: 180, overflowY: 'auto',
 }
 const pickerRow = {

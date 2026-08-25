@@ -387,7 +387,7 @@ const overlay = {
   zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
 }
 const card = {
-  background: C.surface, borderRadius: 8, width: '92%', maxWidth: 560,
+  background: C.card, borderRadius: 8, width: '92%', maxWidth: 560,
   boxShadow: '0 20px 50px -12px rgba(0,0,0,0.28)',
   display: 'flex', flexDirection: 'column', maxHeight: '92vh',
 }
@@ -413,7 +413,7 @@ const readStyle = {
 }
 const inputStyle = {
   width: '100%', padding: '7px 9px', fontSize: 13,
-  color: C.textPrimary, background: C.surface,
+  color: C.textPrimary, background: C.card,
   border: `1px solid ${C.border}`, borderRadius: 5,
 }
 const errorBox = {
@@ -426,7 +426,7 @@ const noteBox = {
 }
 const btnSecondary = {
   padding: '7px 14px', fontSize: 12.5, fontWeight: 500,
-  background: C.surface, color: C.textPrimary,
+  background: C.card, color: C.textPrimary,
   border: `1px solid ${C.border}`, borderRadius: 5, cursor: 'pointer',
 }
 const btnPrimary = {

@@ -154,7 +154,7 @@ export default function ResourceMatrix({ onNavigateToRecord }) {
       {/* ── Sub-toolbar (tab toggle + search + title filter) ───────────── */}
       <div style={{
         display: 'flex', alignItems: 'center', flexWrap: 'wrap',
-        gap: 12, padding: '12px 18px', background: C.surface,
+        gap: 12, padding: '12px 18px', background: C.card,
         borderBottom: `1px solid ${C.border}`,
       }}>
         {/* Tab toggle */}
@@ -178,7 +178,7 @@ export default function ResourceMatrix({ onNavigateToRecord }) {
                   padding: '5px 14px',
                   fontSize: 13, fontWeight: active ? 600 : 500,
                   color: active ? C.textPrimary : C.textSecondary,
-                  background: active ? C.surface : 'transparent',
+                  background: active ? C.card : 'transparent',
                   border: 'none', borderRadius: 5, cursor: 'pointer',
                   boxShadow: active ? '0 1px 2px rgba(13,26,46,0.08)' : 'none',
                 }}
@@ -202,7 +202,7 @@ export default function ResourceMatrix({ onNavigateToRecord }) {
             style={{
               padding: '6px 10px 6px 28px', fontSize: 13,
               border: `1px solid ${C.border}`, borderRadius: 5,
-              background: C.surface, color: C.textPrimary, minWidth: 220,
+              background: C.card, color: C.textPrimary, minWidth: 220,
             }}
           />
         </div>
@@ -219,7 +219,7 @@ export default function ResourceMatrix({ onNavigateToRecord }) {
                   padding: '4px 10px', fontSize: 12,
                   fontWeight: selected ? 600 : 500,
                   color: selected ? '#1e7d4f' : C.textSecondary,
-                  background: selected ? '#e7f8f0' : C.surface,
+                  background: selected ? '#e7f8f0' : C.card,
                   border: `1px solid ${selected ? '#1e7d4f' : C.border}`,
                   borderRadius: 12, cursor: 'pointer',
                 }}
@@ -260,7 +260,7 @@ export default function ResourceMatrix({ onNavigateToRecord }) {
         {/* Refresh */}
         <button onClick={() => setRefreshNonce(n => n + 1)} title="Refresh"
                 style={{
-                  padding: '6px 8px', background: C.surface,
+                  padding: '6px 8px', background: C.card,
                   border: `1px solid ${C.border}`, borderRadius: 5,
                   cursor: 'pointer', color: C.textSecondary,
                 }}>
@@ -301,14 +301,14 @@ function MatrixTable({ staff, cols, tab, matrix, onNavigateToRecord }) {
   const junctionTable = tab === 'skills' ? 'contact_skills' : 'contact_certifications'
 
   return (
-    <div style={{ overflow: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, background: C.surface }}>
+    <div style={{ overflow: 'auto', border: `1px solid ${C.border}`, borderRadius: 6, background: C.card }}>
       <table style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: 600 }}>
         <thead>
           <tr>
             {/* Sticky top-left corner */}
             <th style={{
               position: 'sticky', left: 0, top: 0, zIndex: 3,
-              background: C.surface,
+              background: C.card,
               padding: '10px 14px',
               fontSize: 11, fontWeight: 600, color: C.textSecondary,
               textTransform: 'uppercase', letterSpacing: 0.4,
@@ -328,7 +328,7 @@ function MatrixTable({ staff, cols, tab, matrix, onNavigateToRecord }) {
                     title={title}
                     style={{
                       position: 'sticky', top: 0, zIndex: 2,
-                      background: C.surface,
+                      background: C.card,
                       padding: '10px 8px',
                       fontSize: 11, fontWeight: 600, color: C.textPrimary,
                       borderRight: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
@@ -344,10 +344,10 @@ function MatrixTable({ staff, cols, tab, matrix, onNavigateToRecord }) {
         </thead>
         <tbody>
           {staff.map((s, idx) => (
-            <tr key={s.id} style={{ background: idx % 2 === 0 ? C.surface : '#fafbfd' }}>
+            <tr key={s.id} style={{ background: idx % 2 === 0 ? C.card : '#fafbfd' }}>
               <th style={{
                 position: 'sticky', left: 0, zIndex: 1,
-                background: idx % 2 === 0 ? C.surface : '#fafbfd',
+                background: idx % 2 === 0 ? C.card : '#fafbfd',
                 padding: '10px 14px',
                 fontSize: 13, fontWeight: 500,
                 textAlign: 'left',
@@ -432,7 +432,7 @@ function MobileCards({ staff, cols, tab, matrix, onNavigateToRecord }) {
         return (
           <div key={s.id}
                style={{
-                 background: C.surface, border: `1px solid ${C.border}`,
+                 background: C.card, border: `1px solid ${C.border}`,
                  borderRadius: 8, padding: '12px 14px',
                }}>
             <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 8 }}>
