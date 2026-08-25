@@ -9,6 +9,7 @@ import { Badge, Icon, TableRow, ProgramTag } from './UI';
 import HelpIcon from './help/HelpIcon';
 import FieldValueLink from './FieldValueLink';
 import { formatUsPhoneDisplay } from '../lib/fieldLinks';
+import { collectRelatedFields } from '../lib/listViewFields';
 import {
   getEditableFieldsForTable,
   getPicklistOptions,
@@ -926,17 +927,18 @@ function SortableHeader({ col, sortField, sortDir, onSort, activeFilters, onFilt
 // Searchable, grouped combo box for choosing which columns show in the current
 // view. Driven by the FULL column catalog (every own column + one-hop related
 // columns through the object's lookups), grouped by relationship. A search box
-// filters across all groups by label. Always-on columns (id/name) are shown
-// checked and locked. Selection is an explicit ordered array (newly checked
-// columns append to the end); clearing back to the default set is offered via
-// "Reset to default".
+// filters across all groups by label. EVERY column is un-checkable, including
+// the record number and the name — the only floor is that one column has to
+// remain, or the list would render nothing. Selection is an explicit ordered
+// array (newly checked columns append to the end); clearing back to the
+// default set is offered via "Reset to default".
 //
 // catalog:        [{ field, label, type, group, related?, locked? }]
 // groups:         ordered group labels (object group first)
 // defaultFields:  the field list of the default-visible set (for Reset)
 // visibleColumns: current explicit selection (array) or null (= default set)
 function ColumnPicker({
-  catalog, groups, alwaysOn, visibleColumns, defaultFields, onChange, onClose, triggerRect,
+  catalog, groups, visibleColumns, defaultFields, onChange, onClose, triggerRect,
 }) {
   const ref = useRef();
   const [search, setSearch] = useState('');
@@ -951,19 +953,20 @@ function ColumnPicker({
   const currentOrdered = Array.isArray(visibleColumns)
     ? visibleColumns
     : (defaultFields || []);
-  const selectedSet = new Set([...currentOrdered, ...alwaysOn]);
+  const selectedSet = new Set(currentOrdered);
 
   const isVisible = (field) => selectedSet.has(field);
+  // The last remaining column can't be unchecked — an empty list view has
+  // nothing to click and nothing to read. Everything else, including the
+  // record number and the name, comes off freely.
+  const isLastColumn = (field) => selectedSet.has(field) && selectedSet.size <= 1;
 
   const toggle = (field) => {
-    if (alwaysOn.includes(field)) return;
-    let next;
-    if (selectedSet.has(field)) {
-      next = currentOrdered.filter(f => f !== field && !alwaysOn.includes(f));
-    } else {
+    if (isLastColumn(field)) return;
+    const next = selectedSet.has(field)
+      ? currentOrdered.filter(f => f !== field)
       // Append so the user's most-recently-added column shows at the right.
-      next = [...currentOrdered.filter(f => !alwaysOn.includes(f)), field];
-    }
+      : [...currentOrdered, field];
     onChange(next);
   };
 
@@ -988,7 +991,7 @@ function ColumnPicker({
   const top = rect ? rect.bottom + 4 : 0;
   const left = rect ? rect.left : 0;
   const maxH = rect ? Math.max(240, window.innerHeight - rect.bottom - 16) : 460;
-  const selectedCount = currentOrdered.filter(f => !alwaysOn.includes(f)).length;
+  const selectedCount = selectedSet.size;
 
   const menu = (
     <div ref={ref} style={{
@@ -1030,7 +1033,7 @@ function ColumnPicker({
             </div>
             {cols.map(col => {
               const on = isVisible(col.field);
-              const locked = alwaysOn.includes(col.field) || col.locked;
+              const locked = col.locked || isLastColumn(col.field);
               return (
                 <div key={col.field}
                   onClick={() => toggle(col.field)}
@@ -1048,7 +1051,7 @@ function ColumnPicker({
                   </span>
                   <span style={{ fontSize: 13, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {col.label}
-                    {locked && <span style={{ color: C.textMuted, fontSize: 11 }}> (always shown)</span>}
+                    {locked && <span style={{ color: C.textMuted, fontSize: 11 }}> {isLastColumn(col.field) ? '(last column)' : '(always shown)'}</span>}
                   </span>
                 </div>
               );
@@ -1445,7 +1448,6 @@ function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
     const byGroup = new Map();
     for (const g of (groups || [])) byGroup.set(g, []);
     for (const c of (catalog || [])) {
-      if (c.locked) continue; // id/name are always shown; still filterable via headers
       if (q && !c.label.toLowerCase().includes(q) && !(c.group || '').toLowerCase().includes(q)) continue;
       const g = c.group || 'Other';
       if (!byGroup.has(g)) byGroup.set(g, []);
@@ -1709,6 +1711,12 @@ export function ListView({
   columnCatalog: columnCatalogProp,
   columnGroups: columnGroupsProp,
   onActiveRelatedFieldsChange,
+  // True while the parent is re-fetching rows because this view started
+  // referencing a field the current rows don't carry (a related column added
+  // to the columns, the filters, or the sort). The rows on screen are stale
+  // for that field, so an empty result is "not loaded yet", not "no matches" —
+  // saying otherwise is how a filter looks broken while it's simply waiting.
+  dataPending = false,
   systemViews: systemViewsProp,
   defaultViewId, newLabel,
   renderCell, renderDetail, onNew, onOpenRecord, onRefresh,
@@ -1820,9 +1828,10 @@ export function ListView({
   }, [columns, columnCatalog]);
   const rowKeyFor = (field) => fieldAlias.get(field) || field;
 
-  // Columns that can never be hidden: the primary 'name' (the row's click
-  // target / label) and 'id' (record number, the leading identity column).
-  const ALWAYS_ON_COLS = ['id', 'name'];
+  // Nothing is un-hideable. The record number and the name are ordinary
+  // columns: removable, and draggable to any position. A row stays openable
+  // without them — double-click opens the record, and edit mode's per-row
+  // menu carries Edit / Clone / Delete.
   const systemViews = Array.isArray(systemViewsProp) && systemViewsProp.length > 0
     ? systemViewsProp
     : [{ id: '__default__', name: 'All', filters: [], sortField: null, sortDir: 'asc' }]
@@ -1867,30 +1876,31 @@ export function ListView({
   const [colPickerRect, setColPickerRect] = useState(null);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
-  // The columns actually rendered: full catalog when visibleColumns is null,
-  // otherwise the catalog filtered to the visible set (preserving catalog
-  // order) with always-on columns forced in. Header, rows, and the mobile
-  // card all map over effectiveColumns so a hidden column disappears
-  // everywhere consistently.
+  // The columns actually rendered: the default set when visibleColumns is null,
+  // otherwise EXACTLY the user's selection, in the user's order. Header, rows,
+  // and the mobile card all map over effectiveColumns so a hidden column
+  // disappears everywhere consistently.
+  //
+  // Nothing is pinned. The record number and the name used to be forced to the
+  // front and could not be unchecked, which meant they could not be dragged
+  // anywhere either — every reorder snapped them back. A column the user
+  // doesn't want is a column that shouldn't be on screen, wherever it sits in
+  // the catalog. The one floor is that a list can't render zero columns: an
+  // empty selection falls back to the default set.
   const effectiveColumns = useMemo(() => {
     // Default view (no explicit selection): show the default column set.
     if (!Array.isArray(visibleColumns)) return columns;
-    // Explicit selection: render in the user's chosen order. Identity columns
-    // (id, name) are always forced to the front so a row stays clickable. Each
-    // field resolves through the merged catalog so related/extra columns the
-    // user added render even though they're not in the default set.
+    // Explicit selection: render in the user's chosen order. Each field
+    // resolves through the merged catalog so related/extra columns the user
+    // added render even though they're not in the default set.
     const ordered = [];
     const seen = new Set();
-    for (const f of ALWAYS_ON_COLS) {
-      const c = columnByField.get(f);
-      if (c && !seen.has(f)) { ordered.push(c); seen.add(f); }
-    }
     for (const f of visibleColumns) {
       if (seen.has(f)) continue;
       const c = columnByField.get(f);
       if (c) { ordered.push(c); seen.add(f); }
     }
-    return ordered;
+    return ordered.length > 0 ? ordered : columns;
   }, [columns, columnByField, visibleColumns]);
 
   // Sum of every column's width (its custom drag width, or its type-based
@@ -1928,20 +1938,22 @@ export function ListView({
     setIsDirty(true);
   };
 
-  // Report active related (one-hop) fields to the parent so it can refetch with
-  // the necessary parent joins. Own-column changes don't trigger this (their
-  // data is already present). Fires only when the set actually changes.
+  // Report the related (one-hop) fields this view REFERENCES to the parent so it
+  // can refetch with the necessary parent joins. A view references a field by
+  // displaying it, by filtering on it, or by sorting on it — all three count.
+  // Hiding a column never removes the field the active filter needs, which is
+  // what used to empty the list the moment someone unchecked the column their
+  // filter rode on. Own-column changes don't trigger this (their data is on
+  // every row already). Fires only when the set actually changes.
   const lastRelatedKeyRef = useRef('');
   useEffect(() => {
     if (typeof onActiveRelatedFieldsChange !== 'function') return;
-    const related = Array.isArray(visibleColumns)
-      ? visibleColumns.filter(f => typeof f === 'string' && f.includes('__rel__'))
-      : [];
-    const key = [...related].sort().join('|');
+    const related = collectRelatedFields({ visibleColumns, filters: activeFilters, sortField });
+    const key = related.join('|');
     if (key === lastRelatedKeyRef.current) return;
     lastRelatedKeyRef.current = key;
     onActiveRelatedFieldsChange(related);
-  }, [visibleColumns, onActiveRelatedFieldsChange]);
+  }, [visibleColumns, activeFilters, sortField, onActiveRelatedFieldsChange]);
   const [openFilterCol, setOpenFilterCol] = useState(null);
   const [activeViewId, setActiveViewId] = useState(defaultViewId);
   const [showViewSel, setShowViewSel] = useState(false);
@@ -2606,14 +2618,17 @@ export function ListView({
                 </svg>
               </div>
               <div style={{ fontSize: 15, fontWeight: 500, color: C.textPrimary }}>
-                {data.length === 0 ? `No ${pluralizeLabel(newLabel ? newLabel.toLowerCase() : '')} yet` : 'No matching records'}
+                {dataPending ? 'Loading matching records…'
+                  : data.length === 0 ? `No ${pluralizeLabel(newLabel ? newLabel.toLowerCase() : '')} yet` : 'No matching records'}
               </div>
               <div style={{ fontSize: 13, maxWidth: 260, lineHeight: 1.4 }}>
-                {data.length === 0
+                {dataPending
+                  ? 'Fetching the fields this view filters on.'
+                  : data.length === 0
                   ? `Tap the + button to create your first ${newLabel ? newLabel.toLowerCase() : 'record'}.`
                   : 'Try adjusting the filters or search to find what you\'re looking for.'}
               </div>
-              {data.length > 0 && (activeFilters.length > 0 || sortField || globalSearch) && (
+              {!dataPending && data.length > 0 && (activeFilters.length > 0 || sortField || globalSearch) && (
                 <button
                   onClick={() => { clearAll(); setGlobalSearch('') }}
                   style={{
@@ -2742,7 +2757,7 @@ export function ListView({
             Columns
             {Array.isArray(visibleColumns) && <span style={{ fontSize: 11, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{effectiveColumns.length}</span>}
           </button>
-          {showColPicker && <ColumnPicker catalog={columnCatalog} groups={columnGroups} alwaysOn={ALWAYS_ON_COLS} visibleColumns={visibleColumns} defaultFields={columns.map(c => c.field)} onChange={(next) => { setVisibleColumns(next); setIsDirty(true); }} onClose={() => setShowColPicker(false)} triggerRect={colPickerRect} />}
+          {showColPicker && <ColumnPicker catalog={columnCatalog} groups={columnGroups} visibleColumns={visibleColumns} defaultFields={columns.map(c => c.field)} onChange={(next) => { setVisibleColumns(next); setIsDirty(true); }} onClose={() => setShowColPicker(false)} triggerRect={colPickerRect} />}
         </div>
 
         {persistEnabled && <HelpIcon anchors={[{ type: 'concept', concept: 'list-views' }, { type: 'concept', concept: 'column-visibility' }]} title="List views & columns" />}
@@ -2940,7 +2955,9 @@ export function ListView({
               <tbody>
                 {filtered.length === 0 ? (
                   <tr><td colSpan={effectiveColumns.length + (editMode ? 2 : 0)} style={{ padding: '40px 20px', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
-                    {data.length === 0
+                    {dataPending
+                      ? <>Loading matching records…</>
+                      : data.length === 0
                       ? <>No {pluralizeLabel(newLabel ? newLabel.toLowerCase() : '')} yet. <span onClick={onNew} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Create one</span></>
                       : <>No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span></>
                     }
