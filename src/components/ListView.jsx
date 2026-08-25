@@ -3191,7 +3191,7 @@ export function ListView({
                                   <span style={{
                                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                     minWidth: 18, height: 18, padding: '0 4px', marginRight: 7, borderRadius: 4,
-                                    background: C.skyBlue || '#7eb3e8', color: '#fff', fontSize: 10.5, fontWeight: 700,
+                                    background: C.sky, color: '#fff', fontSize: 10.5, fontWeight: 700,
                                     fontFamily: 'JetBrains Mono, monospace',
                                   }}>{d.number}</span>
                                   <span style={{ color: C.textPrimary, fontWeight: 600 }}>{d.label}</span>
