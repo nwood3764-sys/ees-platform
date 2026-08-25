@@ -48,3 +48,56 @@ export async function encodeImageForPdf(url, {
   if (bmp.close) bmp.close()
   return { dataUrl: canvas.toDataURL('image/jpeg', quality), w, h }
 }
+
+// ---------------------------------------------------------------------------
+// First page of a PDF, as a JPEG data URL.
+//
+// Used to preview an attached PDF inside a generated report. pdf.js is loaded
+// from the same CDN build the Asset Score parser already uses, lazily, so a
+// session that previews no PDF never downloads it.
+// ---------------------------------------------------------------------------
+const PDFJS_VERSION = '4.6.82'
+const PDFJS_SCRIPT = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.min.mjs`
+const PDFJS_WORKER = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.mjs`
+
+let _pdfjs = null
+function loadPdfJs() {
+  if (!_pdfjs) {
+    _pdfjs = import(/* @vite-ignore */ PDFJS_SCRIPT)
+      .then(m => { m.GlobalWorkerOptions.workerSrc = PDFJS_WORKER; return m })
+      .catch(err => { _pdfjs = null; throw err })
+  }
+  return _pdfjs
+}
+
+/**
+ * @returns {Promise<{dataUrl:string,w:number,h:number}|null>} null when the URL
+ * is missing or the file cannot be rendered — a preview is a nicety, and a
+ * document that will not render still earns its row and its link.
+ */
+export async function renderPdfFirstPageForPdf(url, { maxEdge = 900, quality = 0.8 } = {}) {
+  if (!url) return null
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`document fetch ${res.status}`)
+  const data = await res.arrayBuffer()
+  const pdfjs = await loadPdfJs()
+  const pdf = await pdfjs.getDocument({ data }).promise
+  try {
+    const page = await pdf.getPage(1)
+    const base = page.getViewport({ scale: 1 })
+    const scale = Math.min(2, maxEdge / Math.max(base.width, base.height))
+    const viewport = page.getViewport({ scale })
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(viewport.width))
+    canvas.height = Math.max(1, Math.round(viewport.height))
+    const ctx = canvas.getContext('2d')
+    // A PDF page is transparent where it is blank; without this the preview
+    // comes out on a black ground once flattened into JPEG.
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    await page.render({ canvasContext: ctx, viewport }).promise
+    return { dataUrl: canvas.toDataURL('image/jpeg', quality), w: canvas.width, h: canvas.height }
+  } finally {
+    try { await pdf.destroy() } catch { /* nothing to do */ }
+  }
+}

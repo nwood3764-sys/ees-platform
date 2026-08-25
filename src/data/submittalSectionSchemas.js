@@ -202,6 +202,16 @@ export const SUBMITTAL_SECTION_SCHEMAS = {
     { key: 'signer_label', label: 'Signer Label', type: 'text',
       default: 'Property Owner / Authorized Representative' },
   ],
+  assessment_documents: [
+    { key: 'heading', label: 'Heading', type: 'text', default: 'Documents' },
+    { key: 'body', label: 'Intro Text', type: 'textarea' },
+    { key: 'link_hint', label: 'Link Hint', type: 'text',
+      default: 'Click the name to open or download this file.' },
+    { key: 'preview_width', label: 'Preview Width (points)', type: 'text', default: 108,
+      description: 'How wide the thumbnail of a previewable document is. Files that cannot show a preview print as a row and a link.' },
+    { key: '__info__', type: 'info',
+      description: 'Which documents appear is chosen when the report is generated, from the work order\u2019s Documents list. This section prints nothing when none were chosen.' },
+  ],
   assessment_footer: [
     { key: 'company_line', label: 'Company Line', type: 'text',
       placeholder: 'Leave blank to use the Submittal Document Wording' },
@@ -240,6 +250,7 @@ export const SUBMITTAL_SECTION_LABELS = {
   assessment_recommendations: 'Findings & Measures',
   assessment_deliverables: 'Deliverables',
   assessment_signature: 'Acknowledgment & Signature',
+  assessment_documents: 'Documents',
   assessment_footer: 'Page Footer',
 }
 

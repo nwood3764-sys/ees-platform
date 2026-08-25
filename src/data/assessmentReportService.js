@@ -19,20 +19,26 @@
 // ---------------------------------------------------------------------------
 
 import { supabase } from '../lib/supabase'
-import { listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrls } from './storageService'
+import {
+  listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrls, signedUrl, listDocuments,
+} from './storageService'
 import { loadSubmittalDocumentTemplate, loadSubmittalTextBlocks } from './paperworkService'
 import { buildAssessmentReportPdf } from './paperworkModel'
-import { encodeImageForPdf } from '../lib/pdfImages'
+import { encodeImageForPdf, renderPdfFirstPageForPdf } from '../lib/pdfImages'
 import {
   ASSESSMENT_REPORT_KIND, assessmentReportFor, buildStepEntry, reportPhotos,
   photoCaption, reportPhotoLabel, buildingSummaryRows, addressLines, cityStateZip,
   reportFileName, collectRecordIds, applyLookupLabels, companyNameForState,
+  documentPreviewKind, documentTypeLabel, formatFileSize, documentDownloadName,
 } from '../lib/assessmentReport'
 
 // How long the in-PDF photo links stay good. A report is filed with a program
 // and read months later, so a one-hour link would be dead on arrival; a year
 // matches the life of the submittal it accompanies.
 const PHOTO_LINK_TTL_SECONDS = 60 * 60 * 24 * 365
+// Documents linked from the report are reachable for the same period, and are
+// signed with a readable filename so a saved copy is identifiable.
+const DOCUMENT_LINK_TTL_SECONDS = 60 * 60 * 24 * 365
 
 function fmtDate(iso) {
   if (!iso) return null
@@ -186,6 +192,21 @@ export async function loadAssessmentReportContext(workOrderId) {
     return { ...s, photoCount, answeredCount: answered, willPrint: answered > 0 || photoCount > 0 || s.notApplicable }
   })
 
+  // ── Documents attached to this assessment ───────────────────────────────
+  // Exactly the work order's Documents related list — the same listDocuments
+  // call the card on the record makes, so what the user sees on the work order
+  // is what they are offered here. Nothing is included until they pick it.
+  const documentRows = await listDocuments('work_orders', workOrderId)
+  const documents = documentRows.map(row => ({
+    id: row.id,
+    name: row.name || row.document_number || 'Document',
+    typeLabel: documentTypeLabel(row.mime_type, row.name),
+    size: formatFileSize(row.file_size_bytes),
+    date: fmtDate(row.created_at),
+    previewKind: documentPreviewKind(row.mime_type, row.name),
+    _row: row,
+  }))
+
   // ── The template that drives the section list ───────────────────────────
   const [template, textBlocks] = await Promise.all([
     loadSubmittalDocumentTemplate(def.documentKey, opportunity?.opportunity_record_type || null),
@@ -255,6 +276,9 @@ export async function loadAssessmentReportContext(workOrderId) {
       caption: photoCaption(p, { formatDate: fmtDateTime }),
       _row: p,
     })),
+    // Filled in by the caller from the user's selection — nothing is included
+    // in the report until it is chosen.
+    documents: [],
     recommendations: [],
     textBlocks,
   }
@@ -272,12 +296,13 @@ export async function loadAssessmentReportContext(workOrderId) {
   const model = applyLookupLabels(draftModel, labelById)
 
   return {
-    def, model, template,
+    def, model, template, documents,
     counts: {
       photosFlagged: flagged.length,
       photosTotal:   allPhotos.length,
       steps:         modelSteps.length,
       sectionsWithContent: model.steps.filter(s => s.willPrint).length,
+      documents: documents.length,
     },
   }
 }
@@ -320,6 +345,46 @@ export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
     if (onProgress) onProgress(done, list.length)
   }
   for (const p of list) delete p._row
+  return model
+}
+
+/**
+ * Resolve the chosen documents into what the renderer needs: a long-lived,
+ * correctly-named download link for every one, and a preview for those that
+ * can show one (an image, a PDF's first page).
+ *
+ * A document that cannot be previewed still gets its row and its link — the
+ * point is that the reader can always reach the file.
+ */
+export async function attachAssessmentDocuments(model, chosen, { onProgress } = {}) {
+  const list = (chosen || []).filter(Boolean)
+  model.documents = list.map(({ _row, ...rest }) => ({ ...rest }))
+  if (!list.length) return model
+
+  const buildingLabel = model.building?.label || model.building?.name || null
+  let done = 0
+  for (let i = 0; i < list.length; i++) {
+    const src = list[i], out = model.documents[i], row = src._row || {}
+    try {
+      if (row.storage_bucket && row.storage_path) {
+        out.linkUrl = await signedUrl(
+          row.storage_bucket, row.storage_path, DOCUMENT_LINK_TTL_SECONDS,
+          documentDownloadName(src, buildingLabel))
+      }
+      if (out.linkUrl && src.previewKind === 'image') {
+        const img = await encodeImageForPdf(out.linkUrl)
+        if (img) { out.previewDataUrl = img.dataUrl; out.previewW = img.w; out.previewH = img.h }
+      } else if (out.linkUrl && src.previewKind === 'pdf') {
+        const page = await renderPdfFirstPageForPdf(out.linkUrl)
+        if (page) { out.previewDataUrl = page.dataUrl; out.previewW = page.w; out.previewH = page.h }
+      }
+    } catch {
+      /* A preview is a nicety. A document that will not render keeps its row
+         and its link rather than taking the whole report down with it. */
+    }
+    done++
+    if (onProgress) onProgress(done, list.length)
+  }
   return model
 }
 

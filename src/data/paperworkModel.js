@@ -619,6 +619,9 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
     // tagged photo is ever silently dropped. Prints nothing when there is none.
     { type: 'assessment_photo_documentation', config: {
       heading: 'Additional Photographs', columns: 2, group_by_step: true, exclude_printed: true } },
+    // The documents the user chose at generate time. Prints nothing when none
+    // were chosen.
+    { type: 'assessment_documents', config: { heading: 'Documents' } },
     { type: 'assessment_footer' },
   ],
   // Combustion Safety Notification (Large Multifamily 5+ Units) — its own engine.
@@ -1465,6 +1468,65 @@ export const ASSESSMENT_SECTION_RENDERERS = {
       columns: cfg.columns, aspect: cfg.aspect,
       group_by_step: cfg.group_by_step !== false,
     })
+  },
+
+  /* Documents attached to the assessment — the ones the user chose to include.
+     Anything that can be shown IS shown (an image, a PDF's first page);
+     anything that cannot still gets a row and a link, so the reader can fetch
+     it later rather than being told it exists somewhere out of reach. */
+  assessment_documents(x, cfg = {}) {
+    const { m, W, M, CW, st, d, font, t, tc, wrap, need, stroke, fill, band, para, subHead, RULE, NAVY, MUT, INK } = x
+    const docs = (m.documents || []).filter(Boolean)
+    if (!docs.length && cfg.omit_when_empty !== false) return
+    band(cfg.heading || 'Documents')
+    if (cfg.body) para(cfg.body)
+    if (!docs.length) {
+      subHead(cfg.empty_label || 'No documents were included.')
+      return
+    }
+
+    const LINK = [42, 110, 178]
+    const thumbW = Math.max(60, Math.min(160, Number(cfg.preview_width) || 108))
+    for (const doc of docs) {
+      const hasPreview = !!(doc.previewDataUrl && doc.previewW && doc.previewH)
+      const thumbH = hasPreview
+        ? Math.min(Number(cfg.preview_max_height) || 140,
+                   Math.round(thumbW * (doc.previewH / doc.previewW)))
+        : 0
+      const textX = hasPreview ? M + thumbW + 12 : M
+      const textW = W - M - textX
+      const nameLines = wrap(String(doc.name || 'Document'), textW)
+      const metaBits = [doc.typeLabel, doc.size, doc.date].filter(v => v != null && String(v).trim() !== '')
+      const textH = nameLines.length * 12 + (metaBits.length ? 12 : 0) + (doc.linkUrl ? 11 : 0)
+      const rowH = Math.max(thumbH, textH) + 12
+      need(rowH)
+
+      const top = st.y
+      if (hasPreview) {
+        stroke(RULE); d.setLineWidth(.6); d.rect(M, top, thumbW, thumbH)
+        try { d.addImage(doc.previewDataUrl, 'JPEG', M, top, thumbW, thumbH) }
+        catch { /* an unreadable preview leaves the box — never sinks the report */ }
+      }
+
+      let ty = top
+      tc(doc.linkUrl ? LINK : NAVY); font(9, 'bold')
+      nameLines.forEach(ln => { ty += 11; t(textX, ty, ln) })
+      if (doc.linkUrl) {
+        const lw = Math.min(textW, d.getTextWidth(nameLines[nameLines.length - 1] || ''))
+        stroke(LINK); d.setLineWidth(.5); d.line(textX, ty + 2, textX + lw, ty + 2)
+        d.link(textX, top, textW, Math.max(textH, 14), { url: doc.linkUrl })
+      }
+      if (metaBits.length) {
+        tc(MUT); font(7.5); ty += 11; t(textX, ty, metaBits.join('  ·  '))
+      }
+      if (doc.linkUrl) {
+        tc(MUT); font(7.5); ty += 10
+        t(textX, ty, cfg.link_hint || 'Click the name to open or download this file.')
+      }
+
+      st.y = top + rowH
+      stroke(RULE); d.setLineWidth(.4); d.line(M, st.y - 4, W - M, st.y - 4)
+    }
   },
 
   /* Findings / recommended energy efficiency measures. Deliberately narrative

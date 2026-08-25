@@ -15,6 +15,7 @@ import {
   ASSESSMENT_REPORTS, ASSESSMENT_REPORT_KIND, assessmentReportFor, hasAssessmentReport,
   fieldDisplayValue, buildStepEntry, isNotApplicable, reportPhotos, photoCaption, reportPhotoLabel,
   isRecordId, collectRecordIds, applyLookupLabels, companyNameForState, stateFullName,
+  documentPreviewKind, documentTypeLabel, formatFileSize, documentDownloadName,
   buildingSummaryRows, addressLines, cityStateZip, reportFileName,
 } from '../src/lib/assessmentReport.js'
 import {
@@ -199,6 +200,8 @@ const stepSections = defaults.filter(s => s.type === 'assessment_field_data')
 eq(stepSections.length, 13, 'one section per captured system, and none for anything else')
 ok(!defaults.some(x => ['assessment_narrative','assessment_deliverables','assessment_recommendations','assessment_signature'].includes(x.type)),
   'the report carries no narrative, deliverables, findings or signature block — only the building and its photographs')
+ok(defaults.some(x => x.type === 'assessment_documents'),
+  'the report can carry the documents the user chose')
 ok(stepSections.every(s => s.config.photos === 'step'),
   'each system section prints its own photos, so the report reads beside the Asset Score sections')
 
@@ -305,6 +308,51 @@ const filledChrome = await buildAssessmentReportPdf(
   [{ type: 'assessment_building_summary' }, { type: 'assessment_recommendations' }])
 ok(filledChrome.size > emptyChrome.size,
   'an empty Building Summary and an empty Findings list are dropped, not printed as headings over nothing')
+
+// ── Documents ───────────────────────────────────────────────────────────────
+// Whatever can be previewed is; whatever cannot still earns a row and a link,
+// so the reader can always reach the file.
+eq(documentPreviewKind('application/pdf'), 'pdf', 'a PDF previews its first page')
+eq(documentPreviewKind('image/jpeg'), 'image', 'a picture previews itself')
+eq(documentPreviewKind('video/mp4'), 'none', 'a video cannot preview in a PDF')
+eq(documentPreviewKind('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'none',
+  'a spreadsheet cannot preview')
+eq(documentPreviewKind(null, 'Utility Bills.PDF'), 'pdf',
+  'a row with no mime type falls back to its extension rather than refusing to preview')
+eq(documentPreviewKind(null, 'notes'), 'none', 'and an extensionless unknown gets no preview')
+eq(documentTypeLabel('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'Spreadsheet',
+  'the type reads as a word, not a mime string')
+eq(documentTypeLabel(null, 'model.hpxml'), 'HPXML', 'an unknown type falls back to its extension')
+eq(formatFileSize(2516582), '2.4 MB', 'sizes are human-readable')
+eq(formatFileSize(0), '', 'an unknown size is blank, never "0 B"')
+eq(formatFileSize(null), '', 'and so is a missing one')
+eq(documentDownloadName({ name: 'Utility Bills.pdf' }, '100 - 110'),
+  '100 - 110 - Utility Bills.pdf', 'a saved document is named for the building, keeping its extension')
+eq(documentDownloadName({ name: 'notes' }, null), 'notes', 'with no building label the name stands alone')
+ok(!documentDownloadName({ name: 'a/b:c.pdf' }, null).includes('/'),
+  'characters a filesystem rejects are stripped')
+
+// The section prints nothing when nothing was chosen, and grows with each
+// document — a previewable one takes more room than a link-only one.
+const docBase = { ...model, documents: [] }
+const noDocs = await buildAssessmentReportPdf(docBase, ASSESSMENT_REPORT_KIND, [{ type: 'assessment_documents' }])
+const linkOnly = await buildAssessmentReportPdf(
+  { ...docBase, documents: [{ id: 'd1', name: 'Utility Bills.xlsx', typeLabel: 'Spreadsheet', size: '18 KB', date: 'Aug 24, 2026', linkUrl: 'https://example.test/x.xlsx' }] },
+  ASSESSMENT_REPORT_KIND, [{ type: 'assessment_documents' }])
+ok(linkOnly.size > noDocs.size,
+  'a document with no preview still prints a row and a link; no documents prints nothing at all')
+const noLink = await buildAssessmentReportPdf(
+  { ...docBase, documents: [{ id: 'd1', name: 'Utility Bills.xlsx', typeLabel: 'Spreadsheet', size: '18 KB', date: 'Aug 24, 2026' }] },
+  ASSESSMENT_REPORT_KIND, [{ type: 'assessment_documents' }])
+ok(noLink.size > noDocs.size, 'a document whose link could not be signed still gets its row')
+const forcedEmpty = await buildAssessmentReportPdf(docBase, ASSESSMENT_REPORT_KIND,
+  [{ type: 'assessment_documents', config: { omit_when_empty: false } }])
+ok(forcedEmpty.size > noDocs.size, 'omit_when_empty:false says so explicitly instead of printing nothing')
+// A preview that failed to render must not take the report down.
+const brokenPreview = await buildAssessmentReportPdf(
+  { ...docBase, documents: [{ id: 'd1', name: 'Scan.pdf', typeLabel: 'PDF', linkUrl: 'https://example.test/s.pdf', previewDataUrl: 'not-an-image', previewW: 100, previewH: 130 }] },
+  ASSESSMENT_REPORT_KIND, [{ type: 'assessment_documents' }])
+ok(brokenPreview.size > 1000, 'an unreadable preview leaves its box rather than failing the report')
 
 // A photo carrying a link renders larger than one without: the link, the
 // underline and the link-coloured label are all real marks on the page.

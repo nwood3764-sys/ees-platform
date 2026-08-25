@@ -18,7 +18,7 @@ import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
 import {
-  loadAssessmentReportContext, attachAssessmentPhotoImages,
+  loadAssessmentReportContext, attachAssessmentPhotoImages, attachAssessmentDocuments,
   saveAssessmentReportToWorkOrder,
 } from '../data/assessmentReportService'
 import { buildAssessmentReportPdf } from '../data/paperworkModel'
@@ -35,6 +35,9 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
   const [result, setResult] = useState(null)     // { url, fileName, blob }
   const [saving, setSaving] = useState(false)
   const [savedName, setSavedName] = useState(null)
+  // Documents are opt-in: nothing from the work order's Documents list goes
+  // into the report until it is chosen here.
+  const [chosenDocs, setChosenDocs] = useState(() => new Set())
 
   useEffect(() => {
     let alive = true
@@ -52,10 +55,15 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
 
   async function handleGenerate() {
     if (!ctx) return
-    setGenerating(true); setProgress({ done: 0, total: ctx.counts.photosFlagged })
+    setGenerating(true); setProgress({ done: 0, total: ctx.counts.photosFlagged, phase: 'photos' })
     try {
       await attachAssessmentPhotoImages(ctx.model, {
         onProgress: (done, total) => setProgress({ done, total }),
+      })
+      const picked = (ctx.documents || []).filter(d => chosenDocs.has(d.id))
+      setProgress({ done: 0, total: picked.length, phase: 'documents' })
+      await attachAssessmentDocuments(ctx.model, picked, {
+        onProgress: (done, total) => setProgress({ done, total, phase: 'documents' }),
       })
       const blob = await buildAssessmentReportPdf(
         ctx.model, ASSESSMENT_REPORT_KIND, ctx.template?.sections || null)
@@ -185,6 +193,52 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
                 </div>
               </div>
 
+              {/* The work order's Documents related list. Pick what belongs in
+                  the report — each one gets a link the reader can download
+                  later, and a preview where the file can show one. */}
+              <div style={{ marginTop: 4 }}>
+                <div style={{ ...sectionLabel, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Documents{(ctx.documents || []).length ? ` (${chosenDocs.size} of ${ctx.documents.length} selected)` : ''}</span>
+                  {(ctx.documents || []).length > 1 && (
+                    <button type="button" onClick={() => setChosenDocs(prev =>
+                      prev.size === ctx.documents.length ? new Set() : new Set(ctx.documents.map(d => d.id)))}
+                      style={linkBtn}>
+                      {chosenDocs.size === ctx.documents.length ? 'Clear all' : 'Select all'}
+                    </button>
+                  )}
+                </div>
+                <div style={sectionList}>
+                  {(ctx.documents || []).map(docItem => (
+                    <label key={docItem.id} style={{ ...sectionRow, cursor: 'pointer', gap: 10 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+                        <input type="checkbox" checked={chosenDocs.has(docItem.id)}
+                          onChange={() => setChosenDocs(prev => {
+                            const next = new Set(prev)
+                            if (next.has(docItem.id)) next.delete(docItem.id); else next.add(docItem.id)
+                            return next
+                          })} />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{docItem.name}</span>
+                      </span>
+                      <span style={{ color: C.textMuted, fontSize: 11, whiteSpace: 'nowrap', marginLeft: 10 }}>
+                        {[docItem.typeLabel, docItem.size,
+                          docItem.previewKind === 'none' ? 'link only' : 'preview'].filter(Boolean).join('  ·  ')}
+                      </span>
+                    </label>
+                  ))}
+                  {!(ctx.documents || []).length && (
+                    <div style={{ ...sectionRow, color: C.textMuted }}>
+                      No documents on this work order. Anything added to its Documents card can be included here.
+                    </div>
+                  )}
+                </div>
+                {chosenDocs.size > 0 && (
+                  <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 6, lineHeight: 1.5 }}>
+                    Selected documents are listed in the report with a link the reader can use to download
+                    the file. A picture or a PDF also shows a preview; anything else is the link alone.
+                  </div>
+                )}
+              </div>
+
               {result && (
                 <div style={{ ...notice, background: '#ecfdf5', borderColor: '#a7f3d0', color: '#0f6b47' }}>
                   <Icon path="M5 13l4 4L19 7" size={15} color="#0f6b47" />
@@ -201,7 +255,9 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
         {/* Footer */}
         <div style={footer}>
           <div style={{ fontSize: 11.5, color: C.textMuted, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {generating && progress.total > 0 ? `Preparing photos ${progress.done} of ${progress.total}…` : ''}
+            {generating && progress.total > 0
+              ? `Preparing ${progress.phase === 'documents' ? 'documents' : 'photos'} ${progress.done} of ${progress.total}…`
+              : ''}
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button onClick={onClose} style={btnGhost}>Close</button>
@@ -293,3 +349,7 @@ const btnBase = {
 }
 const btnGhost = { ...btnBase, background: C.card, border: `1px solid ${C.borderDark}`, color: C.textSecondary }
 const btnPrimary = { ...btnBase, background: C.emerald, border: `1px solid ${C.emerald}`, color: '#06301f' }
+const linkBtn = {
+  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+  fontSize: 10.5, fontWeight: 600, color: C.emeraldMid, textTransform: 'none', letterSpacing: 0,
+}
