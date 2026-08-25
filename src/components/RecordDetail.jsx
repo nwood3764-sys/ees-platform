@@ -38,6 +38,7 @@ import { useToast } from './Toast'
 import { blockNegativeKeys, nonNegativeMin } from '../lib/numberInput'
 import { formatUsPhoneDisplay } from '../lib/fieldLinks'
 import { holdAppReload } from '../lib/appUpdate'
+import { contractorContactPairsFor, resolveContractorContact } from '../lib/contractorContact'
 import FieldValueLink from './FieldValueLink'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl, buildScopedListUrl, pushRecordSubPath } from '../lib/urlNav'
@@ -7229,22 +7230,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             .eq('account_name', name).eq('account_is_deleted', false).maybeSingle()
           return data?.id || null
         }
-        const contactOf = async (name, accountName) => {
-          const aId = await acct(accountName)
-          if (!aId) return null
-          const { data } = await supabase.from('contacts').select('id')
-            .eq('contact_name', name).eq('contact_account_id', aId)
-            .eq('contact_is_deleted', false).maybeSingle()
-          return data?.id || null
-        }
-        const [appFor, bType, bProj, sealedRow, eesRow, tylerRow, nickRow] = await Promise.all([
+        const [appFor, bType, bProj, sealedRow, eesRow] = await Promise.all([
           pv('application_for', 'Project Reservation'),
           pv('building_type', 'Existing'),
           pv('building_project_type', 'Multifamily - Central 5 Units'),
           acct('Sealed Inc'),
           acct('Energy Efficiency Services of Wisconsin'),
-          contactOf('Tyler Wallace', 'Sealed Inc'),
-          contactOf('Nicholas Wood', 'Energy Efficiency Services of Wisconsin'),
         ])
         if (cancelled) return
         setDraft(prev => {
@@ -7252,14 +7243,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           if (appFor && next.enrollment_application_for == null) next.enrollment_application_for = appFor
           if (bType && next.enrollment_building_type == null) next.enrollment_building_type = bType
           if (bProj && next.enrollment_building_project_type == null) next.enrollment_building_project_type = bProj
-          // Primary contractor = Sealed Inc / Tyler Wallace; support = Yes ->
-          // Energy Efficiency Services of Wisconsin / Nicholas Wood. Fill blanks
-          // only, so the user can change any of them before saving.
+          // Primary contractor = Sealed Inc, support contractor = Energy
+          // Efficiency Services of Wisconsin. Which COMPANY runs the program is
+          // program config; which PERSON represents it is never named here --
+          // the contractor-contact effect below reads it off each account, the
+          // same way contractor_contact_for_account does server-side. Naming
+          // the people here was why updating an account's Account Contact
+          // changed nothing on the form. Fill blanks only.
           if (sealedRow && next.enrollment_contractor_account_id == null) next.enrollment_contractor_account_id = sealedRow
-          if (tylerRow && next.enrollment_contractor_contact_id == null) next.enrollment_contractor_contact_id = tylerRow
           if (next.enrollment_has_support_contractor == null) next.enrollment_has_support_contractor = true
           if (eesRow && next.enrollment_support_contractor_account_id == null) next.enrollment_support_contractor_account_id = eesRow
-          if (nickRow && next.enrollment_support_contractor_contact_id == null) next.enrollment_support_contractor_contact_id = nickRow
           return next
         })
       }
@@ -7466,28 +7459,62 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreate, tableName, draft?.building_id, allPicklistOpts])
 
-  // Contractor contact inherits from the account's primary contact (Nicholas,
-  // 2026-08-03): when creating an enrollment and a Registered Contractor account
-  // is chosen, default the contractor contact to that account's primary contact
-  // (accounts.account_contact_id) if one isn't already set — e.g. picking Johnson
-  // Controls auto-sets the contact to Jeff Van Ess. Fills blanks only.
+  // A contractor contact follows the contractor account it sits beside
+  // (Nicholas, 2026-08-03, extended 2026-08-25). Picking Johnson Controls sets
+  // the contact to that account's Account Contact; CHANGING the account moves
+  // the contact with it rather than leaving the previous company's person on a
+  // program form, which is how ENR-00012 came to list a Sealed Inc contact
+  // under Energy Efficiency Services of Wisconsin. Both the primary and the
+  // support contractor are covered — the earlier version only handled the
+  // primary, so the support block never inherited anything.
+  //
+  // Eligibility is the field's own picker (list_contacts_for_account_hierarchy:
+  // the account, its ancestors, and account_contact_relations), so the form can
+  // never show a contact contractor_contact_for_account would replace on save.
+  const contractorPairs = useMemo(() => contractorContactPairsFor(tableName), [tableName])
+  const contractorPairKey = contractorPairs
+    .map(pair => `${draft?.[pair.account] || ''}:${draft?.[pair.contact] || ''}`).join('|')
   useEffect(() => {
-    if (!isCreate || tableName !== 'enrollments') return
-    const acctId = draft?.enrollment_contractor_account_id
-    if (!acctId || draft?.enrollment_contractor_contact_id) return
+    if (!isCreate || contractorPairs.length === 0) return
+    const pending = contractorPairs
+      .map(pair => ({ pair, accountId: draft?.[pair.account] || null }))
+      .filter(entry => entry.accountId)
+    if (pending.length === 0) return
     let cancelled = false
     ;(async () => {
-      const { data: a } = await supabase.from('accounts')
-        .select('account_contact_id').eq('id', acctId).maybeSingle()
-      if (cancelled || !a?.account_contact_id) return
+      const resolved = await Promise.all(pending.map(async ({ pair, accountId }) => {
+        const [{ data: acct }, { data: eligible }] = await Promise.all([
+          supabase.from('accounts').select('account_contact_id').eq('id', accountId).maybeSingle(),
+          supabase.rpc('list_contacts_for_account_hierarchy', { p_account_ids: [accountId] }),
+        ])
+        return {
+          pair,
+          accountId,
+          next: resolveContractorContact({
+            accountId,
+            currentContactId: draft?.[pair.contact] || null,
+            eligibleContactIds: Array.isArray(eligible) ? eligible.map(r => r.id) : null,
+            accountContactId: acct?.account_contact_id || null,
+          }),
+        }
+      }))
+      if (cancelled) return
       setDraft(prev => {
-        if (prev.enrollment_contractor_account_id !== acctId || prev.enrollment_contractor_contact_id) return prev
-        return { ...prev, enrollment_contractor_contact_id: a.account_contact_id }
+        let changed = false
+        const next = { ...prev }
+        for (const entry of resolved) {
+          // The account may have moved on while the lookups were in flight.
+          if (prev[entry.pair.account] !== entry.accountId) continue
+          if ((prev[entry.pair.contact] || null) === entry.next) continue
+          next[entry.pair.contact] = entry.next
+          changed = true
+        }
+        return changed ? next : prev
       })
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCreate, tableName, draft?.enrollment_contractor_account_id])
+  }, [isCreate, contractorPairs, contractorPairKey])
 
   // Record the visit for Recent Items (Salesforce parity). Fires once per opened
   // record, only for the URL-addressed record (so ObjectListSection's non-URL
