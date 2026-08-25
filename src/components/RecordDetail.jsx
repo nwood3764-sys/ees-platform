@@ -102,6 +102,7 @@ import {
 } from '../data/layoutService'
 import RecordTypePicker from './RecordTypePicker'
 import { buildCreateModalGroups, listUnlaidOutRequiredColumns } from '../lib/createRecordFields'
+import { recordTypeSeedValue } from '../lib/recordTypeSeed'
 import { isChoiceColumn, getChoiceOptions } from '../data/choiceColumns'
 import { RecordVisualBadge } from '../lib/recordTypeIcons'
 import RecordLink from './RecordLink'
@@ -7156,8 +7157,24 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       //   pickedRecordType === object -> the user (or auto-pick) chose one
       const rtId    = pickedRecordType && pickedRecordType.id    ? pickedRecordType.id    : null
       const rtCol   = getRecordTypeColumn(tableName)
-      // Seed value for the form's record-type column when we have a pick
-      const seededRT = rtId ? { [rtCol]: rtId } : {}
+      // Seed value for the form's record-type column when we have a pick.
+      // WHAT gets seeded is decided by what the column can hold, not by the
+      // convention alone: a `{object}_record_type` uuid column takes the picked
+      // type's id, but portal_users.record_type is TEXT and holds the picklist
+      // value — and every portal gate compares that text, so an id there
+      // creates a portal user no portal recognises. Resolved before the form
+      // seeds its draft, below.
+      let seededRT = {}
+      const resolveSeededRecordType = async () => {
+        if (!pickedRecordType || !pickedRecordType.id) return {}
+        let dataType = null
+        try {
+          const cols = await getEditableFieldsForTable(tableName)
+          dataType = (cols || []).find(c => c.columnName === rtCol)?.dataType || null
+        } catch { /* unknown type falls back to the uuid convention */ }
+        const seed = recordTypeSeedValue(pickedRecordType, dataType)
+        return seed ? { [rtCol]: seed } : {}
+      }
 
       // Compose a derived display name when the prefill carried a name base
       // (e.g. projects: opportunity name + record-type label, mirroring
@@ -7251,9 +7268,10 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       // Layout selection uses the picked RT (if any) so the right
       // record-type-specific layout loads.
       const layoutKey = rtId || getRecordTypeValue(prefill)
-      Promise.all([fetchPageLayout(tableName, layoutKey), loadAllPicklists()])
-        .then(([layoutData, picklists]) => {
+      Promise.all([fetchPageLayout(tableName, layoutKey), loadAllPicklists(), resolveSeededRecordType()])
+        .then(([layoutData, picklists, resolvedRT]) => {
           if (cancelled) return
+          seededRT = resolvedRT
           setData({
             record: {},
             layout: layoutData?.layout || null,
