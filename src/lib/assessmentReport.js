@@ -348,6 +348,79 @@ export function cityStateZip(rec, prefix) {
   return [left, zip].filter(v => v != null && String(v).trim() !== '').join(' ').trim() || null
 }
 
+// ---------------------------------------------------------------------------
+// Documents attached to the assessment.
+//
+// A report is handed to a program reviewer or a property owner, and the
+// paperwork of the audit belongs with it: the model file, the utility bills,
+// the signed forms. Whatever can be shown IS shown; whatever cannot still gets
+// a row and a link, so the reader can fetch it later rather than being told it
+// exists somewhere they cannot reach.
+// ---------------------------------------------------------------------------
+
+/**
+ * How a document can be presented in a PDF report.
+ *
+ *   'image'  the file is itself a picture — draw it
+ *   'pdf'    render its first page as the preview
+ *   'none'   a spreadsheet, a video, a Word file — a row and a link, no preview
+ */
+export function documentPreviewKind(mimeType, name) {
+  const mime = String(mimeType || '').toLowerCase()
+  if (mime.startsWith('image/')) return 'image'
+  if (mime === 'application/pdf') return 'pdf'
+  if (!mime) {
+    // Some rows carry no mime type; fall back to the extension rather than
+    // silently refusing to preview a perfectly ordinary file.
+    const ext = String(name || '').toLowerCase().split('.').pop()
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'image'
+    if (ext === 'pdf') return 'pdf'
+  }
+  return 'none'
+}
+
+/** A short, readable type for the document row: "PDF", "Spreadsheet", "Video"… */
+export function documentTypeLabel(mimeType, name) {
+  const mime = String(mimeType || '').toLowerCase()
+  if (mime === 'application/pdf') return 'PDF'
+  if (mime.startsWith('image/')) return 'Image'
+  if (mime.startsWith('video/')) return 'Video'
+  if (mime.startsWith('audio/')) return 'Audio'
+  if (mime.includes('spreadsheet') || mime === 'text/csv') return 'Spreadsheet'
+  if (mime.includes('wordprocessing') || mime === 'application/msword') return 'Word Document'
+  if (mime === 'text/xml' || mime === 'application/xml') return 'XML'
+  if (mime === 'text/html') return 'HTML'
+  if (mime === 'text/plain') return 'Text'
+  const ext = String(name || '').toLowerCase().split('.').pop()
+  return ext && ext.length <= 5 ? ext.toUpperCase() : 'File'
+}
+
+/** "2.4 MB". Blank when the size is unknown — never "0 B" for "we don't know". */
+export function formatFileSize(bytes) {
+  const n = Number(bytes)
+  if (!isFinite(n) || n <= 0) return ''
+  const units = ['B', 'KB', 'MB', 'GB']
+  let v = n, i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`
+}
+
+/**
+ * The name a reader's browser should save a document under. Led by the
+ * building, for the same reason the report itself is: a downloads folder full
+ * of storage keys tells nobody what they are holding.
+ */
+export function documentDownloadName(doc, buildingLabel) {
+  const raw = String(doc?.name || 'Document').trim()
+  const dot = raw.lastIndexOf('.')
+  const stem = dot > 0 ? raw.slice(0, dot) : raw
+  const ext = dot > 0 ? raw.slice(dot) : ''
+  const parts = [buildingLabel, stem]
+    .filter(v => v != null && String(v).trim() !== '')
+    .map(v => String(v).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim())
+  return `${parts.join(' - ')}${ext}`
+}
+
 /**
  * Filename for a generated report: the BUILDING it is about, then which report
  * it is. Named for the building because that is how these are filed and looked
