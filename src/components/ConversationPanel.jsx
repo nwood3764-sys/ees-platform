@@ -5,7 +5,7 @@ import { Icon } from './UI'
 import { useToast } from './Toast'
 import { useIsMobile } from '../lib/useMediaQuery'
 import {
-  fetchConversationsForParent,
+  fetchConversationById,
   fetchMessagesForConversation,
   markConversationRead,
   sendReplyToConversation,
@@ -15,8 +15,12 @@ import {
   createAttachmentSignedUrl,
   formatBytes,
 } from '../data/conversationsService'
+import { fetchCommunicationTimeline } from '../data/omniChannelService'
+import { dragCarriesEmail, snapshotDrop, readDropSnapshot } from '../lib/droppedEmail'
 import ComposeEmailModal from './ComposeEmailModal'
 import ComposeSmsModal from './ComposeSmsModal'
+import LogActivityModal from './LogActivityModal'
+import LogDroppedEmailModal from './LogDroppedEmailModal'
 
 // FK column on conversations → anchor object name expected by send-email-v1.
 // The widget knows its parent only through widget_config.fk, so the modal
@@ -36,25 +40,37 @@ const FK_TO_ANCHOR_OBJECT = {
 }
 
 // ---------------------------------------------------------------------------
-// ConversationPanel — Salesforce Service Cloud Messaging-style split-pane
-// rendered on the parent record's Related tab. Replaces the previous
-// related_list rendering of the `conversations` table on contact, account,
-// project, and service_appointment page layouts.
+// ConversationPanel — the OMNI-CHANNEL communication area on a record.
+//
+// Nicholas, 2026-08-25: "we definitely need to make sure we have one omni
+// channel for communication and tracking area for reach. For contacts and
+// accounts," and "phone call messages need to be listed under the Conversations
+// tab, which I'd prefer."
+//
+// So the left pane is no longer a list of email/SMS threads. It is every
+// communication with this record in one time-ordered list — email threads,
+// text threads, and logged calls, meetings and notes — fed by
+// list_communication_timeline. On an account it also carries the contacts'
+// own history, labelled with the contact it came through, because a call with
+// a person at a company is a call with the company.
+//
+// Three ways in, all from this one card:
+//   • New Email / New Text — LEAP sends it.
+//   • Log a Call           — a call that happened on somebody's phone.
+//   • Drop an email on it  — a message that happened in Outlook. The card is
+//                            a drop target; what was read is shown for
+//                            checking before anything is written.
 //
 // Layout:
 //   ┌──────────── card header (collapsible) ─────────────┐
-//   │ icon  Conversations  [3]                  refresh ↻│
+//   │ icon  Conversations  [3]      Log a Call · New ↻   │
 //   ├─────────────────┬───────────────────────────────────┤
-//   │ thread list     │ active thread timeline            │
-//   │ (left pane)     │ (right pane: header + bubbles)    │
-//   │                 │                                   │
+//   │ omni-channel    │ thread timeline, or the detail of │
+//   │ feed            │ a logged call                     │
 //   │                 │ ───────── composer ─────────────  │
-//   │                 │ [ textarea …………… ] [ Send ]       │
 //   └─────────────────┴───────────────────────────────────┘
 //
-// Mobile (≤768px): single-column. Thread list shows when no thread selected;
-// selecting a thread swaps the whole inner body to the thread view with a
-// back button at top to return to the list.
+// Mobile (≤768px): single-column, same as before.
 // ---------------------------------------------------------------------------
 
 const PANE_HEIGHT_DESKTOP = 520
@@ -90,8 +106,19 @@ function absoluteTime(iso) {
   })
 }
 
+// "12 min" / "1 hr 5 min" — a logged call's length, as a person would say it.
+function formatDuration(seconds) {
+  const s = Number(seconds)
+  if (!Number.isFinite(s) || s <= 0) return null
+  const mins = Math.round(s / 60)
+  if (mins < 60) return `${mins} min`
+  const hrs = Math.floor(mins / 60)
+  const rem = mins % 60
+  return rem ? `${hrs} hr ${rem} min` : `${hrs} hr`
+}
+
 export default function ConversationPanelWidget({
-  widget, parentRecordId,
+  widget, parentRecordId, parentTable,
 }) {
   const config = widget.widget_config || {}
   const fk = config.fk
@@ -102,6 +129,9 @@ export default function ConversationPanelWidget({
     config.channel_filter === 'sms' || config.channel_filter === 'email'
       ? config.channel_filter
       : null
+  // The record this card lives on. RecordDetail passes its table name; the FK
+  // map is the fallback for any caller that renders the widget on its own.
+  const parentObject = parentTable || FK_TO_ANCHOR_OBJECT[fk] || null
   // SMS compose context: the account/contact/project the new thread anchors to
   // (derived from this panel's own FK when it matches, else from config), plus
   // an optional prefilled recipient phone + name for the composer.
@@ -120,11 +150,14 @@ export default function ConversationPanelWidget({
   const toast = useToast()
 
   const [collapsed, setCollapsed] = useState(false)
-  const [threads, setThreads] = useState([])
-  const [threadsLoading, setThreadsLoading] = useState(true)
-  const [threadsError, setThreadsError] = useState(null)
+  // The omni-channel feed: conversations AND logged activities, newest first.
+  const [entries, setEntries] = useState([])
+  const [feedLoading, setFeedLoading] = useState(true)
+  const [feedError, setFeedError] = useState(null)
 
-  const [selectedThreadId, setSelectedThreadId] = useState(null)
+  // What's open in the right pane — a thread or a logged activity.
+  const [selectedId, setSelectedId] = useState(null)
+  const [thread, setThread] = useState(null)        // full conversation row (carries the reply anchors)
   const [messages, setMessages] = useState([])
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [messagesError, setMessagesError] = useState(null)
@@ -138,52 +171,69 @@ export default function ConversationPanelWidget({
   const [showCompose, setShowCompose] = useState(false)
   // New-text composer modal — opens via the header "New Text" button on SMS panels.
   const [showSmsCompose, setShowSmsCompose] = useState(false)
+  // Log-a-call composer — a call that happened on somebody's phone.
+  const [showLogActivity, setShowLogActivity] = useState(false)
+  // Emails dropped on the card, waiting to be checked and filed. A queue,
+  // because a drag can carry more than one message.
+  const [droppedEmails, setDroppedEmails] = useState([])
+  const [dragActive, setDragActive] = useState(false)
+  const [dropBusy, setDropBusy] = useState(false)
 
   const messagesScrollRef = useRef(null)
   const composerRef = useRef(null)
+  const dragDepth = useRef(0)
+
+  const selectedEntry = useMemo(
+    () => entries.find(e => e.entry_id === selectedId) || null,
+    [entries, selectedId],
+  )
+  const isActivityOpen = selectedEntry?.entry_kind === 'activity'
 
   // ── Loaders ─────────────────────────────────────────────────────────
-  const refreshThreads = useCallback(async (opts = {}) => {
-    if (!fk || !parentRecordId) {
-      setThreads([])
-      setThreadsLoading(false)
+  const refreshFeed = useCallback(async (opts = {}) => {
+    if (!parentObject || !parentRecordId) {
+      setEntries([])
+      setFeedLoading(false)
       return
     }
-    if (!opts.background) setThreadsLoading(true)
-    setThreadsError(null)
+    if (!opts.background) setFeedLoading(true)
+    setFeedError(null)
     try {
-      const rows = await fetchConversationsForParent(fk, parentRecordId, channelFilter)
-      setThreads(rows)
+      const rows = await fetchCommunicationTimeline(parentObject, parentRecordId, channelFilter)
+      setEntries(rows)
       // Keep the current selection if it's still in the list; otherwise
       // clear it so the right pane returns to the empty state.
-      setSelectedThreadId(prev => (prev && rows.some(r => r.id === prev) ? prev : null))
+      setSelectedId(prev => (prev && rows.some(r => r.entry_id === prev) ? prev : null))
     } catch (err) {
-      setThreadsError(err.message || String(err))
+      setFeedError(err.message || String(err))
     } finally {
-      if (!opts.background) setThreadsLoading(false)
+      if (!opts.background) setFeedLoading(false)
     }
-  }, [fk, parentRecordId, channelFilter])
+  }, [parentObject, parentRecordId, channelFilter])
 
-  useEffect(() => { refreshThreads() }, [refreshThreads])
+  useEffect(() => { refreshFeed() }, [refreshFeed])
 
-  // Fetch messages whenever the selected thread changes. Marks the thread
-  // read in parallel so the unread badge clears on open.
+  // Fetch the selected thread in full plus its messages. A logged activity
+  // needs neither — the feed row already carries everything it shows.
   useEffect(() => {
-    if (!selectedThreadId) {
+    if (!selectedId || selectedEntry?.entry_kind !== 'conversation') {
+      setThread(null)
       setMessages([])
       setMessagesError(null)
       setAttachmentsByMessage({})
-      return
+      return undefined
     }
     let alive = true
     setMessagesLoading(true)
     setMessagesError(null)
     Promise.all([
-      fetchMessagesForConversation(selectedThreadId),
-      markConversationRead(selectedThreadId),
+      fetchConversationById(selectedId),
+      fetchMessagesForConversation(selectedId),
+      markConversationRead(selectedId),
     ])
-      .then(async ([rows]) => {
+      .then(async ([conv, rows]) => {
         if (!alive) return
+        setThread(conv)
         setMessages(rows)
         // Pull attachments for every message in one batched query
         if (rows.length > 0) {
@@ -201,35 +251,30 @@ export default function ConversationPanelWidget({
           setAttachmentsByMessage({})
         }
         // Optimistically clear the thread's unread badge in local state so
-        // the left pane updates immediately. The next refreshThreads call
+        // the left pane updates immediately. The next refreshFeed call
         // will reconcile against the server-rolled-up value.
-        setThreads(prev => prev.map(t =>
-          t.id === selectedThreadId ? { ...t, conv_inbound_unread_count: 0 } : t,
+        setEntries(prev => prev.map(t =>
+          t.entry_id === selectedId ? { ...t, unread_count: 0 } : t,
         ))
       })
       .catch(err => { if (alive) setMessagesError(err.message || String(err)) })
       .finally(() => { if (alive) setMessagesLoading(false) })
     return () => { alive = false }
-  }, [selectedThreadId])
+  }, [selectedId, selectedEntry?.entry_kind])
 
   // Scroll to bottom on message-list change so the latest reply is visible.
   useEffect(() => {
     const el = messagesScrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [messages, selectedThreadId])
-
-  const selectedThread = useMemo(
-    () => threads.find(t => t.id === selectedThreadId) || null,
-    [threads, selectedThreadId],
-  )
+  }, [messages, selectedId])
 
   // ── Send handler ────────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
-    if (!selectedThread) return
+    if (!thread) return
     const body = draft.trim()
     if (!body) return
-    const channel = selectedThread.conv_channel
+    const channel = thread.conv_channel
     // SMS hard cap at 1600 chars (Twilio segmented limit); email is effectively
     // unlimited at the messages-table level.
     if (channel === 'sms' && body.length > 1600) {
@@ -238,7 +283,7 @@ export default function ConversationPanelWidget({
     }
     setSending(true)
     try {
-      const result = await sendReplyToConversation(selectedThread, body)
+      const result = await sendReplyToConversation(thread, body)
       const isMock = result?.mode === 'mock'
       const channelName = channel === 'email' ? 'Email reply' : 'Reply'
       const provider = channel === 'email' ? 'Graph not yet configured' : 'Twilio not configured'
@@ -247,8 +292,8 @@ export default function ConversationPanelWidget({
       // Refetch both panes so the new outbound message and the rolled-up
       // last-message preview/timestamp are reflected immediately.
       const [refreshedMsgs] = await Promise.all([
-        fetchMessagesForConversation(selectedThread.id),
-        refreshThreads({ background: true }),
+        fetchMessagesForConversation(thread.id),
+        refreshFeed({ background: true }),
       ])
       setMessages(refreshedMsgs)
       if (refreshedMsgs.length > 0) {
@@ -267,16 +312,80 @@ export default function ConversationPanelWidget({
     } finally {
       setSending(false)
     }
-  }, [draft, refreshThreads, selectedThread, toast])
+  }, [draft, refreshFeed, thread, toast])
 
   // ── Compose-modal callback ──────────────────────────────────────────
   // The modal calls onSent with the newly-created conversation_id and
-  // message_id. We refresh the thread list in the background and select
-  // the new thread so the user sees their just-sent email immediately.
+  // message_id. We refresh the feed in the background and select the new
+  // thread so the user sees their just-sent email immediately.
   const handleComposeSent = useCallback(async ({ conversationId }) => {
-    await refreshThreads({ background: true })
-    if (conversationId) setSelectedThreadId(conversationId)
-  }, [refreshThreads])
+    await refreshFeed({ background: true })
+    if (conversationId) setSelectedId(conversationId)
+  }, [refreshFeed])
+
+  // ── Dropping an email on the card ───────────────────────────────────
+  //
+  // The DataTransfer is snapshotted synchronously: its item list is emptied
+  // the moment this handler returns, so reading it after an await silently
+  // loses the file — which is how a drop target ends up doing nothing at all.
+  const handleDrop = useCallback(async (e) => {
+    if (!parentObject) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepth.current = 0
+    setDragActive(false)
+    const snapshot = snapshotDrop(e.dataTransfer)
+    setDropBusy(true)
+    try {
+      const { emails, errors } = await readDropSnapshot(snapshot)
+      if (emails.length) setDroppedEmails(prev => [...prev, ...emails])
+      for (const message of errors) toast.error(message)
+    } catch (err) {
+      toast.error(err.message || 'That drop could not be read as an email.')
+    } finally {
+      setDropBusy(false)
+    }
+  }, [parentObject, toast])
+
+  const handleDragEnter = useCallback((e) => {
+    if (!parentObject || !dragCarriesEmail(e.dataTransfer)) return
+    e.preventDefault()
+    dragDepth.current += 1
+    setDragActive(true)
+  }, [parentObject])
+
+  const handleDragOver = useCallback((e) => {
+    if (!parentObject || !dragCarriesEmail(e.dataTransfer)) return
+    // Without preventDefault the browser navigates away to the dropped file.
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }, [parentObject])
+
+  const handleDragLeave = useCallback(() => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (dragDepth.current === 0) setDragActive(false)
+  }, [])
+
+  const handleEmailFiled = useCallback(async (result) => {
+    setDroppedEmails(prev => prev.slice(1))
+    if (result?.was_duplicate) {
+      toast.success('That email was already filed — opening the copy already on this record.')
+    } else {
+      const matched = (result?.participants || []).filter(p => p.matched_object).length
+      const total = (result?.participants || []).length
+      toast.success(total
+        ? `Email filed — ${matched} of ${total} ${total === 1 ? 'address' : 'addresses'} matched to LEAP records.`
+        : 'Email filed.')
+    }
+    await refreshFeed({ background: true })
+    if (result?.conversation_id) setSelectedId(result.conversation_id)
+  }, [refreshFeed, toast])
+
+  const handleActivityLogged = useCallback(async () => {
+    setShowLogActivity(false)
+    toast.success('Logged.')
+    await refreshFeed({ background: true })
+  }, [refreshFeed, toast])
 
   // Composer submit on Cmd/Ctrl + Enter; plain Enter inserts a newline.
   const handleKeyDown = (e) => {
@@ -287,26 +396,51 @@ export default function ConversationPanelWidget({
   }
 
   const title = widget.widget_title || 'Conversations'
-  const threadCount = threads.length
-  const totalUnread = threads.reduce((sum, t) => sum + (t.conv_inbound_unread_count || 0), 0)
+  const entryCount = entries.length
+  const totalUnread = entries.reduce((sum, t) => sum + (t.unread_count || 0), 0)
+  // Calls and other logged activities belong to the record, not to a thread,
+  // so a channel-filtered panel (an SMS-only card, say) never shows them.
+  const canLogActivity = !!parentObject && !channelFilter
+  const canFileEmail = !!parentObject && channelFilter !== 'sms'
 
   // ── Render ──────────────────────────────────────────────────────────
   const paneHeight = isMobile ? PANE_HEIGHT_MOBILE : PANE_HEIGHT_DESKTOP
 
-  // Mobile: a thread is "open" when selectedThreadId is set; the back button
+  // Mobile: an entry is "open" when selectedId is set; the back button
   // returns to the list view. Desktop shows both panes side-by-side.
-  const showMobileList = isMobile && !selectedThreadId
-  const showMobileThread = isMobile && selectedThreadId
+  const showMobileList = isMobile && !selectedId
+  const showMobileThread = isMobile && selectedId
+
+  const headerButton = (extra = {}) => ({
+    background: C.card, color: C.textSecondary,
+    border: `1px solid ${C.border}`, borderRadius: 5,
+    padding: isMobile ? '8px 10px' : '4px 8px',
+    fontSize: isMobile ? 13 : 11.5,
+    cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    minHeight: isMobile ? 36 : undefined,
+    fontFamily: 'inherit',
+    ...extra,
+  })
 
   return (
     <>
-      <div style={{
-      background: C.card,
-      border: `1px solid ${C.border}`,
-      borderRadius: 8,
-      marginBottom: 12,
-      overflow: 'hidden',
-    }}>
+      <div
+        onDragEnter={canFileEmail ? handleDragEnter : undefined}
+        onDragOver={canFileEmail ? handleDragOver : undefined}
+        onDragLeave={canFileEmail ? handleDragLeave : undefined}
+        onDrop={canFileEmail ? handleDrop : undefined}
+        style={{
+          background: C.card,
+          border: `1px solid ${dragActive ? (C.emerald || '#3ecf8e') : C.border}`,
+          boxShadow: dragActive ? `0 0 0 3px rgba(62,207,142,0.18)` : 'none',
+          borderRadius: 8,
+          marginBottom: 12,
+          overflow: 'hidden',
+          position: 'relative',
+          transition: 'border-color 150ms ease, box-shadow 150ms ease',
+        }}
+      >
       {/* Header */}
       <div
         onClick={() => setCollapsed(c => !c)}
@@ -346,7 +480,7 @@ export default function ConversationPanelWidget({
             padding: '1px 8px', borderRadius: 10,
             fontFamily: 'JetBrains Mono, monospace',
           }}>
-            {threadCount}
+            {entryCount}
           </span>
           {totalUnread > 0 && (
             <span style={{
@@ -360,22 +494,26 @@ export default function ConversationPanelWidget({
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {canLogActivity && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowLogActivity(true) }}
+              title="Log a call, meeting or note that happened outside LEAP"
+              style={headerButton()}
+            >
+              <Icon path="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.13.96.36 1.9.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0122 16.92z"
+                    size={isMobile ? 13 : 11} color="currentColor" />
+              {isMobile ? '' : 'Log a Call'}
+            </button>
+          )}
           {channelFilter === 'sms' ? (
             <button
               onClick={(e) => { e.stopPropagation(); setShowSmsCompose(true) }}
               title="Send a new text message anchored to this record"
-              style={{
-                background: C.emerald || '#3ecf8e',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 5,
+              style={headerButton({
+                background: C.emerald || '#3ecf8e', color: '#fff',
+                border: 'none', fontWeight: 600,
                 padding: isMobile ? '8px 10px' : '4px 10px',
-                fontSize: isMobile ? 13 : 11.5,
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                minHeight: isMobile ? 36 : undefined,
-              }}
+              })}
             >
               <Icon path="M12 5v14 M5 12h14" size={isMobile ? 13 : 11} color="currentColor" />
               {isMobile ? '' : 'New Text'}
@@ -384,37 +522,24 @@ export default function ConversationPanelWidget({
             <button
               onClick={(e) => { e.stopPropagation(); setShowCompose(true) }}
               title="Compose a new email anchored to this record"
-              style={{
-                background: C.emerald || '#3ecf8e',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 5,
+              style={headerButton({
+                background: C.emerald || '#3ecf8e', color: '#fff',
+                border: 'none', fontWeight: 600,
                 padding: isMobile ? '8px 10px' : '4px 10px',
-                fontSize: isMobile ? 13 : 11.5,
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                minHeight: isMobile ? 36 : undefined,
-              }}
+              })}
             >
               <Icon path="M12 5v14 M5 12h14" size={isMobile ? 13 : 11} color="currentColor" />
               {isMobile ? '' : 'New Email'}
             </button>
           )}
           <button
-            onClick={(e) => { e.stopPropagation(); refreshThreads() }}
+            onClick={(e) => { e.stopPropagation(); refreshFeed() }}
             title="Refresh"
-            disabled={threadsLoading}
-            style={{
-              background: C.card, color: C.textSecondary,
-              border: `1px solid ${C.border}`, borderRadius: 5,
-              padding: isMobile ? '8px 10px' : '4px 8px',
-              fontSize: isMobile ? 13 : 11.5,
-              cursor: threadsLoading ? 'wait' : 'pointer',
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              opacity: threadsLoading ? 0.6 : 1,
-              minHeight: isMobile ? 36 : undefined,
-            }}
+            disabled={feedLoading}
+            style={headerButton({
+              cursor: feedLoading ? 'wait' : 'pointer',
+              opacity: feedLoading ? 0.6 : 1,
+            })}
           >
             <Icon path="M23 4v6h-6 M1 20v-6h6 M3.51 9a9 9 0 0114.85-3.36L23 10 M20.49 15A9 9 0 015.64 18.36L1 14" size={isMobile ? 13 : 11} color="currentColor" />
             {isMobile ? '' : 'Refresh'}
@@ -438,7 +563,7 @@ export default function ConversationPanelWidget({
           height: paneHeight,
           maxHeight: paneHeight,
         }}>
-          {/* Left pane — thread list */}
+          {/* Left pane — the omni-channel feed */}
           {(!isMobile || showMobileList) && (
             <div style={{
               width: isMobile ? '100%' : THREAD_LIST_WIDTH,
@@ -449,71 +574,81 @@ export default function ConversationPanelWidget({
               minHeight: 0,
             }}>
               <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-                {threadsLoading && (
+                {feedLoading && (
                   <div style={{
                     padding: 24, fontSize: 12, color: C.textMuted,
                     textAlign: 'center',
                   }}>
-                    Loading threads…
+                    Loading…
                   </div>
                 )}
-                {threadsError && (
+                {feedError && (
                   <div style={{
                     padding: 12, fontSize: 12, color: '#1e466b',
                     background: '#e8f1fb', borderBottom: `1px solid ${C.border}`,
                   }}>
-                    {threadsError}
+                    {feedError}
                   </div>
                 )}
-                {!threadsLoading && !threadsError && threads.length === 0 && (
+                {!feedLoading && !feedError && entries.length === 0 && (
                   <div style={{
                     padding: '32px 20px',
                     fontSize: 12.5, color: C.textMuted,
                     textAlign: 'center', lineHeight: 1.6,
                   }}>
                     <div style={{ marginBottom: 6, fontWeight: 600, color: C.textSecondary }}>
-                      No conversations yet
+                      Nothing logged yet
                     </div>
-                    Threads appear here when an SMS or email is sent to — or received from — this record's contact. Click <strong>{channelFilter === 'sms' ? 'New Text' : 'New Email'}</strong> above to start one.
+                    Emails and texts appear here when they are sent or received.
+                    {canLogActivity && <> Use <strong>Log a Call</strong> for a call that happened on the phone,</>}
+                    {canFileEmail && <> or drag an email straight onto this card to file it.</>}
                   </div>
                 )}
-                {threads.map(thread => (
-                  <ThreadListItem
-                    key={thread.id}
-                    thread={thread}
-                    selected={thread.id === selectedThreadId}
-                    onSelect={() => setSelectedThreadId(thread.id)}
+                {entries.map(entry => (
+                  <FeedListItem
+                    key={`${entry.entry_kind}-${entry.entry_id}`}
+                    entry={entry}
+                    selected={entry.entry_id === selectedId}
+                    onSelect={() => setSelectedId(entry.entry_id)}
                   />
                 ))}
               </div>
             </div>
           )}
 
-          {/* Right pane — active thread */}
+          {/* Right pane — the open thread, or the open logged activity */}
           {(!isMobile || showMobileThread) && (
             <div style={{
               flex: 1, minWidth: 0,
               display: 'flex', flexDirection: 'column',
               background: C.cardSecondary || '#f7f9fc',
             }}>
-              {!selectedThread ? (
+              {isActivityOpen ? (
+                <ActivityDetailPane
+                  entry={selectedEntry}
+                  isMobile={isMobile}
+                  onBack={isMobile ? () => setSelectedId(null) : null}
+                />
+              ) : !thread ? (
                 <div style={{
                   flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   padding: 20, textAlign: 'center',
                   color: C.textMuted, fontSize: 12.5, lineHeight: 1.6,
                 }}>
-                  {threads.length === 0
-                    ? (channelFilter === 'sms'
-                        ? 'Click New Text above to send this provider a text and start a thread.'
-                        : 'Send an SMS notification to this record\'s contact to start a thread.')
-                    : 'Select a thread on the left to view messages and reply.'}
+                  {messagesLoading
+                    ? 'Loading…'
+                    : entries.length === 0
+                      ? (channelFilter === 'sms'
+                          ? 'Click New Text above to send this provider a text and start a thread.'
+                          : 'Send an email, log a call, or drag an email onto this card to start the record of who you have reached.')
+                      : 'Select an entry on the left to read it.'}
                 </div>
               ) : (
                 <>
                   <ThreadHeader
-                    thread={selectedThread}
+                    thread={thread}
                     isMobile={isMobile}
-                    onBack={isMobile ? () => setSelectedThreadId(null) : null}
+                    onBack={isMobile ? () => setSelectedId(null) : null}
                   />
                   <div
                     ref={messagesScrollRef}
@@ -564,12 +699,39 @@ export default function ConversationPanelWidget({
                     onSend={handleSend}
                     onKeyDown={handleKeyDown}
                     composerRef={composerRef}
-                    channel={selectedThread.conv_channel}
-                    customerAddress={selectedThread.conv_customer_address}
+                    channel={thread.conv_channel}
+                    customerAddress={thread.conv_customer_address}
                     isMobile={isMobile}
                   />
                 </>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Drop affordance — only while something is actually being dragged over
+          the card, so it never competes with the content the rest of the time. */}
+      {(dragActive || dropBusy) && canFileEmail && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'rgba(240, 250, 246, 0.94)',
+          border: `2px dashed ${C.emerald || '#3ecf8e'}`,
+          borderRadius: 8,
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          gap: 8, pointerEvents: 'none', zIndex: 3,
+          textAlign: 'center', padding: 20,
+        }}>
+          <Icon path="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6"
+                size={22} color="#1a7a4e" />
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0d1a2e' }}>
+            {dropBusy ? 'Reading the message…' : 'Drop the email here to file it'}
+          </div>
+          {!dropBusy && (
+            <div style={{ fontSize: 11.5, color: C.textSecondary, maxWidth: 320, lineHeight: 1.5 }}>
+              LEAP reads who it is from, who it went to, and when — and shows you
+              before anything is saved.
             </div>
           )}
         </div>
@@ -598,18 +760,48 @@ export default function ConversationPanelWidget({
         contactId={smsContactId}
         projectId={smsProjectId}
       />
+      {/* Log a call / meeting / note — the same composer the Activity tab uses,
+          reached from the one place all communication is read. */}
+      {showLogActivity && parentObject && (
+        <LogActivityModal
+          tableName={parentObject}
+          recordId={parentRecordId}
+          defaultType="Call"
+          onClose={() => setShowLogActivity(false)}
+          onLogged={handleActivityLogged}
+        />
+      )}
+      {/* One dropped email at a time, checked before it is written. */}
+      {droppedEmails.length > 0 && parentObject && (
+        <LogDroppedEmailModal
+          key={`${droppedEmails[0].internetMessageId || droppedEmails[0].subject}-${droppedEmails.length}`}
+          parsed={droppedEmails[0]}
+          targetObject={parentObject}
+          targetId={parentRecordId}
+          targetLabel={title === 'Conversations' ? 'this record' : title}
+          onClose={() => setDroppedEmails(prev => prev.slice(1))}
+          onFiled={handleEmailFiled}
+        />
+      )}
     </>
   )
 }
 
 // ---------------------------------------------------------------------------
-// ThreadListItem — one row in the left pane
+// FeedListItem — one row in the omni-channel feed.
+//
+// A thread and a logged call are different things, and the row says which:
+// a thread shows its counterparty and last message, a call shows who logged it
+// and how long it ran. What they share is the channel icon and the time, which
+// is what makes one list readable.
 // ---------------------------------------------------------------------------
-function ThreadListItem({ thread, selected, onSelect }) {
-  const channel = describeChannel(thread.conv_channel)
-  const unread = thread.conv_inbound_unread_count || 0
-  const direction = thread.conv_last_message_direction
-  const preview = thread.conv_last_message_preview || '—'
+function FeedListItem({ entry, selected, onSelect }) {
+  const isActivity = entry.entry_kind === 'activity'
+  const channel = describeChannel(entry.channel)
+  const unread = entry.unread_count || 0
+  const preview = entry.preview || (isActivity ? 'No notes recorded' : '—')
+  const badge = isActivity ? (entry.activity_type || channel.label) : channel.label
+  const duration = isActivity ? formatDuration(entry.duration_seconds) : null
 
   return (
     <div
@@ -635,11 +827,15 @@ function ThreadListItem({ thread, selected, onSelect }) {
           <Icon path={channel.iconPath} size={10} color={channel.color} />
         </div>
         <span style={{
-          fontSize: 12.5, fontWeight: 600, color: C.textPrimary,
-          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: isActivity ? 11 : 12.5,
+          fontWeight: isActivity ? 700 : 600,
+          color: isActivity ? channel.color : C.textPrimary,
+          fontFamily: isActivity ? 'inherit' : 'JetBrains Mono, monospace',
+          textTransform: isActivity ? 'uppercase' : 'none',
+          letterSpacing: isActivity ? 0.3 : 0,
           flexShrink: 0,
         }}>
-          {thread.conv_record_number}
+          {isActivity ? badge : entry.record_number}
         </span>
         {unread > 0 && (
           <span style={{
@@ -655,23 +851,26 @@ function ThreadListItem({ thread, selected, onSelect }) {
           marginLeft: 'auto', fontSize: 10.5, color: C.textMuted,
           whiteSpace: 'nowrap', flexShrink: 0,
         }}>
-          {relativeTime(thread.conv_last_message_at)}
+          {relativeTime(entry.occurred_at)}
         </span>
       </div>
-      {thread.conv_subject && (
+      {entry.subject && (
         <div style={{
           fontSize: 12.5, fontWeight: 600, color: C.textPrimary, marginBottom: 3,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          {thread.conv_subject}
+          {entry.subject}
         </div>
       )}
       <div style={{
         fontSize: 12, color: C.textSecondary, marginBottom: 2,
-        fontFamily: 'JetBrains Mono, monospace',
+        fontFamily: isActivity ? 'inherit' : 'JetBrains Mono, monospace',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
-        {thread.conv_customer_address || '—'}
+        {isActivity
+          ? [entry.contact_name, entry.actor_name && `logged by ${entry.actor_name}`, duration]
+              .filter(Boolean).join(' · ') || '—'
+          : (entry.counterparty || '—')}
       </div>
       <div style={{
         fontSize: 11.5, color: C.textMuted,
@@ -680,12 +879,119 @@ function ThreadListItem({ thread, selected, onSelect }) {
         WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
         lineHeight: 1.4,
       }}>
-        {direction === 'outbound' && (
+        {!isActivity && entry.direction === 'outbound' && (
           <span style={{ color: C.textMuted, fontStyle: 'italic' }}>You: </span>
         )}
         {preview}
       </div>
+      {/* On an account, history reached through one of its contacts says so —
+          otherwise a call with a person reads as a call with the company and
+          there is no way to tell which person it was. */}
+      {entry.via_label && (
+        <div style={{
+          marginTop: 5, display: 'inline-block',
+          fontSize: 10, fontWeight: 600, letterSpacing: 0.2,
+          color: '#1e466b', background: '#e8f1fb',
+          padding: '1px 7px', borderRadius: 9,
+        }}>
+          via {entry.via_label}
+        </div>
+      )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ActivityDetailPane — the right pane for a logged call, meeting or note.
+//
+// It deliberately has no composer: a logged call is a record of something that
+// already happened, and there is nothing to reply to.
+// ---------------------------------------------------------------------------
+function ActivityDetailPane({ entry, isMobile, onBack }) {
+  const channel = describeChannel(entry.channel)
+  const duration = formatDuration(entry.duration_seconds)
+  const facts = [
+    entry.direction && { label: 'Direction', value: entry.direction === 'outbound' ? 'Outbound' : 'Inbound' },
+    duration && { label: 'Duration', value: duration },
+    entry.contact_name && { label: 'Contact', value: entry.contact_name },
+    entry.actor_name && { label: 'Logged by', value: entry.actor_name },
+    entry.via_label && { label: 'On', value: entry.via_label },
+  ].filter(Boolean)
+
+  return (
+    <>
+      <div style={{
+        padding: '10px 16px',
+        borderBottom: `1px solid ${C.border}`,
+        background: C.card,
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        {onBack && (
+          <button
+            onClick={onBack}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              padding: 4, display: 'flex', alignItems: 'center', color: C.textSecondary,
+            }}
+            title="Back to the list"
+          >
+            <Icon path="M15 18l-6-6 6-6" size={16} color="currentColor" />
+          </button>
+        )}
+        <div style={{
+          width: 26, height: 26, borderRadius: 5, background: channel.bg,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <Icon path={channel.iconPath} size={13} color={channel.color} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>
+              {entry.subject || entry.activity_type || 'Logged activity'}
+            </span>
+            <span style={{
+              fontSize: 11, color: channel.color, fontWeight: 600,
+              textTransform: 'uppercase', letterSpacing: 0.3,
+            }}>
+              {entry.activity_type || channel.label}
+            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: C.textSecondary, marginTop: 2 }}>
+            {absoluteTime(entry.occurred_at) || 'Time not recorded'}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', minHeight: 0 }}>
+        {facts.length > 0 && (
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: '8px 18px',
+            padding: '10px 12px', marginBottom: 12,
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+          }}>
+            {facts.map(f => (
+              <div key={f.label}>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+                  textTransform: 'uppercase', color: C.textMuted, marginBottom: 2,
+                }}>
+                  {f.label}
+                </div>
+                <div style={{ fontSize: 12.5, color: C.textPrimary }}>{f.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: 12, fontSize: 13, lineHeight: 1.5,
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          color: entry.body ? C.textPrimary : C.textMuted,
+        }}>
+          {entry.body || 'No notes were recorded on this activity.'}
+        </div>
+      </div>
+    </>
   )
 }
 

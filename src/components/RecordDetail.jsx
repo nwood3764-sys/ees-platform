@@ -9595,7 +9595,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     )
                   }
                   if (w.widget_type === 'conversation_panel') {
-                    return <ConversationPanelWidget key={w.id} widget={w} parentRecordId={recordId} />
+                    return <ConversationPanelWidget key={w.id} widget={w} parentRecordId={recordId} parentTable={tableName} />
                   }
                   if (w.widget_type === 'conversation_messages') {
                     return <ConversationMessagesWidget key={w.id} widget={w} parentRecordId={recordId} />
@@ -9723,6 +9723,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                             key={w.id}
                             widget={w}
                             parentRecordId={recordId}
+                            parentTable={tableName}
                           />
                         ))}
                       {(sec.widgets || [])
