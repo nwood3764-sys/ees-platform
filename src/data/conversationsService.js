@@ -508,11 +508,52 @@ export async function resolveDefaultRecipientForAnchor({ anchorObject, anchorRec
 }
 
 /**
+ * One conversation row, by id.
+ *
+ * The omni-channel feed comes from list_communication_timeline, which returns
+ * display columns rather than the thread's eleven anchor FKs. Replying needs
+ * those FKs (sendReplyToConversation resolves the send anchor from them), so
+ * the selected thread is fetched in full rather than reconstructed from the
+ * feed row — a reconstructed thread would lose its anchor and every reply
+ * would fail with "no resolvable parent".
+ */
+export async function fetchConversationById(conversationId) {
+  if (!conversationId) return null
+  const { data, error } = await supabase
+    .from('conversations')
+    .select(CONV_COLUMNS)
+    .eq('id', conversationId)
+    .maybeSingle()
+  if (error) throw error
+  return data || null
+}
+
+/**
  * Channel-aware display helper for the thread list.
  * Returned shape: { label, iconPath, color, bg }
  */
 export function describeChannel(channel) {
   switch (channel) {
+    // A logged phone call is a channel in the omni-channel feed, alongside the
+    // threads — Nicholas, 2026-08-25: "phone call messages need to be listed
+    // under the Conversations tab, which I'd prefer."
+    case 'call':
+      return {
+        label: 'Call',
+        iconPath: 'M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.13.96.36 1.9.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0122 16.92z',
+        color: '#2aab72',
+        bg: '#e8f8f2',
+      }
+    // Everything else an admin can add to the activity_type picklist — a
+    // meeting, a site visit, a note. The badge carries the real type, so this
+    // one style scales without a code change.
+    case 'activity':
+      return {
+        label: 'Activity',
+        iconPath: 'M12 20h9 M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z',
+        color: '#4a5e7a',
+        bg: '#f0f3f8',
+      }
     case 'sms':
       return {
         label: 'SMS',
