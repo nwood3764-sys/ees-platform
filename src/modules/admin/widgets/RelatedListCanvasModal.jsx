@@ -289,25 +289,25 @@ export default function RelatedListCanvasModal({
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose, busy])
 
-  // fkCount = how many foreign keys on the target table point at the object
-  // this list hangs off. More than one and the object's name is not a name —
-  // the title has to say WHICH relationship (see lib/relatedListNaming).
-  function selectChain(nextChain, fkCount = 1) {
+  // The auto-filled TITLE is the object's name — what the card is called is
+  // the admin's call, and they type over it. The relationship naming
+  // (lib/relatedListNaming) belongs to the picker ROWS above, where two
+  // routes to the same object have to be told apart before one is chosen.
+  function selectChain(nextChain) {
     setChain(nextChain)
     setSharedParent(null)
     setDefaultsPending(true)
     if (!titleTouched.current) {
-      const leaf = nextChain[nextChain.length - 1]
-      setTitle(relatedListTitle(leaf.table, leaf.fk, { fkCount }))
+      setTitle(humanizeTableName(nextChain[nextChain.length - 1].table))
     }
   }
 
-  function selectSharedParent(sp, fkCount = 1) {
+  function selectSharedParent(sp) {
     setSharedParent(sp)
     setChain([])
     setDefaultsPending(true)
     if (!titleTouched.current) {
-      setTitle(relatedListTitle(sp.targetTable, sp.targetFk, { fkCount }))
+      setTitle(humanizeTableName(sp.targetTable))
     }
   }
 
@@ -509,7 +509,7 @@ export default function RelatedListCanvasModal({
       return (
         <div key={pathKey}>
           <div
-            onClick={() => { if (!busy) selectChain(nodeChain, tableCounts[node.table]) }}
+            onClick={() => { if (!busy) selectChain(nodeChain) }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '7px 12px',
@@ -645,7 +645,7 @@ export default function RelatedListCanvasModal({
                   return (
                     <div
                       key={`${p.parentTable}/${s.targetTable}/${s.targetFk}`}
-                      onClick={() => { if (!busy) selectSharedParent({ ...s, parentTable: p.parentTable, objectFk: p.objectFk }, sameTableCount) }}
+                      onClick={() => { if (!busy) selectSharedParent({ ...s, parentTable: p.parentTable, objectFk: p.objectFk }) }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8,
                         padding: '7px 12px', paddingLeft: 34,
