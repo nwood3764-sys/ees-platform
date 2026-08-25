@@ -1,6 +1,6 @@
 # LEAP — Program Manager Portal
 
-**Status:** planned, not built. Spec agreed with Nicholas 2026-08-24.
+**Status:** BUILT 2026-08-25 and live on prod, end to end. No program manager has been invited yet — grants are chosen record by record in LEAP, and which ones get exposed is a business decision made per record.
 **First and only tenant for now:** Everblue.
 **Related:** `docs/leap-property-owner-portal.md` (the portal this borrows its navigation from), `docs/leap-portals.md` (the standing portal spec).
 
@@ -101,13 +101,18 @@ Field-level financial tiers are still unbuilt platform-wide, so the read RPC ret
 
 ## 8. Phased build
 
-**Phase 1 — the spine.** Everblue account + contact, the third portal user record type and roles, `portal_record_grants`, `get_program_portal_data()`, the `/program-portal` surface with the property → building → record tree, read-only, view-only (no downloads yet). Admin View As from day one so it can be checked before anyone is invited.
+**Phases 1–3 shipped together on 2026-08-25** — viewing photos needs signed URLs just as downloading does, so splitting "view" from "files" would have shipped a portal that renders nothing.
 
-**Phase 2 — files.** `portal_download_log`, the `program-portal-file` edge function, the per-grant download permission, and the download UI. Inline photo viewing lands here too, via the existing signed-URL pattern.
+- Everblue (ACC-07622, Program Implementer), the Program Manager User record type, the Program Manager / Program Reviewer roles.
+- `portal_record_grants` (PRG-) and `portal_download_log` (PDL-).
+- `get_program_portal_data()` — the single read.
+- `program-portal-file` — the only route to a byte, view and download.
+- `/program-portal` — the surface: property → building → assessment, reports, work steps, photos, lightbox.
+- **Manage Shared Records** on a Program Manager User: search every assessment and project, share one at a time, revoke by soft-delete.
+- **View Portal as This User** routes by record type, so a program manager opens `/program-portal` and an owner opens `/project-portal`.
+- Download permission is tickable at both levels — a *Portal Access* section on the account and on the portal user layouts.
 
-**Phase 3 — granting UX.** A record picker on the Everblue account: search assessments and projects, tick the ones to share, set download permission per grant. Until this exists, grants are inserted by an admin.
-
-**Phase 4 — the invitation.** Invite Everblue's contact, first to an internal address for a dry run, then for real.
+**Phase 4 — the invitation.** Not done. Everblue has no contact record and no portal user yet; `portal_invite_create` is property-grant shaped and would need a sibling for program managers. Testing today goes through admin View As, which needs no invitation at all.
 
 ---
 

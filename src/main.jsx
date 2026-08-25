@@ -5,6 +5,7 @@ import App from './App.jsx'
 import SigningPortalRoot from './pages/SigningPortal.jsx'
 import ProjectPortalRoot from './pages/ProjectPortalRoot.jsx'
 import ProviderPortalRoot from './pages/ProviderPortalRoot.jsx'
+import ProgramPortalRoot from './pages/ProgramPortalRoot.jsx'
 import ProviderIntakeRoot from './pages/ProviderIntakeRoot.jsx'
 import ServiceAppointmentRoot from './serviceAppointments/ServiceAppointmentRoot.jsx'
 import FieldMobileRoot from './fieldMobile/FieldMobileRoot.jsx'
@@ -46,6 +47,7 @@ const pathname                  = window.location.pathname
 const isSigningRoute            = pathname.startsWith('/sign/')
 const isProjectPortalRoute      = pathname === '/project-portal' || pathname.startsWith('/project-portal/')
 const isProviderPortalRoute     = pathname === '/provider-portal' || pathname.startsWith('/provider-portal/')
+const isProgramPortalRoute      = pathname === '/program-portal' || pathname.startsWith('/program-portal/')
 const isProviderIntakeRoute     = pathname === '/provider-signup' || pathname.startsWith('/provider-signup/')
 const isServiceAppointmentRoute = pathname === '/sa' || pathname.startsWith('/sa/')
 const isFieldRoute              = pathname === '/field' || pathname.startsWith('/field/')
@@ -55,6 +57,7 @@ createRoot(document.getElementById('root')).render(
     {isSigningRoute ? <SigningPortalRoot />
      : isProjectPortalRoute ? <ProjectPortalRoot />
      : isProviderPortalRoute ? <ProviderPortalRoot />
+     : isProgramPortalRoute ? <ProgramPortalRoot />
      : isProviderIntakeRoute ? <ProviderIntakeRoot />
      : isServiceAppointmentRoute ? <ServiceAppointmentRoot />
      : isFieldRoute ? <FieldMobileRoot />

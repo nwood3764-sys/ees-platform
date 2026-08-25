@@ -76,6 +76,7 @@ export const ACTION_KEYS = Object.freeze({
   PREVIEW_DOCUMENT:        'preview_document',
   VIEW_OWNER_PORTAL:       'view_owner_portal',
   VIEW_AS_PORTAL_USER:     'view_as_portal_user',
+  MANAGE_SHARED_RECORDS:   'manage_shared_records',
   PREVIEW_EMAIL:           'preview_email',
   CLONE_TEMPLATE:          'clone_template',
   EDIT_SUBMITTAL_TEMPLATE: 'edit_submittal_template',
@@ -228,6 +229,21 @@ export const ACTION_REGISTRY = Object.freeze({
     defaultSortOrder:    41,
     isAvailable: ({ tableName, editing, isSystemAdmin }) =>
       !editing && tableName === 'portal_users' && !!isSystemAdmin,
+  },
+  // Program Manager Portal: pick, record by record, what a program implementer
+  // may see. Deliberately its own action rather than folding into portal access
+  // — property grants and record grants are different models on different
+  // objects, and one is not a variation of the other.
+  manage_shared_records: {
+    key:                 ACTION_KEYS.MANAGE_SHARED_RECORDS,
+    label:               'Manage Shared Records',
+    icon:                'M4 6h16M4 12h16M4 18h10 M18 16l2 2 4-4',
+    color:               ACTION_COLORS.EMERALD,
+    applicableObjects:   ['portal_users'],
+    defaultTier:         'menu',
+    defaultSortOrder:    42,
+    isAvailable: ({ tableName, editing, record }) =>
+      !editing && tableName === 'portal_users' && record?.record_type === 'Program Manager User',
   },
   // ── Program submittals ──────────────────────────────────────────────────
   // Each program runs its own incentive application with three stages that

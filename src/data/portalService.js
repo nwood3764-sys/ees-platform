@@ -79,6 +79,7 @@ export async function fetchPortalUsers() {
       if (rtValue === 'PARTNER-ORGANIZATION') return 'Partner Portal'
       if (rtValue === 'PROPERTY-OWNER')       return 'Property Owner Portal'
       if (rtValue === 'PROPERTY-MANAGEMENT-COMPANY') return 'Property Manager Portal'
+      if (rtValue === 'PROGRAM-IMPLEMENTER' || rtValue === 'PROGRAM-ADMINISTRATOR') return 'Program Manager Portal'
       return 'Portal'
     })()
 
