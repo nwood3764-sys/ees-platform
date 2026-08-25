@@ -2470,6 +2470,29 @@ export function ListView({
     return d;
   }, [activeFilters, filterLogic, sortField, sortDir, globalSearch, data, fieldAlias]);
 
+  // Filters whose field this object no longer offers. A saved view can carry
+  // one: a filter authored against a column that has since been withdrawn —
+  // most of them uuid columns that held a record id and could never match text
+  // in the first place. The list would simply come back empty, which reads as
+  // "there are no such records" rather than "this filter cannot match". Say so
+  // instead. Only computed once the catalog is actually loaded, so a list still
+  // fetching its columns never accuses a perfectly good filter.
+  const unmatchableFilters = useMemo(() => {
+    if (!Array.isArray(columnCatalog) || columnCatalog.length === 0) return [];
+    const known = new Set();
+    for (const c of columnCatalog) known.add(c.field);
+    for (const c of columns) known.add(c.field);
+    for (const [columnName, field] of fieldAlias) { known.add(columnName); known.add(field); }
+    const seen = new Set();
+    const out = [];
+    for (const f of activeFilters) {
+      if (known.has(f.field) || seen.has(f.field)) continue;
+      seen.add(f.field);
+      out.push(f);
+    }
+    return out;
+  }, [activeFilters, columnCatalog, columns, fieldAlias]);
+
   // Render-time row cap. Filtering + sorting still run across the full
   // dataset above, but only the first `renderLimit` rows actually mount.
   // 200 is a comfortable scroll buffer for screens. The toolbar shows
@@ -3070,7 +3093,20 @@ export function ListView({
                       ? <>Loading matching records…</>
                       : data.length === 0
                       ? <>No {pluralizeLabel(newLabel ? newLabel.toLowerCase() : '')} yet. <span onClick={onNew} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Create one</span></>
-                      : <>No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span></>
+                      : <>
+                          No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span>
+                          {unmatchableFilters.length > 0 && (
+                            <div style={{ marginTop: 10, fontSize: 12.5, color: C.textSecondary, lineHeight: 1.5 }}>
+                              {unmatchableFilters.length === 1 ? 'This filter refers' : 'These filters refer'} to a field this list no longer offers, so {unmatchableFilters.length === 1 ? 'it' : 'they'} cannot match any record:{' '}
+                              <span style={{ color: C.textPrimary, fontWeight: 600 }}>
+                                {unmatchableFilters.map(f => f.label || f.field).join(', ')}
+                              </span>.
+                              <div style={{ marginTop: 4 }}>
+                                Remove {unmatchableFilters.length === 1 ? 'it' : 'them'} and filter on the parent record instead — a lookup is filtered by the record's name, under its relationship group in the field picker.
+                              </div>
+                            </div>
+                          )}
+                        </>
                     }
                   </td></tr>
                 ) : visibleRows.map(r => {
