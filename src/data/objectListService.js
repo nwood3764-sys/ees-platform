@@ -18,6 +18,11 @@
 import { supabase, fetchAllPaged, fetchAllPagedParallel } from '../lib/supabase'
 import { describeObject } from './adminService'
 import { loadPicklists } from './outreachService'
+import { guessPrefix } from './fieldMetadataService'
+import {
+  LABELED_FK_TABLES, idColumnKind, isOpaqueIdColumn, stripTablePrefix,
+  parentLookupNameField, isParentLookupNameField, parentLookupColumnOf,
+} from '../lib/lookupColumnRules'
 
 // Columns we never surface in an auto-generated list (audit/system plumbing).
 const HIDDEN_SUFFIXES = [
@@ -55,14 +60,36 @@ export function parseRelatedField(field) {
 
 // FK references we resolve to a human label inline (no separate parent row
 // fetch needed): picklist values and users have cheap label maps already.
-const LABELED_FK_TABLES = new Set(['picklist_values', 'users'])
+// LABELED_FK_TABLES is defined once, in ../lib/lookupColumnRules.
 
 // Parent tables we never expand into related columns (audit/identity plumbing).
 // user/picklist parents are surfaced as the FK's own __label column instead.
 const NON_EXPANDABLE_PARENTS = new Set(['users', 'picklist_values'])
 
+
+// ---------------------------------------------------------------------------
+// The context the id-column rules need for one table: its column prefix, and
+// whether the platform manages a picklist for a given field. Built from the
+// picklist definitions the app already has loaded, so no extra round trip.
+// ---------------------------------------------------------------------------
+function idColumnContextFor(table, picklists) {
+  const byField = picklists?.byField
+  const hasPicklistDefinition = (obj, field) => {
+    if (!byField) return false
+    const rows = byField.get(`${obj}.${field}`)
+    return Array.isArray(rows) && rows.length > 0
+  }
+  return { table, prefix: guessPrefix(table) || undefined, hasPicklistDefinition }
+}
+
+// An unconstrained uuid column the platform can name is a picklist column and
+// is rendered/filtered exactly like an FK to picklist_values.
+function isPicklistValuedColumn(c, ctx) {
+  return !c.is_foreign_key && idColumnKind(c, ctx) === 'picklist'
+}
+
 // Whether a schema column belongs in an auto-generated list view.
-function isListableColumn(c, { recordNumber, nameCol }) {
+function isListableColumn(c, { recordNumber, nameCol, idContext }) {
   const n = c.column_name
   if (n === 'id' || n === recordNumber || n === nameCol) return false
   if (c.is_primary_key) return false
@@ -70,6 +97,8 @@ function isListableColumn(c, { recordNumber, nameCol }) {
   if (HIDDEN_SUFFIXES.some(suf => n.endsWith(suf))) return false
   // Keep non-FKs and label-resolvable FKs; drop opaque table FKs.
   if (c.is_foreign_key && !LABELED_FK_TABLES.has(c.references_table)) return false
+  // A uuid column carrying no FK and no picklist behind it renders a raw id.
+  if (idContext && isOpaqueIdColumn(c, idContext)) return false
   return true
 }
 
@@ -79,12 +108,16 @@ function isListableColumn(c, { recordNumber, nameCol }) {
 // FKs are excluded as direct columns — they're surfaced as their *__label and,
 // when expandable, as a related group — but everything else on the object is
 // selectable, with no MAX cap.
-function isSelectableColumn(c, { recordNumber, nameCol }) {
+function isSelectableColumn(c, { recordNumber, nameCol, idContext }) {
   const n = c.column_name
   if (n === 'id' || n === recordNumber || n === nameCol) return false
   if (c.is_primary_key) return false
   if (HIDDEN_EXACT.has(n)) return false
   if (HIDDEN_SUFFIXES.some(suf => n.endsWith(suf))) return false
+  // A uuid column the platform cannot turn into a name is not a field a person
+  // can filter, sort or read — it is an id. Offering it is what let a filter
+  // be authored that could never match anything (Nicholas, 2026-08-25).
+  if (idContext && isOpaqueIdColumn(c, idContext)) return false
   return true
 }
 
@@ -112,12 +145,17 @@ function linkTypeOf(c) {
 //   { kind: 'picklist', object, field }  — managed picklist_values definition
 //   { kind: 'lookup',   table }          — search records in a referenced table
 //   undefined                            — free text/number/date (manual entry)
-function ownColumnDescriptor(c, group, ownerTable) {
+function ownColumnDescriptor(c, group, ownerTable, idContext) {
   // columnName is the real DB column the ListView writes back to for inline /
   // bulk edit. For FK columns the visible `field` is the *__label display
   // column, but edits target the underlying FK column — so carry both, and tell
   // the editor which display field to refresh after a save (labelField).
-  if (c.is_foreign_key && c.references_table === 'picklist_values') {
+  // A picklist column — whether it carries the FK to picklist_values or is one
+  // of the import's unconstrained uuids that the platform can still name.
+  // Either way the row holds an id and the list must show, filter and sort the
+  // LABEL; the raw id is never the value a person means.
+  if ((c.is_foreign_key && c.references_table === 'picklist_values')
+      || (idContext && isPicklistValuedColumn(c, idContext))) {
     return {
       field: `${c.column_name}__label`, label: titleize(c.column_name), type: 'text', group,
       columnName: c.column_name, labelField: `${c.column_name}__label`,
@@ -232,8 +270,12 @@ function identityColumns(table, cols) {
 // buildObjectColumnCatalog and is exposed through the column picker.
 // ---------------------------------------------------------------------------
 export async function buildObjectColumns(table) {
-  const cols = await describeObject(table)
+  const [cols, picklists] = await Promise.all([
+    describeObject(table),
+    loadPicklists().catch(() => null),
+  ])
   const { recordNumber, nameCol } = identityColumns(table, cols)
+  const idContext = idColumnContextFor(table, picklists)
   const objectGroup = titleize(table.replace(/ies$/, 'y').replace(/s$/, ''))
 
   const out = []
@@ -242,9 +284,9 @@ export async function buildObjectColumns(table) {
 
   let businessCount = 0
   for (const c of cols) {
-    if (!isListableColumn(c, { recordNumber, nameCol })) continue
+    if (!isListableColumn(c, { recordNumber, nameCol, idContext })) continue
     if (businessCount >= MAX_BUSINESS_COLS) break
-    out.push(ownColumnDescriptor(c, objectGroup, table))
+    out.push(ownColumnDescriptor(c, objectGroup, table, idContext))
     businessCount++
   }
   return out
@@ -268,8 +310,12 @@ export async function buildObjectColumns(table) {
 // fetch time (see fetchObjectRecords).
 // ---------------------------------------------------------------------------
 export async function buildObjectColumnCatalog(table) {
-  const cols = await describeObject(table)
+  const [cols, picklists] = await Promise.all([
+    describeObject(table),
+    loadPicklists().catch(() => null),
+  ])
   const { recordNumber, nameCol } = identityColumns(table, cols)
+  const idContext = idColumnContextFor(table, picklists)
   const objectGroup = titleize(table.replace(/ies$/, 'y').replace(/s$/, ''))
 
   const catalog = []
@@ -284,11 +330,11 @@ export async function buildObjectColumnCatalog(table) {
 
   // All own selectable columns (no cap).
   for (const c of cols) {
-    if (!isSelectableColumn(c, { recordNumber, nameCol })) continue
+    if (!isSelectableColumn(c, { recordNumber, nameCol, idContext })) continue
     // Table FKs are not added as a direct column; they become a related group
     // below (and their __label is offered if picklist/user).
     if (c.is_foreign_key && !LABELED_FK_TABLES.has(c.references_table)) continue
-    catalog.push(ownColumnDescriptor(c, objectGroup, table))
+    catalog.push(ownColumnDescriptor(c, objectGroup, table, idContext))
   }
 
   // Related (one-hop) columns. Follow each expandable table FK to its parent.
@@ -306,6 +352,11 @@ export async function buildObjectColumnCatalog(table) {
     })
   )
 
+  // Parent columns that are themselves lookups, collected on the first pass and
+  // resolved on the second — their target tables are not known until every
+  // parent has been described.
+  const deferredParentLookups = []
+
   for (const fk of tableFks) {
     const parentTable = fk.references_table
     const pCols = parentSchemas.get(parentTable) || []
@@ -314,12 +365,37 @@ export async function buildObjectColumnCatalog(table) {
     if (!groups.includes(groupLabel)) groups.push(groupLabel)
     const pIdentity = identityColumns(parentTable, pCols)
 
+    const parentIdContext = idColumnContextFor(parentTable, picklists)
+
     for (const pc of pCols) {
-      if (!isSelectableColumn(pc, { recordNumber: pIdentity.recordNumber, nameCol: pIdentity.nameCol })) continue
-      // Skip parent FK columns that point at further tables — we only expand one
-      // hop. Picklist/user parent FKs are surfaced via their __label.
-      const isParentTableFk = pc.is_foreign_key && !LABELED_FK_TABLES.has(pc.references_table)
-      if (isParentTableFk) continue
+      if (!isSelectableColumn(pc, { recordNumber: pIdentity.recordNumber, nameCol: pIdentity.nameCol, idContext: parentIdContext })) continue
+
+      // A parent column that is ITSELF a lookup onto another object. These used
+      // to be skipped outright, which is why "properties managed by Lutheran"
+      // could not be asked from the Opportunities list at all: the property's
+      // management company is an FK to accounts, so it was dropped here, and
+      // the only field left bearing that name was the opportunity's own
+      // unconstrained uuid — a filter that could never match. Resolved one hop
+      // further, to the referenced record's NAME, so it filters like the text
+      // the user actually sees.
+      const isParentTableFk = pc.is_foreign_key
+        && pc.references_table
+        && !LABELED_FK_TABLES.has(pc.references_table)
+      if (isParentTableFk) {
+        const grandTable = pc.references_table
+        const grandCols = parentSchemas.get(grandTable) || []
+        const grandName = grandCols.length > 0
+          ? identityColumns(grandTable, grandCols).nameCol
+          : null
+        // Without the grandparent's schema (not among this object's own FK
+        // targets) the name column can't be resolved yet — it is filled in on
+        // the second pass below, once every referenced table is described.
+        deferredParentLookups.push({
+          fkColumn: fk.column_name, parentTable, groupLabel,
+          parentColumn: pc.column_name, grandTable, grandName,
+        })
+        continue
+      }
 
       const baseField = pc.is_foreign_key && LABELED_FK_TABLES.has(pc.references_table)
         ? `${pc.column_name}__label`
@@ -366,6 +442,45 @@ export async function buildObjectColumnCatalog(table) {
         related: { fkColumn: fk.column_name, parentTable, parentColumn: pIdentity.nameCol },
       })
     }
+  }
+
+  // ── Second pass: parent columns that are themselves lookups ───────────────
+  // Each resolves to the referenced record's NAME. The grandparent tables were
+  // not necessarily described in the first pass (a property's management
+  // company is an account, which the opportunity may not reference directly),
+  // so describe whatever is still missing, once, and then emit the fields.
+  const missingGrandTables = Array.from(new Set(
+    deferredParentLookups.map(d => d.grandTable).filter(t => t && !parentSchemas.has(t))
+  ))
+  await Promise.all(missingGrandTables.map(async (gt) => {
+    try { parentSchemas.set(gt, await describeObject(gt)) }
+    catch { parentSchemas.set(gt, []) }
+  }))
+
+  for (const d of deferredParentLookups) {
+    const grandCols = parentSchemas.get(d.grandTable) || []
+    const grandName = d.grandName
+      || (grandCols.length > 0 ? identityColumns(d.grandTable, grandCols).nameCol : null)
+    // A referenced object with no name column has nothing to show but its id,
+    // and an id is exactly what must never be offered as a filterable field.
+    if (!grandName) continue
+    catalog.push({
+      field: `${d.fkColumn}${REL_DELIM}${parentLookupNameField(d.parentColumn)}`,
+      label: titleize(stripParentPrefix(d.parentColumn, d.parentTable).replace(/_id$/, '')),
+      type: 'text',
+      group: d.groupLabel,
+      // The value is a name on the grandparent object, so the filter typeahead
+      // offers the names that are actually out there rather than free text.
+      valueSource: { kind: 'lookup', table: d.grandTable },
+      related: {
+        fkColumn: d.fkColumn,
+        parentTable: d.parentTable,
+        parentColumn: d.parentColumn,
+        parentIsLookup: true,
+        parentRefTable: d.grandTable,
+        parentRefNameColumn: grandName,
+      },
+    })
   }
 
   // De-dupe by field (identity name columns added twice above), preserving
@@ -469,14 +584,19 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
   ])
   const colNames = new Set(cols.map(c => c.column_name))
   const { recordNumber, nameCol } = identityColumns(table, cols)
+  const idContext = idColumnContextFor(table, picklists)
   const softDel = softDeleteColumn(table, colNames)
 
   // FK columns and the table they reference, for label resolution.
   const fkCols = cols.filter(c => c.is_foreign_key)
   const userFkCols = fkCols.filter(c => c.references_table === 'users').map(c => c.column_name)
-  const picklistFkCols = fkCols
-    .filter(c => c.references_table === 'picklist_values')
-    .map(c => c.column_name)
+  // Columns whose value is a picklist id: the real FKs, plus the import's
+  // unconstrained uuid columns the platform can still name. Both hold an id
+  // and must render (and therefore filter and sort) as the LABEL.
+  const picklistFkCols = [
+    ...fkCols.filter(c => c.references_table === 'picklist_values').map(c => c.column_name),
+    ...cols.filter(c => isPicklistValuedColumn(c, idContext)).map(c => c.column_name),
+  ]
 
   // Build a users label map only if needed.
   let userLabels = new Map()
@@ -570,11 +690,16 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
       if (!relNeeds.has(fkColumn)) {
         relNeeds.set(fkColumn, { parentTable: fkMeta.references_table, parentColumns: new Set() })
       }
-      // parentColumn may carry a trailing __label (parent FK to user/picklist);
-      // strip it to the real column for the SELECT, remember it needs labeling.
+      // parentColumn may carry a trailing __label (parent FK to user/picklist)
+      // or __name (the parent's own lookup, resolved to the referenced record's
+      // name); strip either to the real column for the SELECT and remember how
+      // the value has to be resolved.
       const isLabel = parentColumn.endsWith('__label')
-      const realCol = isLabel ? parentColumn.slice(0, -('__label'.length)) : parentColumn
-      relNeeds.get(fkColumn).parentColumns.add(JSON.stringify({ realCol, isLabel, field }))
+      const isLookupName = isParentLookupNameField(parentColumn)
+      const realCol = isLabel
+        ? parentColumn.slice(0, -('__label'.length))
+        : (isLookupName ? parentLookupColumnOf(parentColumn) : parentColumn)
+      relNeeds.get(fkColumn).parentColumns.add(JSON.stringify({ realCol, isLabel, isLookupName, field }))
     }
   }
 
@@ -594,6 +719,34 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
       const { data } = await supabase.from(need.parentTable).select(selectCols).in('id', slice)
       if (data) parentRows.push(...data)
     }
+    // ── Second hop: parent columns that are themselves lookups ─────────────
+    // "Properties managed by Lutheran" is opportunity → property → account →
+    // account_name. The parent row holds only the account's id, so the ids it
+    // references are collected and resolved to names in one further batch — a
+    // filter can only match the text the user sees.
+    const lookupNameMaps = new Map()   // realCol -> Map<grandId, name>
+    const lookupCols = wanted.filter(w => w.isLookupName)
+    if (lookupCols.length > 0) {
+      const parentCols = await describeObject(need.parentTable).catch(() => [])
+      await Promise.all(lookupCols.map(async (w) => {
+        const meta = parentCols.find(c => c.column_name === w.realCol)
+        const grandTable = meta?.references_table
+        if (!grandTable) { lookupNameMaps.set(w.realCol, new Map()); return }
+        const grandIds = Array.from(new Set(parentRows.map(pr => pr[w.realCol]).filter(Boolean)))
+        if (grandIds.length === 0) { lookupNameMaps.set(w.realCol, new Map()); return }
+        const grandCols = await describeObject(grandTable).catch(() => [])
+        const grandName = identityColumns(grandTable, grandCols).nameCol
+        if (!grandName) { lookupNameMaps.set(w.realCol, new Map()); return }
+        const nameById = new Map()
+        for (let i = 0; i < grandIds.length; i += CHUNK) {
+          const slice = grandIds.slice(i, i + CHUNK)
+          const { data } = await supabase.from(grandTable).select(`id, ${grandName}`).in('id', slice)
+          for (const g of (data || [])) nameById.set(g.id, g[grandName] || '')
+        }
+        lookupNameMaps.set(w.realCol, nameById)
+      }))
+    }
+
     const byId = new Map()
     for (const pr of parentRows) {
       const vm = new Map()
@@ -602,6 +755,10 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
         if (w.isLabel && val != null) {
           // Parent column is itself a user/picklist FK — label it.
           val = picklists.byId.get(val) || userLabels.get(val) || String(val)
+        } else if (w.isLookupName) {
+          // Parent column is a lookup onto another object — its NAME, and
+          // blank (never the raw id) when the record can't be named.
+          val = val != null ? (lookupNameMaps.get(w.realCol)?.get(val) || '') : ''
         }
         vm.set(w.field, val == null ? '' : val)
       }
@@ -622,9 +779,9 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
     // bare table-FK column, if ever shown, isn't blank — though the picker
     // surfaces those as related groups instead).
     for (const c of cols) {
-      if (!isSelectableColumn(c, { recordNumber, nameCol })) continue
+      if (!isSelectableColumn(c, { recordNumber, nameCol, idContext })) continue
       const n = c.column_name
-      if (c.is_foreign_key) {
+      if (c.is_foreign_key || picklistFkCols.includes(n)) {
         const raw = r[n]
         let label = '—'
         if (raw != null) {
