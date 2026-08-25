@@ -151,15 +151,24 @@ function stripParentPrefix(parentColumn, parentTable) {
   return parentColumn.startsWith(pfx) ? parentColumn.slice(pfx.length) : parentColumn
 }
 
-// Friendly relationship group label from an FK column name:
-//   property_id              -> Property
-//   opportunity_account_id   -> Account            (canonical single parent link)
-//   opportunity_managing_account_id -> Managing Account
-//   building_id              -> Building
-// The label is the FK stem (minus a leading object prefix and trailing _id),
-// titleized. Distinct FKs to the same parent keep distinct labels so two
-// account relationships don't collapse into one ambiguous "Account" group.
-function relationshipLabel(fkColumn, parentTable) {
+// Relationship group label from an FK column name. The group heads a set of
+// columns that live on a REAL object, so the label always says which object —
+// a relationship name on its own reads as the name of an object that doesn't
+// exist. "Managing Account" is not an object in LEAP; the Account object,
+// reached through the opportunity's managing-account lookup, is.
+//
+//   property_id                     -> Property
+//   opportunity_account_id          -> Account   (relationship == object name)
+//   opportunity_managing_account_id -> Managing Account (Account)
+//   opportunity_account_contact     -> Account Contact (Contact)
+//   building_id                     -> Building
+//
+// The relationship name is the FK stem (minus a leading object prefix and
+// trailing _id), titleized; the object name is appended only when the two
+// differ, so the common case stays clean. Distinct FKs to the same parent keep
+// distinct labels so two account relationships don't collapse into one
+// ambiguous "Account" group.
+export function relationshipLabel(fkColumn, parentTable) {
   const parentSingular = parentTable.replace(/ies$/, 'y').replace(/s$/, '')
   let stem = fkColumn.replace(/_id$/, '')
   // Drop a leading object prefix that carries no relationship meaning, but only
@@ -172,7 +181,9 @@ function relationshipLabel(fkColumn, parentTable) {
       stem = rest
     }
   }
-  return titleize(stem)
+  const relationship = titleize(stem)
+  const objectLabel = titleize(parentSingular)
+  return relationship === objectLabel ? relationship : `${relationship} (${objectLabel})`
 }
 
 function titleize(name) {
@@ -264,10 +275,12 @@ export async function buildObjectColumnCatalog(table) {
   const catalog = []
   const groups = [objectGroup]
 
-  // Identity columns first (always available, always shown — the picker marks
-  // them locked, but they belong in the catalog so search finds them).
-  if (recordNumber) catalog.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup, locked: true })
-  if (nameCol) catalog.push({ field: 'name', label: 'Name', type: 'text', group: objectGroup, locked: true })
+  // Identity columns first. They are ordinary catalog entries — shown by
+  // default, but hideable, reorderable and filterable like anything else. They
+  // used to carry locked:true, which pinned them to the left of every list AND
+  // hid them from the filter sidebar's field picker.
+  if (recordNumber) catalog.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup })
+  if (nameCol) catalog.push({ field: 'name', label: 'Name', type: 'text', group: objectGroup })
 
   // All own selectable columns (no cap).
   for (const c of cols) {

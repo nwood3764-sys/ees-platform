@@ -4,6 +4,7 @@ import { LoadingState, ErrorState } from './UI'
 import RecordDetail from './RecordDetail'
 import RecordLink from './RecordLink'
 import { fetchObjectRecords, buildObjectColumnCatalog, deriveColumnOptions, isRelatedField } from '../data/objectListService'
+import { collectRelatedFieldsForViews, collectRelatedFields } from '../lib/listViewFields'
 import { fetchSavedViewsForObject } from '../data/listViewsService'
 import { useNav } from '../lib/navContext'
 import { isUrlAddressableTable, getTableListUrl } from '../lib/urlNav'
@@ -59,15 +60,22 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
   const [activeRelated, setActiveRelated] = useState([])
   const activeRelatedKey = activeRelated.join('|')
   const lastRowsRef = useRef([])
+  // True while a refetch triggered by a newly-referenced related field is in
+  // flight. The rows on screen don't carry that field yet, so a filter on it
+  // matches nothing — the list says "loading" instead of "no records match",
+  // which would read as a broken filter.
+  const [relatedPending, setRelatedPending] = useState(false)
 
-  // Pre-seed related fields from saved views so a default view that includes a
-  // related column resolves on first paint without a second fetch.
+  // Pre-seed related fields from saved views so a view resolves on first paint
+  // without a second fetch. Every way a view REFERENCES a field counts — the
+  // columns it displays, the fields it filters on, and the field it sorts by —
+  // because a filter on a related field is worthless if the fetch didn't
+  // resolve it. Drill-down filters passed in by a caller are seeded the same
+  // way, since they arrive as the default view.
   const seedRelatedFromViews = (savedViews) => {
-    const s = new Set()
-    for (const v of savedViews || []) {
-      for (const f of (v.visibleColumns || [])) if (isRelatedField(f)) s.add(f)
-    }
-    return Array.from(s).sort()
+    const seeded = new Set(collectRelatedFieldsForViews(savedViews))
+    for (const f of collectRelatedFields({ filters: initialFilters })) seeded.add(f)
+    return Array.from(seeded).sort()
   }
 
   const fetchRows = useCallback(async (relatedFields) => {
@@ -148,7 +156,10 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
       const prevKey = prev.join('|')
       const nextKey = next.join('|')
       if (prevKey === nextKey) return prev
+      // A field this view now references but the current rows don't carry.
       // Refetch in the background; keep showing current rows meanwhile.
+      const needsRows = next.some(f => !prev.includes(f))
+      if (needsRows) setRelatedPending(true)
       ;(async () => {
         try {
           const rows = await fetchRows(next)
@@ -158,6 +169,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
           // the catalog (cheap; deriveColumnOptions only touches text cols).
           setColumns(cols => deriveColumnOptions(cols, rows))
         } catch { /* keep prior rows on failure */ }
+        finally { if (needsRows) setRelatedPending(false) }
       })()
       return next
     })
@@ -264,6 +276,7 @@ export default function ObjectListSection({ objectTable, moduleId, initialFilter
       columnCatalog={catalog}
       columnGroups={groups}
       onActiveRelatedFieldsChange={handleActiveRelatedChange}
+      dataPending={relatedPending}
       systemViews={effectiveViews}
       defaultViewId={drillView ? '__drill__' : undefined}
       applyDefaultViewOnLoad={!drillView && !listScope}
