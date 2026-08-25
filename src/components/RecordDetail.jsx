@@ -25,6 +25,7 @@ const IssueToProviderModal                = lazy(() => import('./IssueToProvider
 const SendForSignatureModal               = lazy(() => import('./SendForSignatureModal'))
 const AccountMergeModal                    = lazy(() => import('./AccountMergeModal'))
 const AddToPortalModal                     = lazy(() => import('./AddToPortalModal'))
+const ManageSharedRecordsModal             = lazy(() => import('./ManageSharedRecordsModal'))
 const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
 const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstallPhotoPickerModal'))
 const EnergyAssessmentReportModal          = lazy(() => import('./EnergyAssessmentReportModal'))
@@ -6873,6 +6874,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // (soft-deleted loser). Null = live record, or still resolving the survivor.
   // Shape: { status: 'merged'|'deleted', master?, mergedAt? }
   const [mergedInfo, setMergedInfo] = useState(null)
+  const [showSharedRecords, setShowSharedRecords] = useState(false)
   const [showPortalModal, setShowPortalModal] = useState(false)
   const [showLogCall, setShowLogCall] = useState(false)
   // Bumped when a call is logged from the header action so the Activity tab's
@@ -9073,8 +9075,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     // from. The URL is only a request — the portal RPCs re-check app_is_admin().
     [ACTION_KEYS.VIEW_OWNER_PORTAL]:
       () => window.open(`/project-portal?account=${recordId}`, '_blank', 'noopener'),
-    [ACTION_KEYS.VIEW_AS_PORTAL_USER]:
-      () => window.open(`/project-portal?as=${recordId}`, '_blank', 'noopener'),
+    // Which portal to open depends on what kind of portal user this is — a
+    // program manager's records do not live in the owner portal.
+    [ACTION_KEYS.VIEW_AS_PORTAL_USER]: () => {
+      const surface = data?.record?.record_type === 'Program Manager User'
+        ? 'program-portal' : 'project-portal'
+      window.open(`/${surface}?as=${recordId}`, '_blank', 'noopener')
+    },
+    [ACTION_KEYS.MANAGE_SHARED_RECORDS]: () => setShowSharedRecords(true),
     [ACTION_KEYS.GENERATE_REPORT]:        () => setShowReportModal(true),
     [ACTION_KEYS.GENERATE_PROJECT_RESERVATION_SUBMITTAL]:
       () => setSubmittalStage(SUBMITTAL_STAGES.PROJECT_RESERVATION),
@@ -10043,6 +10051,13 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
               if (message) window.alert(message)
               setReloadTick(t => t + 1)
             }}
+          />
+        )}
+        {showSharedRecords && tableName === 'portal_users' && (
+          <ManageSharedRecordsModal
+            portalUserId={recordId}
+            portalUserName={record?.full_name || 'This portal user'}
+            onClose={() => { setShowSharedRecords(false); setReloadTick(t => t + 1) }}
           />
         )}
         {showLogCall && (
