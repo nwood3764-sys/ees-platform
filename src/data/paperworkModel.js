@@ -1137,6 +1137,16 @@ async function buildAssessmentContext(m, kind, opts = {}) {
   const text = (key) => resolveTextBlock(m.textBlocks, key)
   const pv = v => (v != null && String(v).trim() !== '') ? String(v) : '—'
 
+  // Name the document inside the PDF as well as on disk, so a viewer tab and
+  // any downstream system show the building rather than a blob id.
+  try {
+    d.setProperties({
+      title: [m.building?.label || m.building?.name, m.title].filter(Boolean).join(' — '),
+      subject: m.workOrder?.number ? `Work Order ${m.workOrder.number}` : '',
+      author: m.company?.name || 'Energy Efficiency Services',
+    })
+  } catch { /* metadata is a nicety; never fail a report over it */ }
+
   // Numbered section band: emerald tick, navy uppercase heading, hairline.
   const band = (txt, gap = 16) => {
     need(34); st.y += gap

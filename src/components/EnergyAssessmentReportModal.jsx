@@ -59,7 +59,9 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
       })
       const blob = await buildAssessmentReportPdf(
         ctx.model, ASSESSMENT_REPORT_KIND, ctx.template?.sections || null)
-      const fileName = reportFileName(ctx.def, ctx.model.workOrder?.number, ctx.model.building?.label)
+      // Named for the BUILDING — same rule the service uses. Passing the work
+      // order number here was why the download came out wrong.
+      const fileName = reportFileName(ctx.def, ctx.model.building?.fileName, ctx.model.building?.label)
       if (result?.url) URL.revokeObjectURL(result.url)
       setResult({ blob, fileName, url: URL.createObjectURL(blob) })
     } catch (e) {
@@ -187,7 +189,7 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
                 <div style={{ ...notice, background: '#ecfdf5', borderColor: '#a7f3d0', color: '#0f6b47' }}>
                   <Icon path="M5 13l4 4L19 7" size={15} color="#0f6b47" />
                   <span>
-                    {result.fileName} is ready.
+                    <strong>{result.fileName}</strong> is ready.
                     {savedName ? ' Saved to this work order’s Documents.' : ''}
                   </span>
                 </div>
@@ -205,13 +207,15 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
             <button onClick={onClose} style={btnGhost}>Close</button>
             {result && (
               <>
-                <a href={result.url} target="_blank" rel="noreferrer" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
-                  Preview
+                <a href={result.url} target="_blank" rel="noreferrer"
+                  title="Opens in a new tab for viewing. Use Download to save it — a tab saves under the browser's own name, not the report's."
+                  style={{ ...btnGhost, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+                  View
                 </a>
-                <button onClick={handleDownload} style={btnGhost}>Download</button>
-                <button onClick={handleSave} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }}>
+                <button onClick={handleSave} disabled={saving} style={{ ...btnGhost, opacity: saving ? 0.6 : 1 }}>
                   {saving ? 'Saving…' : 'Save to Work Order'}
                 </button>
+                <button onClick={handleDownload} style={btnPrimary}>Download</button>
               </>
             )}
             {!result && (
