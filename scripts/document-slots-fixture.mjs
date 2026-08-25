@@ -158,8 +158,8 @@ check('missing: nothing uploaded at all reports every required slot',
   ['payment_w9', 'audit_template_report', 'homes_final_invoice', 'qi_tool_pdf'])
 check('missing: a slot with no title falls back to its type',
   missingRequiredDocuments(
-    [gallery('', { target: 'documents', document_type: 'assessment_energy_report', required: true })], []),
-  [{ type: 'assessment_energy_report', label: 'assessment_energy_report' }])
+    [gallery('', { target: 'documents', document_type: 'assessment_asset_score', required: true })], []),
+  [{ type: 'assessment_asset_score', label: 'assessment_asset_score' }])
 check('missing: a required PHOTO gallery is not a document requirement',
   missingRequiredDocuments(
     [{ widget_type: 'file_gallery', widget_title: 'Photos',
@@ -170,22 +170,24 @@ check('missing: no documents argument is treated as none uploaded',
   ['payment_w9', 'audit_template_report', 'homes_final_invoice', 'qi_tool_pdf'])
 
 // ── The audit application's own slots ───────────────────────────────────────
+// The three uploads the live Focus On Energy assessment application requires,
+// verbatim from /forms/ira_assessment_app.
 const auditLayout = [
-  gallery('Energy Report (PDF)', { target: 'documents', document_type: 'assessment_energy_report', required: true }),
-  gallery('HPXMLv4 / BuildingSync File', { target: 'documents', document_type: 'assessment_hpxml_buildingsync', required: true }),
-  gallery('Signed Assessment Invoice', { target: 'documents', document_type: 'assessment_signed_invoice', required: true }),
+  gallery('Asset Score', { target: 'documents', document_type: 'assessment_asset_score', required: true }),
+  gallery('BuildingSync File', { target: 'documents', document_type: 'assessment_buildingsync_file', required: true }),
+  gallery('Invoice', { target: 'documents', document_type: 'assessment_invoice', required: true }),
   gallery('Supporting Documents', { target: 'documents', document_type: CATCH_ALL_DOCUMENT_TYPE }),
 ]
 const auditDocs = [
-  { id: 'a1', document_type: 'assessment_energy_report' },
+  { id: 'a1', document_type: 'assessment_asset_score' },
   { id: 'a2', document_type: 'attachment' },
 ]
 check('audit: the three required slots are declared',
   [...slotTypesOnLayout(auditLayout)],
-  ['assessment_energy_report', 'assessment_hpxml_buildingsync', 'assessment_signed_invoice'])
-check('audit: two of three outstanding after the energy report lands',
+  ['assessment_asset_score', 'assessment_buildingsync_file', 'assessment_invoice'])
+check('audit: two of three outstanding after the asset score lands',
   missingRequiredDocuments(auditLayout, auditDocs).map(m => m.label),
-  ['HPXMLv4 / BuildingSync File', 'Signed Assessment Invoice'])
+  ['BuildingSync File', 'Invoice'])
 check('audit: the catch-all shows only the unclaimed file',
   filterSlotDocuments(auditDocs, auditLayout[3].widget_config, slotTypesOnLayout(auditLayout)).map(d => d.id),
   ['a2'])
