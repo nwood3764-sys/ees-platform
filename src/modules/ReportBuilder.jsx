@@ -1,7 +1,14 @@
-import { useState, useEffect, useMemo, lazy, Suspense } from 'react'
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react'
 import { C } from '../data/constants'
 import { Icon, LoadingState, ErrorState } from '../components/UI'
 import SearchableCombo from '../components/SearchableCombo'
+import AnchoredPopover from '../components/AnchoredPopover'
+import { guessPrefix } from '../data/fieldMetadataService'
+import {
+  deriveReportColumnLabel,
+  resolveReportColumnLabels,
+  objectSingularLabel,
+} from '../lib/reportColumnLabels'
 import {
   loadReport, saveReport, cloneReport,
   loadFieldTree, loadRelatedObjectFields,
@@ -155,7 +162,12 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
             rpt_folder_id:        loaded.report.rpt_folder_id,
             rpt_format:           loaded.report.rpt_format || 'tabular',
             rpt_primary_object:   loaded.report.rpt_primary_object || '',
-            rpt_selected_fields:  loaded.report.rpt_selected_fields || [],
+            // Headers are re-resolved on load, so the Fields tab shows the
+            // same names the viewer does — a report saved before 2026-08-25
+            // stored the bare label ("Name") for every object's name field.
+            rpt_selected_fields:  resolveReportColumnLabels(
+              loaded.report.rpt_selected_fields || [],
+              { primaryObject: loaded.report.rpt_primary_object, prefixFor: guessPrefix }),
             rpt_filter_logic:     loaded.report.rpt_filter_logic || 'all',
             rpt_sort_config:      loaded.report.rpt_sort_config || [],
             rpt_column_groupings: loaded.report.rpt_column_groupings || [],
@@ -224,6 +236,11 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
   // ─── Helpers ───────────────────────────────────────────────────────────
   const updateReport = (patch) => setReport(prev => ({ ...prev, ...patch }))
 
+  // Everything that names a column goes through the one shared rule, with
+  // the platform's column-prefix map as its authority on how an object
+  // prefixes its own columns.
+  const labelOpts = { primaryObject: report.rpt_primary_object, prefixFor: guessPrefix }
+
   const handleExpandRelated = async (viaPath, table) => {
     // viaPath is the full FK chain to this node, e.g. ['property_id'] or
     // ['property_id', 'account_id']. Keying on the joined path lets multiple
@@ -274,17 +291,26 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     const newField = {
       name:     column.name,
       table:    table,
-      // Prefer the metadata label (prefix-stripped, title-cased); fall back to
-      // a humanized column name for older field-tree shapes.
-      label:    column.label || column.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
       via_path: viaPath,
       type:     column.type,
     }
-    updateReport({ rpt_selected_fields: [...report.rpt_selected_fields, newField] })
+    // The header is derived by the shared rule, then the whole set is
+    // re-resolved so a new column that collides with one already on the
+    // report widens both — a report never shows two columns headed alike.
+    newField.label = deriveReportColumnLabel(newField, labelOpts)
+    updateReport({
+      rpt_selected_fields: resolveReportColumnLabels(
+        [...report.rpt_selected_fields, newField], labelOpts),
+    })
   }
 
   const removeField = (idx) => {
-    updateReport({ rpt_selected_fields: report.rpt_selected_fields.filter((_, i) => i !== idx) })
+    // Re-resolved after the removal: a header widened only because two
+    // columns collided goes back to its short form once the clash is gone.
+    updateReport({
+      rpt_selected_fields: resolveReportColumnLabels(
+        report.rpt_selected_fields.filter((_, i) => i !== idx), labelOpts),
+    })
   }
 
   const moveField = (idx, dir) => {
@@ -899,6 +925,7 @@ function FiltersTab({
   fieldTree, primaryOptions, expandedRelated, onExpandRelated,
 }) {
   const [addOpen, setAddOpen] = useState(false)
+  const addBtnRef = useRef(null)
 
   const fieldCatalog = useMemo(
     () => buildFieldCatalog(primaryObject, fieldTree, expandedRelated),
@@ -953,28 +980,26 @@ function FiltersTab({
         <div style={cardHeader()}>
           <span>Filters ({filters.length})</span>
           <div style={{ position:'relative' }}>
-            <button onClick={() => setAddOpen(o => !o)} style={btnSecondary(false, 'small')}>+ Add Filter ▾</button>
-            {addOpen && (
-              <>
-                <div onClick={() => setAddOpen(false)} style={{ position:'fixed', inset:0, zIndex:40 }} />
-                <div style={{
-                  position:'absolute', right:0, top:'calc(100% + 4px)', zIndex:41,
-                  background:C.card, border:`1px solid ${C.borderDark}`, borderRadius:6,
-                  boxShadow:'0 6px 18px rgba(13,26,46,0.12)', minWidth:220, overflow:'hidden',
-                }}>
-                  <MenuItem
-                    title="Field Filter"
-                    subtitle="Filter on a field of this report"
-                    onClick={addFilter}
-                  />
-                  <MenuItem
-                    title="Cross Filter"
-                    subtitle="Records with / without related records"
-                    onClick={addCrossFilter}
-                  />
-                </div>
-              </>
-            )}
+            <button ref={addBtnRef} onClick={() => setAddOpen(o => !o)} style={btnSecondary(false, 'small')}>+ Add Filter ▾</button>
+            <AnchoredPopover
+              anchorRef={addBtnRef}
+              open={addOpen}
+              onClose={() => setAddOpen(false)}
+              width={240}
+              align="right"
+              maxHeight={220}
+            >
+              <MenuItem
+                title="Field Filter"
+                subtitle="Filter on a field of this report"
+                onClick={addFilter}
+              />
+              <MenuItem
+                title="Cross Filter"
+                subtitle="Records with / without related records"
+                onClick={addCrossFilter}
+              />
+            </AnchoredPopover>
           </div>
         </div>
         <div style={{ padding:12 }}>
@@ -1132,9 +1157,11 @@ function buildFieldCatalog(primaryObject, fieldTree, expandedRelated) {
   }
   for (const [key, node] of Object.entries(expandedRelated || {})) {
     const viaPath = key.split('.')
+    // Singularize properly — `.replace(/s$/,'')` turned "properties" into
+    // "Propertie" in every filter and grouping picker.
     const objectLabel = node?.table
-      ? humanizeFieldName(node.table.replace(/s$/, ''))
-      : viaPath[viaPath.length - 1]
+      ? objectSingularLabel(node.table)
+      : humanizeFieldName(viaPath[viaPath.length - 1])
     for (const col of (node?.columns || [])) {
       push(col, node.table, viaPath, objectLabel)
     }
@@ -1245,6 +1272,7 @@ function FieldFilterRow({
 function FilterFieldPicker({ value, catalog, onChange, onExpandRelated }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const triggerRef = useRef(null)
 
   const selected = catalog.options.find(o => o.value === value)
   const q = query.trim().toLowerCase()
@@ -1255,6 +1283,7 @@ function FilterFieldPicker({ value, catalog, onChange, onExpandRelated }) {
   return (
     <div style={{ position:'relative' }}>
       <button
+        ref={triggerRef}
         onClick={() => { setOpen(o => !o); setQuery('') }}
         style={{
           ...inputStyle(), textAlign:'left', cursor:'pointer',
@@ -1264,67 +1293,65 @@ function FilterFieldPicker({ value, catalog, onChange, onExpandRelated }) {
       >
         {selected ? selected.label : '— Field —'}
       </button>
-      {open && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position:'fixed', inset:0, zIndex:60 }} />
-          <div style={{
-            position:'absolute', left:0, top:'calc(100% + 4px)', zIndex:61,
-            width:'max(320px, 100%)', maxHeight:340, overflow:'auto',
-            background:C.card, border:`1px solid ${C.borderDark}`, borderRadius:6,
-            boxShadow:'0 8px 24px rgba(13,26,46,0.14)',
-          }}>
-            <div style={{ padding:8, borderBottom:`1px solid ${C.border}`, position:'sticky', top:0, background:C.card }}>
-              <input
-                autoFocus
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder="Search fields…"
-                style={{ ...inputStyle(), fontSize:12, padding:'6px 8px' }}
-              />
-            </div>
-            {matches.length === 0 && (
-              <div style={{ padding:'10px 12px', fontSize:12, color:C.textMuted }}>
-                No matching fields. Expand a related object below to search its fields.
-              </div>
-            )}
-            {matches.map(o => (
-              <button
-                key={o.value}
-                onClick={() => { onChange(o.value); setOpen(false) }}
-                style={{
-                  display:'block', width:'100%', textAlign:'left', padding:'7px 12px',
-                  background: o.value === value ? C.cardSecondary : 'transparent',
-                  border:'none', cursor:'pointer', fontSize:12, color:C.textPrimary,
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = C.cardSecondary}
-                onMouseLeave={e => e.currentTarget.style.background = o.value === value ? C.cardSecondary : 'transparent'}
-              >
-                {o.label}
-                <span style={{ color:C.textMuted, marginLeft:6, fontSize:11 }}>{o.secondary}</span>
-              </button>
-            ))}
-            {(catalog.related || []).length > 0 && (
-              <div style={{ borderTop:`1px solid ${C.border}`, padding:'8px 12px' }}>
-                <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:0.5, color:C.textMuted, marginBottom:6 }}>
-                  Related Objects
-                </div>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-                  {catalog.related.map(rel => (
-                    <button
-                      key={rel.fk_column}
-                      onClick={() => onExpandRelated?.([rel.fk_column], rel.table)}
-                      style={{ ...btnSecondary(false, 'small'), fontSize:11 }}
-                      title={`Load ${rel.table} fields`}
-                    >
-                      + {rel.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+      <AnchoredPopover
+        anchorRef={triggerRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        minWidth={340}
+        maxHeight={380}
+      >
+        <div>
+          <div style={{ padding:8, borderBottom:`1px solid ${C.border}`, position:'sticky', top:0, background:C.card }}>
+            <input
+              autoFocus
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search fields…"
+              style={{ ...inputStyle(), fontSize:12, padding:'6px 8px' }}
+            />
           </div>
-        </>
-      )}
+          {matches.length === 0 && (
+            <div style={{ padding:'10px 12px', fontSize:12, color:C.textMuted }}>
+              No matching fields. Expand a related object below to search its fields.
+            </div>
+          )}
+          {matches.map(o => (
+            <button
+              key={o.value}
+              onClick={() => { onChange(o.value); setOpen(false) }}
+              style={{
+                display:'block', width:'100%', textAlign:'left', padding:'7px 12px',
+                background: o.value === value ? C.cardSecondary : 'transparent',
+                border:'none', cursor:'pointer', fontSize:12, color:C.textPrimary,
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = C.cardSecondary}
+              onMouseLeave={e => e.currentTarget.style.background = o.value === value ? C.cardSecondary : 'transparent'}
+            >
+              {o.label}
+              <span style={{ color:C.textMuted, marginLeft:6, fontSize:11 }}>{o.secondary}</span>
+            </button>
+          ))}
+          {(catalog.related || []).length > 0 && (
+            <div style={{ borderTop:`1px solid ${C.border}`, padding:'8px 12px' }}>
+              <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:0.5, color:C.textMuted, marginBottom:6 }}>
+                Related Objects
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                {catalog.related.map(rel => (
+                  <button
+                    key={rel.fk_column}
+                    onClick={() => onExpandRelated?.([rel.fk_column], rel.table)}
+                    style={{ ...btnSecondary(false, 'small'), fontSize:11 }}
+                    title={`Load ${rel.table} fields`}
+                  >
+                    + {rel.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </AnchoredPopover>
     </div>
   )
 }

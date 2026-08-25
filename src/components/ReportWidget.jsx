@@ -15,6 +15,7 @@
 
 import { useState, useEffect } from 'react'
 import { runReport, getRowValue } from '../data/reportsService'
+import ReportRecordCellLink, { reportCellLink } from './ReportRecordCellLink'
 import { C } from '../data/constants'
 
 export function ReportWidget({ widget, parentTable, parentRecordId, onOpenRecord }) {
@@ -131,9 +132,14 @@ function ReportWidgetTable({ result, maxRows }) {
               <tr key={row.id || ri}>
                 {columns.map((c, ci) => {
                   const v = getRowValue(row, c, result)
+                  // Same rule as the report viewer: a cell that is a record
+                  // opens it, so a dashboard tile is a way in, not a dead end.
+                  const cellLink = reportCellLink(row, c, result.primaryObject, ci === 0)
                   return (
                     <td key={ci} style={{ padding:'6px 10px', whiteSpace:'nowrap', color:C.textPrimary, borderTop:`1px solid ${C.border}` }}>
-                      {formatWidgetCell(v)}
+                      {cellLink
+                        ? <ReportRecordCellLink link={cellLink} emphasis={ci === 0}>{formatWidgetCell(v)}</ReportRecordCellLink>
+                        : formatWidgetCell(v)}
                     </td>
                   )
                 })}
