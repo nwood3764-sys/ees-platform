@@ -230,7 +230,7 @@ export default function StatusPathWidget({ widget, parentRecordId, tableName, re
           marginTop: 10,
           padding: '8px 10px',
           background: '#f7f9fc',
-          borderLeft: `3px solid ${C.skyBlueSecondary || '#7eb3e8'}`,
+          borderLeft: `3px solid ${C.sky}`,
           borderRadius: 4,
           fontSize: 12,
           color: C.textSecondary,

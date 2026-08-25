@@ -1087,7 +1087,7 @@ function ComboWidget({ result, widget, canDrill, drillTo }) {
         name: cfg.measure2_label || 'Line', type: 'line',
         yAxisIndex: dual ? 1 : 0,
         data: names.map(n => secondByName.get(n) ?? 0),
-        lineStyle: { width: 2, color: C.navy || '#1e466b' },
+        lineStyle: { width: 2, color: C.navy },
         itemStyle: { color: '#1e466b', borderColor: '#ffffff', borderWidth: 2 },
         symbol: 'circle', symbolSize: 7,
       }] : []),

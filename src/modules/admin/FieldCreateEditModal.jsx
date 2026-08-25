@@ -467,7 +467,7 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
 
             {/* ── Formula configuration ── */}
             {isFormula && (
-              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14, background: C.pageAlt || '#f7f9fc' }}>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14, background: C.cardSecondary }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: C.textPrimary, marginBottom: 10 }}>Formula</div>
                 {field('Return Type',
                   <select value={formulaReturn} onChange={e => setFormulaReturn(e.target.value)} style={{ ...inputStyle, background: C.card }}>
@@ -520,7 +520,7 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
 
             {/* ── Rollup configuration ── */}
             {isRollup && (
-              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14, background: C.pageAlt || '#f7f9fc' }}>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14, background: C.cardSecondary }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: C.textPrimary, marginBottom: 10 }}>Roll-Up Summary</div>
                 {field('Child Records',
                   <select value={rollupChildKey} onChange={e => { setRollupChildKey(e.target.value); setRollupField('') }} style={{ ...inputStyle, background: C.card }}>
@@ -551,7 +551,7 @@ export default function FieldCreateEditModal({ mode, object, objectLabel, column
 
             {/* ── Inherited-field configuration ── */}
             {isInherited && (
-              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14, background: C.pageAlt || '#f7f9fc' }}>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14, background: C.cardSecondary }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>Inherit from a parent record</div>
                 <div style={{ fontSize: 10.5, color: C.textMuted, marginBottom: 10 }}>
                   Follow a relationship up to a base record and show one of its fields — read-only, never re-entered here. Edit the value on the base record.
