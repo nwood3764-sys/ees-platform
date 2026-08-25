@@ -22,7 +22,10 @@ import { guessPrefix } from './fieldMetadataService'
 import {
   LABELED_FK_TABLES, idColumnKind, isOpaqueIdColumn, stripTablePrefix,
   parentLookupNameField, isParentLookupNameField, parentLookupColumnOf,
+  qualifiedFieldLabel,
 } from '../lib/lookupColumnRules'
+// Re-exported so existing importers of the list service keep working.
+export { qualifiedFieldLabel } from '../lib/lookupColumnRules'
 
 // Columns we never surface in an auto-generated list (audit/system plumbing).
 const HIDDEN_SUFFIXES = [
@@ -180,6 +183,7 @@ function ownColumnDescriptor(c, group, ownerTable, idContext) {
   return base
 }
 
+
 // Strip a leading object prefix from a parent column for display under its
 // relationship group: properties' "property_city" shows as "City" under the
 // "Property" group, avoiding "Property › Property City".
@@ -280,7 +284,10 @@ export async function buildObjectColumns(table) {
 
   const out = []
   if (recordNumber) out.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup })
-  if (nameCol) out.push({ field: 'name', label: 'Name', type: 'text', group: objectGroup })
+  // "Name" on its own says nothing — a list showing an opportunity's name beside
+  // an account's name rendered two columns both headed NAME. The primary name
+  // column always names its object.
+  if (nameCol) out.push({ field: 'name', label: `${objectGroup} Name`, shortLabel: 'Name', type: 'text', group: objectGroup })
 
   let businessCount = 0
   for (const c of cols) {
@@ -326,7 +333,7 @@ export async function buildObjectColumnCatalog(table) {
   // used to carry locked:true, which pinned them to the left of every list AND
   // hid them from the filter sidebar's field picker.
   if (recordNumber) catalog.push({ field: 'id', label: 'Record #', type: 'text', group: objectGroup })
-  if (nameCol) catalog.push({ field: 'name', label: 'Name', type: 'text', group: objectGroup })
+  if (nameCol) catalog.push({ field: 'name', label: `${objectGroup} Name`, shortLabel: 'Name', type: 'text', group: objectGroup })
 
   // All own selectable columns (no cap).
   for (const c of cols) {
@@ -413,11 +420,15 @@ export async function buildObjectColumnCatalog(table) {
         valueSource = { kind: 'picklist', object: parentTable, field: pc.column_name, maybe: true }
       }
 
+      const relShortLabel = pc.references_table === 'users' && /_owner$/.test(pc.column_name)
+        ? 'Record Owner'
+        : titleize(stripParentPrefix(pc.column_name, parentTable))
       catalog.push({
         field: `${fk.column_name}${REL_DELIM}${baseField}`,
-        label: pc.references_table === 'users' && /_owner$/.test(pc.column_name)
-          ? 'Record Owner'
-          : titleize(stripParentPrefix(pc.column_name, parentTable)),
+        // Qualified for the header and the filter chip ("Property State"), bare
+        // for the picker, where the group heading already says "Property".
+        label: qualifiedFieldLabel(groupLabel, relShortLabel),
+        shortLabel: relShortLabel,
         type,
         linkType: linkTypeOf(pc),
         group: groupLabel,
@@ -436,7 +447,8 @@ export async function buildObjectColumnCatalog(table) {
     if (pIdentity.nameCol) {
       catalog.push({
         field: `${fk.column_name}${REL_DELIM}${pIdentity.nameCol}`,
-        label: 'Name',
+        label: qualifiedFieldLabel(groupLabel, 'Name'),
+        shortLabel: 'Name',
         type: 'text',
         group: groupLabel,
         related: { fkColumn: fk.column_name, parentTable, parentColumn: pIdentity.nameCol },
@@ -464,9 +476,13 @@ export async function buildObjectColumnCatalog(table) {
     // A referenced object with no name column has nothing to show but its id,
     // and an id is exactly what must never be offered as a filterable field.
     if (!grandName) continue
+    const lookupShortLabel = titleize(stripParentPrefix(d.parentColumn, d.parentTable).replace(/_id$/, ''))
     catalog.push({
       field: `${d.fkColumn}${REL_DELIM}${parentLookupNameField(d.parentColumn)}`,
-      label: titleize(stripParentPrefix(d.parentColumn, d.parentTable).replace(/_id$/, '')),
+      // "Property Management Company" — the object it hangs off, then the
+      // relationship. This is the name the field was always asked for by.
+      label: qualifiedFieldLabel(d.groupLabel, lookupShortLabel),
+      shortLabel: lookupShortLabel,
       type: 'text',
       group: d.groupLabel,
       // The value is a name on the grandparent object, so the filter typeahead

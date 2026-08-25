@@ -13,6 +13,7 @@ import {
   isIdColumn, idColumnKind, isOpaqueIdColumn, stripTablePrefix,
   defaultTablePrefix, parentLookupNameField, isParentLookupNameField,
   parentLookupColumnOf,
+  qualifiedFieldLabel,
 } from '../src/lib/lookupColumnRules.js'
 
 let failures = 0
@@ -93,6 +94,27 @@ check('and the underlying column is recoverable',
   parentLookupColumnOf('property_management_company_id__name'), 'property_management_company_id')
 check('recovering from a plain column returns it unchanged',
   parentLookupColumnOf('property_city'), 'property_city')
+
+// ── Field labels name their object ─────────────────────────────────────────
+// "Name" is not a field name: an opportunities list showing its own name beside
+// the account's name rendered two columns both headed NAME, and a filter chip
+// read "State: WI" without saying whose state.
+check('a related field is qualified by its relationship',
+  qualifiedFieldLabel('Property', 'State'), 'Property State')
+check('the parent name column says which object',
+  qualifiedFieldLabel('Account', 'Name'), 'Account Name')
+check('the field asked for by name comes out with that name',
+  qualifiedFieldLabel('Property', 'Management Company'), 'Property Management Company')
+check('a relationship group carrying its object in parentheses does not repeat it',
+  qualifiedFieldLabel('Managing Account (Account)', 'Name'), 'Managing Account Name')
+check('a label that already leads with the relationship does not stutter',
+  qualifiedFieldLabel('Property', 'Property Owner'), 'Property Owner')
+check('a label identical to the relationship stands alone',
+  qualifiedFieldLabel('Account', 'Account'), 'Account')
+check('no group leaves the label untouched', qualifiedFieldLabel('', 'State'), 'State')
+check('no label leaves the relationship', qualifiedFieldLabel('Property', ''), 'Property')
+check('matching is case-insensitive, and the authored casing wins',
+  qualifiedFieldLabel('Property', 'property state'), 'property state')
 
 console.log(`\n${checks - failures}/${checks} checks passed`)
 if (failures > 0) { console.error(`${failures} failing`); process.exit(1) }
