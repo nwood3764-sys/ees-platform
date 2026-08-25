@@ -154,34 +154,60 @@ export function stepEvidenceInSelection(photos) {
 }
 
 /**
- * The tag options a person may CHOOSE, given the picklist and the photos being
- * tagged. Two rules, both about not silently destroying evidence:
+ * The tags a person may choose, in GROUPS, because a photo's vocabulary comes
+ * from two different places and merging them into one list hides the useful
+ * half (Nicholas, 2026-08-24: "why aren't all my tags coming up here?" — the
+ * picker was offering ten generic tags while the work order's own work plan
+ * defined fourteen photo prompts that never appeared).
  *
- *   - The picklist values are always offered, in the admin's order.
- *   - Tags already on the selection that the picklist does not contain (a work
- *     step template's named prompts) are offered too, so re-tagging a batch
- *     back to a step's own prompt stays possible without an admin adding every
- *     template field name to the picklist.
+ *   This work order   the photo prompts its work plan asks for — "Roofs",
+ *                     "Windows", "Service Hot Water Systems". Per-job, so it
+ *                     cannot live in a global picklist, and it is what makes
+ *                     a loose photo line up with the step it documents.
+ *   All work orders   the `photos` / `photo_type` picklist — generic tags that
+ *                     apply to any job, managed in Setup.
+ *   Already in use    tags on the photos being tagged that neither list holds,
+ *                     so re-tagging back to one stays possible.
  *
- * `UNTAGGED` is never in the list — clearing is a separate action, so it can
- * read as "Remove tag" rather than sit among the real choices.
+ * Groups with nothing in them are omitted rather than rendered as an empty
+ * heading. `UNTAGGED` is never a choice — clearing is its own action.
  */
-export function buildTagChoices(picklistOptions, photos, labels) {
-  const out = []
+export function buildTagChoices({ prompts, picklist, photos, labels } = {}) {
   const seen = new Set()
-  for (const o of picklistOptions || []) {
-    const value = String(o?.value ?? '').trim()
-    if (!value || seen.has(value.toLowerCase())) continue
-    seen.add(value.toLowerCase())
-    out.push({ value, label: o.label || value, source: 'picklist' })
+  const take = (list, source) => {
+    const out = []
+    for (const o of list || []) {
+      const value = String(o?.value ?? '').trim()
+      if (!value || value === UNTAGGED || seen.has(value.toLowerCase())) continue
+      seen.add(value.toLowerCase())
+      out.push({ value, label: o.label || value, source })
+    }
+    return out
   }
+
+  const groups = []
+  // Job-specific first: on an assessment it is the answer nine times in ten.
+  const jobTags = take(prompts, 'work-plan')
+  if (jobTags.length) groups.push({ id: 'work-plan', title: 'This work order asks for', choices: jobTags })
+
+  const generic = take(picklist, 'picklist')
+  if (generic.length) groups.push({ id: 'picklist', title: 'General tags', choices: generic })
+
+  const inUse = []
   for (const p of photos || []) {
     const value = String(p?.photo_type ?? '').trim()
     if (!value || value === UNTAGGED || seen.has(value.toLowerCase())) continue
     seen.add(value.toLowerCase())
-    out.push({ value, label: photoTagLabel(p, labels), source: 'in-use' })
+    inUse.push({ value, label: photoTagLabel(p, labels), source: 'in-use' })
   }
-  return out
+  if (inUse.length) groups.push({ id: 'in-use', title: 'Already on these photos', choices: inUse })
+
+  return groups
+}
+
+/** Flatten grouped choices — used where only the values matter. */
+export function flattenTagChoices(groups) {
+  return (groups || []).flatMap(g => g.choices || [])
 }
 
 /** The step a photo filters under. */

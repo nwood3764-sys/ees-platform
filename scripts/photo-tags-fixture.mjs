@@ -27,6 +27,7 @@ import {
   tagIsStepEvidence,
   stepEvidenceInSelection,
   buildTagChoices,
+  flattenTagChoices,
 } from '../src/lib/photoTags.js'
 
 let failures = 0
@@ -203,25 +204,47 @@ const PICKLIST = [
   { value: 'Damage or Deficiency', label: 'Damage or Deficiency' },
 ]
 
-check('the picklist is offered in the admin\'s order',
-  buildTagChoices(PICKLIST, []).map(c => c.value),
-  ['Before', 'Damage or Deficiency'])
+const G = (o) => buildTagChoices(o).map(g => [g.id, g.choices.map(c => c.value)])
 
-// A step's own prompts are not in the picklist, so without this a batch that
-// included one could never be put back to it.
+check('with only a picklist, one group of general tags',
+  G({ picklist: PICKLIST }), [['picklist', ['Before', 'Damage or Deficiency']]])
+
+// The gap Nicholas hit: a work order whose work plan defines its own photo
+// prompts was offered ten generic tags and none of the fourteen that matched
+// what was actually walked.
+const PROMPTS = [
+  { value: 'roof_photo', label: 'Roofs' },
+  { value: 'window_photo', label: 'Windows' },
+]
+check("the job's own prompts come first, then the general tags",
+  G({ prompts: PROMPTS, picklist: PICKLIST }),
+  [['work-plan', ['roof_photo', 'window_photo']],
+   ['picklist', ['Before', 'Damage or Deficiency']]])
+
+// A step's prompts are not in the picklist, so without the in-use group a
+// batch that included one could never be put back to it.
 const stepShot = [{ id: 'p1', _work_step_id: 's1', photo_type: 'kitchen_overall_photo' }]
-check('a tag already in use is offered alongside the picklist',
-  buildTagChoices(PICKLIST, stepShot).map(c => c.value),
-  ['Before', 'Damage or Deficiency', 'kitchen_overall_photo'])
-check('an in-use tag is marked as such, not passed off as a configured one',
-  buildTagChoices(PICKLIST, stepShot).find(c => c.value === 'kitchen_overall_photo').source,
-  'in-use')
+check('a tag already in use is offered when neither list holds it',
+  G({ picklist: PICKLIST, photos: stepShot }),
+  [['picklist', ['Before', 'Damage or Deficiency']],
+   ['in-use', ['kitchen_overall_photo']]])
+check('a tag the work plan already offers is not repeated as in-use',
+  G({ prompts: [{ value: 'kitchen_overall_photo', label: 'Kitchen Overall Photo' }],
+      picklist: PICKLIST, photos: stepShot }),
+  [['work-plan', ['kitchen_overall_photo']],
+   ['picklist', ['Before', 'Damage or Deficiency']]])
+check('an empty group is omitted, not rendered as a bare heading',
+  G({ prompts: [], picklist: PICKLIST, photos: [] }),
+  [['picklist', ['Before', 'Damage or Deficiency']]])
 check('the untagged value is never offered as a choice',
-  buildTagChoices(PICKLIST, [{ id: 'p2', photo_type: UNTAGGED }]).map(c => c.value),
-  ['Before', 'Damage or Deficiency'])
-check('a tag matching the picklist case-insensitively is not offered twice',
-  buildTagChoices(PICKLIST, [{ id: 'p3', _work_step_id: 's1', photo_type: 'before' }]).map(c => c.value),
-  ['Before', 'Damage or Deficiency'])
+  G({ picklist: PICKLIST, photos: [{ id: 'p2', photo_type: UNTAGGED }] }),
+  [['picklist', ['Before', 'Damage or Deficiency']]])
+check('a tag matching case-insensitively is not offered twice',
+  G({ picklist: PICKLIST, photos: [{ id: 'p3', _work_step_id: 's1', photo_type: 'before' }] }),
+  [['picklist', ['Before', 'Damage or Deficiency']]])
+check('flattening gives every choice across the groups',
+  flattenTagChoices(buildTagChoices({ prompts: PROMPTS, picklist: PICKLIST })).map(c => c.value),
+  ['roof_photo', 'window_photo', 'Before', 'Damage or Deficiency'])
 
 // The warning: the DB counts step photos by tag to decide whether a step can
 // be completed, so re-tagging one is not a cosmetic edit.

@@ -7,6 +7,7 @@ import {
   UNTAGGED,
   buildStepFilterOptions,
   buildTagChoices,
+  flattenTagChoices,
   buildTagFilterOptions,
   stepEvidenceInSelection,
   filterGalleryPhotos,
@@ -27,6 +28,7 @@ import {
   reprocessPhoto,
   repairUnrenderedPhotos,
   fetchPhotoTagOptions,
+  fetchWorkStepPhotoPrompts,
   setPhotoTag,
   uploadDocument,
   listDocuments,
@@ -435,6 +437,7 @@ export default function FileGalleryWidget({
   const [reportBusy, setReportBusy] = useState(false)
   const [tagPicker, setTagPicker] = useState(null)   // {photos} while choosing a tag
   const [tagVocabulary, setTagVocabulary] = useState([]) // picklist: photos / photo_type
+  const [tagPrompts, setTagPrompts] = useState([])       // this work order's own photo prompts
   const [tagBusy, setTagBusy] = useState(null)       // {done,total} while applying
   const selectedPhotos = useMemo(
     () => visiblePhotos.filter(p => selectedIds.has(p.id)),
@@ -495,8 +498,15 @@ export default function FileGalleryWidget({
     fetchPhotoTagOptions()
       .then(opts => { if (!cancelled) setTagVocabulary(opts) })
       .catch(() => {})
+    // The work order's OWN prompts — the vocabulary that matches what was
+    // actually walked. Without these the picker offers only generic tags.
+    if (parentTable === 'work_orders' && parentRecordId) {
+      fetchWorkStepPhotoPrompts(parentRecordId)
+        .then(list => { if (!cancelled) setTagPrompts(list) })
+        .catch(() => {})
+    }
     return () => { cancelled = true }
-  }, [target])
+  }, [target, parentTable, parentRecordId])
 
   // Photos with no displayable image — a HEIC capture whose rendition and
   // watermark were never produced. These are the tiles that used to render as
@@ -1003,6 +1013,7 @@ export default function FileGalleryWidget({
           startIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
           onIndexChange={setLightboxIdx}
+          onTag={(p) => setTagPicker({ photos: [p] })}
           onToggleReport={handleToggleReport}
         />
       )}
@@ -1022,6 +1033,7 @@ export default function FileGalleryWidget({
         <PhotoTagPickerModal
           photos={tagPicker.photos}
           vocabulary={tagVocabulary}
+          prompts={tagPrompts}
           busy={tagBusy}
           onApply={handleApplyTag}
           onCancel={() => { if (!tagBusy) setTagPicker(null) }}
@@ -1967,7 +1979,7 @@ function formatBytes(n) {
 // Lightbox
 // ---------------------------------------------------------------------------
 
-function Lightbox({ photos, startIndex, onClose, onIndexChange, onToggleReport }) {
+function Lightbox({ photos, startIndex, onClose, onIndexChange, onToggleReport, onTag }) {
   const [idx, setIdx] = useState(startIndex)
   // Keep parent in sync so it can close the lightbox if the photo is deleted.
   useEffect(() => { onIndexChange(idx) }, [idx, onIndexChange])
@@ -2056,6 +2068,29 @@ function Lightbox({ photos, startIndex, onClose, onIndexChange, onToggleReport }
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Tag, on the photo itself. Bulk tagging lives behind Select, which
+              is the right home for a batch but not for the moment a person is
+              looking at one picture thinking "this is the water heater"
+              (Nicholas, 2026-08-24: "I still don't know how to tag photos"). */}
+          {onTag && (
+            <button
+              onClick={() => onTag(photo)}
+              title="Say what this photo shows"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                height: 36, padding: '0 14px', borderRadius: 18,
+                background: 'rgba(255,255,255,0.1)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+            >
+              <Icon path="M20.6 13.4L12 4.8V2H4v8h2.8l8.6 8.6a2 2 0 002.8 0l2.4-2.4a2 2 0 000-2.8z M7 7h.01"
+                size={14} color="#fff" />
+              {isMeaningfulTag(photo.photo_type)
+                ? photoTagLabel(photo)
+                : 'Add tag'}
+            </button>
+          )}
           {onToggleReport && (
             <button
               onClick={() => onToggleReport(photo)}
@@ -2834,9 +2869,12 @@ function WordPreview({ doc }) {
 //     possible, so the warning names what is affected instead of blocking.
 //   - It says the watermark is being redrawn. The tag is printed onto the face
 //     of the evidence copy, so tagging is not a metadata-only edit.
-function PhotoTagPickerModal({ photos, vocabulary, busy, onApply, onCancel }) {
+function PhotoTagPickerModal({ photos, vocabulary, prompts, busy, onApply, onCancel }) {
   const count = photos.length
-  const choices = useMemo(() => buildTagChoices(vocabulary, photos), [vocabulary, photos])
+  const groups = useMemo(
+    () => buildTagChoices({ prompts, picklist: vocabulary, photos }),
+    [prompts, vocabulary, photos])
+  const choices = useMemo(() => flattenTagChoices(groups), [groups])
   const stepEvidence = useMemo(() => stepEvidenceInSelection(photos), [photos])
   // Every photo already carrying the same tag → show it as the current value.
   const currentTag = useMemo(() => {
@@ -2889,36 +2927,40 @@ function PhotoTagPickerModal({ photos, vocabulary, busy, onApply, onCancel }) {
               No photo tags are configured. An administrator adds them at
               Setup → Picklists, on <strong>photos / photo_type</strong>.
             </div>
-          ) : choices.map(c => {
-            const isCurrent = currentTag && currentTag.toLowerCase() === c.value.toLowerCase()
-            return (
-              <button
-                key={c.value}
-                onClick={() => onApply(c.value)}
-                disabled={!!busy}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  padding: '9px 12px', marginBottom: 2,
-                  border: `1px solid ${isCurrent ? C.emerald : 'transparent'}`,
-                  background: isCurrent ? '#e8f8f2' : 'transparent',
-                  borderRadius: 6, cursor: busy ? 'default' : 'pointer',
-                  fontSize: 13, color: C.textPrimary, fontWeight: isCurrent ? 600 : 500,
-                }}
-              >
-                {c.label}
-                {c.source === 'in-use' && (
-                  <span style={{ fontSize: 10.5, color: C.textMuted, marginLeft: 8 }}>
-                    already in use
-                  </span>
-                )}
-                {isCurrent && (
-                  <span style={{ fontSize: 10.5, color: C.emeraldMid, marginLeft: 8 }}>
-                    current
-                  </span>
-                )}
-              </button>
-            )
-          })}
+          ) : groups.map(g => (
+            <div key={g.id} style={{ marginBottom: 6 }}>
+              <div style={{
+                fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5,
+                textTransform: 'uppercase', color: C.textMuted,
+                padding: '8px 12px 4px',
+              }}>{g.title}</div>
+              {g.choices.map(c => {
+                const isCurrent = currentTag && currentTag.toLowerCase() === c.value.toLowerCase()
+                return (
+                  <button
+                    key={c.value}
+                    onClick={() => onApply(c.value)}
+                    disabled={!!busy}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      padding: '9px 12px', marginBottom: 2,
+                      border: `1px solid ${isCurrent ? C.emerald : 'transparent'}`,
+                      background: isCurrent ? '#e8f8f2' : 'transparent',
+                      borderRadius: 6, cursor: busy ? 'default' : 'pointer',
+                      fontSize: 13, color: C.textPrimary, fontWeight: isCurrent ? 600 : 500,
+                    }}
+                  >
+                    {c.label}
+                    {isCurrent && (
+                      <span style={{ fontSize: 10.5, color: C.emeraldMid, marginLeft: 8 }}>
+                        current
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </div>
 
         <div style={{

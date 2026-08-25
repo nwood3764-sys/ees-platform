@@ -689,6 +689,52 @@ export async function fetchPhotoTagOptions() {
 }
 
 /**
+ * The photo prompts this work order's own work plan asks for — "Roofs",
+ * "Windows", "Service Hot Water Systems" — read from the work step templates
+ * behind its steps.
+ *
+ * This is the vocabulary that actually matters on an assessment, and it is
+ * per-job: a Multifamily Energy Assessment asks for different shots than an
+ * insulation removal. It cannot live in the global picklist for that reason,
+ * which is why the tag picker reads both.
+ *
+ * Returns [] on any failure — a tag picker missing a group is worse than one
+ * that throws, but only slightly, and the generic tags still work.
+ */
+export async function fetchWorkStepPhotoPrompts(workOrderId) {
+  if (!workOrderId) return []
+  const { data: steps, error: stepErr } = await supabase
+    .from('work_steps')
+    .select('work_step_template_id')
+    .eq('work_order_id', workOrderId)
+    .eq('is_deleted', false)
+  if (stepErr) return []
+  const templateIds = Array.from(new Set(
+    (steps || []).map(s => s.work_step_template_id).filter(Boolean)
+  ))
+  if (templateIds.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('work_step_template_fields')
+    .select('wstf_field_name, wstf_field_label, wstf_sort_order, work_step_template_id')
+    .in('work_step_template_id', templateIds)
+    .eq('wstf_field_type', 'photo')
+    .eq('wstf_is_deleted', false)
+    .order('wstf_sort_order', { ascending: true })
+  if (error) return []
+
+  const seen = new Set()
+  const out = []
+  for (const row of data || []) {
+    const value = String(row.wstf_field_name || '').trim()
+    if (!value || seen.has(value.toLowerCase())) continue
+    seen.add(value.toLowerCase())
+    out.push({ value, label: row.wstf_field_label || value })
+  }
+  return out
+}
+
+/**
  * Apply a tag to photos — or clear it, by passing null.
  *
  * Re-watermarking is part of the operation, not an afterthought. process-photo
@@ -716,10 +762,10 @@ export async function setPhotoTag(photoIds, tag, { onProgress } = {}) {
   let tagged = 0
   let failed = 0
   for (let i = 0; i < ids.length; i++) {
-    const { error: invErr } = await supabase.functions
-      .invoke('process-photo', { body: { photo_id: ids[i] } })
-    if (invErr) failed++
-    else tagged++
+    // reprocessPhoto, not a raw invoke: it builds the device-side rendition
+    // when one is missing, so tagging a HEIC that has never been rendered
+    // renders it as well as re-stamping it.
+    try { await reprocessPhoto(ids[i]); tagged++ } catch { failed++ }
     if (onProgress) onProgress({ done: i + 1, total: ids.length, tagged, failed })
   }
   return { tagged, failed }
