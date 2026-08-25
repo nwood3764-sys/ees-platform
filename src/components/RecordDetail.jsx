@@ -68,11 +68,13 @@ import { getSectionFilterSchema } from '../data/sectionFilterSchemas'
 import { MERGE_FIELD_OBJECTS, loadFieldsForObject } from '../data/mergeFieldCatalog'
 import { resolveLookupLabel, getEditableFieldsForTable } from '../data/fieldMetadataService'
 import { isSystemAuditField, isSystemAuditColumn, fieldRenderKey } from '../lib/systemAuditFields'
+import { slotTypesOnLayout, missingRequiredDocuments } from '../lib/documentSlots'
 import {
   uploadDocumentTemplateAsset,
   signedDocumentTemplateAssetUrl,
   copyDocumentTemplateAsset,
   uploadAvatar,
+  listDocuments,
 } from '../data/storageService'
 import {
   loadRecordDetailData,
@@ -8008,7 +8010,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // that drive them (Property / Building / Opportunity / contractor account) ARE
   // checked — an unset parent means the inherited values won't resolve either.
   // Booleans are treated as answered (false is a valid answer).
-  const handleVerifyFields = useCallback(() => {
+  const handleVerifyFields = useCallback(async () => {
     const rec = data?.record || {}
     const sections = data?.sections || []
     const isEmpty = (v) =>
@@ -8023,17 +8025,43 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         }
       }
     }
-    if (typeof window === 'undefined') return
-    if (missing.length === 0) {
-      window.alert('Verify Fields: every field is complete. The forms are ready to export.')
-    } else {
-      window.alert(
-        `Verify Fields — ${missing.length} field${missing.length === 1 ? '' : 's'} still ` +
-        `need${missing.length === 1 ? 's' : ''} attention before export:\n\n• ` +
-        missing.join('\n• ')
-      )
+    // A required DOCUMENT is as much a reason the submittal isn't ready as an
+    // empty field is — the layout declares both, so Verify Fields checks both.
+    // Read failure is reported rather than swallowed: silently claiming the
+    // documents are fine would be worse than saying we couldn't look.
+    let missingDocs = []
+    let docCheckError = null
+    const galleries = sections.flatMap(sec => sec.widgets || [])
+    try {
+      if (recordId) {
+        const docs = await listDocuments(tableName, recordId)
+        missingDocs = missingRequiredDocuments(galleries, docs)
+      }
+    } catch (err) {
+      docCheckError = err?.message || String(err)
     }
-  }, [data])
+
+    if (typeof window === 'undefined') return
+    const parts = []
+    if (missing.length > 0) {
+      parts.push(
+        `${missing.length} field${missing.length === 1 ? '' : 's'} still ` +
+        `need${missing.length === 1 ? 's' : ''} attention:\n• ` + missing.join('\n• '))
+    }
+    if (missingDocs.length > 0) {
+      parts.push(
+        `${missingDocs.length} required document${missingDocs.length === 1 ? '' : 's'} ` +
+        `not yet uploaded:\n• ` + missingDocs.map(d => d.label).join('\n• '))
+    }
+    if (docCheckError) {
+      parts.push(`Required documents could not be checked — ${docCheckError}`)
+    }
+    if (parts.length === 0) {
+      window.alert('Verify Fields: every field is complete and every required document is attached. The forms are ready to export.')
+    } else {
+      window.alert(`Verify Fields\n\n${parts.join('\n\n')}`)
+    }
+  }, [data, tableName, recordId])
 
   // Deep clone for any lifecycle template (PRT / ET / DT) — calls the
   // table-specific clone RPC from TEMPLATE_LIFECYCLES, which atomically
@@ -8794,6 +8822,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Related second (if any section has related_list widgets), Activity third
   // (not on new records — nothing to show yet), alphabetical after.
   const orderedTabs = buildOrderedTabs(sections, { includeActivity: !isInsertMode })
+
+  // Every document type a file-gallery SLOT on this layout claims. A catch-all
+  // gallery leaves those files to their own slot instead of listing them a
+  // second time on the same page. See src/lib/documentSlots.js.
+  const claimedSlotTypes = useMemo(
+    () => slotTypesOnLayout((sections || []).flatMap(sec => sec.widgets || [])),
+    [sections],
+  )
 
   const objectLabel = TABLE_META[tableName]?.label || humanizeObjectLabel(tableName)
   // Header values driven from TABLE_META so adding a new object only requires
@@ -9582,7 +9618,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                     )
                   }
                   if (w.widget_type === 'file_gallery') {
-                    return <FileGalleryWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId} />
+                    return <FileGalleryWidget key={w.id} widget={w} parentTable={tableName} parentRecordId={recordId}
+                              claimedSlotTypes={claimedSlotTypes} />
                   }
                   if (w.widget_type === 'work_plan') {
                     return (
@@ -9752,6 +9789,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
                             widget={w}
                             parentTable={tableName}
                             parentRecordId={recordId}
+                            claimedSlotTypes={claimedSlotTypes}
                           />
                         ))}
                       {(sec.widgets || [])

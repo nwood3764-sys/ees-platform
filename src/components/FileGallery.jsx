@@ -48,6 +48,12 @@ import {
   pruneSelectedIds,
   uniqueEntryName,
 } from '../lib/documentDownloads'
+import {
+  documentSlotType,
+  isRequiredDocumentSlot,
+  documentSlotHelpText,
+  filterSlotDocuments,
+} from '../lib/documentSlots'
 
 // ---------------------------------------------------------------------------
 // FileGallery — Salesforce-style related-list card for photos and documents.
@@ -211,10 +217,21 @@ async function downloadDocumentsZip(documents, zipName) {
 }
 
 export default function FileGalleryWidget({
-  widget, parentTable, parentRecordId,
+  widget, parentTable, parentRecordId, claimedSlotTypes,
 }) {
   const config = widget.widget_config || {}
   const target = config.target === 'documents' ? 'documents' : 'photos'
+  // Document slots: a gallery naming a `document_type` shows only that kind of
+  // file; a catch-all shows everything no sibling slot on the layout claims.
+  // See src/lib/documentSlots.js — before 2026-08-25 nothing filtered, so every
+  // typed slot on a layout rendered the identical full document list.
+  const slotType    = documentSlotType(config)
+  const slotHelp    = documentSlotHelpText(config)
+  const slotRequired = isRequiredDocumentSlot(config)
+  // The claimed-type set comes down as a fresh value on every parent render, so
+  // reduce it to a stable string first — a Set in a hook dependency list would
+  // re-run the loader forever.
+  const claimedKey  = [...(claimedSlotTypes || [])].sort().join('|')
   // Work-order photo galleries aggregate across every step of the work order,
   // tagging each photo with its work step. Active only on a work_orders record
   // with no specific step pinned in config (a step-scoped widget keeps the
@@ -255,6 +272,11 @@ export default function FileGalleryWidget({
   const [downloading, setDownloading] = useState(false)
   const [showReportOnly, setShowReportOnly] = useState(false) // filter to report-flagged photos
 
+  const claimedList = useMemo(
+    () => (claimedKey ? claimedKey.split('|') : []),
+    [claimedKey],
+  )
+
   // Photos-only: detect a misconfigured widget (e.g. on a property) so we
   // can show a clear message instead of letting the user click Upload and
   // see an opaque error. Documents have no such restriction.
@@ -282,7 +304,10 @@ export default function FileGalleryWidget({
         const hydrated = await hydratePhotoUrls(rows)
         setItems(hydrated)
       } else {
-        const rows = await listDocuments(parentTable, parentRecordId)
+        const all = await listDocuments(parentTable, parentRecordId)
+        // Filter BEFORE hydrating: signing a URL costs a round trip, and a slot
+        // has no use for the rows belonging to other slots.
+        const rows = filterSlotDocuments(all, config, claimedList)
         const hydrated = await hydrateDocumentUrls(rows)
         setItems(hydrated)
       }
@@ -292,7 +317,9 @@ export default function FileGalleryWidget({
       setLoading(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentTable, parentRecordId, target, config.work_step_id, isWorkOrderPhotoGallery])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parentTable, parentRecordId, target, config.work_step_id, isWorkOrderPhotoGallery,
+      slotType, claimedList])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -827,6 +854,17 @@ export default function FileGalleryWidget({
             }}>
               {loading ? '…' : items.length}
             </span>
+            {slotRequired && !loading && (
+              <span style={{
+                background: items.length > 0 ? '#e8f8f2' : '#e8f3fb',
+                color:      items.length > 0 ? '#1a7a4e' : '#1a5a8a',
+                fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em',
+                padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
+                whiteSpace: 'nowrap',
+              }}>
+                {items.length > 0 ? 'Attached' : 'Required'}
+              </span>
+            )}
             {uploading > 0 && (
               <span style={{ fontSize: 11, color: C.textMuted, fontStyle: 'italic' }}>
                 Uploading {uploading}…
@@ -861,6 +899,16 @@ export default function FileGalleryWidget({
         {/* Body */}
         {!collapsed && (
           <div style={{ padding: isMobile ? 12 : 14 }}>
+            {slotHelp && (
+              <div style={{
+                fontSize: 12, lineHeight: 1.5, color: C.textSecondary,
+                background: '#f7f9fc',   // design-system card secondary
+                border: `1px solid ${C.border}`, borderRadius: 6,
+                padding: '8px 10px', marginBottom: 12,
+              }}>
+                {slotHelp}
+              </div>
+            )}
             {photoLockoutMessage ? (
               <LockoutNotice message={photoLockoutMessage} />
             ) : loading ? (
@@ -870,6 +918,18 @@ export default function FileGalleryWidget({
             ) : items.length === 0 ? (
               <EmptyState
                 target={target}
+                message={
+                  slotRequired
+                    ? 'Required — nothing uploaded yet.'
+                    : slotType
+                      ? 'Nothing of this kind uploaded yet.'
+                      : claimedList.length > 0
+                        // A catch-all whose every file is claimed by a slot on
+                        // this layout: say so, rather than reading as "there are
+                        // no documents on this record" when there plainly are.
+                        ? 'No other documents on this record — everything uploaded so far is filed above.'
+                        : null
+                }
                 onPick={() => fileInputRef.current?.click()}
                 onCamera={target === 'photos' && isMobile
                   ? () => cameraInputRef.current?.click()
@@ -1124,7 +1184,7 @@ function ErrorNotice({ message, onRetry }) {
   )
 }
 
-function EmptyState({ target, onPick, onCamera }) {
+function EmptyState({ target, onPick, onCamera, message }) {
   return (
     <div style={{
       padding: '28px 16px',
@@ -1133,7 +1193,7 @@ function EmptyState({ target, onPick, onCamera }) {
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
     }}>
       <div style={{ fontSize: 13 }}>
-        No {target === 'photos' ? 'photos' : 'documents'} on this record yet.
+        {message || `No ${target === 'photos' ? 'photos' : 'documents'} on this record yet.`}
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
         {onCamera && (
