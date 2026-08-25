@@ -40,7 +40,7 @@ import {
   freshDocumentUrlsBatch,
 } from '../data/storageService'
 import { isSignedUrlUsable } from '../lib/signedUrlExpiry'
-import { unrepairableIds, allowRetry } from '../lib/photoRepairQueue'
+import { isImageFile, fileTypeLabel } from '../lib/fileKinds'
 import { usePhotoRepair } from '../lib/usePhotoRepair'
 import {
   documentFileName,
@@ -515,14 +515,6 @@ export default function FileGalleryWidget({
     () => (target === 'photos' ? items.filter(p => !p._thumbUrl && p.storage_path_original) : []),
     [items, target]
   )
-  // The ones this session already tried and could not render. Only these are
-  // ever surfaced as something a person might act on; everything else is
-  // either already rendered or being rendered right now.
-  const stuckPhotoIds = useMemo(
-    () => (target === 'photos' ? unrepairableIds(items) : []),
-    [items, target]
-  )
-
   // ── Upload handlers ─────────────────────────────────────────────────
   const handleFiles = useCallback(async (fileList) => {
     if (!fileList || fileList.length === 0) return
@@ -531,6 +523,7 @@ export default function FileGalleryWidget({
       return
     }
     const files = Array.from(fileList)
+    const misfiled = []   // non-images filed as documents instead
     let successCount = 0
     let failCount = 0
     setUploading(c => c + files.length)
@@ -540,7 +533,23 @@ export default function FileGalleryWidget({
       // real-world uploads are 1-3 files at a time.
       for (const file of files) {
         try {
-          if (target === 'photos') {
+          // A PDF floor plan, a DWG, a spreadsheet — these are documents that
+          // happened to be dropped on the Photos card. Taking them as photos
+          // produced a tile that could never show anything (Nicholas,
+          // 2026-08-24). They are filed as documents on the SAME record
+          // instead: documentation is never blocked, it just lands in the
+          // right place, and the work step already has a Documents card.
+          if (target === 'photos' && !isImageFile(file.name, file.type)) {
+            await uploadDocument({
+              file,
+              relatedObject: parentTable,
+              relatedId: parentRecordId,
+              documentType: config.document_type || 'attachment',
+              category: config.category || null,
+              programId: config.program_id || null,
+            })
+            misfiled.push({ name: file.name, kind: fileTypeLabel(file.name, file.type) })
+          } else if (target === 'photos') {
             await uploadPhoto({
               file,
               relatedObject: parentTable,
@@ -576,11 +585,24 @@ export default function FileGalleryWidget({
       setUploading(c => Math.max(0, c - files.length))
     }
     if (successCount > 0) {
-      toast.success(
-        files.length === 1
-          ? `Uploaded ${files[0].name}`
-          : `Uploaded ${successCount} of ${files.length} files`
-      )
+      if (misfiled.length === successCount) {
+        // Everything dropped was a document. Say where it went — silently
+        // filing it elsewhere would look like the upload vanished.
+        toast.success(misfiled.length === 1
+          ? `${misfiled[0].name} is a ${misfiled[0].kind}, not a photo — filed under Documents`
+          : `${misfiled.length} files were documents, not photos — filed under Documents`)
+      } else if (misfiled.length > 0) {
+        toast.success(`Uploaded ${successCount - misfiled.length} photo${successCount - misfiled.length === 1 ? '' : 's'}`)
+        toast.success(misfiled.length === 1
+          ? `${misfiled[0].name} is a ${misfiled[0].kind} — filed under Documents`
+          : `${misfiled.length} of them were documents — filed under Documents`)
+      } else {
+        toast.success(
+          files.length === 1
+            ? `Uploaded ${files[0].name}`
+            : `Uploaded ${successCount} of ${files.length} files`
+        )
+      }
       await refresh()
     } else if (failCount > 0) {
       // Errors already toasted per-file above; nothing to add.
@@ -715,14 +737,6 @@ export default function FileGalleryWidget({
     onRepaired: refresh,
     recordKey: `${parentTable}:${parentRecordId}:${config?.work_step_id || ''}`,
   })
-
-  // A person explicitly asking for another go is not the loop the attempt
-  // registry guards against, so retrying clears those photos' records and lets
-  // the hook pick them up again.
-  const handleRetryUnrepairable = useCallback(() => {
-    allowRetry(stuckPhotoIds)
-    setItems(prev => [...prev])
-  }, [stuckPhotoIds])
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
@@ -910,40 +924,22 @@ export default function FileGalleryWidget({
                     the card says what is wrong and fixes it in place. The
                     decode runs in this tab, which is precisely why the server
                     could not do it. */}
-                {(repairBusy || stuckPhotoIds.length > 0) && !selectMode && (
+                {/* Progress only. A photo that could not be rendered says so
+                    on its own tile with the format it is; there is no button
+                    here asking anyone to run it again. */}
+                {repairBusy && !selectMode && (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
                     margin: '0 0 10px', padding: '9px 12px',
                     background: '#eef4fb', border: `1px solid ${C.sky}`,
                     borderRadius: 6, fontSize: 12.5, color: C.textSecondary,
                   }}>
-                    <Icon path="M12 9v4 M12 17h.01 M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"
+                    <Icon path="M3 7h2l2-3h10l2 3h2v12H3V7z M12 11a4 4 0 100 8 4 4 0 000-8z"
                       size={14} color="#2a5a8a" />
-                    {repairBusy ? (
-                      <span style={{ flex: 1, minWidth: 200 }}>
-                        Rendering {repairBusy.done} of {repairBusy.total} photo{repairBusy.total === 1 ? '' : 's'}
-                        {' '}— they will appear as each one finishes.
-                      </span>
-                    ) : (
-                      <>
-                        <span style={{ flex: 1, minWidth: 200 }}>
-                          {stuckPhotoIds.length} photo{stuckPhotoIds.length === 1 ? '' : 's'}
-                          {' '}could not be rendered. The capture{stuckPhotoIds.length === 1 ? ' is' : 's are'} safe
-                          {' '}— download{stuckPhotoIds.length === 1 ? 's' : ''} still work
-                          {stuckPhotoIds.length === 1 ? 's' : ''}.
-                        </span>
-                        <button
-                          onClick={handleRetryUnrepairable}
-                          style={{
-                            padding: '5px 11px', borderRadius: 5,
-                            border: `1px solid ${C.emeraldMid}`,
-                            background: C.emerald, color: '#fff',
-                            fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >Try again</button>
-                      </>
-                    )}
+                    <span style={{ flex: 1, minWidth: 200 }}>
+                      Rendering {repairBusy.done} of {repairBusy.total} photo{repairBusy.total === 1 ? '' : 's'}
+                      {' '}— they will appear as each one finishes.
+                    </span>
                   </div>
                 )}
                 {visiblePhotos.length === 0 ? (
@@ -1549,6 +1545,9 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
   // `rendering` comes from the live repair pass, NOT from a mutated row: the
   // pass writing into `items` is exactly what made it cancel itself.
   const working = rendering || status === 'pending' || status === 'processing'
+  const source = photo.storage_path_original || photo.file_url
+  const notAnImage = !isImageFile(source, photo.mime_type)
+  const kindLabel = fileTypeLabel(source, photo.mime_type)
   const failedWithImage = status === 'failed' && !!url
   const [hover, setHover] = useState(false)
   return (
@@ -1606,25 +1605,23 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
         }}>
           <Icon path="M3 7h2l2-3h10l2 3h2v12H3V7z M12 11a4 4 0 100 8 4 4 0 000-8z"
             size={20} color="rgba(255,255,255,0.5)" />
-          {/* The card renders these by itself on load, so a tile only reaches
-              the second state after that pass already tried and failed. Say
-              so — "No preview yet" alongside a Render button read as a chore
-              waiting on the user, which is the app's job, not theirs
-              (Nicholas, 2026-08-24). */}
+          {/* Either it renders or it doesn't. No button asking the person to
+              run the app's job again (Nicholas, 2026-08-24: "Just say
+              AutoCAD"). A file that is not an image is not a failure at all —
+              it is a document filed under photos, so the tile names the format
+              and stops. An IMAGE that would not render is a real fault, and
+              the only honest ask is a fresh upload, because retrying the same
+              bytes changes nothing. */}
           {working
             ? 'Rendering…'
-            : <>
-                <span>Could not render</span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onReprocess() }}
-                  style={{
-                    padding: '3px 9px', borderRadius: 4,
-                    border: '1px solid rgba(255,255,255,0.45)',
-                    background: 'rgba(255,255,255,0.12)', color: '#fff',
-                    fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
-                  }}
-                >Try again</button>
-              </>}
+            : notAnImage
+              ? <span style={{ fontWeight: 600, letterSpacing: 0.3 }}>{kindLabel}</span>
+              : <>
+                  <span style={{ fontWeight: 600 }}>{kindLabel}</span>
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)' }}>
+                    Upload this photo again
+                  </span>
+                </>}
         </div>
       )}
 
@@ -1638,25 +1635,10 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
           textTransform: 'uppercase', letterSpacing: 0.4,
         }}>Processing</div>
       )}
-      {failedWithImage && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onReprocess() }}
-          title={photo.watermark_error || 'Retry processing'}
-          style={{
-            position: 'absolute', top: 6, left: 6,
-            background: '#e8f0fb', color: '#2a5a8a',
-            border: '1px solid #7eb3e8', borderRadius: 10,
-            fontSize: 10, fontWeight: 600,
-            padding: '2px 7px', cursor: 'pointer',
-            textTransform: 'uppercase', letterSpacing: 0.4,
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-          }}
-        >
-          <Icon path="M4 4v5h5 M20 20v-5h-5 M5.5 9.5a8 8 0 0114-3 M18.5 14.5a8 8 0 01-14 3"
-            size={9} color="#2a5a8a" />
-          Retry
-        </button>
-      )}
+      {/* A photo that displays but never got its watermark still shows the
+          picture, so there is nothing for the viewer to do and nothing worth
+          interrupting them with. The gap is reported on the card, not as a
+          button on every tile. */}
 
       {/* Include-in-final-report flag — top-right, always visible so flagged
           photos read at a glance. Filled emerald when included. Internal only;
