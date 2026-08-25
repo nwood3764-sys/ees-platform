@@ -238,6 +238,21 @@ export default function ReportsModule({
   }
   const closeRecord = () => setSelectedRecord(null)
 
+  // Switching section tabs is a FORWARD navigation, not a Back. navigateToSection
+  // (reached through setSec) already clears the open record, so calling
+  // closeRecord() here as well fired a second navigation — and since 2026-08-22
+  // closeRecord means "go back to the screen behind this record", not "clear the
+  // record". Clicking a tab while a record was open therefore sent the browser
+  // BACK to whatever preceded it: the record the user had just come from, or
+  // another list entirely, while the tab strip showed the tab they clicked
+  // (Nicholas, 2026-08-25: clicking Opportunities on an account record "just
+  // keeps going back to the account record"). Only the local-state fallback
+  // path (no URL navigation) has a record to clear here.
+  const changeSection = (nextSection) => {
+    setSec(nextSection)
+    if (!urlDriven) setSelectedRecordLocal(null)
+  }
+
   const [folders, setFolders]                       = useState([])
   const [reports, setReports]                       = useState([])
   const [schedules, setSchedules]                   = useState([])
@@ -296,7 +311,7 @@ export default function ReportsModule({
           {selectedRecord && <><span style={{ color:C.textMuted }}>/</span><span style={{ color:C.textPrimary, fontWeight:500 }}>{selectedRecord.name || 'Record'}</span></>}
         </div>
       </div>
-      <SectionTabs sections={SECTIONS} moduleId="reports" active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} />
+      <SectionTabs sections={SECTIONS} moduleId="reports" active={sec} onChange={changeSection} counts={counts} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
           selectedRecord.table === 'reports' ? (

@@ -11,6 +11,10 @@ import FieldValueLink from './FieldValueLink';
 import { formatUsPhoneDisplay } from '../lib/fieldLinks';
 import { collectRelatedFields } from '../lib/listViewFields';
 import {
+  numberFilters, compileFilterLogic, logicAfterRemoval, validateFilterLogic,
+  isMatchAll, defaultFilterLogic, MATCH_ALL,
+} from '../lib/listFilterLogic';
+import {
   getEditableFieldsForTable,
   getPicklistOptions,
   searchLookupOptions,
@@ -1328,7 +1332,7 @@ function SaveViewModal({ activeFilters, sortField, sortDir, cols, onSave, onSave
 // { id, field, label, type, op, value }. On Apply it serializes to the
 // activeFilters shape the list engine consumes (array-valued equals for
 // multi-select; scalar value otherwise), and pushes via onApply.
-function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
+function FilterSidebar({ catalog, groups, activeFilters, filterLogic, onApply, onClose }) {
   const ref = useRef();
 
   // Resolve a catalog column by field.
@@ -1369,6 +1373,13 @@ function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
   const [rows, setRows] = useState(hydrate);
   const [picking, setPicking] = useState(false); // field-picker open for a new row
   const [search, setSearch] = useState('');
+  // The filter-logic expression being edited. Rows here are 1:1 with the
+  // numbers the expression refers to (hydrate already collapses a field's
+  // multi-select rows into one), so what the user counts on screen is what
+  // "2" means.
+  const [logic, setLogic] = useState(filterLogic || MATCH_ALL);
+  const usingLogic = !isMatchAll(logic);
+  const logicCheck = validateFilterLogic(logic, rows.length);
 
   useEffect(() => {
     const esc = e => { if (e.key === 'Escape') onClose(); };
@@ -1399,7 +1410,11 @@ function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
   };
 
   const updateRow = (id, patch) => setRows(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
-  const removeRow = (id) => setRows(prev => prev.filter(r => r.id !== id));
+  const removeRow = (id) => {
+    const idx = rows.findIndex(r => r.id === id);
+    setRows(prev => prev.filter(r => r.id !== id));
+    if (idx >= 0) setLogic(prev => logicAfterRemoval(prev, rows.length, idx));
+  };
 
   const changeOp = (id, op) => {
     const row = rows.find(r => r.id === id);
@@ -1436,11 +1451,24 @@ function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
       if (r.value === '' || r.value == null) continue;
       out.push({ field: r.field, label: r.label, op: r.op, value: r.value });
     }
-    onApply(out);
+    // The logic refers to filter NUMBERS, so it is only meaningful against the
+    // rows it was written for. A row that contributed no filter (an operator
+    // left without a value) would shift every number after it, so an
+    // incomplete row falls back to match-all rather than shifting the
+    // expression silently onto the wrong filters.
+    const authored = rows.filter(r => {
+      if (VALUELESS_OPS.has(r.op)) return true;
+      if (Array.isArray(r.value)) return r.value.some(v => v !== '' && v != null);
+      return r.value !== '' && r.value != null;
+    });
+    const logicOut = (!isMatchAll(logic) && authored.length === rows.length && logicCheck.ok)
+      ? logic
+      : MATCH_ALL;
+    onApply(out, logicOut);
     onClose();
   };
 
-  const clearAll = () => setRows([]);
+  const clearAll = () => { setRows([]); setLogic(MATCH_ALL); };
 
   // Grouped, searched catalog for the field picker.
   const q = search.trim().toLowerCase();
@@ -1481,10 +1509,21 @@ function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
             </div>
           )}
 
-          {rows.map(row => (
+          {rows.map((row, rowIndex) => (
             <div key={row.id} style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 10, background: C.cardSecondary || C.page }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.label}>{row.label}</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  {/* The number the filter logic refers to. Always shown, so an
+                      expression can be written without counting rows by eye. */}
+                  <span style={{
+                    flexShrink: 0, minWidth: 18, height: 18, borderRadius: 4,
+                    background: usingLogic ? C.emerald : C.border,
+                    color: usingLogic ? '#fff' : C.textSecondary,
+                    fontSize: 10.5, fontWeight: 700, fontFamily: 'JetBrains Mono, monospace',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
+                  }}>{rowIndex + 1}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.label}>{row.label}</span>
+                </span>
                 <svg onClick={() => removeRow(row.id)} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth={2} style={{ cursor: 'pointer', flexShrink: 0 }}><path d="M18 6L6 18M6 6l12 12" /></svg>
               </div>
 
@@ -1530,6 +1569,59 @@ function FilterSidebar({ catalog, groups, activeFilters, onApply, onClose }) {
             </div>
           )}
         </div>
+
+        {/* Filter logic — how the numbered filters above combine. Absent, they
+            are all ANDed, which is what this list always did and cannot express
+            "owned by Lutheran OR managed by Lutheran". */}
+        {rows.length > 1 && (
+          <div style={{ padding: '12px 18px', borderTop: `1px solid ${C.border}`, background: C.page }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: C.textPrimary }}>Filter Logic</span>
+              {usingLogic ? (
+                <span onClick={() => setLogic(MATCH_ALL)}
+                  style={{ fontSize: 11.5, color: C.textMuted, cursor: 'pointer' }}>Match all filters</span>
+              ) : (
+                <span onClick={() => setLogic(defaultFilterLogic(rows.length))}
+                  style={{ fontSize: 11.5, color: C.emerald, fontWeight: 600, cursor: 'pointer' }}>Add filter logic</span>
+              )}
+            </div>
+            {usingLogic ? (
+              <>
+                <input
+                  value={logic}
+                  onChange={e => setLogic(e.target.value)}
+                  placeholder={`e.g. 1 AND (2 OR ${rows.length})`}
+                  spellCheck={false}
+                  style={{
+                    width: '100%', marginTop: 8, boxSizing: 'border-box',
+                    background: C.card, border: `1px solid ${logicCheck.ok ? C.border : C.skyBlue || '#7eb3e8'}`,
+                    borderRadius: 5, padding: '7px 9px', fontSize: 12.5, color: C.textPrimary,
+                    fontFamily: 'JetBrains Mono, monospace', outline: 'none',
+                  }} />
+                <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'Any of these', expr: Array.from({ length: rows.length }, (_, i) => i + 1).join(' OR ') },
+                    { label: 'All of these', expr: MATCH_ALL },
+                  ].map(p => (
+                    <span key={p.label} onClick={() => setLogic(p.expr)}
+                      style={{ fontSize: 11, color: C.textSecondary, background: C.card, border: `1px solid ${C.border}`, borderRadius: 4, padding: '3px 7px', cursor: 'pointer' }}>
+                      {p.label}
+                    </span>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11.5, marginTop: 6, color: logicCheck.ok ? C.textMuted : (C.skyBlue || '#7eb3e8'), lineHeight: 1.4 }}>
+                  {logicCheck.ok
+                    ? 'Refer to filters by number, with AND, OR, NOT and parentheses.'
+                    : logicCheck.error}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 4 }}>
+                A record must match every filter. Add filter logic to say OR.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Footer */}
         <div style={{ padding: '14px 18px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 10 }}>
@@ -1867,6 +1959,9 @@ export function ListView({
   const [sortField, setSortField] = useState(firstView?.sortField || null);
   const [sortDir, setSortDir] = useState(firstView?.sortDir || 'asc');
   const [activeFilters, setActiveFilters] = useState([...(firstView?.filters || [])]);
+  // How those filters combine. 'all' — every filter must match — is the default
+  // and what every view saved before filter logic existed means.
+  const [filterLogic, setFilterLogic] = useState(firstView?.filterLogic || MATCH_ALL);
   // Column visibility for the active view. null = show all columns (default).
   // When set, it's an array of column field names to show, in the catalog's
   // order. The record-identity columns ('name', and the record-number 'id'
@@ -2064,6 +2159,7 @@ export function ListView({
         defaultAppliedRef.current = true;
         setActiveViewId(def.id);
         setActiveFilters([...(def.filters || [])]);
+        setFilterLogic(def.filterLogic || MATCH_ALL);
         setSortField(def.sortField || null);
         setSortDir(def.sortDir || 'asc');
         setVisibleColumns(Array.isArray(def.visibleColumns) ? def.visibleColumns : null);
@@ -2082,7 +2178,7 @@ export function ListView({
   // separately via localStorage.
   const handleSave = async ({ name, scope, isDefault }) => {
     if (!persistEnabled) {
-      const v = { id: 'pv' + Date.now(), name, filters: [...activeFilters], sortField, sortDir, visibleColumns };
+      const v = { id: 'pv' + Date.now(), name, filters: [...activeFilters], filterLogic, sortField, sortDir, visibleColumns };
       setPersonalViews(prev => [...prev, v]);
       setActiveViewId(v.id);
       setIsDirty(false); setShowSave(false); setEditingView(null);
@@ -2091,7 +2187,7 @@ export function ListView({
     const common = {
       name, scope: scope || 'personal', isDefault: !!isDefault,
       object: persistObject, module: listModule || persistObject,
-      filters: [...activeFilters], sortField, sortDir, visibleColumns,
+      filters: [...activeFilters], filterLogic, sortField, sortDir, visibleColumns,
       // Preserve a system view's origin id when editing one, so the selector
       // can overlay the saved version on the in-code constant.
       systemBase: editingView?.systemBase || (editingView && !editingView._persisted ? editingView.id : null),
@@ -2138,6 +2234,7 @@ export function ListView({
     // edit mode so Save Changes re-persists with any tweaks.
     setActiveViewId(v.id);
     setActiveFilters(v.filters || []);
+    setFilterLogic(v.filterLogic || MATCH_ALL);
     setSortField(v.sortField || null);
     setSortDir(v.sortDir || 'asc');
     setVisibleColumns(Array.isArray(v.visibleColumns) ? v.visibleColumns : null);
@@ -2164,7 +2261,8 @@ export function ListView({
       await createSavedView({
         name: v.name, scope: 'personal', isDefault: true,
         object: persistObject, module: listModule || persistObject,
-        filters: v.filters || [], sortField: v.sortField || null, sortDir: v.sortDir || 'asc',
+        filters: v.filters || [], filterLogic: v.filterLogic || MATCH_ALL,
+        sortField: v.sortField || null, sortDir: v.sortDir || 'asc',
         visibleColumns: Array.isArray(v.visibleColumns) ? v.visibleColumns : null,
         systemBase: v.id,
       });
@@ -2176,6 +2274,7 @@ export function ListView({
     userInteractedRef.current = true;
     setActiveViewId(v.id);
     setActiveFilters(v.filters || []);
+    setFilterLogic(v.filterLogic || MATCH_ALL);
     setSortField(v.sortField || null);
     setSortDir(v.sortDir || 'asc');
     setVisibleColumns(Array.isArray(v.visibleColumns) ? v.visibleColumns : null);
@@ -2184,11 +2283,33 @@ export function ListView({
 
   const handleSort = (f, d) => { userInteractedRef.current = true; setSortField(f); setSortDir(d); setIsDirty(true); };
 
-  const handleFilterApply = nf => { userInteractedRef.current = true; setActiveFilters(nf); setIsDirty(true); setOpenFilterCol(null); };
+  // A header-dropdown filter change can't know about filter logic, so it
+  // resets to match-all rather than leaving an expression pointing at filter
+  // numbers the change just shifted — which is how a list silently empties.
+  const handleFilterApply = (nf, nextLogic) => {
+    userInteractedRef.current = true;
+    setActiveFilters(nf);
+    setFilterLogic(nextLogic === undefined ? MATCH_ALL : (nextLogic || MATCH_ALL));
+    setIsDirty(true);
+    setOpenFilterCol(null);
+  };
 
-  const removeFilter = i => { userInteractedRef.current = true; setActiveFilters(prev => prev.filter((_, j) => j !== i)); setIsDirty(true); };
+  // Removing a chip removes ONE numbered filter (a multi-value chip set is one
+  // filter over several rows) and renumbers the logic around it, so "1 AND (2
+  // OR 3)" never survives as a reference to a filter that no longer exists.
+  const removeFilter = i => {
+    userInteractedRef.current = true;
+    const removed = activeFilters[i];
+    if (!removed) return;
+    const entries = numberFilters(activeFilters);
+    const entryIndex = entries.findIndex(e => e.rows.includes(removed));
+    const doomed = entryIndex >= 0 ? new Set(entries[entryIndex].rows) : new Set([removed]);
+    setActiveFilters(prev => prev.filter(f => !doomed.has(f)));
+    if (entryIndex >= 0) setFilterLogic(prev => logicAfterRemoval(prev, entries.length, entryIndex));
+    setIsDirty(true);
+  };
 
-  const clearAll = () => { userInteractedRef.current = true; setActiveFilters([]); setSortField(null); setSortDir('asc'); setIsDirty(false); setActiveViewId(defaultViewId); };
+  const clearAll = () => { userInteractedRef.current = true; setActiveFilters([]); setFilterLogic(MATCH_ALL); setSortField(null); setSortDir('asc'); setIsDirty(false); setActiveViewId(defaultViewId); };
 
   // Toggle the view selector, capturing the trigger's screen rect so the
   // portal'd dropdown can anchor to it (escapes toolbar overflow clipping).
@@ -2325,32 +2446,19 @@ export function ListView({
       const q = globalSearch.toLowerCase();
       d = d.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q)));
     }
-    // Group active filters by field. Across fields: AND. Within a field:
-    // multiple equals rows (the per-header multi-select emits one row per
-    // chosen value) are OR'd together; every other operator row is an
-    // additional AND constraint on that field.
-    const byField = new Map();
-    for (const f of activeFilters) {
-      if (!byField.has(f.field)) byField.set(f.field, []);
-      byField.get(f.field).push(f);
-    }
-    for (const [field, fs] of byField) {
-      // Collect scalar 'equals' values into one OR set (legacy header dropdown
-      // shape); array-valued equals from the sidebar are handled by matchFilter
-      // directly and stay as their own row.
-      const scalarEquals = fs.filter(f => f.op === 'equals' && !Array.isArray(f.value)).map(f => f.value);
-      const otherRows = fs.filter(f => !(f.op === 'equals' && !Array.isArray(f.value)));
-      const rk = rowKeyFor(field);
-      d = d.filter(r => {
-        const raw = r[rk];
-        if (scalarEquals.length) {
-          if (!matchFilter(raw, { op: 'equals', value: scalarEquals })) return false;
-        }
-        for (const row of otherRows) {
-          if (!matchFilter(raw, row)) return false;
-        }
-        return true;
-      });
+    // Filters, numbered the way the sidebar shows them, combined the way the
+    // view's filter logic says. The default logic is match-all, which is the
+    // behavior this list always had: every filter must match, with one field's
+    // multi-select values OR'd together (the header dropdown emits one row per
+    // chosen value, and numberFilters collapses them back into one filter).
+    // Anything else — "1 AND (2 OR 3)" — is the whole point: two filters ANDed
+    // cannot answer "owned by Lutheran OR managed by Lutheran".
+    const filterEntries = numberFilters(activeFilters);
+    if (filterEntries.length > 0) {
+      // Parse the expression ONCE for the whole list, not once per row.
+      const evaluate = compileFilterLogic(filterEntries, filterLogic);
+      const entryKeys = filterEntries.map(e => rowKeyFor(e.field));
+      d = d.filter(r => evaluate((entry, i) => matchFilter(r[entryKeys[i]], entry)));
     }
     if (sortField) {
       const sk = rowKeyFor(sortField);
@@ -2360,7 +2468,30 @@ export function ListView({
       });
     }
     return d;
-  }, [activeFilters, sortField, sortDir, globalSearch, data, fieldAlias]);
+  }, [activeFilters, filterLogic, sortField, sortDir, globalSearch, data, fieldAlias]);
+
+  // Filters whose field this object no longer offers. A saved view can carry
+  // one: a filter authored against a column that has since been withdrawn —
+  // most of them uuid columns that held a record id and could never match text
+  // in the first place. The list would simply come back empty, which reads as
+  // "there are no such records" rather than "this filter cannot match". Say so
+  // instead. Only computed once the catalog is actually loaded, so a list still
+  // fetching its columns never accuses a perfectly good filter.
+  const unmatchableFilters = useMemo(() => {
+    if (!Array.isArray(columnCatalog) || columnCatalog.length === 0) return [];
+    const known = new Set();
+    for (const c of columnCatalog) known.add(c.field);
+    for (const c of columns) known.add(c.field);
+    for (const [columnName, field] of fieldAlias) { known.add(columnName); known.add(field); }
+    const seen = new Set();
+    const out = [];
+    for (const f of activeFilters) {
+      if (known.has(f.field) || seen.has(f.field)) continue;
+      seen.add(f.field);
+      out.push(f);
+    }
+    return out;
+  }, [activeFilters, columnCatalog, columns, fieldAlias]);
 
   // Render-time row cap. Filtering + sorting still run across the full
   // dataset above, but only the first `renderLimit` rows actually mount.
@@ -2713,6 +2844,9 @@ export function ListView({
             onClose={() => setShowFilterSheet(false)}
             onApply={({ filters, sortField: sf, sortDir: sd }) => {
               setActiveFilters(filters);
+              // The mobile sheet edits filters without showing their numbers,
+              // so it cannot keep an expression written against the old ones.
+              setFilterLogic(MATCH_ALL);
               setSortField(sf);
               setSortDir(sd);
               setIsDirty(true);
@@ -2959,7 +3093,20 @@ export function ListView({
                       ? <>Loading matching records…</>
                       : data.length === 0
                       ? <>No {pluralizeLabel(newLabel ? newLabel.toLowerCase() : '')} yet. <span onClick={onNew} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Create one</span></>
-                      : <>No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span></>
+                      : <>
+                          No records match the current filters. <span onClick={() => { clearAll(); setGlobalSearch('') }} style={{ color: '#1a5a8a', cursor: 'pointer', textDecoration: 'underline' }}>Clear filters</span>
+                          {unmatchableFilters.length > 0 && (
+                            <div style={{ marginTop: 10, fontSize: 12.5, color: C.textSecondary, lineHeight: 1.5 }}>
+                              {unmatchableFilters.length === 1 ? 'This filter refers' : 'These filters refer'} to a field this list no longer offers, so {unmatchableFilters.length === 1 ? 'it' : 'they'} cannot match any record:{' '}
+                              <span style={{ color: C.textPrimary, fontWeight: 600 }}>
+                                {unmatchableFilters.map(f => f.label || f.field).join(', ')}
+                              </span>.
+                              <div style={{ marginTop: 4 }}>
+                                Remove {unmatchableFilters.length === 1 ? 'it' : 'them'} and filter on the parent record instead — a lookup is filtered by the record's name, under its relationship group in the field picker.
+                              </div>
+                            </div>
+                          )}
+                        </>
                     }
                   </td></tr>
                 ) : visibleRows.map(r => {
@@ -3117,7 +3264,13 @@ export function ListView({
           catalog={filterCatalog}
           groups={columnGroups}
           activeFilters={activeFilters}
-          onApply={(nf) => { setActiveFilters(nf); setIsDirty(true); }}
+          filterLogic={filterLogic}
+          onApply={(nf, nextLogic) => {
+            userInteractedRef.current = true;
+            setActiveFilters(nf);
+            setFilterLogic(nextLogic || MATCH_ALL);
+            setIsDirty(true);
+          }}
           onClose={() => setShowFilterPanel(false)}
         />
       )}

@@ -64,7 +64,7 @@ export async function fetchSavedViewsForObject(objectName) {
         id, list_view_name, list_view_object, list_view_module,
         list_view_user_id, list_view_role_id, list_view_is_shared,
         list_view_sort_field, list_view_sort_direction,
-        list_view_visible_columns, list_view_filters, list_view_owner
+        list_view_visible_columns, list_view_filters, list_view_filter_logic, list_view_owner
       `)
       .eq('list_view_object', objectName)
       .eq('is_deleted', false)
@@ -101,6 +101,14 @@ async function fetchDefaultViewId(objectName, userId) {
   }
 }
 
+// 'all' and an empty expression both mean "match every filter", which is the
+// column's NULL. Storing the word would be storing the default twice.
+function normalizeFilterLogic(logic) {
+  const e = String(logic ?? '').trim()
+  if (!e || e.toLowerCase() === 'all') return null
+  return e
+}
+
 // Map a DB row to the shape the ListView selector expects. isDefault is
 // per-user: true only when the row is THIS user's pinned default.
 function toSelectorView(r, defaultViewId) {
@@ -123,6 +131,9 @@ function toSelectorView(r, defaultViewId) {
     _persisted: true,
     name: r.list_view_name,
     filters,
+    // How those filters combine. NULL means match-all — the meaning of every
+    // view saved before filter logic existed.
+    filterLogic: r.list_view_filter_logic || 'all',
     sortField: r.list_view_sort_field || null,
     sortDir: r.list_view_sort_direction || 'asc',
     visibleColumns: Array.isArray(r.list_view_visible_columns) ? r.list_view_visible_columns : null,
@@ -159,6 +170,7 @@ export async function createSavedView(opts) {
     list_view_sort_direction: opts.sortDir || 'asc',
     list_view_visible_columns: opts.visibleColumns || null,
     list_view_filters: filtersPayload,
+    list_view_filter_logic: normalizeFilterLogic(opts.filterLogic),
     list_view_owner: userId,
     list_view_created_by: userId,
   }
@@ -181,6 +193,7 @@ export async function updateSavedView(id, opts) {
   if (opts.sortField   !== undefined) patch.list_view_sort_field = opts.sortField || null
   if (opts.sortDir     !== undefined) patch.list_view_sort_direction = opts.sortDir || 'asc'
   if (opts.visibleColumns !== undefined) patch.list_view_visible_columns = opts.visibleColumns || null
+  if (opts.filterLogic !== undefined) patch.list_view_filter_logic = normalizeFilterLogic(opts.filterLogic)
   if (opts.filters     !== undefined || opts.systemBase !== undefined) {
     patch.list_view_filters = opts.systemBase
       ? { filters: opts.filters || [], __system_base: opts.systemBase }

@@ -293,6 +293,21 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
   const SEC_TABLE = {'requests': 'project_payment_requests', 'received': 'payment_receipts'}
   const openRecord = (row) => { if (row?._id && SEC_TABLE[sec]) setSelectedRecord({ table: SEC_TABLE[sec], id: row._id, name: row.name }) }
   const closeRecord = () => setSelectedRecord(null)
+
+  // Switching section tabs is a FORWARD navigation, not a Back. navigateToSection
+  // (reached through setSec) already clears the open record, so calling
+  // closeRecord() here as well fired a second navigation — and since 2026-08-22
+  // closeRecord means "go back to the screen behind this record", not "clear the
+  // record". Clicking a tab while a record was open therefore sent the browser
+  // BACK to whatever preceded it: the record the user had just come from, or
+  // another list entirely, while the tab strip showed the tab they clicked
+  // (Nicholas, 2026-08-25: clicking Opportunities on an account record "just
+  // keeps going back to the account record"). Only the local-state fallback
+  // path (no URL navigation) has a record to clear here.
+  const changeSection = (nextSection) => {
+    setSec(nextSection)
+    if (!urlDriven) setSelectedRecordLocal(null)
+  }
   const [requests, setRequests] = useState([])
   const [receipts, setReceipts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -337,7 +352,7 @@ export default function IncentivesModule({ selectedRecord: navSelectedRecord, se
           <Icon path="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" size={13} color={C.textSecondary}/>Reports
         </button>
       </div>
-      <SectionTabs sections={SECTIONS} moduleId="incentives" active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} moduleId="incentives" active={sec} onChange={changeSection} counts={counts} urgentSections={urgentSections} />
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (
           <RecordDetail tableName={selectedRecord.table} recordId={selectedRecord.id} onBack={closeRecord}
