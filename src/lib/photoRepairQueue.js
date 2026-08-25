@@ -24,6 +24,8 @@
 // URL, a dropped connection, or a tab that ran out of memory.
 // ---------------------------------------------------------------------------
 
+import { isImageFile } from './fileKinds.js'
+
 const attempted = new Set()
 const failed = new Set()
 let inFlight = null
@@ -32,9 +34,15 @@ let inFlight = null
  * A photo needs rendering when it has an original in storage but nothing that
  * a browser can paint. `_thumbUrl` is the resolved display URL — null is
  * exactly the state that used to render as a broken tile.
+ *
+ * A file that is not an image is never a rendering job. A PDF or a DWG filed
+ * under photos cannot become a picture, so attempting it every session burned
+ * a download and an edge-function call to fail the same way each time. Those
+ * tiles name their format instead.
  */
 export function needsRendering(photo) {
-  return !!photo && !photo._thumbUrl && !!photo.storage_path_original
+  if (!photo || photo._thumbUrl || !photo.storage_path_original) return false
+  return isImageFile(photo.storage_path_original, photo.mime_type)
 }
 
 /**
