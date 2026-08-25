@@ -1,7 +1,7 @@
 import { humanizeObjectLabel } from './objectNav.js'
 
 // ---------------------------------------------------------------------------
-// relatedListNaming — what a related list on a page layout is CALLED.
+// relatedListNaming — how the Add Related List picker names a RELATIONSHIP.
 //
 // A related list is named for the object it lists: "Contacts", "Opportunities",
 // "Properties". That is unambiguous only while the object reaches the layout's
@@ -11,10 +11,15 @@ import { humanizeObjectLabel } from './objectNav.js'
 // record page carrying both shows the same heading twice.
 //
 // Salesforce names the child RELATIONSHIP when an object is related more than
-// once; LEAP does the same: "Properties (Property Management Company)". The
-// relationship name is the lookup field's own label, never a paraphrase of it
-// ("Properties Managed" is a description somebody invented, not the name of
-// anything in the platform).
+// once, and that is what the picker rows do here: "Properties (Property
+// Management Company)" is a row you can tell apart from "Properties (Property
+// Account)" before you choose it. The relationship name is the lookup field's
+// own label rather than a description of it.
+//
+// What the CARD is called is not this module's business — the title is
+// auto-filled with the object's name and the admin types whatever the people
+// reading the record page call it (on an Account: "Properties" and
+// "Properties Managed").
 //
 // The relationship label is derived from the foreign key column so it matches
 // the label that field carries on its own object's page layout:
