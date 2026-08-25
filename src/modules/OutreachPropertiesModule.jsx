@@ -617,6 +617,21 @@ export default function OutreachPropertiesModule({
   }
   const closeRecord = () => setSelectedRecord(null)
 
+  // Switching section tabs is a FORWARD navigation, not a Back. navigateToSection
+  // (reached through setSec) already clears the open record, so calling
+  // closeRecord() here as well fired a second navigation — and since 2026-08-22
+  // closeRecord means "go back to the screen behind this record", not "clear the
+  // record". Clicking a tab while a record was open therefore sent the browser
+  // BACK to whatever preceded it: the record the user had just come from, or
+  // another list entirely, while the tab strip showed the tab they clicked
+  // (Nicholas, 2026-08-25: clicking Opportunities on an account record "just
+  // keeps going back to the account record"). Only the local-state fallback
+  // path (no URL navigation) has a record to clear here.
+  const changeSection = (nextSection) => {
+    setSec(nextSection)
+    if (!urlDriven) setSelectedRecordLocal(null)
+  }
+
   // Map detail card: clicking a marker opens the slide-in card (not the
   // full record). Owner-account click inside the card navigates to the
   // account record via setSelectedRecord.
@@ -753,7 +768,7 @@ export default function OutreachPropertiesModule({
         </div>
       </div>
 
-      <SectionTabs sections={SECTIONS} moduleId="outreach" active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts4Tabs} />
+      <SectionTabs sections={SECTIONS} moduleId="outreach" active={sec} onChange={changeSection} counts={counts4Tabs} />
 
       <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
         {selectedRecord ? (

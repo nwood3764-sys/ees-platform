@@ -3,7 +3,7 @@ import { C } from '../data/constants'
 import { LoadingState, ErrorState } from '../components/UI'
 import { runReport, getRowValue, getReportPrompts, cloneReport } from '../data/reportsService'
 import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } from '../lib/reportFormulaEval'
-import RecordLink from '../components/RecordLink'
+import ReportRecordCellLink, { reportCellLink } from '../components/ReportRecordCellLink'
 import { getEditableFieldsForTable, getPicklistOptions, bulkUpdateRecords } from '../data/fieldMetadataService'
 
 // ─── Report Runner ────────────────────────────────────────────────────────
@@ -397,23 +397,17 @@ export function TabularLayout({ result, fill = false }) {
                   )
                 }
 
-                // First column links to the underlying record — real anchor,
-                // so new-tab / copy-link work like any record link.
-                if (idx === 0 && row.id && primaryObject) {
+                // Every cell that IS a record opens it: this row's record in
+                // the first column, a lookup column's target, and a related
+                // object's own name — real anchors, so new-tab and copy-link
+                // work like any record link in LEAP.
+                const cellLink = reportCellLink(row, c, primaryObject, idx === 0)
+                if (cellLink) {
                   return (
-                    <td key={`r-${rowIdx}-${idx}`} style={{ ...cellStyle(), ...ROW_TOP_BORDER }}>
-                      <RecordLink
-                        table={primaryObject}
-                        id={row.id}
-                        title="Open record"
-                        onActivate={() => {
-                          window.history.pushState(null, '', `/${primaryObject}/${row.id}`)
-                          window.dispatchEvent(new PopStateEvent('popstate'))
-                        }}
-                        style={{ color:'#1a5a8a', fontWeight:600 }}
-                      >
+                    <td key={`r-${rowIdx}-${idx}`} style={{ ...cellStyle(), ...ROW_TOP_BORDER, ...(condStyle || {}) }}>
+                      <ReportRecordCellLink link={cellLink} emphasis={idx === 0}>
                         {display}
-                      </RecordLink>
+                      </ReportRecordCellLink>
                     </td>
                   )
                 }
@@ -857,20 +851,13 @@ function SummaryTreeRows({ nodes, columns, renderColumns, groupings, depth, ctx,
           const val = getRowValue(row, c, ctx)
           const cond = conditionalCellStyle(val, c)
           const display = formatReportValue(val, c)
+          const cellLink = reportCellLink(row, c, primaryObject, ci === 0)
           return (
             <td key={ci} style={{ ...cellStyle(), ...ROW_TOP_BORDER, paddingLeft: ci === 0 ? 12 + depth * 18 : 12, ...(cond || {}) }}>
-              {/* First column opens the record, same as a tabular report. */}
-              {ci === 0 && row.id && primaryObject ? (
-                <RecordLink
-                  table={primaryObject}
-                  id={row.id}
-                  title="Open record"
-                  onActivate={() => {
-                    window.history.pushState(null, '', `/${primaryObject}/${row.id}`)
-                    window.dispatchEvent(new PopStateEvent('popstate'))
-                  }}
-                  style={{ color:'#1a5a8a', fontWeight:600 }}
-                >{display}</RecordLink>
+              {/* Same rule as a tabular report: a cell that is a record
+                  opens it, whether that's this row's record or a related one. */}
+              {cellLink ? (
+                <ReportRecordCellLink link={cellLink} emphasis={ci === 0}>{display}</ReportRecordCellLink>
               ) : display}
             </td>
           )

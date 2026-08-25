@@ -12,6 +12,12 @@
 import { supabase } from '../lib/supabase'
 import { guessPrefix } from './fieldMetadataService'
 import {
+  resolveReportColumnLabels,
+  deriveReportColumnLabel,
+  isDerivedLabel,
+} from '../lib/reportColumnLabels'
+import { recordLinkForField } from '../lib/reportRecordLinks'
+import {
   fieldKindFor,
   resolveDateBound,
   resolveDateLiteral,
@@ -443,12 +449,17 @@ export async function getReportSelectedFields(reportId) {
   if (!reportId || reportId === 'new') return []
   const { data, error } = await supabase
     .from('reports')
-    .select('rpt_selected_fields')
+    .select('rpt_selected_fields, rpt_primary_object')
     .eq('id', reportId)
     .eq('is_deleted', false)
     .single()
   if (error) return []
-  return data?.rpt_selected_fields || []
+  // Headers are derived here too, so a dashboard widget's group-by and
+  // measure dropdowns name the same fields the report's own columns do.
+  return resolveReportColumnLabels(data?.rpt_selected_fields || [], {
+    primaryObject: data?.rpt_primary_object,
+    prefixFor:     guessPrefix,
+  })
 }
 
 export async function loadReport(reportId) {
@@ -1256,6 +1267,9 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
       }
     } else {
       const node = ensureEmbedNode(f.via_path, f.table)
+      // `id` on every embedded object: a related record's name cell is a
+      // link to that record, and the link needs the record it points at.
+      if (!node.fields.includes('id')) node.fields.push('id')
       if (!node.fields.includes(f.name)) node.fields.push(f.name)
     }
   }
@@ -1508,13 +1522,25 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     }).eq('id', reportId)
   }
 
+  // Column headers are DERIVED, not read back from what was saved: the
+  // stored label on a field selected before 2026-08-25 is the object's
+  // prefix-stripped column name, which is how a report showing a property's,
+  // a building's and an opportunity's name came to head all three "Name".
+  // A label a person wrote by hand is detected and kept (isDerivedLabel).
+  const labelOpts = { primaryObject: r.rpt_primary_object, prefixFor: guessPrefix }
+  const labelledColumns = resolveReportColumnLabels(r.rpt_selected_fields || [], labelOpts)
+
   return {
     rows: data || [],
-    columns: (r.rpt_selected_fields || []).map(f => ({
+    columns: labelledColumns.map(f => ({
       ...f,
       // Mark picklist columns so getRowValue knows to look up the
       // label — works for direct fields AND fields reached via_path.
       _is_picklist: isPicklistField(f.name, f.table, f.via_path),
+      // Where this cell's record lives, when the cell IS a record: a lookup
+      // column on the primary object points at the record it references, and
+      // a related object's own name column points at that related record.
+      _link: recordLinkForField(f, r.rpt_primary_object, fkLookup, { prefixFor: guessPrefix }),
     })),
     picklistMap,
     // Groupings carry `name`/`via_path`/`_is_picklist` as well as their
@@ -1523,7 +1549,7 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     // headers to labels instead of UUIDs.
     groupings: (loaded.groupings || []).map(g => ({
       field_name:        g.rgr_field_name,
-      field_label:       g.rgr_field_label || columnLabel(tableForField(g.rgr_field_table, g.rgr_field_via_path), g.rgr_field_name),
+      field_label:       groupingLabel(g, r.rpt_primary_object),
       field_table:       g.rgr_field_table,
       field_via_path:    g.rgr_field_via_path,
       name:              g.rgr_field_name,
@@ -1542,7 +1568,12 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
       return {
         ...base,
         name,
-        label: base.label || columnLabel(tableForField(base.table, base.via_path), name),
+        label: groupingLabel({
+          rgr_field_name:     name,
+          rgr_field_table:    base.table,
+          rgr_field_via_path: base.via_path,
+          rgr_field_label:    base.label,
+        }, r.rpt_primary_object),
         via_path: base.via_path || null,
         _is_picklist: isPicklistField(name, base.table, base.via_path),
       }
@@ -1562,6 +1593,22 @@ export async function runReportDefinition(loaded, { promptValues = null, extraFi
     name:          r.rpt_name,
     truncated,
   }
+}
+
+/**
+ * A grouping's header. Same rule the columns follow: derived unless a person
+ * wrote the label, so "Group by Property" never reads "Group by Name".
+ */
+function groupingLabel(g, primaryObject) {
+  const descriptor = {
+    name:     g.rgr_field_name,
+    table:    g.rgr_field_table,
+    via_path: g.rgr_field_via_path,
+  }
+  const opts = { primaryObject, prefixFor: guessPrefix }
+  const stored = g.rgr_field_label
+  if (stored && !isDerivedLabel(stored, descriptor, opts)) return stored
+  return deriveReportColumnLabel(descriptor, opts)
 }
 
 /**

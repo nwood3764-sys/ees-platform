@@ -232,6 +232,21 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
 
   const closeRecord = () => setSelectedRecord(null)
 
+  // Switching section tabs is a FORWARD navigation, not a Back. navigateToSection
+  // (reached through setSec) already clears the open record, so calling
+  // closeRecord() here as well fired a second navigation — and since 2026-08-22
+  // closeRecord means "go back to the screen behind this record", not "clear the
+  // record". Clicking a tab while a record was open therefore sent the browser
+  // BACK to whatever preceded it: the record the user had just come from, or
+  // another list entirely, while the tab strip showed the tab they clicked
+  // (Nicholas, 2026-08-25: clicking Opportunities on an account record "just
+  // keeps going back to the account record"). Only the local-state fallback
+  // path (no URL navigation) has a record to clear here.
+  const changeSection = (nextSection) => {
+    setSec(nextSection)
+    if (!urlDriven) setSelectedRecordLocal(null)
+  }
+
   // ─── Data layer ────────────────────────────────────────────────────────
   // Each section fetches ONLY its dataset, and only when the section is
   // active. Cache survives unmounts, so navigating away and back returns
@@ -334,7 +349,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
           <NavLink
             to={{ activeModule: 'enrollment' }}
-            onActivate={() => { setSec('home'); closeRecord() }}
+            onActivate={() => changeSection('home')}
             style={{ color: C.textMuted, cursor: 'pointer' }}
             onMouseEnter={e => { e.currentTarget.style.color = C.textSecondary }}
             onMouseLeave={e => { e.currentTarget.style.color = C.textMuted }}
@@ -342,7 +357,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
           <span style={{ color: C.textMuted }}>/</span>
           <NavLink
             to={{ activeModule: 'enrollment', section: sec }}
-            onActivate={() => { if (selectedRecord) closeRecord(); else if (sec !== 'home') setSec('home') }}
+            onActivate={() => changeSection(sec)}
             style={{ color: (selectedRecord || sec !== 'home') ? C.textMuted : C.textPrimary, fontWeight: (selectedRecord || sec !== 'home') ? 400 : 500, cursor: (selectedRecord || sec !== 'home') ? 'pointer' : 'default' }}
             onMouseEnter={e => { if (selectedRecord || sec !== 'home') e.currentTarget.style.color = C.textSecondary }}
             onMouseLeave={e => { if (selectedRecord || sec !== 'home') e.currentTarget.style.color = C.textMuted }}
@@ -355,7 +370,7 @@ export default function OutreachModule({ selectedRecord: navSelectedRecord, sect
         </button>
       </div>
 
-      <SectionTabs sections={SECTIONS} moduleId="enrollment" active={sec} onChange={s => { setSec(s); closeRecord(); }} counts={counts} urgentSections={urgentSections} />
+      <SectionTabs sections={SECTIONS} moduleId="enrollment" active={sec} onChange={changeSection} counts={counts} urgentSections={urgentSections} />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {selectedRecord ? (
