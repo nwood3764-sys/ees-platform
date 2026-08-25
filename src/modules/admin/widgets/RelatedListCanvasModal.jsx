@@ -3,6 +3,8 @@ import { C } from '../../../data/constants'
 import { useIsMobile } from '../../../lib/useMediaQuery'
 import { describeObject, describeIncomingFKs } from '../../../data/adminService'
 import { humanizeColumnName } from './eesFieldTypes'
+import { humanizeObjectLabel } from '../../../lib/objectNav.js'
+import { relatedListTitle } from '../../../lib/relatedListNaming.js'
 import {
   FormField,
   inputStyle,
@@ -62,11 +64,11 @@ const HIDDEN_TARGET_COLUMNS = new Set([
   'is_deleted', 'deleted_at', 'deleted_by', 'deletion_reason',
 ])
 
+// One humanizer for object names platform-wide, so a related list, a
+// breadcrumb and a record page all call the same object the same thing
+// (and LEAP's acronyms stay upper-case: EFR Reports, HUD, GPS Points).
 function humanizeTableName(table) {
-  return String(table || '')
-    .split('_')
-    .map(w => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
-    .join(' ')
+  return humanizeObjectLabel(table)
 }
 
 // Renderer-facing type for a describeObject column row (related-list cells).
@@ -287,21 +289,25 @@ export default function RelatedListCanvasModal({
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose, busy])
 
-  function selectChain(nextChain) {
+  // fkCount = how many foreign keys on the target table point at the object
+  // this list hangs off. More than one and the object's name is not a name —
+  // the title has to say WHICH relationship (see lib/relatedListNaming).
+  function selectChain(nextChain, fkCount = 1) {
     setChain(nextChain)
     setSharedParent(null)
     setDefaultsPending(true)
     if (!titleTouched.current) {
-      setTitle(humanizeTableName(nextChain[nextChain.length - 1].table))
+      const leaf = nextChain[nextChain.length - 1]
+      setTitle(relatedListTitle(leaf.table, leaf.fk, { fkCount }))
     }
   }
 
-  function selectSharedParent(sp) {
+  function selectSharedParent(sp, fkCount = 1) {
     setSharedParent(sp)
     setChain([])
     setDefaultsPending(true)
     if (!titleTouched.current) {
-      setTitle(humanizeTableName(sp.targetTable))
+      setTitle(relatedListTitle(sp.targetTable, sp.targetFk, { fkCount }))
     }
   }
 
@@ -489,7 +495,7 @@ export default function RelatedListCanvasModal({
       const node = { table: r.referencing_table, fk: r.referencing_column }
       const nodeChain = [...ancestry, node]
       const pathKey = chainKey(nodeChain)
-      const label = humanizeTableName(node.table)
+      const label = relatedListTitle(node.table, node.fk, { fkCount: tableCounts[node.table] })
       // Top-level search: hide non-matching rows, but never hide an expanded
       // branch or the current selection's path.
       const matchesSearch = !searchLower
@@ -503,7 +509,7 @@ export default function RelatedListCanvasModal({
       return (
         <div key={pathKey}>
           <div
-            onClick={() => { if (!busy) selectChain(nodeChain) }}
+            onClick={() => { if (!busy) selectChain(nodeChain, tableCounts[node.table]) }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '7px 12px',
@@ -639,7 +645,7 @@ export default function RelatedListCanvasModal({
                   return (
                     <div
                       key={`${p.parentTable}/${s.targetTable}/${s.targetFk}`}
-                      onClick={() => { if (!busy) selectSharedParent({ ...s, parentTable: p.parentTable, objectFk: p.objectFk }) }}
+                      onClick={() => { if (!busy) selectSharedParent({ ...s, parentTable: p.parentTable, objectFk: p.objectFk }, sameTableCount) }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8,
                         padding: '7px 12px', paddingLeft: 34,
@@ -660,7 +666,7 @@ export default function RelatedListCanvasModal({
                         color: C.textPrimary, fontWeight: isSelected ? 600 : 400,
                         minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>
-                        {humanizeTableName(s.targetTable)}
+                        {relatedListTitle(s.targetTable, s.targetFk, { fkCount: sameTableCount })}
                       </span>
                       {sameTableCount > 1 && (
                         <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5, color: C.textMuted, flexShrink: 0 }}>
