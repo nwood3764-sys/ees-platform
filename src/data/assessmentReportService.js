@@ -20,7 +20,7 @@
 
 import { supabase } from '../lib/supabase'
 import {
-  listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrls, signedUrl, listDocuments,
+  listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrl, listDocuments,
 } from './storageService'
 import { loadSubmittalDocumentTemplate, loadSubmittalTextBlocks } from './paperworkService'
 import { buildAssessmentReportPdf } from './paperworkModel'
@@ -30,6 +30,7 @@ import {
   photoCaption, reportPhotoLabel, buildingSummaryRows, addressLines, cityStateZip,
   reportFileName, collectRecordIds, applyLookupLabels, companyNameForState,
   documentPreviewKind, documentTypeLabel, formatFileSize, documentDownloadName,
+  photoDownloadName,
 } from '../lib/assessmentReport'
 
 // How long the in-PDF photo links stay good. A report is filed with a program
@@ -238,14 +239,10 @@ export async function loadAssessmentReportContext(workOrderId) {
   const draftModel = {
     title:    def.title,
     subtitle: def.subtitle || null,
-    company:  {
-      name: companyNameForState(reportState),
-      // The Monona street address belongs to the Wisconsin entity — printing
-      // it under another state's name would put a false address on the report.
-      footerLine: String(reportState || '').toUpperCase() === 'WI'
-        ? null                                  // the seeded WI footer line is correct
-        : companyNameForState(reportState),
-    },
+    // Who performed the assessment, named for the state the building is in.
+    // No street address and no contact line: the address on this report is the
+    // building's, and it is on the cover.
+    company:  { name: companyNameForState(reportState) },
     program:  programRt ? { label: programRt.picklist_label || programRt.picklist_value, name: programRt.picklist_value } : null,
     property: property ? {
       name: property.property_name,
@@ -323,17 +320,20 @@ export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
   // can open or save the full-resolution photo with its EXIF intact. Signed
   // object URLs are read-only: they expose that one photo and nothing else —
   // no record, no edit, no delete.
+  //
+  // Signed ONE AT A TIME rather than in a batch, because each carries its own
+  // download filename — the batch API can only set one for the whole call. The
+  // storage key is a uuid, so without this a saved photo lands in the reader's
+  // downloads as "1d655a50-….jpg" and tells them nothing.
+  const buildingLabel = model.building?.label || model.building?.name || null
   const linkById = new Map()
-  const byBucket = new Map()
   for (const r of rows) {
     if (!r.storage_bucket || !r.storage_path_original) continue
-    if (!byBucket.has(r.storage_bucket)) byBucket.set(r.storage_bucket, [])
-    byBucket.get(r.storage_bucket).push(r)
+    const url = await signedUrl(
+      r.storage_bucket, r.storage_path_original, PHOTO_LINK_TTL_SECONDS,
+      photoDownloadName(r, buildingLabel))
+    if (url) linkById.set(r.id, url)
   }
-  await Promise.all(Array.from(byBucket.entries()).map(async ([bucket, group]) => {
-    const urls = await signedUrls(bucket, group.map(r => r.storage_path_original), PHOTO_LINK_TTL_SECONDS)
-    group.forEach((r, i) => { if (urls[i]) linkById.set(r.id, urls[i]) })
-  }))
   let done = 0
   for (const p of list) {
     try {

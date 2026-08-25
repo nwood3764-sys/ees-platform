@@ -214,11 +214,9 @@ export const SUBMITTAL_SECTION_SCHEMAS = {
   ],
   assessment_footer: [
     { key: 'company_line', label: 'Company Line', type: 'text',
-      placeholder: 'Leave blank to use the Submittal Document Wording' },
-    { key: 'contact_line', label: 'Contact Line', type: 'text',
-      placeholder: 'Leave blank to use the Submittal Document Wording' },
+      placeholder: 'Leave blank to name the company for the building’s state' },
     { key: '__info__', type: 'info',
-      description: 'Stamped on every page with the work order number and “Page N of M”. Place it last.' },
+      description: 'Stamped on every page with the work order number, the building, and “Page N of M”. Carries no street address or contact line — the address on this report is the building’s. Place it last.' },
   ],
 }
 

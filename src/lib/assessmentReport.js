@@ -176,6 +176,31 @@ export function reportPhotoLabel(photo, labels) {
   return photo.photo_number || 'Photo'
 }
 
+/**
+ * The name a reader's browser should save a photograph under: the building it
+ * is of, and what it shows.
+ *
+ * The storage key is a uuid — collision-free, and meaningless to a person.
+ * A folder of "1d655a50-c34d-437a-bc98-2fdddce9b288.jpg" tells nobody which
+ * building or which system they are looking at.
+ *
+ * When a photo carries no meaningful tag the label falls back to its photo
+ * number, which is at least a real identifier that leads back to the record.
+ */
+export function photoDownloadName(photo, buildingLabel, labels) {
+  const label = reportPhotoLabel(photo, labels)
+  const mime = String(photo?.mime_type || '').toLowerCase()
+  const ext = mime === 'image/png' ? '.png'
+    : mime === 'image/webp' ? '.webp'
+    : mime === 'image/heic' || mime === 'image/heif' ? '.heic'
+    : mime === 'image/gif' ? '.gif'
+    : '.jpg'
+  const parts = [buildingLabel, label]
+    .filter(v => v != null && String(v).trim() !== '')
+    .map(v => String(v).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim())
+  return `${parts.join(' - ')}${ext}`
+}
+
 /** Caption line under a report photo: when it was taken, and where. */
 export function photoCaption(photo, { formatDate } = {}) {
   const parts = []

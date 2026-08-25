@@ -1573,19 +1573,22 @@ export const ASSESSMENT_SECTION_RENDERERS = {
 
   /* Page footer, stamped on every page with "Page N of M". */
   assessment_footer(x, cfg = {}) {
-    const { m, W, H, M, d, font, t, tc, stroke, C, text } = x
+    const { m, W, H, M, d, font, t, tc, stroke, C } = x
     const total = d.getNumberOfPages()
-    const l1 = cfg.company_line || m.company?.footerLine
-      || text('assessment.footer.company_line') || text('footer.company_line')
-    const l2 = cfg.contact_line || text('assessment.footer.contact_line') || text('footer.contact_line')
+    // The company that performed the assessment, named for the state the
+    // building is in — and nothing else. EES's own street address and its
+    // Wisconsin contact line have no business on a report about somebody
+    // else's building in another state (Nicholas, 2026-08-25: "You don't need
+    // our address on this stuff"). The address that matters is the building's,
+    // and that is on the cover.
+    const company = cfg.company_line || m.company?.name || 'Energy Efficiency Services'
     const ref = [m.workOrder?.number, m.building?.label || m.building?.name].filter(Boolean).join('  ·  ')
     for (let pg = 1; pg <= total; pg++) {
       d.setPage(pg)
       const fy = H - 40
       stroke(C.line); d.setLineWidth(.5); d.line(M, fy, W - M, fy)
       tc(C.mut); font(7.5)
-      if (l1) t(M, fy + 12, String(l1))
-      if (l2) t(M, fy + 21, String(l2))
+      if (company) t(M, fy + 12, String(company))
       if (ref) t(W / 2, fy + 12, ref, { align: 'center' })
       t(W - M, fy + 12, `Page ${pg} of ${total}`, { align: 'right' })
     }
