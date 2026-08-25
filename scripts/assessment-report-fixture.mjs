@@ -15,7 +15,7 @@ import {
   ASSESSMENT_REPORTS, ASSESSMENT_REPORT_KIND, assessmentReportFor, hasAssessmentReport,
   fieldDisplayValue, buildStepEntry, isNotApplicable, reportPhotos, photoCaption, reportPhotoLabel,
   isRecordId, collectRecordIds, applyLookupLabels, companyNameForState, stateFullName,
-  documentPreviewKind, documentTypeLabel, formatFileSize, documentDownloadName,
+  documentPreviewKind, documentTypeLabel, formatFileSize, documentDownloadName, photoDownloadName,
   buildingSummaryRows, addressLines, cityStateZip, reportFileName,
 } from '../src/lib/assessmentReport.js'
 import {
@@ -103,6 +103,20 @@ eq(reportPhotoLabel({ photo_type: 'general', caption: 'North elevation', photo_n
 eq(reportPhotoLabel({ photo_type: 'general', photo_number: 'PHO-01855' }), 'PHO-01855',
   'with no meaningful tag and no caption the photo number is the last resort — never an empty label')
 eq(reportPhotoLabel(null), 'Photo', 'a missing photo still gets a label rather than "undefined"')
+
+// A saved photograph is named for the building and what it shows — the storage
+// key is a uuid and means nothing to the person who downloads it.
+eq(photoDownloadName({ photo_type: 'boiler_nameplate', mime_type: 'image/jpeg' }, '100 - 110'),
+  '100 - 110 - Boiler Nameplate.jpg', 'a tagged photo is named for the building and its tag')
+eq(photoDownloadName({ photo_type: 'general', photo_number: 'PHO-01826', mime_type: 'image/jpeg' }, '100 - 110'),
+  '100 - 110 - PHO-01826.jpg',
+  'an untagged photo falls back to its number — still a real identifier, never a uuid')
+eq(photoDownloadName({ photo_type: 'roof', mime_type: 'image/png' }, '100 - 110'),
+  '100 - 110 - Roof.png', 'the extension follows the mime type')
+eq(photoDownloadName({ photo_type: 'roof', mime_type: 'image/heic' }, null),
+  'Roof.heic', 'with no building label the tag stands alone')
+ok(!photoDownloadName({ photo_type: 'a/b', mime_type: 'image/jpeg' }, null).includes('/'),
+  'characters a filesystem rejects are stripped')
 
 // ── 5. Building summary ─────────────────────────────────────────────────────
 // This is a BUILDING energy audit report: the summary carries building facts
