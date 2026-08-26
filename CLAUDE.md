@@ -129,6 +129,29 @@ Then set the **CURRENT BUILD STATE → Active workstream** line to point at the 
 
 ## CURRENT BUILD STATE (as of 2026-07-14)
 
+**Pinned table headers — the recurring one, and how to actually check it (2026-08-25).**
+"Text overlaps the column headers when I scroll a dashboard widget" has been
+reported four or five times over several months and re-fixed each time by moving
+the `position: sticky` rule around. That was never the cause. **`C.cardSecondary`
+was referenced in 34 files and defined in none**, so `background: undefined` was
+dropped by React and every pinned header in reports, dashboards and list views
+painted nothing — the rows scrolled straight through it while every line of CSS
+read correctly. Defined in `src/data/constants.js` (`#f7f9fc`), along with
+`navy`; the five phantom aliases (`surface`, `pageAlt`, `skyBlue`,
+`skyBlueSecondary`, `accentLink`) were pointed at the tokens that already meant
+them. **Never add a palette alias — point the code at the existing token.**
+Guards, all three of which must stay: `scripts/palette-token-fixture.mjs` (no
+`C.<key>` may be undefined), `scripts/pinned-header-fixture.mjs` (a sticky style
+must declare a background whose value is an *opaque* colour), and
+**`npm run verify:pinned-headers`** — a real Chromium that photographs the header
+band, scrolls the rows under it and requires the pixels to be identical, with a
+positive control that must fail. **Reading the CSS is not verification of this
+defect; run the browser tool.** (`npm install --no-save playwright-core` first;
+it is deliberately not a dependency and not in `build:safe`.) Known gap it
+surfaced: `MatrixLayout` in `ReportRunner.jsx` pins nothing, so a matrix report's
+column headers scroll out of sight — not an overlap, not fixed.
+
+
 Active workstream: **Report Builder + viewer + dashboards enterprise rebuild** — Salesforce/Tableau/Power BI parity for filters, field/column management, sorting, groupings, group formulas, and dashboard cross-filter/drill. Full phased plan + code-grounded architecture map in `docs/leap-report-builder-enterprise.md`. Phase 1 shipped on branch `claude/report-builder-filter-logic-89lvva` (PR #237): shared filter kernel (`src/lib/reportFilters.js`), rebuilt Filters tab with validated `1 AND (2 OR 3)` filter logic + type-scoped operators + relative dates + multi-value, searchable field picker spanning related objects, group-header label fix (picklist/lookup labels instead of UUIDs), and viewer click-to-sort + per-column summarize. Phases 2–7 (grouping depth, PARENT/PREVGROUPVAL group formulas, server-side aggregation w/ via_path, viewer conditional formatting, dashboard cascade/cross-filter/drill, delivery+security) queued in the doc. Prior workstream (LEAP Pad field-service work orders, PRs #114–#133) live on master/prod.
 
 **Shipped 2026-08-25 — One omni-channel Conversations area, and an email you drag onto a record files itself (branch `claude/call-logging-activity-tracking-1dbhqa`; 3 migrations live on prod, advisors 218 / same known categories, zero findings naming the new artifacts; HA-00188):**

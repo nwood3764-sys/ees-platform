@@ -12,7 +12,8 @@
     "build:safe": "npm run preflight && npm run check:tdz && npm run check:hooks && npm run fixtures && npm run build && npm run runtime-smoke",
     "check:tdz": "node scripts/check-hook-deps-tdz.mjs",
     "check:hooks": "node scripts/check-conditional-hooks.mjs",
-    "fixtures": "node scripts/run-fixtures.mjs"
+    "fixtures": "node scripts/run-fixtures.mjs",
+    "verify:pinned-headers": "node tools/pinned-header-check/run.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
