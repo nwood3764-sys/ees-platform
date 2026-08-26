@@ -663,7 +663,12 @@ const DERIVED_READONLY = {
   // trg_opportunity_price_book, using the opportunity_record_type_price_books
   // mapping — the record type dictates the price book and a user never picks
   // one (Nicholas, 2026-07-26).
-  opportunities: ['opportunity_name', 'price_book_id'],
+  // opportunity_property_management_company is forced from the property by
+  // trg_0_opportunity_management_company_follows_property — a property's
+  // management company is inherited all the way down, and there is no way to
+  // have a different one on the opportunity (Nicholas, 2026-08-25). Editable,
+  // it would offer a choice the database reverts on save.
+  opportunities: ['opportunity_name', 'price_book_id', 'opportunity_property_management_company'],
   // building_name is trigger-derived; the In-Unit Information fields are
   // trigger-maintained rollups from child units (recompute_building_rollups,
   // 2026-07-27) — read-only so users edit the unit rows, not the aggregate.
