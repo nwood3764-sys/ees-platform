@@ -725,14 +725,46 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
   await Promise.all(Array.from(relNeeds.entries()).map(async ([fkColumn, need]) => {
     const ids = Array.from(new Set(rows.map(r => r[fkColumn]).filter(Boolean)))
     if (ids.length === 0) { relResolvers.set(fkColumn, new Map()); return }
-    const wanted = Array.from(need.parentColumns).map(s => JSON.parse(s))
+    const requested = Array.from(need.parentColumns).map(s => JSON.parse(s))
+
+    // Every column of ONE relationship rides in ONE select, and PostgREST
+    // rejects the whole request when any single column is unknown. So a view
+    // still referencing a column that has since been dropped did not just lose
+    // THAT column — it blanked every other field from the same parent, because
+    // the request returned nothing and the resolver had no rows to map
+    // (Nicholas, 2026-08-25: Building Number Or Name showed an em dash on every
+    // row while the value sat on the building record; the view also filtered on
+    // a building column dropped earlier that evening).
+    //
+    // Ask the parent's schema which columns actually exist and drop the rest.
+    // A stale field then costs only itself.
+    const parentSchema = await describeObject(need.parentTable).catch(() => [])
+    const parentColNames = new Set(parentSchema.map(c => c.column_name))
+    const wanted = parentColNames.size === 0
+      ? requested
+      : requested.filter(w => parentColNames.has(w.realCol))
+    if (wanted.length < requested.length) {
+      const dropped = requested.filter(w => !wanted.includes(w)).map(w => w.realCol)
+      console.warn(
+        `[list] ${table}: ignoring ${dropped.length} field(s) that no longer exist on ${need.parentTable}: ${dropped.join(', ')}`
+      )
+    }
+    if (wanted.length === 0) { relResolvers.set(fkColumn, new Map()); return }
+
     const selectCols = Array.from(new Set(['id', ...wanted.map(w => w.realCol)])).join(', ')
     // Batch the id IN-list to stay under URL limits.
     const parentRows = []
     const CHUNK = 300
     for (let i = 0; i < ids.length; i += CHUNK) {
       const slice = ids.slice(i, i + CHUNK)
-      const { data } = await supabase.from(need.parentTable).select(selectCols).in('id', slice)
+      const { data, error } = await supabase.from(need.parentTable).select(selectCols).in('id', slice)
+      // Never swallow this: a failed parent fetch used to look exactly like a
+      // parent with no data, which is how an em dash stood in for a value that
+      // was really there.
+      if (error) {
+        console.error(`[list] ${table}: could not resolve ${need.parentTable} (${selectCols}) —`, error.message || error)
+        break
+      }
       if (data) parentRows.push(...data)
     }
     // ── Second hop: parent columns that are themselves lookups ─────────────
@@ -743,9 +775,8 @@ export async function fetchObjectRecords(table, { activeFields = null, relatedSc
     const lookupNameMaps = new Map()   // realCol -> Map<grandId, name>
     const lookupCols = wanted.filter(w => w.isLookupName)
     if (lookupCols.length > 0) {
-      const parentCols = await describeObject(need.parentTable).catch(() => [])
       await Promise.all(lookupCols.map(async (w) => {
-        const meta = parentCols.find(c => c.column_name === w.realCol)
+        const meta = parentSchema.find(c => c.column_name === w.realCol)
         const grandTable = meta?.references_table
         if (!grandTable) { lookupNameMaps.set(w.realCol, new Map()); return }
         const grandIds = Array.from(new Set(parentRows.map(pr => pr[w.realCol]).filter(Boolean)))
