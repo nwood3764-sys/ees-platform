@@ -18,6 +18,12 @@
 //   - every branch of that value (ternaries and || chains included) is either an
 //     opaque colour literal or a palette token that IS an opaque colour
 //
+// Since 2026-08-26 the recipe has ONE definition — src/lib/pinnedTableHeader.js —
+// so this suite checks it in two places: the helper's own default background,
+// and any call site that overrides it. A style that spreads a helper is covered
+// by the helper; a hand-rolled sticky style is still checked literally, because
+// nothing stops someone writing one.
+//
 // Run with:  node scripts/pinned-header-fixture.mjs
 
 import { readdirSync, readFileSync } from 'node:fs'
@@ -52,6 +58,27 @@ function isOpaqueColour(value) {
   const rgba = v.match(/^rgba\(\s*[\d.]+\s*[, ]\s*[\d.]+\s*[, ]\s*[\d.]+\s*[,/]\s*([\d.]+)\s*\)$/i)
   if (rgba) return parseFloat(rgba[1]) === 1
   return false
+}
+
+// Read a property's value out of an object-literal source string, balancing
+// parens and brackets so a value that CONTAINS a comma — `rgba(0, 0, 0, 1)` is
+// the one that matters here — comes back whole. Splitting on the first comma
+// reported `'rgba(255` as the colour, which fails safe but tells whoever hits
+// it the wrong thing about why.
+function readProperty(source, prop) {
+  const at = source.search(new RegExp(`\\b${prop}\\s*:`))
+  if (at < 0) return null
+  let i = source.indexOf(':', at) + 1
+  let depth = 0
+  let out = ''
+  for (; i < source.length; i++) {
+    const c = source[i]
+    if ('([{'.includes(c)) depth += 1
+    else if (')]}'.includes(c)) { if (depth === 0) break; depth -= 1 }
+    else if ((c === ',' || c === '\n') && depth === 0) break
+    out += c
+  }
+  return out.trim() || null
 }
 
 // One branch of a background expression: a quoted literal, or C.<key>.
@@ -102,8 +129,48 @@ function enclosingLiteral(text, index) {
   return null
 }
 
+// ── The shared definition's own defaults ────────────────────────────────────
+const HELPER_PATH = join(srcDir, 'lib/pinnedTableHeader.js')
+const helperSrc = readFileSync(HELPER_PATH, 'utf8')
+const HELPERS = ['pinnedHeaderCell', 'pinnedFooterCell', 'pinnedFirstColumn']
+
+check('the shared pinned-header definition exists', helperSrc.includes('position:'),
+  'src/lib/pinnedTableHeader.js is where this rule lives — do not re-hand-roll it')
+
+for (const helper of HELPERS) {
+  const fn = helperSrc.match(new RegExp(`export function ${helper}\\(([^)]*)\\)`))
+  check(`${helper} is exported from the shared definition`, !!fn)
+  if (!fn) continue
+  const dflt = fn[1].match(/background\s*=\s*([^,}]+)/)
+  check(`${helper}'s default background is declared`, !!dflt,
+    'a pinned cell with no background lets the scrolled content draw through it')
+  if (dflt) {
+    const verdict = describeBranch(dflt[1])
+    check(`${helper}'s default background is an opaque colour`, verdict.ok, verdict.why)
+  }
+}
+
+// ── Every call site that overrides the background ───────────────────────────
+let overrides = 0
+for (const file of sourceFiles(srcDir)) {
+  if (file === HELPER_PATH) continue
+  const text = readFileSync(file, 'utf8')
+  for (const helper of HELPERS) {
+    for (const call of text.matchAll(new RegExp(`${helper}\\(\\{([^}]*)\\}\\)`, 'g'))) {
+      const bg = readProperty(call[1], 'background')
+      if (!bg) continue
+      overrides += 1
+      const where = `${relative(root, file)}:${text.slice(0, call.index).split('\n').length}`
+      const verdict = describeBranch(bg)
+      check(`${where}: ${helper} is passed an opaque background`, verdict.ok, verdict.why)
+    }
+  }
+}
+
+// ── Hand-rolled sticky styles ───────────────────────────────────────────────
 let pinned = 0
 for (const file of sourceFiles(srcDir)) {
+  if (file === HELPER_PATH) continue   // checked above, by its defaults
   const text = readFileSync(file, 'utf8')
   for (const match of text.matchAll(/position:\s*['"]sticky['"]/g)) {
     pinned += 1
@@ -111,7 +178,10 @@ for (const file of sourceFiles(srcDir)) {
     const literal = enclosingLiteral(text, match.index)
     if (!literal) { check(`${where}: pinned style could be read`, false, 'no enclosing object literal found'); continue }
 
-    const declared = literal.match(/\bbackground(?:Color)?\s*:\s*([^,}\n]+)/)
+    // A style built from the shared definition is covered by the checks above.
+    if (HELPERS.some(h => literal.includes(`...${h}(`) || literal.includes(`${h}(`))) continue
+
+    const declared = readProperty(literal, 'background') || readProperty(literal, 'backgroundColor')
     if (!declared) {
       check(`${where}: pinned element declares a background`, false,
         'a sticky element with no background lets the scrolled content draw through it')
@@ -120,7 +190,7 @@ for (const file of sourceFiles(srcDir)) {
     // Split ternaries and || chains — every branch is painted at some point.
     // A segment that a `?` follows is the CONDITION, not a colour, so it is
     // dropped: in `isSelected ? '#f0faf6' : C.card` only the last two paint.
-    const parts = declared[1].split(/(\?|:|\|\|)/).map(s => s.trim())
+    const parts = declared.split(/(\?|:|\|\|)/).map(s => s.trim())
     const branches = parts.filter((part, i) =>
       part && part !== '?' && part !== ':' && part !== '||' && parts[i + 1] !== '?')
     for (const branch of branches) {
@@ -130,10 +200,10 @@ for (const file of sourceFiles(srcDir)) {
   }
 }
 
-check('the scan found the pinned elements', pinned >= 20,
+check('the scan found the hand-rolled pinned elements', pinned >= 15,
   `only ${pinned} sticky styles found — the scan is probably broken`)
 
 console.log(failures === 0
-  ? `pinned-header-fixture: ${checks} checks passed across ${pinned} pinned styles`
+  ? `pinned-header-fixture: ${checks} checks passed — shared definition + ${overrides} background overrides + ${pinned} hand-rolled pinned styles`
   : `pinned-header-fixture: ${failures} of ${checks} checks FAILED`)
 process.exit(failures === 0 ? 0 : 1)

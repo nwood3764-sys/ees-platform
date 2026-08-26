@@ -21,6 +21,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { C } from '../../data/constants'
+import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell } from '../../lib/pinnedTableHeader'
 import { Icon } from '../../components/UI'
 import HelpIcon from '../../components/help/HelpIcon'
 import { useToast } from '../../components/Toast'
@@ -865,9 +866,9 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
         background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden',
       }}>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 1200 }}>
+          <table style={{ ...PINNED_TABLE, fontSize: 12, minWidth: 1200 }}>
             <thead>
-              <tr style={{ background: '#fafbfd', borderBottom: `2px solid ${C.border}` }}>
+              <tr>
                 <th style={TH}>#</th>
                 <th style={TH}>Status</th>
                 <th style={TH}>Action</th>
@@ -912,7 +913,7 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
                 }
 
                 return (
-                  <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <tr key={i}>
                     <td style={TD_MONO}>{i + 2}</td>
                     <td style={TD}>
                       <span style={{
@@ -979,9 +980,14 @@ function Step3Preview({ filename, rows, analysis, serverPreview, rowActions, set
   )
 }
 
-const TH = { textAlign: 'left', padding: '10px 12px', fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3, whiteSpace: 'nowrap' }
-const TD = { padding: '8px 12px', verticalAlign: 'top', color: C.textPrimary }
-const TD_MONO = { padding: '8px 12px', verticalAlign: 'top', color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }
+// An import preview is hundreds of rows long by definition, so its header pins:
+// scrolling to row 300 to check a column you can no longer name is how a bad
+// row gets imported.
+const TH = { textAlign: 'left', padding: '10px 12px', fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3, whiteSpace: 'nowrap', ...pinnedHeaderCell({ background: '#fafbfd' }) }
+// The row rule lives on the CELLS: a border on a <tr> is not painted with
+// border-collapse: separate, which the pinned header requires.
+const TD = { padding: '8px 12px', verticalAlign: 'top', color: C.textPrimary, ...ROW_RULE }
+const TD_MONO = { ...TD, fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 }
 
 function SummaryCard({ color, bg, label, value }) {
   return (

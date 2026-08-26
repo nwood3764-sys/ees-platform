@@ -17,6 +17,7 @@ import { useState, useEffect } from 'react'
 import { runReport, getRowValue } from '../data/reportsService'
 import ReportRecordCellLink, { reportCellLink } from './ReportRecordCellLink'
 import { C } from '../data/constants'
+import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell } from '../lib/pinnedTableHeader'
 
 export function ReportWidget({ widget, parentTable, parentRecordId, onOpenRecord }) {
   const cfg = widget.widget_config || {}
@@ -110,19 +111,18 @@ function ReportWidgetTable({ result, maxRows }) {
   return (
     <>
       <div style={{ overflow:'auto', maxHeight: 320 }}>
-        {/* `separate` borders, not collapsed: a collapsed table paints its rows
-            and row groups with the table itself, which strands a sticky header
-            behind the scrolled rows and leaves ghosted rows behind while the
-            tile scrolls. Sticky and every row rule live on the cells. */}
-        <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:12 }}>
+        {/* One definition of a header that stays put — src/lib/pinnedTableHeader.js.
+            It carries WHY `separate` borders and an opaque background are not
+            optional here; four hand-rolled copies of that rule are how this
+            defect kept coming back. */}
+        <table style={{ ...PINNED_TABLE, fontSize:12 }}>
           <thead>
             <tr>
               {columns.map((c, idx) => (
                 <th key={idx} style={{
                   padding:'6px 10px', fontSize:10, fontWeight:600, color:C.textSecondary,
                   textTransform:'uppercase', letterSpacing:0.5, textAlign:'left', whiteSpace:'nowrap',
-                  position:'sticky', top:0, zIndex:2, background:C.cardSecondary,
-                  boxShadow:`inset 0 -1px 0 ${C.border}`,
+                  ...pinnedHeaderCell(),
                 }}>{c.label}</th>
               ))}
             </tr>
@@ -136,7 +136,7 @@ function ReportWidgetTable({ result, maxRows }) {
                   // opens it, so a dashboard tile is a way in, not a dead end.
                   const cellLink = reportCellLink(row, c, result.primaryObject, ci === 0)
                   return (
-                    <td key={ci} style={{ padding:'6px 10px', whiteSpace:'nowrap', color:C.textPrimary, borderTop:`1px solid ${C.border}` }}>
+                    <td key={ci} style={{ padding:'6px 10px', whiteSpace:'nowrap', color:C.textPrimary, ...ROW_RULE }}>
                       {cellLink
                         ? <ReportRecordCellLink link={cellLink} emphasis={ci === 0}>{formatWidgetCell(v)}</ReportRecordCellLink>
                         : formatWidgetCell(v)}
