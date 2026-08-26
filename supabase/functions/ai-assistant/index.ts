@@ -50,6 +50,7 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 // Deno-free module so they can be pinned by scripts/assistant-transcript-fixture.mjs.
 import {
   trimHistory, compactTranscript, relaxedSearchTerms, isModelUnavailable,
+  addUsage, costOf, totalInputTokens, emptySpend,
 } from "./transcript.js"
 
 // The Anthropic messages shape. Declared here because transcript.js is plain
@@ -66,23 +67,16 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
-// The assistant's model. Env-overridable so it can be moved without a deploy
-// of this file; FALLBACK_MODEL is used once, automatically, if the configured
-// model is not available to this API key (a 404/400 naming the model), and the
-// substitution is recorded on the usage row rather than failing the user's turn.
-const MODEL = Deno.env.get("ASSISTANT_MODEL") || "claude-sonnet-5"
-const FALLBACK_MODEL = "claude-sonnet-4-6"
-// Per-model list price ($/megatoken). Keyed by model so the usage row stays
-// honest when the model is changed by env — a Sonnet price on an Opus turn is
-// a wrong number in the cost report, not a rounding error.
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-5":     { input: 15.00, output: 75.00 },
-  "claude-sonnet-5":   { input: 3.00,  output: 15.00 },
-  "claude-sonnet-4-6": { input: 3.00,  output: 15.00 },
-  "claude-haiku-4-5-20251001": { input: 1.00, output: 5.00 },
-}
-const DEFAULT_PRICING = { input: 3.00, output: 15.00 }
-const pricingFor = (model: string) => MODEL_PRICING[model] ?? DEFAULT_PRICING
+// The assistant's model, env-overridable via ASSISTANT_MODEL so it can be moved
+// without a deploy. Opus 5 is the default deliberately: this surface is judged
+// against Claude itself, and with the system prompt + tool catalog cached the
+// input side (which dominates every turn here) bills at a tenth of list.
+const MODEL = Deno.env.get("ASSISTANT_MODEL") || "claude-opus-5"
+// Tried in order if the configured model is not available to this API key (a
+// 404/400 naming the model). Each step is a real downgrade, so the substitution
+// is recorded on the usage row rather than passed off as normal service.
+const FALLBACK_MODELS = ["claude-sonnet-5", "claude-sonnet-4-6"]
+
 const MAX_TURNS = 8   // tool-use loop ceiling per request
 // Output budget per model call. Must be large enough to emit a whole batch of
 // tool calls at once — a 17-record create is ~2k tokens of tool_use alone, so
@@ -677,7 +671,7 @@ Deno.serve(async (req) => {
   const systemBlocks = cachedSystem(stable, volatile)
 
   const proposedActions: unknown[] = []
-  let totalIn = 0, totalOut = 0
+  const spend = emptySpend()
   let finalText = ""
   let endedNaturally = false
   // The model actually served. Starts at the configured one and moves to the
@@ -685,10 +679,16 @@ Deno.serve(async (req) => {
   let activeModel = MODEL
   let modelNote: string | null = null
 
-  // One Anthropic call, with the single automatic model fallback. Returns the
-  // parsed body, or throws with the API's own text so the caller can report it.
+  // One Anthropic call, walking the fallback chain if the configured model is
+  // unavailable to this key. Returns the parsed body, or throws with the API's
+  // own text so the caller can report it. Once a fallback serves a turn it
+  // becomes activeModel, so the rest of the request stops probing the model
+  // that already answered 404.
   const callModel = async (payload: Record<string, unknown>): Promise<any> => {
-    for (const model of (activeModel === FALLBACK_MODEL ? [activeModel] : [activeModel, FALLBACK_MODEL])) {
+    const chain = [activeModel, ...FALLBACK_MODELS.filter(m => m !== activeModel)]
+    for (let i = 0; i < chain.length; i++) {
+      const model = chain[i]
+      const isLast = i === chain.length - 1
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -706,7 +706,7 @@ Deno.serve(async (req) => {
         return await resp.json()
       }
       const errText = await resp.text()
-      if (model !== FALLBACK_MODEL && isModelUnavailable(resp.status, errText)) continue
+      if (!isLast && isModelUnavailable(resp.status, errText)) continue
       const err = new Error(`Anthropic API ${resp.status}: ${errText.slice(0, 300)}`)
       ;(err as any).status = resp.status
       ;(err as any).detail = errText.slice(0, 300)
@@ -729,16 +729,13 @@ Deno.serve(async (req) => {
         const status = (e as any).status || 502
         await logUsage(admin, {
           userId: callerUserId, flowId: body.flow_id, runId: body.run_id,
-          model: activeModel, inTok: totalIn, outTok: totalOut, cost: 0,
+          model: activeModel, inTok: totalInputTokens(spend), outTok: spend.output, cost: costOf(spend, activeModel),
           outcome: "error", message: (e as Error).message.slice(0, 300),
         })
         return json({ error: `Assistant call failed (${status}).`, detail: (e as any).detail || (e as Error).message }, 502)
       }
 
-      totalIn  += (data?.usage?.input_tokens ?? 0)
-                + (data?.usage?.cache_creation_input_tokens ?? 0)
-                + (data?.usage?.cache_read_input_tokens ?? 0)
-      totalOut += data?.usage?.output_tokens ?? 0
+      addUsage(spend, data?.usage)
 
       const blocks: any[] = data?.content ?? []
       const textBlocks = blocks.filter(b => b.type === "text").map(b => b.text)
@@ -804,10 +801,7 @@ Deno.serve(async (req) => {
           tool_choice: { type: "none" },
           messages: withConversationCacheBreakpoint(closeMessages),
         })
-        totalIn  += (cd?.usage?.input_tokens ?? 0)
-                  + (cd?.usage?.cache_creation_input_tokens ?? 0)
-                  + (cd?.usage?.cache_read_input_tokens ?? 0)
-        totalOut += cd?.usage?.output_tokens ?? 0
+        addUsage(spend, cd?.usage)
         const closeText = (cd?.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n")
         if (closeText) finalText = closeText
       } catch { /* keep the interim narration rather than failing the whole turn */ }
@@ -815,15 +809,13 @@ Deno.serve(async (req) => {
   } catch (e) {
     await logUsage(admin, {
       userId: callerUserId, flowId: body.flow_id, runId: body.run_id,
-      model: activeModel, inTok: totalIn, outTok: totalOut, cost: 0,
+      model: activeModel, inTok: totalInputTokens(spend), outTok: spend.output, cost: costOf(spend, activeModel),
       outcome: "error", message: `Request error: ${(e as Error).message}`,
     })
     return json({ error: "Assistant request failed." }, 502)
   }
 
-  const price = pricingFor(activeModel)
-  const cost = (totalIn / 1_000_000) * price.input
-             + (totalOut / 1_000_000) * price.output
+  const cost = costOf(spend, activeModel)
 
   // The transcript this turn produced, ending on the assistant's own answer, so
   // the NEXT turn starts holding what this one learned instead of blind. The
@@ -831,14 +823,22 @@ Deno.serve(async (req) => {
   const transcript = [...messages]
   if (finalText) transcript.push({ role: "assistant", content: finalText })
 
+  // Record the cache split on every turn. Without it there is no way to tell
+  // from the usage report whether prompt caching is actually working — and
+  // "cache_read is zero across repeated requests" is the one symptom that
+  // means a silent invalidator crept into the prefix.
+  const cacheNote = (spend.cacheWrite || spend.cacheRead)
+    ? `cache ${spend.cacheRead} read / ${spend.cacheWrite} written / ${spend.uncached} uncached`
+    : `no cache hit (${spend.uncached} uncached input tokens)`
   const outcomeParts = [
     proposedActions.length ? `${proposedActions.length} action(s) proposed` : null,
     modelNote,
+    cacheNote,
   ].filter(Boolean)
 
   await logUsage(admin, {
     userId: callerUserId, flowId: body.flow_id, runId: body.run_id,
-    model: activeModel, inTok: totalIn, outTok: totalOut, cost,
+    model: activeModel, inTok: totalInputTokens(spend), outTok: spend.output, cost,
     outcome: "ok", message: outcomeParts.length ? outcomeParts.join("; ") : null,
   })
 
@@ -849,7 +849,12 @@ Deno.serve(async (req) => {
     // Working memory. The client threads this straight back on the next turn.
     history: compactTranscript(transcript),
     model: activeModel,
-    usage: { input_tokens: totalIn, output_tokens: totalOut, estimated_cost_usd: cost },
+    usage: {
+      input_tokens: totalInputTokens(spend), output_tokens: spend.output,
+      cache_read_input_tokens: spend.cacheRead,
+      cache_creation_input_tokens: spend.cacheWrite,
+      estimated_cost_usd: cost,
+    },
   })
 })
 

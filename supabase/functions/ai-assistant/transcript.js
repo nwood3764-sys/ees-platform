@@ -126,3 +126,53 @@ export function isModelUnavailable(status, body) {
   if (status !== 404 && status !== 400) return false
   return /model/i.test(body) && /(not_found|not found|does not exist|unavailable|invalid)/i.test(body)
 }
+
+// Per-model list price ($ per megatoken), from the Anthropic model reference —
+// NOT from memory. Getting these wrong is not a rounding error: the first cut
+// of this file priced Opus 5 at $15/$75 (3x its real rate) and Sonnet 5 at
+// $3/$15, which would have made the cost report fiction and, worse, drove the
+// model choice itself.
+//
+// Model ids are complete as written. Never append a date suffix — a key like
+// "claude-haiku-4-5-20251001" matches nothing and silently falls through to
+// DEFAULT_PRICING.
+const MODEL_PRICING = {
+  "claude-opus-5":     { input: 5.00, output: 25.00 },
+  "claude-sonnet-5":   { input: 2.00, output: 10.00 },
+  "claude-sonnet-4-6": { input: 3.00, output: 15.00 },
+  "claude-haiku-4-5":  { input: 1.00, output:  5.00 },
+}
+// An unknown model is priced at the most expensive rate we know, so a bad
+// ASSISTANT_MODEL overstates rather than understates what it is costing.
+const DEFAULT_PRICING = { input: 5.00, output: 25.00 }
+export const pricingFor = (model) => MODEL_PRICING[model] ?? DEFAULT_PRICING
+
+// Cached input does not bill at the input rate. A cache WRITE costs ~1.25x the
+// base rate and a cache READ ~0.1x, so summing the three input buckets and
+// multiplying by one rate — which is what the first cut of this file did —
+// makes the cost column RISE when caching starts working and hides the whole
+// saving. Priced per bucket instead.
+const CACHE_WRITE_MULTIPLIER = 1.25
+const CACHE_READ_MULTIPLIER  = 0.10
+
+/** One turn's token spend, split by how each bucket actually bills. */
+export const emptySpend = () => ({ uncached: 0, cacheWrite: 0, cacheRead: 0, output: 0 })
+
+// Every input token the turn consumed, cached or not — what the usage row's
+// token count has always meant. Cost is computed per bucket (see costOf).
+export const totalInputTokens = (s) => s.uncached + s.cacheWrite + s.cacheRead
+
+export function addUsage(spend, usage) {
+  spend.uncached   += usage?.input_tokens ?? 0
+  spend.cacheWrite += usage?.cache_creation_input_tokens ?? 0
+  spend.cacheRead  += usage?.cache_read_input_tokens ?? 0
+  spend.output     += usage?.output_tokens ?? 0
+}
+
+export function costOf(spend, model) {
+  const p = pricingFor(model)
+  return (spend.uncached   / 1_000_000) * p.input
+       + (spend.cacheWrite / 1_000_000) * p.input * CACHE_WRITE_MULTIPLIER
+       + (spend.cacheRead  / 1_000_000) * p.input * CACHE_READ_MULTIPLIER
+       + (spend.output     / 1_000_000) * p.output
+}
