@@ -182,6 +182,10 @@
       <div class="got"></div>
       <input type="file" accept=".html,.htm,.osm"></div>
   </div>
+  <div style="margin:8px 2px 0;font-size:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <button type="button" id="clearSessionBtn" style="background:#fff;border:1px solid #d0d8e8;color:#4a5e7a;border-radius:6px;padding:4px 10px;cursor:pointer">Clear saved session</button>
+    <span style="color:#8fa0b8">Your files &amp; project details are remembered on this device across reloads (and new builds). Clear to start a different building.</span>
+  </div>
 
   <div class="review" id="review">
     <h2 id="rTitle">Review</h2>
@@ -811,7 +815,8 @@ document.querySelectorAll('.slot[data-atkey]').forEach(slot=>{
   ['dragleave','drop'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.remove('hot');}));
   const take=f=>{atDocs[key]=f;slot.classList.add('ok');slot.querySelector('.got').textContent='✓ '+f.name;refresh();
     if(key==='baseXml'||key==='impXml'){const ok2=key==='baseXml'?'baseOwner':'impOwner';atDocs[ok2]=null;
-      _parseOwnerFile(f).then(o=>{atDocs[ok2]=o;if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();});}};
+      _parseOwnerFile(f).then(o=>{atDocs[ok2]=o;if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();saveSession();});}
+    saveSession();};
   slot.addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])take(ev.dataTransfer.files[0]);});
   inp.addEventListener('change',()=>{if(inp.files[0])take(inp.files[0]);});
 });
@@ -872,12 +877,80 @@ document.querySelectorAll('.slot[data-key]').forEach(slot=>{
       });
       setStatus('');
       refresh();
+      saveSession();   // persist so a reload (e.g. after a new build) restores it
     }catch(err){
       setStatus('Could not read '+file.name+': '+err.message,'err');
       slot.classList.remove('ok');
     }
   }
 });
+
+/* ---------- Session memory ----------------------------------------------------
+   Persist the uploaded files + parsed data in IndexedDB so a page reload — e.g.
+   after a new build deploys — restores everything: no re-uploading, no re-running
+   the EnergyPlus runner. (Project details — owner, dates, rates, occupancy —
+   already persist per property in localStorage; restoring `data` brings them
+   back because refresh() re-runs pjLoadAndPrefill.) All wrapped in try/catch so a
+   private window or a storage-blocked browser degrades to the old behavior. */
+const ATB_DB='atb_session', ATB_STORE='session', ATB_KEY='current';
+function _idbOpen(){return new Promise((res,rej)=>{let r;
+  try{r=indexedDB.open(ATB_DB,1);}catch(e){return rej(e);}
+  r.onupgradeneeded=()=>{try{r.result.createObjectStore(ATB_STORE);}catch(e){}};
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);});}
+function _idbPut(v){return _idbOpen().then(db=>new Promise((res,rej)=>{
+  const tx=db.transaction(ATB_STORE,'readwrite'); tx.objectStore(ATB_STORE).put(v,ATB_KEY);
+  tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);}));}
+function _idbGet(){return _idbOpen().then(db=>new Promise((res,rej)=>{
+  const tx=db.transaction(ATB_STORE,'readonly'); const g=tx.objectStore(ATB_STORE).get(ATB_KEY);
+  g.onsuccess=()=>res(g.result||null); g.onerror=()=>rej(g.error);}));}
+function _idbDel(){return _idbOpen().then(db=>new Promise(res=>{
+  const tx=db.transaction(ATB_STORE,'readwrite'); tx.objectStore(ATB_STORE).delete(ATB_KEY);
+  tx.oncomplete=res; tx.onerror=res;})).catch(()=>{});}
+let _saveT=null, _restoring=false;
+function saveSession(){
+  if(_restoring) return;
+  clearTimeout(_saveT);
+  _saveT=setTimeout(()=>{
+    try{
+      const any=Object.values(files).some(Boolean)||['basePdf','impPdf','baseXml','impXml'].some(k=>atDocs[k]);
+      if(!any){ _idbDel(); return; }
+      _idbPut({ v:1,
+        data:JSON.parse(JSON.stringify(data)),
+        rawDocs:JSON.parse(JSON.stringify(rawDocs)),
+        files:{asBase:files.asBase,asImp:files.asImp,osBase:files.osBase,osImp:files.osImp},
+        atDocs:{basePdf:atDocs.basePdf,impPdf:atDocs.impPdf,baseXml:atDocs.baseXml,impXml:atDocs.impXml,
+                baseOwner:atDocs.baseOwner,impOwner:atDocs.impOwner}
+      }).catch(()=>{});
+    }catch(e){/* storage full/unavailable — skip */}
+  },600);
+}
+async function restoreSession(){
+  let rec=null; try{ rec=await _idbGet(); }catch(e){ return; }
+  if(!rec||rec.v!==1) return;
+  _restoring=true;
+  try{
+    if(rec.data)    Object.assign(data, rec.data);
+    if(rec.rawDocs) Object.assign(rawDocs, rec.rawDocs);
+    if(rec.files)   Object.assign(files, rec.files);
+    if(rec.atDocs)  Object.assign(atDocs, rec.atDocs);
+    const mark=(sel,f)=>{ if(!f)return; document.querySelectorAll(sel).forEach(sl=>{
+      sl.classList.add('ok'); const g=sl.querySelector('.got'); if(g)g.textContent='✓ '+(f.name||'restored'); }); };
+    ['asBase','asImp','osBase','osImp'].forEach(k=>mark('.slot[data-key="'+k+'"]', files[k]));
+    ['basePdf','impPdf','baseXml','impXml'].forEach(k=>mark('.slot[data-atkey="'+k+'"]', atDocs[k]));
+    setStatus('Restored your previous session — files and details are back. Upload a new file to replace, or press “Clear saved session”.','ok');
+  }catch(e){}
+  _restoring=false;
+  try{ refresh(); if(typeof scheduleAutoChecks==='function') scheduleAutoChecks(); }catch(e){}
+}
+function clearSession(){
+  _idbDel();
+  ['asBase','asImp','osBase','osImp'].forEach(k=>{files[k]=null;data[k]=null;rawDocs[k]=null;});
+  ['basePdf','impPdf','baseXml','impXml','baseOwner','impOwner'].forEach(k=>atDocs[k]=null);
+  document.querySelectorAll('.slot').forEach(sl=>{sl.classList.remove('ok'); const g=sl.querySelector('.got'); if(g)g.textContent='';});
+  setStatus('Cleared saved session.','');
+  try{ refresh(); }catch(e){}
+}
+window.clearSession=clearSession;
 function setStatus(msg,cls){const s=document.getElementById('status');s.textContent=msg||'';s.className='status'+(cls?' '+cls:'');}
 function fmt(n,d=0){return (n||0).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:d});}
 function copyText(text,btn){
@@ -3134,7 +3207,8 @@ function buildMappedForReview(){
      the rounding so Gross Total = Total Rebates exactly → TOTAL DUE $0.                    */
 const PJ_FIELDS=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone','pjPropName',
   'pjInstallAddr','pjCsz','pjIQ','pjInvNo','pjProjInvNo','pjInvDate','pjEstStart','pjEstEnd','pjStart','pjEnd',
-  'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower','rateElec','rateGas'];
+  'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower','rateElec','rateGas',
+  'occUnits','occBeds','occBedsTotal'];   // occupancy persists per property too
 function pj(id){const e=document.getElementById(id);return e?e.value.trim():'';}
 function pjStorageKey(){const as=data.asImp||data.asBase;return as?'atb_project_'+fileBase(as.name):null;}
 function pjSave(){const k=pjStorageKey();if(!k)return;
@@ -3184,6 +3258,13 @@ function pjLoadAndPrefill(){
     if(/^rate(Elec|Gas)$/.test(f)){   // rate edit → re-render every $ figure + re-check
       if(typeof refresh==='function')refresh();
       if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();}});}})();
+
+// Restore a saved session on load (files + parsed data from IndexedDB; project
+// details — owner, dates, rates, occupancy — follow from localStorage once
+// `data` is set and refresh() re-runs pjLoadAndPrefill). Runs after every helper
+// above is defined.
+{const _csb=document.getElementById('clearSessionBtn'); if(_csb)_csb.onclick=clearSession;}
+restoreSession();
 
 // The Measure Description Bank (from the workbook), with R-value substitution slots.
 const BANK={
