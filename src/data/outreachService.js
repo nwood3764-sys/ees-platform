@@ -324,15 +324,16 @@ export async function fetchOpportunities() {
         opportunity_status,
         opportunity_program,
         opportunity_amount,
-        opportunity_close_date,
         opportunity_state,
         opportunity_owner,
         property_id,
         properties:property_id ( property_name, property_total_units )
       `)
       .eq('opportunity_is_deleted', false)
-      .order('opportunity_close_date', { ascending: true })
-      .order('id',                     { ascending: true })
+      // Close Date was retired 2026-08-26 (Nicholas: "we don't use closed
+      // dates") — it was null on every row, so it never ordered anything.
+      .order('opportunity_name', { ascending: true })
+      .order('id',               { ascending: true })
       .range(from, to)
   )
 
@@ -348,7 +349,6 @@ export async function fetchOpportunities() {
     amount: fmtAmount(r.opportunity_amount),
     _amountRaw: Number(r.opportunity_amount) || 0,
     units: r.properties?.property_total_units ?? 0,
-    closeDate: r.opportunity_close_date || '',
     state: r.opportunity_state || '',
   }))
 }

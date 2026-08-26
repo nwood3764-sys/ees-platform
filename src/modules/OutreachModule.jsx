@@ -31,7 +31,6 @@ const OPP_COLS = [
   { field:'owner',     label:'Owner',      type:'select', sortable:true,  filterable:true,  options:['Marcus Reid','Priya Nair','Lisa Tanaka'] },
   { field:'amount',    label:'Amount',     type:'text',   sortable:true,  filterable:false  },
   { field:'units',     label:'Units',      type:'text',   sortable:true,  filterable:false  },
-  { field:'closeDate', label:'Close Date', type:'date',   sortable:true,  filterable:true   },
   { field:'state',     label:'State',      type:'select', sortable:true,  filterable:true,  options:['WI','NC','CO','MI'] },
 ]
 const ACCOUNT_COLS = [

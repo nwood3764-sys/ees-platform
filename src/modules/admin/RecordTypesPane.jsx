@@ -48,6 +48,16 @@ const PROJECT_RECORD_TYPE_OBJECTS = new Set(['assessments'])
 // record_type_eligibility and enforced in the database; this pane is the UI over
 // it. Add an entry when another parent/child pair needs the same control.
 const CHILD_RECORD_TYPE_SCOPES = {
+  // A building's record type is the housing type, and a program is written for
+  // one — the IRA multifamily track and the single-family track are different
+  // programs with different applications and different money. So the building
+  // decides which programs may run on it (Nicholas, 2026-08-26: "the
+  // single-family record types can't possibly be on a multi-family record
+  // building"). Seeded in 20260826144116; retune it here, per building type,
+  // with no deploy.
+  buildings: [
+    { childObject: 'opportunities', childLabel: 'Opportunity', buttonLabel: 'Programs' },
+  ],
   opportunities: [
     { childObject: 'assessments', childLabel: 'Assessment', buttonLabel: 'Assessment types' },
     // Every program runs its own incentive application, so the opportunity

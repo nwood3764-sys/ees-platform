@@ -229,7 +229,7 @@ export function relationshipLabel(fkColumn, parentTable) {
 }
 
 function titleize(name) {
-  // opportunity_close_date -> Close Date  (drop the object prefix noise where
+  // opportunity_next_step_date -> Next Step Date  (drop the object prefix noise where
   // present, then title-case the rest).
   return name
     .replace(/_/g, ' ')
