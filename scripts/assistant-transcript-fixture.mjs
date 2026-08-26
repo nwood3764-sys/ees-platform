@@ -17,6 +17,7 @@
 import {
   trimHistory, compactTranscript, isToolResultTurn,
   relaxedSearchTerms, isModelUnavailable, HISTORY_CHAR_BUDGET,
+  pricingFor, addUsage, costOf, totalInputTokens, emptySpend,
 } from '../supabase/functions/ai-assistant/transcript.js'
 
 let failures = 0
@@ -142,6 +143,71 @@ check('a rate limit does NOT silently change model', isModelUnavailable(429, 'ra
 check('an overload does NOT silently change model', isModelUnavailable(529, 'overloaded_error'), false)
 check('a 400 about something else does not change model',
   isModelUnavailable(400, '{"error":{"message":"messages: unexpected role"}}'), false)
+
+
+// ── Pricing and cost ────────────────────────────────────────────────────────
+// This section exists because the first cut of this file got all of it wrong:
+// Opus 5 priced at 3x its real rate, Sonnet 5 at 1.5x, a Haiku key with a date
+// suffix that could never match, and — worst — the three input buckets summed
+// and billed at one rate, which makes the cost column RISE when prompt caching
+// starts working. None of it was checked against the model reference before it
+// shipped. It is checked here now.
+
+check('Opus 5 is $5 / $25 per megatoken', pricingFor('claude-opus-5'), { input: 5.00, output: 25.00 })
+check('Sonnet 5 is $2 / $10', pricingFor('claude-sonnet-5'), { input: 2.00, output: 10.00 })
+check('Sonnet 4.6 is $3 / $15', pricingFor('claude-sonnet-4-6'), { input: 3.00, output: 15.00 })
+check('Haiku 4.5 is keyed WITHOUT a date suffix', pricingFor('claude-haiku-4-5'), { input: 1.00, output: 5.00 })
+check('a date-suffixed id is NOT a real key (it falls through)',
+  pricingFor('claude-haiku-4-5-20251001'), pricingFor('some-model-that-does-not-exist'))
+check('an unknown model is priced at the dearest known rate, never the cheapest',
+  pricingFor('whatever-the-env-var-said'), { input: 5.00, output: 25.00 })
+
+// ── Cache tokens do not bill at the input rate ──────────────────────────────
+{
+  const spend = emptySpend()
+  addUsage(spend, { input_tokens: 1_000_000, output_tokens: 0 })
+  check('1M uncached input on Opus 5 costs the input rate', costOf(spend, 'claude-opus-5'), 5.00)
+}
+{
+  const spend = emptySpend()
+  addUsage(spend, { cache_read_input_tokens: 1_000_000 })
+  check('1M CACHE-READ input costs a tenth of it', costOf(spend, 'claude-opus-5'), 0.50)
+}
+{
+  const spend = emptySpend()
+  addUsage(spend, { cache_creation_input_tokens: 1_000_000 })
+  check('1M CACHE-WRITE input costs 1.25x of it', costOf(spend, 'claude-opus-5'), 6.25)
+}
+{
+  const spend = emptySpend()
+  addUsage(spend, { output_tokens: 1_000_000 })
+  check('1M output costs the output rate', costOf(spend, 'claude-opus-5'), 25.00)
+}
+
+// The regression this whole section is for: the SAME input tokens, once billed
+// as uncached and once as a cache read, must not cost the same.
+{
+  const cold = emptySpend(); addUsage(cold, { input_tokens: 100_000, output_tokens: 500 })
+  const warm = emptySpend(); addUsage(warm, { input_tokens: 5_000, cache_read_input_tokens: 95_000, output_tokens: 500 })
+  check('cold and warm turns carry the same input-token count',
+    totalInputTokens(cold), totalInputTokens(warm))
+  check('…but the cached turn costs strictly less', costOf(warm, 'claude-opus-5') < costOf(cold, 'claude-opus-5'), true)
+  // 100k cold = $0.50 + $0.0125 output. 95k cached = $0.025 + $0.0475 + $0.0125.
+  check('cold 100k-input Opus 5 turn', Number(costOf(cold, 'claude-opus-5').toFixed(4)), 0.5125)
+  check('warm 100k-input Opus 5 turn', Number(costOf(warm, 'claude-opus-5').toFixed(4)), 0.0850)
+}
+
+// ── Accumulation across the tool-use loop ───────────────────────────────────
+{
+  const spend = emptySpend()
+  addUsage(spend, { input_tokens: 10, cache_creation_input_tokens: 20, cache_read_input_tokens: 30, output_tokens: 40 })
+  addUsage(spend, { input_tokens: 1, cache_read_input_tokens: 2, output_tokens: 3 })
+  check('every bucket accumulates', spend, { uncached: 11, cacheWrite: 20, cacheRead: 32, output: 43 })
+  check('the reported input-token count is all three input buckets', totalInputTokens(spend), 63)
+  addUsage(spend, undefined)
+  check('a missing usage object is a no-op, not a crash', totalInputTokens(spend), 63)
+}
+check('a fresh spend is zero', costOf(emptySpend(), 'claude-opus-5'), 0)
 
 console.log(failures === 0
   ? `assistant-transcript fixture: ${checks} checks passed`
