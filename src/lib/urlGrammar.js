@@ -111,8 +111,9 @@ function scopeToToken(scope) {
 }
 
 // Decode the `rel` query param (see buildScopedListUrl) back into a listScope
-// object, or null when absent/malformed.
-function decodeListScope(search) {
+// object, or null when absent/malformed. Exported so the assistant can read the
+// scope out of a LEAP URL the user pastes into the chat (see assistantContext).
+export function decodeListScope(search) {
   const params = new URLSearchParams(search || '')
   const raw = params.get('rel')
   if (!raw) return null

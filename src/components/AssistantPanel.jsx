@@ -20,6 +20,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { C } from '../data/constants'
 import { useToast } from './Toast'
+import { buildAssistantContext, contextForStorage } from '../lib/assistantContext'
 import {
   sendAssistantMessage, commitAssistantActions,
   saveAssistantTask, listAssistantTasks, getAssistantTask, runAssistantTask,
@@ -56,20 +57,9 @@ const VERIFY_DIRECTIVE =
   "If anything FAILED or is missing, say so plainly and, when it is within the user's permissions, take the corrective action now to finish the job. " +
   'If a genuine decision is needed from the user, ask one short question. Never claim a result you cannot see in the note.'
 
-// Map the app's selected-record shape to the edge function's context shape.
-// selectedRecord carries { table, id, name/label } in this codebase; we read
-// defensively since not every surface sets every field.
-function buildContext(selectedRecord, listTable) {
-  if (selectedRecord?.id) {
-    return {
-      object: selectedRecord.table || selectedRecord.object || listTable || null,
-      record_id: selectedRecord.id,
-      record_label: selectedRecord.name || selectedRecord.label || null,
-    }
-  }
-  if (listTable) return { object: listTable }
-  return null
-}
+// Context is built by src/lib/assistantContext.js — see that file for why the
+// old version (selected record only) was the reason the assistant could not
+// see the account whose contact list was on screen.
 
 function currentObject(selectedRecord, listTable) {
   return selectedRecord?.table || selectedRecord?.object || listTable || null
@@ -283,7 +273,7 @@ function FreeTextStep({ onSubmit, busy }) {
   )
 }
 
-export default function AssistantPanel({ activeModule, selectedRecord, listTable, onNavigateToRecord }) {
+export default function AssistantPanel({ activeModule, selectedRecord, listTable, listScope = null, onNavigateToRecord }) {
   const toast = useToast()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
@@ -443,8 +433,12 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     setInput('')
     setTurns(t => [...t, { role: 'user', text: message }])
     setBusy(true)
-    const ctx = buildContext(selectedRecord, listTable)
-    const ctxJson = ctx ? { object: ctx.object || null, record_id: ctx.record_id || null } : null
+    // Everything the assistant is allowed to know about this screen: the open
+    // record if there is one, the related-list filter if the list is scoped to
+    // a parent, and any LEAP link the user pasted into the message itself.
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    const ctx = buildAssistantContext({ selectedRecord, listTable, listScope, message, origin })
+    const ctxJson = contextForStorage(ctx)
     // One local conversation array threaded through the whole request. React
     // state updates async, so we can't rely on `history` mid-loop; we build
     // convo locally and commit it to state once at the end.
@@ -456,10 +450,14 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
         setTurns(t => [...t, { role: 'assistant', text: res.reply, actions: [] }])
         return
       }
-      convo = [...convo,
-        { role: 'user', content: message },
-        { role: 'assistant', content: res.reply || '' },
-      ]
+      // Working memory. The edge function hands back the real transcript —
+      // including the tool calls it made and what they returned — so the next
+      // turn starts holding what this one learned. Before this, every turn
+      // replayed text only, so the assistant re-derived (or forgot) every id
+      // and lookup it had already done: the "gets dumber as we go" complaint.
+      convo = Array.isArray(res.history) && res.history.length
+        ? res.history
+        : [...convo, { role: 'user', content: message }, { role: 'assistant', content: res.reply || '' }]
       saveAssistantMessage({ role: 'user', content: message, context: ctxJson }).catch(() => {})
       if (res.reply) saveAssistantMessage({ role: 'assistant', content: res.reply }).catch(() => {})
 
@@ -480,10 +478,9 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
         if (fres.mock) break
         // The verify directive is an internal control turn — kept in context
         // for the model, never shown to the user and never persisted.
-        convo = [...convo,
-          { role: 'user', content: VERIFY_DIRECTIVE },
-          { role: 'assistant', content: fres.reply || '' },
-        ]
+        convo = Array.isArray(fres.history) && fres.history.length
+          ? fres.history
+          : [...convo, { role: 'user', content: VERIFY_DIRECTIVE }, { role: 'assistant', content: fres.reply || '' }]
         if (fres.reply) saveAssistantMessage({ role: 'assistant', content: fres.reply }).catch(() => {})
         const factions = fres.proposed_actions || []
         const fr = await runAndRender(fres.reply, factions, ctx, convo)
@@ -498,7 +495,7 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     } finally {
       setBusy(false)
     }
-  }, [input, busy, history, selectedRecord, listTable, toast, runAndRender])
+  }, [input, busy, history, selectedRecord, listTable, listScope, toast, runAndRender])
 
   // Manual Confirm path (used only for the sensitive action types that still
   // show a card): commit the chosen actions and mark that turn done.
@@ -507,7 +504,7 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     try {
       const turn = turns[turnIdx]
       const actions = actionIndices.map(i => turn.actions[i])
-      const ctx = buildContext(selectedRecord, listTable)
+      const ctx = buildAssistantContext({ selectedRecord, listTable, listScope })
       const { ok, links, note } = await performCommit(actions, ctx)
       if (note) setHistory(h => [...h, { role: 'user', content: note }])
       if (ok) {
@@ -523,7 +520,7 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     } finally {
       setBusy(false)
     }
-  }, [turns, selectedRecord, listTable, toast, performCommit])
+  }, [turns, selectedRecord, listTable, listScope, toast, performCommit])
 
   const confirmAction = useCallback((turnIdx, actionIdx) => commitSet(turnIdx, [actionIdx]), [commitSet])
 
@@ -593,7 +590,7 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     if (!runTask) return
     setBusy(true)
     try {
-      const ctx = buildContext(selectedRecord, listTable)
+      const ctx = buildAssistantContext({ selectedRecord, listTable, listScope })
       const result = await runAssistantTask({
         flowId: runTask.task.flow_id, snapshot: runTask.snapshot, answers, context: ctx,
       })
@@ -611,7 +608,7 @@ export default function AssistantPanel({ activeModule, selectedRecord, listTable
     } finally {
       setBusy(false)
     }
-  }, [runTask, selectedRecord, listTable, toast])
+  }, [runTask, selectedRecord, listTable, listScope, toast])
 
   return (
     <>
