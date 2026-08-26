@@ -78,10 +78,9 @@ const OPP_COLS = [
   { field:'stage',     label:'Stage',       type:'text',   sortable:true, filterable:true  },
   { field:'program',   label:'Program',     type:'text',   sortable:true, filterable:true  },
   { field:'amount',    label:'Amount',      type:'text',   sortable:true, filterable:false },
-  { field:'closeDate', label:'Close',       type:'date',   sortable:true, filterable:true  },
   { field:'state',     label:'State',       type:'select', sortable:true, filterable:true, options:['WI','NC','CO','MI'] },
 ]
-const OPP_VIEWS = [{ id:'QOP-01', name:'All Opportunities', filters:[], sortField:'closeDate', sortDir:'asc' }]
+const OPP_VIEWS = [{ id:'QOP-01', name:'All Opportunities', filters:[], sortField:'name', sortDir:'asc' }]
 
 function LiveListView({ loading, error, data, onRetry, ...rest }) {
   if (loading) return <LoadingState />
