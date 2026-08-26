@@ -8759,6 +8759,18 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     }
   }
 
+  // Every document type a file-gallery SLOT on this layout claims. A catch-all
+  // gallery leaves those files to their own slot instead of listing them a
+  // second time on the same page. See src/lib/documentSlots.js.
+  //
+  // Declared HERE, above every conditional return below, because a hook must
+  // run on every render. Reading `data?.sections` keeps it safe on the first
+  // render, when the record is still loading and `data` is null.
+  const claimedSlotTypes = useMemo(
+    () => slotTypesOnLayout((data?.sections || []).flatMap(sec => sec.widgets || [])),
+    [data],
+  )
+
   // Show the record-type picker before loading the layout. Gates create mode.
   if (isCreate && pickerEvaluated && pickedRecordType === null) {
     const objectLabel = TABLE_META[tableName]?.label || humanizeObjectLabel(tableName)
@@ -8849,14 +8861,6 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // Related second (if any section has related_list widgets), Activity third
   // (not on new records — nothing to show yet), alphabetical after.
   const orderedTabs = buildOrderedTabs(sections, { includeActivity: !isInsertMode })
-
-  // Every document type a file-gallery SLOT on this layout claims. A catch-all
-  // gallery leaves those files to their own slot instead of listing them a
-  // second time on the same page. See src/lib/documentSlots.js.
-  const claimedSlotTypes = useMemo(
-    () => slotTypesOnLayout((sections || []).flatMap(sec => sec.widgets || [])),
-    [sections],
-  )
 
   const objectLabel = TABLE_META[tableName]?.label || humanizeObjectLabel(tableName)
   // Header values driven from TABLE_META so adding a new object only requires

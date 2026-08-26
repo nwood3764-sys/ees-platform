@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "preflight": "node scripts/preflight.mjs",
     "runtime-smoke": "node scripts/runtime-smoke.mjs",
-    "build:safe": "npm run preflight && npm run check:tdz && npm run fixtures && npm run build && npm run runtime-smoke",
+    "build:safe": "npm run preflight && npm run check:tdz && npm run check:hooks && npm run fixtures && npm run build && npm run runtime-smoke",
     "check:tdz": "node scripts/check-hook-deps-tdz.mjs",
+    "check:hooks": "node scripts/check-conditional-hooks.mjs",
     "fixtures": "node scripts/run-fixtures.mjs"
   },
   "dependencies": {
