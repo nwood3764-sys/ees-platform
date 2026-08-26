@@ -3,11 +3,15 @@
 // Kept out of index.ts (which imports Deno/JSR modules) so they can be run and
 // pinned from Node: scripts/assistant-transcript-fixture.mjs. Nothing here
 // touches the network, the database, or a Deno global.
-
-export interface AnthropicMessage {
-  role: "user" | "assistant"
-  content: unknown
-}
+//
+// Plain JavaScript, deliberately. Deno reads it as happily as TypeScript, and
+// Node imports it with no flag — which matters because the Netlify build runs
+// `npm run fixtures` on NODE_VERSION 20, and Node 20 cannot import a .ts file
+// at all. Authoring this as .ts passed locally on Node 22 (which strips types
+// on import) and failed the deploy build outright. Types live in JSDoc.
+//
+// A message is { role: "user" | "assistant", content: unknown } — the
+// Anthropic messages shape, with content either a string or a block array.
 
 // Cap the replayed history sent to the model (chars). Conversation memory can
 // balloon over a long session; that degrades the model and can starve the
@@ -19,9 +23,10 @@ export const HISTORY_CHAR_BUDGET = 140000
 // what the model reasons from, so keep that and say plainly what was cut.
 const CARRIED_TOOL_RESULT_CHARS = 2500
 
-export function isToolResultTurn(m: AnthropicMessage): boolean {
+/** @param {{role:string, content:unknown}} m */
+export function isToolResultTurn(m) {
   return m?.role === "user" && Array.isArray(m.content) &&
-    (m.content as any[]).some(b => b?.type === "tool_result")
+    m.content.some(b => b?.type === "tool_result")
 }
 
 /**
@@ -36,7 +41,7 @@ export function isToolResultTurn(m: AnthropicMessage): boolean {
  * cut, the start is advanced forward until the window opens on a genuine user
  * message.
  */
-export function trimHistory(history: AnthropicMessage[]): AnthropicMessage[] {
+export function trimHistory(history) {
   if (!Array.isArray(history)) return []
   let total = 0
   let start = history.length
@@ -63,10 +68,10 @@ export function trimHistory(history: AnthropicMessage[]): AnthropicMessage[] {
  * dropped, and it says so where it was cut, so the model re-reads rather than
  * assuming.
  */
-export function compactTranscript(messages: AnthropicMessage[]): AnthropicMessage[] {
+export function compactTranscript(messages) {
   return messages.map(m => {
     if (!Array.isArray(m.content)) return m
-    const blocks = (m.content as any[]).map(b => {
+    const blocks = m.content.map(b => {
       if (b?.type !== "tool_result" || typeof b.content !== "string") return b
       if (b.content.length <= CARRIED_TOOL_RESULT_CHARS) return b
       return {
@@ -90,10 +95,10 @@ const ENTITY_SUFFIX_RE =
  * Progressively looser forms of a search term, most specific first, excluding
  * the original. Bounded at two so a miss costs at most two extra queries.
  */
-export function relaxedSearchTerms(term: string): string[] {
+export function relaxedSearchTerms(term) {
   const base = String(term ?? "").trim().replace(/\s+/g, " ")
   if (!base) return []
-  const out: string[] = []
+  const out = []
   let stripped = base
   // Strip repeated suffixes ("Foo Holdings Co., Inc." -> "Foo Holdings").
   for (let i = 0; i < 3; i++) {
@@ -117,7 +122,7 @@ export function relaxedSearchTerms(term: string): string[] {
 // Does this API error mean "that model is not available to this key"? Only then
 // is the fallback correct — every other failure must surface, not be masked by
 // silently answering on a different model.
-export function isModelUnavailable(status: number, body: string): boolean {
+export function isModelUnavailable(status, body) {
   if (status !== 404 && status !== 400) return false
   return /model/i.test(body) && /(not_found|not found|does not exist|unavailable|invalid)/i.test(body)
 }

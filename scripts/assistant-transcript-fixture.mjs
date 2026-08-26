@@ -17,7 +17,7 @@
 import {
   trimHistory, compactTranscript, isToolResultTurn,
   relaxedSearchTerms, isModelUnavailable, HISTORY_CHAR_BUDGET,
-} from '../supabase/functions/ai-assistant/transcript.ts'
+} from '../supabase/functions/ai-assistant/transcript.js'
 
 let failures = 0
 let checks = 0

@@ -49,9 +49,16 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 // Pure transcript / search-term / model-fallback rules, kept in their own
 // Deno-free module so they can be pinned by scripts/assistant-transcript-fixture.mjs.
 import {
-  type AnthropicMessage, trimHistory, compactTranscript,
-  relaxedSearchTerms, isModelUnavailable,
-} from "./transcript.ts"
+  trimHistory, compactTranscript, relaxedSearchTerms, isModelUnavailable,
+} from "./transcript.js"
+
+// The Anthropic messages shape. Declared here because transcript.js is plain
+// JavaScript on purpose (see its header — the Netlify build's Node 20 cannot
+// import a .ts file), so it carries no exported type.
+interface AnthropicMessage {
+  role: "user" | "assistant"
+  content: unknown
+}
 
 const cors = {
   "Access-Control-Allow-Origin":  "*",
