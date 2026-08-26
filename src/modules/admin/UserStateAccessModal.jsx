@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { C } from '../../data/constants'
+import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell } from '../../lib/pinnedTableHeader'
 import {
   fetchStateScopesForUser,
   fetchStateScopeOptions,
@@ -281,16 +282,18 @@ const secondaryBtn = {
 const tableWrap = {
   border: `1px solid ${C.border}`, borderRadius: 6, overflowX: 'auto', marginTop: 4,
 }
-const tableStyle = { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }
+const tableStyle = { ...PINNED_TABLE, fontSize: 12.5 }
+// The preview lists every object in the platform, so it is always taller than
+// the modal — pinned, or you scroll three screens of numbers with nothing
+// saying which column is Visible and which is Total.
 const thStyle = {
   textAlign: 'left', padding: '8px 10px', color: C.textMuted, fontWeight: 600,
   fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3,
-  borderBottom: `1px solid ${C.border}`, background: '#f7f9fc', whiteSpace: 'nowrap',
+  whiteSpace: 'nowrap', ...pinnedHeaderCell(),
 }
 const thNum = { ...thStyle, textAlign: 'right' }
 const tdStyle = {
-  padding: '7px 10px', color: C.textPrimary, borderBottom: `1px solid ${C.border}`,
-  whiteSpace: 'nowrap',
+  padding: '7px 10px', color: C.textPrimary, whiteSpace: 'nowrap', ...ROW_RULE,
 }
 const tdNum = {
   ...tdStyle, textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,

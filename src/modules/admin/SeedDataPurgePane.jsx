@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { C } from '../../data/constants'
+import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell } from '../../lib/pinnedTableHeader'
 import { Icon, LoadingState } from '../../components/UI'
 import HelpIcon from '../../components/help/HelpIcon'
 import { supabase } from '../../lib/supabase'
@@ -116,18 +117,20 @@ export default function SeedDataPurgePane() {
                 No training data currently loaded.
               </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <table style={{ ...PINNED_TABLE, fontSize: 13 }}>
                 <thead>
-                  <tr style={{ borderBottom: `1px solid ${C.border}`, color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                    <th style={{ textAlign: 'left',  padding: '6px 0', fontWeight: 600 }}>Object</th>
-                    <th style={{ textAlign: 'right', padding: '6px 0', fontWeight: 600 }}>Seed records</th>
+                  <tr style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <th style={{ textAlign: 'left',  padding: '6px 8px', fontWeight: 600, ...pinnedHeaderCell() }}>Object</th>
+                    <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600, ...pinnedHeaderCell() }}>Seed records</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(counts || []).map(row => (
-                    <tr key={row.table_name} style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <td style={{ padding: '7px 0', color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{row.table_name}</td>
-                      <td style={{ padding: '7px 0', textAlign: 'right', color: C.textPrimary, fontWeight: 500 }}>{Number(row.record_count).toLocaleString()}</td>
+                    <tr key={row.table_name}>
+                      {/* The rule sits on the cells: a border on a <tr> is not
+                          painted with border-collapse: separate. */}
+                      <td style={{ padding: '7px 8px', color: C.textPrimary, fontFamily: 'JetBrains Mono, monospace', fontSize: 12, ...ROW_RULE }}>{row.table_name}</td>
+                      <td style={{ padding: '7px 8px', textAlign: 'right', color: C.textPrimary, fontWeight: 500, ...ROW_RULE }}>{Number(row.record_count).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

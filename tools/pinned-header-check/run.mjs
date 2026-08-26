@@ -193,6 +193,60 @@ try {
           distinct.map(([h, tops]) => `${h} @ scrollTop ${tops.join(',')}`).join(' | '))
     }
     await box.evaluate(el => { el.scrollTop = 0 })
+
+    // ── The other axis ─────────────────────────────────────────────────────
+    // A table that also scrolls SIDEWAYS can lose its row labels the same way a
+    // scrolling one loses its column headings, and it reads worse: a grid of
+    // numbers with nothing naming the rows. Same test, turned ninety degrees.
+    const scrollsX = await box.evaluate(el => el.scrollWidth > el.clientWidth + 2)
+    if (!scrollsX) continue
+
+    const lane = await page.evaluate((cid) => {
+      const rootEl = document.querySelector(`[data-case="${cid}"]`)
+      const pinned = [...rootEl.querySelectorAll('td, th')]
+        .filter(c => { const s = getComputedStyle(c); return s.position === 'sticky' && s.left !== 'auto' })
+      if (!pinned.length) return null
+      let el = rootEl.querySelector('table').parentElement
+      while (el && el !== rootEl && !(el.scrollHeight > el.clientHeight + 2)) el = el.parentElement
+      const b = el.getBoundingClientRect()
+      const r = pinned.map(c => c.getBoundingClientRect())
+      const ARC = Math.ceil(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0) + 2
+      const top = Math.max(Math.min(...r.map(v => v.top)), b.top) + ARC
+      const bottom = Math.min(Math.max(...r.map(v => v.bottom)), b.bottom - 20)
+      return {
+        x: Math.min(...r.map(v => v.left)) + window.scrollX,
+        y: top + window.scrollY,
+        width: Math.min(Math.max(...r.map(v => v.right)), b.right) - Math.min(...r.map(v => v.left)),
+        height: bottom - top,
+        bg: getComputedStyle(pinned[0]).backgroundColor,
+      }
+    }, id)
+
+    if (!lane) {
+      const decided = await page.getAttribute(`[data-case="${id}"]`, 'data-x-pin-decided')
+      console.log(decided
+        ? `NOTE  ${id}: pins no column sideways, deliberately — ${decided}`
+        : `NOTE  ${id}: scrolls sideways but pins no column — its row labels scroll out of sight`)
+      continue
+    }
+    note(lane.bg !== 'rgba(0, 0, 0, 0)', `${id}: pinned row-label column is not transparent`, `computed ${lane.bg}`)
+
+    const laneClip = { x: lane.x, y: lane.y, width: lane.width, height: lane.height }
+    const laneHashes = new Map()
+    for (const left of [0, 1, 3, 7, 9.5, 14, 40, 120, 400, 900]) {
+      await box.evaluate((el, l) => { el.scrollLeft = l }, left)
+      await page.waitForTimeout(60)
+      const png = await page.screenshot({ clip: laneClip })
+      const h = createHash('sha256').update(png).digest('hex').slice(0, 12)
+      if (!laneHashes.has(h)) laneHashes.set(h, [])
+      laneHashes.get(h).push(left)
+    }
+    const laneDistinct = [...laneHashes.entries()]
+    note(laneDistinct.length === 1,
+      `${id}: pinned row-label column is pixel-identical at every horizontal offset (${Math.round(lane.width)}x${Math.round(lane.height)}px)`,
+      laneDistinct.length === 1 ? '' : `${laneDistinct.length} distinct renderings — cells are painting inside the pinned column: ` +
+        laneDistinct.map(([h, ls]) => `${h} @ scrollLeft ${ls.join(',')}`).join(' | '))
+    await box.evaluate(el => { el.scrollLeft = 0 })
   }
 
   note(controlSeen, 'the positive control case was present in the run')

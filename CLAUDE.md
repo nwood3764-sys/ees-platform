@@ -140,16 +140,29 @@ read correctly. Defined in `src/data/constants.js` (`#f7f9fc`), along with
 `navy`; the five phantom aliases (`surface`, `pageAlt`, `skyBlue`,
 `skyBlueSecondary`, `accentLink`) were pointed at the tokens that already meant
 them. **Never add a palette alias — point the code at the existing token.**
+**The recipe now has ONE definition — `src/lib/pinnedTableHeader.js`** — because
+it was hand-rolled in four files and four copies is four chances for one to be
+wrong. `PINNED_TABLE` on the table, `pinnedHeaderCell()` on every `<th>`,
+`ROW_RULE` on the cells of any row that used to carry a border on its `<tr>` (a
+`<tr>` border is NOT painted with `border-collapse: separate`, which the pinned
+header requires). Never re-hand-roll it.
 Guards, all three of which must stay: `scripts/palette-token-fixture.mjs` (no
-`C.<key>` may be undefined), `scripts/pinned-header-fixture.mjs` (a sticky style
-must declare a background whose value is an *opaque* colour), and
+`C.<key>` may be undefined), `scripts/pinned-header-fixture.mjs` (checks the
+shared definition's own default, every call site that overrides `background`,
+and any remaining hand-rolled sticky style — all must be *opaque*), and
 **`npm run verify:pinned-headers`** — a real Chromium that photographs the header
 band, scrolls the rows under it and requires the pixels to be identical, with a
 positive control that must fail. **Reading the CSS is not verification of this
 defect; run the browser tool.** (`npm install --no-save playwright-core` first;
-it is deliberately not a dependency and not in `build:safe`.) Known gap it
-surfaced: `MatrixLayout` in `ReportRunner.jsx` pins nothing, so a matrix report's
-column headers scroll out of sight — not an overlap, not fixed.
+it is deliberately not a dependency and not in `build:safe`.)
+Fixed 2026-08-26 after the browser check reported them: **matrix reports pinned
+nothing at all** on either axis (column headings scrolled up, row labels scrolled
+sideways — nested header levels stack from one constant that is both the declared
+row height and the offset step, so they cannot drift), and four admin preview
+tables (user state access, bulk property import, seed purge, flow runs) lost
+their headers the same way. Deliberate and NOT a defect: a list view pins no
+column horizontally (Nicholas, PR #549) — the harness records that so nobody
+"fixes" it back.
 
 
 Active workstream: **Report Builder + viewer + dashboards enterprise rebuild** — Salesforce/Tableau/Power BI parity for filters, field/column management, sorting, groupings, group formulas, and dashboard cross-filter/drill. Full phased plan + code-grounded architecture map in `docs/leap-report-builder-enterprise.md`. Phase 1 shipped on branch `claude/report-builder-filter-logic-89lvva` (PR #237): shared filter kernel (`src/lib/reportFilters.js`), rebuilt Filters tab with validated `1 AND (2 OR 3)` filter logic + type-scoped operators + relative dates + multi-value, searchable field picker spanning related objects, group-header label fix (picklist/lookup labels instead of UUIDs), and viewer click-to-sort + per-column summarize. Phases 2–7 (grouping depth, PARENT/PREVGROUPVAL group formulas, server-side aggregation w/ via_path, viewer conditional formatting, dashboard cascade/cross-filter/drill, delivery+security) queued in the doc. Prior workstream (LEAP Pad field-service work orders, PRs #114–#133) live on master/prod.

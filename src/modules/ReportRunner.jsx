@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 import { C } from '../data/constants'
+import {
+  PINNED_TABLE, ROW_RULE, TOTAL_RULE, pinnedHeaderCell, pinnedFirstColumn,
+} from '../lib/pinnedTableHeader'
 import { LoadingState, ErrorState } from '../components/UI'
 import { runReport, getRowValue, getReportPrompts, cloneReport } from '../data/reportsService'
 import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } from '../lib/reportFormulaEval'
@@ -1127,21 +1130,29 @@ export function MatrixLayout({ result, fill = false }) {
   return (
     <div style={{
       background:C.card, border:`1px solid ${C.border}`, borderRadius:8,
-      overflow:'auto', minHeight:0,
+      display:'flex', flexDirection:'column', minHeight:0, overflow:'hidden',
       ...(fill ? { flex:1 } : { maxHeight:'70vh' }),
     }}>
-      <div style={{ padding:'6px 12px', fontSize:11, color:C.textMuted, borderBottom:`1px solid ${C.border}` }}>
+      {/* Outside the scroll box on purpose: what the numbers MEAN must not
+          scroll away from the numbers. */}
+      <div style={{ padding:'6px 12px', fontSize:11, color:C.textMuted,
+                    borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
         Measure: <strong style={{ color:C.textSecondary }}>{measureLabel}</strong>
       </div>
+      <div style={{ overflow:'auto', minHeight:0, flex:1 }}>
       <table style={{ ...TABLE_STYLE, width:'auto' }}>
         <thead>
           {/* Column header rows — one row per column-grouping level */}
           {Array.from({ length: headerRowCount }, (_, hLvl) => (
             <tr key={`ch-${hLvl}`}>
-              {/* Empty corner cells for the row-grouping label columns */}
+              {/* Empty corner cells for the row-grouping label columns. It pins
+                  on BOTH axes — it is the one cell that is a header of the
+                  columns and a header of the rows at the same time. */}
               {hLvl === 0 && (
                 <th colSpan={labelColCount} rowSpan={headerRowCount}
-                    style={{ ...cellHeaderStyle(), borderRight:`1px solid ${C.border}`, background:C.cardSecondary }}>
+                    style={{ ...matrixHeaderCellStyle(0, { spansAllLevels: true }),
+                             ...MATRIX_PINNED_LABEL_COL, zIndex:5,
+                             borderRight:`1px solid ${C.border}` }}>
                   {groupings.map(g => g.field_label || g.field_name).join(' / ')}
                 </th>
               )}
@@ -1150,7 +1161,8 @@ export function MatrixLayout({ result, fill = false }) {
               {/* Row-total column header spans all header rows */}
               {hLvl === 0 && (
                 <th rowSpan={headerRowCount}
-                    style={{ ...cellHeaderStyle(), textAlign:'right', background:C.cardSecondary, borderLeft:`2px solid ${C.borderDark}` }}>
+                    style={{ ...matrixHeaderCellStyle(0, { spansAllLevels: true }),
+                             textAlign:'right', borderLeft:`2px solid ${C.borderDark}` }}>
                   Total
                 </th>
               )}
@@ -1161,7 +1173,9 @@ export function MatrixLayout({ result, fill = false }) {
           {rowLeaves.map((rl, ri) => (
             <tr key={`rl-${ri}`}>
               {rl.values.map((v, vi) => (
-                <td key={vi} style={{ ...cellStyle(), ...ROW_TOP_BORDER, fontWeight:500, background:C.cardSecondary }}>
+                <td key={vi} style={{ ...cellStyle(), ...ROW_TOP_BORDER, fontWeight:500,
+                                      background:C.cardSecondary,
+                                      ...(vi === 0 ? MATRIX_PINNED_LABEL_COL : null) }}>
                   {String(v)}
                 </td>
               ))}
@@ -1177,7 +1191,9 @@ export function MatrixLayout({ result, fill = false }) {
           ))}
           {/* Column totals + grand total */}
           <tr style={{ background:C.borderDark }}>
-            <td colSpan={labelColCount} style={{ ...cellStyle(), ...TOTAL_TOP_BORDER, fontWeight:700, color:C.textPrimary }}>Total</td>
+            <td colSpan={labelColCount} style={{ ...cellStyle(), ...TOTAL_TOP_BORDER, fontWeight:700,
+                                                 color:C.textPrimary, background:C.borderDark,
+                                                 ...MATRIX_PINNED_LABEL_COL }}>Total</td>
             {colLeaves.map((cl, ci) => (
               <td key={`ct-${ci}`} style={{ ...cellStyle(), ...TOTAL_TOP_BORDER, textAlign:'right', fontWeight:600, color:C.textPrimary }}>
                 {fmt(colTotals[ci])}
@@ -1189,6 +1205,7 @@ export function MatrixLayout({ result, fill = false }) {
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
@@ -1237,7 +1254,7 @@ function emitAxisHeaderCells(node, targetLevel) {
       const span = countLeaves(c.child)
       return (
         <th key={`hh-${targetLevel}-${i}`} colSpan={span} style={{
-          ...cellHeaderStyle(),
+          ...matrixHeaderCellStyle(targetLevel),
           borderLeft:`1px solid ${C.border}`,
           textAlign:'center',
         }}>
@@ -1469,29 +1486,60 @@ function sheetSafe(s) { return String(s).replace(/[\\/?*[\]:]/g, '_').slice(0, 3
 
 // ─── Style helpers ────────────────────────────────────────────────────────
 
-// Report tables deliberately do NOT use border-collapse:collapse.
+// Report tables deliberately do NOT use border-collapse:collapse, and their
+// headers pin from src/lib/pinnedTableHeader.js — the ONE definition of that
+// rule. It used to be written out here, in ReportWidget, in DashboardWidgetView
+// and again for the matrix, and four copies of a rule is four chances for one
+// of them to be subtly wrong. The reasoning (why `separate`, why the rule sits
+// on the cells, why the background must be an opaque colour that exists) lives
+// with the definition.
+const TABLE_STYLE = { ...PINNED_TABLE, fontSize:13 }
+
+// The row rule, carried by each cell — a border on a <tr> is not painted here.
+const ROW_TOP_BORDER   = ROW_RULE
+const TOTAL_TOP_BORDER = TOTAL_RULE
+
+// ── Matrix layout: a grid you can lose your place in ────────────────────────
 //
-// A collapsed-border table owns its rows' and row-groups' backgrounds and
-// borders: a sticky header painted with the table gets left behind as the rows
-// scroll (fixed once in #494 by moving the background onto the cells), and
-// Chrome repaints a scrolling collapsed table with sticky cells in it
-// incompletely — rows leave ghost pixels behind and read as two rows drawn on
-// top of each other (Nicholas, 2026-08-18, on the Enrolments dashboard tile).
+// A matrix report is the one layout where BOTH axes carry meaning: scroll down
+// and the column headings must stay, scroll right and the row labels must stay.
+// Neither was pinned, so a matrix of any size became an anonymous block of
+// numbers (found 2026-08-26 by the browser check, which reported "no pinned
+// header at all" where the other layouts reported a pinned one).
 //
-// With `separate` + zero spacing the geometry is identical, the sticky cells
-// composite independently, and every rule that used to sit on a <tr> now sits
-// on its cells — ROW_TOP_BORDER below. Row borders on a <tr> are NOT painted
-// in this mode, so never put one back there.
-const TABLE_STYLE = {
-  width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:13,
+// The column headers are NESTED — one row per column-grouping level — so each
+// level has to pin at its own offset. That offset is only knowable if the row
+// height is known, so ONE constant is both the declared height of a header cell
+// and the step used to stack the levels. Deriving `top` from a height that is
+// merely assumed is how these drift apart silently; here they cannot, because
+// there is only one number.
+//
+// `box-sizing: border-box` matters: cellHeaderStyle() carries padding, and
+// without it the declared height would be the CONTENT height and every level
+// below the first would pin a padding's worth too high.
+const MATRIX_HEADER_ROW_HEIGHT = 34
+
+function matrixHeaderCellStyle(level, { spansAllLevels = false } = {}) {
+  return {
+    ...cellHeaderStyle(),
+    // A cell with rowSpan covers every level, so its height is the browser's to
+    // work out — only the single-level cells declare the step. pinnedHeaderCell
+    // uses the SAME number for the declared height and for the offset, so the
+    // two cannot drift apart and land a level a padding's worth off.
+    ...pinnedHeaderCell({ level, rowHeight: spansAllLevels ? null : MATRIX_HEADER_ROW_HEIGHT, zIndex: 4 }),
+  }
 }
 
-// The row rule, carried by each cell.
-const ROW_TOP_BORDER   = { borderTop:`1px solid ${C.border}` }
-const TOTAL_TOP_BORDER = { borderTop:`2px solid ${C.borderDark}` }
+// The row-label column pins to the left. Only the FIRST label column pins:
+// stacking a second one needs the first one's WIDTH, and a width that is
+// guessed rather than measured is the same silent drift as above — a label
+// column with a hardcoded width truncates the first long property name it
+// meets. With one column pinned, a second grouping level simply slides under
+// it, which keeps the outer label visible and never lies about the inner one.
+const MATRIX_PINNED_LABEL_COL = pinnedFirstColumn({ background: C.cardSecondary, zIndex: 3 })
 
 // Header cells pin themselves — sticky belongs on the cells, not on <thead>.
-const STICKY_HEAD = { position:'sticky', top:0, zIndex:2, background:C.cardSecondary }
+const STICKY_HEAD = pinnedHeaderCell()
 
 // Header cells carry their own background: these tables use
 // border-collapse:collapse, where a background set on the sticky <thead> is
