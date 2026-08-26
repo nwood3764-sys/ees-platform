@@ -53,16 +53,41 @@ function walkOwn (node, visit) {
   }
 }
 
-function hookCallsIn (node) {
+// Find hook calls in this function's own scope. `conditional` reports whether
+// the call sits under anything that can skip it on some renders — an if/loop/
+// try, or a ternary/`&&` branch. A hook reached only through `ready ? useMemo()
+// : null` is just as conditional as one inside an if, and reads as ordinary
+// code, so it has to be caught by shape rather than by statement position.
+function hookCallsIn (node, startConditional = false) {
   const found = []
-  walkOwn(node, n => {
-    if (n.type !== 'CallExpression') return
-    const c = n.callee
-    const name = c?.type === 'Identifier' ? c.name
-      : (c?.type === 'MemberExpression' && c.property?.type === 'Identifier' && c.object?.name === 'React') ? c.property.name
-        : null
-    if (name && HOOK_RE.test(name)) found.push({ name, line: n.loc?.start.line })
-  })
+  ;(function walk (n, conditional) {
+    if (!n || typeof n.type !== 'string') return
+    if (isFn(n)) return   // a nested function owns its own hooks
+
+    if (n.type === 'CallExpression') {
+      const c = n.callee
+      const name = c?.type === 'Identifier' ? c.name
+        : (c?.type === 'MemberExpression' && c.property?.type === 'Identifier' && c.object?.name === 'React') ? c.property.name
+          : null
+      if (name && HOOK_RE.test(name)) found.push({ name, line: n.loc?.start.line, conditional })
+    }
+
+    for (const key of Object.keys(n)) {
+      if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments') continue
+      const v = n[key]
+      const kids = Array.isArray(v) ? v : [v]
+      for (const k of kids) {
+        if (!k || typeof k.type !== 'string') continue
+        // Only the branches that may be skipped are conditional: a ternary's
+        // test and a logical expression's LEFT operand always evaluate.
+        let branchConditional = conditional
+        if (n.type === 'ConditionalExpression') branchConditional = conditional || key !== 'test'
+        else if (n.type === 'LogicalExpression') branchConditional = conditional || key === 'right'
+        else if (/^(If|For|ForIn|ForOf|While|DoWhile|Switch|Try)Statement$/.test(n.type)) branchConditional = true
+        walk(k, branchConditional)
+      }
+    }
+  })(node, startConditional)
   return found
 }
 
@@ -93,21 +118,16 @@ for (const file of files) {
       for (const stmt of node.body.body) {
         // A hook that runs only after the function may already have returned
         // is a hook that does not run on every render.
-        if (returnLine !== null) {
-          for (const h of hookCallsIn(stmt)) {
+        for (const h of hookCallsIn(stmt)) {
+          if (returnLine !== null) {
             violations.push(
               `${rel}:${h.line}  ${h.name}() is called below an early return on line ${returnLine}. ` +
               `Hoist it above every return (read loading values with ?.).`,
             )
-          }
-        }
-        // A hook nested inside a conditional/loop/try doesn't run every render
-        // either, even when nothing has returned yet.
-        if (/^(If|For|ForIn|ForOf|While|DoWhile|Switch|Try)Statement$/.test(stmt.type)) {
-          for (const h of hookCallsIn(stmt)) {
+          } else if (h.conditional) {
             violations.push(
-              `${rel}:${h.line}  ${h.name}() is called inside a conditional (${stmt.type}). ` +
-              `Hooks must run unconditionally on every render.`,
+              `${rel}:${h.line}  ${h.name}() is called conditionally (inside an if/loop/try, ` +
+              `or a ternary or && branch). Hooks must run on every render.`,
             )
           }
         }
