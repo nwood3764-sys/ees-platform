@@ -3552,6 +3552,12 @@ function ListCheckbox({ checked, indeterminate, onChange }) {
 // flips into edit state, replacing the cell contents with the right
 // editor for the field's data type.
 function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSaving, errorHere, overlayVal, onStartEdit, onCancel, onSave }) {
+  // Declared above the edit-state return below: `isEditing` flips while this
+  // cell is mounted (double-click to edit, then save or cancel), so a hook
+  // called only on the view branch would change the hook count between two
+  // renders of the same cell and abort the list with React error #310.
+  const [hover, setHover] = useState(false);
+
   // If we have an overlay value (just-saved) and the baseCell hasn't
   // caught up yet (parent hasn't reloaded), render a small chip over the
   // baseCell instead so the user sees the new value immediately.
@@ -3575,7 +3581,6 @@ function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSav
     );
   }
 
-  const [hover, setHover] = useState(false);
   return (
     <td style={{
       padding: 0,
