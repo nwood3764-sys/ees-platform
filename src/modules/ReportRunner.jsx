@@ -4,6 +4,7 @@ import { LoadingState, ErrorState } from '../components/UI'
 import { runReport, getRowValue, getReportPrompts, cloneReport } from '../data/reportsService'
 import { evaluateRowExpression, evaluateSummaryExpression, computeAggregates } from '../lib/reportFormulaEval'
 import ReportRecordCellLink, { reportCellLink } from '../components/ReportRecordCellLink'
+import { describeSaveError } from '../lib/saveErrorMessage'
 import { getEditableFieldsForTable, getPicklistOptions, bulkUpdateRecords } from '../data/fieldMetadataService'
 
 // ─── Report Runner ────────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ export default function ReportRunner({ reportId, onClose, onEdit, onDuplicate, e
       const newId = await cloneReport(reportId)
       if (onDuplicate) onDuplicate(newId)
     } catch (err) {
-      setDuplicateError(err.message || String(err))
+      setDuplicateError(describeSaveError(err, { object: 'report' }).message)
     } finally {
       setDuplicating(false)
     }

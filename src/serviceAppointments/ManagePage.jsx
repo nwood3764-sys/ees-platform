@@ -28,10 +28,18 @@ import {
 } from './styles'
 import { useSchedulerIdentity } from './SchedulerIdentityContext'
 
+// The token-shape guard lives in this thin wrapper rather than inside the
+// component below. A guard that returns ahead of the hooks makes the hook
+// count depend on the token, so a token that changed shape between renders
+// would abort the page with React error #310. Splitting it keeps every hook
+// in the inner component unconditional.
 export default function ManagePage({ token }) {
   const validShape = /^[a-f0-9]{32}$/.test(token || '')
   if (!validShape) return <InvalidTokenPage />
+  return <ManagePageForValidToken token={token} />
+}
 
+function ManagePageForValidToken({ token }) {
   const { setState: setIdentityState } = useSchedulerIdentity()
 
   const [view, setView] = useState('loading')

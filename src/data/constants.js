@@ -1,3 +1,19 @@
+// The LEAP palette. This object is the ONLY place a LEAP colour is named, and
+// every key the app references must exist here.
+//
+// Why that is worth stating: `C.cardSecondary` — the secondary card surface the
+// design system has always specified — was referenced in 34 files and defined in
+// none. `background: undefined` is not an error in React; the declaration is
+// simply dropped, so every "secondary" surface in LEAP rendered transparent. On a
+// scrolling table that meant the pinned column header had no background at all
+// and the rows scrolled straight THROUGH it — the header text and the row text
+// drawn on top of each other (Nicholas, 2026-08-25, on the Enrolments home
+// widget). Several sessions moved the sticky rule around looking for the cause;
+// the background was never painting in the first place.
+//
+// scripts/palette-token-fixture.mjs fails the build if any C.<key> in src/ is
+// missing from this object, so a phantom colour cannot silently render as
+// nothing again.
 export const C = {
   sidebar: '#07111f',
   sidebarHover: '#0d1f35',
@@ -5,8 +21,10 @@ export const C = {
   emeraldMid: '#2aab72',
   page: '#f0f3f8',
   card: '#ffffff',
+  cardSecondary: '#f7f9fc',
   border: '#e4e9f2',
   borderDark: '#d0d8e8',
+  navy: '#1e466b',
   textPrimary: '#0d1a2e',
   textSecondary: '#4a5e7a',
   textMuted: '#8fa0b8',

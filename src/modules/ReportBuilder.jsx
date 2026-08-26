@@ -3,6 +3,7 @@ import { C } from '../data/constants'
 import { Icon, LoadingState, ErrorState } from '../components/UI'
 import SearchableCombo from '../components/SearchableCombo'
 import AnchoredPopover from '../components/AnchoredPopover'
+import { describeSaveError } from '../lib/saveErrorMessage'
 import { guessPrefix } from '../data/fieldMetadataService'
 import {
   deriveReportColumnLabel,
@@ -60,6 +61,11 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
   const [tab, setTab]               = useState('fields')
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState(null)
+  // A LOAD failure replaces the screen — there is nothing to edit. A SAVE
+  // failure must not: the user's unsaved work is still on screen and throwing
+  // the editor away to show a database error loses it.
+  const [saveError, setSaveError]   = useState(null)
+  const [saveDetailOpen, setSaveDetailOpen] = useState(false)
   const [primaryOptions, setPrimaryOptions] = useState([])
   const [folders, setFolders]       = useState([])
 
@@ -330,7 +336,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
   const handleSave = async () => {
     if (!report.rpt_name) { alert('Report name is required.'); return }
     if (!report.rpt_primary_object) { alert('Primary object is required.'); return }
-    setSaving(true); setError(null)
+    setSaving(true); setSaveError(null); setSaveDetailOpen(false)
     try {
       const newId = await saveReport({
         id: reportId, report, filters, groupings, calculatedFields,
@@ -339,7 +345,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
       setPreviewNonce(n => n + 1)
       onSaved?.(newId)
     } catch (err) {
-      setError(err)
+      setSaveError(describeSaveError(err, { object: 'report' }))
     } finally {
       setSaving(false)
     }
@@ -356,7 +362,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
     if (isNew) return
     if (!report.rpt_name) { alert('Report name is required.'); return }
     if (!report.rpt_primary_object) { alert('Primary object is required.'); return }
-    setSaving(true); setError(null)
+    setSaving(true); setSaveError(null); setSaveDetailOpen(false)
     try {
       // Step 1 — persist current edits to the source. saveReport handles
       // both insert and update; for an existing record it updates in place.
@@ -366,7 +372,7 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
       setSavedAt(new Date())
       onSaved?.(newId)
     } catch (err) {
-      setError(err)
+      setSaveError(describeSaveError(err, { object: 'report' }))
     } finally {
       setSaving(false)
     }
@@ -412,6 +418,43 @@ export default function ReportBuilder({ reportId, onClose, onSaved }) {
           </button>
         </div>
       </div>
+
+      {/* A save that failed says so here, with the editor and every unsaved
+          change left exactly where they were. Never a full-screen error —
+          that reads as "your report is gone" and takes the work with it. */}
+      {saveError && (
+        <div style={{
+          background:'#eef4fb', borderBottom:`1px solid ${C.border}`,
+          padding:'10px 24px', display:'flex', alignItems:'flex-start', gap:10,
+        }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a5a8a" strokeWidth={2}
+               strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0, marginTop:1 }}>
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:13, color:C.textPrimary }}>{saveError.message}</div>
+            <button
+              onClick={() => setSaveDetailOpen(o => !o)}
+              style={{
+                background:'none', border:'none', padding:'2px 0', cursor:'pointer',
+                fontSize:11, color:'#1a5a8a', textDecoration:'underline',
+              }}
+            >{saveDetailOpen ? 'Hide details' : 'Show details'}</button>
+            {saveDetailOpen && (
+              <div style={{
+                fontSize:11, color:C.textSecondary, fontFamily:'JetBrains Mono, monospace',
+                marginTop:4, wordBreak:'break-word',
+              }}>{saveError.detail}</div>
+            )}
+          </div>
+          <button onClick={() => setSaveError(null)} style={{
+            background:'none', border:'none', cursor:'pointer', color:C.textMuted,
+            fontSize:16, lineHeight:1, padding:2,
+          }} title="Dismiss">×</button>
+        </div>
+      )}
 
       {/* Body: Salesforce-style split — config rail left (40%), live results
           preview right (60%). */}
@@ -1075,10 +1118,10 @@ function FiltersTab({
                 style={{
                   ...inputStyle(),
                   fontFamily:'JetBrains Mono, monospace',
-                  borderColor: logicCheck.ok ? C.border : C.skyBlue,
+                  borderColor: logicCheck.ok ? C.border : C.sky,
                 }}
               />
-              <div style={{ fontSize:11, marginTop:6, color: logicCheck.ok ? C.textMuted : C.skyBlue }}>
+              <div style={{ fontSize:11, marginTop:6, color: logicCheck.ok ? C.textMuted : C.sky }}>
                 {logicCheck.ok
                   ? `Reference each filter by its number. Operators: AND, OR, NOT, and parentheses.`
                   : logicCheck.error}

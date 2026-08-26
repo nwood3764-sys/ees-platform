@@ -1520,7 +1520,7 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWith
           )}
 
           {rows.map((row, rowIndex) => (
-            <div key={row.id} style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 10, background: C.cardSecondary || C.page }}>
+            <div key={row.id} style={{ border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 10, background: C.cardSecondary }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   {/* The number the filter logic refers to. Always shown, so an
@@ -1613,7 +1613,7 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWith
                   spellCheck={false}
                   style={{
                     width: '100%', marginTop: 8, boxSizing: 'border-box',
-                    background: C.card, border: `1px solid ${logicCheck.ok ? C.border : C.skyBlue || '#7eb3e8'}`,
+                    background: C.card, border: `1px solid ${logicCheck.ok ? C.border : C.sky}`,
                     borderRadius: 5, padding: '7px 9px', fontSize: 12.5, color: C.textPrimary,
                     fontFamily: 'JetBrains Mono, monospace', outline: 'none',
                   }} />
@@ -1628,7 +1628,7 @@ function FilterSidebar({ catalog, groups, activeFilters, filterLogic, fieldsWith
                     </span>
                   ))}
                 </div>
-                <div style={{ fontSize: 11.5, marginTop: 6, color: logicCheck.ok ? C.textMuted : (C.skyBlue || '#7eb3e8'), lineHeight: 1.4 }}>
+                <div style={{ fontSize: 11.5, marginTop: 6, color: logicCheck.ok ? C.textMuted : C.sky, lineHeight: 1.4 }}>
                   {logicCheck.ok
                     ? 'Refer to filters by number, with AND, OR, NOT and parentheses.'
                     : logicCheck.error}
@@ -3058,7 +3058,7 @@ export function ListView({
           </button>
           <button onClick={() => setConfirmDelete({ ids: [...selected] })} disabled={bulkBusy}
             style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 600,
-                     background: C.card, border: `1px solid ${C.skyBlue || '#7eb3e8'}`, borderRadius: 6,
+                     background: C.card, border: `1px solid ${C.sky}`, borderRadius: 6,
                      color: '#1a5a8a', cursor: bulkBusy ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon path="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" size={13} color="#1a5a8a" />
             Delete
@@ -3191,7 +3191,7 @@ export function ListView({
                                   <span style={{
                                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                     minWidth: 18, height: 18, padding: '0 4px', marginRight: 7, borderRadius: 4,
-                                    background: C.skyBlue || '#7eb3e8', color: '#fff', fontSize: 10.5, fontWeight: 700,
+                                    background: C.sky, color: '#fff', fontSize: 10.5, fontWeight: 700,
                                     fontFamily: 'JetBrains Mono, monospace',
                                   }}>{d.number}</span>
                                   <span style={{ color: C.textPrimary, fontWeight: 600 }}>{d.label}</span>
@@ -3552,6 +3552,12 @@ function ListCheckbox({ checked, indeterminate, onChange }) {
 // flips into edit state, replacing the cell contents with the right
 // editor for the field's data type.
 function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSaving, errorHere, overlayVal, onStartEdit, onCancel, onSave }) {
+  // Declared above the edit-state return below: `isEditing` flips while this
+  // cell is mounted (double-click to edit, then save or cancel), so a hook
+  // called only on the view branch would change the hook count between two
+  // renders of the same cell and abort the list with React error #310.
+  const [hover, setHover] = useState(false);
+
   // If we have an overlay value (just-saved) and the baseCell hasn't
   // caught up yet (parent hasn't reloaded), render a small chip over the
   // baseCell instead so the user sees the new value immediately.
@@ -3575,7 +3581,6 @@ function EditableCellTd({ col, row, columnName, meta, baseCell, isEditing, isSav
     );
   }
 
-  const [hover, setHover] = useState(false);
   return (
     <td style={{
       padding: 0,

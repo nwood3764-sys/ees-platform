@@ -299,7 +299,7 @@ function MiniPick({ label, options, selectedIds, onChange }) {
         <Icon path={open ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} size={12} color={C.textMuted} />
       </button>
       {open && (
-        <div style={{ marginTop: 4, padding: '4px 0', border: `1px solid ${C.border}`, borderRadius: 5, background: C.surface, maxHeight: 140, overflowY: 'auto' }}>
+        <div style={{ marginTop: 4, padding: '4px 0', border: `1px solid ${C.border}`, borderRadius: 5, background: C.card, maxHeight: 140, overflowY: 'auto' }}>
           {options.map(o => (
             <label key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', cursor: 'pointer' }}>
               <input
@@ -322,13 +322,13 @@ function MiniPick({ label, options, selectedIds, onChange }) {
 // ─── Styles ─────────────────────────────────────────────────────────────
 const rail = {
   width: 260, flexShrink: 0,
-  borderLeft: `1px solid ${C.border}`, background: C.surface,
+  borderLeft: `1px solid ${C.border}`, background: C.card,
   display: 'flex', flexDirection: 'column',
   maxHeight: '100%',
 }
 const collapsedRail = {
   width: 36, flexShrink: 0,
-  borderLeft: `1px solid ${C.border}`, background: C.surface,
+  borderLeft: `1px solid ${C.border}`, background: C.card,
   display: 'flex', flexDirection: 'column', alignItems: 'center',
   paddingTop: 8,
 }
@@ -343,17 +343,17 @@ const collapseToggleBtn = {
 }
 const searchInput = {
   width: '100%', padding: '6px 8px', fontSize: 12.5,
-  color: C.textPrimary, background: C.surface,
+  color: C.textPrimary, background: C.card,
   border: `1px solid ${C.border}`, borderRadius: 5,
 }
 const pickerToggle = {
   width: '100%', padding: '6px 8px', fontSize: 12.5,
-  background: C.surface, border: `1px solid ${C.border}`, borderRadius: 5,
+  background: C.card, border: `1px solid ${C.border}`, borderRadius: 5,
   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
   cursor: 'pointer', textAlign: 'left', color: C.textPrimary,
 }
 const toggleRow = {
   display: 'flex', gap: 8, alignItems: 'center',
-  padding: '5px 8px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 5,
+  padding: '5px 8px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 5,
   cursor: 'pointer',
 }

@@ -127,7 +127,7 @@ export default function TasksModule({ selectedRecord, sectionFromUrl, onNavigate
     relatedDisplay: r.relatedObject !== '—'
       ? (
         <span
-          style={{ color: C.accentLink || C.emerald, cursor: 'pointer', textDecoration: 'underline' }}
+          style={{ color: C.emerald, cursor: 'pointer', textDecoration: 'underline' }}
           onClick={(e) => {
             e.stopPropagation()
             if (r.relatedId && onNavigateToRecord) onNavigateToRecord({ table: r.relatedObject, id: r.relatedId, mode: 'view' })

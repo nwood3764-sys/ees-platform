@@ -220,7 +220,7 @@ export default function DashboardRunner({ dashboardId, onClose, onEdit, onOpenRe
             <div style={{
               display:'inline-flex', alignItems:'center', gap:8,
               padding:'5px 8px 5px 12px', borderRadius:16,
-              background:'#e8f1fb', border:`1px solid ${C.skyBlue}`, color:'#2f6da3', fontSize:12,
+              background:'#e8f1fb', border:`1px solid ${C.sky}`, color:'#2f6da3', fontSize:12,
             }}>
               <span>Filtered by <strong>{String(crossFilter.label)}</strong></span>
               <button onClick={clearCrossFilter} title="Clear cross-filter"
