@@ -176,3 +176,41 @@ export function costOf(spend, model) {
        + (spend.cacheRead  / 1_000_000) * p.input * CACHE_READ_MULTIPLIER
        + (spend.output     / 1_000_000) * p.output
 }
+
+// ── Turn deadline ──────────────────────────────────────────────────────────
+// Supabase edge functions are killed on a ~150s request idle timeout and a
+// ~400s worker wall clock (the lesson property-owner-research learned the hard
+// way, which is why its research turns run as background tasks). The assistant
+// runs up to MAX_TURNS sequential model calls, and moving to a thinking model
+// made each one slower — so a complex turn can now run past that ceiling and
+// the user gets a hang instead of an answer, which is strictly worse than a
+// short answer.
+//
+// So the loop watches the clock. Past the soft deadline it stops issuing new
+// tool rounds and goes straight to composing a reply from what it already has;
+// past the hard deadline it does not even do that. Budgets are generous enough
+// that a normal turn never notices.
+export const SOFT_DEADLINE_MS = 100_000
+export const HARD_DEADLINE_MS = 135_000
+
+/**
+ * What the loop should do next, given how long this request has been running.
+ *
+ *   "continue" — there is time for another tool round.
+ *   "close"    — stop tool use; compose the final answer from what is held.
+ *   "abandon"  — no time even for that; return the narration already produced.
+ */
+export function deadlineState(elapsedMs) {
+  const ms = Number(elapsedMs)
+  if (!Number.isFinite(ms) || ms < 0) return "continue"
+  if (ms >= HARD_DEADLINE_MS) return "abandon"
+  if (ms >= SOFT_DEADLINE_MS) return "close"
+  return "continue"
+}
+
+// What the model is told when its tool budget was cut short by the clock. It
+// must not silently pretend it finished the job.
+export const DEADLINE_NOTE =
+  "You are out of time for this turn. Do NOT call any more tools. " +
+  "Answer now from what you have already gathered, and say plainly which part " +
+  "you did not get to so the user can ask again — never imply you finished."
