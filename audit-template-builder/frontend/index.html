@@ -3716,6 +3716,7 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
   const _pn=String(F.pjPropName||'').trim();
   const showName=_pn&&!(_addr&&_pn.toLowerCase().startsWith(_addr));
   const lLines=[showName?_pn:'',F.pjInstallAddr,F.pjCsz,'Property Type: Multifamily',
+    m.units?('Number of Units: '+m.units):'',
     F.pjIQ?('IQ Number: '+F.pjIQ):''].filter(v=>v&&String(v).trim());
   const rLines=[F.pjOwner,F.pjOwnerAddr,F.pjOwnerCsz,F.pjContact,F.pjEmail,F.pjPhone]
     .filter(v=>v&&String(v).trim());
@@ -3771,47 +3772,55 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
       t(AMT,st.y+11,r[5],{align:'right'});
       st.y+=h;});
   }else{
-    /* Each measure is a stacked block, not a squeezed table row: the numbered
-       name and the full-width DESCRIPTION sit on top with the whole page width to
-       breathe, then a bordered SUB-GRID underneath carries the numbers. For NC the
-       sub-grid is Quantity / Labor / Material / Total (the HOMES cost-documentation
-       split); every other state gets Quantity / Unit / Amount. */
+    /* Clean Sealed-style line-item table (Nicholas: "make it look a lot more like
+       the sealed proposal template"): a blue rule, right-aligned amount columns,
+       the numbered measure name + its dollar columns on one line and the
+       description flowing below in the wide left column, zebra striping and a
+       hairline between measures — NO boxed sub-grids or empty cells. NC keeps its
+       Quantity / Labor / Material / Total split (the HOMES cost-documentation
+       requirement); every other state shows Quantity / Unit / Amount. */
     const isNC=m.state==='NC';
-    const cols=isNC
-      ?[['QUANTITY',r=>_qty(r.qty)+(r.unit?(' '+r.unit):'')],
-        ['LABOR',   r=>_money(r.labor)],
-        ['MATERIAL',r=>_money(r.material)],
-        ['TOTAL',   r=>_money(r.cost)]]
-      :[['QUANTITY',r=>_qty(r.qty)],
-        ['UNIT',    r=>String(r.unit||'')],
-        ['AMOUNT',  r=>_money(r.cost)]];
-    const n=cols.length, colW=CW/n, gridH=27;   // sub-grid: label band 13 + value band 14
-    const textX=M+8, textW=CW-16;
+    // Each column: [label, value(row), width]. Values are right-aligned at the
+    // column's right edge; the description column takes whatever is left.
+    const numCols=isNC
+      ?[['QUANTITY',r=>_qty(r.qty)+(r.unit?(' '+r.unit):''),84],
+        ['LABOR',   r=>_money(r.labor),64],
+        ['MATERIAL',r=>_money(r.material),68],
+        ['TOTAL',   r=>_money(r.cost),72]]
+      :[['QUANTITY',r=>_qty(r.qty),82],
+        ['UNIT',    r=>String(r.unit||''),70],
+        ['AMOUNT',  r=>_money(r.cost),80]];
+    const numTotW=numCols.reduce((a,c)=>a+c[2],0);
+    const descW=CW-numTotW;                       // wide left column for name + description
+    // Precompute each column's right edge (rightmost first, walking left from W-M).
+    let _rx=W-M; for(let c=numCols.length-1;c>=0;c--){numCols[c][3]=_rx; _rx-=numCols[c][2];}
+    // header: blue top rule, blue column labels, light-blue underline (Sealed look)
+    need(24);
+    stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+    tc(C.sealBlue); font(8,'bold'); t(M,st.y+13,'MEASURE');
+    numCols.forEach(([lbl,,w,rx])=>t(rx,st.y+13,lbl,{align:'right'}));
+    st.y+=17; stroke([188,214,242]); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
     m.rows.forEach((r,i)=>{
-      font(10.5,'bold'); const nameLines=wrap((i+1)+'.  '+r.name,textW);
-      font(8.5);         const dl=wrap(r.desc,textW);
-      const nameH=nameLines.length*12.5, descH=dl.length?dl.length*10:0;
-      const h=8+nameH+(descH?descH+4:0)+10+gridH+6;
-      if(st.y+h>H-M-20){d.addPage();st.y=M;}    // blocks never split across a page
+      font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.name,descW-6);
+      font(8.5);       const dl=wrap(r.desc,descW-6);
+      const nameH=nameLines.length*12, descH=dl.length?dl.length*10+3:0;
+      const h=8+nameH+descH+6;
+      if(st.y+h>H-M-20){d.addPage();st.y=M;}
       const y0=st.y;
       if(i%2===1){fill(C.zebra); d.rect(M,y0,CW,h,'F');}   // subtle zebra for scanning
-      stroke(GL); d.setLineWidth(.6); d.rect(M,y0,CW,h);   // outer card border
-      // measure name (numbered) — full width
-      tc(C.ink); font(10.5,'bold');
-      nameLines.forEach((ln,k)=>t(textX,y0+8+(k+1)*12.5-2.5,ln));
-      // description — full width, never truncated into a narrow column
+      // measure name (numbered), left column
+      tc(C.ink); font(10,'bold');
+      nameLines.forEach((ln,k)=>t(M+2,y0+8+(k+1)*12-2.5,ln));
+      // dollar / quantity columns, right-aligned on the name's first line
+      numCols.forEach(([lbl,fn,w,rx],c)=>{
+        font(9.5,c===numCols.length-1?'bold':'normal');
+        tc(c===numCols.length-1?C.ink:[64,78,96]);
+        t(rx,y0+8+12-2.5,fn(r),{align:'right'});});
+      // description below, wrapping across the wide left column
       const dy=y0+8+nameH+8; font(8.5); tc([70,82,98]);
-      dl.forEach((ln,k)=>t(textX,dy+k*10,ln));
-      // sub-grid pinned across the bottom of the card
-      const gy=y0+h-gridH-4;
-      fill(HB); d.rect(M,gy,CW,13,'F');
-      stroke(GL); d.setLineWidth(.5);
-      d.rect(M,gy,CW,gridH); d.line(M,gy+13,W-M,gy+13);
-      for(let c=1;c<n;c++) d.line(M+c*colW,gy,M+c*colW,gy+gridH);
-      cols.forEach(([lbl,fn],c)=>{const cx=M+c*colW+colW/2;
-        tc([96,108,124]); font(7,'bold');  t(cx,gy+9, lbl,{align:'center'});
-        tc(C.ink); font(9.5,c===n-1?'bold':'normal'); t(cx,gy+24,fn(r),{align:'center'});});
+      dl.forEach((ln,k)=>t(M+2,dy+k*10,ln));
       st.y=y0+h;
+      stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;  // hairline between measures
     });
   }
   /* ---- rebates as credit lines in a gridded table ---- */
