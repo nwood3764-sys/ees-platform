@@ -22,6 +22,7 @@ import { supabase } from '../lib/supabase'
 import {
   listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrl, listDocuments,
 } from './storageService'
+import { proxiedStorageUrl } from '../lib/reportFileLinks'
 import { loadSubmittalDocumentTemplate, loadSubmittalTextBlocks } from './paperworkService'
 import { buildAssessmentReportPdf } from './paperworkModel'
 import { encodeImageForPdf, renderPdfFirstPageForPdf } from '../lib/pdfImages'
@@ -351,7 +352,9 @@ export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
     const url = await signedUrl(
       r.storage_bucket, linkPath, PHOTO_LINK_TTL_SECONDS,
       photoDownloadName(r, buildingLabel))
-    if (url) linkById.set(r.id, url)
+    // Served through LEAP's own domain so Acrobat's "do you trust this site"
+    // prompt names a host the reader recognises. The signed token is unchanged.
+    if (url) linkById.set(r.id, proxiedStorageUrl(url))
   }
   let done = 0
   for (const p of list) {
@@ -386,9 +389,9 @@ export async function attachAssessmentDocuments(model, chosen, { onProgress } = 
     const src = list[i], out = model.documents[i], row = src._row || {}
     try {
       if (row.storage_bucket && row.storage_path) {
-        out.linkUrl = await signedUrl(
+        out.linkUrl = proxiedStorageUrl(await signedUrl(
           row.storage_bucket, row.storage_path, DOCUMENT_LINK_TTL_SECONDS,
-          documentDownloadName(src, buildingLabel))
+          documentDownloadName(src, buildingLabel)))
       }
       if (out.linkUrl && src.previewKind === 'image') {
         const img = await encodeImageForPdf(out.linkUrl)
