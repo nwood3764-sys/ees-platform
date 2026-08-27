@@ -127,7 +127,7 @@
   <div class="eyebrow">Leap · Qualification Workflow</div>
   <h1>Audit Template Builder</h1>
   <div id="buildstamp" style="font:12px 'JetBrains Mono',ui-monospace,monospace;color:#8fa0b8;margin:-6px 0 14px;letter-spacing:.02em">
-    Last updated <!--STAMP-->2026-08-13 · dev<!--/STAMP--> — systems now translate from the Asset Score (heat pump with COP, no phantom boiler); owner reads from the Audit Template XML; exports are blocked when the systems or owner don't match</div>
+    Last updated <!--STAMP-->2026-08-13 · dev<!--/STAMP--> — owner, unit count, and invoice numbers auto-fill from the uploaded reports; NC proposal/invoice measures are stacked with a Quantity / Labor / Material / Total sub-grid and a Total Cost / Rebates / Deposits / Due summary</div>
   <p class="sub">Drop in the four files for a building. The tool reads them and builds
   two BuildingSync files — one Baseline and one Improved Audit Template — each importing
   into the DOE Audit Template as its own building record. No data entry.</p>
@@ -807,15 +807,24 @@ function fuelScaleFactor(os,fuel){
 
 /* ---------- file wiring ---------- */
 // Optional DOE Audit Template documents (no parsing — deliverable pass-through)
-const atDocs={basePdf:null,impPdf:null,baseXml:null,impXml:null,baseOwner:null,impOwner:null};
+const atDocs={basePdf:null,impPdf:null,baseXml:null,impXml:null,baseOwner:null,impOwner:null,baseUnits:null,impUnits:null};
 document.querySelectorAll('.slot[data-atkey]').forEach(slot=>{
   const key=slot.dataset.atkey, inp=slot.querySelector('input');
   slot.onclick=()=>inp.click();
   ['dragover','dragenter'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.add('hot');}));
   ['dragleave','drop'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.remove('hot');}));
   const take=f=>{atDocs[key]=f;slot.classList.add('ok');slot.querySelector('.got').textContent='✓ '+f.name;refresh();
-    if(key==='baseXml'||key==='impXml'){const ok2=key==='baseXml'?'baseOwner':'impOwner';atDocs[ok2]=null;
-      _parseOwnerFile(f).then(o=>{atDocs[ok2]=o;if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();saveSession();});}
+    if(key==='baseXml'||key==='impXml'){
+      const oK=key==='baseXml'?'baseOwner':'impOwner', uK=key==='baseXml'?'baseUnits':'impUnits';
+      atDocs[oK]=null; atDocs[uK]=null;
+      // The Audit Template XML already carries the owner contact and the unit
+      // count — pull both so the user doesn't retype them (and the occupants math
+      // stops being wrong). Fills empty form fields only; never clobbers edits.
+      _parseOwnerFile(f).then(o=>{atDocs[oK]=o; if(typeof prefillFromAuditTemplate==='function')prefillFromAuditTemplate();
+        if(typeof scheduleAutoChecks==='function')scheduleAutoChecks(); saveSession();});
+      _parseUnitsFile(f).then(u=>{atDocs[uK]=u; if(typeof prefillFromAuditTemplate==='function')prefillFromAuditTemplate();
+        if(typeof scheduleAutoChecks==='function')scheduleAutoChecks(); saveSession();});
+    }
     saveSession();};
   slot.addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])take(ev.dataTransfer.files[0]);});
   inp.addEventListener('change',()=>{if(inp.files[0])take(inp.files[0]);});
@@ -919,7 +928,7 @@ function saveSession(){
         rawDocs:JSON.parse(JSON.stringify(rawDocs)),
         files:{asBase:files.asBase,asImp:files.asImp,osBase:files.osBase,osImp:files.osImp},
         atDocs:{basePdf:atDocs.basePdf,impPdf:atDocs.impPdf,baseXml:atDocs.baseXml,impXml:atDocs.impXml,
-                baseOwner:atDocs.baseOwner,impOwner:atDocs.impOwner}
+                baseOwner:atDocs.baseOwner,impOwner:atDocs.impOwner,baseUnits:atDocs.baseUnits,impUnits:atDocs.impUnits}
       }).catch(()=>{});
     }catch(e){/* storage full/unavailable — skip */}
   },600);
@@ -945,7 +954,7 @@ async function restoreSession(){
 function clearSession(){
   _idbDel();
   ['asBase','asImp','osBase','osImp'].forEach(k=>{files[k]=null;data[k]=null;rawDocs[k]=null;});
-  ['basePdf','impPdf','baseXml','impXml','baseOwner','impOwner'].forEach(k=>atDocs[k]=null);
+  ['basePdf','impPdf','baseXml','impXml','baseOwner','impOwner','baseUnits','impUnits'].forEach(k=>atDocs[k]=null);
   document.querySelectorAll('.slot').forEach(sl=>{sl.classList.remove('ok'); const g=sl.querySelector('.got'); if(g)g.textContent='';});
   setStatus('Cleared saved session.','');
   try{ refresh(); }catch(e){}
@@ -1629,6 +1638,29 @@ async function _parseOwnerFile(f){
       email:g('EmailAddress'),phone:g('TelephoneNumber'),
       street:g('StreetAddress'),city:g('City'),state:g('State'),zip:g('PostalCode')};
     return (o.name||o.company)?o:null;   // only trust it if it actually names someone
+  }catch(e){ return null; }
+}
+// Parse the dwelling-unit count out of an Audit Template XML. BuildingSync
+// records it as a SpatialUnit whose SpatialUnitType names apartment/dwelling
+// units (e.g. "Apartment units") with a NumberOfUnits — that is the real unit
+// count, so the user shouldn't retype it and the occupants math stops being off.
+// Prefer the dwelling-typed unit; fall back to any NumberOfUnits > 0. Never a guess.
+async function _parseUnitsFile(f){
+  if(!f) return null;
+  try{
+    const doc=new DOMParser().parseFromString(await f.text(),'application/xml');
+    if(doc.querySelector('parsererror')) return null;
+    let fallback=null;
+    for(const su of doc.getElementsByTagNameNS(NS_AUC,'SpatialUnit')){
+      const tEl=su.getElementsByTagNameNS(NS_AUC,'SpatialUnitType')[0];
+      const nEl=su.getElementsByTagNameNS(NS_AUC,'NumberOfUnits')[0];
+      const n=nEl?parseInt((nEl.textContent||'').trim(),10):NaN;
+      if(!Number.isFinite(n)||n<1) continue;
+      const type=(tEl?tEl.textContent:'')||'';
+      if(/apartment|dwelling|unit/i.test(type)) return n;   // authoritative match
+      if(fallback==null) fallback=n;
+    }
+    return fallback;
   }catch(e){ return null; }
 }
 // The resolved owner for a given side: the cached uploaded-XML owner first
@@ -3236,7 +3268,7 @@ function pjLoadAndPrefill(){
   set('pjInstallAddr',(asB||as).street);
   set('pjCsz',(asB||as).cityStateZip);
   const t=new Date(); set('pjInvDate',(t.getMonth()+1)+'/'+t.getDate()+'/'+t.getFullYear());
-  set('pjInvNo','INV-'+(buildingState()||'WI')+'-');
+  prefillFromAuditTemplate();   // owner + unit count + invoice numbers, before the qty cascade
   // Quantity fields show the live report-derived numbers until the user edits
   // one — an edited field takes over permanently (dataset.auto cleared below).
   const qd=pjQtyDefaults();
@@ -3250,6 +3282,46 @@ function pjLoadAndPrefill(){
   // is left untouched.
   {const rr=STATE_UTILITY_RATES[buildingState()]||STATE_UTILITY_RATES.US;
    set('rateElec',String(rr.elec)); set('rateGas',String(rr.gas));}
+}
+// Compose the invoice/quote number from what the reports already tell us:
+//   <STATE>-<building number>-<first letter of the street name>   e.g. NC-101-Q
+// The building number is the leading number of the install address (a range like
+// "101-111" contributes 101); the street letter is the first letter of the street
+// NAME (the first alpha token after the house number). Empty when we can't form
+// at least the state + one identifier — never a half-baked stub.
+function composeInvoiceNo(){
+  const st=buildingState()||'';
+  const addr=(pj('pjInstallAddr')||((data.asBase||data.asImp||{}).street)||'').trim();
+  const name=(pj('pjPropName')||((data.asBase||data.asImp||{}).name)||'').trim();
+  const num=((addr.match(/\d+/)||[])[0])||((name.match(/\d+/)||[])[0])||'';
+  const afterNum=addr.replace(/^[^A-Za-z]*/,'');           // drop the house number/range
+  const letter=((afterNum.match(/[A-Za-z]/)||[])[0]||'').toUpperCase();
+  const parts=[st,num,letter].filter(Boolean);
+  return parts.length>=2?parts.join('-'):'';
+}
+// Pull everything the uploaded Audit Template XML already knows into the empty
+// Project-details fields, so the user retypes as little as possible (fewer typos):
+//   · the Owner contact  -> Property Owner / Contact / Email / Phone / address
+//   · the dwelling-unit count -> Occupancy "Units"  (fixes the occupants math)
+//   · the composed number -> both the audit and the project invoice fields
+// Every write is fill-when-empty — a value the user has typed is never overwritten.
+function prefillFromAuditTemplate(){
+  const set=(id,v)=>{const e=document.getElementById(id); if(e&&!e.value&&v!=null&&String(v)!=='')e.value=String(v);};
+  const ow=atDocs.baseOwner||atDocs.impOwner;
+  if(ow){
+    set('pjOwner', ow.company||ow.name);      // Property Owner = the organization
+    set('pjContact', ow.name);
+    set('pjEmail', ow.email);
+    set('pjPhone', ow.phone);
+    set('pjOwnerAddr', ow.street);
+    const stZip=[ow.state,ow.zip].filter(Boolean).join(' ');
+    set('pjOwnerCsz', [ow.city,stZip].filter(Boolean).join(', '));
+  }
+  const un=atDocs.baseUnits||atDocs.impUnits;
+  if(un!=null){const e=document.getElementById('occUnits'); if(e&&!e.value)e.value=String(un);}
+  const inv=composeInvoiceNo();
+  if(inv){set('pjInvNo',inv); set('pjProjInvNo',inv);}
+  try{pjSave();}catch(e){}
 }
 (function(){for(const f of PJ_FIELDS){const e=document.getElementById(f);
   if(e)e.addEventListener('input',()=>{pjSave();
