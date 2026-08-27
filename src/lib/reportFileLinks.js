@@ -34,6 +34,21 @@ export const REPORT_LINK_ORIGIN = 'https://leap.energyefficiencyservices.org'
 // netlify.toml, which sits ABOVE the SPA catch-all so it is matched first.
 export const STORAGE_PROXY_PREFIX = '/evidence/'
 
+// Where a SHORT link lives. `/f/<token>` — the whole point is that this fits on
+// one line, so Gmail's redirect page and Acrobat's prompt show something a
+// person can read and trust instead of 500 characters of JWT.
+export const SHORT_LINK_PREFIX = '/f/'
+
+/**
+ * The public link for a minted report-file token.
+ * @param {string} token  from mint_report_file_link
+ */
+export function shortFileLink(token, origin = REPORT_LINK_ORIGIN) {
+  const t = String(token || '').trim()
+  if (!t) return null
+  return `${origin.replace(/\/+$/, '')}${SHORT_LINK_PREFIX}${t}`
+}
+
 // What a Supabase signed object URL looks like, at the point the bucket begins.
 const SIGN_MARKER = '/storage/v1/object/sign/'
 

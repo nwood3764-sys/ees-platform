@@ -16,8 +16,10 @@
 
 import {
   proxiedStorageUrl,
+  shortFileLink,
   REPORT_LINK_ORIGIN,
   STORAGE_PROXY_PREFIX,
+  SHORT_LINK_PREFIX,
 } from '../src/lib/reportFileLinks.js'
 import { readFileSync } from 'node:fs'
 
@@ -64,6 +66,25 @@ check('a trailing slash on the origin does not double up',
   proxiedStorageUrl(SIGNED, 'https://leap.example.org/'),
   'https://leap.example.org/evidence/work-evidence/work_steps/abc/originals/x.jpg?token=eyJhbGciOi.J9.sig')
 
+// ── Short links ───────────────────────────────────────────────────────────
+// The whole point: one readable line, so Gmail's redirect page and Acrobat's
+// prompt show something a person can trust.
+check('a token becomes a short link on LEAP\'s domain',
+  shortFileLink('9f8a3c2b1d4e5f60718293a4b5c6d7e8'),
+  REPORT_LINK_ORIGIN + '/f/9f8a3c2b1d4e5f60718293a4b5c6d7e8')
+// The property that matters is not "shorter than the constant above" (which is
+// an abbreviated stand-in) but that the link carries NO query string at all —
+// the 500-character JWT is what Gmail printed and what looked like phishing.
+check('a short link carries no query string',
+  shortFileLink('9f8a3c2b1d4e5f60718293a4b5c6d7e8').includes('?'), false)
+check('a short link fits on one line',
+  shortFileLink('9f8a3c2b1d4e5f60718293a4b5c6d7e8').length < 100, true)
+check('no token yields no link, never a bare /f/', shortFileLink(''), null)
+check('null token yields null', shortFileLink(null), null)
+check('whitespace is not a token', shortFileLink('   '), null)
+check('a trailing slash on the origin does not double up',
+  shortFileLink('abc', 'https://leap.example.org/'), 'https://leap.example.org/f/abc')
+
 // ── The proxy rule must actually exist, and above the SPA catch-all ───────
 // This is the check that matters most: the rewrite is useless if netlify.toml
 // does not carry the matching rule, and actively harmful if /* is matched first.
@@ -76,6 +97,13 @@ check('the proxy is a 200 rewrite, not a 301/302 to another host',
   /from\s+=\s+"\/evidence\/\*"[\s\S]{0,200}?status = 200/.test(toml), true)
 check('the proxy rule is declared BEFORE the SPA catch-all',
   toml.indexOf('"/evidence/*"') < toml.indexOf('from   = "/*"'), true)
+
+check('netlify.toml routes the short-link prefix this module produces',
+  toml.includes(`from   = "${SHORT_LINK_PREFIX}*"`), true)
+check('short links resolve to the report-file function',
+  /to\s+=\s+"https:\/\/\S+\/functions\/v1\/report-file\/:splat"/.test(toml), true)
+check('the short-link rule is also above the SPA catch-all',
+  toml.indexOf('"/f/*"') < toml.indexOf('from   = "/*"'), true)
 
 if (failures > 0) {
   console.error(`\nreport-file-links fixture: ${failures} of ${checks} checks FAILED`)
