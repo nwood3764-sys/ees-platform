@@ -42,7 +42,7 @@ when you run the model, or repoint the weather file in OpenStudio first.
 
 ## Version note
 
-The service pins **`openstudio==3.7.0`** to match the current models. The SDK
+The service pins **`openstudio==3.11.0`** to match the current models. The SDK
 version must be **>= the uploaded model's version**; older models are
 auto-upgraded by the VersionTranslator. If you start producing models on a newer
 OpenStudio, bump the pin in `service/requirements.txt` to match.
@@ -72,7 +72,7 @@ Render service is the engine behind it.)
 4. **Deploy** — Create Web Service. First build is ~5–10 min (installs the
    OpenStudio library). Wait for **Live** (green).
 5. **Test** — open `https://osm-fixer-xxxx.onrender.com/health` → expect
-   `{"ok":true,"sdk":"3.7.0"}`. Copy that base URL.
+   `{"ok":true,"sdk":"3.11.0"}`. Copy that base URL.
 6. **Wire the tab** — put the URL in the Audit Template Builder's OSM Fixer tab
    config (Claude does this step) and redeploy the site.
 
@@ -92,7 +92,7 @@ fly status                      # note the https URL, e.g. https://osm-fixer.fly
 (Railway/Render work the same way — point them at `service/Dockerfile`, expose
 port 8080, set `ALLOWED_ORIGIN`.)
 
-Verify: `curl https://<service-url>/health` → `{"ok":true,"sdk":"3.7.0"}`.
+Verify: `curl https://<service-url>/health` → `{"ok":true,"sdk":"3.11.0"}`.
 
 ### 2. The front-end (Netlify example)
 
