@@ -3308,20 +3308,29 @@ function prefillFromAuditTemplate(){
 // Manual-only fields (IQ number, the date fields) are left untouched.
 function verifyAndSyncFields(){
   const as=data.asImp||data.asBase, asB=data.asBase;
-  const set=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null&&String(v)!==''){e.value=String(v); e.dataset.auto='1';}};
-  const derived=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone',
-    'pjPropName','pjInstallAddr','pjCsz','occUnits','pjInvNo','pjProjInvNo',
-    'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower'];
-  for(const id of derived){const e=document.getElementById(id); if(e){e.value=''; delete e.dataset.auto;}}
+  // Force each field to the value the FILES provide. Crucially, if the files DON'T
+  // provide a value for a field (e.g. no audit-template XML → no owner/units), leave
+  // whatever is already there — NEVER blank a field the files can't refill. (Clearing
+  // then refilling used to wipe a hand-typed unit count when there was no XML, which
+  // then silently disabled the proposal.)
+  const force=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null&&String(v)!==''){e.value=String(v); e.dataset.auto='1';}};
   if(as){const strip=n=>cleanName(n||'').replace(/\s*-\s*(Baseline|Improved)\s*$/i,'');
-    set('pjPropName', strip((asB||as).name));
-    set('pjInstallAddr',(asB||as).street);
-    set('pjCsz',(asB||as).cityStateZip);}
-  prefillFromAuditTemplate();                 // owner + units + invoice into the now-empty fields
-  const qd=pjQtyDefaults();                    // aerator counts read occUnits (just set)
-  for(const [id,v] of Object.entries(qd)) if(v!=null) set(id,v);
+    force('pjPropName', strip((asB||as).name));
+    force('pjInstallAddr',(asB||as).street);
+    force('pjCsz',(asB||as).cityStateZip);}
+  const ow=atDocs.baseOwner||atDocs.impOwner;
+  if(ow){
+    force('pjOwner', ow.company||ow.name); force('pjContact', ow.name);
+    force('pjEmail', ow.email); force('pjPhone', ow.phone); force('pjOwnerAddr', ow.street);
+    const stZip=[ow.state,ow.zip].filter(Boolean).join(' ');
+    force('pjOwnerCsz', [ow.city,stZip].filter(Boolean).join(', '));
+  }
+  const un=atDocs.baseUnits||atDocs.impUnits; if(un!=null) force('occUnits', un);
+  force('pjInvNo', composeInvoiceNo('A')); force('pjProjInvNo', composeInvoiceNo('P'));
+  const qd=pjQtyDefaults();                     // aerator counts read the (now current) occUnits
+  for(const [id,v] of Object.entries(qd)) if(v!=null) force(id,v);
   try{pjSave();}catch(e){}
-  if(typeof refresh==='function')refresh();    // re-evaluate button gating with the synced values
+  if(typeof refresh==='function')refresh();     // re-evaluate button gating with the synced values
   paintVerifyPanel(true);
 }
 // Readiness rows for the Verify panel.
@@ -3358,7 +3367,8 @@ function paintVerifyPanel(fromSync){
 (function(){for(const f of PJ_FIELDS){const e=document.getElementById(f);
   if(e)e.addEventListener('input',()=>{pjSave();
     delete e.dataset.auto;   // the moment the user types, it's THEIRS — never auto-overwrite it again
-    if(typeof paintVerifyPanel==='function')paintVerifyPanel();
+    if(f==='occUnits'){ if(typeof refresh==='function')refresh(); }  // unit count gates the paperwork buttons — refresh, don't just repaint
+    else if(typeof paintVerifyPanel==='function')paintVerifyPanel();
     if(/^pjQty/.test(f)){
       if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();}
     if(/^rate(Elec|Gas)$/.test(f)){   // rate edit → re-render every $ figure + re-check
