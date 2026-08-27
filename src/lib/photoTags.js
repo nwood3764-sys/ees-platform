@@ -160,10 +160,10 @@ export function stepEvidenceInSelection(photos) {
  * picker was offering ten generic tags while the work order's own work plan
  * defined fourteen photo prompts that never appeared).
  *
- *   This work order   the photo prompts its work plan asks for — "Roofs",
- *                     "Windows", "Service Hot Water Systems". Per-job, so it
- *                     cannot live in a global picklist, and it is what makes
- *                     a loose photo line up with the step it documents.
+ *   This work plan    its work steps and their photo prompts — "Roof /
+ *                     Ceiling", "Service Hot Water". Per-job, so it cannot live
+ *                     in a global picklist, and it is what makes a loose photo
+ *                     line up with the step it documents.
  *   All work orders   the `photos` / `photo_type` picklist — generic tags that
  *                     apply to any job, managed in Setup.
  *   Already in use    tags on the photos being tagged that neither list holds,
@@ -188,7 +188,7 @@ export function buildTagChoices({ prompts, picklist, photos, labels } = {}) {
   const groups = []
   // Job-specific first: on an assessment it is the answer nine times in ten.
   const jobTags = take(prompts, 'work-plan')
-  if (jobTags.length) groups.push({ id: 'work-plan', title: 'This work order asks for', choices: jobTags })
+  if (jobTags.length) groups.push({ id: 'work-plan', title: 'This work plan', choices: jobTags })
 
   const generic = take(picklist, 'picklist')
   if (generic.length) groups.push({ id: 'picklist', title: 'General tags', choices: generic })
