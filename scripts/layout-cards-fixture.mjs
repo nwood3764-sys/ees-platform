@@ -149,18 +149,34 @@ check('an unknown card id builds nothing', buildCardWidget('nope', 'enrollments'
 const targets = cardCopyTargets(enrollmentSections(), 'sec-rel', ['Assessment'])
 check('every existing section is a target, grouped by where it renders',
   targets.filter(t => t.kind === 'section').map(t => `${t.group}/${t.label}`),
-  ['Details/Supporting Documentation', 'Right sidebar/Documents', 'Related/New Section'])
+  ['Details/Supporting Documentation', 'Related/New Section', 'Right sidebar/Documents'])
+// Groups follow the record page's own tab order with the rail LAST, not the
+// order sections happen to be stored in. Grouping by section_order put "Right
+// sidebar" between two tabs, where it reads as a third tab — caught in the
+// browser by tools/layout-card-check, not by this file, which is why that tool
+// exists.
+check('groups run Details, Related, custom tabs, then the right sidebar last',
+  [...new Set(targets.map(t => t.group))],
+  ['Details', 'Related', 'Assessment', 'Right sidebar'])
+check('each group ends with its own "new section" entry',
+  targets.filter(t => t.group === 'Right sidebar').map(t => t.kind),
+  ['section', 'new'])
 check('the source section is offered and marked as the source',
   targets.find(t => t.sectionKey === 'sec-rel').isSource, true)
 check('a new section is offered on every tab and on the right sidebar',
   targets.filter(t => t.kind === 'new').map(t => t.group),
   ['Details', 'Related', 'Assessment', 'Right sidebar'])
+check('the right sidebar’s new-section entry is the LAST target in the list',
+  targets.at(-1).id, `new::${RIGHT_RAIL}`)
 check('the right-sidebar new-section target carries placement right',
   targets.find(t => t.id === `new::${RIGHT_RAIL}`).placement, 'right')
 check('an empty tab with no sections is still a target',
   targets.some(t => t.kind === 'new' && t.tab === 'Assessment'), true)
 check('Details and Related are targets on a layout that has neither',
   cardCopyTargets([], null, []).map(t => t.group),
+  ['Details', 'Related', 'Right sidebar'])
+check('a tab named Details or Related is not duplicated as a custom tab',
+  cardCopyTargets([], null, ['Details', 'Related']).map(t => t.group),
   ['Details', 'Related', 'Right sidebar'])
 
 // ─── Copying ─────────────────────────────────────────────────────────────────
