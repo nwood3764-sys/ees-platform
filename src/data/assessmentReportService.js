@@ -205,6 +205,10 @@ export async function loadAssessmentReportContext(workOrderId) {
     size: formatFileSize(row.file_size_bytes),
     date: fmtDate(row.created_at),
     previewKind: documentPreviewKind(row.mime_type, row.name),
+    // The curation flag from the Documents card. A document marked for the
+    // final report is pre-selected here, so the set is decided ONCE on the
+    // record instead of re-picked on every generation (Nicholas, 2026-08-27).
+    inFinalReport: row.include_in_final_report === true,
     _row: row,
   }))
 
