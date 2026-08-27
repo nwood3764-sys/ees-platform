@@ -13,6 +13,7 @@ import { areSignedUrlsUsable } from '../lib/signedUrlExpiry'
 import { CATCH_ALL_DOCUMENT_TYPE } from '../lib/documentSlots'
 import { documentTypeLabel } from '../lib/documentTypes'
 import { storageSafeFileName, isStorageSafeKey } from '../lib/storageKey'
+import { isVideoFile } from '../lib/fileKinds'
 
 // ---------------------------------------------------------------------------
 // storageService.js — uploads, downloads, deletes, and signed URLs for the
@@ -835,6 +836,19 @@ export async function uploadDocument({
   if (!relatedObject) throw new Error('uploadDocument: relatedObject is required')
   if (!relatedId)     throw new Error('uploadDocument: relatedId is required')
 
+  // A video is typed as a video, wherever it came in.
+  //
+  // `documentType` names the SLOT a file was filed into, and a named slot
+  // always wins — a video uploaded into "Utility Bill" is still that slot's
+  // file. But the generic default is 'attachment', and a video landing under
+  // it is how two 360 captures came to sit on a work step on 2026-08-27
+  // indistinguishable from a spec sheet: nothing could find them, count them,
+  // or offer them to a report. The type is a fact about the bytes, so it is
+  // read from the bytes here rather than trusted to every call site.
+  if ((documentType || 'attachment') === 'attachment' && isVideoFile(file.name, file.type)) {
+    documentType = 'video'
+  }
+
   const bucket = defaultDocumentBucket(relatedObject)
   const docId = newId()
   const path = assertStorageKey(documentStoragePath(relatedObject, relatedId, docId, file.name), file.name)
@@ -874,6 +888,68 @@ export async function uploadDocument({
   }
 
   return docRow
+}
+
+/**
+ * Every document filed against a work order — on the order itself AND on any of
+ * its work steps — each tagged with the step it belongs to.
+ *
+ * The Energy Assessment Report's generate dialog offered only documents
+ * attached to the WORK ORDER, so a file captured where the work happened was
+ * invisible to the report it is evidence for. That is where a video lands: an
+ * assessor records the roof standing on the "Roof / Ceiling" step, and the step
+ * is the correct place for it — the report just could not see it (2026-08-27).
+ *
+ * Ordered the way the steps run, so the list reads down the building the same
+ * way the report does, with the work order's own files first.
+ */
+export async function listWorkOrderAndStepDocuments(workOrderId) {
+  if (!workOrderId) return []
+
+  const { data: steps, error: stepErr } = await supabase
+    .from('work_steps')
+    .select('id, work_step_name, work_step_execution_order, work_step_plan_execution_order')
+    .eq('work_order_id', workOrderId)
+    .eq('work_step_is_deleted', false)
+  if (stepErr) throw new Error(`work order steps load failed: ${stepErr.message}`)
+
+  const stepIds = (steps || []).map(s => s.id)
+  const stepNameById = new Map((steps || []).map(s => [s.id, s.work_step_name]))
+  const stepPosById = new Map((steps || []).map(s => [
+    s.id,
+    s.work_step_execution_order ?? s.work_step_plan_execution_order ?? STEP_POSITION_LAST,
+  ]))
+
+  const docSelect = () => supabase.from('documents').select('*').eq('is_deleted', false)
+  const queries = [docSelect().eq('related_object', 'work_orders').eq('related_id', workOrderId)]
+  if (stepIds.length > 0) {
+    queries.push(docSelect().eq('related_object', 'work_steps').in('related_id', stepIds))
+  }
+  const results = await Promise.all(queries)
+  const failed = results.find(r => r.error)
+  if (failed) throw new Error(`work order documents load failed: ${failed.error.message}`)
+
+  const byId = new Map()
+  for (const r of results) for (const d of r.data || []) byId.set(d.id, d)
+  const rows = Array.from(byId.values())
+  if (rows.length === 0) return []
+
+  const labels = await resolveDocumentTypeLabels(rows.map(d => d.document_type))
+  return rows
+    .map(d => {
+      const onAStep = d.related_object === 'work_steps' && stepNameById.has(d.related_id)
+      return {
+        ...d,
+        _document_type_label: documentTypeLabel(d.document_type, labels),
+        _work_step_name: onAStep ? stepNameById.get(d.related_id) : null,
+        _work_step_position: onAStep
+          ? (stepPosById.get(d.related_id) ?? STEP_POSITION_LAST)
+          : STEP_POSITION_WORK_ORDER,
+      }
+    })
+    .sort((a, b) =>
+      (a._work_step_position - b._work_step_position) ||
+      String(a.created_at || '').localeCompare(String(b.created_at || '')))
 }
 
 /** List non-deleted documents attached to a record, newest first. */

@@ -20,7 +20,8 @@
 
 import { supabase } from '../lib/supabase'
 import {
-  listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrl, listDocuments,
+  listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrl,
+  listWorkOrderAndStepDocuments,
 } from './storageService'
 import { proxiedStorageUrl, shortFileLink } from '../lib/reportFileLinks'
 import { loadSubmittalDocumentTemplate, loadSubmittalTextBlocks } from './paperworkService'
@@ -195,13 +196,19 @@ export async function loadAssessmentReportContext(workOrderId) {
   })
 
   // ── Documents attached to this assessment ───────────────────────────────
-  // Exactly the work order's Documents related list — the same listDocuments
-  // call the card on the record makes, so what the user sees on the work order
-  // is what they are offered here. Nothing is included until they pick it.
-  const documentRows = await listDocuments('work_orders', workOrderId)
+  // The work order's own Documents card AND every one of its work steps'.
+  // Until 2026-08-27 this read the work order alone, so a file captured where
+  // the work happened could not be put in the report it is evidence for — which
+  // is precisely where a video lands, recorded standing on the step it
+  // documents. Ordered the way the steps run, and each one says which step it
+  // came from. Nothing is included until the user picks it.
+  const documentRows = await listWorkOrderAndStepDocuments(workOrderId)
   const documents = documentRows.map(row => ({
     id: row.id,
     name: row.name || row.document_number || 'Document',
+    // The step is part of the file's identity in a report that is organised by
+    // step — "Roof / Ceiling" is what tells a reader which video this is.
+    step: row._work_step_name || null,
     typeLabel: documentTypeLabel(row.mime_type, row.name),
     size: formatFileSize(row.file_size_bytes),
     date: fmtDate(row.created_at),

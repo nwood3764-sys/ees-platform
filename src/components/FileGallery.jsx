@@ -39,7 +39,8 @@ import {
   freshDocumentUrlsBatch,
 } from '../data/storageService'
 import { isSignedUrlUsable } from '../lib/signedUrlExpiry'
-import { isImageFile, fileTypeLabel } from '../lib/fileKinds'
+import { isImageFile, isVideoFile, fileTypeLabel, extensionOf } from '../lib/fileKinds'
+import { uploadOutcomeMessages } from '../lib/galleryUploadOutcome'
 import { usePhotoRepair } from '../lib/usePhotoRepair'
 import {
   documentFileName,
@@ -86,7 +87,14 @@ const HEADER_THEME = {
 }
 
 const ACCEPT_BY_MODE = {
-  photos: 'image/*',
+  // Photos card: pictures AND video. A 360 pan of an attic is evidence of the
+  // same job as the stills either side of it, and the assessor is standing on
+  // the step that wants it — sending them to find a different card is how a
+  // video ends up on the wrong step, or nowhere (Nicholas, 2026-08-27: "we need
+  // to include videos"). The bytes still land in `documents`, because `photos`
+  // is an image pipeline (watermark, EXIF, HEIC rendition); what changes is
+  // that the person is never turned away.
+  photos: 'image/*,video/*',
   // Documents: no picker filter. The storage bucket governs what's actually
   // allowed, and drag-and-drop bypasses `accept` regardless — so an over-tight
   // filter only hides valid files (video, CAD/.dwg, Matterport/point-cloud
@@ -568,7 +576,9 @@ export default function FileGalleryWidget({
       return
     }
     const files = Array.from(fileList)
-    const misfiled = []   // non-images filed as documents instead
+    const misfiled = []   // non-images, non-videos filed as documents instead
+    const videosFiled = [] // videos dropped on the Photos card — evidence, not a misfile
+    const photoNames  = [] // for the single-photo confirmation, which names the file
     let successCount = 0
     let failCount = 0
     setUploading(c => c + files.length)
@@ -578,22 +588,35 @@ export default function FileGalleryWidget({
       // real-world uploads are 1-3 files at a time.
       for (const file of files) {
         try {
-          // A PDF floor plan, a DWG, a spreadsheet — these are documents that
-          // happened to be dropped on the Photos card. Taking them as photos
-          // produced a tile that could never show anything (Nicholas,
-          // 2026-08-24). They are filed as documents on the SAME record
-          // instead: documentation is never blocked, it just lands in the
-          // right place, and the work step already has a Documents card.
+          // Neither a PDF floor plan nor a 360 video is an image, and the two
+          // are not the same event.
+          //
+          // A PDF, a DWG, a spreadsheet is a DOCUMENT that happened to be
+          // dropped on the Photos card. Taking it as a photo produced a tile
+          // that could never show anything (Nicholas, 2026-08-24), so it is
+          // filed as a document on the SAME record and the person is told
+          // where it went — silently filing it elsewhere looks like the upload
+          // vanished.
+          //
+          // A VIDEO is evidence of the very work this card is for, so it is
+          // filed as one — document_type 'video', named as a video, no
+          // "you misfiled this". It goes to `documents` rather than `photos`
+          // only because `photos` is an image pipeline (watermark, EXIF, HEIC
+          // rendition) with nothing to do to a video; that is an
+          // implementation fact and not something to make the assessor's
+          // problem.
+          const asVideo = target === 'photos' && isVideoFile(file.name, file.type)
           if (target === 'photos' && !isImageFile(file.name, file.type)) {
             await uploadDocument({
               file,
               relatedObject: parentTable,
               relatedId: parentRecordId,
-              documentType: config.document_type || 'attachment',
+              documentType: asVideo ? 'video' : (config.document_type || 'attachment'),
               category: config.category || null,
               programId: config.program_id || null,
             })
-            misfiled.push({ name: file.name, kind: fileTypeLabel(file.name, file.type) })
+            if (asVideo) videosFiled.push({ name: file.name })
+            else misfiled.push({ name: file.name, kind: fileTypeLabel(file.name, file.type) })
           } else if (target === 'photos') {
             await uploadPhoto({
               file,
@@ -608,6 +631,7 @@ export default function FileGalleryWidget({
               photoType: config.photo_type || 'general',
               applyWatermark: config.apply_watermark !== false,
             })
+            photoNames.push(file.name)
           } else {
             await uploadDocument({
               file,
@@ -630,24 +654,16 @@ export default function FileGalleryWidget({
       setUploading(c => Math.max(0, c - files.length))
     }
     if (successCount > 0) {
-      if (misfiled.length === successCount) {
-        // Everything dropped was a document. Say where it went — silently
-        // filing it elsewhere would look like the upload vanished.
-        toast.success(misfiled.length === 1
-          ? `${misfiled[0].name} is a ${misfiled[0].kind}, not a photo — filed under Documents`
-          : `${misfiled.length} files were documents, not photos — filed under Documents`)
-      } else if (misfiled.length > 0) {
-        toast.success(`Uploaded ${successCount - misfiled.length} photo${successCount - misfiled.length === 1 ? '' : 's'}`)
-        toast.success(misfiled.length === 1
-          ? `${misfiled[0].name} is a ${misfiled[0].kind} — filed under Documents`
-          : `${misfiled.length} of them were documents — filed under Documents`)
-      } else {
-        toast.success(
-          files.length === 1
-            ? `Uploaded ${files[0].name}`
-            : `Uploaded ${successCount} of ${files.length} files`
-        )
-      }
+      // Wording lives in src/lib/galleryUploadOutcome.js — three outcomes off
+      // one drag is more branching than belongs in an upload handler, and it
+      // is the part worth testing.
+      for (const message of uploadOutcomeMessages({
+        attempted: files.length,
+        photos: successCount - misfiled.length - videosFiled.length,
+        photoNames,
+        videos: videosFiled,
+        documents: misfiled,
+      })) toast.success(message)
       await refresh()
     } else if (failCount > 0) {
       // Errors already toasted per-file above; nothing to add.
@@ -2397,6 +2413,10 @@ function getPreviewKind(doc) {
   const mime = (doc.mime_type || '').toLowerCase()
   if (mime === 'application/pdf' || ext === 'pdf') return 'pdf'
   if (mime.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext)) return 'image'
+  // Video plays in the modal. It is evidence someone recorded on site, and a
+  // Download button was the whole of what LEAP offered for it until
+  // 2026-08-27 — nobody reviews a 430 MB attic pan by saving it first.
+  if (isVideoFile(doc.name, doc.mime_type)) return 'video'
   // Spreadsheets render client-side via SheetJS (workbook → HTML table). The
   // file bytes are read in the browser the user already authenticated to —
   // nothing transits a third-party viewer, which matters for PII-bearing
@@ -2503,6 +2523,8 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
             <Icon
               path={kind === 'image'
                 ? 'M3 7h18v12H3V7z M3 7l5-5h8l5 5 M9 13a2 2 0 100-4 2 2 0 000 4z'
+                : kind === 'video'
+                ? 'M3 5h18v14H3V5z M3 9h18 M3 15h18 M7 5v14 M17 5v14'
                 : 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z M14 2v6h6'}
               size={14} color="#1a5a8a"
             />
@@ -2582,7 +2604,7 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
         {/* Body */}
         <div style={{
           flex: 1, minHeight: 0,
-          background: kind === 'image' ? '#0d1a2e' : '#f5f7fa',
+          background: (kind === 'image' || kind === 'video') ? '#0d1a2e' : '#f5f7fa',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           overflow: 'auto',
           position: 'relative',
@@ -2613,6 +2635,8 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
                 objectFit: 'contain', display: 'block',
               }}
             />
+          ) : kind === 'video' ? (
+            <VideoPreview doc={doc} url={url} onDownload={onDownload} />
           ) : kind === 'spreadsheet' ? (
             <SpreadsheetPreview doc={doc} />
           ) : kind === 'word' ? (
@@ -2700,6 +2724,72 @@ function FallbackPreview({ doc }) {
         </a>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// VideoPreview — plays an evidence video in the modal.
+//
+// Streamed straight from its signed Storage URL: <video preload="metadata">
+// fetches byte ranges on demand, so opening a 430 MB attic pan costs the first
+// few hundred kilobytes and not the whole file.
+//
+// The honest part is the failure. A browser decodes what it decodes, and an
+// iPhone capture arrives as a .MOV (video/quicktime) that Chrome on Windows
+// often will not play — the very file that started this (IMG_0346.MOV,
+// 2026-08-27). There is nothing the app can do about that, and a black
+// rectangle is not an answer: on `error` this names the format, says the
+// browser cannot play it, and puts Download right there. The file is fine and
+// it is safe on the record either way, which is the thing the person needs to
+// know.
+// ---------------------------------------------------------------------------
+function VideoPreview({ doc, url, onDownload }) {
+  const [failed, setFailed] = useState(false)
+  const kindLabel = fileTypeLabel(doc.name, doc.mime_type)
+  const format = extensionOf(doc.name) ? `.${extensionOf(doc.name)}` : kindLabel
+
+  if (failed) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: 12, padding: 32, textAlign: 'center', maxWidth: 420,
+      }}>
+        <Icon path="M3 5h18v14H3V5z M3 9h18 M3 15h18 M7 5v14 M17 5v14" size={26} color="#8fa0b8" />
+        <div style={{ color: '#e8eef6', fontSize: 14, fontWeight: 600 }}>
+          This browser cannot play a {format} video
+        </div>
+        <div style={{ color: '#8fa0b8', fontSize: 12.5, lineHeight: 1.5 }}>
+          The file is saved on this record and is not damaged — download it and
+          play it in your video player, or open this page in Safari.
+        </div>
+        {onDownload && (
+          <button
+            onClick={onDownload}
+            style={{
+              background: C.emerald, color: '#fff', border: 'none', borderRadius: 5,
+              padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <Icon path="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+              size={12} color="#fff" />
+            Download
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <video
+      key={url}
+      src={url}
+      controls
+      playsInline
+      preload="metadata"
+      onError={() => setFailed(true)}
+      style={{ maxWidth: '100%', maxHeight: '100%', display: 'block', outline: 'none' }}
+    />
   )
 }
 

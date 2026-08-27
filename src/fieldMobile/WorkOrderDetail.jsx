@@ -764,7 +764,12 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
   const legRef         = useRef('general')  // synchronous — no state race with the picker
   // {done, total} while photos upload, null when idle — see UploadProgress.
   const [batch, setBatch] = useState(null)
-  const uploading = !!batch
+  // A video is one file and can be very large, so it says so in words rather
+  // than counting a batch down. Tracked separately from `batch` because any
+  // step can now take a video, so "is a video going up" is no longer the same
+  // question as "is this a Video step".
+  const [videoUploading, setVideoUploading] = useState(false)
+  const uploading = !!batch || videoUploading
 
   const done = isStepDone(step)
   const corrections = isStepCorrections(step)
@@ -849,14 +854,14 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
     const file = e.target.files && e.target.files[0]
     e.target.value = '' // allow re-selecting the same file
     if (!file) return
-    setBatch({ done: 0, total: 1 })
+    setVideoUploading(true)
     try {
       await captureStepVideo({ file, workStepId: step.work_step_id, stepName: step.name })
       onPhotoUploaded(`Video attached · ${step.name}`)
     } catch (err) {
       onPhotoError(err.message || 'Video upload failed.')
     } finally {
-      setBatch(null)
+      setVideoUploading(false)
     }
   }
 
@@ -992,12 +997,14 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
       )}
 
       {/* Evidence requirements summary */}
-      {!done && (reqCount > 0 || needsBefore || needsAfter || isVideoStep || step.evidence_type === 'Document Upload') && (
+      {!done && (reqCount > 0 || needsBefore || needsAfter || isVideoStep || videoCount > 0 || step.evidence_type === 'Document Upload') && (
         <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>
           {reqCount > 0 && <span>Photos: {step.photo_count}/{reqCount}  </span>}
           {needsBefore && <span style={{ color: step.before_count > 0 ? C.emeraldMid : C.amber }}>Before {step.before_count > 0 ? '✓' : '—'}  </span>}
           {needsAfter && <span style={{ color: step.after_count > 0 ? C.emeraldMid : C.amber }}>After {step.after_count > 0 ? '✓' : '—'}</span>}
-          {isVideoStep && <span style={{ color: videoCount > 0 ? C.emeraldMid : C.amber }}>Video {videoCount > 0 ? '✓' : 'required'}</span>}
+          {isVideoStep
+            ? <span style={{ color: videoCount > 0 ? C.emeraldMid : C.amber }}>Video {videoCount > 0 ? '✓' : 'required'}</span>
+            : videoCount > 0 && <span style={{ color: C.emeraldMid }}>Videos: {videoCount}  </span>}
           {step.evidence_type === 'Document Upload' && <span>Document upload required</span>}
         </div>
       )}
@@ -1045,27 +1052,37 @@ function StepCard({ step, woId, index, locked, isActionable, busy, onComplete, o
               </span>
             </button>
           )}
+          {/* EVERY step can take a video, not only a step whose evidence type
+              IS Video.
+              A Video step still leads with Record Video, because that is the
+              evidence it is waiting on. But a Photo step used to offer nothing
+              but `accept="image/*"`, so an assessor with a 360 pan of a roof
+              had no route at all — which is exactly how two videos came to be
+              filed by hand onto "Roof / Ceiling" while the work order's own
+              "Building 360 Video" step sat empty (2026-08-27). What a step
+              REQUIRES is still what the gate reads; being able to record more
+              than that is not the same question. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: gap ? 8 : 0, flexWrap: 'wrap' }}>
-            {isVideoStep ? (
+            {isVideoStep && (
               <CaptureBtn label="Record Video" icon="video" onClick={() => videoRef.current?.click()} onFolder={() => folderVideoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />
-            ) : (
-              <>
-                {needsBefore && (
-                  <CaptureBtn label="Before" onClick={() => triggerCapture('before')} onFolder={() => triggerFolder('before')} disabled={uploading || busy} done={step.before_count > 0} />
-                )}
-                {needsAfter && (
-                  <CaptureBtn label="After" onClick={() => triggerCapture('after')} onFolder={() => triggerFolder('after')} disabled={uploading || busy} done={step.after_count > 0} />
-                )}
-                {/* General capture when the step needs a count but no specific leg,
-                    or to add beyond before/after toward the required count. */}
-                {(reqCount > 0 || (!needsBefore && !needsAfter)) && (
-                  <CaptureBtn label="Photo" onClick={() => triggerCapture('general')} onFolder={() => triggerFolder('general')} disabled={uploading || busy} />
-                )}
-              </>
+            )}
+            {needsBefore && (
+              <CaptureBtn label="Before" onClick={() => triggerCapture('before')} onFolder={() => triggerFolder('before')} disabled={uploading || busy} done={step.before_count > 0} />
+            )}
+            {needsAfter && (
+              <CaptureBtn label="After" onClick={() => triggerCapture('after')} onFolder={() => triggerFolder('after')} disabled={uploading || busy} done={step.after_count > 0} />
+            )}
+            {/* General capture when the step needs a count but no specific leg,
+                or to add beyond before/after toward the required count. */}
+            {!isVideoStep && (reqCount > 0 || (!needsBefore && !needsAfter)) && (
+              <CaptureBtn label="Photo" onClick={() => triggerCapture('general')} onFolder={() => triggerFolder('general')} disabled={uploading || busy} />
+            )}
+            {!isVideoStep && (
+              <CaptureBtn label="Video" icon="video" onClick={() => videoRef.current?.click()} onFolder={() => folderVideoRef.current?.click()} disabled={uploading || busy} done={videoCount > 0} />
             )}
           </div>
 
-          {isVideoStep && uploading
+          {videoUploading
             ? <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>Uploading video…</div>
             : <UploadProgress batch={batch} />}
 

@@ -238,14 +238,14 @@ export default function EnergyAssessmentReportModal({ workOrderId, workOrder, on
                             padding: '1px 6px', borderRadius: 9,
                           }}>IN REPORT</span>
                         )}
-                        {[docItem.typeLabel, docItem.size,
+                        {[docItem.step, docItem.typeLabel, docItem.size,
                           docItem.previewKind === 'none' ? 'link only' : 'preview'].filter(Boolean).join('  ·  ')}
                       </span>
                     </label>
                   ))}
                   {!(ctx.documents || []).length && (
                     <div style={{ ...sectionRow, color: C.textMuted }}>
-                      No documents on this work order. Anything added to its Documents card can be included here — flag one there and it arrives ticked.
+                      No documents on this work order or its work steps. Anything added to a Documents card — a video recorded on a step included — can be included here, and a file flagged there arrives ticked.
                     </div>
                   )}
                 </div>
