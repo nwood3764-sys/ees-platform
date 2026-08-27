@@ -1968,6 +1968,12 @@ async function build50121XML(which){
   }
 
   // ---- Deep building-science fields (Asset Score PDF is authoritative) ----
+  // Enclosure air-tightness: ALWAYS the leakiest ("Very Leaky") — an EES rule.
+  // A leaky baseline is what gives air-sealing measures their modeled savings, so
+  // we hard-code it rather than let the model assume a tight enclosure. This is
+  // the whole-building AirInfiltrationSystem/Tightness (a valid BuildingSync enum:
+  // Very Tight / Tight / Average / Leaky / Very Leaky; "Very Leaky" is level 1).
+  _setFirst(doc,'Tightness','Very Leaky');
   // Envelope assemblies
   _setFirst(doc,'WallInsulationRValue', as.wallR);
   // Roofs: the report can list MULTIPLE roof systems (e.g. an R-0 kneewall attic
