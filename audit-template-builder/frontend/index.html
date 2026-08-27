@@ -142,7 +142,11 @@
       <input id="occBedsTotal" type="number" min="0" placeholder="mixed units" style="width:96px;margin-left:4px"></label>
     <span class="copyhint" id="occCalc"></span>
   </div>
-  <div id="occErr" style="margin:4px 0 12px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and either bedrooms per unit (uniform) or total bedrooms (mixed unit types) to enable exports.</div>
+  <div id="occErr" style="margin:4px 0 8px;font-size:12.5px;font-weight:600;color:#2a4a6a">Enter dwelling units and either bedrooms per unit (uniform) or total bedrooms (mixed unit types) to enable exports.</div>
+  <div style="margin:2px 0 14px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+    <button class="btn" id="verifyBtn" type="button" style="white-space:nowrap">Verify &amp; sync fields from files</button>
+    <div id="verifyPanel" style="flex:1;min-width:280px;font-size:12.5px"></div>
+  </div>
 
   <div id="rateRow" style="margin-top:2px;font-size:13px;color:var(--ink);display:flex;gap:14px;align-items:center;flex-wrap:wrap">
     <strong>Utility rates</strong>
@@ -807,7 +811,7 @@ function fuelScaleFactor(os,fuel){
 
 /* ---------- file wiring ---------- */
 // Optional DOE Audit Template documents (no parsing — deliverable pass-through)
-const atDocs={basePdf:null,impPdf:null,baseXml:null,impXml:null,baseOwner:null,impOwner:null,baseUnits:null,impUnits:null};
+const atDocs={basePdf:null,impPdf:null,baseXml:null,impXml:null,baseOwner:null,impOwner:null,baseUnits:null,impUnits:null,baseBldg:null,impBldg:null};
 document.querySelectorAll('.slot[data-atkey]').forEach(slot=>{
   const key=slot.dataset.atkey, inp=slot.querySelector('input');
   slot.onclick=()=>inp.click();
@@ -815,15 +819,18 @@ document.querySelectorAll('.slot[data-atkey]').forEach(slot=>{
   ['dragleave','drop'].forEach(e=>slot.addEventListener(e,ev=>{ev.preventDefault();slot.classList.remove('hot');}));
   const take=f=>{atDocs[key]=f;slot.classList.add('ok');slot.querySelector('.got').textContent='✓ '+f.name;refresh();
     if(key==='baseXml'||key==='impXml'){
-      const oK=key==='baseXml'?'baseOwner':'impOwner', uK=key==='baseXml'?'baseUnits':'impUnits';
-      atDocs[oK]=null; atDocs[uK]=null;
-      // The Audit Template XML already carries the owner contact and the unit
-      // count — pull both so the user doesn't retype them (and the occupants math
-      // stops being wrong). Fills empty form fields only; never clobbers edits.
+      const oK=key==='baseXml'?'baseOwner':'impOwner', uK=key==='baseXml'?'baseUnits':'impUnits',
+            bK=key==='baseXml'?'baseBldg':'impBldg';
+      atDocs[oK]=null; atDocs[uK]=null; atDocs[bK]=null;
+      // The Audit Template XML already carries the owner contact, the unit count,
+      // and the building's own address/state — pull all three so the user doesn't
+      // retype them (and Verify can flag a wrong-state file). Fills empty form
+      // fields only; never clobbers edits.
       _parseOwnerFile(f).then(o=>{atDocs[oK]=o; if(typeof prefillFromAuditTemplate==='function')prefillFromAuditTemplate();
         if(typeof scheduleAutoChecks==='function')scheduleAutoChecks(); saveSession();});
       _parseUnitsFile(f).then(u=>{atDocs[uK]=u; if(typeof prefillFromAuditTemplate==='function')prefillFromAuditTemplate();
         if(typeof scheduleAutoChecks==='function')scheduleAutoChecks(); saveSession();});
+      _parseAuditBuildingFile(f).then(bg=>{atDocs[bK]=bg; if(typeof paintVerifyPanel==='function')paintVerifyPanel(); saveSession();});
     }
     saveSession();};
   slot.addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])take(ev.dataTransfer.files[0]);});
@@ -928,7 +935,8 @@ function saveSession(){
         rawDocs:JSON.parse(JSON.stringify(rawDocs)),
         files:{asBase:files.asBase,asImp:files.asImp,osBase:files.osBase,osImp:files.osImp},
         atDocs:{basePdf:atDocs.basePdf,impPdf:atDocs.impPdf,baseXml:atDocs.baseXml,impXml:atDocs.impXml,
-                baseOwner:atDocs.baseOwner,impOwner:atDocs.impOwner,baseUnits:atDocs.baseUnits,impUnits:atDocs.impUnits}
+                baseOwner:atDocs.baseOwner,impOwner:atDocs.impOwner,baseUnits:atDocs.baseUnits,impUnits:atDocs.impUnits,
+                baseBldg:atDocs.baseBldg,impBldg:atDocs.impBldg}
       }).catch(()=>{});
     }catch(e){/* storage full/unavailable — skip */}
   },600);
@@ -954,7 +962,7 @@ async function restoreSession(){
 function clearSession(){
   _idbDel();
   ['asBase','asImp','osBase','osImp'].forEach(k=>{files[k]=null;data[k]=null;rawDocs[k]=null;});
-  ['basePdf','impPdf','baseXml','impXml','baseOwner','impOwner','baseUnits','impUnits'].forEach(k=>atDocs[k]=null);
+  ['basePdf','impPdf','baseXml','impXml','baseOwner','impOwner','baseUnits','impUnits','baseBldg','impBldg'].forEach(k=>atDocs[k]=null);
   document.querySelectorAll('.slot').forEach(sl=>{sl.classList.remove('ok'); const g=sl.querySelector('.got'); if(g)g.textContent='';});
   setStatus('Cleared saved session.','');
   try{ refresh(); }catch(e){}
@@ -1061,6 +1069,7 @@ function refresh(){
   document.getElementById('smartReview').disabled=!filesReady;   // AI review doesn't export
   document.getElementById('aiExtract').disabled=!filesReady;
   if(data.asBase||data.asImp)pjLoadAndPrefill();
+  if(typeof paintVerifyPanel==='function')paintVerifyPanel();
   const occErr=document.getElementById('occErr'); if(occErr) occErr.style.display=occOk?'none':'';
   if(!filesReady){return;}
   // Scale OpenStudio monthly energy to the Asset Score annual (per fuel), preserving the
@@ -1666,6 +1675,21 @@ async function _parseUnitsFile(f){
       if(fallback==null) fallback=n;
     }
     return fallback;
+  }catch(e){ return null; }
+}
+// Parse the BUILDING's own identity (name + address + state) from an Audit
+// Template XML. In BuildingSync the Site/Building address is the first address
+// block in the file; the contact addresses (auditor, owner) come later in
+// document order — so the first StreetAddress/State/etc. is the building's.
+// Verify uses the state to flag a wrong-building/wrong-state upload.
+async function _parseAuditBuildingFile(f){
+  if(!f) return null;
+  try{
+    const doc=new DOMParser().parseFromString(await f.text(),'application/xml');
+    if(doc.querySelector('parsererror')) return null;
+    const g=tag=>{const e=doc.getElementsByTagNameNS(NS_AUC,tag)[0];return e?(e.textContent||'').trim():'';};
+    const o={name:g('PremisesName'),street:g('StreetAddress'),city:g('City'),state:g('State'),zip:g('PostalCode')};
+    return (o.name||o.street||o.state)?o:null;
   }catch(e){ return null; }
 }
 // The resolved owner for a given side: the cached uploaded-XML owner first
@@ -3335,9 +3359,62 @@ function prefillFromAuditTemplate(){
   set('pjProjInvNo', composeInvoiceNo('P'));  // P = project
   try{pjSave();}catch(e){}
 }
+// One click: force every attachment-derived field to match the CURRENT uploads,
+// then report readiness. Replaces "delete all the fields by hand, then refresh".
+// Manual-only fields (IQ number, the date fields) are left untouched.
+function verifyAndSyncFields(){
+  const as=data.asImp||data.asBase, asB=data.asBase;
+  const set=(id,v)=>{const e=document.getElementById(id); if(e&&v!=null&&String(v)!==''){e.value=String(v); e.dataset.auto='1';}};
+  const derived=['pjOwner','pjOwnerAddr','pjOwnerCsz','pjContact','pjEmail','pjPhone',
+    'pjPropName','pjInstallAddr','pjCsz','occUnits','pjInvNo','pjProjInvNo',
+    'pjQtyAttic','pjQtyBath','pjQtyKitchen','pjQtyShower'];
+  for(const id of derived){const e=document.getElementById(id); if(e){e.value=''; delete e.dataset.auto;}}
+  if(as){const strip=n=>cleanName(n||'').replace(/\s*-\s*(Baseline|Improved)\s*$/i,'');
+    set('pjPropName', strip((asB||as).name));
+    set('pjInstallAddr',(asB||as).street);
+    set('pjCsz',(asB||as).cityStateZip);}
+  prefillFromAuditTemplate();                 // owner + units + invoice into the now-empty fields
+  const qd=pjQtyDefaults();                    // aerator counts read occUnits (just set)
+  for(const [id,v] of Object.entries(qd)) if(v!=null) set(id,v);
+  try{pjSave();}catch(e){}
+  if(typeof refresh==='function')refresh();    // re-evaluate button gating with the synced values
+  paintVerifyPanel(true);
+}
+// Readiness rows for the Verify panel.
+function verifyReport(){
+  const rows=[]; const ck=(label,ok,detail,required)=>rows.push({label,ok:!!ok,detail:detail||'',required:required!==false});
+  const asB=data.asBase, asI=data.asImp;
+  ck('Baseline Asset Score report', !!asB, asB?(asB.name||'loaded'):'not uploaded');
+  ck('Improved Asset Score report', !!asI, asI?(asI.name||'loaded'):'not uploaded');
+  const u=parseInt((document.getElementById('occUnits')||{}).value,10);
+  ck('Dwelling-unit count', Number.isFinite(u)&&u>=1, (Number.isFinite(u)&&u>=1)?(u+' units'):'enter Occupancy → Dwelling units');
+  const owName=pj('pjOwner')||pj('pjContact');
+  ck('Property owner (bill-to)', !!owName, owName||'upload the audit template XML, or type it', false);
+  const haveXml=!!(atDocs.baseXml||atDocs.impXml);
+  ck('Audit Template XML (auto-fills owner + units)', haveXml, haveXml?'loaded':'not uploaded — optional', false);
+  const asState=(asB&&asB.state)||(asI&&asI.state)||'';
+  const atState=(atDocs.baseBldg&&atDocs.baseBldg.state)||(atDocs.impBldg&&atDocs.impBldg.state)||'';
+  if(asState&&atState) ck('Asset Score & Audit Template are the same state', asState===atState,
+    'Asset Score: '+asState+' · Audit Template: '+atState+(asState!==atState?' — these files look like DIFFERENT buildings':''));
+  return rows;
+}
+function paintVerifyPanel(fromSync){
+  const el=document.getElementById('verifyPanel'); if(!el)return;
+  const rows=verifyReport();
+  const missing=rows.filter(r=>!r.ok&&r.required);
+  const uEl=document.getElementById('occUnits');
+  if(uEl){const uMiss=rows.some(r=>/unit count/i.test(r.label)&&!r.ok);
+    uEl.style.outline=uMiss?'2px solid #7eb3e8':''; uEl.style.borderRadius=uMiss?'4px':'';}
+  const line=r=>`<div style="padding:3px 0;border-top:1px solid var(--line)"><span style="color:${r.ok?'#2aab72':(r.required?'#2a4a6a':'#8fa0b8')};font-weight:700">${r.ok?'✓':'✕'}</span> <strong>${r.label}</strong>${r.detail?` — <span style="color:#4a5e7a">${r.detail}</span>`:''}</div>`;
+  const head=!missing.length
+    ? `<div style="color:#2aab72;font-weight:700">✓ Ready — everything the proposal needs is present${fromSync?' (fields re-synced from your files)':''}.</div>`
+    : `<div style="color:#2a4a6a;font-weight:700">⚠ Still needed before the paperwork: ${missing.map(m=>m.label).join(', ')}.</div>`;
+  el.innerHTML=head+rows.map(line).join('');
+}
 (function(){for(const f of PJ_FIELDS){const e=document.getElementById(f);
   if(e)e.addEventListener('input',()=>{pjSave();
     delete e.dataset.auto;   // the moment the user types, it's THEIRS — never auto-overwrite it again
+    if(typeof paintVerifyPanel==='function')paintVerifyPanel();
     if(/^pjQty/.test(f)){
       if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();}
     if(/^rate(Elec|Gas)$/.test(f)){   // rate edit → re-render every $ figure + re-check
@@ -3349,6 +3426,8 @@ function prefillFromAuditTemplate(){
 // `data` is set and refresh() re-runs pjLoadAndPrefill). Runs after every helper
 // above is defined.
 {const _csb=document.getElementById('clearSessionBtn'); if(_csb)_csb.onclick=clearSession;}
+{const _vb=document.getElementById('verifyBtn'); if(_vb)_vb.onclick=verifyAndSyncFields;}
+if(typeof paintVerifyPanel==='function')paintVerifyPanel();
 restoreSession();
 
 // The Measure Description Bank (from the workbook), with R-value substitution slots.
