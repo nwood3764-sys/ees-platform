@@ -1504,7 +1504,7 @@ export const ASSESSMENT_SECTION_RENDERERS = {
       const textX = hasPreview ? M + thumbW + 12 : M
       const textW = W - M - textX
       const nameLines = wrap(String(doc.name || 'Document'), textW)
-      const metaBits = [doc.typeLabel, doc.size, doc.date].filter(v => v != null && String(v).trim() !== '')
+      const metaBits = [doc.step, doc.typeLabel, doc.size, doc.date].filter(v => v != null && String(v).trim() !== '')
       const textH = nameLines.length * 12 + (metaBits.length ? 12 : 0) + (doc.linkUrl ? 11 : 0)
       const rowH = Math.max(thumbH, textH) + 12
       need(rowH)
