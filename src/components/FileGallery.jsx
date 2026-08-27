@@ -1767,28 +1767,21 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
           the work order's roll-up gallery (on a step's own card the step is
           already the context); the photo tag — the named prompt the
           technician answered — appears wherever it says something. */}
+      {/* ONE chip. A photo has one tag — if we switch it the old one falls
+          off (Nicholas, 2026-08-27: "I don't know how we have two tags on a
+          photo. We should only ever have one"). What looked like two was the
+          step chip and the tag chip side by side; now the tag wins where there
+          is one, and the step name stands in only for an untagged photo. */}
       {(showStepTag || isMeaningfulTag(photo.photo_type)) && (
         <div style={{
           position: 'absolute', left: 6, right: 6, bottom: 6,
-          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
+          display: 'flex', alignItems: 'center', gap: 4,
           pointerEvents: 'none',
         }}>
-          {showStepTag && (
+          {isMeaningfulTag(photo.photo_type) ? (
             <span style={{
               maxWidth: '100%',
-              background: 'rgba(7,17,31,0.82)', color: '#fff',
-              fontSize: 10, fontWeight: 600,
-              padding: '2px 7px', borderRadius: 10,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
-              {photo._work_step_name || 'Step'}
-            </span>
-          )}
-          {isMeaningfulTag(photo.photo_type) && (
-            <span style={{
-              maxWidth: '100%',
-              background: photo.photo_type === 'before' ? '#e8f3fb' : '#e8f8f0',
-              color: photo.photo_type === 'before' ? '#1a5a8a' : '#1a7a4f',
+              background: '#e8f8f0', color: '#1a7a4f',
               fontSize: 9.5, fontWeight: 700,
               padding: '2px 6px', borderRadius: 10,
               letterSpacing: 0.3,
@@ -1796,7 +1789,17 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
             }}>
               {photoTagLabel(photo)}
             </span>
-          )}
+          ) : showStepTag ? (
+            <span style={{
+              maxWidth: '100%',
+              background: 'rgba(7,17,31,0.82)', color: '#fff',
+              fontSize: 10, fontWeight: 600,
+              padding: '2px 7px', borderRadius: 10,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {photo._work_step_name || 'Untagged'}
+            </span>
+          ) : null}
         </div>
       )}
 

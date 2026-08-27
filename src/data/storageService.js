@@ -661,24 +661,23 @@ async function resolvePhotoTagLabels(types) {
 }
 
 /**
- * Every tag this work order's WORK PLAN offers — the vocabulary that actually
- * describes the job (Nicholas, 2026-08-25: "I need the tags for that work plan
- * to display so any user can select a photo and re-tag it").
+ * The tags this work order's work plan offers: its WORK STEPS, and nothing
+ * else (Nicholas, 2026-08-27: "The tag names need to match the work steps").
  *
- * Two kinds, in the order the plan runs:
+ * An earlier version also offered each step's template photo prompts. That was
+ * wrong twice over. It produced near-duplicates that do not match the plan a
+ * person is looking at — the step "Service Hot Water" sitting beside its prompt
+ * "Water Heater" — so a tag could disagree with the step it documents. And the
+ * prompts are stored as machine tokens ('mf_dhw_photo'), which process-photo
+ * prints onto the watermark verbatim.
  *
- *   the work step itself   "Roof / Ceiling", "Service Hot Water" — the section
- *                          a photo documents, and the same names the assessment
- *                          report groups by, so tagging lines the two up.
- *   its photo prompts      the named shots that step asks for, where it has any.
+ * A work step name is already human text, already the thing the assessment
+ * report groups by, and already what the crew walked. It is the tag.
  *
  * Resolvable from EITHER end: pass the work order, or pass a work step and the
- * work order is looked up from it. That matters because the Photos card lives
- * on both — gating this on work orders alone is why a work step's tag picker
- * showed nothing but generic tags.
+ * work order is looked up from it — the Photos card lives on both.
  *
- * Returns [] on any failure; a missing group is survivable, a thrown picker is
- * not.
+ * Returns [] on failure; a missing list is survivable, a thrown picker is not.
  */
 export async function fetchWorkPlanPhotoTags({ workOrderId = null, workStepId = null } = {}) {
   let orderId = workOrderId
@@ -693,56 +692,20 @@ export async function fetchWorkPlanPhotoTags({ workOrderId = null, workStepId = 
   }
   if (!orderId) return []
 
-  const { data: steps, error: stepErr } = await supabase
+  const { data: steps, error } = await supabase
     .from('work_steps')
-    .select('id, work_step_name, work_step_template_id, work_step_execution_order')
+    .select('work_step_name, work_step_execution_order')
     .eq('work_order_id', orderId)
     .order('work_step_execution_order', { ascending: true })
-  if (stepErr || !steps) return []
+  if (error || !steps) return []
 
-  const templateIds = Array.from(new Set(steps.map(s => s.work_step_template_id).filter(Boolean)))
-  const promptsByTemplate = new Map()
-  if (templateIds.length > 0) {
-    const { data: fields } = await supabase
-      .from('work_step_template_fields')
-      .select('work_step_template_id, wstf_field_name, wstf_field_label, wstf_sort_order')
-      .in('work_step_template_id', templateIds)
-      .eq('wstf_field_type', 'photo')
-      .eq('wstf_is_deleted', false)
-      .order('wstf_sort_order', { ascending: true })
-    for (const f of fields || []) {
-      if (!promptsByTemplate.has(f.work_step_template_id)) {
-        promptsByTemplate.set(f.work_step_template_id, [])
-      }
-      promptsByTemplate.get(f.work_step_template_id).push(f)
-    }
-  }
-
-  // Deduped on BOTH value and label. A step and its single photo prompt often
-  // read the same ("Foundation / Floor" the step, "Foundation / Floor" the
-  // prompt) while carrying different stored values, so a value-only check
-  // leaves the picker showing the same words twice with no way to tell them
-  // apart. The step name wins, because it is added first and is the one a
-  // person reaches for.
-  const seenValues = new Set()
-  const seenLabels = new Set()
+  const seen = new Set()
   const out = []
-  const push = (value, label) => {
-    const v = String(value || '').trim()
-    if (!v) return
-    const text = String(label || v).trim()
-    if (seenValues.has(v.toLowerCase()) || seenLabels.has(text.toLowerCase())) return
-    seenValues.add(v.toLowerCase())
-    seenLabels.add(text.toLowerCase())
-    out.push({ value: v, label: text })
-  }
-
   for (const step of steps) {
-    // The step name first — it is the one a person reaches for.
-    push(step.work_step_name, step.work_step_name)
-    for (const f of promptsByTemplate.get(step.work_step_template_id) || []) {
-      push(f.wstf_field_name, f.wstf_field_label || f.wstf_field_name)
-    }
+    const name = String(step.work_step_name || '').trim()
+    if (!name || seen.has(name.toLowerCase())) continue
+    seen.add(name.toLowerCase())
+    out.push({ value: name, label: name })
   }
   return out
 }
