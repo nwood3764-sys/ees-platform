@@ -1595,6 +1595,15 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
   )
 }
 
+// An optional callback stays optional all the way down. Wrapping it in an
+// arrow — `onToggleReport={() => onToggleReport(p)}` — makes a null prop
+// arrive at the tile as a function, so the tile's own `{onToggleReport && …}`
+// guard passes, the "In report" button renders on an object that has no report
+// to read the flag, and pressing it calls null. That is exactly what happened
+// on a WORK STEP page (Lucas, 2026-08-27): `objectHasReportInclusion` returns
+// false for work_steps, so the flag was correctly withheld — and the button was
+// drawn anyway, and crashed the record page to the error screen the moment he
+// flagged the video he had just uploaded. Pass the null through.
 function PhotoGrid({ photos, renderingIds, isMobile, showStepTag, selectMode, selectedIds, onToggleSelect, onToggleReport, onOpen, onReprocess, onDelete }) {
   return (
     <div style={{
@@ -1611,7 +1620,7 @@ function PhotoGrid({ photos, renderingIds, isMobile, showStepTag, selectMode, se
           selectMode={selectMode}
           selected={selectedIds?.has(p.id)}
           onToggleSelect={() => onToggleSelect(p.id)}
-          onToggleReport={() => onToggleReport(p)}
+          onToggleReport={onToggleReport ? () => onToggleReport(p) : null}
           onOpen={() => onOpen(idx)}
           rendering={!!renderingIds?.has(p.id)}
           onReprocess={() => onReprocess(p.id)}
@@ -1937,6 +1946,7 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, r
   )
 }
 
+// Same null-through rule as PhotoGrid above.
 function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSelect, onPreview, onDownload, onToggleReport, onDelete }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1950,7 +1960,7 @@ function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSe
           onToggleSelect={() => onToggleSelect(d.id)}
           onPreview={() => onPreview(d)}
           onDownload={() => onDownload(d)}
-          onToggleReport={() => onToggleReport(d)}
+          onToggleReport={onToggleReport ? () => onToggleReport(d) : null}
           onDelete={() => onDelete(d)}
         />
       ))}
