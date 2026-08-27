@@ -13,7 +13,8 @@
     "check:tdz": "node scripts/check-hook-deps-tdz.mjs",
     "check:hooks": "node scripts/check-conditional-hooks.mjs",
     "fixtures": "node scripts/run-fixtures.mjs",
-    "verify:pinned-headers": "node tools/pinned-header-check/run.mjs"
+    "verify:pinned-headers": "node tools/pinned-header-check/run.mjs",
+    "verify:layout-cards": "node tools/layout-card-check/run.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

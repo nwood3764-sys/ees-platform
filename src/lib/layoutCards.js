@@ -234,50 +234,61 @@ export const RIGHT_RAIL = '__right_sidebar__'
 
 /**
  * Where a card can be copied to: every section on the layout, grouped by the
- * tab it renders on (or the right sidebar), plus "a new section" per tab.
+ * surface it renders on, each group ending with "a new section".
+ *
+ * Groups come out in the record page's own order — Details, Related, custom
+ * tabs alphabetically, then the right sidebar last, mirroring the editor's tab
+ * bar (the rail pill sits on the far right). Grouping in section_order instead
+ * put "Right sidebar" between two tabs, which reads as a third tab and made the
+ * list's shape depend on which section happened to be second.
  *
  * The source section is included — copying a card beside itself is pointless
- * but not wrong, and excluding it would take the whole GROUP away when a tab
- * has only one section. It carries `isSource` so the caller can mark it.
+ * but not wrong, and excluding it would take a whole GROUP away when a tab has
+ * only one section. It carries `isSource` so the caller can mark it.
  *
  * `tabs` names tabs that exist in the editor but hold no section yet, so a
  * freshly created tab is a target before anything is on it.
  */
 export function cardCopyTargets(sections, sourceSectionKey, tabs) {
+  const list = (sections || []).filter(Boolean)
+
+  const custom = [...new Set([
+    ...list.filter(s => (s.placement || 'main') !== 'right').map(s => s.tab || 'Details'),
+    ...(tabs || []),
+  ])].filter(t => t !== 'Details' && t !== 'Related').sort((a, b) => a.localeCompare(b))
+
+  const groups = [
+    { name: 'Details', tab: 'Details', placement: 'main' },
+    { name: 'Related', tab: 'Related', placement: 'main' },
+    ...custom.map(t => ({ name: t, tab: t, placement: 'main' })),
+    { name: 'Right sidebar', tab: 'Details', placement: 'right' },
+  ]
+
   const targets = []
-  const tabsSeen = []
-  const noteTab = (t) => { if (!tabsSeen.includes(t)) tabsSeen.push(t) }
-
-  for (const s of sections || []) {
-    if (!s) continue
-    const right = (s.placement || 'main') === 'right'
-    const group = right ? 'Right sidebar' : (s.tab || 'Details')
-    if (!right) noteTab(s.tab || 'Details')
+  for (const g of groups) {
+    const inGroup = list.filter(s => g.placement === 'right'
+      ? (s.placement || 'main') === 'right'
+      : (s.placement || 'main') !== 'right' && (s.tab || 'Details') === g.tab)
+    for (const s of inGroup) {
+      targets.push({
+        id: `section::${s.key}`,
+        kind: 'section',
+        sectionKey: s.key,
+        group: g.name,
+        label: s.label || 'Untitled Section',
+        isSource: s.key === sourceSectionKey,
+      })
+    }
     targets.push({
-      id: `section::${s.key}`,
-      kind: 'section',
-      sectionKey: s.key,
-      group,
-      label: s.label || 'Untitled Section',
-      isSource: s.key === sourceSectionKey,
+      id: g.placement === 'right' ? `new::${RIGHT_RAIL}` : `new::${g.tab}`,
+      kind: 'new',
+      tab: g.tab,
+      placement: g.placement,
+      group: g.name,
+      label: 'New section…',
+      isSource: false,
     })
   }
-
-  for (const t of ['Details', 'Related', ...(tabs || [])]) {
-    if (!tabsSeen.includes(t)) tabsSeen.push(t)
-  }
-
-  for (const t of tabsSeen) {
-    targets.push({
-      id: `new::${t}`, kind: 'new', tab: t, placement: 'main',
-      group: t, label: 'New section…', isSource: false,
-    })
-  }
-  targets.push({
-    id: `new::${RIGHT_RAIL}`, kind: 'new', tab: 'Details', placement: 'right',
-    group: 'Right sidebar', label: 'New section…', isSource: false,
-  })
-
   return targets
 }
 
