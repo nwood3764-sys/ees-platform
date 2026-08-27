@@ -22,7 +22,7 @@ import { supabase } from '../lib/supabase'
 import {
   listWorkOrderPhotos, hydratePhotoUrls, uploadDocument, signedUrl, listDocuments,
 } from './storageService'
-import { proxiedStorageUrl } from '../lib/reportFileLinks'
+import { proxiedStorageUrl, shortFileLink } from '../lib/reportFileLinks'
 import { loadSubmittalDocumentTemplate, loadSubmittalTextBlocks } from './paperworkService'
 import { buildAssessmentReportPdf } from './paperworkModel'
 import { encodeImageForPdf, renderPdfFirstPageForPdf } from '../lib/pdfImages'
@@ -314,6 +314,31 @@ export async function loadAssessmentReportContext(workOrderId) {
  * Done as its own step so the modal can show progress — a report with 40
  * flagged photos is a real wait, and a HEIC capture has to be decoded first.
  */
+/**
+ * Mint a short, revocable link for one stored file.
+ *
+ * Falls back to the long proxied signed URL if minting fails, so a database
+ * hiccup degrades a link's APPEARANCE rather than removing evidence from a
+ * report. Returns null only when neither route produces anything.
+ */
+async function mintFileLink({ bucket, path, displayName, ttlSeconds, photoId = null, documentId = null, workOrderId = null }) {
+  if (!bucket || !path) return null
+  try {
+    const { data, error } = await supabase.rpc('mint_report_file_link', {
+      p_bucket: bucket,
+      p_path: path,
+      p_display_name: displayName || null,
+      p_ttl_seconds: ttlSeconds,
+      p_photo_id: photoId,
+      p_document_id: documentId,
+      p_work_order_id: workOrderId,
+    })
+    if (!error && data) return shortFileLink(data)
+  } catch { /* fall through to the long form */ }
+  const signed = await signedUrl(bucket, path, ttlSeconds, displayName || null)
+  return signed ? proxiedStorageUrl(signed) : null
+}
+
 export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
   const list = model.photos || []
   if (!list.length) return model
@@ -349,12 +374,18 @@ export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
     // its link entirely.
     const linkPath = r.storage_path_watermarked || r.storage_path_original
     if (!r.storage_bucket || !linkPath) continue
-    const url = await signedUrl(
-      r.storage_bucket, linkPath, PHOTO_LINK_TTL_SECONDS,
-      photoDownloadName(r, buildingLabel))
-    // Served through LEAP's own domain so Acrobat's "do you trust this site"
-    // prompt names a host the reader recognises. The signed token is unchanged.
-    if (url) linkById.set(r.id, proxiedStorageUrl(url))
+    // A SHORT link on LEAP's own domain. The long signed URL is what made
+    // Gmail's redirect page and Acrobat's prompt look like phishing; this is
+    // one readable line, and unlike a signed URL it can be revoked.
+    const link = await mintFileLink({
+      bucket: r.storage_bucket,
+      path: linkPath,
+      displayName: photoDownloadName(r, buildingLabel),
+      ttlSeconds: PHOTO_LINK_TTL_SECONDS,
+      photoId: r.id,
+      workOrderId: r.work_order_id || model.workOrder?.id || null,
+    })
+    if (link) linkById.set(r.id, link)
   }
   let done = 0
   for (const p of list) {
@@ -389,9 +420,13 @@ export async function attachAssessmentDocuments(model, chosen, { onProgress } = 
     const src = list[i], out = model.documents[i], row = src._row || {}
     try {
       if (row.storage_bucket && row.storage_path) {
-        out.linkUrl = proxiedStorageUrl(await signedUrl(
-          row.storage_bucket, row.storage_path, DOCUMENT_LINK_TTL_SECONDS,
-          documentDownloadName(src, buildingLabel)))
+        out.linkUrl = await mintFileLink({
+          bucket: row.storage_bucket,
+          path: row.storage_path,
+          displayName: documentDownloadName(src, buildingLabel),
+          ttlSeconds: DOCUMENT_LINK_TTL_SECONDS,
+          documentId: row.id,
+        })
       }
       if (out.linkUrl && src.previewKind === 'image') {
         const img = await encodeImageForPdf(out.linkUrl)
