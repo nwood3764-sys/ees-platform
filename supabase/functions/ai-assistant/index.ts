@@ -51,6 +51,7 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 import {
   trimHistory, compactTranscript, relaxedSearchTerms, isModelUnavailable,
   addUsage, costOf, totalInputTokens, emptySpend,
+  deadlineState, DEADLINE_NOTE,
 } from "./transcript.js"
 
 // The Anthropic messages shape. Declared here because transcript.js is plain
@@ -64,7 +65,7 @@ interface AnthropicMessage {
 const cors = {
   "Access-Control-Allow-Origin":  "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-pipeline-test-secret",
 }
 
 // The assistant's model, env-overridable via ASSISTANT_MODEL so it can be moved
@@ -81,8 +82,22 @@ const MAX_TURNS = 8   // tool-use loop ceiling per request
 // Output budget per model call. Must be large enough to emit a whole batch of
 // tool calls at once — a 17-record create is ~2k tokens of tool_use alone, so
 // the old 1500 truncated mid-batch and the proposed cards never materialised.
-const MAX_TOKENS = 8192
+// Raised from 8192 when the model moved to a thinking model: reasoning is
+// drawn from this same budget, so the old ceiling would now be shared and a
+// big batch could be cut off again.
+const MAX_TOKENS = 16000
 const CLOSE_MAX_TOKENS = 2048
+
+// Adaptive thinking, sent explicitly on every call. On Opus 5 it is already
+// the default, but ASSISTANT_MODEL can point at Opus 4.8 / 4.7, where OMITTING
+// this means the model does not think at all — a silent, invisible downgrade
+// of exactly the capability this surface was failing for.
+const THINKING = { type: "adaptive" }
+// Reasoning depth. Unset means the API default (high), which is the documented
+// balance of quality and token efficiency; ASSISTANT_EFFORT can dial it to
+// low/medium if turns feel slow, or xhigh/max for correctness-critical work.
+const EFFORT = Deno.env.get("ASSISTANT_EFFORT") || ""
+const OUTPUT_CONFIG = EFFORT ? { effort: EFFORT } : undefined
 interface ScopeContext {
   table:         string          // the object being listed
   fk:            string          // that object's FK toward the parent
@@ -606,13 +621,141 @@ async function renderScreenContext(
   return "\n\n[What the user is looking at right now:\n" + lines.join("\n") + "]"
 }
 
+// ── Autonomous self-test ───────────────────────────────────────────────────
+// The one thing that could never be checked from a build sandbox: does the
+// CONFIGURED model actually answer for this API key, and does prompt caching
+// engage on the real cached prefix? Both were shipped on 2026-08-26 unverified.
+//
+// Same shared-secret shape the rest of the platform already uses for autonomous
+// harnesses (admin-test-send-email, property-owner-research): a named row in
+// internal_cron_auth, readable only by the service role, presented as
+// x-pipeline-test-secret. Fail closed — no row or no match and this is not a
+// self-test at all, so the request falls through to the normal 401.
+//
+// DELIBERATELY NARROW: it builds the real system blocks and the real tool
+// catalog (so the cache entry it exercises is the one live traffic hits) and
+// then asks the model for one word. It reads NO user data and touches the
+// user-scoped client not at all, so it can carry no RLS or permission risk —
+// and it is honest that it therefore proves connectivity, model and caching,
+// not record access.
+async function maybeRunSelfTest(
+  admin: SupabaseClient, req: Request, body: any, apiKey: string | undefined,
+): Promise<Record<string, unknown> | null> {
+  if (!body?.self_test) return null
+  const presented = req.headers.get("x-pipeline-test-secret") || ""
+  if (!presented) return null
+  const { data: row } = await admin
+    .from("internal_cron_auth").select("secret").eq("name", "assistant_self_test").maybeSingle()
+  const expected = row?.secret || ""
+  if (!expected || !constantTimeEquals(presented, expected)) return null
+  if (!apiKey) return { ok: false, error: "ANTHROPIC_API_KEY is not set (mock mode)" }
+
+  const appBaseUrl = sanitizeBaseUrl(body.app_base_url) || "https://leap.energyefficiencyservices.org"
+  const { stable, volatile } = buildSystemPrompt(
+    appBaseUrl, buildNowContext(), { name: "the self-test harness", role: "", title: "" })
+  const systemBlocks = cachedSystem(stable, volatile)
+
+  // Two identical calls. The first writes the cached prefix (or reads one a
+  // real user just warmed); the second must READ it. cache_read still zero on
+  // the second call is the signal that a silent invalidator is in the prefix.
+  const probe = async (model: string) => {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        // Room for adaptive thinking to run and still emit the word. At 64 the
+        // probe would hit the cap mid-reasoning and come back with empty text,
+        // which reads as a failure when the call actually succeeded.
+        max_tokens: 1024,
+        system: systemBlocks,
+        tools: API_TOOLS,
+        thinking: THINKING,
+        ...(OUTPUT_CONFIG ? { output_config: OUTPUT_CONFIG } : {}),
+        messages: [{ role: "user", content: "Reply with the single word OK and nothing else." }],
+      }),
+    })
+    const text = await resp.text()
+    return { status: resp.status, text }
+  }
+
+  const attempts: Record<string, unknown>[] = []
+  let served: string | null = null
+  let first: any = null, second: any = null
+
+  for (const model of [MODEL, ...FALLBACK_MODELS.filter(m => m !== MODEL)]) {
+    const r = await probe(model)
+    if (r.status === 200) { served = model; first = JSON.parse(r.text); break }
+    attempts.push({ model, status: r.status, error: r.text.slice(0, 300) })
+    if (!isModelUnavailable(r.status, r.text)) break   // a real failure, not availability
+  }
+  if (!served) {
+    return { ok: false, configured_model: MODEL, attempts, note: "No model in the chain answered." }
+  }
+  const r2 = await probe(served)
+  if (r2.status === 200) second = JSON.parse(r2.text)
+
+  const u1 = first?.usage ?? {}
+  const u2 = second?.usage ?? {}
+  const cacheRead2 = u2.cache_read_input_tokens ?? 0
+  const spend = emptySpend()
+  addUsage(spend, u1); addUsage(spend, u2)
+
+  await logUsage(admin, {
+    userId: null, flowId: undefined, runId: undefined,
+    model: served, inTok: totalInputTokens(spend), outTok: spend.output,
+    cost: costOf(spend, served), outcome: "ok",
+    purpose: "assistant_self_test",
+    message: `served on ${served}; cache read ${cacheRead2} on the repeat call`,
+  })
+
+  return {
+    ok: true,
+    configured_model: MODEL,
+    served_model: served,
+    served_configured_model: served === MODEL,
+    fallback_attempts: attempts,
+    reply: (first?.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join(" ").trim(),
+    call_1: {
+      uncached: u1.input_tokens ?? 0,
+      cache_written: u1.cache_creation_input_tokens ?? 0,
+      cache_read: u1.cache_read_input_tokens ?? 0,
+      output: u1.output_tokens ?? 0,
+    },
+    call_2: {
+      uncached: u2.input_tokens ?? 0,
+      cache_written: u2.cache_creation_input_tokens ?? 0,
+      cache_read: cacheRead2,
+      output: u2.output_tokens ?? 0,
+    },
+    caching_working: cacheRead2 > 0,
+    estimated_cost_usd: costOf(spend, served),
+    note: "Proves the deployed code path, the model, and prompt caching on the real cached prefix. It reads NO user records, so it says nothing about RLS or record access.",
+  }
+}
+
+// Length-independent comparison so a shared secret cannot be probed byte by
+// byte from response timing.
+function constantTimeEquals(a: string, b: string): boolean {
+  const ba = new TextEncoder().encode(a)
+  const bb = new TextEncoder().encode(b)
+  if (ba.length !== bb.length) return false
+  let diff = 0
+  for (let i = 0; i < ba.length; i++) diff |= ba[i] ^ bb[i]
+  return diff === 0
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
   if (req.method !== "POST") return json({ error: "POST only" }, 405)
 
   let body: ReqBody
   try { body = await req.json() } catch { return json({ error: "Invalid JSON body" }, 400) }
-  if (!body.message && !(body.history && body.history.length)) {
+  if (!body.self_test && !body.message && !(body.history && body.history.length)) {
     return json({ error: "Provide a message" }, 400)
   }
 
@@ -626,6 +769,11 @@ Deno.serve(async (req) => {
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
+
+  // Autonomous self-test (shared-secret gated, reads no user data) runs before
+  // caller resolution — it deliberately has no signed-in user.
+  const selfTest = await maybeRunSelfTest(admin, req, body, apiKey)
+  if (selfTest) return json(selfTest, selfTest.ok === false ? 502 : 200)
 
   const authHeader = req.headers.get("Authorization") || ""
   const callerUserId = await resolveCallerUserId(admin, authHeader)
@@ -670,10 +818,12 @@ Deno.serve(async (req) => {
   const { stable, volatile } = buildSystemPrompt(appBaseUrl, buildNowContext(), callerProfile)
   const systemBlocks = cachedSystem(stable, volatile)
 
+  const startedAt = Date.now()
   const proposedActions: unknown[] = []
   const spend = emptySpend()
   let finalText = ""
   let endedNaturally = false
+  let ranOutOfTime = false
   // The model actually served. Starts at the configured one and moves to the
   // fallback only if the API says that model is unavailable to this key.
   let activeModel = MODEL
@@ -717,12 +867,20 @@ Deno.serve(async (req) => {
 
   try {
     for (let turn = 0; turn < MAX_TURNS; turn++) {
+      // Out of clock? Stop issuing tool rounds and go compose an answer from
+      // what is already held, rather than being killed mid-request.
+      if (turn > 0 && deadlineState(Date.now() - startedAt) !== "continue") {
+        ranOutOfTime = true
+        break
+      }
       let data: any
       try {
         data = await callModel({
           max_tokens: MAX_TOKENS,
           system: systemBlocks,
           tools: API_TOOLS,
+          thinking: THINKING,
+          ...(OUTPUT_CONFIG ? { output_config: OUTPUT_CONFIG } : {}),
           messages: withConversationCacheBreakpoint(messages),
         })
       } catch (e) {
@@ -791,13 +949,17 @@ Deno.serve(async (req) => {
     // If the loop exhausted MAX_TURNS while still mid-tool-use, the model never
     // composed a closing answer — finalText holds only interim narration. Make
     // one more call with tool_choice:none to force a text-only final reply.
-    if (!endedNaturally) {
-      const closeMessages = [...messages, { role: "user" as const, content: "Give your final answer now in plain text, using what you have already gathered. Do not call any more tools." }]
+    if (!endedNaturally && deadlineState(Date.now() - startedAt) !== "abandon") {
+      const closeMessages = [...messages, { role: "user" as const, content: ranOutOfTime
+        ? DEADLINE_NOTE
+        : "Give your final answer now in plain text, using what you have already gathered. Do not call any more tools." }]
       try {
         const cd = await callModel({
           max_tokens: CLOSE_MAX_TOKENS,
           system: systemBlocks,
           tools: API_TOOLS,
+          thinking: THINKING,
+          ...(OUTPUT_CONFIG ? { output_config: OUTPUT_CONFIG } : {}),
           tool_choice: { type: "none" },
           messages: withConversationCacheBreakpoint(closeMessages),
         })
@@ -833,6 +995,7 @@ Deno.serve(async (req) => {
   const outcomeParts = [
     proposedActions.length ? `${proposedActions.length} action(s) proposed` : null,
     modelNote,
+    ranOutOfTime ? `tool loop cut short at ${Math.round((Date.now() - startedAt) / 1000)}s (turn deadline)` : null,
     cacheNote,
   ].filter(Boolean)
 
@@ -1116,9 +1279,12 @@ async function runReadTool(userClient: SupabaseClient, name: string, input: any)
 }
 
 interface UsageLog {
-  userId: string; flowId?: string; runId?: string
+  userId: string | null; flowId?: string; runId?: string
   model: string; inTok: number; outTok: number; cost: number
   outcome: string; message: string | null
+  // Defaults to "assistant". The self-test logs under its own purpose so a
+  // diagnostic probe never lands in the assistant's real usage figures.
+  purpose?: string
 }
 
 async function logUsage(admin: SupabaseClient, u: UsageLog) {
@@ -1128,7 +1294,7 @@ async function logUsage(admin: SupabaseClient, u: UsageLog) {
       fau_user_id: u.userId,
       fau_flow_id: u.flowId || null,
       fau_run_id: u.runId || null,
-      fau_purpose: "assistant",
+      fau_purpose: u.purpose || "assistant",
       fau_model: u.model,
       fau_input_tokens: u.inTok,
       fau_output_tokens: u.outTok,

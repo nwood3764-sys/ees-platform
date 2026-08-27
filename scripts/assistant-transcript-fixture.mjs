@@ -18,6 +18,7 @@ import {
   trimHistory, compactTranscript, isToolResultTurn,
   relaxedSearchTerms, isModelUnavailable, HISTORY_CHAR_BUDGET,
   pricingFor, addUsage, costOf, totalInputTokens, emptySpend,
+  deadlineState, DEADLINE_NOTE, SOFT_DEADLINE_MS, HARD_DEADLINE_MS,
 } from '../supabase/functions/ai-assistant/transcript.js'
 
 let failures = 0
@@ -208,6 +209,30 @@ check('an unknown model is priced at the dearest known rate, never the cheapest'
   check('a missing usage object is a no-op, not a crash', totalInputTokens(spend), 63)
 }
 check('a fresh spend is zero', costOf(emptySpend(), 'claude-opus-5'), 0)
+
+
+// ── Turn deadline ───────────────────────────────────────────────────────────
+// Moving to a thinking model made each model call slower, and the assistant
+// makes up to 8 of them in sequence inside an edge function that is killed on
+// a ~150s idle timeout. Without a clock the user gets a hang instead of an
+// answer — worse than the short answer the deadline produces.
+
+check('a fresh turn continues', deadlineState(0), 'continue')
+check('well inside the budget continues', deadlineState(30_000), 'continue')
+check('one ms under the soft deadline still continues', deadlineState(SOFT_DEADLINE_MS - 1), 'continue')
+check('at the soft deadline it stops calling tools', deadlineState(SOFT_DEADLINE_MS), 'close')
+check('between the deadlines it still composes an answer', deadlineState(120_000), 'close')
+check('at the hard deadline it does not even do that', deadlineState(HARD_DEADLINE_MS), 'abandon')
+check('past the hard deadline stays abandoned', deadlineState(600_000), 'abandon')
+check('the soft deadline leaves room for the closing call under a 150s timeout',
+  HARD_DEADLINE_MS > SOFT_DEADLINE_MS && HARD_DEADLINE_MS < 150_000, true)
+// A missing or nonsense clock must never strand a turn that could still answer.
+check('a NaN elapsed does not abandon the turn', deadlineState(NaN), 'continue')
+check('undefined elapsed does not abandon the turn', deadlineState(undefined), 'continue')
+check('a negative elapsed does not abandon the turn', deadlineState(-5), 'continue')
+// The note is what stops a cut-short turn being reported as a finished one.
+check('the deadline note forbids further tool calls', /do NOT call any more tools/i.test(DEADLINE_NOTE), true)
+check('…and forbids implying the job finished', /never imply you finished/i.test(DEADLINE_NOTE), true)
 
 console.log(failures === 0
   ? `assistant-transcript fixture: ${checks} checks passed`
