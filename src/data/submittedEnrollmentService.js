@@ -19,7 +19,7 @@
 
 import { supabase } from '../lib/supabase'
 import { listDocuments, signedUrl, uploadDocument } from './storageService'
-import { proxiedStorageUrl } from '../lib/reportFileLinks'
+import { proxiedStorageUrl, shortFileLink } from '../lib/reportFileLinks'
 import { loadSubmittalDocumentTemplate, loadSubmittalTextBlocks } from './paperworkService'
 import { buildSubmittedEnrollmentPdf } from './paperworkModel'
 import { companyNameForState, addressLines, cityStateZip } from '../lib/assessmentReport'
@@ -33,6 +33,37 @@ import {
 // links have to outlive the session that made it. One year matches the life of
 // the filing it documents — the same TTL the assessment report uses.
 const DOCUMENT_LINK_TTL_SECONDS = 60 * 60 * 24 * 365
+
+/**
+ * A short, revocable link for one attached file.
+ *
+ * Same route the assessment report takes: `mint_report_file_link` returns a
+ * token served at /f/<token>, which fits on one line — so Acrobat's "do you
+ * trust this site" prompt and Gmail's redirect page show something a program
+ * reviewer can read, instead of 500 characters of JWT. It is also revocable
+ * after the fact, which a raw signed URL is not.
+ *
+ * Falls back to the long proxied signed URL when minting fails, so a database
+ * hiccup costs a link's APPEARANCE rather than removing an attachment from the
+ * filing. Returns null only when neither route produces anything.
+ */
+async function mintDocumentLink({ bucket, path, displayName, documentId }) {
+  if (!bucket || !path) return null
+  try {
+    const { data, error } = await supabase.rpc('mint_report_file_link', {
+      p_bucket: bucket,
+      p_path: path,
+      p_display_name: displayName || null,
+      p_ttl_seconds: DOCUMENT_LINK_TTL_SECONDS,
+      p_photo_id: null,
+      p_document_id: documentId || null,
+      p_work_order_id: null,
+    })
+    if (!error && data) return shortFileLink(data)
+  } catch { /* fall through to the long form */ }
+  const signed = await signedUrl(bucket, path, DOCUMENT_LINK_TTL_SECONDS, displayName || null)
+  return signed ? proxiedStorageUrl(signed) : null
+}
 
 function fmtDate(iso) {
   if (!iso) return null
@@ -220,14 +251,12 @@ export async function attachSubmittedEnrollmentDocuments(model, documents, { fla
     const out = model.documents[i]
     out.uploadedOn = fmtDate(row.created_at)
     try {
-      if (row.storage_bucket && row.storage_path) {
-        const url = await signedUrl(
-          row.storage_bucket, row.storage_path, DOCUMENT_LINK_TTL_SECONDS,
-          documentDownloadName(manifest[i], enrollmentNumber))
-        // Served through LEAP's own domain so a reader's PDF viewer names a
-        // host they recognise. The signed token is unchanged.
-        if (url) out.linkUrl = proxiedStorageUrl(url)
-      }
+      out.linkUrl = await mintDocumentLink({
+        bucket: row.storage_bucket,
+        path: row.storage_path,
+        displayName: documentDownloadName(manifest[i], enrollmentNumber),
+        documentId: row.id,
+      })
     } catch {
       /* A link is best-effort. The row stays either way. */
     }

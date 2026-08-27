@@ -167,7 +167,7 @@ export default function SubmittedEnrollmentModal({ enrollmentId, onClose, onSave
               <div style={{ fontSize: 12, color: C.textMuted }}>
                 {listedCount === 0
                   ? 'No documents are attached to this enrollment — it will still list what was submitted.'
-                  : `${listedCount} document${listedCount === 1 ? '' : 's'} will be listed, each with a download link good for one year.`}
+                  : `${listedCount} document${listedCount === 1 ? '' : 's'} will be listed, each with a short download link good for one year.`}
               </div>
 
               {counts.summaryBlank > 0 && (
