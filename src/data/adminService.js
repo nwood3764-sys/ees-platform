@@ -1,5 +1,6 @@
 import { supabase, fetchAllPaged } from '../lib/supabase'
 import { getCurrentUserId } from './layoutService'
+import { softDeleteColumnFor, liveRecordsFilter } from '../lib/softDeleteColumn'
 
 // ---------------------------------------------------------------------------
 // Roles (used by Permission Builder)
@@ -607,13 +608,15 @@ export async function fetchListViewPreview({ object, filters = [], sortField = n
   } catch { /* if this fails, fall back to no column-aware clauses */ }
   const has = (c) => realCols.size === 0 || realCols.has(c)
 
-  // Soft-delete guard: prefer the prefixed column, then a bare is_deleted.
-  const prefix = object.replace(/s$/, '')
-  const softDelCol = realCols.has(`${prefix}_is_deleted`) ? `${prefix}_is_deleted`
-    : realCols.has('is_deleted') ? 'is_deleted' : null
+  // Soft-delete guard, discovered from the table's own columns. Deriving the
+  // name from the table name ('opportunities' -> 'opportunitie_is_deleted')
+  // resolved to null on 116 of the 188 soft-deletable tables and skipped the
+  // guard entirely — see src/lib/softDeleteColumn.js.
+  const softDelCol = softDeleteColumnFor(realCols)
+  const liveOnly = liveRecordsFilter(softDelCol)
 
   let q = supabase.from(object).select('*')
-  if (softDelCol) q = q.or(`${softDelCol}.is.null,${softDelCol}.eq.false`)
+  if (liveOnly) q = q.or(liveOnly)
 
   for (const f of filters) {
     if (!f || !f.field || !has(f.field)) continue   // skip logical fields that aren't real columns
