@@ -1042,11 +1042,16 @@ function refresh(){
   const atAudit=!!(atDocs.basePdf&&atDocs.baseXml);
   const atAll=!!(atDocs.basePdf&&atDocs.impPdf&&atDocs.baseXml&&atDocs.impXml);
   const AUDIT_ACTS=['auditDoc'];
-  const FULL_ACTS=['propDoc','invDoc','workbook','sealedProp','sealedInv'];
+  // Paperwork (proposal / invoice / workbook / Sealed) is generated from the two
+  // Asset Score reports + the unit count via invoiceModel() — it does NOT read the
+  // uploaded DOE Audit Template documents, and a PROPOSAL is written before those
+  // documents even exist. So gate paperwork on paperReady only; requiring all four
+  // audit-template uploads (atAll) was wrong and silently blocked every proposal.
+  const PAPER_ACTS=['propDoc','invDoc','workbook','sealedProp','sealedInv'];
   for(const e of document.querySelectorAll('button[data-act]')){
     const a=e.dataset.act;
     if(AUDIT_ACTS.indexOf(a)>=0) e.disabled=!(paperReady&&atAudit);
-    else if(FULL_ACTS.indexOf(a)>=0) e.disabled=!(paperReady&&atAll);
+    else if(PAPER_ACTS.indexOf(a)>=0) e.disabled=!paperReady;
     else if(a==='reportBase') e.disabled=!(files.asBase||atDocs.basePdf);
     else if(a==='reportImp') e.disabled=!(files.asImp||atDocs.impPdf);
     else if(a==='dlvXmlBase') e.disabled=!atDocs.baseXml;
