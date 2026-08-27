@@ -1146,39 +1146,10 @@ function refresh(){
   rows.forEach(r=>h+=`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`);
   h+='</table></div>';
 
-  // Copyable Metered Energy Year Start Date (yyyy-mm-dd) for the utility import.
-  const startDate=startDateFor(asB);
-  h+=`<div class="sect"><h3>Metered Energy Year Start Date</h3>
-    <div class="copyrow">
-      <code id="startDateVal">${startDate}</code>
-      <button class="copybtn" onclick="copyStart()">Copy</button>
-      <span class="copyhint">Paste into the required “Metered Energy Year Start Date” field (yyyy-mm-dd) on the import screen. Same for baseline and improved. The 12-month window ends two full calendar months before the current month, so the newest reading is never an implausibly-recent bill.</span>
-    </div></div>`;
-
-  // ---- Benchmarking screen, copyable fields (two sections: baseline + improved) ----
-  function benchFields(label, e, g){
-    const kbtu=e*KWH_KBTU+g*THERM_KBTU;
-    const cost=e*RATE_ELEC+g*RATE_GAS;
-    const eui=(kbtu/asB.gfa).toFixed(1);
-    const costInt=(cost/asB.gfa).toFixed(1);
-    const fields=[
-      ['Benchmarking Source','Other'],
-      ['Benchmarking Source (Other)','Energy Modeling'],
-      ['Year Benchmarked', String(asB.scoreDate?asB.scoreDate.year:new Date().getFullYear())],
-      ['Site Energy Use Intensity (kBtu/ft²)', eui],
-      ['Site Energy Cost Intensity ($/ft²)', costInt],
-    ];
-    let s=`<div class="sect"><h3>Benchmarking — ${label}</h3>`;
-    s+=`<div class="cardgrid">`;
-    fields.forEach(f=>{
-      s+=`<div class="fcard"><div class="flabel">${f[0]}</div>
-        <div class="copyrow"><code>${f[1]}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div></div>`;
-    });
-    s+=`</div><div class="copyhint" style="margin-top:6px">Total site energy for reference: ${fmt(kbtu)} kBtu · annual cost $${fmt(cost)}. The field is labeled “Intensity” (per ft²); some submittals enter the total instead — match your reviewer.</div></div>`;
-    return s;
-  }
-  h+=benchFields('Baseline (benchmark / current)', b.e, b.g);
-  h+=benchFields('Improved (target)', i.e, i.g);
+  // (Metered Energy Year Start Date and the Benchmarking copy-fields were removed
+  // 2026-08-27 — the generated 50121 XML carries all of them (TimeSeries start,
+  // Scenario benchmark/target SiteEnergyUseIntensity), so the manual-paste helpers
+  // were redundant once the XML import replaced hand entry.)
 
   // Whole-building reported energy savings — its own copyable field
   h+=`<div class="sect"><h3>Whole Building Reported Energy Savings</h3>
@@ -1190,38 +1161,11 @@ function refresh(){
     </div>
     <div class="copyhint" style="margin-top:6px">The 50121 qualification field. Asset Score stated value is the headline; OpenStudio monthly is from the metered grid.</div></div>`;
 
-  // ---- Building Characteristics (Audit Template screen) ----
-  // Readable straight from the Asset Score PDF: GFA, floors above/below grade, HVAC assignment.
-  // NOT printed on the report: Conditioned Floor Area Heated/Cooled, and General Building Shape — confirm-prompts.
-  {
-    const fa = asB.floorsAbove, fb = asB.floorsBelow;
-    const totFloors = (fa!=null?fa:0) + (fb!=null?fb:0);
-    const card=(label,val,hint)=>`<div class="fcard"><div class="flabel">${label}</div>
-      <div class="copyrow"><code>${val}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div>
-      ${hint?`<div class="copyhint" style="margin-top:4px">${hint}</div>`:''}</div>`;
-    const prompt=(label,val,hint)=>`<div class="fcard" style="border-style:dashed">
-      <div class="flabel">${label} <span style="color:var(--gold)">— confirm</span></div>
-      <div class="copyrow"><code>${val}</code><button class="copybtn" onclick="copyVal(this)">Copy</button></div>
-      <div class="copyhint" style="margin-top:4px">${hint}</div></div>`;
-    let s='<div class="sect"><h3>Building Characteristics</h3><div class="cardgrid">';
-    s+=card('Gross Floor Area (ft²)', fmt(asB.gfa), 'Page-1 value from the Asset Score Report.');
-    s+=card('Floors Above-grade, Conditioned', fa!=null?fa:'—', 'Asset Score block detail.');
-    s+=card('Floors Below-grade, Conditioned', fb!=null?fb:'—', 'Asset Score block detail.');
-    s+=card('Number of Floors, Conditioned', totFloors||'—', 'Above + below grade.');
-    s+=prompt('Conditioned Floor Area, Heated and Cooled (ft²)', fmt(asB.gfa),
-      'NOT printed on the Asset Score Report — this is your entry. Start from Gross Floor Area and subtract any unconditioned space (e.g. an excluded basement), to match what you set in Asset Score.');
-    s+=prompt('General Building Shape', 'Rectangle',
-      'NOT printed as a shape on the report (it gives footprint/perimeter geometry). Select the shape you used in Asset Score: Rectangle, L, T, H, or U.');
-    s+='</div>';
-    // HVAC assignment — read from the block detail
-    s+='<div class="copyhint" style="margin-top:10px"><strong>Heating/cooling system assignment</strong> (Asset Score block detail): ';
-    const hv=[];
-    if(asB.coolTons!=null||asB.coolCop!=null) hv.push(`Primary — Through-the-Wall AC / Terminal DX${asB.coolCop!=null?' · '+asB.coolCop+' COP':''}${asB.coolTons!=null?' · '+asB.coolTons+' tons':''}`);
-    if(asB.heatCap!=null) hv.push(`Secondary — Convective Baseboard: Electric · ${asB.heatCap} kBtu/hr`);
-    s+= hv.length? hv.join(' &nbsp;|&nbsp; ') : 'see Envelope &amp; systems below';
-    s+='</div></div>';
-    h+=s;
-  }
+  // (The Building Characteristics copy-field section was removed 2026-08-27 — GFA,
+  // conditioned floor area, floors above/below, and building shape are all written
+  // into the generated 50121 XML (FloorAreas, ConditionedFloorsAboveGrade,
+  // FootprintShape), so the manual-paste section had no purpose after XML import.
+  // The Envelope & systems table below still shows the real building detail.)
 
   h+='<div class="sect"><h3>Envelope &amp; systems</h3><table class="kv">';
   const env=[['Roof',(asB.roofType||'?')+' · R: '+(asB.roofRs&&asB.roofRs.length?asB.roofRs.join(' / '):asB.roofR)+' → '+((asI&&asI.roofRs&&asI.roofRs.length)?asI.roofRs.join(' / '):(asI?asI.roofR:asB.roofR))],
