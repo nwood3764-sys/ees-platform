@@ -3794,31 +3794,40 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     const descW=CW-numTotW;                       // wide left column for name + description
     // Precompute each column's right edge (rightmost first, walking left from W-M).
     let _rx=W-M; for(let c=numCols.length-1;c>=0;c--){numCols[c][3]=_rx; _rx-=numCols[c][2];}
-    // header: blue top rule, blue column labels, light-blue underline (Sealed look)
-    need(24);
-    stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
-    tc(C.sealBlue); font(8,'bold'); t(M,st.y+13,'MEASURE');
-    numCols.forEach(([lbl,,w,rx])=>t(rx,st.y+13,lbl,{align:'right'}));
-    st.y+=17; stroke([188,214,242]); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=3;
+    // header row — a helper so it can REPEAT at the top of every page the table
+    // spills onto (professional multi-page tables never orphan their columns).
+    const tableHeader=()=>{
+      need(26);
+      stroke(C.sealBlue); d.setLineWidth(1); d.line(M,st.y,W-M,st.y);
+      tc(C.sealBlue); font(8,'bold'); t(M+2,st.y+14,'MEASURE');
+      numCols.forEach(([lbl,,w,rx])=>t(rx,st.y+14,lbl,{align:'right'}));
+      st.y+=19; stroke([188,214,242]); d.setLineWidth(1.2); d.line(M,st.y,W-M,st.y); st.y+=2;
+    };
+    tableHeader();
+    const nameLH=12.5, descLH=10.5, padT=8, gapND=5, padB=7;   // comfortable leading = the "line breaks"
     m.rows.forEach((r,i)=>{
       font(10,'bold'); const nameLines=wrap((i+1)+'.  '+r.name,descW-6);
       font(8.5);       const dl=wrap(r.desc,descW-6);
-      const nameH=nameLines.length*12, descH=dl.length?dl.length*10+3:0;
-      const h=8+nameH+descH+6;
-      if(st.y+h>H-M-20){d.addPage();st.y=M;}
+      const nameH=nameLines.length*nameLH, descH=dl.length?dl.length*descLH:0;
+      const h=padT+nameH+(descH?gapND+descH:0)+padB;
+      // page break BEFORE drawing the row, then repeat the header so the columns
+      // are labeled on the new page too. A measure block never splits across pages.
+      if(st.y+h>H-M-24){d.addPage();st.y=M; tableHeader();}
       const y0=st.y;
       if(i%2===1){fill(C.zebra); d.rect(M,y0,CW,h,'F');}   // subtle zebra for scanning
       // measure name (numbered), left column
       tc(C.ink); font(10,'bold');
-      nameLines.forEach((ln,k)=>t(M+2,y0+8+(k+1)*12-2.5,ln));
-      // dollar / quantity columns, right-aligned on the name's first line
+      nameLines.forEach((ln,k)=>t(M+2,y0+padT+k*nameLH+9,ln));
+      // description below the name, wrapping across the wide left column
+      if(dl.length){const dy=y0+padT+nameH+gapND; font(8.5); tc([70,82,98]);
+        dl.forEach((ln,k)=>t(M+2,dy+k*descLH+8,ln));}
+      // quantity / dollar columns — VERTICALLY CENTERED in the row so they sit
+      // level with the whole measure block instead of stranded at the top.
+      const midY=y0+h/2+3;
       numCols.forEach(([lbl,fn,w,rx],c)=>{
         font(9.5,c===numCols.length-1?'bold':'normal');
         tc(c===numCols.length-1?C.ink:[64,78,96]);
-        t(rx,y0+8+12-2.5,fn(r),{align:'right'});});
-      // description below, wrapping across the wide left column
-      const dy=y0+8+nameH+8; font(8.5); tc([70,82,98]);
-      dl.forEach((ln,k)=>t(M+2,dy+k*10,ln));
+        t(rx,midY,fn(r),{align:'right'});});
       st.y=y0+h;
       stroke(C.line); d.setLineWidth(.5); d.line(M,st.y,W-M,st.y); st.y+=3;  // hairline between measures
     });
@@ -3831,6 +3840,9 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
     if(m.foe&&foeAmt) credits.push(['Focus on Energy \u2014 Instant Discount',m.foe.desc+' ('+m.foe.note+')',foeAmt]);
     if(m.tier&&iraAmt) credits.push(['IRA HOMES \u2014 Instant Discount',m.tier.desc+' ('+m.tier.note+')',iraAmt]);
   }
+  // keep the rebate heading with its column header and first credit line (never
+  // orphan a section title at the foot of a page).
+  need(96);
   head(isAudit?'Rebates & Incentives Applied':'Applicable Rebates & Incentives',10);
   {font(8.5,'bold');
    const pw=Math.max(60,...credits.map(c=>d.getTextWidth(c[0])))+12;
@@ -3854,7 +3866,11 @@ function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 
      Due lines make it explicit that the rebates cover the job and nothing else is
      funding it — a $0.00 balance with no deposit owed. ---- */
   const reb=foeAmt+iraAmt, deposits=0, due=Math.round((gross-reb-deposits)*100)/100;
-  head('Totals',12);
+  // the Totals block is atomic — heading + all four lines move together to the
+  // next page rather than breaking mid-block. Reserve its true height (heading
+  // ~27 + four 18pt rows) so it is not bumped to a fresh page by a stale margin.
+  need(100);
+  head('Totals',10);
   {const trows=[['Total Cost',_money(gross),false],
      ['Total Rebates & Incentives Applied','('+_money(reb)+')',false],
      ['Total Deposits',_money(deposits),false],
