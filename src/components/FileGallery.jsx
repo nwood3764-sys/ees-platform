@@ -7,7 +7,6 @@ import {
   UNTAGGED,
   buildStepFilterOptions,
   buildTagChoices,
-  flattenTagChoices,
   buildTagFilterOptions,
   stepEvidenceInSelection,
   filterGalleryPhotos,
@@ -25,10 +24,10 @@ import {
   hydratePhotoUrls,
   softDeletePhoto,
   setPhotoReportInclusion,
+  setDocumentReportInclusion,
   reprocessPhoto,
   repairUnrenderedPhotos,
-  fetchPhotoTagOptions,
-  fetchWorkStepPhotoPrompts,
+  fetchWorkPlanPhotoTags,
   setPhotoTag,
   uploadDocument,
   listDocuments,
@@ -386,7 +385,11 @@ export default function FileGalleryWidget({
 
   // The rows a bulk action can actually reach: the filtered grid in photo
   // mode, the whole list in document mode (documents carry no filters).
-  const visibleItems = target === 'photos' ? visiblePhotos : items
+  const visibleItems = target === 'photos'
+    ? visiblePhotos
+    // Documents carry the same curation flag as photos, so the same "In
+    // report" filter applies to them.
+    : (showReportOnly ? items.filter(d => d.include_in_final_report) : items)
 
   // ── Selection + download ────────────────────────────────────────────
   // Drop selections that scroll out of the current filter, or that were just
@@ -446,15 +449,22 @@ export default function FileGalleryWidget({
 
   // Toggle the internal "include in final report" flag. Optimistic — flips the
   // local row immediately, reverts on failure. Not shown on the watermark.
-  const setLocalReportFlag = (photoId, val) =>
-    setItems(prev => prev.map(p => p.id === photoId ? { ...p, include_in_final_report: val } : p))
-  const handleToggleReport = async (photo) => {
-    const next = !photo.include_in_final_report
-    setLocalReportFlag(photo.id, next)
+  const setLocalReportFlag = (rowId, val) =>
+    setItems(prev => prev.map(p => p.id === rowId ? { ...p, include_in_final_report: val } : p))
+  // One curation flag, two objects. A document belongs in a deliverable for
+  // exactly the reasons a photo does, so it is flagged once and the report
+  // reads the flag — rather than the person re-picking files on every
+  // generation (Nicholas, 2026-08-27).
+  const setReportInclusion = (id, include) => (target === 'photos'
+    ? setPhotoReportInclusion(id, include)
+    : setDocumentReportInclusion(id, include))
+  const handleToggleReport = async (row) => {
+    const next = !row.include_in_final_report
+    setLocalReportFlag(row.id, next)
     try {
-      await setPhotoReportInclusion(photo.id, next)
+      await setReportInclusion(row.id, next)
     } catch (e) {
-      setLocalReportFlag(photo.id, !next) // revert
+      setLocalReportFlag(row.id, !next) // revert
       toast.error(e.message || 'Could not update report flag')
     }
   }
@@ -463,12 +473,11 @@ export default function FileGalleryWidget({
   // keeps up with a 40-photo selection.
   const [reportBusy, setReportBusy] = useState(false)
   const [tagPicker, setTagPicker] = useState(null)   // {photos} while choosing a tag
-  const [tagVocabulary, setTagVocabulary] = useState([]) // picklist: photos / photo_type
   const [tagPrompts, setTagPrompts] = useState([])       // this work order's own photo prompts
   const [tagBusy, setTagBusy] = useState(null)       // {done,total} while applying
   const selectedPhotos = useMemo(
-    () => visiblePhotos.filter(p => selectedIds.has(p.id)),
-    [visiblePhotos, selectedIds])
+    () => (target === 'photos' ? visiblePhotos : visibleItems).filter(p => selectedIds.has(p.id)),
+    [target, visiblePhotos, visibleItems, selectedIds])
   const selectedAllInReport = selectedPhotos.length > 0
     && selectedPhotos.every(p => p.include_in_final_report)
   const handleReportSelected = async () => {
@@ -481,7 +490,7 @@ export default function FileGalleryWidget({
       if (!!photo.include_in_final_report === next) continue
       setLocalReportFlag(photo.id, next)
       try {
-        await setPhotoReportInclusion(photo.id, next)
+        await setReportInclusion(photo.id, next)
         changed += 1
       } catch (e) {
         setLocalReportFlag(photo.id, !next)
@@ -490,17 +499,18 @@ export default function FileGalleryWidget({
     }
     setReportBusy(false)
     if (changed > 0) {
+      const noun = target === 'photos' ? 'photo' : 'document'
       toast.success(next
-        ? `${changed} photo${changed === 1 ? '' : 's'} added to the final report`
-        : `${changed} photo${changed === 1 ? '' : 's'} removed from the final report`)
+        ? `${changed} ${noun}${changed === 1 ? '' : 's'} added to the final report`
+        : `${changed} ${noun}${changed === 1 ? '' : 's'} removed from the final report`)
     }
     if (failed > 0) toast.error(`${failed} could not be updated`)
     if (changed > 0 || failed > 0) exitSelect()
   }
 
   const reportCount = useMemo(
-    () => (target === 'photos' ? items.filter(p => p.include_in_final_report).length : 0),
-    [items, target]
+    () => items.filter(p => p.include_in_final_report).length,
+    [items]
   )
 
   // Photos still being processed won't have their watermarked URL on first
@@ -516,19 +526,20 @@ export default function FileGalleryWidget({
     return () => clearTimeout(t)
   }, [items, target, refresh])
 
-  // The tag vocabulary is admin-managed, so it is read from the picklist rather
-  // than compiled in. Loaded once per card; an empty list is a real answer (an
-  // admin has retired every tag) and the picker says so.
+  // The tag vocabulary belongs to the work plan — its steps and their photo
+  // prompts. There is no second, generic list: a photo on a job documents part
+  // of that job.
   useEffect(() => {
     if (target !== 'photos') return
     let cancelled = false
-    fetchPhotoTagOptions()
-      .then(opts => { if (!cancelled) setTagVocabulary(opts) })
-      .catch(() => {})
-    // The work order's OWN prompts — the vocabulary that matches what was
-    // actually walked. Without these the picker offers only generic tags.
-    if (parentTable === 'work_orders' && parentRecordId) {
-      fetchWorkStepPhotoPrompts(parentRecordId)
+    // The work PLAN's own vocabulary — its work steps and their photo prompts.
+    // Resolved from either end, because the Photos card lives on the work order
+    // AND on each work step; gating this on work orders alone is exactly why a
+    // work step's picker showed nothing but generic tags.
+    if (parentRecordId && (parentTable === 'work_orders' || parentTable === 'work_steps')) {
+      fetchWorkPlanPhotoTags(parentTable === 'work_orders'
+        ? { workOrderId: parentRecordId }
+        : { workStepId: parentRecordId })
         .then(list => { if (!cancelled) setTagPrompts(list) })
         .catch(() => {})
     }
@@ -1031,6 +1042,12 @@ export default function FileGalleryWidget({
                   selectedCount={selectedIds.size}
                   totalCount={visibleItems.length}
                   downloading={downloading}
+                  reportCount={reportCount}
+                  showReportOnly={showReportOnly}
+                  onToggleReportFilter={() => setShowReportOnly(v => !v)}
+                  onReportSelected={handleReportSelected}
+                  selectedAllInReport={selectedAllInReport}
+                  reportBusy={reportBusy}
                   onEnterSelect={() => setSelectMode(true)}
                   onCancel={exitSelect}
                   onSelectAll={selectAllVisible}
@@ -1047,13 +1064,14 @@ export default function FileGalleryWidget({
                   }}
                 />
                 <DocumentList
-                  documents={items}
+                  documents={visibleItems}
                   isMobile={isMobile}
                   selectMode={selectMode}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
                   onPreview={(d) => setPreviewDoc(d)}
                   onDownload={handleDownloadDocument}
+                  onToggleReport={handleToggleReport}
                   onDelete={(d) => setConfirmDelete({ id: d.id, name: d.name || 'document' })}
                 />
               </>
@@ -1088,7 +1106,6 @@ export default function FileGalleryWidget({
       {tagPicker && (
         <PhotoTagPickerModal
           photos={tagPicker.photos}
-          vocabulary={tagVocabulary}
           prompts={tagPrompts}
           busy={tagBusy}
           onApply={handleApplyTag}
@@ -1750,28 +1767,21 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
           the work order's roll-up gallery (on a step's own card the step is
           already the context); the photo tag — the named prompt the
           technician answered — appears wherever it says something. */}
+      {/* ONE chip. A photo has one tag — if we switch it the old one falls
+          off (Nicholas, 2026-08-27: "I don't know how we have two tags on a
+          photo. We should only ever have one"). What looked like two was the
+          step chip and the tag chip side by side; now the tag wins where there
+          is one, and the step name stands in only for an untagged photo. */}
       {(showStepTag || isMeaningfulTag(photo.photo_type)) && (
         <div style={{
           position: 'absolute', left: 6, right: 6, bottom: 6,
-          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
+          display: 'flex', alignItems: 'center', gap: 4,
           pointerEvents: 'none',
         }}>
-          {showStepTag && (
+          {isMeaningfulTag(photo.photo_type) ? (
             <span style={{
               maxWidth: '100%',
-              background: 'rgba(7,17,31,0.82)', color: '#fff',
-              fontSize: 10, fontWeight: 600,
-              padding: '2px 7px', borderRadius: 10,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
-              {photo._work_step_name || 'Step'}
-            </span>
-          )}
-          {isMeaningfulTag(photo.photo_type) && (
-            <span style={{
-              maxWidth: '100%',
-              background: photo.photo_type === 'before' ? '#e8f3fb' : '#e8f8f0',
-              color: photo.photo_type === 'before' ? '#1a5a8a' : '#1a7a4f',
+              background: '#e8f8f0', color: '#1a7a4f',
               fontSize: 9.5, fontWeight: 700,
               padding: '2px 6px', borderRadius: 10,
               letterSpacing: 0.3,
@@ -1779,7 +1789,17 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
             }}>
               {photoTagLabel(photo)}
             </span>
-          )}
+          ) : showStepTag ? (
+            <span style={{
+              maxWidth: '100%',
+              background: 'rgba(7,17,31,0.82)', color: '#fff',
+              fontSize: 10, fontWeight: 600,
+              padding: '2px 7px', borderRadius: 10,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {photo._work_step_name || 'Untagged'}
+            </span>
+          ) : null}
         </div>
       )}
 
@@ -1804,8 +1824,8 @@ function PhotoTile({ photo, rendering, isMobile, showStepTag, selectMode, select
 // Delete / Download. Purpose-built for documents rather than shared with
 // PhotoToolbar, which carries the final-report flag actions that mean nothing
 // to a document (Nicholas, 2026-08-24).
-function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected }) {
-  if (totalCount === 0) return null
+function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, reportCount, showReportOnly, onToggleReportFilter, onEnterSelect, onCancel, onSelectAll, onDownload, onDeleteSelected, onReportSelected, selectedAllInReport, reportBusy }) {
+  if (totalCount === 0 && !showReportOnly && !reportCount) return null
   const btn = (extra = {}) => ({
     display: 'inline-flex', alignItems: 'center', gap: 5,
     padding: '5px 10px', fontSize: 12, fontWeight: 600,
@@ -1817,6 +1837,16 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, o
       display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
       gap: 8, marginBottom: 10, flexWrap: 'wrap',
     }}>
+      {!selectMode && (
+        <button
+          onClick={onToggleReportFilter}
+          title="Show only documents marked for the final report"
+          style={{ ...btn(showReportOnly ? { background: '#e8f8f2', borderColor: C.emerald, color: C.emeraldMid } : {}), marginRight: 'auto' }}
+        >
+          <Icon path={FLAG_ICON} size={12} color={showReportOnly ? C.emeraldMid : C.textMuted} />
+          In report{reportCount ? ` (${reportCount})` : ''}
+        </button>
+      )}
       {!selectMode ? (
         <button onClick={onEnterSelect} style={btn()}>
           <Icon path="M9 11l3 3L22 4 M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" size={13} color={C.textSecondary} />
@@ -1831,6 +1861,29 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, o
             {selectedCount === totalCount ? 'All selected' : `Select all (${totalCount})`}
           </button>
           <button onClick={onCancel} style={btn()}>Cancel</button>
+          {/* Flag the whole selection for the final report. This is the point
+              of the flag: say once which documents belong in the deliverable,
+              instead of re-picking them on every generation. */}
+          <button
+            onClick={onReportSelected}
+            disabled={selectedCount === 0 || reportBusy}
+            title={selectedAllInReport
+              ? 'Remove the selected documents from the final report'
+              : 'Add the selected documents to the final report'}
+            style={btn({
+              background: (selectedCount === 0 || reportBusy) ? C.border : '#e8f8f2',
+              borderColor: (selectedCount === 0 || reportBusy) ? C.border : C.emerald,
+              color: (selectedCount === 0 || reportBusy) ? C.textMuted : C.emeraldMid,
+              cursor: (selectedCount === 0 || reportBusy) ? 'default' : 'pointer',
+            })}
+          >
+            <Icon path={FLAG_ICON} size={12}
+              color={(selectedCount === 0 || reportBusy) ? C.textMuted : C.emeraldMid} />
+            {reportBusy ? 'Saving…'
+              : selectedAllInReport
+                ? `Remove from report${selectedCount ? ` (${selectedCount})` : ''}`
+                : `Add to report${selectedCount ? ` (${selectedCount})` : ''}`}
+          </button>
           {/* Blue, not red, per the design system; soft delete either way. */}
           <button
             onClick={onDeleteSelected}
@@ -1871,7 +1924,7 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, o
   )
 }
 
-function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSelect, onPreview, onDownload, onDelete }) {
+function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSelect, onPreview, onDownload, onToggleReport, onDelete }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {documents.map((d) => (
@@ -1884,6 +1937,7 @@ function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSe
           onToggleSelect={() => onToggleSelect(d.id)}
           onPreview={() => onPreview(d)}
           onDownload={() => onDownload(d)}
+          onToggleReport={() => onToggleReport(d)}
           onDelete={() => onDelete(d)}
         />
       ))}
@@ -1891,7 +1945,7 @@ function DocumentList({ documents, isMobile, selectMode, selectedIds, onToggleSe
   )
 }
 
-function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPreview, onDownload, onDelete }) {
+function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPreview, onDownload, onToggleReport, onDelete }) {
   const [hover, setHover] = useState(false)
   const ext = (doc.name || '').split('.').pop()?.toLowerCase() || ''
   const iconPath = ext === 'pdf'
@@ -1970,6 +2024,29 @@ function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPr
           then, and a stray per-row delete mid-selection is a surprise. */}
       {!selectMode && (
         <>
+          {/* Include in final report — the same curation flag photos carry, so
+              the deliverable's contents are recorded once instead of re-picked
+              on every generation. Sits outside the _url guard: a document is
+              curated whether or not its signed URL resolved this load.
+              Internal only — never shown on the file, never restricts access. */}
+          {onToggleReport && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleReport() }}
+              title={doc.include_in_final_report
+                ? 'Included in final report — click to remove'
+                : 'Include in final report'}
+              style={{
+                width: 28, height: 28, borderRadius: '50%',
+                background: doc.include_in_final_report ? C.emerald : 'transparent',
+                border: doc.include_in_final_report ? 'none' : `1px solid ${C.border}`,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', flexShrink: 0,
+              }}
+            >
+              <Icon path={FLAG_ICON} size={13}
+                color={doc.include_in_final_report ? '#fff' : C.textMuted} />
+            </button>
+          )}
           {doc._url && (
             <button
               onClick={(e) => { e.stopPropagation(); onDownload() }}
@@ -2911,12 +2988,9 @@ function WordPreview({ doc }) {
 //     possible, so the warning names what is affected instead of blocking.
 //   - It says the watermark is being redrawn. The tag is printed onto the face
 //     of the evidence copy, so tagging is not a metadata-only edit.
-function PhotoTagPickerModal({ photos, vocabulary, prompts, busy, onApply, onCancel }) {
+function PhotoTagPickerModal({ photos, prompts, busy, onApply, onCancel }) {
   const count = photos.length
-  const groups = useMemo(
-    () => buildTagChoices({ prompts, picklist: vocabulary, photos }),
-    [prompts, vocabulary, photos])
-  const choices = useMemo(() => flattenTagChoices(groups), [groups])
+  const choices = useMemo(() => buildTagChoices(prompts), [prompts])
   const stepEvidence = useMemo(() => stepEvidenceInSelection(photos), [photos])
   // Every photo already carrying the same tag → show it as the current value.
   const currentTag = useMemo(() => {
@@ -2965,44 +3039,36 @@ function PhotoTagPickerModal({ photos, vocabulary, prompts, busy, onApply, onCan
 
         <div style={{ overflowY: 'auto', padding: '8px 8px 4px', flex: 1 }}>
           {choices.length === 0 ? (
-            <div style={{ padding: 16, fontSize: 12.5, color: C.textMuted }}>
-              No photo tags are configured. An administrator adds them at
-              Setup → Picklists, on <strong>photos / photo_type</strong>.
+            <div style={{ padding: 16, fontSize: 12.5, color: C.textMuted, lineHeight: 1.5 }}>
+              This job's work plan defines no photo tags, so there is nothing to
+              choose. Tags come from the work steps and the shots they ask for —
+              add them to the work plan template and they appear here.
             </div>
-          ) : groups.map(g => (
-            <div key={g.id} style={{ marginBottom: 6 }}>
-              <div style={{
-                fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5,
-                textTransform: 'uppercase', color: C.textMuted,
-                padding: '8px 12px 4px',
-              }}>{g.title}</div>
-              {g.choices.map(c => {
-                const isCurrent = currentTag && currentTag.toLowerCase() === c.value.toLowerCase()
-                return (
-                  <button
-                    key={c.value}
-                    onClick={() => onApply(c.value)}
-                    disabled={!!busy}
-                    style={{
-                      display: 'block', width: '100%', textAlign: 'left',
-                      padding: '9px 12px', marginBottom: 2,
-                      border: `1px solid ${isCurrent ? C.emerald : 'transparent'}`,
-                      background: isCurrent ? '#e8f8f2' : 'transparent',
-                      borderRadius: 6, cursor: busy ? 'default' : 'pointer',
-                      fontSize: 13, color: C.textPrimary, fontWeight: isCurrent ? 600 : 500,
-                    }}
-                  >
-                    {c.label}
-                    {isCurrent && (
-                      <span style={{ fontSize: 10.5, color: C.emeraldMid, marginLeft: 8 }}>
-                        current
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          ))}
+          ) : choices.map(c => {
+            const isCurrent = currentTag && currentTag.toLowerCase() === c.value.toLowerCase()
+            return (
+              <button
+                key={c.value}
+                onClick={() => onApply(c.value)}
+                disabled={!!busy}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '9px 12px', marginBottom: 2,
+                  border: `1px solid ${isCurrent ? C.emerald : 'transparent'}`,
+                  background: isCurrent ? '#e8f8f2' : 'transparent',
+                  borderRadius: 6, cursor: busy ? 'default' : 'pointer',
+                  fontSize: 13, color: C.textPrimary, fontWeight: isCurrent ? 600 : 500,
+                }}
+              >
+                {c.label}
+                {isCurrent && (
+                  <span style={{ fontSize: 10.5, color: C.emeraldMid, marginLeft: 8 }}>
+                    current
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
         <div style={{

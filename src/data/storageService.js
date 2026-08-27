@@ -661,75 +661,51 @@ async function resolvePhotoTagLabels(types) {
 }
 
 /**
- * The tags a person may apply by hand, from the `photos` / `photo_type`
- * picklist. Admin-managed at Setup → Picklists — nothing here is compiled in,
- * so adding a tag the crew needs is a configuration change, not a deploy.
+ * The tags this work order's work plan offers: its WORK STEPS, and nothing
+ * else (Nicholas, 2026-08-27: "The tag names need to match the work steps").
  *
- * Returns [] rather than throwing: an unreachable picklist should leave the
- * picker empty and honest, not break the Photos card.
+ * An earlier version also offered each step's template photo prompts. That was
+ * wrong twice over. It produced near-duplicates that do not match the plan a
+ * person is looking at — the step "Service Hot Water" sitting beside its prompt
+ * "Water Heater" — so a tag could disagree with the step it documents. And the
+ * prompts are stored as machine tokens ('mf_dhw_photo'), which process-photo
+ * prints onto the watermark verbatim.
+ *
+ * A work step name is already human text, already the thing the assessment
+ * report groups by, and already what the crew walked. It is the tag.
+ *
+ * Resolvable from EITHER end: pass the work order, or pass a work step and the
+ * work order is looked up from it — the Photos card lives on both.
+ *
+ * Returns [] on failure; a missing list is survivable, a thrown picker is not.
  */
-export async function fetchPhotoTagOptions() {
-  const { data, error } = await supabase
-    .from('picklist_values')
-    .select('picklist_value, picklist_label, picklist_description, picklist_sort_order')
-    .eq('picklist_object', 'photos')
-    .eq('picklist_field', 'photo_type')
-    .eq('picklist_is_active', true)
-    .order('picklist_sort_order', { ascending: true })
-  if (error) {
-    // eslint-disable-next-line no-console
-    console.warn('photo tag options unavailable:', error.message)
-    return []
+export async function fetchWorkPlanPhotoTags({ workOrderId = null, workStepId = null } = {}) {
+  let orderId = workOrderId
+  if (!orderId && workStepId) {
+    const { data, error } = await supabase
+      .from('work_steps')
+      .select('work_order_id')
+      .eq('id', workStepId)
+      .maybeSingle()
+    if (error || !data?.work_order_id) return []
+    orderId = data.work_order_id
   }
-  return (data || []).map(r => ({
-    value: r.picklist_value,
-    label: r.picklist_label || r.picklist_value,
-    description: r.picklist_description || null,
-  }))
-}
+  if (!orderId) return []
 
-/**
- * The photo prompts this work order's own work plan asks for — "Roofs",
- * "Windows", "Service Hot Water Systems" — read from the work step templates
- * behind its steps.
- *
- * This is the vocabulary that actually matters on an assessment, and it is
- * per-job: a Multifamily Energy Assessment asks for different shots than an
- * insulation removal. It cannot live in the global picklist for that reason,
- * which is why the tag picker reads both.
- *
- * Returns [] on any failure — a tag picker missing a group is worse than one
- * that throws, but only slightly, and the generic tags still work.
- */
-export async function fetchWorkStepPhotoPrompts(workOrderId) {
-  if (!workOrderId) return []
-  const { data: steps, error: stepErr } = await supabase
+  const { data: steps, error } = await supabase
     .from('work_steps')
-    .select('work_step_template_id')
-    .eq('work_order_id', workOrderId)
-    .eq('is_deleted', false)
-  if (stepErr) return []
-  const templateIds = Array.from(new Set(
-    (steps || []).map(s => s.work_step_template_id).filter(Boolean)
-  ))
-  if (templateIds.length === 0) return []
-
-  const { data, error } = await supabase
-    .from('work_step_template_fields')
-    .select('wstf_field_name, wstf_field_label, wstf_sort_order, work_step_template_id')
-    .in('work_step_template_id', templateIds)
-    .eq('wstf_field_type', 'photo')
-    .eq('wstf_is_deleted', false)
-    .order('wstf_sort_order', { ascending: true })
-  if (error) return []
+    .select('work_step_name, work_step_execution_order')
+    .eq('work_order_id', orderId)
+    .order('work_step_execution_order', { ascending: true })
+  if (error || !steps) return []
 
   const seen = new Set()
   const out = []
-  for (const row of data || []) {
-    const value = String(row.wstf_field_name || '').trim()
-    if (!value || seen.has(value.toLowerCase())) continue
-    seen.add(value.toLowerCase())
-    out.push({ value, label: row.wstf_field_label || value })
+  for (const step of steps) {
+    const name = String(step.work_step_name || '').trim()
+    if (!name || seen.has(name.toLowerCase())) continue
+    seen.add(name.toLowerCase())
+    out.push({ value: name, label: name })
   }
   return out
 }
@@ -799,6 +775,23 @@ export async function softDeletePhoto(photoId) {
  * @param {boolean} include
  * @returns {Promise<boolean>} the new flag value
  */
+/**
+ * Flag (or unflag) a DOCUMENT for the record's final report — the same curation
+ * mark photos carry, so the set of things that belong in a deliverable is
+ * recorded once instead of re-picked on every generation.
+ *
+ * Internal only: it never appears on the file and never restricts access.
+ */
+export async function setDocumentReportInclusion(documentId, include) {
+  if (!documentId) throw new Error('setDocumentReportInclusion: documentId is required')
+  const { data, error } = await supabase.rpc('set_document_report_inclusion', {
+    p_document_id: documentId,
+    p_include: !!include,
+  })
+  if (error) throw new Error(`report inclusion update failed: ${error.message}`)
+  return data === true
+}
+
 export async function setPhotoReportInclusion(photoId, include) {
   if (!photoId) throw new Error('setPhotoReportInclusion: photoId is required')
   const { data, error } = await supabase.rpc('set_photo_report_inclusion', {

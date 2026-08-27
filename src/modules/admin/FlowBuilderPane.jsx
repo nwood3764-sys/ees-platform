@@ -922,25 +922,27 @@ function RunHistory({ runs }) {
   }
   return (
     <div style={{ border: '1px solid #e4e9f2', borderRadius: 8, overflow: 'hidden' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <table style={{ ...PINNED_TABLE, fontSize: 13 }}>
         <thead>
-          <tr style={{ background: '#f7f9fc', textAlign: 'left' }}>
+          <tr style={{ textAlign: 'left' }}>
             {['Run', 'Trigger', 'Status', 'Outcome', 'Started', 'AI'].map(h => (
-              <th key={h} style={{ padding: '8px 10px', color: '#4a5e7a', fontWeight: 600 }}>{h}</th>
+              <th key={h} style={{ padding: '8px 10px', color: '#4a5e7a', fontWeight: 600, ...pinnedHeaderCell() }}>{h}</th>
             ))}
           </tr>
         </thead>
+        {/* The row rule sits on the CELLS: a border on a <tr> is not painted
+            with border-collapse: separate, which the pinned header requires. */}
         <tbody>
           {runs.map(r => (
-            <tr key={r.id} style={{ borderTop: '1px solid #e4e9f2' }}>
-              <td style={{ padding: '8px 10px', fontFamily: 'JetBrains Mono, monospace' }}>{r.fr_record_number}</td>
-              <td style={{ padding: '8px 10px' }}>{r.fr_trigger_event || '—'}{r.fr_trigger_object ? ` · ${r.fr_trigger_object}` : ''}</td>
-              <td style={{ padding: '8px 10px' }}>{r.fr_status}</td>
-              <td style={{ padding: '8px 10px', color: '#4a5e7a' }}>{r.fr_outcome_message || '—'}</td>
-              <td style={{ padding: '8px 10px', color: '#8fa0b8' }}>
+            <tr key={r.id}>
+              <td style={{ padding: '8px 10px', fontFamily: 'JetBrains Mono, monospace', ...ROW_RULE }}>{r.fr_record_number}</td>
+              <td style={{ padding: '8px 10px', ...ROW_RULE }}>{r.fr_trigger_event || '—'}{r.fr_trigger_object ? ` · ${r.fr_trigger_object}` : ''}</td>
+              <td style={{ padding: '8px 10px', ...ROW_RULE }}>{r.fr_status}</td>
+              <td style={{ padding: '8px 10px', color: '#4a5e7a', ...ROW_RULE }}>{r.fr_outcome_message || '—'}</td>
+              <td style={{ padding: '8px 10px', color: '#8fa0b8', ...ROW_RULE }}>
                 {r.fr_started_at ? new Date(r.fr_started_at).toLocaleString() : '—'}
               </td>
-              <td style={{ padding: '8px 10px' }}>{r.fr_ai_assisted ? 'Yes' : '—'}</td>
+              <td style={{ padding: '8px 10px', ...ROW_RULE }}>{r.fr_ai_assisted ? 'Yes' : '—'}</td>
             </tr>
           ))}
         </tbody>

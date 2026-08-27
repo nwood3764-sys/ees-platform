@@ -72,25 +72,40 @@ const summaryResult = {
   ...reportResult,
   groupings: [{ field_name: 'property_name', field_label: 'Property Name', sort_direction: 'asc' }],
 }
-const matrixRows = Array.from({ length: 120 }, (_, i) => ({
+// A matrix has to overflow on BOTH axes to be a real test of it: 30 row groups
+// down, 14 column groups across, so the row labels can scroll out sideways just
+// as the column headings can scroll out upwards.
+const matrixRows = Array.from({ length: 600 }, (_, i) => ({
   id: `m${i}`,
-  enrollment_status: ['To Be Prepared', 'Submitted', 'Approved', 'Paid'][i % 4],
-  property_name: `${100 + (i % 30)} Example Street - City ${i % 30}`,
+  enrollment_status: `Stage ${String((i % 14) + 1).padStart(2, '0')} Prepared`,
+  property_name: `${100 + (i % 30)} North Hopkins Street - Milwaukee ${i % 30}`,
   building_name: `Building ${i % 30}`,
 }))
 const matrixResult = {
   ...reportResult,
   rows: matrixRows,
   groupings: [{ field_name: 'property_name', field_label: 'Property Name', sort_direction: 'asc' }],
-  columnGroupings: [{ name: 'enrollment_status', label: 'Status', sort_direction: 'asc' }],
+  // TWO column-grouping levels on purpose. A single level would pin at top:0
+  // and prove nothing about the stacking — the second level is the one that
+  // has to land exactly one header-row-height down, and it is the one that
+  // goes wrong if the declared height and the offset ever drift apart.
+  columnGroupings: [
+    { name: 'building_name',      label: 'Building', sort_direction: 'asc' },
+    { name: 'enrollment_status',  label: 'Status',   sort_direction: 'asc' },
+  ],
   measure: { type: 'count', field: null },
 }
 
 // A report layout in `fill` mode inside a fixed-height box is how a viewer
 // pane renders it; the pinned header lives inside the layout's own scroll box.
-function Pane({ id, title, children }) {
+// `xPinDecided` records that this surface deliberately pins no column on the
+// horizontal axis, and why. Without it the run reports an unpinned column as a
+// gap — which, for a list view, would be a report that the platform has a bug
+// where it actually has a ruling.
+function Pane({ id, title, xPinDecided, children }) {
   return (
-    <div data-case={id} style={{ width: 620, height: 230, margin: 24, display: 'flex', flexDirection: 'column' }}>
+    <div data-case={id} data-x-pin-decided={xPinDecided || undefined}
+         style={{ width: 620, height: 230, margin: 24, display: 'flex', flexDirection: 'column' }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, marginBottom: 6 }}>{title}</div>
       {children}
     </div>
@@ -123,7 +138,8 @@ createRoot(document.getElementById('root')).render(
     </Pane>
     {/* The object list every module opens onto — 5 of the platform's pinned
         styles live here, including the frozen row-actions column. */}
-    <Pane id="list-view" title="Object list (ListView)">
+    <Pane id="list-view" title="Object list (ListView)"
+          xPinDecided="no column is pinned in a list view — Nicholas, PR #549">
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <ListView
           data={rows.map(r => ({ id: r.id, status: r.enrollment_status, property: r.property_name, building: r.building_name }))}

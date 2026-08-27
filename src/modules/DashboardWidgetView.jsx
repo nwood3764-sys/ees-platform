@@ -1,4 +1,5 @@
 import { C } from '../data/constants'
+import { PINNED_TABLE, ROW_RULE, pinnedHeaderCell, pinnedFooterCell } from '../lib/pinnedTableHeader'
 import { getRowValue } from '../data/reportsService'
 import { LeapEChart } from '../builder/chartKit/EChartsLazy'
 import { TOOLTIP_ITEM, TOOLTIP_AXIS } from '../builder/chartKit/leapEchartsTheme'
@@ -268,21 +269,15 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
     <div
       onClick={canDrill ? () => drillWhole?.() : undefined}
       style={{ overflow:'auto', height:'100%', cursor: canDrill ? 'pointer' : 'default' }}>
-      {/* border-collapse stays `separate`: a collapsed table owns its rows'
-          backgrounds and borders, which both strands a sticky header behind the
-          scrolling rows and makes Chrome repaint the scrolling tile incompletely
-          (rows ghost on top of each other). Sticky lives on the cells, and every
-          row rule sits on the cells too — a border on a <tr> is not painted in
-          this mode. */}
-      <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:11 }}>
+      {/* One definition of a header that stays put — src/lib/pinnedTableHeader.js. */}
+      <table style={{ ...PINNED_TABLE, fontSize:11 }}>
         <thead>
           <tr>
             {picked.map((c, idx) => (
               <th key={idx} style={{
                 padding:'4px 8px', fontSize:10, fontWeight:600, color:C.textSecondary,
                 textTransform:'uppercase', textAlign:'left', whiteSpace:'nowrap',
-                position:'sticky', top:0, zIndex:2, background:C.cardSecondary,
-                boxShadow:`inset 0 -1px 0 ${C.border}`,
+                ...pinnedHeaderCell(),
               }}>{c.label}</th>
             ))}
           </tr>
@@ -293,7 +288,7 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
               {picked.map((c, ci) => {
                 const v = getRowValue(row, c, result)
                 return (
-                  <td key={ci} style={{ padding:'4px 8px', whiteSpace:'nowrap', borderTop:`1px solid ${C.border}` }}>
+                  <td key={ci} style={{ padding:'4px 8px', whiteSpace:'nowrap', ...ROW_RULE }}>
                     {v == null ? '—' : (typeof v === 'object' ? '[obj]' : String(v))}
                   </td>
                 )
@@ -306,8 +301,7 @@ function TableWidget({ result, widget, canDrill, drillWhole }) {
             <tr>
               {totals.map((t, i) => (
                 <td key={i} style={{ padding:'4px 8px', fontWeight:700, fontFamily:'JetBrains Mono, monospace', whiteSpace:'nowrap',
-                  position:'sticky', bottom:0, zIndex:2, background:C.cardSecondary,
-                  boxShadow:`inset 0 2px 0 ${C.borderDark}` }}>
+                  ...pinnedFooterCell() }}>
                   {i === 0 && t === null ? `Total (${shown.length})` : t === null ? '' : fmtTotal(t)}
                 </td>
               ))}
@@ -1120,11 +1114,11 @@ function MatrixWidget({ result, widget, canDrill, drillTo }) {
   const colTotal = (s) => groups.reduce((a, g) => a + (get(g, s)?.value || 0), 0)
   const grand = groups.reduce((a, g) => a + rowTotal(g), 0)
   const th = { padding:'5px 9px', fontSize:10, fontWeight:600, color:C.textSecondary, textTransform:'uppercase', whiteSpace:'nowrap', textAlign:'right',
-    position:'sticky', top:0, zIndex:2, background:C.cardSecondary, boxShadow:`inset 0 -1px 0 ${C.border}` }
+    ...pinnedHeaderCell() }
   const td = { padding:'5px 9px', fontSize:11.5, whiteSpace:'nowrap', textAlign:'right', fontFamily:'JetBrains Mono, monospace', borderBottom:`1px solid ${C.border}` }
   return (
     <div style={{ overflow:'auto', height:'100%' }}>
-      <table style={{ borderCollapse:'separate', borderSpacing:0, width:'100%' }}>
+      <table style={PINNED_TABLE}>
         <thead>
           <tr>
             <th style={{ ...th, textAlign:'left' }}></th>

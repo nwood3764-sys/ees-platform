@@ -205,6 +205,10 @@ export async function loadAssessmentReportContext(workOrderId) {
     size: formatFileSize(row.file_size_bytes),
     date: fmtDate(row.created_at),
     previewKind: documentPreviewKind(row.mime_type, row.name),
+    // The curation flag from the Documents card. A document marked for the
+    // final report is pre-selected here, so the set is decided ONCE on the
+    // record instead of re-picked on every generation (Nicholas, 2026-08-27).
+    inFinalReport: row.include_in_final_report === true,
     _row: row,
   }))
 
@@ -316,10 +320,21 @@ export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
   const hydrated = await hydratePhotoUrls(rows)
   const urlById = new Map(hydrated.map(h => [h.id, h._thumbUrl || h._originalUrl || null]))
 
-  // A separate, long-lived link to the ORIGINAL capture, so the PDF's reader
-  // can open or save the full-resolution photo with its EXIF intact. Signed
-  // object URLs are read-only: they expose that one photo and nothing else —
-  // no record, no edit, no delete.
+  // A separate, long-lived link to the WATERMARKED copy — the same file the
+  // Photos card hands over on download, and for the same reason: it carries
+  // the visible tag (step · property·building·unit · date · GPS) that the
+  // incentive programs require in order to accept a photo, AND the original
+  // camera EXIF, which process-photo copies back in verbatim after re-encoding.
+  //
+  // Linking the untouched original (which this did until 2026-08-27) meant the
+  // PDF showed a tagged photo while the file behind it was untagged, so a
+  // reviewer who saved one got the copy their own program will not take. The
+  // watermarked variant is capped at 2400px on its long edge; a tagged,
+  // submittable photo beats a larger unusable one. The pristine original is
+  // still the archival source and is never modified.
+  //
+  // Signed object URLs are read-only: they expose that one photo and nothing
+  // else — no record, no edit, no delete.
   //
   // Signed ONE AT A TIME rather than in a batch, because each carries its own
   // download filename — the batch API can only set one for the whole call. The
@@ -328,9 +343,13 @@ export async function attachAssessmentPhotoImages(model, { onProgress } = {}) {
   const buildingLabel = model.building?.label || model.building?.name || null
   const linkById = new Map()
   for (const r of rows) {
-    if (!r.storage_bucket || !r.storage_path_original) continue
+    // Fall back to the original only when no watermarked copy exists, so a
+    // photo that never rendered still reaches the reader rather than losing
+    // its link entirely.
+    const linkPath = r.storage_path_watermarked || r.storage_path_original
+    if (!r.storage_bucket || !linkPath) continue
     const url = await signedUrl(
-      r.storage_bucket, r.storage_path_original, PHOTO_LINK_TTL_SECONDS,
+      r.storage_bucket, linkPath, PHOTO_LINK_TTL_SECONDS,
       photoDownloadName(r, buildingLabel))
     if (url) linkById.set(r.id, url)
   }
