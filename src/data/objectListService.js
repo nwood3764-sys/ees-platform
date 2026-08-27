@@ -19,6 +19,7 @@ import { supabase, fetchAllPaged, fetchAllPagedParallel } from '../lib/supabase'
 import { describeObject } from './adminService'
 import { loadPicklists } from './outreachService'
 import { guessPrefix } from './fieldMetadataService'
+import { softDeleteColumnFor } from '../lib/softDeleteColumn'
 import {
   LABELED_FK_TABLES, idColumnKind, isOpaqueIdColumn, stripTablePrefix,
   parentLookupNameField, isParentLookupNameField, parentLookupColumnOf,
@@ -246,11 +247,15 @@ function userFkLabel(columnName) {
   return /_owner$/.test(columnName) ? 'Record Owner' : titleize(columnName)
 }
 
+// Which column says a row is deleted, discovered from the table's own columns.
+// This used to build the name from the TABLE NAME
+// (`table.replace(/s$/,'') + '_is_deleted'`), which is wrong on 116 of the 188
+// soft-deletable tables — 'opportunities' produced 'opportunitie_is_deleted'
+// and 'properties' produced 'propertie_is_deleted'. Neither column exists, so
+// this returned null and the filter below was silently skipped: the list
+// rendered deleted records as live. See src/lib/softDeleteColumn.js.
 function softDeleteColumn(table, colNames) {
-  const prefix = table.replace(/s$/, '')
-  if (colNames.has(`${prefix}_is_deleted`)) return `${prefix}_is_deleted`
-  if (colNames.has('is_deleted')) return 'is_deleted'
-  return null
+  return softDeleteColumnFor(colNames)
 }
 
 // Identify the record-number and name columns by the platform convention.
