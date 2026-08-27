@@ -7,7 +7,6 @@ import {
   UNTAGGED,
   buildStepFilterOptions,
   buildTagChoices,
-  flattenTagChoices,
   buildTagFilterOptions,
   stepEvidenceInSelection,
   filterGalleryPhotos,
@@ -28,7 +27,6 @@ import {
   setDocumentReportInclusion,
   reprocessPhoto,
   repairUnrenderedPhotos,
-  fetchPhotoTagOptions,
   fetchWorkPlanPhotoTags,
   setPhotoTag,
   uploadDocument,
@@ -475,7 +473,6 @@ export default function FileGalleryWidget({
   // keeps up with a 40-photo selection.
   const [reportBusy, setReportBusy] = useState(false)
   const [tagPicker, setTagPicker] = useState(null)   // {photos} while choosing a tag
-  const [tagVocabulary, setTagVocabulary] = useState([]) // picklist: photos / photo_type
   const [tagPrompts, setTagPrompts] = useState([])       // this work order's own photo prompts
   const [tagBusy, setTagBusy] = useState(null)       // {done,total} while applying
   const selectedPhotos = useMemo(
@@ -529,15 +526,12 @@ export default function FileGalleryWidget({
     return () => clearTimeout(t)
   }, [items, target, refresh])
 
-  // The tag vocabulary is admin-managed, so it is read from the picklist rather
-  // than compiled in. Loaded once per card; an empty list is a real answer (an
-  // admin has retired every tag) and the picker says so.
+  // The tag vocabulary belongs to the work plan — its steps and their photo
+  // prompts. There is no second, generic list: a photo on a job documents part
+  // of that job.
   useEffect(() => {
     if (target !== 'photos') return
     let cancelled = false
-    fetchPhotoTagOptions()
-      .then(opts => { if (!cancelled) setTagVocabulary(opts) })
-      .catch(() => {})
     // The work PLAN's own vocabulary — its work steps and their photo prompts.
     // Resolved from either end, because the Photos card lives on the work order
     // AND on each work step; gating this on work orders alone is exactly why a
@@ -1112,7 +1106,6 @@ export default function FileGalleryWidget({
       {tagPicker && (
         <PhotoTagPickerModal
           photos={tagPicker.photos}
-          vocabulary={tagVocabulary}
           prompts={tagPrompts}
           busy={tagBusy}
           onApply={handleApplyTag}
@@ -2992,12 +2985,9 @@ function WordPreview({ doc }) {
 //     possible, so the warning names what is affected instead of blocking.
 //   - It says the watermark is being redrawn. The tag is printed onto the face
 //     of the evidence copy, so tagging is not a metadata-only edit.
-function PhotoTagPickerModal({ photos, vocabulary, prompts, busy, onApply, onCancel }) {
+function PhotoTagPickerModal({ photos, prompts, busy, onApply, onCancel }) {
   const count = photos.length
-  const groups = useMemo(
-    () => buildTagChoices({ prompts, picklist: vocabulary, photos }),
-    [prompts, vocabulary, photos])
-  const choices = useMemo(() => flattenTagChoices(groups), [groups])
+  const choices = useMemo(() => buildTagChoices(prompts), [prompts])
   const stepEvidence = useMemo(() => stepEvidenceInSelection(photos), [photos])
   // Every photo already carrying the same tag → show it as the current value.
   const currentTag = useMemo(() => {
@@ -3046,44 +3036,36 @@ function PhotoTagPickerModal({ photos, vocabulary, prompts, busy, onApply, onCan
 
         <div style={{ overflowY: 'auto', padding: '8px 8px 4px', flex: 1 }}>
           {choices.length === 0 ? (
-            <div style={{ padding: 16, fontSize: 12.5, color: C.textMuted }}>
-              No photo tags are configured. An administrator adds them at
-              Setup → Picklists, on <strong>photos / photo_type</strong>.
+            <div style={{ padding: 16, fontSize: 12.5, color: C.textMuted, lineHeight: 1.5 }}>
+              This job's work plan defines no photo tags, so there is nothing to
+              choose. Tags come from the work steps and the shots they ask for —
+              add them to the work plan template and they appear here.
             </div>
-          ) : groups.map(g => (
-            <div key={g.id} style={{ marginBottom: 6 }}>
-              <div style={{
-                fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5,
-                textTransform: 'uppercase', color: C.textMuted,
-                padding: '8px 12px 4px',
-              }}>{g.title}</div>
-              {g.choices.map(c => {
-                const isCurrent = currentTag && currentTag.toLowerCase() === c.value.toLowerCase()
-                return (
-                  <button
-                    key={c.value}
-                    onClick={() => onApply(c.value)}
-                    disabled={!!busy}
-                    style={{
-                      display: 'block', width: '100%', textAlign: 'left',
-                      padding: '9px 12px', marginBottom: 2,
-                      border: `1px solid ${isCurrent ? C.emerald : 'transparent'}`,
-                      background: isCurrent ? '#e8f8f2' : 'transparent',
-                      borderRadius: 6, cursor: busy ? 'default' : 'pointer',
-                      fontSize: 13, color: C.textPrimary, fontWeight: isCurrent ? 600 : 500,
-                    }}
-                  >
-                    {c.label}
-                    {isCurrent && (
-                      <span style={{ fontSize: 10.5, color: C.emeraldMid, marginLeft: 8 }}>
-                        current
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          ))}
+          ) : choices.map(c => {
+            const isCurrent = currentTag && currentTag.toLowerCase() === c.value.toLowerCase()
+            return (
+              <button
+                key={c.value}
+                onClick={() => onApply(c.value)}
+                disabled={!!busy}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '9px 12px', marginBottom: 2,
+                  border: `1px solid ${isCurrent ? C.emerald : 'transparent'}`,
+                  background: isCurrent ? '#e8f8f2' : 'transparent',
+                  borderRadius: 6, cursor: busy ? 'default' : 'pointer',
+                  fontSize: 13, color: C.textPrimary, fontWeight: isCurrent ? 600 : 500,
+                }}
+              >
+                {c.label}
+                {isCurrent && (
+                  <span style={{ fontSize: 10.5, color: C.emeraldMid, marginLeft: 8 }}>
+                    current
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
         <div style={{

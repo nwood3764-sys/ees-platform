@@ -661,34 +661,6 @@ async function resolvePhotoTagLabels(types) {
 }
 
 /**
- * The tags a person may apply by hand, from the `photos` / `photo_type`
- * picklist. Admin-managed at Setup → Picklists — nothing here is compiled in,
- * so adding a tag the crew needs is a configuration change, not a deploy.
- *
- * Returns [] rather than throwing: an unreachable picklist should leave the
- * picker empty and honest, not break the Photos card.
- */
-export async function fetchPhotoTagOptions() {
-  const { data, error } = await supabase
-    .from('picklist_values')
-    .select('picklist_value, picklist_label, picklist_description, picklist_sort_order')
-    .eq('picklist_object', 'photos')
-    .eq('picklist_field', 'photo_type')
-    .eq('picklist_is_active', true)
-    .order('picklist_sort_order', { ascending: true })
-  if (error) {
-    // eslint-disable-next-line no-console
-    console.warn('photo tag options unavailable:', error.message)
-    return []
-  }
-  return (data || []).map(r => ({
-    value: r.picklist_value,
-    label: r.picklist_label || r.picklist_value,
-    description: r.picklist_description || null,
-  }))
-}
-
-/**
  * Every tag this work order's WORK PLAN offers — the vocabulary that actually
  * describes the job (Nicholas, 2026-08-25: "I need the tags for that work plan
  * to display so any user can select a photo and re-tag it").
