@@ -3,6 +3,14 @@
 // completes. Idempotent: safe to re-invoke (e.g. after work_step_id is set
 // to re-render the watermark with the new photo tag).
 //
+// v31 — the watermark never prints a raw tag token:
+//   - photo_type can hold a work step template's machine name ('mf_dhw_photo').
+//     Tagging a work-order photo with one used to stamp that string, underscores
+//     and all, onto the face of an evidence photo that goes to a program
+//     reviewer. It now resolves to the template field's own label, or to a
+//     humanised form when no template holds it — never the raw token. A photo
+//     captured against a work step still takes that STEP's name, unchanged.
+//
 // v25 — HEIC/HEIF support:
 //   - HEIC originals are decodable, via libheif (WASM), decoded straight to the
 //     final watermark size because a full-res intermediate does not fit in an
@@ -639,6 +647,18 @@ function buildExifFromParsed(
   }
 }
 
+// 'mf_dhw_photo' -> 'Mf Dhw Photo'. Last resort only: used when a token has no
+// template label to resolve to. Still far better than printing the underscores.
+function humanizeTag(raw: string): string {
+  return String(raw)
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ") || String(raw)
+}
+
 // Leaf of a hierarchical LEAP name: "1837 Alden Rd - Janesville - 1837 - 11"
 // -> "11". Building/unit names carry the full path; we want the trailing token.
 function leafName(name: string | null | undefined): string | null {
@@ -795,7 +815,23 @@ async function processPhoto(admin: ReturnType<typeof createClient>, photoId: str
 
   // Resolve photo tag + location (property / building / unit) from the work
   // order behind the step. The step/item name takes precedence for the tag.
+  // The tag printed on the watermark must READ. photo_type can hold a machine
+  // token from a work step template ('mf_dhw_photo'), and stamping that onto an
+  // evidence photo that goes to a program reviewer is indefensible (Nicholas,
+  // 2026-08-27: "They can't have the underscore that doesn't read well").
+  // Resolved in order: the work step name (below), the template field's own
+  // label, then a humanised form of the token — never the raw token.
   let photoTag = photo.photo_type || "Photo"
+  if (photo.photo_type && /[_-]/.test(photo.photo_type)) {
+    const { data: labelRow } = await admin
+      .from("work_step_template_fields")
+      .select("wstf_field_label")
+      .eq("wstf_field_name", photo.photo_type)
+      .eq("wstf_is_deleted", false)
+      .limit(1)
+      .maybeSingle()
+    photoTag = labelRow?.wstf_field_label || humanizeTag(photo.photo_type)
+  }
   let locLine: string | null = null
   if (photo.work_step_id) {
     const { data: step } = await admin
