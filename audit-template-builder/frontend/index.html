@@ -3284,20 +3284,21 @@ function pjLoadAndPrefill(){
    set('rateElec',String(rr.elec)); set('rateGas',String(rr.gas));}
 }
 // Compose the invoice/quote number from what the reports already tell us:
-//   <STATE>-<building number>-<first letter of the street name>   e.g. NC-101-Q
+//   <STATE>-<doc code>-<building number>-<first letter of the street name>
+//   assessment (audit) -> A ; project -> P     e.g. NC-A-15008-S / NC-P-15008-S
 // The building number is the leading number of the install address (a range like
 // "101-111" contributes 101); the street letter is the first letter of the street
-// NAME (the first alpha token after the house number). Empty when we can't form
-// at least the state + one identifier — never a half-baked stub.
-function composeInvoiceNo(){
+// NAME (the first alpha token after the house number). Empty unless we have the
+// state AND at least one identifier — never a half-baked stub.
+function composeInvoiceNo(code){
   const st=buildingState()||'';
   const addr=(pj('pjInstallAddr')||((data.asBase||data.asImp||{}).street)||'').trim();
   const name=(pj('pjPropName')||((data.asBase||data.asImp||{}).name)||'').trim();
   const num=((addr.match(/\d+/)||[])[0])||((name.match(/\d+/)||[])[0])||'';
   const afterNum=addr.replace(/^[^A-Za-z]*/,'');           // drop the house number/range
   const letter=((afterNum.match(/[A-Za-z]/)||[])[0]||'').toUpperCase();
-  const parts=[st,num,letter].filter(Boolean);
-  return parts.length>=2?parts.join('-'):'';
+  if(!st || !(num||letter)) return '';
+  return [st,code,num,letter].filter(Boolean).join('-');
 }
 // Pull everything the uploaded Audit Template XML already knows into the empty
 // Project-details fields, so the user retypes as little as possible (fewer typos):
@@ -3319,8 +3320,8 @@ function prefillFromAuditTemplate(){
   }
   const un=atDocs.baseUnits||atDocs.impUnits;
   if(un!=null){const e=document.getElementById('occUnits'); if(e&&!e.value)e.value=String(un);}
-  const inv=composeInvoiceNo();
-  if(inv){set('pjInvNo',inv); set('pjProjInvNo',inv);}
+  const invA=composeInvoiceNo('A'); if(invA)set('pjInvNo',invA);      // A = assessment (audit)
+  const invP=composeInvoiceNo('P'); if(invP)set('pjProjInvNo',invP);  // P = project
   try{pjSave();}catch(e){}
 }
 (function(){for(const f of PJ_FIELDS){const e=document.getElementById(f);
