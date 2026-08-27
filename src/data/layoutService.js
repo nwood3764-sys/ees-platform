@@ -283,7 +283,7 @@ export async function fetchProgramStateForCreate(seed) {
  */
 export async function fetchAvailableRecordTypes(
   objectName,
-  { state = null, parentObject = null, parentRecordTypeId = null } = {},
+  { state = null, parentObject = null, parentRecordTypeId = null, takenOnBuildingId = null } = {},
 ) {
   const runQuery = async (applyState) => {
     let query = supabase
@@ -310,9 +310,11 @@ export async function fetchAvailableRecordTypes(
     }))
   }
 
+  const markTaken = list => applyRecordTypesTakenOnBuilding(list, objectName, takenOnBuildingId)
+
   const scoped = await runQuery(true)
   if (!state || scoped.length > 0) {
-    return applyParentEligibility(scoped, objectName, parentObject, parentRecordTypeId)
+    return markTaken(await applyParentEligibility(scoped, objectName, parentObject, parentRecordTypeId))
   }
 
   // A state was supplied and nothing is scoped to it. What that MEANS depends on
@@ -334,7 +336,71 @@ export async function fetchAvailableRecordTypes(
     none._statesConfigured = statesInRecordTypes(all)
     return none
   }
-  return applyParentEligibility(all, objectName, parentObject, parentRecordTypeId)
+  return markTaken(await applyParentEligibility(all, objectName, parentObject, parentRecordTypeId))
+}
+
+/**
+ * Which opportunity record types a BUILDING already runs, as
+ * { recordTypeId: 'OPP-00153' }.
+ *
+ * A building runs each program once (enforce_one_opportunity_per_building_record_type,
+ * 2026-08-27). The database refuses the second one outright, so this exists to
+ * stop it being OFFERED in the first place — and, when it is offered, to name
+ * the opportunity that already holds the program rather than let the user pick
+ * it and meet an error on save.
+ *
+ * Soft-deleted opportunities do not count: deleting the duplicate is how the
+ * program is freed up again, and a record in the recycle bin must not keep
+ * blocking its own replacement.
+ */
+export async function fetchOpportunityRecordTypesTakenOnBuilding(buildingId) {
+  if (!buildingId || !UUID_RE.test(String(buildingId))) return {}
+  const { data, error } = await supabase
+    .from('opportunities')
+    .select('opportunity_record_type, opportunity_record_number')
+    .eq('building_id', buildingId)
+    .eq('opportunity_is_deleted', false)
+  if (error) throw error
+  const taken = {}
+  for (const row of data || []) {
+    if (!row.opportunity_record_type) continue
+    if (!taken[row.opportunity_record_type]) {
+      taken[row.opportunity_record_type] = row.opportunity_record_number || null
+    }
+  }
+  return taken
+}
+
+/**
+ * Mark (never silently drop) the record types this building already runs.
+ *
+ * Marked rather than filtered out on purpose: a program vanishing from the
+ * list with no explanation reads as a misconfiguration, and the user goes
+ * looking for it in Setup. Named and disabled, it says what actually happened
+ * and points at the record that holds it.
+ *
+ * A failed lookup leaves the list untouched — the database enforces the rule
+ * independently, so a hiccup here costs a worse prompt, never a bad record.
+ */
+async function applyRecordTypesTakenOnBuilding(recordTypes, objectName, buildingId) {
+  if (objectName !== 'opportunities' || !buildingId) return recordTypes
+  try {
+    const taken = await fetchOpportunityRecordTypesTakenOnBuilding(buildingId)
+    if (Object.keys(taken).length === 0) return recordTypes
+    const marked = recordTypes.map(rt => (
+      Object.prototype.hasOwnProperty.call(taken, rt.id)
+        ? { ...rt, taken: true, takenBy: taken[rt.id] }
+        : rt
+    ))
+    // Carry the markers the callers key off (_noneInState / _statesConfigured
+    // ride on the array itself, not on its entries).
+    marked._noneInState = recordTypes._noneInState
+    marked._statesConfigured = recordTypes._statesConfigured
+    return marked
+  } catch (err) {
+    console.warn('applyRecordTypesTakenOnBuilding: lookup failed', err)
+    return recordTypes
+  }
 }
 
 /**
@@ -2275,11 +2341,23 @@ export async function deleteRecord(tableName, recordId) {
   if (!meta.is_deleted_column) {
     throw new Error(`No soft-delete column configured for "${tableName}"`)
   }
-  const { error } = await supabase
+  // .select() so the write REPORTS ITSELF. A PostgREST update that matches no
+  // row — because RLS filtered the record out of this user's view, or the id
+  // is stale — returns success with zero rows and no error, so a bare update
+  // let a delete that never happened be announced as "Moved to recycle bin".
+  // A delete that did not take effect must say so.
+  const { data, error } = await supabase
     .from(tableName)
     .update({ [meta.is_deleted_column]: true })
     .eq('id', recordId)
+    .select('id')
   if (error) throw error
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error(
+      'the record was not updated. It may already be deleted, or your role may '
+      + 'not have permission to delete this record.',
+    )
+  }
   // Same reasoning as saveRecord: a delete affects list views all over
   // the app — invalidate everything so the next render is correct.
   invalidateAll()
