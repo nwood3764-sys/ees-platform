@@ -54,6 +54,7 @@ import {
   filterSlotDocuments,
 } from '../lib/documentSlots'
 import { documentTypeLabel } from '../lib/documentTypes'
+import { objectHasReportInclusion } from '../lib/reportInclusion'
 
 // ---------------------------------------------------------------------------
 // FileGallery — Salesforce-style related-list card for photos and documents.
@@ -240,6 +241,11 @@ export default function FileGalleryWidget({
     target === 'photos' &&
     parentTable === 'work_orders' &&
     !config.work_step_id
+  // "Include in report" is only offered where a report READS it. On every
+  // other object the flag writes a value nothing consumes, which invites
+  // somebody to curate a deliverable that will never be produced — see
+  // src/lib/reportInclusion.js.
+  const offersReportFlag = objectHasReportInclusion(parentTable)
   const isMobile = useIsMobile()
   const toast = useToast()
   const fileInputRef = useRef(null)
@@ -968,14 +974,14 @@ export default function FileGalleryWidget({
                   selectedCount={selectedIds.size}
                   totalCount={visiblePhotos.length}
                   downloading={downloading}
-                  reportCount={reportCount}
-                  showReportOnly={showReportOnly}
-                  onToggleReportFilter={() => setShowReportOnly(v => !v)}
+                  reportCount={offersReportFlag ? reportCount : 0}
+                  showReportOnly={offersReportFlag && showReportOnly}
+                  onToggleReportFilter={offersReportFlag ? () => setShowReportOnly(v => !v) : null}
                   onEnterSelect={() => setSelectMode(true)}
                   onCancel={exitSelect}
                   onSelectAll={selectAllVisible}
                   onDownload={handleDownloadSelected}
-                  onReportSelected={handleReportSelected}
+                  onReportSelected={offersReportFlag ? handleReportSelected : null}
                   selectedAllInReport={selectedAllInReport}
                   reportBusy={reportBusy}
                   onTagSelected={() => {
@@ -1029,7 +1035,7 @@ export default function FileGalleryWidget({
                   selectMode={selectMode}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
-                  onToggleReport={handleToggleReport}
+                  onToggleReport={offersReportFlag ? handleToggleReport : null}
                   onOpen={(idx) => setLightboxIdx(idx)}
                   onReprocess={handleReprocess}
                   onDelete={(p) => setConfirmDelete({ id: p.id, name: p.photo_number || 'photo' })}
@@ -1043,10 +1049,10 @@ export default function FileGalleryWidget({
                   selectedCount={selectedIds.size}
                   totalCount={visibleItems.length}
                   downloading={downloading}
-                  reportCount={reportCount}
-                  showReportOnly={showReportOnly}
-                  onToggleReportFilter={() => setShowReportOnly(v => !v)}
-                  onReportSelected={handleReportSelected}
+                  reportCount={offersReportFlag ? reportCount : 0}
+                  showReportOnly={offersReportFlag && showReportOnly}
+                  onToggleReportFilter={offersReportFlag ? () => setShowReportOnly(v => !v) : null}
+                  onReportSelected={offersReportFlag ? handleReportSelected : null}
                   selectedAllInReport={selectedAllInReport}
                   reportBusy={reportBusy}
                   onEnterSelect={() => setSelectMode(true)}
@@ -1072,7 +1078,7 @@ export default function FileGalleryWidget({
                   onToggleSelect={toggleSelect}
                   onPreview={(d) => setPreviewDoc(d)}
                   onDownload={handleDownloadDocument}
-                  onToggleReport={handleToggleReport}
+                  onToggleReport={offersReportFlag ? handleToggleReport : null}
                   onDelete={(d) => setConfirmDelete({ id: d.id, name: d.name || 'document' })}
                 />
               </>
@@ -1089,7 +1095,7 @@ export default function FileGalleryWidget({
           onClose={() => setLightboxIdx(null)}
           onIndexChange={setLightboxIdx}
           onTag={(p) => setTagPicker({ photos: [p] })}
-          onToggleReport={handleToggleReport}
+          onToggleReport={offersReportFlag ? handleToggleReport : null}
         />
       )}
 
@@ -1479,7 +1485,9 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
   })
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 10 }}>
-      {!selectMode && (
+      {/* No handler means this object has no report reading the flag, so the
+          filter is not offered either — see src/lib/reportInclusion.js. */}
+      {!selectMode && onToggleReportFilter && (
         <button
           onClick={onToggleReportFilter}
           title="Show only photos marked for the final report"
@@ -1525,6 +1533,7 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
               multi-select filters this is the point of selecting at all: filter
               to Roof / Ceiling + Windows & Doors, Select all, and mark them.
               Toggles to Remove once everything selected is already in. */}
+          {onReportSelected && (
           <button
             onClick={onReportSelected}
             disabled={selectedCount === 0 || reportBusy}
@@ -1545,6 +1554,7 @@ function PhotoToolbar({ selectMode, selectedCount, totalCount, downloading, repo
                 ? `Remove from report${selectedCount ? ` (${selectedCount})` : ''}`
                 : `Add to report${selectedCount ? ` (${selectedCount})` : ''}`}
           </button>
+          )}
           {/* Delete the selection. The per-photo delete is hover-revealed and
               hidden while selecting, so without this there was no way to remove
               a batch of photos you'd just uploaded (Nicholas, 2026-08-17).
@@ -1838,7 +1848,7 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, r
       display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
       gap: 8, marginBottom: 10, flexWrap: 'wrap',
     }}>
-      {!selectMode && (
+      {!selectMode && onToggleReportFilter && (
         <button
           onClick={onToggleReportFilter}
           title="Show only documents marked for the final report"
@@ -1865,6 +1875,7 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, r
           {/* Flag the whole selection for the final report. This is the point
               of the flag: say once which documents belong in the deliverable,
               instead of re-picking them on every generation. */}
+          {onReportSelected && (
           <button
             onClick={onReportSelected}
             disabled={selectedCount === 0 || reportBusy}
@@ -1885,6 +1896,7 @@ function DocumentToolbar({ selectMode, selectedCount, totalCount, downloading, r
                 ? `Remove from report${selectedCount ? ` (${selectedCount})` : ''}`
                 : `Add to report${selectedCount ? ` (${selectedCount})` : ''}`}
           </button>
+          )}
           {/* Blue, not red, per the design system; soft delete either way. */}
           <button
             onClick={onDeleteSelected}
