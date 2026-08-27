@@ -40,6 +40,7 @@ import { formatUsPhoneDisplay } from '../lib/fieldLinks'
 import { holdAppReload } from '../lib/appUpdate'
 import { contractorContactPairsFor, resolveContractorContact } from '../lib/contractorContact'
 import FieldValueLink from './FieldValueLink'
+import DeletedRecordBanner from './DeletedRecordBanner'
 import { useIsMobile, useMediaQuery } from '../lib/useMediaQuery'
 import { getTableListUrl, buildScopedListUrl, pushRecordSubPath } from '../lib/urlNav'
 import { objectNavFor, humanizeObjectLabel } from '../lib/objectNav'
@@ -1762,6 +1763,10 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
             state: programState,
             parentObject: parent?.parentObject || null,
             parentRecordTypeId: parent?.parentRecordTypeId || null,
+            // ...and the same building scoping: a building runs each program
+            // once, so a quick-created opportunity is not offered one the
+            // building already has.
+            takenOnBuildingId: table === 'opportunities' ? (effectiveSeed.building_id || null) : null,
           }).catch(() => [])
         }
         // First option page for each required-FK lookup field. Scoped fields
@@ -1910,10 +1915,24 @@ function QuickCreateModal({ table, labelField, objectLabel, onCancel, onCreated,
                 <>
                   <SearchableLookup
                     value={draft[f.name] || ''}
-                    options={recordTypes.map(rt => ({ value: rt.id, label: rt.label || rt.picklist_label }))}
+                    options={recordTypes.filter(rt => !rt.taken)
+                      .map(rt => ({ value: rt.id, label: rt.label || rt.picklist_label }))}
                     onChange={(val) => setVal(f.name, val || null)}
                     placeholder="— Select —"
                   />
+                  {/* A dropdown cannot show a disabled row with a reason the
+                      way the record-type picker can, so a program the building
+                      already runs is left out of the list and NAMED here
+                      instead — an option that just wasn't there would read as
+                      a missing configuration. */}
+                  {recordTypes.some(rt => rt.taken) && (
+                    <div style={{ marginTop: 6, fontSize: 11.5, color: C.textSecondary, lineHeight: 1.5 }}>
+                      Already on this building, so not listed:{' '}
+                      {recordTypes.filter(rt => rt.taken)
+                        .map(rt => `${rt.label}${rt.takenBy ? ` (${rt.takenBy})` : ''}`)
+                        .join(', ')}. A building runs each program once.
+                    </div>
+                  )}
                   {recordTypesNoneInState && (
                     <div style={{ marginTop: 6, fontSize: 11.5, color: C.textSecondary, lineHeight: 1.5 }}>
                       No record type runs in{' '}
@@ -7020,6 +7039,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   // unconstrained, which is the case for most objects.
   const prefillParentObject       = prefill?.__parentObject || null
   const prefillParentRecordTypeId = prefill?.__parentRecordTypeId || null
+  // A building runs each program once, so a new opportunity started from a
+  // building (or from anything that seeded one) must not be OFFERED a program
+  // that building already runs — the database refuses it on save. Only
+  // opportunities are keyed this way; every other object ignores it.
+  const prefillTakenOnBuildingId =
+    tableName === 'opportunities' ? (prefill?.building_id || null) : null
   useEffect(() => {
     if (!isCreate) { setPickerEvaluated(true); return }
     let cancelled = false
@@ -7041,9 +7066,14 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       state: prefillState,
       parentObject: prefillParentObject,
       parentRecordTypeId: prefillParentRecordTypeId,
+      takenOnBuildingId: prefillTakenOnBuildingId,
     })
       .then(rts => {
         if (cancelled) return
+        // Record types the building already runs cannot be saved, so they are
+        // not choices — the show/skip decision counts only the open ones, and
+        // must agree with the picker's own (see RecordTypePicker).
+        const selectable = rts.filter(rt => !rt.taken)
         if (rts._noneInState) {
           // No record type runs in this record's state. Leave the decision
           // unresolved so the picker renders and says so — skipping it here
@@ -7051,10 +7081,12 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
           // falls back to, which is the failure this whole rule exists to stop.
         } else if (rts.length === 0) {
           setPickedRecordType(false)
-        } else if (rts.length === 1) {
-          setPickedRecordType(rts[0])
+        } else if (selectable.length === 1) {
+          setPickedRecordType(selectable[0])
         }
-        // else: leave null so picker renders
+        // else: leave null so the picker renders — including the case where
+        // every program is already taken, which it explains rather than
+        // waving the create through with no record type.
         setPickerEvaluated(true)
       })
       .catch(err => {
@@ -7064,7 +7096,8 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         setPickerEvaluated(true)
       })
     return () => { cancelled = true }
-  }, [isCreate, tableName, prefillRecordTypeValue, prefillState, prefillParentObject, prefillParentRecordTypeId])
+  }, [isCreate, tableName, prefillRecordTypeValue, prefillState, prefillParentObject,
+      prefillParentRecordTypeId, prefillTakenOnBuildingId])
 
   // ── Load required-field set ────────────────────────────────────────────
   // Fetch the table's NOT NULL columns once per mount; render the red
@@ -8786,6 +8819,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
         state={prefillState}
         parentObject={prefillParentObject}
         parentRecordTypeId={prefillParentRecordTypeId}
+        takenOnBuildingId={prefillTakenOnBuildingId}
         onPick={(rt) => {
           // rt can be null when the picker auto-determined no RTs exist;
           // false marks 'no picker needed' so the load effect can proceed.
@@ -9228,6 +9262,20 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
       overflow: 'hidden',
       minHeight: 0,
     }}>
+      {/* A soft-deleted record renders in full — a recycle bin exists so the
+          record can still be read — but it says what it is, on every object.
+          Self-suppresses on a live record. `accounts` never reaches here: a
+          merged-away account returns its own notice above. */}
+      {!isCreate && (
+        <DeletedRecordBanner
+          tableName={tableName}
+          recordId={recordId}
+          record={record}
+          objectLabel={singularizeLabel(objectLabel)}
+          onRestored={() => setReloadTick(t => t + 1)}
+        />
+      )}
+
       {/* Sticky mobile header bar — back button + record number + icon actions.
           Replaces desktop breadcrumbs and the large header card's action row. */}
       {isMobile && (

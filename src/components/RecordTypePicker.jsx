@@ -19,6 +19,7 @@ import { scopedToState, statesInRecordTypes, needsStateChoice as recordOwesState
 export default function RecordTypePicker({
   tableName, objectLabel, state = null,
   parentObject = null, parentRecordTypeId = null,
+  takenOnBuildingId = null,
   onPick, onCancel,
 }) {
   const [loading, setLoading] = useState(true)
@@ -56,7 +57,7 @@ export default function RecordTypePicker({
     setChosenState('')
     setNoneInState(null)
     setStatesConfigured([])
-    fetchAvailableRecordTypes(tableName, { state, parentObject, parentRecordTypeId })
+    fetchAvailableRecordTypes(tableName, { state, parentObject, parentRecordTypeId, takenOnBuildingId })
       .then(rts => {
         if (cancelled) return
         setRecordTypes(rts)
@@ -70,10 +71,18 @@ export default function RecordTypePicker({
         // still owed: "only one nationwide type" is not the same as "only one
         // choice", and auto-picking it would skip the prompt entirely.
         if (recordOwesState(state, rts)) return
-        if (rts.length === 1) {
-          onPick(rts[0])
+        // A record type the building already runs is not a choice — it cannot
+        // be saved (enforce_one_opportunity_per_building_record_type). Only the
+        // ones still open count toward "is there a decision to make here?", so
+        // the last remaining program auto-picks exactly as a lone program
+        // always has, and a fully-taken building never auto-picks a type that
+        // would be refused on save.
+        const selectable = rts.filter(rt => !rt.taken)
+        if (selectable.length === 1) {
+          onPick(selectable[0])
           return
         }
+        if (selectable.length === 0 && rts.length > 0) return  // render, and say why
         if (rts.length === 0) {
           // No record types — caller should skip the picker entirely. Signal
           // by picking null so the parent advances without a record type.
@@ -88,7 +97,7 @@ export default function RecordTypePicker({
     // infinite fetch loop. We only want to refetch when the tableName
     // actually changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableName, state, parentObject, parentRecordTypeId])
+  }, [tableName, state, parentObject, parentRecordTypeId, takenOnBuildingId])
 
   // Cancel on Escape
   useEffect(() => {
@@ -100,7 +109,10 @@ export default function RecordTypePicker({
 
   // Hide entirely when the effect already auto-picked (one or zero RTs). A
   // pending state choice is never an auto-pick, however few types are showing.
-  if (!loading && !needsStateChoice && !noneInState && recordTypes.length <= 1 && !error) return null
+  const selectableCount = recordTypes.filter(rt => !rt.taken).length
+  const allTaken = recordTypes.length > 0 && selectableCount === 0
+  if (!loading && !needsStateChoice && !noneInState && !allTaken
+      && selectableCount <= 1 && !error) return null
 
   return (
     <div
@@ -211,6 +223,17 @@ export default function RecordTypePicker({
               {' '}Set up the {noneInState} record types in Setup → Object Manager first.
             </div>
           )}
+          {!loading && !error && allTaken && (
+            <div style={{
+              padding: 14, background: C.cardSecondary,
+              border: `1px solid ${C.border}`, borderRadius: 6,
+              color: C.textSecondary, fontSize: 12.5, lineHeight: 1.6, marginBottom: 10,
+            }}>
+              This building already runs every program available to it. A building
+              runs each program once, so there is no new opportunity to create here
+              — open the existing one below, or delete it first if it is a duplicate.
+            </div>
+          )}
           {!loading && !error && needsStateChoice && !chosenState && (
             <div style={{
               padding: 14, background: '#f7f9fc',
@@ -225,37 +248,52 @@ export default function RecordTypePicker({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {visibleRecordTypes.map(rt => {
                 const selected = chosenId === rt.id
+                // Already running on this building. Shown, disabled, and named
+                // — a program that simply disappeared would read as a missing
+                // configuration and send the user hunting through Setup.
+                const taken = rt.taken === true
                 return (
                   <button
                     key={rt.id}
-                    onClick={() => setChosenId(rt.id)}
-                    onDoubleClick={() => onPick(rt)}
+                    disabled={taken}
+                    title={taken ? `${rt.label} already runs on this building${rt.takenBy ? ` as ${rt.takenBy}` : ''}` : undefined}
+                    onClick={() => { if (!taken) setChosenId(rt.id) }}
+                    onDoubleClick={() => { if (!taken) onPick(rt) }}
                     style={{
                       textAlign: 'left',
                       padding: '12px 14px',
-                      background: selected ? '#e8f8f2' : '#fff',
-                      border: `1px solid ${selected ? '#3ecf8e' : C.border}`,
+                      background: taken ? C.cardSecondary : (selected ? '#e8f8f2' : '#fff'),
+                      border: `1px solid ${selected && !taken ? '#3ecf8e' : C.border}`,
                       borderRadius: 6,
-                      cursor: 'pointer',
+                      cursor: taken ? 'not-allowed' : 'pointer',
                       display: 'flex', alignItems: 'center', gap: 12,
                       fontFamily: 'inherit',
+                      opacity: taken ? 0.72 : 1,
                     }}
                   >
                     <div style={{
                       width: 18, height: 18, borderRadius: '50%',
-                      border: `2px solid ${selected ? '#3ecf8e' : C.border}`,
-                      background: selected ? '#3ecf8e' : '#fff',
+                      border: `2px solid ${selected && !taken ? '#3ecf8e' : C.border}`,
+                      background: selected && !taken ? '#3ecf8e' : '#fff',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       flexShrink: 0,
                     }}>
-                      {selected && (
+                      {selected && !taken && (
                         <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />
                       )}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: C.textPrimary }}>
+                      <div style={{
+                        fontSize: 13.5, fontWeight: 600,
+                        color: taken ? C.textSecondary : C.textPrimary,
+                      }}>
                         {rt.label}
                       </div>
+                      {taken && (
+                        <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 3 }}>
+                          Already on this building{rt.takenBy ? <> — <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{rt.takenBy}</span></> : null}
+                        </div>
+                      )}
                     </div>
                   </button>
                 )
