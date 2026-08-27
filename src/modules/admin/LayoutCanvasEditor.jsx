@@ -52,6 +52,11 @@ import { loadLayoutForCanvas, saveLayoutFromCanvas } from '../../builder/adapter
 import { describeObject } from '../../data/adminService'
 import { consumeLayoutReturnRecord } from '../../lib/urlNav'
 import RelatedListCanvasModal from './widgets/RelatedListCanvasModal'
+import { CardPaletteModal, CardConfigModal, CopyCardModal } from './widgets/CardPaletteModal'
+import {
+  CARD_WIDGET_TYPES,
+  cardDefinition, buildCardWidget, cardCopyTargets, copyCardTo,
+} from '../../lib/layoutCards.js'
 
 const WIDGET_LABELS = {
   field_group: 'Field Group', related_list: 'Related List', report: 'Report',
@@ -70,25 +75,11 @@ const RESERVED_TAB_NAMES = new Set(['details', 'related', 'activity'])
 // always-visible rail beside the canvas (WYSIWYG) — never inside a tab.
 const RIGHT_TAB = '__right_sidebar__'
 
-// Card widgets (related lists, galleries, conversation panels, reports,
-// publish history). Since 2026-07-26 they render exactly where they're
-// placed — inside their section, on that section's tab (or in the right
-// rail) — so the only render hint a tile needs is the right-sidebar one.
-const CARD_WIDGET_TYPES = new Set(['related_list', 'file_gallery', 'conversation_panel', 'report', 'prtsn_history'])
-
-// Objects whose records can host a Communications (two-way email) panel, and
-// the FK column on `conversations` that anchors a thread to them. A
-// conversation_panel widget stores its anchor as widget_config.fk, so this map
-// is what lets the editor place one on the right object. Mirror of the client
-// FK_TO_ANCHOR_OBJECT / server ANCHOR_FK_PARAM maps — keep them in sync when a
-// new anchor object is enabled.
-const OBJECT_CONVERSATION_FK = {
-  contacts: 'contact_id', accounts: 'account_id', projects: 'project_id',
-  service_appointments: 'service_appointment_id', work_orders: 'work_order_id',
-  incentive_applications: 'incentive_application_id', opportunities: 'opportunity_id',
-  assessments: 'assessment_id', buildings: 'building_id', properties: 'property_id',
-  units: 'unit_id',
-}
+// Which cards exist, which objects can host each one, and how a card is
+// copied into another placement all live in src/lib/layoutCards.js — imported
+// above. Cards render exactly where they're placed (inside their section, on
+// that section's tab, or in the right rail), so the only render hint a tile
+// needs is the right-sidebar one.
 
 function humanize(col, object) {
   let c = col
@@ -165,6 +156,12 @@ function normalizeColumns(sections) {
   }))
 }
 
+// Unique keys for newly placed sections and cards. A counter, not Date.now():
+// adding a card into a section created in the same tick produced two keys that
+// were equal, and two widgets keyed alike collide in the shared drag context.
+let _newKeySeq = 0
+const nextCardKey = () => String(++_newKeySeq)
+
 // Which drag family an id belongs to. Field ids are raw column names and
 // column-zone ids ("<sectionKey>::col:N") — neither can collide with the
 // "sec::" / "wgt::" / "wzone::" / "tabdrop::" prefixes since section keys
@@ -204,6 +201,12 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
   const [saveError, setSaveError] = useState(null)
   // { sectionKey, widgetKey|null } — related-list config modal target.
   const [relatedModal, setRelatedModal] = useState(null)
+  // { sectionKey } — the card palette ("+ Add Card"), or null.
+  const [cardPalette, setCardPalette] = useState(null)
+  // { sectionKey, widgetKey } — the config form for a gallery / report card.
+  const [cardConfig, setCardConfig] = useState(null)
+  // { sectionKey, widgetKey } — the copy-to-another-placement picker.
+  const [copyCard, setCopyCard] = useState(null)
   // Cross-object field drill-down (Salesforce-style): every FK on this
   // object is a group the admin can expand to place READ-ONLY fields from
   // the referenced record (e.g. property HUD fields on an opportunity).
@@ -331,9 +334,6 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
     }))
   }, [])
   const activate = useCallback((key) => setActiveSection(key), [])
-  const openRelatedModal = useCallback((sectionKey, widgetKey = null) => {
-    setRelatedModal({ sectionKey, widgetKey })
-  }, [])
 
   // ── Tab model ──────────────────────────────────────────────────────────────
   // Does a section belong on tab `t`? Right-rail sections never belong to a
@@ -588,22 +588,63 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
     }))
   }
 
-  // Place a Communications (two-way email) panel in a section. Anchored to the
-  // FK on `conversations` for this object (units → unit_id, etc.). One per
-  // layout — Salesforce shows a single communications area per record — so the
-  // affordance hides once a panel exists anywhere on the layout.
-  const addConversationPanel = useCallback((sectionKey) => {
-    const fk = OBJECT_CONVERSATION_FK[meta?.object]
-    if (!fk) return
+  // ── Cards ──────────────────────────────────────────────────────────────────
+  // One path for every card type. The palette decides WHAT (src/lib/layoutCards
+  // says which cards this object can host and why not, when it can't); this
+  // places it and, for the cards that need settings, opens their config form
+  // straight away so a freshly placed card is never left unconfigured.
+  const openCardPalette = useCallback((sectionKey) => setCardPalette({ sectionKey }), [])
+
+  const addCard = useCallback((cardId) => {
+    const sectionKey = cardPalette?.sectionKey
+    setCardPalette(null)
+    if (!sectionKey) return
+    const card = cardDefinition(cardId)
+    if (!card) return
+
+    // A related list is configured before it exists — it needs a target table
+    // and an FK, and an empty one would fail the DB's own validation on save.
+    if (card.configure === 'related_list') {
+      setRelatedModal({ sectionKey, widgetKey: null })
+      return
+    }
+
+    const widgetKey = `w-new-${nextCardKey()}`
+    const widget = buildCardWidget(cardId, meta?.object, widgetKey)
+    if (!widget) return
     setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
-      ...sec,
-      widgets: [...(sec.widgets || []), {
-        key: `w-new-${Date.now()}`, type: 'conversation_panel', title: 'Communications',
-        column: 1, size: 'medium', isRequired: false,
-        config: { fk, table: 'conversations', channel_filter: null },
-      }],
+      ...sec, widgets: [...(sec.widgets || []), widget],
     }))
-  }, [meta?.object])
+    if (card.configure) setCardConfig({ sectionKey, widgetKey })
+  }, [cardPalette, meta?.object])
+
+  // Configure a placed card: related lists open their own builder, galleries
+  // and reports open the card config form. The tile passes its own type so
+  // this never has to read back through stale state.
+  const openCardConfig = useCallback((sectionKey, widgetKey, widgetType) => {
+    if (widgetType === 'related_list') setRelatedModal({ sectionKey, widgetKey })
+    else setCardConfig({ sectionKey, widgetKey })
+  }, [])
+
+  const openCopyCard = useCallback((sectionKey, widgetKey) => setCopyCard({ sectionKey, widgetKey }), [])
+
+  // Copy a card into another section — the right rail, another tab, a new
+  // section — leaving the original exactly where it is. This is what makes
+  // "the same card on the side AND on the related tab" a placement choice
+  // rather than a rebuild.
+  const applyCopyCard = (target) => {
+    const widgetKey = copyCard?.widgetKey
+    setCopyCard(null)
+    if (!widgetKey || !target) return
+    const keys = { widgetKey: `w-new-${nextCardKey()}`, sectionKey: `sec-new-${nextCardKey()}` }
+    setSections(prev => copyCardTo(prev, widgetKey, target, keys))
+    if (target.kind === 'new') {
+      // Follow the copy: land on the tab (or the rail) it was just placed on,
+      // so the admin sees where it went instead of guessing.
+      setActiveTab(target.placement === 'right' ? RIGHT_TAB : (target.tab || 'Details'))
+      setActiveSection(keys.sectionKey)
+    }
+  }
 
   const applyRelatedModal = ({ title, config }) => {
     const { sectionKey, widgetKey } = relatedModal
@@ -613,7 +654,7 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
       setSections(s => s.map(sec => sec.key !== sectionKey ? sec : {
         ...sec,
         widgets: [...(sec.widgets || []), {
-          key: `w-new-${Date.now()}`, type: 'related_list', title,
+          key: `w-new-${nextCardKey()}`, type: 'related_list', title,
           column: 1, size: 'medium', isRequired: false, config,
         }],
       }))
@@ -681,6 +722,15 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
   const modalWidget = relatedModal?.widgetKey
     ? sections.find(s => s.key === relatedModal.sectionKey)?.widgets?.find(w => w.key === relatedModal.widgetKey)
     : null
+  const configWidget = cardConfig
+    ? sections.find(s => s.key === cardConfig.sectionKey)?.widgets?.find(w => w.key === cardConfig.widgetKey)
+    : null
+  const copyWidget = copyCard
+    ? sections.find(s => s.key === copyCard.sectionKey)?.widgets?.find(w => w.key === copyCard.widgetKey)
+    : null
+  const paletteSection = cardPalette
+    ? sections.find(s => s.key === cardPalette.sectionKey)
+    : null
 
   // The canvas shows ONLY the active tab's sections — the whole point of the
   // tab bar: what you see is exactly what that tab renders on the record page.
@@ -688,11 +738,6 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
   const visibleSections = sections.filter(s => sectionInTab(s, activeTab))
   const railSections = sections.filter(s => (s.placement || 'main') === 'right')
   const deleteTabSectionCount = deleteTab ? sections.filter(s => (s.tab || 'Details') === deleteTab).length : 0
-
-  // A Communications panel can be added when this object supports conversations
-  // and the layout doesn't already have one (one comms area per record).
-  const hasConversationPanel = sections.some(s => (s.widgets || []).some(w => w.type === 'conversation_panel'))
-  const canAddConversation = !!OBJECT_CONVERSATION_FK[meta.object] && !hasConversationPanel
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: C.page }}>
@@ -860,8 +905,8 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
                       {visibleSections.map(sec => (
                         <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
                           onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
-                          onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal}
-                          canAddConversation={canAddConversation} onAddConversation={addConversationPanel} />
+                          onPatchWidget={patchWidget} onRemoveWidget={removeWidget}
+                          onOpenCardPalette={openCardPalette} onOpenCardConfig={openCardConfig} onCopyCard={openCopyCard} />
                       ))}
                     </SortableContext>
                     <button onClick={() => addSection('end')} style={addSectionBtn()}>
@@ -875,8 +920,8 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
                   {railSections.map(sec => (
                     <SectionCard key={sec.key} section={sec} object={meta.object} active={activeSection === sec.key}
                       onActivate={activate} onPatch={patchSection} onRemove={removeSection} onSetFields={setFieldGroupFields}
-                      onPatchWidget={patchWidget} onRemoveWidget={removeWidget} onOpenRelatedModal={openRelatedModal}
-                      canAddConversation={canAddConversation} onAddConversation={addConversationPanel} />
+                      onPatchWidget={patchWidget} onRemoveWidget={removeWidget}
+                      onOpenCardPalette={openCardPalette} onOpenCardConfig={openCardConfig} onCopyCard={openCopyCard} />
                   ))}
                 </SortableContext>
               </RightRail>
@@ -911,6 +956,39 @@ export default function LayoutCanvasEditor({ layoutId, objectLabel, onBack, onNa
           initial={modalWidget ? { title: modalWidget.title, config: modalWidget.config || {} } : null}
           onClose={() => setRelatedModal(null)}
           onApply={applyRelatedModal}
+        />
+      )}
+
+      {cardPalette && (
+        <CardPaletteModal
+          object={meta.object}
+          objectLabel={objectLabel}
+          sections={sections}
+          sectionLabel={paletteSection?.label || 'this section'}
+          onPick={addCard}
+          onClose={() => setCardPalette(null)}
+        />
+      )}
+
+      {cardConfig && configWidget && (
+        <CardConfigModal
+          widget={configWidget}
+          object={meta.object}
+          sections={sections}
+          onClose={() => setCardConfig(null)}
+          onApply={({ title, config }) => {
+            patchWidget(cardConfig.sectionKey, cardConfig.widgetKey, { title, config })
+            setCardConfig(null)
+          }}
+        />
+      )}
+
+      {copyCard && copyWidget && (
+        <CopyCardModal
+          widget={copyWidget}
+          targets={cardCopyTargets(sections, copyCard.sectionKey, customTabNames)}
+          onCopy={applyCopyCard}
+          onClose={() => setCopyCard(null)}
         />
       )}
     </div>
@@ -1071,8 +1149,8 @@ function NewTabInput({ onCommit }) {
 const SectionCard = memo(function SectionCard({
   section, object, active,
   onActivate, onPatch, onRemove, onSetFields,
-  onPatchWidget, onRemoveWidget, onOpenRelatedModal,
-  canAddConversation, onAddConversation,
+  onPatchWidget, onRemoveWidget,
+  onOpenCardPalette, onOpenCardConfig, onCopyCard,
 }) {
   const fg = (section.widgets || []).find(w => w.type === 'field_group')
   const others = (section.widgets || []).filter(w => w.type !== 'field_group')
@@ -1122,9 +1200,9 @@ const SectionCard = memo(function SectionCard({
           widgets={others}
           onPatchWidget={onPatchWidget}
           onRemoveWidget={onRemoveWidget}
-          onOpenRelatedModal={onOpenRelatedModal}
-          canAddConversation={canAddConversation}
-          onAddConversation={onAddConversation}
+          onOpenCardPalette={onOpenCardPalette}
+          onOpenCardConfig={onOpenCardConfig}
+          onCopyCard={onCopyCard}
         />
       </div>
     </div>
@@ -1136,7 +1214,7 @@ const SectionCard = memo(function SectionCard({
 // ("wzone::<sectionKey>") so a related-list card can be dragged within its
 // section or into another one — the resulting array order persists as
 // widget_position, which is exactly the order the Related tab renders cards.
-function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWidget, onOpenRelatedModal, canAddConversation, onAddConversation }) {
+function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWidget, onOpenCardPalette, onOpenCardConfig, onCopyCard }) {
   const { setNodeRef, isOver } = useDroppable({ id: `wzone::${sectionKey}` })
   return (
     <div ref={setNodeRef} style={{
@@ -1147,29 +1225,30 @@ function WidgetZone({ sectionKey, placement, widgets, onPatchWidget, onRemoveWid
       <SortableContext items={widgets.map(w => `wgt::${w.key}`)} strategy={verticalListSortingStrategy}>
         {widgets.map(w => (
           <WidgetTile key={w.key} widget={w} sectionKey={sectionKey} placement={placement}
-            onPatch={onPatchWidget} onRemove={onRemoveWidget} onOpenRelatedModal={onOpenRelatedModal} />
+            onPatch={onPatchWidget} onRemove={onRemoveWidget}
+            onOpenCardConfig={onOpenCardConfig} onCopyCard={onCopyCard} />
         ))}
       </SortableContext>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button onClick={() => onOpenRelatedModal(sectionKey, null)}
-          style={{ flex: 1, padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
-            color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
-          + Add Related List
-        </button>
-        {canAddConversation && (
-          <button onClick={() => onAddConversation(sectionKey)}
-            title="Add a two-way email Communications panel anchored to this record"
-            style={{ flex: 1, padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
-              color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
-            + Add Communications
-          </button>
-        )}
-      </div>
+      <button onClick={() => onOpenCardPalette(sectionKey)}
+        title="Add a related list, a documents or photos gallery, a report, a Communications panel…"
+        style={{ width: '100%', padding: '7px', fontSize: 12, fontWeight: 500, background: 'transparent',
+          color: C.emeraldMid, border: `1px dashed ${C.border}`, borderRadius: 6, cursor: 'pointer' }}>
+        + Add Card
+      </button>
     </div>
   )
 }
 
-function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenRelatedModal }) {
+// Card types that carry settings of their own. Everything else (Communications,
+// Work Plan, Publish History) is fully described by its type and its anchor.
+const CONFIGURABLE_CARD_TYPES = new Set(['related_list', 'file_gallery', 'report'])
+
+const cardTileBtn = () => ({
+  padding: '3px 8px', fontSize: 11, fontWeight: 500, background: C.card, color: C.textSecondary,
+  border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+})
+
+function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenCardConfig, onCopyCard }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `wgt::${widget.key}` })
   // Cards render exactly where they're placed — inside their section on its
   // tab. The one placement worth calling out is the right rail.
@@ -1197,11 +1276,18 @@ function WidgetTile({ widget, sectionKey, placement, onPatch, onRemove, onOpenRe
         {WIDGET_LABELS[widget.type] || widget.type}
         {renderHint && <span style={{ color: C.sky }}> · {renderHint}</span>}
       </span>
-      {widget.type === 'related_list' && (
-        <button onClick={() => onOpenRelatedModal(sectionKey, widget.key)} title="Configure table, FK, and columns"
-          style={{ padding: '3px 8px', fontSize: 11, fontWeight: 500, background: C.card, color: C.textSecondary,
-            border: `1px solid ${C.border}`, borderRadius: 4, cursor: 'pointer', flexShrink: 0 }}>
+      {CONFIGURABLE_CARD_TYPES.has(widget.type) && (
+        <button onClick={() => onOpenCardConfig(sectionKey, widget.key, widget.type)}
+          title={widget.type === 'related_list' ? 'Configure table, FK, and columns' : 'Configure this card'}
+          style={cardTileBtn()}>
           Configure
+        </button>
+      )}
+      {isCard && (
+        <button onClick={() => onCopyCard(sectionKey, widget.key)}
+          title="Place a copy of this card somewhere else too — the right sidebar, another tab — without moving this one"
+          style={cardTileBtn()}>
+          Copy to…
         </button>
       )}
       <button onClick={() => onRemove(sectionKey, widget.key)} title="Remove widget" style={miniBtn()}>×</button>

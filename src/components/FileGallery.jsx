@@ -53,6 +53,7 @@ import {
   documentSlotHelpText,
   filterSlotDocuments,
 } from '../lib/documentSlots'
+import { documentTypeLabel } from '../lib/documentTypes'
 
 // ---------------------------------------------------------------------------
 // FileGallery — Salesforce-style related-list card for photos and documents.
@@ -1959,6 +1960,11 @@ function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPr
         { month: 'short', day: 'numeric', year: 'numeric' })
     : null
 
+  // The type in words. listDocuments hydrates the label from the
+  // (documents, document_type) picklist; a row that reached here another way
+  // still humanizes its slug rather than printing it raw.
+  const typeLabel = doc._document_type_label ?? documentTypeLabel(doc.document_type, null)
+
   // While selecting, the whole row is the checkbox — clicking a row to open a
   // preview mid-selection is how you lose a selection you were building.
   const open = () => {
@@ -2015,7 +2021,7 @@ function DocumentRow({ doc, isMobile, selectMode, selected, onToggleSelect, onPr
           fontSize: 11, color: C.textMuted,
           display: 'flex', gap: 8, marginTop: 1,
         }}>
-          {doc.document_type && <span>{doc.document_type}</span>}
+          {typeLabel && <span>{typeLabel}</span>}
           {sizeStr && <span>· {sizeStr}</span>}
           {dateStr && !isMobile && <span>· {dateStr}</span>}
         </div>
@@ -2433,6 +2439,7 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
         { year: 'numeric', month: 'short', day: 'numeric',
           hour: 'numeric', minute: '2-digit' })
     : null
+  const typeLabel = doc._document_type_label ?? documentTypeLabel(doc.document_type, null)
 
   return (
     <div
@@ -2490,7 +2497,7 @@ export function DocumentPreviewModal({ doc: docProp, onDownload, onClose }) {
               display: 'flex', gap: 8, marginTop: 1,
               flexWrap: 'wrap',
             }}>
-              {doc.document_type && <span>{doc.document_type}</span>}
+              {typeLabel && <span>{typeLabel}</span>}
               {sizeStr && <span>· {sizeStr}</span>}
               {createdStr && !isMobile && <span>· Uploaded {createdStr}</span>}
             </div>
