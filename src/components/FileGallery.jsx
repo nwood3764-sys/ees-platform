@@ -28,7 +28,7 @@ import {
   reprocessPhoto,
   repairUnrenderedPhotos,
   fetchPhotoTagOptions,
-  fetchWorkStepPhotoPrompts,
+  fetchWorkPlanPhotoTags,
   setPhotoTag,
   uploadDocument,
   listDocuments,
@@ -525,10 +525,14 @@ export default function FileGalleryWidget({
     fetchPhotoTagOptions()
       .then(opts => { if (!cancelled) setTagVocabulary(opts) })
       .catch(() => {})
-    // The work order's OWN prompts — the vocabulary that matches what was
-    // actually walked. Without these the picker offers only generic tags.
-    if (parentTable === 'work_orders' && parentRecordId) {
-      fetchWorkStepPhotoPrompts(parentRecordId)
+    // The work PLAN's own vocabulary — its work steps and their photo prompts.
+    // Resolved from either end, because the Photos card lives on the work order
+    // AND on each work step; gating this on work orders alone is exactly why a
+    // work step's picker showed nothing but generic tags.
+    if (parentRecordId && (parentTable === 'work_orders' || parentTable === 'work_steps')) {
+      fetchWorkPlanPhotoTags(parentTable === 'work_orders'
+        ? { workOrderId: parentRecordId }
+        : { workStepId: parentRecordId })
         .then(list => { if (!cancelled) setTagPrompts(list) })
         .catch(() => {})
     }

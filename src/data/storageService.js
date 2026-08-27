@@ -689,47 +689,88 @@ export async function fetchPhotoTagOptions() {
 }
 
 /**
- * The photo prompts this work order's own work plan asks for — "Roofs",
- * "Windows", "Service Hot Water Systems" — read from the work step templates
- * behind its steps.
+ * Every tag this work order's WORK PLAN offers — the vocabulary that actually
+ * describes the job (Nicholas, 2026-08-25: "I need the tags for that work plan
+ * to display so any user can select a photo and re-tag it").
  *
- * This is the vocabulary that actually matters on an assessment, and it is
- * per-job: a Multifamily Energy Assessment asks for different shots than an
- * insulation removal. It cannot live in the global picklist for that reason,
- * which is why the tag picker reads both.
+ * Two kinds, in the order the plan runs:
  *
- * Returns [] on any failure — a tag picker missing a group is worse than one
- * that throws, but only slightly, and the generic tags still work.
+ *   the work step itself   "Roof / Ceiling", "Service Hot Water" — the section
+ *                          a photo documents, and the same names the assessment
+ *                          report groups by, so tagging lines the two up.
+ *   its photo prompts      the named shots that step asks for, where it has any.
+ *
+ * Resolvable from EITHER end: pass the work order, or pass a work step and the
+ * work order is looked up from it. That matters because the Photos card lives
+ * on both — gating this on work orders alone is why a work step's tag picker
+ * showed nothing but generic tags.
+ *
+ * Returns [] on any failure; a missing group is survivable, a thrown picker is
+ * not.
  */
-export async function fetchWorkStepPhotoPrompts(workOrderId) {
-  if (!workOrderId) return []
+export async function fetchWorkPlanPhotoTags({ workOrderId = null, workStepId = null } = {}) {
+  let orderId = workOrderId
+  if (!orderId && workStepId) {
+    const { data, error } = await supabase
+      .from('work_steps')
+      .select('work_order_id')
+      .eq('id', workStepId)
+      .maybeSingle()
+    if (error || !data?.work_order_id) return []
+    orderId = data.work_order_id
+  }
+  if (!orderId) return []
+
   const { data: steps, error: stepErr } = await supabase
     .from('work_steps')
-    .select('work_step_template_id')
-    .eq('work_order_id', workOrderId)
-    .eq('is_deleted', false)
-  if (stepErr) return []
-  const templateIds = Array.from(new Set(
-    (steps || []).map(s => s.work_step_template_id).filter(Boolean)
-  ))
-  if (templateIds.length === 0) return []
+    .select('id, work_step_name, work_step_template_id, work_step_execution_order')
+    .eq('work_order_id', orderId)
+    .order('work_step_execution_order', { ascending: true })
+  if (stepErr || !steps) return []
 
-  const { data, error } = await supabase
-    .from('work_step_template_fields')
-    .select('wstf_field_name, wstf_field_label, wstf_sort_order, work_step_template_id')
-    .in('work_step_template_id', templateIds)
-    .eq('wstf_field_type', 'photo')
-    .eq('wstf_is_deleted', false)
-    .order('wstf_sort_order', { ascending: true })
-  if (error) return []
+  const templateIds = Array.from(new Set(steps.map(s => s.work_step_template_id).filter(Boolean)))
+  const promptsByTemplate = new Map()
+  if (templateIds.length > 0) {
+    const { data: fields } = await supabase
+      .from('work_step_template_fields')
+      .select('work_step_template_id, wstf_field_name, wstf_field_label, wstf_sort_order')
+      .in('work_step_template_id', templateIds)
+      .eq('wstf_field_type', 'photo')
+      .eq('wstf_is_deleted', false)
+      .order('wstf_sort_order', { ascending: true })
+    for (const f of fields || []) {
+      if (!promptsByTemplate.has(f.work_step_template_id)) {
+        promptsByTemplate.set(f.work_step_template_id, [])
+      }
+      promptsByTemplate.get(f.work_step_template_id).push(f)
+    }
+  }
 
-  const seen = new Set()
+  // Deduped on BOTH value and label. A step and its single photo prompt often
+  // read the same ("Foundation / Floor" the step, "Foundation / Floor" the
+  // prompt) while carrying different stored values, so a value-only check
+  // leaves the picker showing the same words twice with no way to tell them
+  // apart. The step name wins, because it is added first and is the one a
+  // person reaches for.
+  const seenValues = new Set()
+  const seenLabels = new Set()
   const out = []
-  for (const row of data || []) {
-    const value = String(row.wstf_field_name || '').trim()
-    if (!value || seen.has(value.toLowerCase())) continue
-    seen.add(value.toLowerCase())
-    out.push({ value, label: row.wstf_field_label || value })
+  const push = (value, label) => {
+    const v = String(value || '').trim()
+    if (!v) return
+    const text = String(label || v).trim()
+    if (seenValues.has(v.toLowerCase()) || seenLabels.has(text.toLowerCase())) return
+    seenValues.add(v.toLowerCase())
+    seenLabels.add(text.toLowerCase())
+    out.push({ value: v, label: text })
+  }
+
+  for (const step of steps) {
+    // The step name first — it is the one a person reaches for.
+    push(step.work_step_name, step.work_step_name)
+    for (const f of promptsByTemplate.get(step.work_step_template_id) || []) {
+      push(f.wstf_field_name, f.wstf_field_label || f.wstf_field_name)
+    }
   }
   return out
 }

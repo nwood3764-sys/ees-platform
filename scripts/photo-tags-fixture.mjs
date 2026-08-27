@@ -216,7 +216,7 @@ const PROMPTS = [
   { value: 'roof_photo', label: 'Roofs' },
   { value: 'window_photo', label: 'Windows' },
 ]
-check("the job's own prompts come first, then the general tags",
+check('the work plan comes first, then the general tags',
   G({ prompts: PROMPTS, picklist: PICKLIST }),
   [['work-plan', ['roof_photo', 'window_photo']],
    ['picklist', ['Before', 'Damage or Deficiency']]])
