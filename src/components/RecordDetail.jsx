@@ -29,6 +29,7 @@ const ManageSharedRecordsModal             = lazy(() => import('./ManageSharedRe
 const LogActivityModal                     = lazy(() => import('./LogActivityModal'))
 const QualityInstallPhotoPickerModal       = lazy(() => import('./QualityInstallPhotoPickerModal'))
 const EnergyAssessmentReportModal          = lazy(() => import('./EnergyAssessmentReportModal'))
+const EnrollmentSubmissionReportModal      = lazy(() => import('./EnrollmentSubmissionReportModal'))
 // The work plan runner from LEAP Pad, mounted inside the work order record page
 // so desk staff follow steps and upload evidence without leaving the main app.
 // Same component the technician PWA runs — one engine, not a desktop copy.
@@ -6897,6 +6898,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
   const [showSubmittalEditor, setShowSubmittalEditor] = useState(false)
   const [showQiToolModal, setShowQiToolModal] = useState(false)
   const [showAssessmentReportModal, setShowAssessmentReportModal] = useState(false)
+  const [showSubmissionReportModal, setShowSubmissionReportModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   // Set when the loaded account was merged away by the Merge Accounts tool
   // (soft-deleted loser). Null = live record, or still resolving the survivor.
@@ -9203,6 +9205,7 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
     [ACTION_KEYS.EDIT_SUBMITTAL_TEMPLATE]: () => setShowSubmittalEditor(true),
     [ACTION_KEYS.GENERATE_QUALITY_INSTALL_TOOL]: () => setShowQiToolModal(true),
     [ACTION_KEYS.GENERATE_ENERGY_ASSESSMENT_REPORT]: () => setShowAssessmentReportModal(true),
+    [ACTION_KEYS.GENERATE_SUBMISSION_RECORD]:        () => setShowSubmissionReportModal(true),
     [ACTION_KEYS.GENERATE_PREAPPROVAL_APPLICATION]: handleOpenPreapprovalForm,
     [ACTION_KEYS.SCHEDULE_WORK_ORDERS]:   () => setShowSchedulerWizard(true),
     [ACTION_KEYS.RESCHEDULE_WORK_ORDERS]: () => setShowRescheduleWizard(true),
@@ -10035,6 +10038,16 @@ export default function RecordDetail({ tableName, recordId, onBack, mode = 'view
             workOrderId={recordId}
             workOrder={record}
             onClose={() => setShowAssessmentReportModal(false)}
+            onSaved={() => { setReloadTick(t => t + 1) }}
+          />
+        )}
+
+        {/* Enrollment Submission Record — what this enrollment filed with the
+            program, and the attachments that went with it (enrollments only). */}
+        {showSubmissionReportModal && tableName === 'enrollments' && (
+          <EnrollmentSubmissionReportModal
+            enrollmentId={recordId}
+            onClose={() => setShowSubmissionReportModal(false)}
             onSaved={() => { setReloadTick(t => t + 1) }}
           />
         )}
