@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// EnrollmentSubmissionReportModal — generates the Enrollment Submission Record
-// for one enrollment.
+// SubmittedEnrollmentModal — generates the Submitted Enrollment document for
+// one enrollment.
 //
 // This is the record of a FILING: what was submitted to the program, and the
 // attachments that went with it, each with a link that still works when
@@ -19,15 +19,15 @@ import { C } from '../data/constants'
 import { Icon } from './UI'
 import { useToast } from './Toast'
 import {
-  loadSubmissionReportContext, attachSubmissionDocuments,
-  saveSubmissionReportToEnrollment,
-} from '../data/enrollmentSubmissionReportService'
-import { buildSubmissionRecordPdf } from '../data/paperworkModel'
-import { SUBMISSION_REPORT_KIND, submissionFileName } from '../lib/enrollmentSubmissionReport'
+  loadSubmittedEnrollmentContext, attachSubmittedEnrollmentDocuments,
+  saveSubmittedEnrollmentToRecord,
+} from '../data/submittedEnrollmentService'
+import { buildSubmittedEnrollmentPdf } from '../data/paperworkModel'
+import { SUBMITTED_ENROLLMENT_KIND, submittedEnrollmentFileName } from '../lib/submittedEnrollment'
 
 const CARD_SECONDARY = '#f7f9fc'
 
-export default function EnrollmentSubmissionReportModal({ enrollmentId, onClose, onSaved }) {
+export default function SubmittedEnrollmentModal({ enrollmentId, onClose, onSaved }) {
   const toast = useToast()
   const [ctx, setCtx] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
@@ -45,7 +45,7 @@ export default function EnrollmentSubmissionReportModal({ enrollmentId, onClose,
     let alive = true
     ;(async () => {
       try {
-        const c = await loadSubmissionReportContext(enrollmentId)
+        const c = await loadSubmittedEnrollmentContext(enrollmentId)
         if (!alive) return
         setCtx(c)
         setFlaggedOnly(c.counts.documentsFlagged > 0)
@@ -61,18 +61,18 @@ export default function EnrollmentSubmissionReportModal({ enrollmentId, onClose,
     setGenerating(true)
     setProgress({ done: 0, total: ctx.counts.documentsTotal })
     try {
-      await attachSubmissionDocuments(ctx.model, ctx.documents, {
+      await attachSubmittedEnrollmentDocuments(ctx.model, ctx.documents, {
         flaggedOnly,
         onProgress: (done, total) => setProgress({ done, total }),
       })
-      const blob = await buildSubmissionRecordPdf(
-        ctx.model, SUBMISSION_REPORT_KIND, ctx.template?.sections || null)
-      const fileName = submissionFileName(
+      const blob = await buildSubmittedEnrollmentPdf(
+        ctx.model, SUBMITTED_ENROLLMENT_KIND, ctx.template?.sections || null)
+      const fileName = submittedEnrollmentFileName(
         ctx.def, ctx.model.enrollment?.number, ctx.model.property?.name)
       if (result?.url) URL.revokeObjectURL(result.url)
       setResult({ blob, fileName, url: URL.createObjectURL(blob) })
     } catch (e) {
-      toast.error(`Could not generate the submission record: ${e.message || e}`)
+      toast.error(`Could not generate the Submitted Enrollment: ${e.message || e}`)
     } finally { setGenerating(false) }
   }
 
@@ -80,12 +80,12 @@ export default function EnrollmentSubmissionReportModal({ enrollmentId, onClose,
     if (!result) return
     setSaving(true)
     try {
-      await saveSubmissionReportToEnrollment(enrollmentId, result.blob, result.fileName)
+      await saveSubmittedEnrollmentToRecord(enrollmentId, result.blob, result.fileName)
       toast.success(`Saved to this enrollment’s Documents: ${result.fileName}`)
       if (onSaved) onSaved()
       if (onClose) onClose()
     } catch (e) {
-      toast.error(`Could not save the submission record: ${e.message || e}`)
+      toast.error(`Could not save the Submitted Enrollment: ${e.message || e}`)
     } finally { setSaving(false) }
   }
 
@@ -107,7 +107,7 @@ export default function EnrollmentSubmissionReportModal({ enrollmentId, onClose,
         <div style={header}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>
-              {ctx?.def?.title || 'Enrollment Submission Record'}
+              {ctx?.def?.title || 'Submitted Enrollment'}
             </div>
             <div style={{
               fontSize: 12, color: C.textMuted, marginTop: 2,
@@ -141,7 +141,7 @@ export default function EnrollmentSubmissionReportModal({ enrollmentId, onClose,
                   tone={counts.documentsFlagged ? undefined : 'warn'} />
               </div>
 
-              <div style={sectionLabel}>Documents in this record</div>
+              <div style={sectionLabel}>Documents in this document</div>
               <label style={{
                 display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5,
                 color: C.textPrimary, padding: '8px 0', cursor: counts.documentsFlagged ? 'pointer' : 'default',
@@ -166,8 +166,8 @@ export default function EnrollmentSubmissionReportModal({ enrollmentId, onClose,
               </label>
               <div style={{ fontSize: 12, color: C.textMuted }}>
                 {listedCount === 0
-                  ? 'No documents are attached to this enrollment — the record will still list what was submitted.'
-                  : `${listedCount} document${listedCount === 1 ? '' : 's'} will be listed, each with a download link good for one year.`}
+                  ? 'No documents are attached to this enrollment — it will still list what was submitted.'
+                  : `${listedCount} document${listedCount === 1 ? '' : 's'} will be listed, each with a short download link good for one year.`}
               </div>
 
               {counts.summaryBlank > 0 && (
@@ -175,8 +175,8 @@ export default function EnrollmentSubmissionReportModal({ enrollmentId, onClose,
                   <Icon path="M12 9v2m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" size={15} color="#1e466b" />
                   <div>
                     {counts.summaryBlank} submitted field{counts.summaryBlank === 1 ? ' was' : 's were'} left
-                    blank. They print with an em dash rather than disappearing, so this record shows
-                    what was and was not filled in.
+                    blank. They print with an em dash rather than disappearing, so the document
+                    shows what was and was not filled in.
                   </div>
                 </div>
               )}
@@ -221,7 +221,7 @@ export default function EnrollmentSubmissionReportModal({ enrollmentId, onClose,
             {!result && (
               <button onClick={handleGenerate} disabled={!ctx || generating}
                 style={{ ...btnPrimary, opacity: (!ctx || generating) ? 0.6 : 1 }}>
-                {generating ? 'Generating…' : 'Generate Record'}
+                {generating ? 'Generating…' : 'Generate'}
               </button>
             )}
           </div>

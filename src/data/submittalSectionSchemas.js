@@ -219,8 +219,8 @@ export const SUBMITTAL_SECTION_SCHEMAS = {
       description: 'Stamped on every page with the work order number, the building, and “Page N of M”. Carries no street address or contact line — the address on this report is the building’s. Place it last.' },
   ],
 
-  // --- Enrollment Submission Record ---------------------------------------
-  submission_cover: [
+  // --- Submitted Enrollment ------------------------------------------------
+  submitted_enrollment_cover: [
     { key: 'title', label: 'Title', type: 'text',
       placeholder: 'Leave blank to use the filing’s own name' },
     { key: 'subtitle', label: 'Subtitle', type: 'text',
@@ -232,7 +232,7 @@ export const SUBMITTAL_SECTION_SCHEMAS = {
     { key: '__info__', type: 'info',
       description: 'Names the filing, the property it is for, and its provenance — enrollment number, status, opportunity, who submitted it and when. Place it first.' },
   ],
-  submission_summary: [
+  submitted_enrollment_summary: [
     { key: 'heading', label: 'Heading', type: 'text', default: 'What Was Submitted' },
     { key: 'body', label: 'Intro Text', type: 'textarea' },
     { key: 'empty_label', label: 'Empty Label', type: 'text',
@@ -240,7 +240,7 @@ export const SUBMITTAL_SECTION_SCHEMAS = {
     { key: '__info__', type: 'info',
       description: 'Every submitted field, grouped, in filing order. A field left blank prints an em dash rather than disappearing — on a record of what was filed, “left blank” and “not mentioned” must not look the same. A group in which nothing at all was filled in is dropped.' },
   ],
-  submission_document_manifest: [
+  submitted_enrollment_documents: [
     { key: 'heading', label: 'Heading', type: 'text', default: 'Documents Submitted' },
     { key: 'body', label: 'Intro Text', type: 'textarea' },
     { key: 'link_hint', label: 'Link Hint', type: 'text',
@@ -252,7 +252,7 @@ export const SUBMITTAL_SECTION_SCHEMAS = {
     { key: '__info__', type: 'info',
       description: 'Every attached file, with a download link good for one year. Files flagged “Include in report” on the Documents card carry an emerald dot and sort first; the generate dialog decides whether the manifest is the flagged set or everything.' },
   ],
-  submission_note: [
+  submitted_enrollment_note: [
     { key: 'heading', label: 'Heading', type: 'text',
       placeholder: 'Leave blank for an unheaded paragraph' },
     { key: 'body', label: 'Body', type: 'textarea' },
@@ -262,7 +262,7 @@ export const SUBMITTAL_SECTION_SCHEMAS = {
     { key: '__info__', type: 'info',
       description: 'Free text — a program’s filing instructions, a certification line. Prints nothing when both the body and the wording key are empty.' },
   ],
-  submission_footer: [
+  submitted_enrollment_footer: [
     { key: 'body', label: 'Body', type: 'textarea',
       placeholder: 'Leave blank for the standard note' },
     { key: '__info__', type: 'info',
@@ -300,11 +300,11 @@ export const SUBMITTAL_SECTION_LABELS = {
   assessment_signature: 'Acknowledgment & Signature',
   assessment_documents: 'Documents',
   assessment_footer: 'Page Footer',
-  submission_cover: 'Submission Cover',
-  submission_summary: 'What Was Submitted',
-  submission_document_manifest: 'Document Manifest',
-  submission_note: 'Note',
-  submission_footer: 'Record Footer',
+  submitted_enrollment_cover: 'Cover',
+  submitted_enrollment_summary: 'What Was Submitted',
+  submitted_enrollment_documents: 'Document Manifest',
+  submitted_enrollment_note: 'Note',
+  submitted_enrollment_footer: 'Footer',
 }
 
 /** Return the schema array for a section type, or null (→ JSON fallback). */

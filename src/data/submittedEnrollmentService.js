@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
-// enrollmentSubmissionReportService — assembles the Enrollment Submission
-// Record from an enrollment, and saves the generated PDF back onto it.
+// submittedEnrollmentService — assembles the Submitted Enrollment document
+// from an enrollment, and saves the generated PDF back onto it.
 //
-// The report answers one question: what did we actually file? So everything it
-// prints is read from the enrollment as it stands —
+// It answers one question: what did we actually file? So everything it prints
+// is read from the enrollment as it stands —
 //
-//   · the declared submission fields (SUBMISSION_FIELD_GROUPS), blanks and all
+//   · the declared submission fields (SUBMITTED_ENROLLMENT_FIELD_GROUPS), blanks and all
 //   · the documents attached to the enrollment, each with a long-lived,
 //     correctly-named download link — the first consumer of the
 //     "Include in report" flag on an enrollment's Documents card
@@ -14,25 +14,56 @@
 // The section list comes from the stored template for this document key
 // (optionally scoped to the opportunity's record type, the same axis every
 // other submittal document uses), falling back to the built-in default so the
-// record still generates if the table is unreachable.
+// document still generates if the table is unreachable.
 // ---------------------------------------------------------------------------
 
 import { supabase } from '../lib/supabase'
 import { listDocuments, signedUrl, uploadDocument } from './storageService'
-import { proxiedStorageUrl } from '../lib/reportFileLinks'
+import { proxiedStorageUrl, shortFileLink } from '../lib/reportFileLinks'
 import { loadSubmittalDocumentTemplate, loadSubmittalTextBlocks } from './paperworkService'
-import { buildSubmissionRecordPdf } from './paperworkModel'
+import { buildSubmittedEnrollmentPdf } from './paperworkModel'
 import { companyNameForState, addressLines, cityStateZip } from '../lib/assessmentReport'
 import {
-  SUBMISSION_REPORT_KIND, SUBMISSION_DOCUMENT_KEY, SUBMISSION_FIELD_GROUPS,
-  submissionReportFor, buildSubmissionSummary, buildDocumentManifest,
-  documentDownloadName, submissionFileName,
-} from '../lib/enrollmentSubmissionReport'
+  SUBMITTED_ENROLLMENT_KIND, SUBMITTED_ENROLLMENT_DOCUMENT_KEY, SUBMITTED_ENROLLMENT_FIELD_GROUPS,
+  submittedEnrollmentFor, buildSubmittedEnrollmentSummary, buildDocumentManifest,
+  documentDownloadName, submittedEnrollmentFileName,
+} from '../lib/submittedEnrollment'
 
-// A submission record is filed with a program and read months later, so its
+// A Submitted Enrollment is filed with a program and read months later, so its
 // links have to outlive the session that made it. One year matches the life of
 // the filing it documents — the same TTL the assessment report uses.
 const DOCUMENT_LINK_TTL_SECONDS = 60 * 60 * 24 * 365
+
+/**
+ * A short, revocable link for one attached file.
+ *
+ * Same route the assessment report takes: `mint_report_file_link` returns a
+ * token served at /f/<token>, which fits on one line — so Acrobat's "do you
+ * trust this site" prompt and Gmail's redirect page show something a program
+ * reviewer can read, instead of 500 characters of JWT. It is also revocable
+ * after the fact, which a raw signed URL is not.
+ *
+ * Falls back to the long proxied signed URL when minting fails, so a database
+ * hiccup costs a link's APPEARANCE rather than removing an attachment from the
+ * filing. Returns null only when neither route produces anything.
+ */
+async function mintDocumentLink({ bucket, path, displayName, documentId }) {
+  if (!bucket || !path) return null
+  try {
+    const { data, error } = await supabase.rpc('mint_report_file_link', {
+      p_bucket: bucket,
+      p_path: path,
+      p_display_name: displayName || null,
+      p_ttl_seconds: DOCUMENT_LINK_TTL_SECONDS,
+      p_photo_id: null,
+      p_document_id: documentId || null,
+      p_work_order_id: null,
+    })
+    if (!error && data) return shortFileLink(data)
+  } catch { /* fall through to the long form */ }
+  const signed = await signedUrl(bucket, path, DOCUMENT_LINK_TTL_SECONDS, displayName || null)
+  return signed ? proxiedStorageUrl(signed) : null
+}
 
 function fmtDate(iso) {
   if (!iso) return null
@@ -67,7 +98,7 @@ function idsInSummary(groups) {
  * A submitted value that is an id is nearly always a picklist selection, but
  * enrollments also carry contractor/contact lookups. Both are resolved so a
  * uuid never reaches the page; anything still unnamed is dropped by
- * submissionFieldValue rather than printed.
+ * submittedFieldValue rather than printed.
  */
 async function resolveValueLabels(ids) {
   const out = new Map()
@@ -87,8 +118,8 @@ async function resolveValueLabels(ids) {
  * Load everything the record needs for one enrollment.
  * Returns { def, model, template, documents, counts }.
  */
-export async function loadSubmissionReportContext(enrollmentId) {
-  if (!enrollmentId) throw new Error('loadSubmissionReportContext: enrollmentId is required')
+export async function loadSubmittedEnrollmentContext(enrollmentId) {
+  if (!enrollmentId) throw new Error('loadSubmittedEnrollmentContext: enrollmentId is required')
 
   const { data: enr, error: enrErr } = await supabase
     .from('enrollments').select('*').eq('id', enrollmentId).maybeSingle()
@@ -104,7 +135,7 @@ export async function loadSubmissionReportContext(enrollmentId) {
     : { data: [] }
   const pickById = new Map((pickRows || []).map(r => [r.id, r]))
   const rt = pickById.get(enr.enrollment_record_type) || null
-  const def = submissionReportFor(rt?.picklist_value, rt?.picklist_label)
+  const def = submittedEnrollmentFor(rt?.picklist_value, rt?.picklist_label)
 
   const [propRes, bldRes, oppRes, userRes] = await Promise.all([
     enr.property_id
@@ -140,14 +171,14 @@ export async function loadSubmissionReportContext(enrollmentId) {
   const documents = rawDocs.map(d => ({ ...d, uploaded_by_name: uploaderById.get(d.uploaded_by) || null }))
 
   // Summary, then names for any id inside it.
-  let summary = buildSubmissionSummary(enr, null, SUBMISSION_FIELD_GROUPS)
+  let summary = buildSubmittedEnrollmentSummary(enr, null, SUBMITTED_ENROLLMENT_FIELD_GROUPS)
   const labels = await resolveValueLabels(idsInSummary(summary))
-  if (labels.size) summary = buildSubmissionSummary(enr, labels, SUBMISSION_FIELD_GROUPS)
+  if (labels.size) summary = buildSubmittedEnrollmentSummary(enr, labels, SUBMITTED_ENROLLMENT_FIELD_GROUPS)
 
   const textBlocks = await loadSubmittalTextBlocks(opportunity?.opportunity_record_type || null)
     .catch(() => ({}))
   const template = await loadSubmittalDocumentTemplate(
-    SUBMISSION_DOCUMENT_KEY, opportunity?.opportunity_record_type || null).catch(() => null)
+    SUBMITTED_ENROLLMENT_DOCUMENT_KEY, opportunity?.opportunity_record_type || null).catch(() => null)
 
   const model = {
     title: def.title,
@@ -205,7 +236,7 @@ export async function loadSubmissionReportContext(enrollmentId) {
  * to know the file was part of the filing even if they have to open the record
  * to fetch it.
  */
-export async function attachSubmissionDocuments(model, documents, { flaggedOnly = false, onProgress } = {}) {
+export async function attachSubmittedEnrollmentDocuments(model, documents, { flaggedOnly = false, onProgress } = {}) {
   const manifest = buildDocumentManifest(documents, { flaggedOnly })
   const flaggedCount = (documents || []).filter(d => d?.include_in_final_report === true).length
   model.documents = manifest.map(({ _row, ...rest }) => ({ ...rest }))
@@ -220,14 +251,12 @@ export async function attachSubmissionDocuments(model, documents, { flaggedOnly 
     const out = model.documents[i]
     out.uploadedOn = fmtDate(row.created_at)
     try {
-      if (row.storage_bucket && row.storage_path) {
-        const url = await signedUrl(
-          row.storage_bucket, row.storage_path, DOCUMENT_LINK_TTL_SECONDS,
-          documentDownloadName(manifest[i], enrollmentNumber))
-        // Served through LEAP's own domain so a reader's PDF viewer names a
-        // host they recognise. The signed token is unchanged.
-        if (url) out.linkUrl = proxiedStorageUrl(url)
-      }
+      out.linkUrl = await mintDocumentLink({
+        bucket: row.storage_bucket,
+        path: row.storage_path,
+        displayName: documentDownloadName(manifest[i], enrollmentNumber),
+        documentId: row.id,
+      })
     } catch {
       /* A link is best-effort. The row stays either way. */
     }
@@ -237,29 +266,29 @@ export async function attachSubmissionDocuments(model, documents, { flaggedOnly 
   return model
 }
 
-/** Render the submission record PDF. Returns { blob, fileName, def, counts }. */
-export async function generateSubmissionReport(enrollmentId, { flaggedOnly = false, onProgress } = {}) {
-  const ctx = await loadSubmissionReportContext(enrollmentId)
-  await attachSubmissionDocuments(ctx.model, ctx.documents, { flaggedOnly, onProgress })
-  const blob = await buildSubmissionRecordPdf(
-    ctx.model, SUBMISSION_REPORT_KIND, ctx.template?.sections || null)
+/** Render the Submitted Enrollment PDF. Returns { blob, fileName, def, counts }. */
+export async function generateSubmittedEnrollment(enrollmentId, { flaggedOnly = false, onProgress } = {}) {
+  const ctx = await loadSubmittedEnrollmentContext(enrollmentId)
+  await attachSubmittedEnrollmentDocuments(ctx.model, ctx.documents, { flaggedOnly, onProgress })
+  const blob = await buildSubmittedEnrollmentPdf(
+    ctx.model, SUBMITTED_ENROLLMENT_KIND, ctx.template?.sections || null)
   return {
     blob,
-    fileName: submissionFileName(ctx.def, ctx.model.enrollment?.number, ctx.model.property?.name),
+    fileName: submittedEnrollmentFileName(ctx.def, ctx.model.enrollment?.number, ctx.model.property?.name),
     def: ctx.def,
     counts: ctx.counts,
     templateName: ctx.template?.name || null,
   }
 }
 
-/** Save a generated record onto the enrollment's Documents card. */
-export async function saveSubmissionReportToEnrollment(enrollmentId, blob, fileName) {
+/** Save the generated PDF onto the enrollment's own Documents card. */
+export async function saveSubmittedEnrollmentToRecord(enrollmentId, blob, fileName) {
   const file = new File([blob], fileName, { type: 'application/pdf' })
   return uploadDocument({
     file,
     relatedObject: 'enrollments',
     relatedId:     enrollmentId,
-    documentType:  'enrollment_submission_record',
+    documentType:  'submitted_enrollment',
     name:          fileName,
   })
 }
