@@ -78,6 +78,32 @@
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
     Permissions-Policy        = "geolocation=(self), camera=(self), microphone=()"
 
+# Storage proxy for links printed INTO generated PDFs.
+#
+# Adobe Acrobat prompts before following any link out of a document, naming the
+# host: "This document is trying to connect to: flyjigrijjjtcsvpgzvk.supabase.co
+# — If you trust this site, choose Allow." A program reviewer holding an
+# official assessment report has no way to answer that honestly about a random
+# project ref, so they Block and the evidence link is dead.
+#
+# The prompt cannot be turned off from inside the PDF — it is the reader's
+# setting. What the PDF controls is the hostname it names. Proxying storage
+# through LEAP's own domain makes the question answerable, and Acrobat's
+# "Remember this action for this site" then makes it a one-time prompt.
+#
+# status 200 = proxy, not redirect: the bytes are served under our hostname
+# rather than bouncing the reader to another one, so there is no second host to
+# be asked about. Netlify forwards the query string, which carries the signed
+# token — access is governed exactly as before, by the token, not by the path.
+#
+# MUST stay above the SPA catch-all: rules are matched in order, and /* would
+# otherwise swallow this and return index.html for every photo.
+[[redirects]]
+  from   = "/evidence/*"
+  to     = "https://flyjigrijjjtcsvpgzvk.supabase.co/storage/v1/object/sign/:splat"
+  status = 200
+  force  = true
+
 # SPA routing — any unknown path should serve index.html so the React
 # router (via AuthGate) can handle it client-side. Real static files (incl.
 # everything under /outlook-addin/) are served before this fallback fires.
