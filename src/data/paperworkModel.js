@@ -624,13 +624,13 @@ export const DEFAULT_DOCUMENT_SECTIONS = Object.freeze({
     { type: 'assessment_documents', config: { heading: 'Documents' } },
     { type: 'assessment_footer' },
   ],
-  // Enrollment Submission Record — its own engine. What was filed, and the
-  // attachments that went with it.
-  enrollmentSubmissionRecord: [
-    { type: 'submission_cover' },
-    { type: 'submission_summary', config: { heading: 'What Was Submitted' } },
-    { type: 'submission_document_manifest', config: { heading: 'Documents Submitted' } },
-    { type: 'submission_footer' },
+  // Submitted Enrollment — its own engine. What was filed, and the attachments
+  // that went with it.
+  submittedEnrollment: [
+    { type: 'submitted_enrollment_cover' },
+    { type: 'submitted_enrollment_summary', config: { heading: 'What Was Submitted' } },
+    { type: 'submitted_enrollment_documents', config: { heading: 'Documents Submitted' } },
+    { type: 'submitted_enrollment_footer' },
   ],
   // Combustion Safety Notification (Large Multifamily 5+ Units) — its own engine.
   combustionSafety: [
@@ -1604,7 +1604,7 @@ export const ASSESSMENT_SECTION_RENDERERS = {
 }
 
 // ===========================================================================
-// ENROLLMENT SUBMISSION RECORD — its own engine.
+// SUBMITTED ENROLLMENT — its own engine.
 //
 // What an enrollment FILED: the values that were claimed, and a manifest of
 // the attachments with a working download link for each. It shares nothing
@@ -1613,7 +1613,7 @@ export const ASSESSMENT_SECTION_RENDERERS = {
 // order's record type. This one prints a filing and is keyed by the
 // enrollment's. Its own kind, its own section types, its own templates.
 //
-// The model is assembled by enrollmentSubmissionReportService:
+// The model is assembled by submittedEnrollmentService:
 //
 //   m = {
 //     title, programLabel,
@@ -1634,8 +1634,8 @@ export const ASSESSMENT_SECTION_RENDERERS = {
 // which needs the network; this module stays pure and node-testable.
 // ===========================================================================
 
-/** Shared drawing context for the enrollment submission record. */
-async function buildSubmissionContext(m, kind, opts = {}) {
+/** Shared drawing context for the Submitted Enrollment document. */
+async function buildSubmittedEnrollmentContext(m, kind, opts = {}) {
   const P = await pdfCanvas(48)
   const { d, W, H, M, CW, C, st, font, t, wrap, need, fill, stroke, tc } = P
   const INK = C.ink, MUT = C.mut, NAVY = C.navy
@@ -1704,17 +1704,17 @@ async function buildSubmissionContext(m, kind, opts = {}) {
            INK, MUT, NAVY, RULE, EMERALD, LINK, text, pv, band, subHead, para, kvTable }
 }
 
-export const SUBMISSION_SECTION_RENDERERS = {
+export const SUBMITTED_ENROLLMENT_SECTION_RENDERERS = {
   /* Cover: which filing this is, for which property, and its provenance. */
-  submission_cover(x, cfg = {}) {
+  submitted_enrollment_cover(x, cfg = {}) {
     const { m, W, M, CW, st, font, t, tc, wrap, d, fill, RULE, NAVY, MUT, INK, EMERALD, text } = x
     fill([13, 26, 46]); d.rect(0, 0, W, 4, 'F')
     tc(MUT); font(8.5, 'bold')
-    t(M, st.y + 10, String(cfg.eyebrow || m.company?.name || text('submission.header.company_name')
+    t(M, st.y + 10, String(cfg.eyebrow || m.company?.name || text('submitted_enrollment.header.company_name')
       || 'Energy Efficiency Services').toUpperCase())
     st.y += 26
     tc(NAVY); font(19, 'bold')
-    for (const ln of wrap(cfg.title || m.title || 'Enrollment Submission Record', CW)) {
+    for (const ln of wrap(cfg.title || m.title || 'Submitted Enrollment', CW)) {
       t(M, st.y + 18, ln); st.y += 23
     }
     if (cfg.subtitle || m.programLabel) {
@@ -1753,7 +1753,7 @@ export const SUBMISSION_SECTION_RENDERERS = {
   },
 
   /* What was submitted: every declared field, grouped, blanks included. */
-  submission_summary(x, cfg = {}) {
+  submitted_enrollment_summary(x, cfg = {}) {
     const { m, band, kvTable, subHead, para } = x
     const groups = (m.summary || []).filter(g => g && (g.rows || []).length)
     if (!groups.length && cfg.omit_when_empty !== false) return
@@ -1767,7 +1767,7 @@ export const SUBMISSION_SECTION_RENDERERS = {
   },
 
   /* The attachment manifest: every file, what it is, and a link to it. */
-  submission_document_manifest(x, cfg = {}) {
+  submitted_enrollment_documents(x, cfg = {}) {
     const { m, W, M, st, d, font, t, tc, wrap, need, stroke, RULE, NAVY, MUT, LINK, band, para, subHead } = x
     const docs = (m.documents || []).filter(Boolean)
     if (!docs.length && cfg.omit_when_empty !== false) return
@@ -1815,7 +1815,7 @@ export const SUBMISSION_SECTION_RENDERERS = {
 
   /* Free text a template author controls — a program's filing instructions,
      a certification line, whatever the packet needs said. */
-  submission_note(x, cfg = {}) {
+  submitted_enrollment_note(x, cfg = {}) {
     const { band, para, text } = x
     const body = cfg.body || text(cfg.text_key || '')
     if (!body && cfg.omit_when_empty !== false) return
@@ -1824,13 +1824,13 @@ export const SUBMISSION_SECTION_RENDERERS = {
   },
 
   /* Footer: who generated this record and when. */
-  submission_footer(x, cfg = {}) {
+  submitted_enrollment_footer(x, cfg = {}) {
     const { m, W, M, H, st, d, font, t, tc, stroke, RULE, MUT, need, text } = x
     need(48); st.y += 10
     stroke(RULE); d.setLineWidth(.75); d.line(M, st.y, W - M, st.y); st.y += 12
     tc(MUT); font(7.5)
     const lines = [
-      cfg.body || text('submission.footer.body')
+      cfg.body || text('submitted_enrollment.footer.body')
         || 'This record was generated by LEAP from the enrollment as it stood at the time shown. It lists the values submitted and the files attached to that submission.',
       [m.company?.name, m.generatedOn ? `Generated ${m.generatedOn}` : null,
        m.generatedBy ? `by ${m.generatedBy}` : null].filter(Boolean).join('  \u00b7  '),
@@ -1843,16 +1843,16 @@ export const SUBMISSION_SECTION_RENDERERS = {
 }
 
 /**
- * Render an enrollment submission record. `sections` overrides the built-in
- * list (that is how a stored template drives the output). Returns a Blob.
+ * Render a Submitted Enrollment. `sections` overrides the built-in list (that
+ * is how a stored template drives the output). Returns a Blob.
  */
-export async function buildSubmissionRecordPdf(m, kind, sections, opts = {}) {
-  const x = await buildSubmissionContext(m, kind, opts)
-  const list = sections && sections.length ? sections : DEFAULT_DOCUMENT_SECTIONS.enrollmentSubmissionRecord
-  if (!list) throw new Error(`Unknown submission document kind: ${kind}`)
+export async function buildSubmittedEnrollmentPdf(m, kind, sections, opts = {}) {
+  const x = await buildSubmittedEnrollmentContext(m, kind, opts)
+  const list = sections && sections.length ? sections : DEFAULT_DOCUMENT_SECTIONS.submittedEnrollment
+  if (!list) throw new Error(`Unknown Submitted Enrollment kind: ${kind}`)
   for (const s of list) {
-    const render = SUBMISSION_SECTION_RENDERERS[s.type]
-    if (!render) throw new Error(`Unknown submission section type: ${s.type}`)
+    const render = SUBMITTED_ENROLLMENT_SECTION_RENDERERS[s.type]
+    if (!render) throw new Error(`Unknown Submitted Enrollment section type: ${s.type}`)
     render(x, s.config || {})
   }
   return x.d.output('blob')
@@ -1888,7 +1888,7 @@ export const DOCUMENT_KIND_ENGINE = Object.freeze({
   sealed_proposal: 'sealed', sealed_invoice: 'sealed',
   combustion_safety_notification: 'combustion_safety',
   energy_assessment_report: 'energy_assessment',
-  enrollment_submission_report: 'submission_record',
+  submitted_enrollment: 'submitted_enrollment',
 })
 
 /** Section-type catalogue per engine — the source of truth for the editor palette. */
@@ -1897,7 +1897,7 @@ export const SECTION_TYPES_BY_ENGINE = Object.freeze({
   sealed: Object.keys(SEALED_SECTION_RENDERERS),
   combustion_safety: Object.keys(COMBUSTION_SECTION_RENDERERS),
   energy_assessment: Object.keys(ASSESSMENT_SECTION_RENDERERS),
-  submission_record: Object.keys(SUBMISSION_SECTION_RENDERERS),
+  submitted_enrollment: Object.keys(SUBMITTED_ENROLLMENT_SECTION_RENDERERS),
 })
 
 /** Render any submittal document by kind, dispatching to the right engine. */
@@ -1906,7 +1906,7 @@ export async function buildSubmittalPdf(m, kind, sections) {
   if (engine === 'sealed') return buildSealedPdf(m, kind, sections)
   if (engine === 'combustion_safety') return buildCombustionPdf(m, kind, sections)
   if (engine === 'energy_assessment') return buildAssessmentReportPdf(m, kind, sections)
-  if (engine === 'submission_record') return buildSubmissionRecordPdf(m, kind, sections)
+  if (engine === 'submitted_enrollment') return buildSubmittedEnrollmentPdf(m, kind, sections)
   return buildEesPdf(m, kind, sections)
 }
 

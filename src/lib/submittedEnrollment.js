@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// enrollmentSubmissionReport — pure rules for the Enrollment Submission Record.
+// submittedEnrollment — pure rules for the Submitted Enrollment document.
 //
 // An enrollment IS a submission to a program administrator: WI-IRA-MF-HOMES
 // Assessment Preapproval, WI-IRA-MF-HOMES Project Reservation, NC-IRA-MF, and
@@ -7,7 +7,7 @@
 // had is a way to say, after the fact, exactly what went in: the figures that
 // were claimed, the documents that were attached, and when.
 //
-// That is what this report is. It is NOT an assessment report — that one is
+// That is what this document is. It is NOT an assessment report — that one is
 // the deliverable of a building walk, keyed by the assessment WORK ORDER's
 // record type, and it prints captured field data and photographs. This one is
 // a record of a filing, keyed by the ENROLLMENT's record type, and it prints
@@ -19,12 +19,20 @@
 // similarly to our assessment report, so we can have it so we know exactly
 // what was submitted. The downloadable links for documents and etc."
 //
+// Named SUBMITTED ENROLLMENT, not "Submission Record" — the first cut of this
+// coined a noun the platform does not use for an object it already has a name
+// for. Nicholas, on seeing it: "Where did you get Submission Record? That
+// doesn't make any sense. How about 'Submitted Enrollment'? It should be the
+// name again, be changing names on us." A document about an enrollment is
+// called an enrollment. The rule this records: never mint a new noun for an
+// existing object — the document is named for the record it is about.
+//
 // Kept free of React and Supabase so every selection and labelling rule is
 // testable — see scripts/enrollment-submission-report-fixture.mjs.
 // ---------------------------------------------------------------------------
 
-/** The submittal_document_templates kind every submission record uses. */
-export const SUBMISSION_REPORT_KIND = 'enrollment_submission_report'
+/** The submittal_document_templates kind every Submitted Enrollment uses. */
+export const SUBMITTED_ENROLLMENT_KIND = 'submitted_enrollment'
 
 /**
  * The one document key this report renders under.
@@ -38,7 +46,7 @@ export const SUBMISSION_REPORT_KIND = 'enrollment_submission_report'
  * default for the same key). Minting eight identical keys would fake a
  * difference that isn't there and leave eight templates to maintain in step.
  */
-export const SUBMISSION_DOCUMENT_KEY = 'enrollment_submission_record'
+export const SUBMITTED_ENROLLMENT_DOCUMENT_KEY = 'submitted_enrollment'
 
 // ---------------------------------------------------------------------------
 // THE REGISTRY: enrollment record type → the submission it records.
@@ -49,93 +57,59 @@ export const SUBMISSION_DOCUMENT_KEY = 'enrollment_submission_record'
 // way the program does, so the PDF's title and the saved file say which filing
 // this is rather than a generic "Enrollment Report".
 // ---------------------------------------------------------------------------
-export const SUBMISSION_REPORTS = Object.freeze({
-  'WI-IRA-MF-HOMES-ASSESSMENT-PREAPPROVAL': {
-    enrollmentRecordType: 'WI-IRA-MF-HOMES-Assessment-Preapproval',
-    programLabel: 'WI IRA MF HOMES — Assessment Preapproval',
-    title:    'Assessment Preapproval Submission Record',
-    fileStem: 'Assessment Preapproval Submission Record',
-  },
-  'WI-IRA-MF-HOMES-PROJECT-RESERVATION': {
-    enrollmentRecordType: 'WI-IRA-MF-HOMES-Project-Reservation',
-    programLabel: 'WI IRA MF HOMES — Project Reservation',
-    title:    'Project Reservation Submission Record',
-    fileStem: 'Project Reservation Submission Record',
-  },
-  'WI-IRA-MF': {
-    enrollmentRecordType: 'WI-IRA-MF',
-    programLabel: 'WI IRA Multifamily',
-    title:    'Wisconsin IRA Multifamily Submission Record',
-    fileStem: 'WI IRA MF Submission Record',
-  },
-  'WI-IRA-SF': {
-    enrollmentRecordType: 'WI-IRA-SF',
-    programLabel: 'WI IRA Single-Family',
-    title:    'Wisconsin IRA Single-Family Submission Record',
-    fileStem: 'WI IRA SF Submission Record',
-  },
-  'NC-IRA-MF': {
-    enrollmentRecordType: 'NC-IRA-MF',
-    programLabel: 'NC IRA Multifamily',
-    title:    'North Carolina IRA Multifamily Submission Record',
-    fileStem: 'NC IRA MF Submission Record',
-  },
-  'NC-IRA-SF': {
-    enrollmentRecordType: 'NC-IRA-SF',
-    programLabel: 'NC IRA Single-Family',
-    title:    'North Carolina IRA Single-Family Submission Record',
-    fileStem: 'NC IRA SF Submission Record',
-  },
-  'MI-IRA-MF': {
-    enrollmentRecordType: 'MI-IRA-MF',
-    programLabel: 'MI IRA Multifamily',
-    title:    'Michigan IRA Multifamily Submission Record',
-    fileStem: 'MI IRA MF Submission Record',
-  },
-  'MI-IRA-SF': {
-    enrollmentRecordType: 'MI-IRA-SF',
-    programLabel: 'MI IRA Single-Family',
-    title:    'Michigan IRA Single-Family Submission Record',
-    fileStem: 'MI IRA SF Submission Record',
-  },
+export const SUBMITTED_ENROLLMENT_PROGRAMS = Object.freeze({
+  'WI-IRA-MF-HOMES-ASSESSMENT-PREAPPROVAL': { programLabel: 'WI IRA MF HOMES — Assessment Preapproval' },
+  'WI-IRA-MF-HOMES-PROJECT-RESERVATION':    { programLabel: 'WI IRA MF HOMES — Project Reservation' },
+  'WI-IRA-MF': { programLabel: 'WI IRA Multifamily' },
+  'WI-IRA-SF': { programLabel: 'WI IRA Single-Family' },
+  'NC-IRA-MF': { programLabel: 'NC IRA Multifamily' },
+  'NC-IRA-SF': { programLabel: 'NC IRA Single-Family' },
+  'MI-IRA-MF': { programLabel: 'MI IRA Multifamily' },
+  'MI-IRA-SF': { programLabel: 'MI IRA Single-Family' },
 })
 
 /**
- * The submission definition for an enrollment record type.
+ * The document is called the same thing on every enrollment.
  *
- * An UNREGISTERED record type still gets a report — it falls back to a
- * definition built from the record type's own label. A new program added in
- * Setup is a filing like any other, and refusing to record what was submitted
- * because nobody edited this file would be the registry serving itself. The
- * registry's job is to name the known packets well, not to gate them.
+ * The first cut gave each record type its own title — "Assessment Preapproval
+ * Submission Record", "North Carolina IRA Multifamily Submission Record" —
+ * which is the name drifting eight ways for one document. The PROGRAM belongs
+ * on the page as the subtitle, where it already is; the document's name stays
+ * put.
  */
-export function submissionReportFor(recordTypeValue, recordTypeLabel = null) {
+export const SUBMITTED_ENROLLMENT_TITLE = 'Submitted Enrollment'
+
+/**
+ * The document for an enrollment record type: always the same title, with the
+ * PROGRAM resolved for the subtitle.
+ *
+ * An UNREGISTERED record type still gets a document — the program falls back to
+ * the record type's own label. A program added in Setup files like any other,
+ * and refusing to record what it submitted because nobody edited this file
+ * would be the registry serving itself. The registry's job is to name the known
+ * programs well, not to gate them.
+ */
+export function submittedEnrollmentFor(recordTypeValue, recordTypeLabel = null) {
   const key = String(recordTypeValue ?? '').trim().toUpperCase()
-  if (key && SUBMISSION_REPORTS[key]) return SUBMISSION_REPORTS[key]
-  const name = String(recordTypeLabel || recordTypeValue || '').trim()
-  if (!name) {
-    return {
-      enrollmentRecordType: null,
-      programLabel: null,
-      title:    'Enrollment Submission Record',
-      fileStem: 'Enrollment Submission Record',
-    }
-  }
+  const known = key ? SUBMITTED_ENROLLMENT_PROGRAMS[key] : null
+  const programLabel = known
+    ? known.programLabel
+    : (String(recordTypeLabel || recordTypeValue || '').trim() || null)
   return {
     enrollmentRecordType: recordTypeValue || null,
-    programLabel: name,
-    title:    `${name} Submission Record`,
-    fileStem: `${name} Submission Record`,
+    programLabel,
+    title:    SUBMITTED_ENROLLMENT_TITLE,
+    fileStem: SUBMITTED_ENROLLMENT_TITLE,
   }
 }
 
 /**
- * Every enrollment can produce this report — it is a record of a filing, and
- * an enrollment is always a filing. Exported as a named rule (rather than the
- * action hardcoding `true`) so the day a record type genuinely should not
- * offer one, there is a single place that says so.
+ * Every enrollment can produce this document — an enrollment is always a
+ * filing. Exported as a named rule (rather than the action hardcoding `true`)
+ * so the day a record type genuinely should not offer one, there is a single
+ * place that says so.
  */
-export function hasSubmissionReport(tableName) {
+export function hasSubmittedEnrollment(tableName) {
   return tableName === 'enrollments'
 }
 
@@ -152,7 +126,7 @@ export function hasSubmissionReport(tableName) {
  * submitted no unit count" and "this report forgot to mention the unit count"
  * must not look identical to whoever reads this a year from now.
  */
-export const SUBMISSION_FIELD_GROUPS = Object.freeze([
+export const SUBMITTED_ENROLLMENT_FIELD_GROUPS = Object.freeze([
   { heading: 'Applicant', fields: [
     ['enrollment_contact_name',   'Contact Name'],
     ['enrollment_contact_title',  'Contact Title'],
@@ -249,7 +223,7 @@ function formatSubmittedDate(value) {
  * Zero is an answer, not a blank — `0 unoccupied units` is a fact somebody
  * submitted, and printing an em dash there would misreport the filing.
  */
-export function submissionFieldValue(record, column, labels = null) {
+export function submittedFieldValue(record, column, labels = null) {
   if (!record) return null
   const raw = record[column]
   if (raw === null || raw === undefined) return null
@@ -300,11 +274,11 @@ function resolveLabel(value, labels) {
  * genuinely do not all use the same fields. A group with even one answer keeps
  * all of its rows, so the unanswered ones stay visible next to the answered.
  */
-export function buildSubmissionSummary(record, labels = null, groups = SUBMISSION_FIELD_GROUPS) {
+export function buildSubmittedEnrollmentSummary(record, labels = null, groups = SUBMITTED_ENROLLMENT_FIELD_GROUPS) {
   const out = []
   for (const group of groups || []) {
     const rows = (group.fields || []).map(([column, label]) => ({
-      column, label, value: submissionFieldValue(record, column, labels),
+      column, label, value: submittedFieldValue(record, column, labels),
     }))
     if (!rows.some(r => r.value != null)) continue
     out.push({ heading: group.heading, rows })
@@ -386,9 +360,9 @@ export function buildDocumentManifest(documents, { flaggedOnly = false } = {}) {
   }))
 }
 
-/** The saved file's name: the filing, then the record it belongs to. */
-export function submissionFileName(def, enrollmentNumber, propertyLabel) {
-  const parts = [def?.fileStem || 'Enrollment Submission Record']
+/** The saved file's name: the document, then the record it is about. */
+export function submittedEnrollmentFileName(def, enrollmentNumber, propertyLabel) {
+  const parts = [def?.fileStem || SUBMITTED_ENROLLMENT_TITLE]
   if (enrollmentNumber) parts.push(String(enrollmentNumber))
   else if (propertyLabel) parts.push(String(propertyLabel))
   return `${parts.join(' - ').replace(/[\\/:*?"<>|]+/g, '-')}.pdf`

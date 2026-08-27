@@ -19,7 +19,7 @@
 // the flag when the answer is yes.
 // ---------------------------------------------------------------------------
 
-import { hasSubmissionReport } from './enrollmentSubmissionReport.js'
+import { hasSubmittedEnrollment } from './submittedEnrollment.js'
 
 /**
  * True when a record on this object has a report that reads the flag.
@@ -30,8 +30,8 @@ import { hasSubmissionReport } from './enrollmentSubmissionReport.js'
  *     type, and the gallery does not know it. Offering the flag on a work order
  *     with no report yet is the harmless direction — the curation is still
  *     about that work order's own deliverable.
- *   · enrollments — the Enrollment Submission Record reads flagged documents
- *     as the statement of what was filed.
+ *   · enrollments — the Submitted Enrollment reads flagged documents as the
+ *     statement of what was filed.
  *
  * Everything else (properties, accounts, projects, opportunities, buildings)
  * has no report reading the flag, so the control is not shown there.
@@ -39,5 +39,5 @@ import { hasSubmissionReport } from './enrollmentSubmissionReport.js'
 export function objectHasReportInclusion(tableName) {
   if (!tableName) return false
   if (tableName === 'work_orders') return true
-  return hasSubmissionReport(tableName)
+  return hasSubmittedEnrollment(tableName)
 }
