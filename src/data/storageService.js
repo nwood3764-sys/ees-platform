@@ -12,6 +12,7 @@ import { WORK_ORDER_STEP_KEY, UNASSIGNED_STEP_KEY, UNTAGGED as UNTAGGED_PHOTO_TY
 import { areSignedUrlsUsable } from '../lib/signedUrlExpiry'
 import { CATCH_ALL_DOCUMENT_TYPE } from '../lib/documentSlots'
 import { documentTypeLabel } from '../lib/documentTypes'
+import { storageSafeFileName, isStorageSafeKey } from '../lib/storageKey'
 
 // ---------------------------------------------------------------------------
 // storageService.js — uploads, downloads, deletes, and signed URLs for the
@@ -99,17 +100,17 @@ function fileExt(name) {
   return name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
-// Strip path separators, quotes, control chars, and collapse whitespace.
-// Storage paths must be URL-safe; collisions are prevented by prefixing the
-// generated record id, so this only needs to be readable, not unique.
-function safeName(name) {
-  if (!name) return 'file'
-  return name
-    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[\\/'"`<>?*|:]/g, '_')
-    .replace(/\s+/g, '_')
-    .replace(/_{2,}/g, '_')
-    .slice(0, 120) || 'file'
+// Last line of defence before bytes cross the wire. Every key this file builds
+// is a prefix we control plus a sanitized file name, so this should be
+// unreachable — but "Invalid key" is reported by the API only AFTER the upload
+// has been attempted, and it names a raw storage path at a person who was
+// filing a spec sheet. If a key is ever malformed again, it is named here, by
+// the code that built it, in words the person can act on.
+function assertStorageKey(path, originalName) {
+  if (isStorageSafeKey(path)) return path
+  throw new Error(
+    `Could not build a storage location for “${originalName || path}”. ` +
+    'Rename the file using letters, numbers, spaces, hyphens and periods, then upload it again.')
 }
 
 function newId() {
@@ -127,7 +128,7 @@ function photoOriginalPath(relatedObject, relatedId, photoId, originalName) {
 }
 
 function documentStoragePath(relatedObject, relatedId, docId, originalName) {
-  return `${relatedObject}/${relatedId}/${docId}__${safeName(originalName)}`
+  return `${relatedObject}/${relatedId}/${docId}__${storageSafeFileName(originalName)}`
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -275,7 +276,7 @@ export async function uploadPhoto({
 
   const bucket = defaultPhotoBucket(relatedObject) // throws if not allowed
   const photoId = newId()
-  const path = photoOriginalPath(relatedObject, relatedId, photoId, file.name)
+  const path = assertStorageKey(photoOriginalPath(relatedObject, relatedId, photoId, file.name), file.name)
 
   // A HEIC capture (the iPhone default) is decoded HERE, on the device, and
   // uploaded alongside the untouched original. Nothing server-side can decode
@@ -836,7 +837,7 @@ export async function uploadDocument({
 
   const bucket = defaultDocumentBucket(relatedObject)
   const docId = newId()
-  const path = documentStoragePath(relatedObject, relatedId, docId, file.name)
+  const path = assertStorageKey(documentStoragePath(relatedObject, relatedId, docId, file.name), file.name)
 
   const { error: upErr } = await supabase.storage
     .from(bucket)
@@ -1162,7 +1163,8 @@ export async function uploadDocumentTemplateAsset(documentTemplateId, file) {
     throw new Error(`Only .docx files are supported (got .${ext || 'unknown'})`)
   }
 
-  const path = `document_templates/${documentTemplateId}/${Date.now()}-${safeName(file.name)}`
+  const path = assertStorageKey(
+    `document_templates/${documentTemplateId}/${Date.now()}-${storageSafeFileName(file.name)}`, file.name)
   const { error: uploadError } = await supabase.storage
     .from(DOCX_TEMPLATE_BUCKET)
     .upload(path, file, {
