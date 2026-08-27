@@ -840,6 +840,23 @@ export async function softDeletePhoto(photoId) {
  * @param {boolean} include
  * @returns {Promise<boolean>} the new flag value
  */
+/**
+ * Flag (or unflag) a DOCUMENT for the record's final report — the same curation
+ * mark photos carry, so the set of things that belong in a deliverable is
+ * recorded once instead of re-picked on every generation.
+ *
+ * Internal only: it never appears on the file and never restricts access.
+ */
+export async function setDocumentReportInclusion(documentId, include) {
+  if (!documentId) throw new Error('setDocumentReportInclusion: documentId is required')
+  const { data, error } = await supabase.rpc('set_document_report_inclusion', {
+    p_document_id: documentId,
+    p_include: !!include,
+  })
+  if (error) throw new Error(`report inclusion update failed: ${error.message}`)
+  return data === true
+}
+
 export async function setPhotoReportInclusion(photoId, include) {
   if (!photoId) throw new Error('setPhotoReportInclusion: photoId is required')
   const { data, error } = await supabase.rpc('set_photo_report_inclusion', {
