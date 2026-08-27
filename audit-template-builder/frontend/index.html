@@ -3668,7 +3668,7 @@ function _qty(q){return q!=null?Number(q).toLocaleString('en-US'):'';}
 function buildEesPdfBlob(kind){                       // 'audit' | 'proposal' | 'invoice'
   const m=invoiceModel(), F=m.fields;
   const isAudit=kind==='audit', isInv=kind==='invoice';
-  const P=_pdfNew(28); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
+  const P=_pdfNew(34); const {d,W,H,M,CW,C,st,font,t,wrap,need,fill,stroke,tc}=P;
   const pv=v=>(v!=null&&String(v).trim()!=='')?String(v):'\u2014';
   const GL=[203,210,219], HB=[240,243,247];           // grid line + header fill
   const AMT=W-M-6;                                    // every dollar figure shares this right edge
