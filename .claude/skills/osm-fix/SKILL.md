@@ -3,37 +3,56 @@ name: osm-fix
 description: Repair DOE Asset Score OpenStudio (.osm) models so they run in OpenStudio/EnergyPlus. Use whenever the user uploads or points at .osm file(s) and asks to convert, fix, repair, or "make it run." Fixes the water-heater failures (ambient temp, recirc loops), lets 24/7 supply fans cycle, removes dangling Schedule:File refs, enables HTML output, and verifies a clean forward-translate. Fast and deterministic — do NOT re-derive the repair.
 ---
 
-# OSM Fix — convert DOE Asset Score models so they run
+# OSM Fix — repair a DOE Asset Score model so it runs
 
-The repair is a **single deterministic script run (~3 seconds per file)**. Do not
-explore, diagnose by hand, or re-derive anything for the normal case. Just run it.
+**The job is: file in, one fixed file out.** The user is going to open the result
+in OpenStudio and run it. They are not asking for an analysis, a choice, or a
+tour of the repo. Do the repair and hand back the file.
 
 ## Do this
 
+**1. Make sure the SDK matches the model.** A fresh container has no
+`openstudio` at all, and the version must be **>= the model's own version** or
+it refuses to load (`Version extracted from file '3.11.0' is not supported`).
+Line 3 of any `.osm` is its version identifier:
+
 ```
-python audit-template-builder/osm-fixer/osm_fix.py -o <scratchpad_dir> <uploaded.osm> [more.osm ...]
+head -3 <uploaded.osm>                  # -> e.g. 3.11.0
+pip install openstudio==3.11.0          # install >= that version
 ```
 
-Add `--preserve-recirc` when the building has **central domestic hot water**
-(see "Central DHW" below) — it writes `<name>.recirc.fixed.osm` alongside.
+**2. Run the fixer.** One deterministic script run, ~3 s per file:
 
-It writes `<name>.fixed.osm` for each input and prints a JSON summary. Then:
+```
+python audit-template-builder/osm-fixer/osm_fix.py -o <outdir> <uploaded.osm> [more.osm ...]
+```
 
-1. Confirm each result shows `"runnable": true` and `"translate_errors": []`.
-2. Send the `.fixed.osm` file(s) back with `SendUserFile` (display: attach).
-3. One-line report: water heaters fixed, recirc loops removed (if any), weather
-   file preserved, 0 translation errors. Done.
+**3. Confirm** each result shows `"runnable": true` and `"translate_errors": []`.
 
-Requires `pip install openstudio==3.11.0` (SDK only). **A fresh container does
-not have it — install it first**, and install a version **>= the model's own
-version** (line 3 of the .osm is the version identifier). The script pins
-nothing itself: a newer-than-SDK model is refused with a clear message; bump
-`audit-template-builder/osm-fixer/service/requirements.txt` when models move up.
+**4. Rename the output to something the user can recognise** — the model id and
+the building, e.g. `36630_5513_N_Hopkins_FIXED.osm`. The upload's own name is a
+UUID hash and is useless to them.
 
-There is **no EnergyPlus binary in this environment and none can be installed**
-(the GitHub release assets are blocked by the network policy and there is no
-PyPI build). So the gate is a zero-error forward-translate, not a simulation —
-say so rather than claiming a model "ran".
+**5. Send exactly one file per input** with `SendUserFile` (`display: attach`).
+
+**6. Report in a few lines**: what was fixed, one line each, then "open it in
+OpenStudio and run it; send me any errors and I'll fix them and send a new
+file." Nothing else.
+
+## Hard rules for the hand-back
+
+- **One file. Never a choice.** Do not produce variants, do not ask which one
+  they want, do not hand back a fork for the user to adjudicate. If there is a
+  judgment call, make it — the standard repair is always the right default —
+  and note the consequence in one sentence at the end.
+- **Never mention repo internals.** The hosted fixer service, PR numbers,
+  `osm_fix.py` internals, commits, the skill file itself: none of that is what
+  the user is doing. They uploaded a model and want it back working.
+- **Don't explain unless asked.** Name the defects that were fixed in one line
+  each. Save the mechanism for when they ask "why."
+- **Never tell them to run it and report back as a substitute for finishing.**
+  If the fixer reports `runnable: false`, diagnose and fix it before sending
+  anything (see below).
 
 ## What the script does (so you can explain it if asked)
 
@@ -58,7 +77,22 @@ Two `[utilities.idf.WorkspaceObject] ... "Always On/Off ... cannot be located"`
 messages are **normal** — the translator auto-generates those schedules; they are
 not errors and don't block the run.
 
-## Central DHW — what the recirc loop actually is, and what deleting it costs
+## The two fan settings, because they get confused
+
+A PTAC/PTHP has an **availability schedule** ("is the unit allowed to run" —
+correctly on 24/7 in an apartment; never touch it) and a **supply air fan
+operating mode schedule**, which is *not* a run schedule at all. It is the
+FAN ON / FAN AUTO switch: `>0` = blower runs continuously whenever the unit is
+available, `0` = blower cycles with the coil. DOE ships `Always_On`, so the fan
+ran every hour of the year while only the coil followed the load. The repair
+sets fan-auto, which is what the real equipment does.
+
+Consequence worth stating once if the user asks: these PTACs also carry an
+autosized outdoor-air rate, so cycling the fan means outdoor air now enters only
+when the unit runs. Modeled heating load drops along with fan energy. That is
+the correction, not a new error.
+
+## Central DHW — what the recirc loop is, and what removing it costs
 
 Why those loops fail: the generator puts the **circulating pump alone on the
 supply side** and the **water heater on the demand side** (connected through the
@@ -68,27 +102,42 @@ with **no heat source on its supply side** — it can never meet setpoint. The
 tank is fine; it lives on its own service loop, which is why deleting the recirc
 loop is safe and never removes equipment.
 
-What deleting it costs: the loop also carries the `Pipe:Indoor` that represents
-the building's **uninsulated hot-water distribution main** — on a central-DHW
+What removing it costs: the loop also carries the `Pipe:Indoor` representing the
+building's **uninsulated hot-water distribution main** — on a central-DHW
 multifamily building that is hundreds of metres of pipe, and its standby loss is
-a large share of annual DHW energy. Delete it and the model runs but
+a large share of annual DHW energy. Remove it and the model runs but
 **under-reports DHW**, which matters when the output is an audit report.
 
 `--preserve-recirc` re-creates that pipe (same construction, diameter, length,
 ambient zone) as a parallel branch on the **demand** side of the loop the tank
 actually serves, so the loss becomes a load the tank makes up — which is what a
-recirculation loop physically is. A pipe on a demand branch is an ordinary
-construct (every plant loop already carries a `Pipe:Adiabatic` demand bypass).
-**Unverified without an EnergyPlus run**: whether the demand branch draws enough
-flow for the pipe's loss to register at full magnitude. Tell the user to compare
-`WaterSystems:NaturalGas` between the two files on their own run.
+recirculation loop physically is.
+
+**Do NOT offer this unprompted, and never send it as a second file.** Ship the
+standard repair, and close with one line: if DHW gas reads low in the report,
+the deleted distribution piping is why and it can be put back. Only run
+`--preserve-recirc` if they come back and say the number is low. It is
+**unverified by simulation** — whether the demand branch draws enough flow for
+the loss to register at full magnitude is unknown — so say that when you use it.
+
+## No EnergyPlus in this environment
+
+There is no E+ binary and **none can be installed**: the GitHub release assets
+are blocked by the sandbox network policy (403 from the proxy, not from GitHub)
+and there is no PyPI build. The gate is therefore a zero-error forward-translate,
+not a simulation. Never claim a model "ran" or quote energy results. The user
+runs it in OpenStudio; that is the workflow.
+
+If they want simulations run here, the fix is to widen the environment's network
+policy or bake EnergyPlus into the container image — offer that, don't improvise.
 
 ## Only if a model still fails (`runnable: false`)
 
-Then diagnose — read the actual `translate_errors`, find the class of failure
-(usually an ambient ThermalZone, a Schedule:File, or a plant-loop node), extend
-`audit-template-builder/osm-fixer/osm_fix.py` to fix that *category*, and re-run.
-Add a comment for the new failure mode so the script accumulates the knowledge.
+Then diagnose before sending anything. Read the actual `translate_errors`, find
+the class of failure (usually an ambient ThermalZone, a Schedule:File, or a
+plant-loop node), extend `audit-template-builder/osm-fixer/osm_fix.py` to fix
+that *category*, and re-run. Add a comment for the new failure mode so the
+script accumulates the knowledge, and update this file.
 
 ## Re-modeling (NOT the default — only when explicitly asked)
 
