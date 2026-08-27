@@ -2189,9 +2189,29 @@ async function build50121XML(which){
     const hs0=_q(doc,'HeatingSource')[0];
     let keepSys=hs0; while(keepSys && keepSys.localName!=='HVACSystem') keepSys=keepSys.parentNode;
     if(keepSys){
+      // The kept HeatingSource/CoolingSource may reference a HeatingPlant/CoolingPlant
+      // that the 50121 template puts in a SEPARATE HVACSystem (the boiler plant lives
+      // in its own system, linked by SourceHeatingPlantID). Those plant-holder systems
+      // must ALSO be kept — otherwise the collapse deletes the boiler, the plant
+      // reference dangles, and a real gas furnace ends up as an empty heating source
+      // that imports as all-electric. (Only bites non-electric buildings, because the
+      // electric-conversion path below rebuilds the source; a gas furnace does not.)
+      const keepSystems=new Set([keepSys]);
+      const plantRefs=new Set();
+      for(const r of [...keepSys.getElementsByTagNameNS(NS_AUC,'SourceHeatingPlantID'),
+                      ...keepSys.getElementsByTagNameNS(NS_AUC,'SourceCoolingPlantID')]){
+        const id=r.getAttribute('IDref'); if(id) plantRefs.add(id);
+      }
+      if(plantRefs.size) for(const sys of [..._q(doc,'HVACSystem')]){
+        for(const plant of [...sys.getElementsByTagNameNS(NS_AUC,'HeatingPlant'),
+                            ...sys.getElementsByTagNameNS(NS_AUC,'CoolingPlant'),
+                            ...sys.getElementsByTagNameNS(NS_AUC,'CondenserPlant')]){
+          if(plantRefs.has(plant.getAttribute('ID'))) keepSystems.add(sys);
+        }
+      }
       const removedSrc=new Set();
       for(const sys of [..._q(doc,'HVACSystem')]){
-        if(sys===keepSys) continue;
+        if(keepSystems.has(sys)) continue;
         for(const s of [...sys.getElementsByTagNameNS(NS_AUC,'HeatingSource'),
                         ...sys.getElementsByTagNameNS(NS_AUC,'CoolingSource')]){
           const id=s.getAttribute('ID'); if(id) removedSrc.add(id);
