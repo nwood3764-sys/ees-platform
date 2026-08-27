@@ -90,6 +90,28 @@ export function slotTypesOnLayout(widgets) {
 }
 
 /**
+ * Every document type claimed by a slot that renders on ONE SCREEN of a record:
+ * the sections on the tab being viewed, plus the right rail, which is visible
+ * on every tab.
+ *
+ * `slotTypesOnLayout` answers a different question — what the whole LAYOUT
+ * claims — and using it for a gallery was wrong (2026-08-27). The typed slots
+ * on the WI-IRA-MF-HOMES-PR enrollment layout sit on the Details tab, so
+ * layout-wide claiming emptied the Documents card on the Related tab, and the
+ * only way to reach those files was the one slot card each. "A file is never
+ * shown twice" is a rule about a screen, and this is that rule.
+ *
+ * `sections` is the record's layout sections as the renderer holds them
+ * (section_placement / section_tab / widgets).
+ */
+export function slotTypesOnSurface(sections, tab) {
+  const surface = (sections || []).filter(sec => sec
+    && ((sec.section_placement || 'main') === 'right'
+      || (sec.section_tab || 'Details') === tab))
+  return slotTypesOnLayout(surface.flatMap(sec => sec.widgets || []))
+}
+
+/**
  * The rows this gallery should show.
  *
  *   * slot      → only its own document type.

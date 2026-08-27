@@ -10,6 +10,8 @@ import {
 } from '../lib/heifRendition'
 import { WORK_ORDER_STEP_KEY, UNASSIGNED_STEP_KEY, UNTAGGED as UNTAGGED_PHOTO_TYPE } from '../lib/photoTags'
 import { areSignedUrlsUsable } from '../lib/signedUrlExpiry'
+import { CATCH_ALL_DOCUMENT_TYPE } from '../lib/documentSlots'
+import { documentTypeLabel } from '../lib/documentTypes'
 
 // ---------------------------------------------------------------------------
 // storageService.js — uploads, downloads, deletes, and signed URLs for the
@@ -884,7 +886,49 @@ export async function listDocuments(relatedObject, relatedId) {
     .eq('is_deleted', false)
     .order('created_at', { ascending: false })
   if (error) throw new Error(`documents list failed: ${error.message}`)
-  return data || []
+  const rows = data || []
+  const labels = await resolveDocumentTypeLabels(rows.map(d => d.document_type))
+  return rows.map(d => ({
+    ...d,
+    _document_type_label: documentTypeLabel(d.document_type, labels),
+  }))
+}
+
+/**
+ * document_type → the label a person reads.
+ *
+ * The column stores an internal slug stamped by whichever document SLOT a file
+ * was uploaded into, or by the generator that produced it. Until 2026-08-27
+ * every screen printed the slug: a column headed "Type" reading
+ * `reservation_customer_report`. Labels live in `picklist_values` under
+ * (documents, document_type) — a value-keyed picklist, exactly like
+ * photos.photo_type — so an admin renames one in Setup with no deploy.
+ *
+ * A miss is not an error: documentTypeLabel humanizes an unregistered slug
+ * rather than falling back to the raw text, so a type nobody has labelled still
+ * reads as words. Failure of the lookup itself is survivable for the same
+ * reason — labels are a nicety, an unrenderable gallery is not.
+ */
+async function resolveDocumentTypeLabels(types) {
+  const wanted = Array.from(new Set(
+    (types || [])
+      .map(t => String(t || '').trim())
+      .filter(t => t && t !== CATCH_ALL_DOCUMENT_TYPE)
+  ))
+  if (wanted.length === 0) return new Map()
+
+  const { data, error } = await supabase
+    .from('picklist_values')
+    .select('picklist_value, picklist_label')
+    .eq('picklist_object', 'documents')
+    .eq('picklist_field', 'document_type')
+    .in('picklist_value', wanted)
+
+  const map = new Map()
+  for (const row of error ? [] : (data || [])) {
+    if (row.picklist_label) map.set(row.picklist_value, row.picklist_label)
+  }
+  return map
 }
 
 /** Soft-delete a document. See softDeletePhoto for rationale. */
