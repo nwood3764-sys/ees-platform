@@ -3307,7 +3307,13 @@ function composeInvoiceNo(code){
 //   · the composed number -> both the audit and the project invoice fields
 // Every write is fill-when-empty — a value the user has typed is never overwritten.
 function prefillFromAuditTemplate(){
-  const set=(id,v)=>{const e=document.getElementById(id); if(e&&!e.value&&v!=null&&String(v)!=='')e.value=String(v);};
+  // Fill an empty field, OR refresh a field WE auto-filled earlier (dataset.auto)
+  // so correcting a wrong upload actually updates the screen and the export. A
+  // field the user typed into has its auto flag cleared (see the input listener)
+  // and is never overwritten. A blank incoming value never wipes an existing one.
+  const set=(id,v)=>{const e=document.getElementById(id);
+    if(!e||v==null||String(v)==='')return;
+    if(e.value===''||e.dataset.auto==='1'){e.value=String(v); e.dataset.auto='1';}};
   const ow=atDocs.baseOwner||atDocs.impOwner;
   if(ow){
     set('pjOwner', ow.company||ow.name);      // Property Owner = the organization
@@ -3319,14 +3325,15 @@ function prefillFromAuditTemplate(){
     set('pjOwnerCsz', [ow.city,stZip].filter(Boolean).join(', '));
   }
   const un=atDocs.baseUnits||atDocs.impUnits;
-  if(un!=null){const e=document.getElementById('occUnits'); if(e&&!e.value)e.value=String(un);}
-  const invA=composeInvoiceNo('A'); if(invA)set('pjInvNo',invA);      // A = assessment (audit)
-  const invP=composeInvoiceNo('P'); if(invP)set('pjProjInvNo',invP);  // P = project
+  if(un!=null)set('occUnits', un);
+  set('pjInvNo', composeInvoiceNo('A'));      // A = assessment (audit)
+  set('pjProjInvNo', composeInvoiceNo('P'));  // P = project
   try{pjSave();}catch(e){}
 }
 (function(){for(const f of PJ_FIELDS){const e=document.getElementById(f);
   if(e)e.addEventListener('input',()=>{pjSave();
-    if(/^pjQty/.test(f)){delete e.dataset.auto;
+    delete e.dataset.auto;   // the moment the user types, it's THEIRS — never auto-overwrite it again
+    if(/^pjQty/.test(f)){
       if(typeof scheduleAutoChecks==='function')scheduleAutoChecks();}
     if(/^rate(Elec|Gas)$/.test(f)){   // rate edit → re-render every $ figure + re-check
       if(typeof refresh==='function')refresh();
