@@ -449,6 +449,30 @@ export async function fetchAccountContactsForWorkOrder(woId) {
   return data || []
 }
 
+// Company vehicles, for the `vehicle` field picker (Vehicle Inspection's
+// "Vehicle Inspected"). Retired vehicles are dropped because they are not in
+// service; "In Maintenance" and "Out of Service" ones are KEPT — a technician
+// standing at a real truck must always be able to document it. RLS still
+// decides what comes back (`vehicles` read is granted to every field role).
+export async function fetchVehiclesForInspection() {
+  const [{ data, error }, { data: retired }] = await Promise.all([
+    supabase
+      .from('vehicles')
+      .select('id, vehicle_record_number, vehicle_name, vehicle_license_plate, vehicle_status')
+      .eq('vehicle_is_deleted', false)
+      .order('vehicle_name'),
+    supabase
+      .from('picklist_values')
+      .select('id')
+      .eq('picklist_object', 'vehicles')
+      .eq('picklist_field', 'vehicle_status')
+      .eq('picklist_value', 'Retired'),
+  ])
+  if (error) throw error
+  const retiredIds = new Set((retired || []).map((r) => r.id))
+  return (data || []).filter((v) => !retiredIds.has(v.vehicle_status))
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Session / identity
 // ───────────────────────────────────────────────────────────────────────────
